@@ -1,38 +1,15 @@
 import { isElectron } from "~/env";
 import { isMacPlatform, isWindowsPlatform, normalizeSearchText } from "~/lib/utils";
-import type { EnvironmentId } from "@t3tools/contracts";
-import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
-import {
-  validateSettingsScopeSearch,
-  type ResolvedSettingsScope,
-  type SettingsScopeSearch,
-} from "./settingsScope";
 
 export type SettingsPath =
-  | "/settings/projects"
   | "/settings/general"
   | "/settings/appearance"
   | "/settings/keybindings"
-  | "/settings/snap-shot"
   | "/settings/providers"
-  | "/settings/integrations"
   | "/settings/scheduled-tasks"
   | "/settings/source-control"
   | "/settings/connections"
   | "/settings/archived";
-
-/**
- * Where a setting can be edited. Device-local rows have no scope: they render
- * at every selection. `project-defaults` rows accept project overrides, so
- * they are reachable from any server-backed selection.
- */
-export type SettingsSearchScope =
-  | "environment"
-  | "environment-defaults"
-  | "project-defaults"
-  | "project"
-  | "checkout"
-  | "connections";
 
 export interface SettingsSearchItem {
   readonly id: string;
@@ -41,7 +18,6 @@ export interface SettingsSearchItem {
   readonly targetId?: string;
   /** Descriptions, option labels, and aliases people may remember instead of the title. */
   readonly searchTerms?: ReadonlyArray<string>;
-  readonly scope?: SettingsSearchScope;
   // Its row only renders in the desktop app, so a browser result would land on
   // an anchor that isn't there.
   readonly desktopOnly?: boolean;
@@ -50,7 +26,7 @@ export interface SettingsSearchItem {
   // not expose a result that points to a missing anchor.
   readonly windowsOnly?: boolean;
   readonly cloudOnly?: boolean;
-  readonly environmentOnly?: boolean;
+  readonly primaryOnly?: boolean;
   readonly providerSettingsOnly?: boolean;
   readonly localBackendManagementOnly?: boolean;
   readonly wslAvailableOnly?: boolean;
@@ -59,7 +35,7 @@ export interface SettingsSearchItem {
 
 export interface SettingsSearchAvailability {
   readonly hasCloudPublicConfig: boolean;
-  readonly hasEnvironment: boolean;
+  readonly hasPrimaryEnvironment: boolean;
   readonly hasProviderSettingsEnvironment: boolean;
   readonly canManageLocalBackend: boolean;
   readonly isWslSettingsRowVisible: boolean;
@@ -71,13 +47,11 @@ export interface SettingsSearchAvailability {
  * subtitles both render from this record, so each label exists once.
  */
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
-  "/settings/projects": "Project",
   "/settings/general": "General",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
-  "/settings/snap-shot": "SnapShots",
   "/settings/providers": "Providers",
-  "/settings/integrations": "Integrations",
+  "/settings/scheduled-tasks": "Schedule Tasks",
   "/settings/source-control": "Source Control",
   "/settings/connections": "Connections",
   "/settings/archived": "Archive",
@@ -89,26 +63,6 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
  * that may not be mounted point at their nearest stable section instead.
  */
 export const SETTINGS_SEARCH_ITEMS = [
-  {
-    id: "project-defaults",
-    title: "Project defaults and overrides",
-    to: "/settings/general",
-    scope: "project-defaults",
-    searchTerms: ["model workspace environments projects inheritance checkout"],
-  },
-  {
-    id: "project-overview",
-    title: "Project overview",
-    to: "/settings/projects",
-    searchTerms: ["name icon emoji image checkout remove delete"],
-  },
-  {
-    id: "default-model",
-    title: "Default model",
-    to: "/settings/general",
-    scope: "project-defaults",
-    searchTerms: ["new thread project provider reasoning effort"],
-  },
   {
     id: "color-scheme",
     title: "Color scheme",
@@ -141,23 +95,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["transparent transparency solid menus dialogs composer"],
   },
   {
-    id: "diff-color-scheme",
-    title: "Diff colors",
-    to: "/settings/appearance",
-    searchTerms: ["red green blue orange additions deletions changes counts palette colorblind"],
-  },
-  {
-    id: "panel-animations",
-    title: "Panel animations",
-    to: "/settings/appearance",
-  },
-  {
     id: "environment-identification",
     title: "Environment identification",
     to: "/settings/appearance",
     searchTerms: ["dev nightly artwork pill label hide none"],
     // The setting is stage-dependent, so its parent section is the stable destination.
-    targetId: "appearance-interface",
+    targetId: "appearance",
   },
   {
     id: "interface-font",
@@ -208,7 +151,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
     searchTerms: ["sidebar inactivity days no activity automatically"],
     requiresThreadAutoSettlement: true,
-    scope: "project-defaults",
   },
   {
     id: "auto-settle-merged-threads",
@@ -216,7 +158,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
     searchTerms: ["pull request merge closed automatically sidebar"],
     requiresThreadAutoSettlement: true,
-    scope: "project-defaults",
   },
   {
     id: "days-before-auto-settle",
@@ -225,7 +166,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "auto-settle-inactive-threads",
     searchTerms: ["thread timeout activity sidebar"],
     requiresThreadAutoSettlement: true,
-    scope: "project-defaults",
   },
   {
     id: "time-format",
@@ -240,41 +180,21 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["diff ignore spaces edits default"],
   },
   {
-    id: "diff-layout",
-    title: "Diff layout",
-    to: "/settings/general",
-    searchTerms: ["stacked split side by side unified inline view"],
-  },
-  {
-    id: "proactive-panels",
-    title: "Proactive panels",
-    to: "/settings/general",
-    searchTerms: ["automatically open diff pull request pr right panel agent completion"],
-  },
-  {
     id: "skills-in-slash-menu",
     title: "Show skills in slash menu",
     to: "/settings/general",
     searchTerms: ["command menu dollar $ slash /"],
   },
   {
-    id: "composer-collapse",
-    title: "Collapse composer on scroll",
-    to: "/settings/general",
-    searchTerms: ["composer rest resting scroll wheel conversation timeline shrink minimize"],
-  },
-  {
     id: "provider-update-checks",
     title: "Provider update checks",
     to: "/settings/general",
     searchTerms: ["installed cli versions newer available codex claude cursor grok opencode"],
-    scope: "environment-defaults",
   },
   {
     id: "continue-threads-after-server-update",
     title: "Continue threads after restarts",
     to: "/settings/general",
-    scope: "project-defaults",
     searchTerms: [
       "resume running active interrupted work restart reboot machine crash desktop update automatically",
     ],
@@ -283,7 +203,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "background-activity",
     title: "Background activity",
     to: "/settings/general",
-    scope: "environment-defaults",
     searchTerms: [
       "balanced performance battery saver advanced git fetch provider health refresh host power monitor idle policy",
     ],
@@ -292,21 +211,19 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "new-threads",
     title: "New threads",
     to: "/settings/general",
-    scope: "project-defaults",
     searchTerms: ["default workspace mode draft local worktree"],
   },
   {
     id: "start-from-origin",
     title: "Start from origin",
     to: "/settings/general",
-    scope: "project-defaults",
+    targetId: "new-threads",
     searchTerms: ["new worktrees latest matching remote branch local"],
   },
   {
     id: "add-project-starts-in",
     title: "Add project starts in",
     to: "/settings/general",
-    scope: "environment-defaults",
     searchTerms: ["base directory folder browser path home"],
   },
   {
@@ -338,7 +255,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "text-generation-model",
     title: "Text generation model",
     to: "/settings/general",
-    scope: "project-defaults",
     searchTerms: ["generated thread titles source control content default provider"],
   },
   {
@@ -363,7 +279,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "legacy-token-streaming",
     title: "Stream token by token (legacy)",
     to: "/settings/general",
-    scope: "project-defaults",
     searchTerms: ["response output old compatibility"],
   },
   {
@@ -379,50 +294,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["keyboard shortcuts hotkeys commands bindings json"],
   },
   {
-    id: "snap-shot-enabled",
-    title: "SnapShots",
-    searchTerms: ["window capture screenshot"],
-    to: "/settings/snap-shot",
-  },
-  {
-    id: "snap-shot-accessibility",
-    title: "Include app text",
-    to: "/settings/snap-shot",
-    targetId: "snap-shot-enabled",
-    searchTerms: [
-      "capture accessibility data text UI structure elements privacy omit agent context",
-    ],
-  },
-  {
-    id: "snap-shot-shortcut",
-    title: "Capture shortcut",
-    to: "/settings/snap-shot",
-    targetId: "snap-shot-enabled",
-  },
-  {
-    id: "snap-shot-sound",
-    title: "Capture sound",
-    to: "/settings/snap-shot",
-    targetId: "snap-shot-enabled",
-  },
-  {
-    id: "snap-shot-flash",
-    title: "Capture flash",
-    to: "/settings/snap-shot",
-    targetId: "snap-shot-enabled",
-  },
-  {
-    id: "snap-shot-animations",
-    title: "Capture animations",
-    to: "/settings/snap-shot",
-    targetId: "snap-shot-enabled",
-  },
-  {
     id: "providers",
     title: "Providers",
     to: "/settings/providers",
     searchTerms: [
-      "agents cli codex claude cursor grok opencode antigravity google sign in sign out install subscription instances authentication api key models configuration binary path config directory endpoint arguments environment variables display name accent color custom favorite hidden auto compact",
+      "agents cli codex claude cursor grok opencode instances authentication api key models configuration binary path config directory endpoint arguments environment variables display name accent color custom favorite hidden auto compact",
     ],
   },
   {
@@ -442,105 +318,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     providerSettingsOnly: true,
   },
   {
-    id: "agent-browser-access",
-    title: "Agent browser access",
-    to: "/settings/integrations",
-    scope: "project-defaults",
-    searchTerms: ["allow disable enable open drive preview tools sessions project override"],
-  },
-  {
-    id: "device-hosts",
-    title: "Device hosts",
-    to: "/settings/integrations",
-    searchTerms: ["ssh remote simulator emulator ios android mac mini identity key connection"],
-  },
-  {
-    id: "agent-device-access",
-    title: "Agent device access",
-    to: "/settings/integrations",
-    targetId: "devices",
-    searchTerms: ["allow simulator emulator ios android drive tools sessions"],
-  },
-  {
-    id: "device-hub",
-    title: "Device hub",
-    to: "/settings/integrations",
-    targetId: "devices",
-    searchTerms: ["simulator emulator ios android install start"],
-  },
-  {
-    id: "device-platform-support",
-    title: "Simulator support",
-    to: "/settings/integrations",
-    targetId: "devices",
-    searchTerms: ["xcode android studio sdk avd runtime"],
-  },
-  {
-    id: "browser-profiles",
-    title: "Browser profiles",
-    to: "/settings/integrations",
-    targetId: "browser",
-  },
-  {
-    id: "browser-default-profile",
-    title: "Default browser profile",
-    to: "/settings/integrations",
-    targetId: "browser-profiles",
-  },
-  {
-    id: "browser-default-viewport",
-    title: "Default browser viewport",
-    to: "/settings/integrations",
-    searchTerms: ["preview size width height device desktop mobile rotate"],
-  },
-  {
-    id: "browser-default-zoom",
-    title: "Default browser zoom",
-    to: "/settings/integrations",
-    searchTerms: ["preview page scale tabs percent"],
-  },
-  {
-    id: "browser-default-appearance",
-    title: "Default browser appearance",
-    to: "/settings/integrations",
-    searchTerms: ["preview color scheme light dark system os"],
-  },
-  {
-    id: "browser-recording-frame-rate",
-    title: "Browser recording frame rate",
-    to: "/settings/integrations",
-  },
-  {
-    id: "browser-link-target",
-    title: "Open links in",
-    to: "/settings/integrations",
-    searchTerms: ["links default browser in-app browser external open"],
-  },
-  {
-    id: "browser-auto-show-floating-preview",
-    title: "Auto-show floating preview",
-    to: "/settings/integrations",
-    searchTerms: ["agent opens browser device simulator pop into view hide"],
-  },
-  {
-    id: "automatic-pull",
-    title: "Automatically pull",
-    to: "/settings/source-control",
-    scope: "project-defaults",
-    searchTerms: ["auto pull default branch current checkout fast forward upstream"],
-  },
-  {
-    id: "pull-request-merge-method",
-    title: "Default merge method",
-    to: "/settings/source-control",
-    scope: "project-defaults",
-    searchTerms: ["pull request merge squash rebase last selected"],
-  },
-  {
     id: "source-control",
     title: "Source control",
     to: "/settings/source-control",
-    scope: "environment-defaults",
     searchTerms: [
       "version control git github gitlab bitbucket azure devops hosting integrations credentials scan server environment",
     ],
@@ -552,8 +332,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [
       "automatic remote branch refresh background credentials security keys seconds off",
     ],
-    environmentOnly: true,
-    scope: "environment-defaults",
+    primaryOnly: true,
   },
   {
     id: "source-control-writing-style",
@@ -562,14 +341,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [
       "repository conventions conventional commits custom instructions change descriptions request titles",
     ],
-    environmentOnly: true,
+    primaryOnly: true,
   },
   {
     id: "follow-change-request-templates",
     title: "Follow change request templates",
     to: "/settings/source-control",
     searchTerms: ["repository pr pull request description structure"],
-    environmentOnly: true,
+    primaryOnly: true,
   },
   {
     id: "source-control-writer-model",
@@ -578,22 +357,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [
       "override generated commit change request pr titles descriptions branch bookmark",
     ],
-    environmentOnly: true,
-    scope: "project-defaults",
-  },
-  {
-    id: "project-actions",
-    title: "Actions",
-    to: "/settings/projects",
-    searchTerms: ["commands scripts setup run dev server checkout worktree t3.json import"],
-  },
-  {
-    id: "environment-icon",
-    title: "Environment icon",
-    to: "/settings/connections",
-    targetId: "connections-environment",
-    searchTerms: ["machine glyph sidebar mac mini studio laptop desktop server cloud vm"],
-    localBackendManagementOnly: true,
+    primaryOnly: true,
   },
   {
     id: "network-access",
@@ -656,14 +420,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["add pair backend host code ssh config agent tunnel saved t3 connect"],
   },
   {
-    id: "load-balancing",
-    title: "Load balancing",
-    to: "/settings/connections",
-    searchTerms: [
-      "automatic machine environment resources cpu memory capacity preference weight shared projects",
-    ],
-  },
-  {
     id: "archive",
     title: "Archived threads",
     to: "/settings/archived",
@@ -674,111 +430,6 @@ export const SETTINGS_SEARCH_ITEMS = [
 export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];
 
 const SEARCH_ITEMS_BY_ID = new Map(SETTINGS_SEARCH_ITEMS.map((item) => [item.id, item] as const));
-
-const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScope | null>> = {
-  "/settings/projects": "project",
-  "/settings/general": null,
-  "/settings/appearance": null,
-  "/settings/snap-shot": null,
-  // Keybindings fan out to the selection; Providers shows the representative
-  // environment at any selection. Neither needs a particular scope to render.
-  "/settings/keybindings": null,
-  "/settings/providers": null,
-  "/settings/integrations": null,
-  "/settings/source-control": "environment-defaults",
-  "/settings/connections": "connections",
-  "/settings/archived": "project-defaults",
-};
-
-/** Search keeps the selected target. A missing row can explain its owning scope instead. */
-export function getSettingsSearchTargetScope(targetId: string) {
-  const items: readonly SettingsSearchItem[] = SETTINGS_SEARCH_ITEMS;
-  const item =
-    items.find((candidate) => candidate.id === targetId) ??
-    items.find((candidate) => candidate.targetId === targetId);
-  return item
-    ? {
-        title: item.title,
-        scope: item.scope ?? SETTINGS_CATEGORY_SCOPES[item.to],
-        ...(item.requiresThreadAutoSettlement ? { requiresThreadAutoSettlement: true } : {}),
-      }
-    : null;
-}
-
-interface AutoSettlementSearchEnvironment {
-  readonly environmentId: EnvironmentId;
-  readonly connection: { readonly phase: EnvironmentConnectionPhase };
-  readonly serverConfig: {
-    readonly environment: {
-      readonly capabilities: { readonly threadAutoSettlement?: boolean };
-    };
-  } | null;
-}
-
-/** Discovery needs one capable environment; the selected page needs every connected target to support it. */
-export function getThreadAutoSettlementSearchAvailability(
-  environments: readonly AutoSettlementSearchEnvironment[],
-  scope?: Pick<ResolvedSettingsScope, "kind" | "environmentIds">,
-) {
-  const connected = environments.filter(
-    (environment) =>
-      environment.connection.phase === "connected" && environment.serverConfig !== null,
-  );
-  const eligibleEnvironmentIds = connected
-    .filter(
-      (environment) =>
-        environment.serverConfig?.environment.capabilities.threadAutoSettlement === true,
-    )
-    .map((environment) => environment.environmentId);
-  const selected = connected.filter((environment) =>
-    scope?.environmentIds.includes(environment.environmentId),
-  );
-  return {
-    eligibleEnvironmentIds,
-    isTargetAvailable:
-      scope !== undefined &&
-      scope.kind !== "unavailable" &&
-      selected.length > 0 &&
-      selected.every((environment) => eligibleEnvironmentIds.includes(environment.environmentId)),
-  };
-}
-
-export function isSettingsSearchScopeAvailable(
-  requiredScope: SettingsSearchScope | null,
-  scopeKind: ResolvedSettingsScope["kind"],
-): boolean {
-  switch (requiredScope) {
-    case null:
-    case "connections":
-      return true;
-    case "environment":
-    case "checkout":
-      return requiredScope === scopeKind;
-    case "project":
-      return scopeKind === "project" || scopeKind === "checkout";
-    case "environment-defaults":
-      return scopeKind === "environment" || scopeKind === "all";
-    case "project-defaults":
-      return (
-        scopeKind === "environment" ||
-        scopeKind === "all" ||
-        scopeKind === "project" ||
-        scopeKind === "checkout"
-      );
-  }
-}
-
-function settingsScopeKindFromSearch(search: SettingsScopeSearch): ResolvedSettingsScope["kind"] {
-  const target = validateSettingsScopeSearch({ ...search });
-  if (target.checkout && !target.project) return "unavailable";
-  if (target.project) return target.checkout ? "checkout" : "project";
-  return target.machine ? "environment" : "all";
-}
-
-export function isSettingsOverviewVisible(search: SettingsScopeSearch): boolean {
-  const kind = settingsScopeKindFromSearch(search);
-  return kind === "project" || kind === "checkout";
-}
 
 /**
  * `id` and `title` props for the element a search item anchors to. Panels
@@ -800,7 +451,7 @@ export function filterAvailableSettingsSearchItems(
   return items.filter(
     (item) =>
       (!item.cloudOnly || availability.hasCloudPublicConfig) &&
-      (!item.environmentOnly || availability.hasEnvironment) &&
+      (!item.primaryOnly || availability.hasPrimaryEnvironment) &&
       (!item.providerSettingsOnly || availability.hasProviderSettingsEnvironment) &&
       (!item.localBackendManagementOnly || availability.canManageLocalBackend) &&
       (!item.wslAvailableOnly || availability.isWslSettingsRowVisible) &&
