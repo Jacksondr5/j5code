@@ -1,0 +1,52 @@
+name: J5 CI
+
+on:
+  push:
+    branches:
+      - "j5/**"
+  pull_request:
+    branches:
+      - "j5/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: j5-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Format, lint, typecheck, and unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.10.0
+          run_install: false
+
+      - name: Install Node from .nvmrc
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting
+        run: pnpm exec vp fmt --check
+
+      - name: Lint
+        run: pnpm exec vp lint --report-unused-disable-directives
+
+      - name: Typecheck
+        run: pnpm exec vp run -r --concurrency-limit 2 --log grouped typecheck
+
+      - name: Unit tests
+        run: pnpm exec vp run -r --log grouped test

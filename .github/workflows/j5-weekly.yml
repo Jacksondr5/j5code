@@ -1,0 +1,84 @@
+name: J5 Weekly Full Build
+
+on:
+  schedule:
+    - cron: "23 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: j5-weekly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  full-build:
+    name: Full suite and ad-hoc signed macOS artifact
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.10.0
+          run_install: false
+
+      - name: Install Node from .nvmrc
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install repository-pinned Rust toolchain
+        run: >-
+          rustup toolchain install 1.95.0
+          --profile minimal
+          --component rustfmt
+          --target aarch64-apple-darwin
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Full test suite
+        run: pnpm exec vp run -r --log grouped --verbose test
+
+      - name: Full build
+        run: pnpm build
+
+      - name: Build ad-hoc signed Apple Silicon DMG
+        run: >-
+          pnpm dist:desktop:dmg:arm64
+          --adhoc-sign
+          --skip-build
+          --output-dir release-j5
+
+      - name: Verify packaged identity and ad-hoc signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg_path="$(find release-j5 -maxdepth 1 -name 'J5-Code-*-arm64.dmg' -print -quit)"
+          test -n "$dmg_path"
+          mount_dir="$RUNNER_TEMP/j5-dmg"
+          mkdir -p "$mount_dir"
+          hdiutil attach "$dmg_path" -mountpoint "$mount_dir" -nobrowse -readonly
+          trap 'hdiutil detach "$mount_dir"' EXIT
+          app_path="$mount_dir/J5 Code.app"
+          test -d "$app_path"
+          test "$(plutil -extract CFBundleDisplayName raw "$app_path/Contents/Info.plist")" = "J5 Code"
+          test "$(plutil -extract CFBundleIdentifier raw "$app_path/Contents/Info.plist")" = "codes.jackson.j5code"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          codesign -dv --verbose=4 "$app_path" 2>&1 | grep -F "Signature=adhoc"
+
+      - name: Upload installable artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: j5-code-macos-arm64
+          path: |
+            release-j5/J5-Code-*-arm64.dmg
+            release-j5/J5-Code-*-arm64.zip
+          if-no-files-found: error
+          retention-days: 30

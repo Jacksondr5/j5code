@@ -56,6 +56,11 @@ The original setup plan expected Bun. The advanced pin instead declares pnpm `11
 
 Builds and CI follow the declarations at the recorded pin: use fnm with the version in `.nvmrc` and run `pnpm install --frozen-lockfile`. Do not create a Bun lockfile or change the machine-wide Node installation to compensate for an old pin's instructions.
 
+The advanced lockfile also selects `sysinfo` `0.39.3`, whose declared minimum is Rust `1.95`.
+J5 pins Rust `1.95.0` in `rust-toolchain.toml`; rustup applies that version only inside this
+repository, while Jackson's machine default remains independent. The desktop artifact builder
+already uses Cargo's committed lock with `--locked`.
+
 Until PR #2829 merges:
 
 1. Keep `j5/main` at the recorded pin between deliberate advances.
@@ -71,3 +76,12 @@ After PR #2829 merges:
 4. Update the SHA and date in this file in the same commit as every advance.
 
 If upstream squash-merges or rewrites the work so a normal rebase is misleading, create a branch from the selected new upstream base and cherry-pick J5's new-file commits. Reapply only the minimal appended integration cases, then review the resulting exact delta.
+
+## J5 CI and packaging
+
+Fork-owned workflows use the Node version in `.nvmrc`, pnpm `11.10.0`, the frozen pnpm lockfile, and
+the repo-local Vite Plus binary. `J5 CI` is the push/PR gate for `j5/**`; `J5 Weekly Full Build` is the
+scheduled and manually dispatchable pre-rebase suite plus Apple Silicon desktop build.
+
+See [`docs/j5/macos-packaging.md`](docs/j5/macos-packaging.md) for the local build, signature
+verification, install, Gatekeeper approval, and workflow runbook.
