@@ -246,8 +246,15 @@ const program = Effect.gen(function* () {
   const baseline = summarize(baselineResults.map(({ elapsedMs }) => elapsedMs));
   const fleetDispatch = summarize(fleetResults.map(({ elapsedMs }) => elapsedMs));
   const fleetCreate = summarize(createResults.map(({ elapsedMs }) => elapsedMs));
+  const returnedStoredEvents =
+    baselineResults.reduce((sum, result) => sum + result.storedEvents, 0) +
+    createResults.reduce((sum, result) => sum + result.storedEvents, 0) +
+    fleetResults.reduce((sum, result) => sum + result.storedEvents, 0);
+  const eventGrowth = eventCountAfter - eventCountBefore;
   const interactive =
-    fleetDispatch.p95Ms < INTERACTIVE_P95_MS && fleetBatchMs < INTERACTIVE_BATCH_MS;
+    fleetDispatch.p95Ms < INTERACTIVE_P95_MS &&
+    fleetBatchMs < INTERACTIVE_BATCH_MS &&
+    eventGrowth === returnedStoredEvents;
 
   return {
     generatedAt: new Date().toISOString(),
@@ -286,14 +293,12 @@ const program = Effect.gen(function* () {
     eventStore: {
       eventsBefore: eventCountBefore,
       eventsAfter: eventCountAfter,
-      eventGrowth: eventCountAfter - eventCountBefore,
+      eventGrowth,
       bytesBefore: storeBytesBefore,
       bytesAfter: storeBytesAfter,
       byteGrowth: storeBytesAfter - storeBytesBefore,
-      returnedStoredEvents:
-        baselineResults.reduce((sum, result) => sum + result.storedEvents, 0) +
-        createResults.reduce((sum, result) => sum + result.storedEvents, 0) +
-        fleetResults.reduce((sum, result) => sum + result.storedEvents, 0),
+      returnedStoredEvents,
+      reconciled: eventGrowth === returnedStoredEvents,
     },
     verdict: interactive ? "pass" : "concern",
   };
