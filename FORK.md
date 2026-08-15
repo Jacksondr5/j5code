@@ -45,10 +45,16 @@ The upstream PR branch is moving history and has already been force-rewritten. D
 
 ### Pin log
 
-| Date | Pin | Decision |
-| --- | --- | --- |
-| 2026-08-15 | `77168d081abbdd7522f90b3b204cc693015d5f26` | Original setup-plan pin. The upstream branch was later force-rewritten; this commit is not an ancestor of the rewritten live tip. No J5 build or baseline was created from it. |
+| Date       | Pin                                        | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ---------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 2026-08-15 | `77168d081abbdd7522f90b3b204cc693015d5f26` | Original setup-plan pin. The upstream branch was later force-rewritten; this commit is not an ancestor of the rewritten live tip. No J5 build or baseline was created from it.                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 2026-08-15 | `993407dd9e57f1edf2f5681d70140bfefeca93cc` | First deliberate reviewed advance, before J5 changes. Review of `038560e58036d51b2576b3c2cd9170a194cefe9e..993407dd9` found 336 commits: the branch is rebased onto upstream `main` at `ad117235b`, with 233 orchestration-branch commits on top. The log retains the V2 runtime, contracts, provider adapters, client cutover, migration renumbering, and follow-up fixes/tests; no commit advertised reverting or retiring V2. Reconciliation commits call out repaired rebase conflicts and restored main features, so T2 must establish a fresh full-suite baseline at this exact pin. |
+
+### Toolchain migration at the first advance
+
+The original setup plan expected Bun. The advanced pin instead declares pnpm `11.10.0`, a `pnpm-lock.yaml`, Node `^24.13.1`, and 15 pnpm `patchedDependencies`. Vite Plus is a pinned repo-local dev dependency; the pnpm prepare step runs its workspace configuration without a separate account or global install.
+
+Builds and CI follow the declarations at the recorded pin: use fnm with the version in `.nvmrc` and run `pnpm install --frozen-lockfile`. Do not create a Bun lockfile or change the machine-wide Node installation to compensate for an old pin's instructions.
 
 Until PR #2829 merges:
 
