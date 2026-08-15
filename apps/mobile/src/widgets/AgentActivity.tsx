@@ -1,5 +1,7 @@
 import { HStack, Image, Spacer, Text, VStack, ZStack } from "@expo/ui/swift-ui";
 import type { ComponentProps } from "react";
+
+import { J5_BRANDING } from "../../../../scripts/lib/j5-branding.ts";
 import {
   font,
   foregroundStyle,
@@ -151,7 +153,7 @@ export function AgentActivity(
   const deepLinkRow = attentionRow ?? row0;
   const deepLink =
     deepLinkRow && deepLinkRow.deepLink.startsWith("/") && !deepLinkRow.deepLink.startsWith("//")
-      ? `t3code://${deepLinkRow.deepLink.slice(1)}`
+      ? `${J5_BRANDING.mobile.production.scheme}://${deepLinkRow.deepLink.slice(1)}`
       : null;
 
   // A scannable status glyph per phase — reads faster than colored words and

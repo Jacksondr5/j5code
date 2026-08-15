@@ -457,7 +457,7 @@ describe("DesktopWindow", () => {
         assert.isTrue(createdWindowOptions[0]?.disableAutoHideCursor);
         assert.isFalse(createdWindowOptions[0]?.webPreferences?.backgroundThrottling);
         assert.deepEqual(fakeWindow.setAutoHideCursor.mock.calls, [[false]]);
-        assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["t3code-dev://app/"]);
+        assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["j5code-dev://app/"]);
         assert.equal(fakeWindow.openDevTools.mock.calls.length, 1);
       }).pipe(Effect.provide(layer));
     }),
@@ -1022,8 +1022,8 @@ describe("DesktopWindow", () => {
 
         yield* TestClock.adjust(100);
         assert.deepEqual(fakeWindow.loadURL.mock.calls, [
-          ["t3code-dev://app/"],
-          ["t3code-dev://app/"],
+          ["j5code-dev://app/"],
+          ["j5code-dev://app/"],
         ]);
         assert.equal(fakeWindow.reload.mock.calls.length, 0);
 

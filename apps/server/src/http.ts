@@ -26,6 +26,8 @@ import {
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import { OtlpTracer } from "effect/unstable/observability";
 
+import { J5_BRANDING } from "../../../scripts/lib/j5-branding.ts";
+
 import * as ServerConfig from "./config.ts";
 import { ASSET_ROUTE_PREFIX, resolveAsset } from "./assets/AssetAccess.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
@@ -42,7 +44,10 @@ import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./ht
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
-const DESKTOP_RENDERER_ORIGINS = ["t3code://app", "t3code-dev://app"];
+const DESKTOP_RENDERER_ORIGINS = [
+  `${J5_BRANDING.desktop.productionScheme}://app`,
+  `${J5_BRANDING.desktop.developmentScheme}://app`,
+];
 const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
 
 export function assetResponseHeaders(filePath: string): Record<string, string> {

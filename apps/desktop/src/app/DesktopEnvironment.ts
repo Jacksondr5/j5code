@@ -11,6 +11,8 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
+import { J5_BRANDING } from "../../../../scripts/lib/j5-branding.ts";
+
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
@@ -85,7 +87,7 @@ export class DesktopEnvironment extends Context.Service<
   }
 >()("@t3tools/desktop/app/DesktopEnvironment") {}
 
-const APP_BASE_NAME = "T3 Code";
+const APP_BASE_NAME = J5_BRANDING.desktop.baseName;
 
 function resolveDesktopAppStageLabel(input: {
   readonly isDevelopment: boolean;
@@ -106,7 +108,12 @@ function resolveDesktopAppBranding(input: {
   return {
     baseName: APP_BASE_NAME,
     stageLabel,
-    displayName: `${APP_BASE_NAME} (${stageLabel})`,
+    displayName:
+      stageLabel === "Dev"
+        ? J5_BRANDING.desktop.developmentName
+        : stageLabel === "Nightly"
+          ? J5_BRANDING.desktop.nightlyName
+          : APP_BASE_NAME,
   };
 }
 
@@ -178,8 +185,12 @@ const make = Effect.fn("desktop.environment.make")(function* (
     joinPath: path.join,
     t3Home: config.t3Home,
   });
-  const userDataDirName = isDevelopment ? "t3code-dev" : "t3code";
-  const legacyUserDataDirName = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+  const userDataDirName = isDevelopment
+    ? J5_BRANDING.desktop.developmentUserDataDirName
+    : J5_BRANDING.desktop.productionUserDataDirName;
+  const legacyUserDataDirName = isDevelopment
+    ? J5_BRANDING.desktop.developmentName
+    : J5_BRANDING.desktop.baseName;
   const linuxApplicationsDir = path.join(
     Option.getOrElse(config.xdgDataHome, () => path.join(homeDirectory, ".local", "share")),
     "applications",
@@ -224,10 +235,16 @@ const make = Effect.fn("desktop.environment.make")(function* (
     branding,
     displayName,
     appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () =>
-      isDevelopment ? "com.t3tools.t3code.dev" : "com.t3tools.t3code",
+      isDevelopment ? J5_BRANDING.desktop.developmentAppId : J5_BRANDING.desktop.appId,
     ),
-    linuxDesktopEntryName: isDevelopment ? "t3code-dev.desktop" : "t3code.desktop",
-    linuxWmClass: isDevelopment ? "t3code-dev" : "t3code",
+    linuxDesktopEntryName: `${
+      isDevelopment
+        ? J5_BRANDING.desktop.developmentUserDataDirName
+        : J5_BRANDING.desktop.linuxExecutableName
+    }.desktop`,
+    linuxWmClass: isDevelopment
+      ? J5_BRANDING.desktop.developmentUserDataDirName
+      : J5_BRANDING.desktop.linuxExecutableName,
     linuxApplicationsDir,
     appImagePath: config.appImagePath,
     userDataDirName,

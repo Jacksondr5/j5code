@@ -2,6 +2,8 @@ import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import { J5_BRANDING } from "../../../../scripts/lib/j5-branding.ts";
+
 import {
   DEFAULT_LINUX_PASSWORD_STORE,
   normalizeLinuxPasswordStorePreference,
@@ -81,7 +83,9 @@ export function resolveEarlyLinuxElectronOptions(
 ): EarlyLinuxElectronOptions {
   const preference = resolveEarlyLinuxPasswordStorePreference(input);
   return {
-    linuxWmClass: isDevelopmentEnvironment(input.env) ? "t3code-dev" : "t3code",
+    linuxWmClass: isDevelopmentEnvironment(input.env)
+      ? J5_BRANDING.desktop.developmentUserDataDirName
+      : J5_BRANDING.desktop.linuxExecutableName,
     passwordStore: resolveLinuxPasswordStoreSwitch({
       preference,
       env: input.env,

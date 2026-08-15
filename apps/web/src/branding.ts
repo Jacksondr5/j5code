@@ -1,4 +1,6 @@
 import type { DesktopAppBranding } from "@t3tools/contracts";
+
+import { J5_BRANDING } from "../../../scripts/lib/j5-branding.ts";
 import { formatAppDisplayName } from "./branding.logic";
 
 function readInjectedDesktopAppBranding(): DesktopAppBranding | null {
@@ -16,7 +18,7 @@ export const HOSTED_APP_CHANNEL =
   hostedAppChannel === "latest" || hostedAppChannel === "nightly" ? hostedAppChannel : null;
 export const HOSTED_APP_CHANNEL_LABEL =
   HOSTED_APP_CHANNEL === "nightly" ? "Nightly" : HOSTED_APP_CHANNEL === "latest" ? "Latest" : null;
-export const APP_BASE_NAME = injectedDesktopAppBranding?.baseName ?? "T3 Code";
+export const APP_BASE_NAME = injectedDesktopAppBranding?.baseName ?? J5_BRANDING.desktop.baseName;
 export const APP_STAGE_LABEL =
   injectedDesktopAppBranding?.stageLabel ??
   HOSTED_APP_CHANNEL_LABEL ??

@@ -6,6 +6,7 @@ import * as NodeModule from "node:module";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
+import { J5_BRANDING } from "../../../scripts/lib/j5-branding.ts";
 import { ensureElectronRuntime } from "./ensure-electron-runtime.mjs";
 
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
@@ -15,11 +16,15 @@ const repoRoot = NodePath.resolve(desktopDir, "..", "..");
 const devBundleIdSuffix = NodePath.basename(repoRoot)
   .toLowerCase()
   .replaceAll(/[^a-z0-9]+/g, "");
-export const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+export const APP_DISPLAY_NAME = isDevelopment
+  ? J5_BRANDING.desktop.developmentName
+  : J5_BRANDING.desktop.baseName;
 export const APP_BUNDLE_ID = isDevelopment
-  ? `com.t3tools.t3code.dev.${devBundleIdSuffix || "local"}`
-  : "com.t3tools.t3code";
-const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
+  ? `${J5_BRANDING.desktop.developmentAppId}.${devBundleIdSuffix || "local"}`
+  : J5_BRANDING.desktop.appId;
+const APP_PROTOCOL_SCHEMES = isDevelopment
+  ? [J5_BRANDING.desktop.developmentScheme]
+  : [J5_BRANDING.desktop.productionScheme];
 const LAUNCHER_VERSION = 15;
 const developmentMacIconPngPath = NodePath.join(
   repoRoot,
