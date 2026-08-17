@@ -17,6 +17,8 @@ export type {
 } from "./HomeRegistrar.ts";
 export * from "./LedgerService.ts";
 export * from "./Migrations.ts";
+export * from "./placementContracts.ts";
+export * from "./placementProvenance.ts";
 export {
   A2ASilenceDetector,
   A2ASilenceDetectorError,

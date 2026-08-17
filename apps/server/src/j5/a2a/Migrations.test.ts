@@ -36,10 +36,11 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 3, name: "SquadronRename" },
       { migration_id: 4, name: "SilenceNoticeChannel" },
       { migration_id: 5, name: "ImmutableThreadHome" },
+      { migration_id: 6, name: "ParticipantPlacement" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id]) => id),
-      [1, 2, 3, 4, 5],
+      [1, 2, 3, 4, 5, 6],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
@@ -65,7 +66,9 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'j5_a2a_exchange',
           'j5_a2a_delivery',
           'j5_a2a_human_inbox_data',
-          'j5_a2a_silence_detector_cursor'
+          'j5_a2a_silence_detector_cursor',
+          'j5_a2a_placement_event',
+          'j5_a2a_participant_placement'
         )
       ORDER BY name
     `;
@@ -82,7 +85,9 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'j5_a2a_delivery_drain_idx',
           'j5_a2a_delivery_message_sender_idx',
           'j5_a2a_delivery_one_reply_idx',
-          'j5_a2a_comm_event_agent_home_thread_idx'
+          'j5_a2a_comm_event_agent_home_thread_idx',
+          'j5_a2a_placement_event_participant_idx',
+          'j5_a2a_participant_placement_parent_idx'
         )
       ORDER BY name
     `;
@@ -113,6 +118,8 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       { name: "j5_a2a_delivery" },
       { name: "j5_a2a_exchange" },
       { name: "j5_a2a_human_inbox_data" },
+      { name: "j5_a2a_participant_placement" },
+      { name: "j5_a2a_placement_event" },
       { name: "j5_a2a_silence_detector_cursor" },
       { name: "j5_a2a_squadron" },
       { name: "j5_a2a_squadron_membership" },
@@ -165,6 +172,14 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
     assert.include(
       indexesByName.get("j5_a2a_comm_event_agent_home_thread_idx") ?? "",
       "json_extract(payload, '$.participant.kind') = 'agent'",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_participant_placement_parent_idx") ?? "",
+      "ON j5_a2a_participant_placement(squadron_id, placement_parent_id)",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_placement_event_participant_idx") ?? "",
+      "ON j5_a2a_placement_event(squadron_id, participant_id, seq)",
     );
     const envelopeChannel = deliveryColumns.find((column) => column.name === "envelope_channel");
     assert.equal(envelopeChannel?.notnull, 1);
