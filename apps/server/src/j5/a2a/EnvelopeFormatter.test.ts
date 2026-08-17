@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest";
 
 import {
   A2A_ENVELOPE_VERSION,
+  A2A_JOIN_TOOL_DESCRIPTION,
   A2A_LIST_TOOL_DESCRIPTION,
   A2A_SEND_TOOL_DESCRIPTION,
   formatHumanEnvelope,
@@ -37,4 +38,5 @@ it("tells agents that human-origin exchanges require an explicit tool reply", ()
   assert.include(rendered, 'exchange_id="exchange:human"');
   assert.include(A2A_SEND_TOOL_DESCRIPTION, "returns after the sender ledger commit");
   assert.include(A2A_LIST_TOOL_DESCRIPTION, "reachable J5 A2A participants");
+  assert.include(A2A_JOIN_TOOL_DESCRIPTION, "authenticated thread");
 });

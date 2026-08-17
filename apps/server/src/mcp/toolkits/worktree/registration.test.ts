@@ -12,12 +12,11 @@ import * as GitWorkflowService from "../../../git/GitWorkflowService.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../../../project/ProjectSetupScriptRunner.ts";
+import { SqlitePersistenceMemory } from "../../../persistence/Layers/Sqlite.ts";
 import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
 import { ScheduledTaskService } from "../../../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../../vcs/VcsStatusBroadcaster.ts";
-import { A2ADeliveryWorker } from "../../../j5/a2a/DeliveryWorker.ts";
-import { A2ASendService } from "../../../j5/a2a/SendService.ts";
 import * as McpHttpServer from "../../McpHttpServer.ts";
 import * as McpSessionRegistry from "../../McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
@@ -31,8 +30,6 @@ const StubServicesLive = Layer.mergeAll(
   Layer.mock(GitWorkflowService.GitWorkflowService)({}),
   Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({}),
   Layer.mock(VcsStatusBroadcaster)({}),
-  Layer.mock(A2ASendService)({}),
-  Layer.mock(A2ADeliveryWorker)({}),
 );
 
 const ToolsListPayload = Schema.fromJsonString(
@@ -70,6 +67,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
           }),
         ),
         Layer.provide(PreviewAutomationBroker.layer),
+        Layer.provide(SqlitePersistenceMemory),
         Layer.provide(StubServicesLive),
         Layer.build,
       );
@@ -131,6 +129,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       // that later J5 milestones extend inside the fork-owned toolkit.
       expect(toolNames).toContain("send_message");
       expect(toolNames).toContain("list_participants");
+      expect(toolNames).toContain("join_epic");
 
       // The handoff tool mutates thread state, reaches the network (origin
       // fetch), and runs project setup scripts, so its MCP hints must not

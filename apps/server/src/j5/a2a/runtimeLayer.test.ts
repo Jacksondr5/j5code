@@ -1,0 +1,44 @@
+import { assert, it } from "@effect/vitest";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+
+import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { layer as ledgerLayer } from "./LedgerService.ts";
+import { runJ5A2AMigrations } from "./Migrations.ts";
+import { makeJ5A2ARuntimeLayer } from "./runtimeLayer.ts";
+
+it.effect("shares one ledger and thread-management instance across the runtime graph", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const databaseContext = yield* Layer.build(NodeSqliteClient.layerMemory());
+      const database = Layer.succeed(
+        SqlClient.SqlClient,
+        Context.get(databaseContext, SqlClient.SqlClient),
+      );
+      yield* runJ5A2AMigrations().pipe(Effect.provide(database));
+
+      let ledgerBuilds = 0;
+      let threadManagementBuilds = 0;
+      const countedLedger = ledgerLayer.pipe(
+        Layer.tap(() => Effect.sync(() => (ledgerBuilds += 1))),
+      );
+      const countedThreadManagement = Layer.mock(ThreadManagementService)({}).pipe(
+        Layer.tap(() => Effect.sync(() => (threadManagementBuilds += 1))),
+      );
+      const secondThreadConsumer = Layer.effectDiscard(ThreadManagementService.pipe(Effect.asVoid));
+      const runtime = makeJ5A2ARuntimeLayer({ ledger: countedLedger });
+      yield* Layer.build(
+        Layer.mergeAll(runtime, secondThreadConsumer).pipe(
+          Layer.provide(countedThreadManagement),
+          Layer.provide(database),
+        ),
+      );
+
+      assert.equal(ledgerBuilds, 1);
+      assert.equal(threadManagementBuilds, 1);
+    }),
+  ),
+);

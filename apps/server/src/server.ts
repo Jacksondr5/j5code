@@ -47,7 +47,6 @@ import * as PortScanner from "./preview/PortScanner.ts";
 import * as ProcessRunner from "./processRunner.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as Keybindings from "./keybindings.ts";
-import { J5A2ARuntimeLayer } from "./j5/a2a/runtimeLayer.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
@@ -347,8 +346,6 @@ const OrchestrationApplicationLayerLive = CheckpointDiffQuery.layer.pipe(
 const RuntimeCoreDependenciesBaseLive = AgentAwarenessRelay.layer.pipe(
   // Core Services
   Layer.provideMerge(OrchestrationApplicationLayerLive),
-  // J5 fork extension: durable A2A ledger plus startup delivery reconciliation.
-  Layer.provideMerge(J5A2ARuntimeLayer.pipe(Layer.provide(OrchestrationV2RuntimeLayerLive))),
   Layer.provideMerge(ServerSettingsLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
   Layer.provideMerge(GitLayerLive),

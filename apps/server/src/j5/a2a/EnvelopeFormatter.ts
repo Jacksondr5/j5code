@@ -5,6 +5,7 @@ import type { EpicId, ExchangeId, ParticipantId } from "./contracts.ts";
 export const A2A_ENVELOPE_VERSION = config.version;
 export const A2A_SEND_TOOL_DESCRIPTION = config.sendToolDescription;
 export const A2A_LIST_TOOL_DESCRIPTION = config.listToolDescription;
+export const A2A_JOIN_TOOL_DESCRIPTION = config.joinToolDescription;
 
 const render = (template: string, values: Readonly<Record<string, string>>): string =>
   Object.entries(values).reduce(

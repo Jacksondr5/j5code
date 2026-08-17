@@ -228,6 +228,21 @@ export const SendMessageResult = Schema.Struct({
 });
 export type SendMessageResult = typeof SendMessageResult.Type;
 
+export const JoinEpicInput = Schema.Struct({
+  senderThreadId: ThreadId,
+  epicId: Schema.optional(EpicId),
+  acceptedAt: Schema.String,
+});
+export type JoinEpicInput = typeof JoinEpicInput.Type;
+
+export const JoinEpicResult = Schema.Struct({
+  epicId: EpicId,
+  participantId: ParticipantId,
+  state: Schema.Literals(["created", "joined", "selected"]),
+  previousEpicIds: Schema.Array(EpicId),
+});
+export type JoinEpicResult = typeof JoinEpicResult.Type;
+
 export const ParticipantDirectoryRow = Schema.Struct({
   epicId: EpicId,
   participantId: ParticipantId,

@@ -311,3 +311,50 @@ it.effect("lists membership-derived participant capabilities", () =>
     );
   }).pipe(Effect.provide(testLayer)),
 );
+
+it.effect("marks ambiguous participant rows unavailable before send", () =>
+  Effect.gen(function* () {
+    yield* setupSameEpic();
+    const ledgerService = yield* A2ALedger;
+    const duplicateEpicId = EpicId.make("epic:exchange:duplicate-receiver");
+    yield* ledgerService.createEpic({
+      epic: { id: duplicateEpicId, name: "Duplicate receiver", createdAt: timestamp },
+    });
+    yield* ledgerService.appendEvents({
+      commandId: CommCommandId.make("command:join:duplicate-receiver"),
+      epicId: duplicateEpicId,
+      acceptedAt: timestamp,
+      events: [
+        {
+          kind: "participant.joined",
+          sender: null,
+          receiver: receiver.id,
+          exchangeId: null,
+          correlationId: null,
+          payload: { participant: receiver },
+          createdAt: timestamp,
+        },
+      ],
+    });
+
+    const service = yield* A2ASendService;
+    const rows = (yield* service.listParticipants(sender.threadId)).filter(
+      (row) => row.participantId === receiver.id,
+    );
+    assert.lengthOf(rows, 2);
+    assert.isTrue(rows.every((row) => !row.canReceiveMessage && !row.canOpenExchange));
+
+    const error = yield* Effect.flip(
+      service.send({
+        commandId: CommCommandId.make("command:ambiguous-receiver"),
+        senderThreadId: sender.threadId,
+        to: receiver.id,
+        message: "This must fail before append.",
+        acceptedAt: timestamp,
+      }),
+    );
+    assert.equal(error._tag, "A2AAmbiguousParticipantError");
+    assert.include(error.message, "choose a participantId with canReceiveMessage=true");
+    assert.include(error.message, "ask the human");
+  }).pipe(Effect.provide(testLayer)),
+);

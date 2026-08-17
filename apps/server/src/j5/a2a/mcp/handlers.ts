@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
+import { A2AEpicBootstrap } from "../EpicBootstrapService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { CommCommandId } from "../contracts.ts";
 import { J5Toolkit, type J5McpFailure } from "./tools.ts";
@@ -16,6 +17,16 @@ const failure = (error: unknown): J5McpFailure => ({
   message: error instanceof Error ? error.message : String(error),
 });
 
+const stablePart = (value: string) => encodeURIComponent(value);
+
+export const commandIdForRequest = (input: {
+  readonly providerSessionId: string;
+  readonly requestKey: string;
+}) =>
+  CommCommandId.make(
+    `command:j5:a2a:mcp:${stablePart(input.providerSessionId)}:${stablePart(input.requestKey)}`,
+  );
+
 const handlers = {
   send_message: (input) =>
     Effect.gen(function* () {
@@ -24,8 +35,12 @@ const handlers = {
       const service = yield* A2ASendService;
       const worker = yield* A2ADeliveryWorker;
       const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
       const result = yield* service.send({
-        commandId: CommCommandId.make(`command:j5:a2a:mcp:${yield* crypto.randomUUIDv4}`),
+        commandId: commandIdForRequest({
+          providerSessionId: scope.providerSessionId,
+          requestKey,
+        }),
         senderThreadId: scope.threadId,
         to: input.to,
         message: input.message,
@@ -43,6 +58,17 @@ const handlers = {
       const scope = yield* McpInvocationContext;
       const service = yield* A2ASendService;
       return { participants: yield* service.listParticipants(scope.threadId) };
+    }).pipe(Effect.mapError(failure)),
+  join_epic: (input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
+      const service = yield* A2AEpicBootstrap;
+      const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+      return yield* service.joinEpic({
+        senderThreadId: scope.threadId,
+        ...(input.epic_id === undefined ? {} : { epicId: input.epic_id }),
+        acceptedAt,
+      });
     }).pipe(Effect.mapError(failure)),
 } satisfies Parameters<typeof J5Toolkit.toLayer>[0];
 

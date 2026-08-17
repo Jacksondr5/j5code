@@ -24,6 +24,7 @@ import {
   CorrelationId,
   Epic,
   EpicId,
+  LedgerMessageId,
   ParticipantId,
   type AppendCommEventCommand,
   type CommEvent,
@@ -42,7 +43,7 @@ const fileLedgerLayer = (filename: string) =>
   ledgerLayer.pipe(Layer.provideMerge(NodeSqliteClient.layer({ filename })));
 
 const messageEvent = (index: number): CommEvent => ({
-  kind: "message.sent",
+  kind: "silence.notice",
   sender: ParticipantId.make("agent:sender"),
   receiver: ParticipantId.make("agent:receiver"),
   exchangeId: null,
@@ -50,6 +51,53 @@ const messageEvent = (index: number): CommEvent => ({
   payload: { index },
   createdAt: timestamp,
 });
+
+it.effect("routes single-event append through command ids and A2 projections", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const ledger = yield* A2ALedger;
+    const sql = yield* SqlClient.SqlClient;
+    const epicId = EpicId.make("epic:single-append-projection");
+    const commandId = CommCommandId.make("command:single-append-projection");
+    const messageId = LedgerMessageId.make("message:single-append-projection");
+    yield* ledger.createEpic({
+      epic: { id: epicId, name: "Single append projection", createdAt: timestamp },
+    });
+    yield* ledger.append({
+      commandId,
+      epicId,
+      acceptedAt: timestamp,
+      event: {
+        kind: "message.sent",
+        sender: ParticipantId.make("agent:single:sender"),
+        receiver: ParticipantId.make("agent:single:receiver"),
+        exchangeId: null,
+        correlationId: CorrelationId.make("correlation:single-append-projection"),
+        payload: {
+          messageId,
+          text: "Single append remains deliverable.",
+          originEpicId: epicId,
+          receiverEpicId: epicId,
+          exchangeRole: "none",
+        },
+        createdAt: timestamp,
+      },
+    });
+
+    const rows = yield* sql<{
+      readonly command_id: string;
+      readonly message_id: string;
+      readonly status: string;
+    }>`
+      SELECT command_id, message_id, status
+      FROM j5_a2a_delivery
+      WHERE message_id = ${messageId}
+    `;
+    assert.deepStrictEqual(rows, [
+      { command_id: commandId, message_id: messageId, status: "pending" },
+    ]);
+  }).pipe(Effect.provide(memoryLedgerLayer())),
+);
 
 const appendCommand = (
   epicId: EpicId,

@@ -46,7 +46,7 @@ export class A2AAmbiguousParticipantError extends Schema.TaggedErrorClass<A2AAmb
   { participantId: Schema.String },
 ) {
   override get message(): string {
-    return `Participant ${this.participantId} is active in more than one epic. Resolve the duplicate membership, then call list_participants again.`;
+    return `Participant ${this.participantId} is active in more than one epic and cannot be addressed unambiguously. Call list_participants and choose a participantId with canReceiveMessage=true, or ask the human to repair epic membership.`;
   }
 }
 
@@ -235,6 +235,13 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
         Effect.gen(function* () {
           const sender = yield* senderMembership(senderThreadId);
           const rows = yield* membershipRows();
+          const membershipCounts = new Map<string, number>();
+          for (const row of rows) {
+            membershipCounts.set(
+              row.participant_id,
+              (membershipCounts.get(row.participant_id) ?? 0) + 1,
+            );
+          }
           const selected = rows.filter(
             (row) =>
               row.participant_id !== GLOBAL_HUMAN_PARTICIPANT_ID || row.epic_id === sender.epicId,
@@ -243,14 +250,19 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
             selected,
             (row) =>
               decodeParticipant(row.payload).pipe(
-                Effect.map((participant) => ({
-                  epicId: EpicId.make(row.epic_id),
-                  participantId: participantId(participant),
-                  participant,
-                  canReceiveMessage: true,
-                  canOpenExchange: true,
-                  acceptsUrgency: participant.kind === "human",
-                })),
+                Effect.map((participant) => {
+                  const id = participantId(participant);
+                  const addressable =
+                    id === GLOBAL_HUMAN_PARTICIPANT_ID || membershipCounts.get(id) === 1;
+                  return {
+                    epicId: EpicId.make(row.epic_id),
+                    participantId: id,
+                    participant,
+                    canReceiveMessage: addressable,
+                    canOpenExchange: addressable,
+                    acceptsUrgency: participant.kind === "human",
+                  };
+                }),
               ),
             { concurrency: 1 },
           );

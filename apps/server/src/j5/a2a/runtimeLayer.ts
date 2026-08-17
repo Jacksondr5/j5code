@@ -2,21 +2,26 @@ import * as Layer from "effect/Layer";
 
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
+import { layer as epicBootstrapLayer } from "./EpicBootstrapService.ts";
 import { layer as ledgerLayer } from "./LedgerService.ts";
 import { layer as sendServiceLayer } from "./SendService.ts";
 
-const ledgerProvided = ledgerLayer;
-const deliveryTransportProvided = deliveryTransportLayer;
-const sendServiceProvided = sendServiceLayer.pipe(Layer.provide(ledgerProvided));
-const deliveryWorkerProvided = deliveryWorkerLayer.pipe(
-  Layer.provide(ledgerProvided),
-  Layer.provide(deliveryTransportProvided),
-);
+export const makeJ5A2ARuntimeLayer = (
+  options: {
+    readonly ledger?: typeof ledgerLayer;
+    readonly deliveryTransport?: typeof deliveryTransportLayer;
+  } = {},
+) => {
+  const ledgerProvided = options.ledger ?? ledgerLayer;
+  const deliveryTransportProvided = options.deliveryTransport ?? deliveryTransportLayer;
+  const deliveryWorkerProvided = deliveryWorkerLayer.pipe(
+    Layer.provideMerge(deliveryTransportProvided),
+  );
+
+  return Layer.mergeAll(sendServiceLayer, epicBootstrapLayer, deliveryWorkerProvided).pipe(
+    Layer.provideMerge(ledgerProvided),
+  );
+};
 
 /** Production J5 A2A services; SQL and V2 thread management stay shared runtime dependencies. */
-export const J5A2ARuntimeLayer = Layer.mergeAll(
-  ledgerProvided,
-  deliveryTransportProvided,
-  sendServiceProvided,
-  deliveryWorkerProvided,
-);
+export const J5A2ARuntimeLayer = makeJ5A2ARuntimeLayer();

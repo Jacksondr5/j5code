@@ -28,7 +28,7 @@ import {
 import { WorktreeToolkitHandlersLive } from "./toolkits/worktree/handlers.ts";
 import { WorktreeToolkit } from "./toolkits/worktree/tools.ts";
 import * as WorktreeMcpService from "./WorktreeMcpService.ts";
-import { J5ToolkitRegistrationLive } from "../j5/a2a/mcp/registration.ts";
+import { J5McpIntegrationLive } from "../j5/a2a/mcp/registration.ts";
 
 const unauthorized = HttpServerResponse.jsonUnsafe(
   {
@@ -245,5 +245,5 @@ export const layer = Layer.mergeAll(
   OrchestratorToolkitRegistrationLive,
   WorktreeToolkitRegistrationLive,
   // J5 fork extension: one shared toolkit registration for all J5-owned tools.
-  J5ToolkitRegistrationLive,
+  J5McpIntegrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive));

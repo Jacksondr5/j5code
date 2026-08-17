@@ -411,128 +411,6 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
       return yield* Effect.forEach(rows, membershipFromRow, { concurrency: 1 });
     });
 
-    const appendEffect = Effect.fn("j5.a2a.append")(function* (command: AppendCommEventCommand) {
-      const result = yield* sql.withTransaction(
-        Effect.gen(function* () {
-          yield* ensureEpic(command.epicId);
-          const pending = decideAppendCommEvent(command)[0];
-          const sequenceRows = yield* sql<{ readonly next_seq: number }>`
-            SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq
-            FROM j5_a2a_comm_event
-            WHERE epic_id = ${command.epicId}
-          `;
-          const seq = sequenceRows[0]?.next_seq;
-          if (seq === undefined) {
-            return yield* new A2AStorageError({ operation: "allocate communication sequence" });
-          }
-          const reserved = yield* sql<{ readonly command_id: string }>`
-            INSERT INTO j5_a2a_comm_command_receipt (
-              command_id,
-              epic_id,
-              command_type,
-              accepted_at,
-              result_seq
-            ) VALUES (
-              ${command.commandId},
-              ${command.epicId},
-              'comm.append',
-              ${command.acceptedAt},
-              ${seq}
-            )
-            ON CONFLICT(command_id) DO NOTHING
-            RETURNING command_id
-          `;
-
-          if (reserved[0] === undefined) {
-            const receiptRows = yield* sql<ReceiptRow>`
-              SELECT command_id, epic_id, command_type, accepted_at, result_seq
-              FROM j5_a2a_comm_command_receipt
-              WHERE command_id = ${command.commandId}
-              LIMIT 1
-            `;
-            const row = receiptRows[0];
-            if (row === undefined) {
-              return yield* new A2AStorageError({
-                operation: "read replayed command receipt",
-              });
-            }
-            if (row.epic_id !== command.epicId) {
-              return yield* new CommCommandConflictError({
-                commandId: command.commandId,
-                requestedEpicId: command.epicId,
-                existingEpicId: row.epic_id,
-              });
-            }
-            const eventRows = yield* sql<EventRow>`
-              SELECT
-                seq,
-                epic_id,
-                kind,
-                sender,
-                receiver,
-                exchange_id,
-                correlation_id,
-                payload,
-                created_at
-              FROM j5_a2a_comm_event
-              WHERE epic_id = ${command.epicId} AND seq = ${row.result_seq}
-              LIMIT 1
-            `;
-            const eventRow = eventRows[0];
-            if (eventRow === undefined) {
-              return yield* new A2AStorageError({
-                operation: "read replayed command event",
-              });
-            }
-            return {
-              receipt: yield* receiptFromRow(row),
-              event: yield* eventFromRow(eventRow),
-              committed: false as const,
-            };
-          }
-
-          const payload = yield* encodeJson(pending.payload);
-          yield* sql`
-            INSERT INTO j5_a2a_comm_event (
-              seq,
-              epic_id,
-              kind,
-              sender,
-              receiver,
-              exchange_id,
-              correlation_id,
-              payload,
-              created_at
-            ) VALUES (
-              ${seq},
-              ${pending.epicId},
-              ${pending.kind},
-              ${pending.sender},
-              ${pending.receiver},
-              ${pending.exchangeId},
-              ${pending.correlationId},
-              ${payload},
-              ${pending.createdAt}
-            )
-          `;
-          const event = yield* decodeStoredEvent({ seq, ...pending });
-          yield* applyMembership(event);
-          const receipt = yield* decodeReceipt({
-            commandId: command.commandId,
-            epicId: command.epicId,
-            commandType: "comm.append",
-            acceptedAt: command.acceptedAt,
-            resultSeq: seq,
-          });
-          return { receipt, event, committed: true as const };
-        }),
-      );
-      if (result.committed) {
-        yield* PubSub.publish(committed, result.event);
-      }
-      return result;
-    });
-
     const appendEventsEffect = Effect.fn("j5.a2a.appendEvents")(function* (
       command: AppendCommEventsCommand,
     ) {
@@ -677,8 +555,16 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
           yield* sql`
             INSERT INTO j5_a2a_epic (id, name, created_at)
             VALUES (${command.epic.id}, ${command.epic.name}, ${command.epic.createdAt})
+            ON CONFLICT(id) DO NOTHING
           `;
-          return command.epic;
+          return yield* epicFromRow(
+            (yield* sql<EpicRow>`
+              SELECT id, name, created_at
+              FROM j5_a2a_epic
+              WHERE id = ${command.epic.id}
+              LIMIT 1
+            `)[0]!,
+          );
         }).pipe(Effect.mapError(preserveDomainError("create epic"))),
       listEpics: () =>
         Effect.gen(function* () {
@@ -698,7 +584,25 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
         }).pipe(Effect.mapError(preserveDomainError("read epic"))),
       append: (command) =>
         appendPermit
-          .withPermit(appendEffect(command))
+          .withPermit(
+            appendEventsEffect({
+              commandId: command.commandId,
+              epicId: command.epicId,
+              acceptedAt: command.acceptedAt,
+              events: [command.event],
+            }).pipe(
+              Effect.flatMap((result) => {
+                const event = result.events[0];
+                return event === undefined
+                  ? Effect.fail(new A2AStorageError({ operation: "read single appended event" }))
+                  : Effect.succeed({
+                      receipt: result.receipt,
+                      event,
+                      committed: result.committed,
+                    });
+              }),
+            ),
+          )
           .pipe(Effect.mapError(preserveDomainError("append communication event"))),
       appendEvents: (command) =>
         appendPermit
