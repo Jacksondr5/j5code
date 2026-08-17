@@ -1,4 +1,4 @@
-import { CommandId, type OrchestrationV2ThreadProjection, type ThreadId } from "@t3tools/contracts";
+import { CommandId, ThreadId, type OrchestrationV2ThreadProjection } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -6,7 +6,7 @@ import * as Schema from "effect/Schema";
 
 import * as ThreadLifecycle from "../../orchestration-v2/ThreadLifecycleService.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
-import type { EpicId, ParticipantId } from "./contracts.ts";
+import { ParticipantId, type EpicId } from "./contracts.ts";
 import type { ParticipantPlacementView, PlacementCommandId } from "./placementContracts.ts";
 import {
   type PlacementError,
@@ -28,16 +28,18 @@ export interface PlacementCascadeInput {
   readonly participantId: ParticipantId;
 }
 
-export interface PlacementCascadeRow {
-  readonly participantId: ParticipantId;
-  readonly threadId: ThreadId;
-  readonly outcome:
-    | "interrupt_requested"
-    | "no_active_run"
-    | "already_terminal"
-    | "archived"
-    | "already_archived";
-}
+export const PlacementCascadeRow = Schema.Struct({
+  participantId: ParticipantId,
+  threadId: ThreadId,
+  outcome: Schema.Literals([
+    "interrupt_requested",
+    "no_active_run",
+    "already_terminal",
+    "archived",
+    "already_archived",
+  ]),
+});
+export type PlacementCascadeRow = typeof PlacementCascadeRow.Type;
 
 export class PlacementCascadeDispatchError extends Schema.TaggedErrorClass<PlacementCascadeDispatchError>()(
   "PlacementCascadeDispatchError",

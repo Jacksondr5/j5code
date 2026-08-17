@@ -582,9 +582,9 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             : input.provenance.kind === "forked-from"
               ? input.provenance.sourceParticipantId
               : null;
-        if (provenanceParticipantId !== null) {
-          yield* ensureParticipant(input.epicId, provenanceParticipantId);
-        }
+        // Provenance can name a source outside the active epic. Placement still
+        // requires an active parent, but immutable lineage must not be erased
+        // merely because its source is absent or has since left membership.
         if (provenanceParticipantId === input.participantId) {
           return yield* new PlacementCycleError({
             participantId: input.participantId,
