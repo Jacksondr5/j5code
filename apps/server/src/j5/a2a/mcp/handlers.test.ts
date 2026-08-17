@@ -56,6 +56,7 @@ it.effect("derives send idempotency and epic bootstrap identity from authenticat
               participantId,
               state: "selected" as const,
               previousEpicIds: [],
+              openExchangeWarnings: [],
             }),
           ),
       }),

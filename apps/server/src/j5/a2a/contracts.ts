@@ -240,6 +240,14 @@ export const JoinEpicResult = Schema.Struct({
   participantId: ParticipantId,
   state: Schema.Literals(["created", "joined", "selected"]),
   previousEpicIds: Schema.Array(EpicId),
+  openExchangeWarnings: Schema.Array(
+    Schema.Struct({
+      epicId: EpicId,
+      exchangeId: ExchangeId,
+      peerId: ParticipantId,
+      message: Schema.String.check(Schema.isNonEmpty()),
+    }),
+  ),
 });
 export type JoinEpicResult = typeof JoinEpicResult.Type;
 

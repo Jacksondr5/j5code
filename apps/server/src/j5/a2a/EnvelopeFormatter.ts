@@ -24,6 +24,17 @@ const deliveryInstruction = (input: {
         exchangeId: input.exchangeId,
       });
 
+export const formatEpicSwitchWarning = (input: {
+  readonly epicId: EpicId;
+  readonly exchangeId: ExchangeId;
+  readonly peerId: ParticipantId;
+}): string =>
+  render(config.epicSwitchWarning, {
+    epicId: input.epicId,
+    exchangeId: input.exchangeId,
+    peerId: input.peerId,
+  });
+
 export const formatPeerEnvelope = (input: {
   readonly senderId: ParticipantId;
   readonly originEpicId: EpicId;

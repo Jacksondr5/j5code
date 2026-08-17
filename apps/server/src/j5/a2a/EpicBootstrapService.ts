@@ -3,15 +3,19 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import {
   CommCommandId,
   EpicId,
+  ExchangeId,
   type JoinEpicInput,
   type JoinEpicResult,
   type Membership,
   ParticipantId,
 } from "./contracts.ts";
+import { formatEpicSwitchWarning } from "./EnvelopeFormatter.ts";
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 
 export class A2AEpicSelectionRequiredError extends Schema.TaggedErrorClass<A2AEpicSelectionRequiredError>()(
@@ -23,7 +27,7 @@ export class A2AEpicSelectionRequiredError extends Schema.TaggedErrorClass<A2AEp
   }
 }
 
-export type A2AEpicBootstrapError = A2ALedgerError | A2AEpicSelectionRequiredError;
+export type A2AEpicBootstrapError = A2ALedgerError | A2AEpicSelectionRequiredError | SqlError;
 
 export interface A2AEpicBootstrapShape {
   readonly joinEpic: (input: JoinEpicInput) => Effect.Effect<JoinEpicResult, A2AEpicBootstrapError>;
@@ -50,10 +54,20 @@ const membershipCommandId = (
     `command:j5:a2a:bootstrap:${operation}:${stablePart(threadId)}:${stablePart(epicId)}:${stablePart(incarnation)}`,
   );
 
-export const layer: Layer.Layer<A2AEpicBootstrap, never, A2ALedger> = Layer.effect(
+interface OpenExchangeRow {
+  readonly epic_id: string;
+  readonly exchange_id: string;
+  readonly sender_id: string;
+  readonly receiver_id: string;
+}
+
+type A2AEpicBootstrapLayer = Layer.Layer<A2AEpicBootstrap, never, A2ALedger | SqlClient.SqlClient>;
+
+export const layer: A2AEpicBootstrapLayer = Layer.effect(
   A2AEpicBootstrap,
   Effect.gen(function* () {
     const ledger = yield* A2ALedger;
+    const sql = yield* SqlClient.SqlClient;
 
     const membershipsForThread = Effect.fn("j5.a2a.bootstrap.membershipsForThread")(function* (
       threadId: ThreadId,
@@ -84,6 +98,7 @@ export const layer: Layer.Layer<A2AEpicBootstrap, never, A2ALedger> = Layer.effe
             participantId: existing[0].participant.id,
             state: "selected",
             previousEpicIds: [],
+            openExchangeWarnings: [],
           };
         }
 
@@ -107,6 +122,35 @@ export const layer: Layer.Layer<A2AEpicBootstrap, never, A2ALedger> = Layer.effe
         }
 
         const previous = existing.filter((membership) => membership.epicId !== targetEpicId);
+        const previousParticipantByEpic = new Map(
+          previous.map((membership) => [membership.epicId, membership.participant.id] as const),
+        );
+        const openExchangeWarnings =
+          previous.length === 0
+            ? []
+            : (yield* sql<OpenExchangeRow>`
+                  SELECT epic_id, exchange_id, sender_id, receiver_id
+                  FROM j5_a2a_exchange
+                  WHERE status = 'open'
+                  ORDER BY epic_id, exchange_id
+                `).flatMap((row) => {
+                const leavingParticipantId = previousParticipantByEpic.get(row.epic_id as EpicId);
+                if (
+                  leavingParticipantId === undefined ||
+                  (row.sender_id !== leavingParticipantId &&
+                    row.receiver_id !== leavingParticipantId)
+                ) {
+                  return [];
+                }
+                const warning = {
+                  epicId: EpicId.make(row.epic_id),
+                  exchangeId: ExchangeId.make(row.exchange_id),
+                  peerId: ParticipantId.make(
+                    row.sender_id === leavingParticipantId ? row.receiver_id : row.sender_id,
+                  ),
+                };
+                return [{ ...warning, message: formatEpicSwitchWarning(warning) }];
+              });
         for (const membership of previous) {
           yield* ledger.appendEvents({
             commandId: membershipCommandId(
@@ -170,6 +214,7 @@ export const layer: Layer.Layer<A2AEpicBootstrap, never, A2ALedger> = Layer.effe
           participantId,
           state: created ? "created" : targetMembership === undefined ? "joined" : "selected",
           previousEpicIds: previous.map((membership) => membership.epicId),
+          openExchangeWarnings,
         };
       });
 
