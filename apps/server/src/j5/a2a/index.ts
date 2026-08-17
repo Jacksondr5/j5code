@@ -20,6 +20,18 @@ export * from "./Migrations.ts";
 export * from "./placementContracts.ts";
 export * from "./placementProvenance.ts";
 export {
+  ParticipantPlacementService,
+  type ParticipantPlacementServiceShape,
+  type PlacementError,
+  type PlacementReparentCaller,
+} from "./PlacementService.ts";
+export {
+  PlacementCascadeService,
+  type PlacementCascadeServiceShape,
+  type PlacementCascadeInput,
+  type PlacementCascadeRow,
+} from "./PlacementCascadeService.ts";
+export {
   A2ASilenceDetector,
   A2ASilenceDetectorError,
   SilenceNoticePayload,

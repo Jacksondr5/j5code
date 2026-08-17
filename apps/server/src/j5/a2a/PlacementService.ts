@@ -1,4 +1,8 @@
-import { EnvironmentAuthenticatedPrincipal, ThreadId } from "@t3tools/contracts";
+import {
+  ServerAuthSessionMethod,
+  ThreadId,
+  type EnvironmentSessionPrincipalShape,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -82,16 +86,32 @@ export class PlacementReferenceUnavailableError extends Schema.TaggedErrorClass<
 export class PlacementHumanRequiredError extends Schema.TaggedErrorClass<PlacementHumanRequiredError>()(
   "PlacementHumanRequiredError",
   {
-    actor: Schema.Literal("agent"),
+    callerKind: Schema.Literals(["mcp-agent", "environment-session"]),
     participantId: ParticipantId,
-    providerSessionId: Schema.String,
-    threadId: ThreadId,
+    authMethod: Schema.NullOr(ServerAuthSessionMethod),
+    subject: Schema.NullOr(Schema.String),
+    providerSessionId: Schema.NullOr(Schema.String),
+    threadId: Schema.NullOr(ThreadId),
   },
 ) {
   override get message(): string {
-    return `Placement actor state is agent for ${this.participantId}: MCP session ${this.providerSessionId} on thread ${this.threadId} cannot reparent. Retry from a human-authenticated command.`;
+    const identity =
+      this.callerKind === "mcp-agent"
+        ? `MCP agent session ${this.providerSessionId} on thread ${this.threadId}`
+        : `environment session ${this.subject} authenticated with ${this.authMethod}`;
+    return `Placement actor state is ${this.callerKind} for ${this.participantId}: ${identity} cannot reparent. Retry from a human browser session.`;
   }
 }
+
+/**
+ * V1 treats an authenticated browser-session cookie as the human command
+ * boundary. MCP callers and bearer/DPoP environment sessions are refused;
+ * successful events retain the session id, subject, and auth method measured
+ * at that boundary.
+ */
+export type PlacementReparentCaller =
+  | { readonly kind: "environment"; readonly principal: EnvironmentSessionPrincipalShape }
+  | { readonly kind: "mcp"; readonly scope: McpInvocationScope };
 
 export class PlacementCycleError extends Schema.TaggedErrorClass<PlacementCycleError>()(
   "PlacementCycleError",
@@ -155,12 +175,9 @@ export interface ParticipantPlacementServiceShape {
     input: RecordParticipantPlacementInput,
   ) => Effect.Effect<PlacementMutationResult, PlacementError>;
   readonly reparent: (
+    caller: PlacementReparentCaller,
     input: ReparentParticipantInput,
-  ) => Effect.Effect<PlacementMutationResult, PlacementError, EnvironmentAuthenticatedPrincipal>;
-  readonly reparentFromMcp: (
-    scope: McpInvocationScope,
-    input: ReparentParticipantInput,
-  ) => Effect.Effect<never, PlacementHumanRequiredError>;
+  ) => Effect.Effect<PlacementMutationResult, PlacementError>;
   readonly readPlacement: (input: {
     readonly epicId: EpicId;
     readonly participantId: ParticipantId;
@@ -194,6 +211,13 @@ interface EventRow {
   readonly participant_id: string;
   readonly kind: "participant.placement_created" | "participant.reparented";
   readonly actor: "human" | "agent" | "platform";
+  readonly actor_session_id: string | null;
+  readonly actor_subject: string | null;
+  readonly auth_method:
+    | "browser-session-cookie"
+    | "bearer-access-token"
+    | "dpop-access-token"
+    | null;
   readonly provenance_kind: "spawned-by" | "forked-from" | "unknown" | null;
   readonly provenance_participant_id: string | null;
   readonly provenance_source: "upstream_lineage" | "j5_wrapper" | null;
@@ -213,8 +237,14 @@ interface PlacementRow {
   readonly updated_event_seq: number;
 }
 
-interface ParticipantRow extends PlacementRow {
+interface ParticipantRow {
   readonly payload: string;
+  readonly epic_id: string;
+  readonly participant_id: string;
+  readonly provenance_kind: "spawned-by" | "forked-from" | "unknown" | null;
+  readonly provenance_participant_id: string | null;
+  readonly provenance_source: "upstream_lineage" | "j5_wrapper" | null;
+  readonly placement_parent_id: string | null;
 }
 
 const decodeEvent = Schema.decodeUnknownEffect(PlacementEvent);
@@ -226,6 +256,8 @@ const provenanceFromRow = (row: {
   readonly provenance_participant_id: string | null;
   readonly provenance_source: "upstream_lineage" | "j5_wrapper" | null;
 }) => {
+  // The migration CHECKs make the non-null provenance fields exhaustive for
+  // each stored kind. Projection decoding intentionally relies on that invariant.
   switch (row.provenance_kind) {
     case "unknown":
       return { kind: "unknown", source: "native_or_unobserved" } as const;
@@ -274,12 +306,16 @@ const eventFromRow = (row: EventRow) =>
           createdAt: row.created_at,
         }
       : {
+          // Reparent identity fields are non-null by the event-table CHECK.
           seq: row.seq,
           commandId: row.command_id,
           epicId: row.epic_id,
           participantId: row.participant_id,
           kind: row.kind,
           actor: "human",
+          actorSessionId: row.actor_session_id!,
+          actorSubject: row.actor_subject!,
+          authMethod: row.auth_method!,
           provenance: null,
           previousParentId: row.previous_parent_id,
           placementParentId: row.placement_parent_id,
@@ -390,6 +426,9 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
               participant_id,
               kind,
               actor,
+              actor_session_id,
+              actor_subject,
+              auth_method,
               provenance_kind,
               provenance_participant_id,
               provenance_source,
@@ -573,6 +612,9 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
               participant_id,
               kind,
               actor,
+              actor_session_id,
+              actor_subject,
+              auth_method,
               provenance_kind,
               provenance_participant_id,
               provenance_source,
@@ -587,6 +629,9 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
               ${input.participantId},
               'participant.placement_created',
               ${input.actor},
+              NULL,
+              NULL,
+              NULL,
               ${provenanceKind},
               ${provenanceParticipantId},
               ${provenanceSource},
@@ -624,6 +669,9 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
           participant_id: input.participantId,
           kind: "participant.placement_created",
           actor: input.actor,
+          actor_session_id: null,
+          actor_subject: null,
+          auth_method: null,
           provenance_kind: provenanceKind,
           provenance_participant_id: provenanceParticipantId,
           provenance_source: provenanceSource,
@@ -640,6 +688,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
 
       const reparentEffect = Effect.fn("j5.a2a.placement.reparent")(function* (
         input: ReparentParticipantInput,
+        principal: EnvironmentSessionPrincipalShape,
       ) {
         const fingerprint = reparentFingerprint(input);
         const replayed = yield* replay(input.commandId, fingerprint);
@@ -669,6 +718,9 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             participant_id,
             kind,
             actor,
+            actor_session_id,
+            actor_subject,
+            auth_method,
             provenance_kind,
             provenance_participant_id,
             provenance_source,
@@ -683,6 +735,9 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             ${input.participantId},
             'participant.reparented',
             'human',
+            ${principal.sessionId},
+            ${principal.subject},
+            ${principal.method},
             NULL,
             NULL,
             NULL,
@@ -704,6 +759,9 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
           participant_id: input.participantId,
           kind: "participant.reparented",
           actor: "human",
+          actor_session_id: principal.sessionId,
+          actor_subject: principal.subject,
+          auth_method: principal.method,
           provenance_kind: null,
           provenance_participant_id: null,
           provenance_source: null,
@@ -727,12 +785,10 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
               m.payload,
               m.epic_id,
               m.participant_id,
-              COALESCE(p.provenance_kind, 'unknown') AS provenance_kind,
+              p.provenance_kind,
               p.provenance_participant_id,
               p.provenance_source,
-              p.placement_parent_id,
-              COALESCE(p.created_event_seq, 1) AS created_event_seq,
-              COALESCE(p.updated_event_seq, 1) AS updated_event_seq
+              p.placement_parent_id
             FROM j5_a2a_epic_membership m
             LEFT JOIN j5_a2a_participant_placement p
               ON p.epic_id = m.epic_id AND p.participant_id = m.participant_id
@@ -753,7 +809,13 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
                 provenance:
                   participant.kind === "human"
                     ? ({ kind: "not-applicable" } as const)
-                    : provenanceFromRow(row),
+                    : row.provenance_kind === null
+                      ? ({ kind: "unrecorded" } as const)
+                      : provenanceFromRow({
+                          provenance_kind: row.provenance_kind,
+                          provenance_participant_id: row.provenance_participant_id,
+                          provenance_source: row.provenance_source,
+                        }),
                 placementParentId:
                   participant.kind === "human"
                     ? null
@@ -777,6 +839,9 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             participant_id,
             kind,
             actor,
+            actor_session_id,
+            actor_subject,
+            auth_method,
             provenance_kind,
             provenance_participant_id,
             provenance_source,
@@ -803,6 +868,9 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
               participant_id,
               kind,
               actor,
+              actor_session_id,
+              actor_subject,
+              auth_method,
               provenance_kind,
               provenance_participant_id,
               provenance_source,
@@ -867,20 +935,35 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
           mutationPermit
             .withPermit(sql.withTransaction(recordCreationEffect(input)))
             .pipe(Effect.mapError(preserveDomainError("record participant placement"))),
-        reparent: (input) =>
-          EnvironmentAuthenticatedPrincipal.pipe(
-            Effect.andThen(mutationPermit.withPermit(sql.withTransaction(reparentEffect(input)))),
-            Effect.mapError(preserveDomainError("reparent participant")),
-          ),
-        reparentFromMcp: (scope, input) =>
-          Effect.fail(
-            new PlacementHumanRequiredError({
-              actor: "agent",
-              participantId: input.participantId,
-              providerSessionId: scope.providerSessionId,
-              threadId: scope.threadId,
-            }),
-          ),
+        reparent: (caller, input) => {
+          if (caller.kind === "mcp") {
+            return Effect.fail(
+              new PlacementHumanRequiredError({
+                callerKind: "mcp-agent",
+                participantId: input.participantId,
+                authMethod: null,
+                subject: null,
+                providerSessionId: caller.scope.providerSessionId,
+                threadId: caller.scope.threadId,
+              }),
+            );
+          }
+          if (caller.principal.method !== "browser-session-cookie") {
+            return Effect.fail(
+              new PlacementHumanRequiredError({
+                callerKind: "environment-session",
+                participantId: input.participantId,
+                authMethod: caller.principal.method,
+                subject: caller.principal.subject,
+                providerSessionId: null,
+                threadId: null,
+              }),
+            );
+          }
+          return mutationPermit
+            .withPermit(sql.withTransaction(reparentEffect(input, caller.principal)))
+            .pipe(Effect.mapError(preserveDomainError("reparent participant")));
+        },
         readPlacement: ({ epicId, participantId }) =>
           Effect.gen(function* () {
             yield* ensureEpic(epicId);

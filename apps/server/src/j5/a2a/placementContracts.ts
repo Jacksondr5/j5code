@@ -1,4 +1,4 @@
-import { ThreadId } from "@t3tools/contracts";
+import { AuthSessionId, ServerAuthSessionMethod, ThreadId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 import { EpicId, Participant, ParticipantId } from "./contracts.ts";
@@ -39,10 +39,12 @@ export const ParticipantProvenance = Schema.Union([
 ]);
 export type ParticipantProvenance = typeof ParticipantProvenance.Type;
 
+/** `unknown` is recorded provenance; `unrecorded` means no placement event exists yet. */
 export const ParticipantProvenanceView = Schema.Union([
   SpawnedByParticipantProvenance,
   ForkedFromParticipantProvenance,
   UnknownParticipantProvenance,
+  Schema.Struct({ kind: Schema.Literal("unrecorded") }),
   Schema.Struct({ kind: Schema.Literal("not-applicable") }),
 ]);
 export type ParticipantProvenanceView = typeof ParticipantProvenanceView.Type;
@@ -90,6 +92,9 @@ export const PlacementReparentedEvent = Schema.Struct({
   participantId: ParticipantId,
   kind: Schema.Literal("participant.reparented"),
   actor: Schema.Literal("human"),
+  actorSessionId: AuthSessionId,
+  actorSubject: Schema.String.check(Schema.isNonEmpty()),
+  authMethod: ServerAuthSessionMethod,
   provenance: Schema.Null,
   previousParentId: Schema.NullOr(ParticipantId),
   placementParentId: Schema.NullOr(ParticipantId),

@@ -1,4 +1,4 @@
-import { CommandId, type ThreadId } from "@t3tools/contracts";
+import { CommandId, type OrchestrationV2ThreadProjection, type ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -17,6 +17,11 @@ import {
 export const PlacementCascadeOperation = Schema.Literals(["stop", "archive"]);
 export type PlacementCascadeOperation = typeof PlacementCascadeOperation.Type;
 
+/**
+ * Stop/archive walks the mutable placement subtree, never provenance. A fork
+ * defaults beside its source, so cascading the source does not reach that fork.
+ * Per-thread command ids are derived as `<commandId>:<operation>:<threadId>`.
+ */
 export interface PlacementCascadeInput {
   readonly commandId: PlacementCommandId;
   readonly epicId: EpicId;
@@ -61,7 +66,7 @@ type AgentParticipantPlacementView = Omit<ParticipantPlacementView, "participant
  * do not move together unless their mutable placement pointers say they do.
  */
 export const runPlacementCascade = <A, E>(input: {
-  readonly placement: ParticipantPlacementServiceShape;
+  readonly placement: Pick<ParticipantPlacementServiceShape, "listSubtree">;
   readonly epicId: EpicId;
   readonly participantId: ParticipantId;
   readonly operation: (participant: AgentParticipantPlacementView) => Effect.Effect<A, E>;
@@ -93,6 +98,112 @@ export class PlacementCascadeService extends Context.Service<
   PlacementCascadeServiceShape
 >()("t3/j5/a2a/PlacementCascadeService") {}
 
+export interface PlacementCascadeDependencies<ThreadFailure, LifecycleFailure, ArchiveResult> {
+  readonly placement: Pick<ParticipantPlacementServiceShape, "listSubtree">;
+  readonly threads: {
+    readonly getThreadProjection: (
+      threadId: ThreadId,
+    ) => Effect.Effect<OrchestrationV2ThreadProjection, ThreadFailure>;
+    readonly interruptThread: (
+      input: ThreadManagement.ThreadManagementInterruptInput,
+    ) => Effect.Effect<ThreadManagement.ThreadManagementInterruptResult, ThreadFailure>;
+  };
+  readonly lifecycle: {
+    readonly archive: (input: {
+      readonly commandId: CommandId;
+      readonly threadId: ThreadId;
+    }) => Effect.Effect<ArchiveResult, LifecycleFailure>;
+  };
+}
+
+/** The same constructor is used by the live layer and focused dispatch tests. */
+export const makePlacementCascadeService = <ThreadFailure, LifecycleFailure, ArchiveResult>({
+  placement,
+  threads,
+  lifecycle,
+}: PlacementCascadeDependencies<
+  ThreadFailure,
+  LifecycleFailure,
+  ArchiveResult
+>): PlacementCascadeServiceShape => {
+  const commandId = (
+    input: PlacementCascadeInput,
+    operation: PlacementCascadeOperation,
+    threadId: ThreadId,
+  ) => CommandId.make(`${input.commandId}:${operation}:${threadId}`);
+
+  const stop: PlacementCascadeServiceShape["stop"] = (input) =>
+    runPlacementCascade({
+      placement,
+      epicId: input.epicId,
+      participantId: input.participantId,
+      operation: (participant) =>
+        Effect.gen(function* () {
+          const projection = yield* threads.getThreadProjection(participant.threadId);
+          const result = yield* threads.interruptThread({
+            projectId: projection.thread.projectId,
+            commandId: commandId(input, "stop", participant.threadId),
+            threadId: participant.threadId,
+            reason: `Placement cascade requested by ${input.participantId}.`,
+          });
+          return {
+            participantId: participant.participantId,
+            threadId: participant.threadId,
+            outcome: result.type,
+          } satisfies PlacementCascadeRow;
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new PlacementCascadeDispatchError({
+                operation: "stop",
+                participantId: participant.participantId,
+                threadId: participant.threadId,
+                cause,
+              }),
+          ),
+        ),
+    });
+
+  const archive: PlacementCascadeServiceShape["archive"] = (input) =>
+    runPlacementCascade({
+      placement,
+      epicId: input.epicId,
+      participantId: input.participantId,
+      operation: (participant) =>
+        Effect.gen(function* () {
+          const projection = yield* threads.getThreadProjection(participant.threadId);
+          if (projection.thread.archivedAt !== null) {
+            return {
+              participantId: participant.participantId,
+              threadId: participant.threadId,
+              outcome: "already_archived",
+            } satisfies PlacementCascadeRow;
+          }
+          yield* lifecycle.archive({
+            commandId: commandId(input, "archive", participant.threadId),
+            threadId: participant.threadId,
+          });
+          return {
+            participantId: participant.participantId,
+            threadId: participant.threadId,
+            outcome: "archived",
+          } satisfies PlacementCascadeRow;
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new PlacementCascadeDispatchError({
+                operation: "archive",
+                participantId: participant.participantId,
+                threadId: participant.threadId,
+                cause,
+              }),
+          ),
+        ),
+    });
+
+  return PlacementCascadeService.of({ stop, archive });
+};
+
 export const layer: Layer.Layer<
   PlacementCascadeService,
   never,
@@ -105,82 +216,6 @@ export const layer: Layer.Layer<
     const placement = yield* ParticipantPlacementService;
     const threads = yield* ThreadManagement.ThreadManagementService;
     const lifecycle = yield* ThreadLifecycle.ThreadLifecycleService;
-
-    const commandId = (
-      input: PlacementCascadeInput,
-      operation: PlacementCascadeOperation,
-      threadId: ThreadId,
-    ) => CommandId.make(`${input.commandId}:${operation}:${threadId}`);
-
-    const stop: PlacementCascadeServiceShape["stop"] = (input) =>
-      runPlacementCascade({
-        placement,
-        epicId: input.epicId,
-        participantId: input.participantId,
-        operation: (participant) =>
-          Effect.gen(function* () {
-            const projection = yield* threads.getThreadProjection(participant.threadId);
-            const result = yield* threads.interruptThread({
-              projectId: projection.thread.projectId,
-              commandId: commandId(input, "stop", participant.threadId),
-              threadId: participant.threadId,
-              reason: `Placement cascade requested by ${input.participantId}.`,
-            });
-            return {
-              participantId: participant.participantId,
-              threadId: participant.threadId,
-              outcome: result.type,
-            } satisfies PlacementCascadeRow;
-          }).pipe(
-            Effect.mapError(
-              (cause) =>
-                new PlacementCascadeDispatchError({
-                  operation: "stop",
-                  participantId: participant.participantId,
-                  threadId: participant.threadId,
-                  cause,
-                }),
-            ),
-          ),
-      });
-
-    const archive: PlacementCascadeServiceShape["archive"] = (input) =>
-      runPlacementCascade({
-        placement,
-        epicId: input.epicId,
-        participantId: input.participantId,
-        operation: (participant) =>
-          Effect.gen(function* () {
-            const projection = yield* threads.getThreadProjection(participant.threadId);
-            if (projection.thread.archivedAt !== null) {
-              return {
-                participantId: participant.participantId,
-                threadId: participant.threadId,
-                outcome: "already_archived",
-              } satisfies PlacementCascadeRow;
-            }
-            yield* lifecycle.archive({
-              commandId: commandId(input, "archive", participant.threadId),
-              threadId: participant.threadId,
-            });
-            return {
-              participantId: participant.participantId,
-              threadId: participant.threadId,
-              outcome: "archived",
-            } satisfies PlacementCascadeRow;
-          }).pipe(
-            Effect.mapError(
-              (cause) =>
-                new PlacementCascadeDispatchError({
-                  operation: "archive",
-                  participantId: participant.participantId,
-                  threadId: participant.threadId,
-                  cause,
-                }),
-            ),
-          ),
-      });
-
-    return PlacementCascadeService.of({ stop, archive });
+    return makePlacementCascadeService({ placement, threads, lifecycle });
   }),
 );

@@ -16,6 +16,13 @@ export default Effect.gen(function* () {
         'participant.reparented'
       )),
       actor TEXT NOT NULL CHECK (actor IN ('human', 'agent', 'platform')),
+      actor_session_id TEXT,
+      actor_subject TEXT,
+      auth_method TEXT CHECK (auth_method IN (
+        'browser-session-cookie',
+        'bearer-access-token',
+        'dpop-access-token'
+      )),
       provenance_kind TEXT CHECK (provenance_kind IN (
         'spawned-by',
         'forked-from',
@@ -34,11 +41,17 @@ export default Effect.gen(function* () {
       CHECK (
         (kind = 'participant.reparented'
           AND actor = 'human'
+          AND actor_session_id IS NOT NULL
+          AND length(trim(actor_subject)) > 0
+          AND auth_method = 'browser-session-cookie'
           AND provenance_kind IS NULL
           AND provenance_participant_id IS NULL
           AND provenance_source IS NULL)
         OR
         (kind = 'participant.placement_created'
+          AND actor_session_id IS NULL
+          AND actor_subject IS NULL
+          AND auth_method IS NULL
           AND previous_parent_id IS NULL
           AND provenance_kind IS NOT NULL
           AND (
