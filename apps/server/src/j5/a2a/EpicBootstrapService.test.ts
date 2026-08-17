@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
@@ -97,6 +98,58 @@ it.effect("creates, reuses, and explicitly changes the caller's selected epic", 
       { kind: "participant.left", count: 2 },
     ]);
   }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("derives one command id for concurrent attempts to join the same epic", () =>
+  Effect.gen(function* () {
+    const commandIds = yield* Ref.make<ReadonlyArray<CommCommandId>>([]);
+    const mockedLedger = Layer.mock(A2ALedger)({
+      listEpics: () => Effect.succeed([]),
+      listMembership: () => Effect.succeed([]),
+      createEpic: ({ epic }) => Effect.succeed(epic),
+      appendEvents: (command) =>
+        Ref.update(commandIds, (ids) => [...ids, command.commandId]).pipe(
+          Effect.as({
+            receipt: {
+              commandId: command.commandId,
+              epicId: command.epicId,
+              commandType: "comm.append" as const,
+              acceptedAt: command.acceptedAt,
+              resultSeq: command.events.length,
+            },
+            events: command.events.map((event, index) => ({
+              ...event,
+              epicId: command.epicId,
+              seq: index + 1,
+            })),
+            committed: true,
+          }),
+        ),
+    });
+    const serviceLayer = bootstrapLayer.pipe(Layer.provide(mockedLedger));
+
+    const results = yield* Effect.all(
+      [
+        A2AEpicBootstrap.pipe(
+          Effect.flatMap((service) =>
+            service.joinEpic({ senderThreadId: threadId, acceptedAt: timestamp }),
+          ),
+        ),
+        A2AEpicBootstrap.pipe(
+          Effect.flatMap((service) =>
+            service.joinEpic({ senderThreadId: threadId, acceptedAt: timestamp }),
+          ),
+        ),
+      ],
+      { concurrency: "unbounded" },
+    ).pipe(Effect.provide(serviceLayer));
+
+    assert.equal(results[0].epicId, results[1].epicId);
+    assert.equal(results[0].participantId, results[1].participantId);
+    const captured = yield* Ref.get(commandIds);
+    assert.lengthOf(captured, 2);
+    assert.equal(captured[0], captured[1]);
+  }),
 );
 
 it.effect("requires explicit selection when legacy membership is ambiguous", () =>
