@@ -7,6 +7,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import { runMigrations } from "../Migrations.ts";
 import { ServerConfig } from "../../config.ts";
+import { runJ5A2AMigrations } from "../../j5/a2a/Migrations.ts";
 
 type RuntimeSqliteLayerConfig = {
   readonly filename: string;
@@ -38,6 +39,7 @@ const setup = Layer.effectDiscard(
     yield* sql`PRAGMA foreign_keys = ON;`;
     yield* sql`PRAGMA journal_mode = WAL;`;
     yield* runMigrations();
+    yield* runJ5A2AMigrations();
   }),
 );
 

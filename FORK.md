@@ -37,6 +37,14 @@ Treat these upstream areas as off-limits except for those explicit appended case
 
 If a required change cannot fit this discipline, stop and review the exception before implementing it.
 
+### Fork-owned migration lane
+
+J5 schema migrations use a J5-owned migrator, tracking table, and migration-id space. Never register
+a J5 migration in upstream's `apps/server/src/persistence/Migrations.ts`: after an upstream advance,
+a previously recorded J5 id could cause a new upstream migration with the same or lower id to be
+silently skipped. Keep the lanes independent and retain only the small startup call that runs J5
+migrations after upstream migrations.
+
 ## Pin and upstream advance runbook
 
 Current pin: `993407dd9e57f1edf2f5681d70140bfefeca93cc` (2026-08-15), selected from upstream PR [#2829](https://github.com/pingdotgg/t3code/pull/2829), `t3code/codex-turn-mapping`.
