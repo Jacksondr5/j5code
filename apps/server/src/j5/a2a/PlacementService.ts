@@ -1,3 +1,4 @@
+import { EnvironmentAuthenticatedPrincipal, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -5,6 +6,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import type { McpInvocationScope } from "../../mcp/McpInvocationContext.ts";
 import {
   EpicId,
   Participant,
@@ -79,10 +81,15 @@ export class PlacementReferenceUnavailableError extends Schema.TaggedErrorClass<
 
 export class PlacementHumanRequiredError extends Schema.TaggedErrorClass<PlacementHumanRequiredError>()(
   "PlacementHumanRequiredError",
-  { actor: Schema.Literal("agent"), participantId: ParticipantId },
+  {
+    actor: Schema.Literal("agent"),
+    participantId: ParticipantId,
+    providerSessionId: Schema.String,
+    threadId: ThreadId,
+  },
 ) {
   override get message(): string {
-    return `Placement actor state is agent for ${this.participantId}; reparenting is human-only. Retry from a human-authenticated command.`;
+    return `Placement actor state is agent for ${this.participantId}: MCP session ${this.providerSessionId} on thread ${this.threadId} cannot reparent. Retry from a human-authenticated command.`;
   }
 }
 
@@ -149,7 +156,11 @@ export interface ParticipantPlacementServiceShape {
   ) => Effect.Effect<PlacementMutationResult, PlacementError>;
   readonly reparent: (
     input: ReparentParticipantInput,
-  ) => Effect.Effect<PlacementMutationResult, PlacementError>;
+  ) => Effect.Effect<PlacementMutationResult, PlacementError, EnvironmentAuthenticatedPrincipal>;
+  readonly reparentFromMcp: (
+    scope: McpInvocationScope,
+    input: ReparentParticipantInput,
+  ) => Effect.Effect<never, PlacementHumanRequiredError>;
   readonly readPlacement: (input: {
     readonly epicId: EpicId;
     readonly participantId: ParticipantId;
@@ -297,7 +308,6 @@ const reparentFingerprint = (input: ReparentParticipantInput): string =>
     type: "reparent",
     epicId: input.epicId,
     participantId: input.participantId,
-    actor: input.actor,
     placementParentId: input.placementParentId,
     createdAt: input.createdAt,
   });
@@ -631,12 +641,6 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
       const reparentEffect = Effect.fn("j5.a2a.placement.reparent")(function* (
         input: ReparentParticipantInput,
       ) {
-        if (input.actor !== "human") {
-          return yield* new PlacementHumanRequiredError({
-            actor: "agent",
-            participantId: input.participantId,
-          });
-        }
         const fingerprint = reparentFingerprint(input);
         const replayed = yield* replay(input.commandId, fingerprint);
         if (replayed !== null) return replayed;
@@ -864,9 +868,19 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             .withPermit(sql.withTransaction(recordCreationEffect(input)))
             .pipe(Effect.mapError(preserveDomainError("record participant placement"))),
         reparent: (input) =>
-          mutationPermit
-            .withPermit(sql.withTransaction(reparentEffect(input)))
-            .pipe(Effect.mapError(preserveDomainError("reparent participant"))),
+          EnvironmentAuthenticatedPrincipal.pipe(
+            Effect.andThen(mutationPermit.withPermit(sql.withTransaction(reparentEffect(input)))),
+            Effect.mapError(preserveDomainError("reparent participant")),
+          ),
+        reparentFromMcp: (scope, input) =>
+          Effect.fail(
+            new PlacementHumanRequiredError({
+              actor: "agent",
+              participantId: input.participantId,
+              providerSessionId: scope.providerSessionId,
+              threadId: scope.threadId,
+            }),
+          ),
         readPlacement: ({ epicId, participantId }) =>
           Effect.gen(function* () {
             yield* ensureEpic(epicId);

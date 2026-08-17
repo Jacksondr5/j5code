@@ -115,7 +115,6 @@ export const ReparentParticipantInput = Schema.Struct({
   commandId: PlacementCommandId,
   epicId: EpicId,
   participantId: ParticipantId,
-  actor: Schema.Literals(["human", "agent"]),
   placementParentId: Schema.NullOr(ParticipantId),
   createdAt: Schema.String,
 });

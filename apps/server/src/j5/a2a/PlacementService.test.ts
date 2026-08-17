@@ -1,11 +1,19 @@
 import { assert, it } from "@effect/vitest";
-import { ThreadId } from "@t3tools/contracts";
+import {
+  AuthSessionId,
+  EnvironmentAuthenticatedPrincipal,
+  EnvironmentId,
+  ProviderInstanceId,
+  ThreadId,
+  type AuthEnvironmentScope,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
+import type { McpInvocationScope } from "../../mcp/McpInvocationContext.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import {
@@ -26,6 +34,12 @@ const timestamp = "2026-08-16T16:00:00.000Z";
 const epicId = EpicId.make("epic:placement");
 const isCycle = Schema.is(PlacementCycleError);
 const isHumanRequired = Schema.is(PlacementHumanRequiredError);
+const humanPrincipal = {
+  sessionId: AuthSessionId.make("session:placement-human"),
+  subject: "human:placement-test",
+  method: "browser-session-cookie" as const,
+  scopes: new Set<AuthEnvironmentScope>(),
+};
 
 const TestLayer = Layer.merge(ledgerLayer, placementLayer).pipe(
   Layer.provideMerge(NodeSqliteClient.layerMemory()),
@@ -173,14 +187,15 @@ it.effect(
       assert.notEqual(rootForkResult.placement.placementParentId, source.id);
 
       const placements = yield* ParticipantPlacementService;
-      yield* placements.reparent({
-        commandId: PlacementCommandId.make("reparent:source-under-group"),
-        epicId,
-        participantId: source.id,
-        actor: "human",
-        placementParentId: group.id,
-        createdAt: timestamp,
-      });
+      yield* placements
+        .reparent({
+          commandId: PlacementCommandId.make("reparent:source-under-group"),
+          epicId,
+          participantId: source.id,
+          placementParentId: group.id,
+          createdAt: timestamp,
+        })
+        .pipe(Effect.provideService(EnvironmentAuthenticatedPrincipal, humanPrincipal));
       const nestedForkResult = yield* record({
         index: 4,
         participant: nestedFork,
@@ -192,14 +207,15 @@ it.effect(
       });
       assert.equal(nestedForkResult.placement.placementParentId, group.id);
 
-      yield* placements.reparent({
-        commandId: PlacementCommandId.make("reparent:source-to-root"),
-        epicId,
-        participantId: source.id,
-        actor: "human",
-        placementParentId: null,
-        createdAt: timestamp,
-      });
+      yield* placements
+        .reparent({
+          commandId: PlacementCommandId.make("reparent:source-to-root"),
+          epicId,
+          participantId: source.id,
+          placementParentId: null,
+          createdAt: timestamp,
+        })
+        .pipe(Effect.provideService(EnvironmentAuthenticatedPrincipal, humanPrincipal));
       assert.equal(
         (yield* placements.readPlacement({ epicId, participantId: nestedFork.id }))
           ?.placementParentId,
@@ -274,29 +290,39 @@ it.effect(
       const placements = yield* ParticipantPlacementService;
 
       const beforeAgentAttempt = (yield* placements.listEvents(epicId)).length;
+      const agentScope: McpInvocationScope = {
+        environmentId: EnvironmentId.make("environment:placement-agent"),
+        threadId: first.threadId,
+        providerSessionId: "provider-session:placement-agent",
+        providerInstanceId: ProviderInstanceId.make("codexAgent"),
+        capabilities: new Set(["orchestration"]),
+        issuedAt: 1,
+      };
       const agentError = yield* Effect.flip(
-        placements.reparent({
+        placements.reparentFromMcp(agentScope, {
           commandId: PlacementCommandId.make("reparent:agent-refused"),
           epicId,
           participantId: second.id,
-          actor: "agent",
           placementParentId: null,
           createdAt: timestamp,
         }),
       );
       assert.isTrue(isHumanRequired(agentError));
       assert.include(agentError.message, "Placement actor state is agent");
+      assert.include(agentError.message, agentScope.providerSessionId);
+      assert.include(agentError.message, agentScope.threadId);
       assert.equal((yield* placements.listEvents(epicId)).length, beforeAgentAttempt);
 
       const cycleError = yield* Effect.flip(
-        placements.reparent({
-          commandId: PlacementCommandId.make("reparent:cycle-refused"),
-          epicId,
-          participantId: first.id,
-          actor: "human",
-          placementParentId: third.id,
-          createdAt: timestamp,
-        }),
+        placements
+          .reparent({
+            commandId: PlacementCommandId.make("reparent:cycle-refused"),
+            epicId,
+            participantId: first.id,
+            placementParentId: third.id,
+            createdAt: timestamp,
+          })
+          .pipe(Effect.provideService(EnvironmentAuthenticatedPrincipal, humanPrincipal)),
       );
       assert.isTrue(isCycle(cycleError));
       assert.include(cycleError.message, "Placement cycle state");
@@ -372,14 +398,15 @@ it.effect(
       });
       yield* record({ index: 2, participant: child, provenance: spawnedBy(parent) });
       const placements = yield* ParticipantPlacementService;
-      yield* placements.reparent({
-        commandId: PlacementCommandId.make("reparent:rebuild-child"),
-        epicId,
-        participantId: child.id,
-        actor: "human",
-        placementParentId: null,
-        createdAt: timestamp,
-      });
+      yield* placements
+        .reparent({
+          commandId: PlacementCommandId.make("reparent:rebuild-child"),
+          epicId,
+          participantId: child.id,
+          placementParentId: null,
+          createdAt: timestamp,
+        })
+        .pipe(Effect.provideService(EnvironmentAuthenticatedPrincipal, humanPrincipal));
       const childBefore = yield* placements.readPlacement({ epicId, participantId: child.id });
       const parentBefore = yield* placements.readPlacement({ epicId, participantId: parent.id });
       assert.isNotNull(childBefore);
