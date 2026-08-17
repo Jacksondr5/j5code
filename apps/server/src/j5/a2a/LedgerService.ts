@@ -9,11 +9,17 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
+  type AppendCommEventsCommand,
   CommCommandReceipt,
   type AppendCommEventCommand,
   type CommEventPage,
   type CreateEpicCommand,
   Epic,
+  ExchangeClosedPayload,
+  ExchangeOpenedPayload,
+  MessageDeliveredPayload,
+  MessageDeliveryFailedPayload,
+  MessageSentPayload,
   type EpicId,
   type LedgerCursor,
   Membership,
@@ -79,11 +85,20 @@ export interface AppendResult {
   readonly committed: boolean;
 }
 
+export interface AppendEventsResult {
+  readonly receipt: CommCommandReceipt;
+  readonly events: ReadonlyArray<StoredCommEvent>;
+  readonly committed: boolean;
+}
+
 export interface A2ALedgerShape {
   readonly createEpic: (command: CreateEpicCommand) => Effect.Effect<Epic, A2ALedgerError>;
   readonly listEpics: () => Effect.Effect<ReadonlyArray<Epic>, A2ALedgerError>;
   readonly readEpic: (epicId: EpicId) => Effect.Effect<Epic, A2ALedgerError>;
   readonly append: (command: AppendCommEventCommand) => Effect.Effect<AppendResult, A2ALedgerError>;
+  readonly appendEvents: (
+    command: AppendCommEventsCommand,
+  ) => Effect.Effect<AppendEventsResult, A2ALedgerError>;
   readonly readEvents: (input: {
     readonly epicId: EpicId;
     readonly cursor: LedgerCursor;
@@ -139,6 +154,11 @@ const decodeEpic = Schema.decodeUnknownEffect(Epic);
 const decodeStoredEvent = Schema.decodeUnknownEffect(StoredCommEvent);
 const decodeReceipt = Schema.decodeUnknownEffect(CommCommandReceipt);
 const decodeMembership = Schema.decodeUnknownEffect(Membership);
+const decodeExchangeOpened = Schema.decodeUnknownEffect(ExchangeOpenedPayload);
+const decodeExchangeClosed = Schema.decodeUnknownEffect(ExchangeClosedPayload);
+const decodeMessageSent = Schema.decodeUnknownEffect(MessageSentPayload);
+const decodeMessageDelivered = Schema.decodeUnknownEffect(MessageDeliveredPayload);
+const decodeMessageDeliveryFailed = Schema.decodeUnknownEffect(MessageDeliveryFailedPayload);
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Json));
 
@@ -237,6 +257,147 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
           updated_seq = excluded.updated_seq,
           payload = excluded.payload
       `;
+    });
+
+    const applyA2Projection = Effect.fn("j5.a2a.applyA2Projection")(function* (
+      event: StoredCommEvent,
+      commandId: string,
+    ) {
+      switch (event.kind) {
+        case "exchange.opened": {
+          const payload = yield* decodeExchangeOpened(event.payload);
+          if (event.sender === null || event.receiver === null || event.exchangeId === null) {
+            return yield* new A2AStorageError({ operation: "project opened exchange" });
+          }
+          yield* sql`
+            INSERT INTO j5_a2a_exchange (
+              epic_id,
+              exchange_id,
+              sender_id,
+              receiver_id,
+              status,
+              intent,
+              urgency,
+              opened_seq,
+              closed_seq,
+              created_at,
+              updated_at
+            ) VALUES (
+              ${event.epicId},
+              ${event.exchangeId},
+              ${event.sender},
+              ${event.receiver},
+              'open',
+              ${payload.intent},
+              ${payload.urgency},
+              ${event.seq},
+              NULL,
+              ${event.createdAt},
+              ${event.createdAt}
+            )
+          `;
+          return;
+        }
+        case "exchange.closed": {
+          yield* decodeExchangeClosed(event.payload);
+          if (event.exchangeId === null) {
+            return yield* new A2AStorageError({ operation: "project closed exchange" });
+          }
+          yield* sql`
+            UPDATE j5_a2a_exchange
+            SET
+              status = 'closed',
+              closed_seq = ${event.seq},
+              updated_at = ${event.createdAt}
+            WHERE epic_id = ${event.epicId}
+              AND exchange_id = ${event.exchangeId}
+              AND status = 'open'
+          `;
+          return;
+        }
+        case "message.sent": {
+          const payload = yield* decodeMessageSent(event.payload);
+          if (event.sender === null || event.receiver === null || event.correlationId === null) {
+            return yield* new A2AStorageError({ operation: "project sent message" });
+          }
+          yield* sql`
+            INSERT INTO j5_a2a_delivery (
+              epic_id,
+              message_id,
+              command_id,
+              sent_seq,
+              sender_id,
+              receiver_id,
+              receiver_epic_id,
+              exchange_id,
+              exchange_role,
+              correlation_id,
+              message_text,
+              status,
+              attempts,
+              last_error,
+              next_attempt_at,
+              delivered_seq,
+              created_at,
+              updated_at
+            ) VALUES (
+              ${event.epicId},
+              ${payload.messageId},
+              ${commandId},
+              ${event.seq},
+              ${event.sender},
+              ${event.receiver},
+              ${payload.receiverEpicId},
+              ${event.exchangeId},
+              ${payload.exchangeRole},
+              ${event.correlationId},
+              ${payload.text},
+              'pending',
+              0,
+              NULL,
+              NULL,
+              NULL,
+              ${event.createdAt},
+              ${event.createdAt}
+            )
+          `;
+          return;
+        }
+        case "message.delivered": {
+          const payload = yield* decodeMessageDelivered(event.payload);
+          yield* sql`
+            UPDATE j5_a2a_delivery
+            SET
+              status = 'delivered',
+              attempts = ${payload.attempt},
+              last_error = NULL,
+              next_attempt_at = NULL,
+              delivered_seq = ${event.seq},
+              updated_at = ${event.createdAt}
+            WHERE epic_id = ${event.epicId} AND message_id = ${payload.messageId}
+          `;
+          return;
+        }
+        case "message.delivery_failed": {
+          const payload = yield* decodeMessageDeliveryFailed(event.payload);
+          yield* sql`
+            UPDATE j5_a2a_delivery
+            SET
+              status = ${payload.alarmed ? "alarmed" : "retry_scheduled"},
+              attempts = ${payload.attempt},
+              last_error = ${payload.error},
+              next_attempt_at = ${payload.nextAttemptAt},
+              updated_at = ${event.createdAt}
+            WHERE epic_id = ${event.epicId} AND message_id = ${payload.messageId}
+          `;
+          return;
+        }
+        case "message.received":
+        case "silence.notice":
+        case "participant.joined":
+        case "participant.left":
+          return;
+      }
     });
 
     const listMembershipEffect = Effect.fn("j5.a2a.listMembership")(function* (epicId: EpicId) {
@@ -372,6 +533,144 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
       return result;
     });
 
+    const appendEventsEffect = Effect.fn("j5.a2a.appendEvents")(function* (
+      command: AppendCommEventsCommand,
+    ) {
+      const result = yield* sql.withTransaction(
+        Effect.gen(function* () {
+          yield* ensureEpic(command.epicId);
+          const sequenceRows = yield* sql<{ readonly next_seq: number }>`
+            SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq
+            FROM j5_a2a_comm_event
+            WHERE epic_id = ${command.epicId}
+          `;
+          const firstSeq = sequenceRows[0]?.next_seq;
+          if (firstSeq === undefined) {
+            return yield* new A2AStorageError({ operation: "allocate communication sequences" });
+          }
+          const resultSeq = firstSeq + command.events.length - 1;
+          const reserved = yield* sql<{ readonly command_id: string }>`
+            INSERT INTO j5_a2a_comm_command_receipt (
+              command_id,
+              epic_id,
+              command_type,
+              accepted_at,
+              result_seq
+            ) VALUES (
+              ${command.commandId},
+              ${command.epicId},
+              'comm.append',
+              ${command.acceptedAt},
+              ${resultSeq}
+            )
+            ON CONFLICT(command_id) DO NOTHING
+            RETURNING command_id
+          `;
+
+          if (reserved[0] === undefined) {
+            const receiptRows = yield* sql<ReceiptRow>`
+              SELECT command_id, epic_id, command_type, accepted_at, result_seq
+              FROM j5_a2a_comm_command_receipt
+              WHERE command_id = ${command.commandId}
+              LIMIT 1
+            `;
+            const row = receiptRows[0];
+            if (row === undefined) {
+              return yield* new A2AStorageError({ operation: "read replayed batch receipt" });
+            }
+            if (row.epic_id !== command.epicId) {
+              return yield* new CommCommandConflictError({
+                commandId: command.commandId,
+                requestedEpicId: command.epicId,
+                existingEpicId: row.epic_id,
+              });
+            }
+            const eventRows = yield* sql<EventRow>`
+              SELECT
+                seq,
+                epic_id,
+                kind,
+                sender,
+                receiver,
+                exchange_id,
+                correlation_id,
+                payload,
+                created_at
+              FROM j5_a2a_comm_event
+              WHERE epic_id = ${command.epicId} AND command_id = ${command.commandId}
+              ORDER BY seq
+            `;
+            if (eventRows.length === 0) {
+              return yield* new A2AStorageError({ operation: "read replayed batch events" });
+            }
+            return {
+              receipt: yield* receiptFromRow(row),
+              events: yield* Effect.forEach(eventRows, eventFromRow, { concurrency: 1 }),
+              committed: false as const,
+            };
+          }
+
+          const events: Array<StoredCommEvent> = [];
+          for (const [index, candidate] of command.events.entries()) {
+            const pending = decideAppendCommEvent({
+              commandId: command.commandId,
+              epicId: command.epicId,
+              acceptedAt: command.acceptedAt,
+              event: candidate,
+            })[0];
+            const seq = firstSeq + index;
+            const payload = yield* encodeJson(pending.payload);
+            yield* sql`
+              INSERT INTO j5_a2a_comm_event (
+                seq,
+                epic_id,
+                kind,
+                sender,
+                receiver,
+                exchange_id,
+                correlation_id,
+                payload,
+                created_at,
+                command_id
+              ) VALUES (
+                ${seq},
+                ${pending.epicId},
+                ${pending.kind},
+                ${pending.sender},
+                ${pending.receiver},
+                ${pending.exchangeId},
+                ${pending.correlationId},
+                ${payload},
+                ${pending.createdAt},
+                ${command.commandId}
+              )
+            `;
+            const event = yield* decodeStoredEvent({ seq, ...pending });
+            yield* applyMembership(event);
+            yield* applyA2Projection(event, command.commandId);
+            events.push(event);
+          }
+          return {
+            receipt: yield* decodeReceipt({
+              commandId: command.commandId,
+              epicId: command.epicId,
+              commandType: "comm.append",
+              acceptedAt: command.acceptedAt,
+              resultSeq,
+            }),
+            events,
+            committed: true as const,
+          };
+        }),
+      );
+      if (result.committed) {
+        for (const event of result.events) {
+          yield* PubSub.publish(committed, event);
+        }
+      }
+      return result;
+    });
+
     return A2ALedger.of({
       createEpic: (command) =>
         Effect.gen(function* () {
@@ -401,6 +700,10 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
         appendPermit
           .withPermit(appendEffect(command))
           .pipe(Effect.mapError(preserveDomainError("append communication event"))),
+      appendEvents: (command) =>
+        appendPermit
+          .withPermit(appendEventsEffect(command))
+          .pipe(Effect.mapError(preserveDomainError("append communication events"))),
       readEvents: ({ epicId, cursor, limit }) =>
         Effect.gen(function* () {
           yield* ensureEpic(epicId);

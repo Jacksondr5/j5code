@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "peerMessage": "[J5 A2A message from {{senderId}} in {{originEpicId}}]\n\n{{message}}\n\n{{exchangeInstruction}}",
+  "humanMessage": "[Message from the human]\n\n{{message}}\n\nThe human is not watching this chat. They see only what you send back on this exchange.\n\n{{exchangeInstruction}}",
+  "silenceNotice": "[J5 system notice: {{noticeType}}]\n\n{{message}}\n\nThis is a platform-authored delivery signal, not a peer reply.",
+  "replyInstruction": "Reply once with send_message(to=\"{{senderId}}\", exchange_id=\"{{exchangeId}}\", message=\"...\") to close the exchange. Follow-ups from the asker carrying this id join the same exchange.",
+  "oneShotInstruction": "No reply is required. Use send_message without exchange_id only if a new message is needed.",
+  "sendToolDescription": "Durably send one J5 A2A message. expect_reply=true opens or joins one sender-to-receiver exchange and requires intent; a reply is send_message carrying exchange_id, and one reply closes that exchange. urgency is required only when opening an exchange to the human. The call returns after the sender ledger commit; delivery continues asynchronously.",
+  "listToolDescription": "List reachable J5 A2A participants and the capabilities accepted by each row. Use this before send_message instead of discovering participant state through failures."
+}

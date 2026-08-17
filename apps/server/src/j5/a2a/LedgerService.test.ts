@@ -364,7 +364,15 @@ it.effect("enforces one message.received correlation per receiver epic", () =>
       createdAt: timestamp,
     };
     yield* ledger.append(appendCommand(epicId, 1, receivedEvent));
-    const error = yield* Effect.flip(ledger.append(appendCommand(epicId, 2, receivedEvent)));
+    const failedCommand = CommCommandId.make(`command:${epicId}:2`);
+    const error = yield* Effect.flip(
+      ledger.appendEvents({
+        commandId: failedCommand,
+        epicId,
+        acceptedAt: timestamp,
+        events: [receivedEvent],
+      }),
+    );
     assert.isTrue(isA2AStorageError(error));
     const rows = yield* sql<{ readonly count: number }>`
       SELECT COUNT(*) AS count
@@ -372,5 +380,25 @@ it.effect("enforces one message.received correlation per receiver epic", () =>
       WHERE epic_id = ${epicId} AND kind = 'message.received'
     `;
     assert.equal(rows[0]?.count, 1);
+
+    const receipts = yield* sql<{ readonly count: number }>`
+      SELECT COUNT(*) AS count
+      FROM j5_a2a_comm_command_receipt
+      WHERE command_id = ${failedCommand}
+    `;
+    assert.equal(receipts[0]?.count, 0, "the failed event insert rolls back its receipt");
+
+    const retried = yield* ledger.appendEvents({
+      commandId: failedCommand,
+      epicId,
+      acceptedAt: timestamp,
+      events: [
+        {
+          ...receivedEvent,
+          correlationId: CorrelationId.make("correlation:retry-after-rollback"),
+        },
+      ],
+    });
+    assert.isTrue(retried.committed, "the rolled-back command id remains reusable");
   }).pipe(Effect.provide(memoryLedgerLayer())),
 );

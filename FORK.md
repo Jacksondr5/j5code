@@ -35,6 +35,13 @@ Treat these upstream areas as off-limits except for those explicit appended case
 - existing provider adapters and shared runtime modules
 - vendored references under `.repos`
 
+### Sanctioned appended integration cases
+
+- `apps/server/src/persistence/Layers/Sqlite.ts` runs the independent J5 migration lane after upstream migrations.
+- `apps/server/src/mcp/McpHttpServer.ts` registers exactly one shared J5 MCP toolkit. A2 owns the bootstrap and A6 reuses it by adding tools only inside `apps/server/src/j5/a2a/mcp/`, without another protected-file registration edit.
+- `apps/server/src/server.ts` provides the J5 A2A runtime independently of the MCP transport so the ledger and startup delivery reconciliation are always active.
+- Focused upstream integration tests may append a case that proves a J5 dependency contract at the pinned runtime without changing upstream production behavior.
+
 If a required change cannot fit this discipline, stop and review the exception before implementing it.
 
 ### Fork-owned migration lane

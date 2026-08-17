@@ -185,6 +185,54 @@ it.layer(TestLayer)("OrchestrationV2LayerLive", (it) => {
     }),
   );
 
+  it.effect("replays an internal thread send without injecting a second message", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* OrchestratorV2;
+      const threadManagement = yield* ThreadManagementService;
+      const threadId = ThreadId.make("runtime-layer-idempotent-thread-send");
+      const projectId = ProjectId.make("runtime-layer-idempotent-thread-send-project");
+      const commandId = CommandId.make("runtime-layer-idempotent-thread-send-command");
+      const messageId = MessageId.make("runtime-layer-idempotent-thread-send-message");
+
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-layer-idempotent-thread-send-create"),
+        threadId,
+        projectId,
+        title: "Idempotent internal send",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: "/tmp/runtime-layer-idempotent-thread-send",
+      });
+
+      const input = {
+        projectId,
+        commandId,
+        threadId,
+        messageId,
+        text: "Deliver exactly once",
+        attachments: [],
+        mode: "auto" as const,
+        createdBy: "agent" as const,
+        creationSource: "mcp" as const,
+      };
+      const first = yield* threadManagement.sendToThread(input);
+      const replay = yield* threadManagement.sendToThread(input);
+      const projection = yield* threadManagement.getThreadProjection(threadId);
+
+      assert.equal(replay.dispatch.sequence, first.dispatch.sequence);
+      assert.deepEqual(replay.dispatch.storedEvents, first.dispatch.storedEvents);
+      assert.equal(replay.message.id, first.message.id);
+      assert.equal(replay.run.id, first.run.id);
+      assert.equal(projection.messages.filter((message) => message.id === messageId).length, 1);
+      assert.equal(projection.runs.filter((run) => run.userMessageId === messageId).length, 1);
+    }),
+  );
+
   it.effect("merges an explicit provider-finished run while checkpoint capture is pending", () =>
     Effect.gen(function* () {
       const orchestrator = yield* OrchestratorV2;
