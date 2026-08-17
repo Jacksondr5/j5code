@@ -191,7 +191,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
 
     const ensureEpic = Effect.fn("j5.a2a.ensureEpic")(function* (epicId: EpicId) {
       const rows = yield* sql<{ readonly id: string }>`
-        SELECT id FROM epic WHERE id = ${epicId} LIMIT 1
+        SELECT id FROM j5_a2a_epic WHERE id = ${epicId} LIMIT 1
       `;
       if (rows[0] === undefined) {
         return yield* new EpicNotFoundError({ epicId });
@@ -204,7 +204,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
       const id = participantId(participant);
       if (event.kind === "participant.left") {
         yield* sql`
-          DELETE FROM epic_membership
+          DELETE FROM j5_a2a_epic_membership
           WHERE epic_id = ${event.epicId} AND participant_id = ${id}
         `;
         return;
@@ -212,7 +212,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
       const payload = yield* encodeJson(participant);
       const threadId = participant.kind === "agent" ? participant.threadId : null;
       yield* sql`
-        INSERT INTO epic_membership (
+        INSERT INTO j5_a2a_epic_membership (
           epic_id,
           participant_id,
           participant_kind,
@@ -233,7 +233,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
         DO UPDATE SET
           participant_kind = excluded.participant_kind,
           thread_id = excluded.thread_id,
-          joined_seq = excluded.joined_seq,
+          joined_seq = j5_a2a_epic_membership.joined_seq,
           updated_seq = excluded.updated_seq,
           payload = excluded.payload
       `;
@@ -243,7 +243,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
       yield* ensureEpic(epicId);
       const rows = yield* sql<MembershipRow>`
         SELECT epic_id, joined_seq, updated_seq, payload
-        FROM epic_membership
+        FROM j5_a2a_epic_membership
         WHERE epic_id = ${epicId}
         ORDER BY participant_id
       `;
@@ -257,7 +257,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
           const pending = decideAppendCommEvent(command)[0];
           const sequenceRows = yield* sql<{ readonly next_seq: number }>`
             SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq
-            FROM comm_event
+            FROM j5_a2a_comm_event
             WHERE epic_id = ${command.epicId}
           `;
           const seq = sequenceRows[0]?.next_seq;
@@ -265,7 +265,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
             return yield* new A2AStorageError({ operation: "allocate communication sequence" });
           }
           const reserved = yield* sql<{ readonly command_id: string }>`
-            INSERT INTO comm_command_receipt (
+            INSERT INTO j5_a2a_comm_command_receipt (
               command_id,
               epic_id,
               command_type,
@@ -285,7 +285,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
           if (reserved[0] === undefined) {
             const receiptRows = yield* sql<ReceiptRow>`
               SELECT command_id, epic_id, command_type, accepted_at, result_seq
-              FROM comm_command_receipt
+              FROM j5_a2a_comm_command_receipt
               WHERE command_id = ${command.commandId}
               LIMIT 1
             `;
@@ -313,7 +313,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
                 correlation_id,
                 payload,
                 created_at
-              FROM comm_event
+              FROM j5_a2a_comm_event
               WHERE epic_id = ${command.epicId} AND seq = ${row.result_seq}
               LIMIT 1
             `;
@@ -332,7 +332,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
 
           const payload = yield* encodeJson(pending.payload);
           yield* sql`
-            INSERT INTO comm_event (
+            INSERT INTO j5_a2a_comm_event (
               seq,
               epic_id,
               kind,
@@ -376,7 +376,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
       createEpic: (command) =>
         Effect.gen(function* () {
           yield* sql`
-            INSERT INTO epic (id, name, created_at)
+            INSERT INTO j5_a2a_epic (id, name, created_at)
             VALUES (${command.epic.id}, ${command.epic.name}, ${command.epic.createdAt})
           `;
           return command.epic;
@@ -384,14 +384,14 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
       listEpics: () =>
         Effect.gen(function* () {
           const rows = yield* sql<EpicRow>`
-            SELECT id, name, created_at FROM epic ORDER BY created_at, id
+            SELECT id, name, created_at FROM j5_a2a_epic ORDER BY created_at, id
           `;
           return yield* Effect.forEach(rows, epicFromRow, { concurrency: 1 });
         }).pipe(Effect.mapError(preserveDomainError("list epics"))),
       readEpic: (epicId) =>
         Effect.gen(function* () {
           const rows = yield* sql<EpicRow>`
-            SELECT id, name, created_at FROM epic WHERE id = ${epicId} LIMIT 1
+            SELECT id, name, created_at FROM j5_a2a_epic WHERE id = ${epicId} LIMIT 1
           `;
           const row = rows[0];
           if (row === undefined) return yield* new EpicNotFoundError({ epicId });
@@ -406,7 +406,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
           yield* ensureEpic(epicId);
           const highWaterRows = yield* sql<{ readonly high_water: number }>`
             SELECT COALESCE(MAX(seq), 0) AS high_water
-            FROM comm_event
+            FROM j5_a2a_comm_event
             WHERE epic_id = ${epicId}
           `;
           const highWater = highWaterRows[0]?.high_water ?? 0;
@@ -429,7 +429,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
               correlation_id,
               payload,
               created_at
-            FROM comm_event
+            FROM j5_a2a_comm_event
             WHERE epic_id = ${epicId}
               AND seq > ${cursor.afterSeq}
               AND seq <= ${snapshotEnd}
@@ -468,7 +468,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
             sql.withTransaction(
               Effect.gen(function* () {
                 yield* ensureEpic(epicId);
-                yield* sql`DELETE FROM epic_membership WHERE epic_id = ${epicId}`;
+                yield* sql`DELETE FROM j5_a2a_epic_membership WHERE epic_id = ${epicId}`;
                 const rows = yield* sql<EventRow>`
                   SELECT
                     seq,
@@ -480,7 +480,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
                     correlation_id,
                     payload,
                     created_at
-                  FROM comm_event
+                  FROM j5_a2a_comm_event
                   WHERE epic_id = ${epicId}
                     AND kind IN ('participant.joined', 'participant.left')
                   ORDER BY seq

@@ -2,6 +2,9 @@ import { ThreadId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 const Identifier = Schema.String.check(Schema.isNonEmpty());
+const EpicName = Schema.String.check(
+  Schema.makeFilter((name) => name.trim().length > 0 || "Epic name must not be blank."),
+);
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
@@ -47,7 +50,7 @@ export const participantId = (participant: Participant): ParticipantId =>
 
 export const Epic = Schema.Struct({
   id: EpicId,
-  name: Identifier,
+  name: EpicName,
   createdAt: Schema.String,
 });
 export type Epic = typeof Epic.Type;

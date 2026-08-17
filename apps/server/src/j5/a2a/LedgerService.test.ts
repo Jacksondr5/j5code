@@ -22,6 +22,7 @@ import { runJ5A2AMigrations } from "./Migrations.ts";
 import {
   CommCommandId,
   CorrelationId,
+  Epic,
   EpicId,
   ParticipantId,
   type AppendCommEventCommand,
@@ -30,6 +31,7 @@ import {
 } from "./contracts.ts";
 
 const timestamp = "2026-08-16T12:00:00.000Z";
+const isEpic = Schema.is(Epic);
 const isLedgerGapError = Schema.is(LedgerGapError);
 const isA2AStorageError = Schema.is(A2AStorageError);
 
@@ -82,6 +84,16 @@ it.effect("creates, lists, and reads minimal epics", () =>
     assert.deepStrictEqual(yield* ledger.listEpics(), [first, second]);
   }).pipe(Effect.provide(memoryLedgerLayer())),
 );
+
+it("rejects a whitespace-only epic name during contract validation", () => {
+  assert.isFalse(
+    isEpic({
+      id: EpicId.make("epic:blank-name"),
+      name: "   ",
+      createdAt: timestamp,
+    }),
+  );
+});
 
 it.effect("replays an append command from its durable receipt without adding a row", () =>
   Effect.gen(function* () {
@@ -183,7 +195,7 @@ it.effect("negative control: a deleted ledger row fails the gap-free read", () =
       yield* ledger.append(appendCommand(epicId, index));
     }
 
-    yield* sql`DELETE FROM comm_event WHERE epic_id = ${epicId} AND seq = 2`;
+    yield* sql`DELETE FROM j5_a2a_comm_event WHERE epic_id = ${epicId} AND seq = 2`;
     const error = yield* Effect.flip(
       ledger.readEvents({ epicId, cursor: { afterSeq: 0 }, limit: 10 }),
     );
@@ -242,6 +254,15 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
         createdAt: timestamp,
       },
       {
+        kind: "participant.joined",
+        sender: null,
+        receiver: secondAgent.id,
+        exchangeId: null,
+        correlationId: null,
+        payload: { participant: secondAgent },
+        createdAt: timestamp,
+      },
+      {
         kind: "participant.left",
         sender: firstAgent.id,
         receiver: null,
@@ -260,7 +281,7 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
         epicId,
         participant: secondAgent,
         joinedSeq: 3,
-        updatedSeq: 3,
+        updatedSeq: 4,
       },
       {
         epicId,
@@ -272,7 +293,7 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
     const before = yield* ledger.listMembership(epicId);
     assert.deepStrictEqual(before, expected);
 
-    yield* sql`DELETE FROM epic_membership WHERE epic_id = ${epicId}`;
+    yield* sql`DELETE FROM j5_a2a_epic_membership WHERE epic_id = ${epicId}`;
     const corrupted = yield* ledger.listMembership(epicId);
     assert.deepStrictEqual(corrupted, []);
     assert.notEqual(corrupted.length, expected.length);
@@ -347,7 +368,7 @@ it.effect("enforces one message.received correlation per receiver epic", () =>
     assert.isTrue(isA2AStorageError(error));
     const rows = yield* sql<{ readonly count: number }>`
       SELECT COUNT(*) AS count
-      FROM comm_event
+      FROM j5_a2a_comm_event
       WHERE epic_id = ${epicId} AND kind = 'message.received'
     `;
     assert.equal(rows[0]?.count, 1);

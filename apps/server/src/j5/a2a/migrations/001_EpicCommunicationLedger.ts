@@ -5,7 +5,7 @@ export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   yield* sql`
-    CREATE TABLE epic (
+    CREATE TABLE j5_a2a_epic (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL CHECK (length(trim(name)) > 0),
       created_at TEXT NOT NULL
@@ -13,7 +13,7 @@ export default Effect.gen(function* () {
   `;
 
   yield* sql`
-    CREATE TABLE comm_event (
+    CREATE TABLE j5_a2a_comm_event (
       seq INTEGER NOT NULL,
       epic_id TEXT NOT NULL,
       kind TEXT NOT NULL CHECK (kind IN (
@@ -34,33 +34,33 @@ export default Effect.gen(function* () {
       payload TEXT NOT NULL,
       created_at TEXT NOT NULL,
       PRIMARY KEY (epic_id, seq),
-      FOREIGN KEY (epic_id) REFERENCES epic(id) ON DELETE RESTRICT,
+      FOREIGN KEY (epic_id) REFERENCES j5_a2a_epic(id) ON DELETE RESTRICT,
       CHECK (kind <> 'message.received' OR correlation_id IS NOT NULL)
     )
   `;
   yield* sql`
-    CREATE UNIQUE INDEX comm_event_received_correlation_idx
-    ON comm_event(epic_id, correlation_id)
+    CREATE UNIQUE INDEX j5_a2a_comm_event_received_correlation_idx
+    ON j5_a2a_comm_event(epic_id, correlation_id)
     WHERE kind = 'message.received'
   `;
 
   yield* sql`
-    CREATE TABLE comm_command_receipt (
+    CREATE TABLE j5_a2a_comm_command_receipt (
       command_id TEXT PRIMARY KEY,
       epic_id TEXT NOT NULL,
       command_type TEXT NOT NULL CHECK (command_type = 'comm.append'),
       accepted_at TEXT NOT NULL,
       result_seq INTEGER NOT NULL CHECK (result_seq > 0),
-      FOREIGN KEY (epic_id) REFERENCES epic(id) ON DELETE RESTRICT
+      FOREIGN KEY (epic_id) REFERENCES j5_a2a_epic(id) ON DELETE RESTRICT
     )
   `;
   yield* sql`
-    CREATE INDEX comm_command_receipt_epic_seq_idx
-    ON comm_command_receipt(epic_id, result_seq)
+    CREATE INDEX j5_a2a_comm_command_receipt_epic_seq_idx
+    ON j5_a2a_comm_command_receipt(epic_id, result_seq)
   `;
 
   yield* sql`
-    CREATE TABLE epic_membership (
+    CREATE TABLE j5_a2a_epic_membership (
       epic_id TEXT NOT NULL,
       participant_id TEXT NOT NULL,
       participant_kind TEXT NOT NULL CHECK (participant_kind IN ('agent', 'human')),
@@ -69,7 +69,7 @@ export default Effect.gen(function* () {
       updated_seq INTEGER NOT NULL,
       payload TEXT NOT NULL,
       PRIMARY KEY (epic_id, participant_id),
-      FOREIGN KEY (epic_id) REFERENCES epic(id) ON DELETE CASCADE,
+      FOREIGN KEY (epic_id) REFERENCES j5_a2a_epic(id) ON DELETE CASCADE,
       CHECK (
         (participant_kind = 'human' AND participant_id = 'human:global' AND thread_id IS NULL)
         OR
