@@ -5,7 +5,7 @@ import type { ParticipantProvenance } from "./placementContracts.ts";
 
 /**
  * Converts immutable upstream lineage into the typed J5 provenance fact.
- * `parentParticipantId` comes from epic membership; timeline breadcrumbs such
+ * `parentParticipantId` comes from squadron membership; timeline breadcrumbs such
  * as `thread.created.record` are intentionally not consulted.
  */
 export function provenanceFromThreadLineage(input: {

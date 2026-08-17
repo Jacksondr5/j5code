@@ -1,6 +1,8 @@
+import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 
-import { layer as threadLifecycleLayer } from "../../orchestration-v2/ThreadLifecycleService.ts";
+import * as ThreadLifecycle from "../../orchestration-v2/ThreadLifecycleService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import { layer as homeRegistrarLayer } from "./HomeRegistrar.ts";
@@ -9,6 +11,16 @@ import { layer as placementCascadeLayer } from "./PlacementCascadeService.ts";
 import { layer as participantPlacementLayer } from "./PlacementService.ts";
 import { layer as sendServiceLayer } from "./SendService.ts";
 import { layer as silenceDetectorLayer } from "./SilenceDetector.ts";
+
+const sharedThreadLifecycleOrStandaloneFallback = Layer.effect(
+  ThreadLifecycle.ThreadLifecycleService,
+  Effect.gen(function* () {
+    const shared = yield* Effect.serviceOption(ThreadLifecycle.ThreadLifecycleService);
+    // Production supplies the V2 runtime's shared service. The fallback keeps
+    // isolated toolkit/listing layers buildable from ThreadManagement alone.
+    return Option.isSome(shared) ? shared.value : yield* ThreadLifecycle.make;
+  }),
+);
 
 export const makeJ5A2ARuntimeLayer = (
   options: {
@@ -25,7 +37,7 @@ export const makeJ5A2ARuntimeLayer = (
     Layer.provideMerge(deliveryWorkerProvided),
   );
   const placementCascadeProvided = placementCascadeLayer.pipe(
-    Layer.provide(threadLifecycleLayer),
+    Layer.provide(sharedThreadLifecycleOrStandaloneFallback),
     Layer.provideMerge(participantPlacementLayer),
   );
 

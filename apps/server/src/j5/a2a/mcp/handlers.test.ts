@@ -13,9 +13,11 @@ import { PlacementCascadeService } from "../PlacementCascadeService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import {
+  GLOBAL_HUMAN_PARTICIPANT_ID,
   LedgerMessageId,
   ParticipantId,
   SquadronId,
+  type ParticipantDirectoryRow,
   type SendMessageInput,
 } from "../contracts.ts";
 import { J5ToolkitHandlersLive } from "./handlers.ts";
@@ -91,34 +93,46 @@ it.effect("derives send idempotency and sender identity from authenticated scope
   }),
 );
 
-it.effect("enriches participants and reaches placement cascades through the shared toolkit", () =>
+it.effect("enriches participants and authorizes cascades before placement dispatch", () =>
   Effect.gen(function* () {
     const squadronId = SquadronId.make("squadron:j5:mcp-placement-handler");
+    const otherSquadronId = SquadronId.make("squadron:j5:mcp-placement-other");
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-placement-caller");
+    const displayParentId = ParticipantId.make("agent:j5:mcp-display-parent");
     const childParticipantId = ParticipantId.make("agent:j5:mcp-placement-child");
     const childThreadId = ThreadId.make("thread:j5:mcp-placement-child");
     const cascadeCommands = yield* Ref.make<
       ReadonlyArray<{ operation: string; commandId: string }>
     >([]);
+    const callerRow = {
+      squadronId,
+      participantId: callerParticipantId,
+      participant: {
+        kind: "agent" as const,
+        id: callerParticipantId,
+        threadId: invocation.threadId,
+      },
+      canReceiveMessage: true,
+      canOpenExchange: true,
+      acceptsUrgency: false,
+    } satisfies ParticipantDirectoryRow;
+    const humanRow = {
+      squadronId,
+      participantId: GLOBAL_HUMAN_PARTICIPANT_ID,
+      participant: { kind: "human" as const },
+      canReceiveMessage: true,
+      canOpenExchange: true,
+      acceptsUrgency: true,
+    } satisfies ParticipantDirectoryRow;
+    const directoryRows = yield* Ref.make<ReadonlyArray<ParticipantDirectoryRow>>([
+      callerRow,
+      humanRow,
+    ]);
     const sendService = Layer.succeed(
       A2ASendService,
       A2ASendService.of({
         send: () => Effect.die("send_message is outside this placement-handler test"),
-        listParticipants: () =>
-          Effect.succeed([
-            {
-              squadronId,
-              participantId: callerParticipantId,
-              participant: {
-                kind: "agent" as const,
-                id: callerParticipantId,
-                threadId: invocation.threadId,
-              },
-              canReceiveMessage: true,
-              canOpenExchange: true,
-              acceptsUrgency: false,
-            },
-          ]),
+        listParticipants: () => Ref.get(directoryRows),
       }),
     );
     const placementService = Layer.mock(ParticipantPlacementService)({
@@ -127,14 +141,10 @@ it.effect("enriches participants and reaches placement cascades through the shar
           {
             squadronId,
             participantId: callerParticipantId,
-            participant: {
-              kind: "agent" as const,
-              id: callerParticipantId,
-              threadId: invocation.threadId,
-            },
+            participant: callerRow.participant,
             threadId: invocation.threadId,
             provenance: { kind: "unknown" as const, source: "native_or_unobserved" as const },
-            placementParentId: null,
+            placementParentId: displayParentId,
           },
         ]),
     });
@@ -191,14 +201,19 @@ it.effect("enriches participants and reaches placement cascades through the shar
           );
 
       const listed = yield* call("list_participants", {});
-      assert.equal(
-        (
-          listed.result as unknown as {
-            readonly participants: ReadonlyArray<{ provenance: { kind: string } }>;
-          }
-        ).participants[0]?.provenance.kind,
-        "unknown",
-      );
+      const listedRows = (
+        listed.result as unknown as {
+          readonly participants: ReadonlyArray<{
+            readonly provenance: { readonly kind: string };
+            readonly placementParentId: ParticipantId | null;
+          }>;
+        }
+      ).participants;
+      assert.equal(listedRows[0]?.provenance.kind, "unknown");
+      assert.equal(listedRows[0]?.placementParentId, displayParentId);
+      assert.deepStrictEqual(listedRows[1]?.provenance, { kind: "not-applicable" });
+      assert.equal(listedRows[1]?.placementParentId, null);
+
       yield* call("stop_agent", {
         client_request_id: "cascade-stop-1",
         squadron_id: squadronId,
@@ -227,6 +242,44 @@ it.effect("enriches participants and reaches placement cascades through the shar
           },
         ],
       );
+
+      const crossSquadron = yield* call("stop_agent", {
+        client_request_id: "cross-squadron-stop",
+        squadron_id: otherSquadronId,
+        participant_id: childParticipantId,
+      });
+      assert.isTrue(crossSquadron.isFailure);
+      assert.include(
+        (crossSquadron.result as unknown as { message: string }).message,
+        `current Squadron is ${squadronId}, but stop_agent targeted ${otherSquadronId}`,
+      );
+      assert.lengthOf(yield* Ref.get(cascadeCommands), 2);
+
+      yield* Ref.set(directoryRows, []);
+      const missing = yield* call("archive_agent", {
+        client_request_id: "missing-caller",
+        squadron_id: squadronId,
+        participant_id: childParticipantId,
+      });
+      assert.isTrue(missing.isFailure);
+      assert.include((missing.result as unknown as { message: string }).message, "missing for thread");
+      assert.lengthOf(yield* Ref.get(cascadeCommands), 2);
+
+      yield* Ref.set(directoryRows, [
+        callerRow,
+        { ...callerRow, squadronId: otherSquadronId },
+      ]);
+      const ambiguous = yield* call("stop_agent", {
+        client_request_id: "ambiguous-caller",
+        squadron_id: squadronId,
+        participant_id: childParticipantId,
+      });
+      assert.isTrue(ambiguous.isFailure);
+      assert.include(
+        (ambiguous.result as unknown as { message: string }).message,
+        `ambiguous across current Squadrons ${squadronId}, ${otherSquadronId}`,
+      );
+      assert.lengthOf(yield* Ref.get(cascadeCommands), 2);
     }).pipe(Effect.provide(layer));
   }),
 );

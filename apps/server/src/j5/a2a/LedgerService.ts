@@ -7,6 +7,7 @@ import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { ThreadId } from "@t3tools/contracts";
 
 import {
   type AppendCommEventsCommand,
@@ -23,6 +24,7 @@ import {
   type SquadronId,
   type LedgerCursor,
   Membership,
+  ParticipantId,
   StoredCommEvent,
   participantId,
 } from "./contracts.ts";
@@ -109,6 +111,10 @@ export interface A2ALedgerShape {
   readonly listMembership: (
     squadronId: SquadronId,
   ) => Effect.Effect<ReadonlyArray<Membership>, A2ALedgerError>;
+  readonly findHistoricalAgentParticipantId: (input: {
+    readonly squadronId: SquadronId;
+    readonly threadId: ThreadId;
+  }) => Effect.Effect<ParticipantId | null, A2ALedgerError>;
   readonly rebuildMembership: (
     squadronId: SquadronId,
   ) => Effect.Effect<ReadonlyArray<Membership>, A2ALedgerError>;
@@ -425,6 +431,22 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
       return yield* Effect.forEach(rows, membershipFromRow, { concurrency: 1 });
     });
 
+    const findHistoricalAgentParticipantId = Effect.fn("j5.a2a.findHistoricalAgentParticipantId")(
+      function* (input: { readonly squadronId: SquadronId; readonly threadId: ThreadId }) {
+        yield* ensureSquadron(input.squadronId);
+        const rows = yield* sql<{ readonly participant_id: string }>`
+        SELECT DISTINCT json_extract(payload, '$.participant.id') AS participant_id
+        FROM j5_a2a_comm_event
+        WHERE squadron_id = ${input.squadronId}
+          AND kind = 'participant.joined'
+          AND json_extract(payload, '$.participant.kind') = 'agent'
+          AND json_extract(payload, '$.participant.threadId') = ${input.threadId}
+        ORDER BY participant_id
+      `;
+        return rows.length === 1 ? ParticipantId.make(rows[0]!.participant_id) : null;
+      },
+    );
+
     const appendEventsEffect = Effect.fn("j5.a2a.appendEvents")(function* (
       command: AppendCommEventsCommand,
     ) {
@@ -682,6 +704,10 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
       listMembership: (squadronId) =>
         listMembershipEffect(squadronId).pipe(
           Effect.mapError(preserveDomainError("list squadron membership")),
+        ),
+      findHistoricalAgentParticipantId: (input) =>
+        findHistoricalAgentParticipantId(input).pipe(
+          Effect.mapError(preserveDomainError("find historical agent participant")),
         ),
       rebuildMembership: (squadronId) =>
         appendPermit

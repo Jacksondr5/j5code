@@ -6,7 +6,7 @@ import * as Schema from "effect/Schema";
 
 import * as ThreadLifecycle from "../../orchestration-v2/ThreadLifecycleService.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
-import { ParticipantId, type EpicId } from "./contracts.ts";
+import { ParticipantId, type SquadronId } from "./contracts.ts";
 import type { ParticipantPlacementView, PlacementCommandId } from "./placementContracts.ts";
 import {
   type PlacementError,
@@ -24,7 +24,7 @@ export type PlacementCascadeOperation = typeof PlacementCascadeOperation.Type;
  */
 export interface PlacementCascadeInput {
   readonly commandId: PlacementCommandId;
-  readonly epicId: EpicId;
+  readonly squadronId: SquadronId;
   readonly participantId: ParticipantId;
 }
 
@@ -69,11 +69,11 @@ type AgentParticipantPlacementView = Omit<ParticipantPlacementView, "participant
  */
 export const runPlacementCascade = <A, E>(input: {
   readonly placement: Pick<ParticipantPlacementServiceShape, "listSubtree">;
-  readonly epicId: EpicId;
+  readonly squadronId: SquadronId;
   readonly participantId: ParticipantId;
   readonly operation: (participant: AgentParticipantPlacementView) => Effect.Effect<A, E>;
 }): Effect.Effect<ReadonlyArray<A>, PlacementError | E> =>
-  input.placement.listSubtree({ epicId: input.epicId, participantId: input.participantId }).pipe(
+  input.placement.listSubtree({ squadronId: input.squadronId, participantId: input.participantId }).pipe(
     Effect.flatMap((participants) =>
       Effect.forEach(
         participants.filter(
@@ -137,7 +137,7 @@ export const makePlacementCascadeService = <ThreadFailure, LifecycleFailure, Arc
   const stop: PlacementCascadeServiceShape["stop"] = (input) =>
     runPlacementCascade({
       placement,
-      epicId: input.epicId,
+      squadronId: input.squadronId,
       participantId: input.participantId,
       operation: (participant) =>
         Effect.gen(function* () {
@@ -169,7 +169,7 @@ export const makePlacementCascadeService = <ThreadFailure, LifecycleFailure, Arc
   const archive: PlacementCascadeServiceShape["archive"] = (input) =>
     runPlacementCascade({
       placement,
-      epicId: input.epicId,
+      squadronId: input.squadronId,
       participantId: input.participantId,
       operation: (participant) =>
         Effect.gen(function* () {

@@ -6,9 +6,9 @@ import * as Effect from "effect/Effect";
 import type { ParticipantPlacementView } from "./placementContracts.ts";
 import { PlacementCommandId } from "./placementContracts.ts";
 import { makePlacementCascadeService } from "./PlacementCascadeService.ts";
-import { EpicId, ParticipantId } from "./contracts.ts";
+import { SquadronId, ParticipantId } from "./contracts.ts";
 
-const epicId = EpicId.make("epic:cascade-dispatch");
+const squadronId = SquadronId.make("squadron:cascade-dispatch");
 const projectId = ProjectId.make("project:cascade-dispatch");
 const rootId = ParticipantId.make("agent:root");
 const branchId = ParticipantId.make("agent:branch");
@@ -25,7 +25,7 @@ const participant = (
   threadId: ThreadId,
   placementParentId: ParticipantId | null,
 ): ParticipantPlacementView => ({
-  epicId,
+  squadronId,
   participant: { kind: "agent", id: participantId, threadId },
   participantId,
   threadId,
@@ -92,7 +92,7 @@ it.effect("dispatches stop and archive leaves-first with stable per-thread comma
     const stop = makeHarness({});
     const stopResult = yield* stop.service.stop({
       commandId: PlacementCommandId.make("cascade:one"),
-      epicId,
+      squadronId,
       participantId: rootId,
     });
     assert.deepStrictEqual(
@@ -112,7 +112,7 @@ it.effect("dispatches stop and archive leaves-first with stable per-thread comma
     const archive = makeHarness({ archived: new Set([branchThreadId]) });
     const archiveResult = yield* archive.service.archive({
       commandId: PlacementCommandId.make("cascade:two"),
-      epicId,
+      squadronId,
       participantId: rootId,
     });
     assert.deepStrictEqual(archive.projectionReads, [leafThreadId, branchThreadId, rootThreadId]);
@@ -136,7 +136,7 @@ it.effect("stops after a mid-cascade failure while preserving earlier descendant
     const error = yield* Effect.flip(
       harness.service.stop({
         commandId: PlacementCommandId.make("cascade:partial"),
-        epicId,
+        squadronId,
         participantId: rootId,
       }),
     );

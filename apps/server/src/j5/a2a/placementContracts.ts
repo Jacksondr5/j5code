@@ -1,7 +1,7 @@
 import { AuthSessionId, ServerAuthSessionMethod, ThreadId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
-import { EpicId, Participant, ParticipantId } from "./contracts.ts";
+import { SquadronId, Participant, ParticipantId } from "./contracts.ts";
 
 const Identifier = Schema.String.check(Schema.isNonEmpty());
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
@@ -62,7 +62,7 @@ export const PlacementSelection = Schema.Union([
 export type PlacementSelection = typeof PlacementSelection.Type;
 
 export const ParticipantPlacement = Schema.Struct({
-  epicId: EpicId,
+  squadronId: SquadronId,
   participantId: ParticipantId,
   provenance: ParticipantProvenance,
   placementParentId: Schema.NullOr(ParticipantId),
@@ -74,7 +74,7 @@ export type ParticipantPlacement = typeof ParticipantPlacement.Type;
 export const PlacementCreatedEvent = Schema.Struct({
   seq: PositiveInt,
   commandId: PlacementCommandId,
-  epicId: EpicId,
+  squadronId: SquadronId,
   participantId: ParticipantId,
   kind: Schema.Literal("participant.placement_created"),
   actor: PlacementActor,
@@ -88,7 +88,7 @@ export type PlacementCreatedEvent = typeof PlacementCreatedEvent.Type;
 export const PlacementReparentedEvent = Schema.Struct({
   seq: PositiveInt,
   commandId: PlacementCommandId,
-  epicId: EpicId,
+  squadronId: SquadronId,
   participantId: ParticipantId,
   kind: Schema.Literal("participant.reparented"),
   actor: Schema.Literal("human"),
@@ -107,7 +107,7 @@ export type PlacementEvent = typeof PlacementEvent.Type;
 
 export const RecordParticipantPlacementInput = Schema.Struct({
   commandId: PlacementCommandId,
-  epicId: EpicId,
+  squadronId: SquadronId,
   participantId: ParticipantId,
   actor: PlacementActor,
   provenance: ParticipantProvenance,
@@ -118,7 +118,7 @@ export type RecordParticipantPlacementInput = typeof RecordParticipantPlacementI
 
 export const ReparentParticipantInput = Schema.Struct({
   commandId: PlacementCommandId,
-  epicId: EpicId,
+  squadronId: SquadronId,
   participantId: ParticipantId,
   placementParentId: Schema.NullOr(ParticipantId),
   createdAt: Schema.String,
@@ -126,7 +126,7 @@ export const ReparentParticipantInput = Schema.Struct({
 export type ReparentParticipantInput = typeof ReparentParticipantInput.Type;
 
 export const ParticipantPlacementView = Schema.Struct({
-  epicId: EpicId,
+  squadronId: SquadronId,
   participant: Participant,
   participantId: ParticipantId,
   threadId: Schema.NullOr(ThreadId),

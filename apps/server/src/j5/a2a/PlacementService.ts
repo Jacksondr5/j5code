@@ -12,7 +12,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import type { McpInvocationScope } from "../../mcp/McpInvocationContext.ts";
 import {
-  EpicId,
+  SquadronId,
   Participant,
   ParticipantId,
   participantId as participantIdOf,
@@ -34,39 +34,39 @@ export class PlacementStorageError extends Schema.TaggedErrorClass<PlacementStor
   },
 ) {}
 
-export class PlacementEpicNotFoundError extends Schema.TaggedErrorClass<PlacementEpicNotFoundError>()(
-  "PlacementEpicNotFoundError",
-  { epicId: EpicId },
+export class PlacementSquadronNotFoundError extends Schema.TaggedErrorClass<PlacementSquadronNotFoundError>()(
+  "PlacementSquadronNotFoundError",
+  { squadronId: SquadronId },
 ) {
   override get message(): string {
-    return `Placement epic state is missing for ${this.epicId}. Create the epic before placing participants.`;
+    return `Placement squadron state is missing for ${this.squadronId}. Create the squadron before placing participants.`;
   }
 }
 
 export class PlacementParticipantNotFoundError extends Schema.TaggedErrorClass<PlacementParticipantNotFoundError>()(
   "PlacementParticipantNotFoundError",
-  { epicId: EpicId, participantId: ParticipantId },
+  { squadronId: SquadronId, participantId: ParticipantId },
 ) {
   override get message(): string {
-    return `Placement participant state is missing for ${this.participantId} in epic ${this.epicId}. Join the participant before changing placement.`;
+    return `Placement participant state is missing for ${this.participantId} in squadron ${this.squadronId}. Join the participant before changing placement.`;
   }
 }
 
 export class PlacementParentNotFoundError extends Schema.TaggedErrorClass<PlacementParentNotFoundError>()(
   "PlacementParentNotFoundError",
-  { epicId: EpicId, parentParticipantId: ParticipantId },
+  { squadronId: SquadronId, parentParticipantId: ParticipantId },
 ) {
   override get message(): string {
-    return `Placement parent state is missing for ${this.parentParticipantId} in epic ${this.epicId}. Choose an active participant or root.`;
+    return `Placement parent state is missing for ${this.parentParticipantId} in squadron ${this.squadronId}. Choose an active participant or root.`;
   }
 }
 
 export class PlacementAlreadyExistsError extends Schema.TaggedErrorClass<PlacementAlreadyExistsError>()(
   "PlacementAlreadyExistsError",
-  { epicId: EpicId, participantId: ParticipantId },
+  { squadronId: SquadronId, participantId: ParticipantId },
 ) {
   override get message(): string {
-    return `Placement state already exists for ${this.participantId} in epic ${this.epicId}; provenance is immutable. Use the human reparent command to change only display placement.`;
+    return `Placement state already exists for ${this.participantId} in squadron ${this.squadronId}; provenance is immutable. Use the human reparent command to change only display placement.`;
   }
 }
 
@@ -128,10 +128,10 @@ export class PlacementCycleError extends Schema.TaggedErrorClass<PlacementCycleE
 
 export class PlacementGraphCorruptError extends Schema.TaggedErrorClass<PlacementGraphCorruptError>()(
   "PlacementGraphCorruptError",
-  { epicId: EpicId, path: Schema.Array(ParticipantId) },
+  { squadronId: SquadronId, path: Schema.Array(ParticipantId) },
 ) {
   override get message(): string {
-    return `Placement graph state is already cyclic or exceeds its membership bound in epic ${this.epicId}: ${this.path.join(" -> ")}. Repair the placement projection before retrying.`;
+    return `Placement graph state is already cyclic or exceeds its membership bound in squadron ${this.squadronId}: ${this.path.join(" -> ")}. Repair the placement projection before retrying.`;
   }
 }
 
@@ -146,7 +146,7 @@ export class PlacementCommandConflictError extends Schema.TaggedErrorClass<Place
 
 export type PlacementError =
   | PlacementStorageError
-  | PlacementEpicNotFoundError
+  | PlacementSquadronNotFoundError
   | PlacementParticipantNotFoundError
   | PlacementParentNotFoundError
   | PlacementAlreadyExistsError
@@ -158,7 +158,7 @@ export type PlacementError =
 
 const PlacementErrorSchema = Schema.Union([
   PlacementStorageError,
-  PlacementEpicNotFoundError,
+  PlacementSquadronNotFoundError,
   PlacementParticipantNotFoundError,
   PlacementParentNotFoundError,
   PlacementAlreadyExistsError,
@@ -179,22 +179,22 @@ export interface ParticipantPlacementServiceShape {
     input: ReparentParticipantInput,
   ) => Effect.Effect<PlacementMutationResult, PlacementError>;
   readonly readPlacement: (input: {
-    readonly epicId: EpicId;
+    readonly squadronId: SquadronId;
     readonly participantId: ParticipantId;
   }) => Effect.Effect<ParticipantPlacement | null, PlacementError>;
   readonly listParticipants: (
-    epicId: EpicId,
+    squadronId: SquadronId,
   ) => Effect.Effect<ReadonlyArray<ParticipantPlacementView>, PlacementError>;
   /** Placement descendants in leaves-first order, including the requested root. */
   readonly listSubtree: (input: {
-    readonly epicId: EpicId;
+    readonly squadronId: SquadronId;
     readonly participantId: ParticipantId;
   }) => Effect.Effect<ReadonlyArray<ParticipantPlacementView>, PlacementError>;
   readonly listEvents: (
-    epicId: EpicId,
+    squadronId: SquadronId,
   ) => Effect.Effect<ReadonlyArray<PlacementEvent>, PlacementError>;
   readonly rebuildProjection: (
-    epicId: EpicId,
+    squadronId: SquadronId,
   ) => Effect.Effect<ReadonlyArray<ParticipantPlacement>, PlacementError>;
 }
 
@@ -207,7 +207,7 @@ interface EventRow {
   readonly seq: number;
   readonly command_id: string;
   readonly request_fingerprint: string;
-  readonly epic_id: string;
+  readonly squadron_id: string;
   readonly participant_id: string;
   readonly kind: "participant.placement_created" | "participant.reparented";
   readonly actor: "human" | "agent" | "platform";
@@ -227,7 +227,7 @@ interface EventRow {
 }
 
 interface PlacementRow {
-  readonly epic_id: string;
+  readonly squadron_id: string;
   readonly participant_id: string;
   readonly provenance_kind: "spawned-by" | "forked-from" | "unknown";
   readonly provenance_participant_id: string | null;
@@ -239,7 +239,7 @@ interface PlacementRow {
 
 interface ParticipantRow {
   readonly payload: string;
-  readonly epic_id: string;
+  readonly squadron_id: string;
   readonly participant_id: string;
   readonly provenance_kind: "spawned-by" | "forked-from" | "unknown" | null;
   readonly provenance_participant_id: string | null;
@@ -278,7 +278,7 @@ const provenanceFromRow = (row: {
 
 const placementFromRow = (row: PlacementRow) =>
   decodePlacement({
-    epicId: row.epic_id,
+    squadronId: row.squadron_id,
     participantId: row.participant_id,
     provenance: provenanceFromRow(row),
     placementParentId: row.placement_parent_id,
@@ -292,7 +292,7 @@ const eventFromRow = (row: EventRow) =>
       ? {
           seq: row.seq,
           commandId: row.command_id,
-          epicId: row.epic_id,
+          squadronId: row.squadron_id,
           participantId: row.participant_id,
           kind: row.kind,
           actor: row.actor,
@@ -309,7 +309,7 @@ const eventFromRow = (row: EventRow) =>
           // Reparent identity fields are non-null by the event-table CHECK.
           seq: row.seq,
           commandId: row.command_id,
-          epicId: row.epic_id,
+          squadronId: row.squadron_id,
           participantId: row.participant_id,
           kind: row.kind,
           actor: "human",
@@ -331,7 +331,7 @@ const preserveDomainError =
 const creationFingerprint = (input: RecordParticipantPlacementInput): string =>
   JSON.stringify({
     type: "record_creation",
-    epicId: input.epicId,
+    squadronId: input.squadronId,
     participantId: input.participantId,
     actor: input.actor,
     provenance: input.provenance,
@@ -342,7 +342,7 @@ const creationFingerprint = (input: RecordParticipantPlacementInput): string =>
 const reparentFingerprint = (input: ReparentParticipantInput): string =>
   JSON.stringify({
     type: "reparent",
-    epicId: input.epicId,
+    squadronId: input.squadronId,
     participantId: input.participantId,
     placementParentId: input.placementParentId,
     createdAt: input.createdAt,
@@ -355,51 +355,67 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
       const sql = yield* SqlClient.SqlClient;
       const mutationPermit = yield* Semaphore.make(1);
 
-      const ensureEpic = Effect.fn("j5.a2a.placement.ensureEpic")(function* (epicId: EpicId) {
+      const ensureSquadron = Effect.fn("j5.a2a.placement.ensureSquadron")(function* (squadronId: SquadronId) {
         const rows = yield* sql<{ readonly id: string }>`
-          SELECT id FROM j5_a2a_epic WHERE id = ${epicId} LIMIT 1
+          SELECT id FROM j5_a2a_squadron WHERE id = ${squadronId} LIMIT 1
         `;
-        if (rows[0] === undefined) return yield* new PlacementEpicNotFoundError({ epicId });
+        if (rows[0] === undefined) return yield* new PlacementSquadronNotFoundError({ squadronId });
       });
 
       const ensureParticipant = Effect.fn("j5.a2a.placement.ensureParticipant")(function* (
-        epicId: EpicId,
+        squadronId: SquadronId,
         participantId: ParticipantId,
       ) {
         const rows = yield* sql<{ readonly participant_id: string }>`
           SELECT participant_id
-          FROM j5_a2a_epic_membership
-          WHERE epic_id = ${epicId} AND participant_id = ${participantId}
+          FROM j5_a2a_squadron_membership
+          WHERE squadron_id = ${squadronId} AND participant_id = ${participantId}
           LIMIT 1
         `;
         if (rows[0] === undefined) {
-          return yield* new PlacementParticipantNotFoundError({ epicId, participantId });
+          return yield* new PlacementParticipantNotFoundError({ squadronId, participantId });
         }
       });
 
+      const ensureProvenanceParticipant = Effect.fn("j5.a2a.placement.ensureProvenanceParticipant")(
+        function* (squadronId: SquadronId, participantId: ParticipantId) {
+          const rows = yield* sql<{ readonly participant_id: string }>`
+          SELECT json_extract(payload, '$.participant.id') AS participant_id
+          FROM j5_a2a_comm_event
+          WHERE squadron_id = ${squadronId}
+            AND kind = 'participant.joined'
+            AND json_extract(payload, '$.participant.id') = ${participantId}
+          LIMIT 1
+        `;
+          if (rows[0] === undefined) {
+            return yield* new PlacementParticipantNotFoundError({ squadronId, participantId });
+          }
+        },
+      );
+
       const ensureParent = Effect.fn("j5.a2a.placement.ensureParent")(function* (
-        epicId: EpicId,
+        squadronId: SquadronId,
         parentParticipantId: ParticipantId | null,
       ) {
         if (parentParticipantId === null) return;
         const rows = yield* sql<{ readonly participant_id: string }>`
           SELECT participant_id
-          FROM j5_a2a_epic_membership
-          WHERE epic_id = ${epicId} AND participant_id = ${parentParticipantId}
+          FROM j5_a2a_squadron_membership
+          WHERE squadron_id = ${squadronId} AND participant_id = ${parentParticipantId}
           LIMIT 1
         `;
         if (rows[0] === undefined) {
-          return yield* new PlacementParentNotFoundError({ epicId, parentParticipantId });
+          return yield* new PlacementParentNotFoundError({ squadronId, parentParticipantId });
         }
       });
 
       const selectPlacement = Effect.fn("j5.a2a.placement.selectPlacement")(function* (
-        epicId: EpicId,
+        squadronId: SquadronId,
         participantId: ParticipantId,
       ) {
         const rows = yield* sql<PlacementRow>`
           SELECT
-            epic_id,
+            squadron_id,
             participant_id,
             provenance_kind,
             provenance_participant_id,
@@ -408,7 +424,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             created_event_seq,
             updated_event_seq
           FROM j5_a2a_participant_placement
-          WHERE epic_id = ${epicId} AND participant_id = ${participantId}
+          WHERE squadron_id = ${squadronId} AND participant_id = ${participantId}
           LIMIT 1
         `;
         return rows[0] === undefined ? null : yield* placementFromRow(rows[0]);
@@ -422,7 +438,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
               seq,
               command_id,
               request_fingerprint,
-              epic_id,
+              squadron_id,
               participant_id,
               kind,
               actor,
@@ -455,7 +471,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
           });
         }
         const placement = yield* selectPlacement(
-          EpicId.make(row.epic_id),
+          SquadronId.make(row.squadron_id),
           ParticipantId.make(row.participant_id),
         );
         if (placement === null) {
@@ -468,11 +484,11 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
         };
       });
 
-      const allocateSeq = Effect.fn("j5.a2a.placement.allocateSeq")(function* (epicId: EpicId) {
+      const allocateSeq = Effect.fn("j5.a2a.placement.allocateSeq")(function* (squadronId: SquadronId) {
         const rows = yield* sql<{ readonly next_seq: number }>`
           SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq
           FROM j5_a2a_placement_event
-          WHERE epic_id = ${epicId}
+          WHERE squadron_id = ${squadronId}
         `;
         const seq = rows[0]?.next_seq;
         if (seq === undefined) {
@@ -485,7 +501,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
         input: RecordParticipantPlacementInput,
       ) {
         const siblingOf = (sourceParticipantId: ParticipantId) =>
-          selectPlacement(input.epicId, sourceParticipantId).pipe(
+          selectPlacement(input.squadronId, sourceParticipantId).pipe(
             Effect.map((source) => source?.placementParentId ?? null),
           );
         switch (input.placement.type) {
@@ -529,13 +545,13 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
       });
 
       const assertAcyclic = Effect.fn("j5.a2a.placement.assertAcyclic")(function* (input: {
-        readonly epicId: EpicId;
+        readonly squadronId: SquadronId;
         readonly participantId: ParticipantId;
         readonly requestedParentId: ParticipantId | null;
       }) {
         if (input.requestedParentId === null) return;
         const countRows = yield* sql<{ readonly count: number }>`
-          SELECT COUNT(*) AS count FROM j5_a2a_epic_membership WHERE epic_id = ${input.epicId}
+          SELECT COUNT(*) AS count FROM j5_a2a_squadron_membership WHERE squadron_id = ${input.squadronId}
         `;
         const membershipBound = (countRows[0]?.count ?? 0) + 1;
         const visited = new Set<ParticipantId>();
@@ -551,11 +567,11 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             });
           }
           if (visited.has(current) || path.length > membershipBound) {
-            return yield* new PlacementGraphCorruptError({ epicId: input.epicId, path });
+            return yield* new PlacementGraphCorruptError({ squadronId: input.squadronId, path });
           }
           visited.add(current);
           const placement: ParticipantPlacement | null = yield* selectPlacement(
-            input.epicId,
+            input.squadronId,
             current,
           );
           current = placement?.placementParentId ?? null;
@@ -568,11 +584,11 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
         const fingerprint = creationFingerprint(input);
         const replayed = yield* replay(input.commandId, fingerprint);
         if (replayed !== null) return replayed;
-        yield* ensureEpic(input.epicId);
-        yield* ensureParticipant(input.epicId, input.participantId);
-        if ((yield* selectPlacement(input.epicId, input.participantId)) !== null) {
+        yield* ensureSquadron(input.squadronId);
+        yield* ensureParticipant(input.squadronId, input.participantId);
+        if ((yield* selectPlacement(input.squadronId, input.participantId)) !== null) {
           return yield* new PlacementAlreadyExistsError({
-            epicId: input.epicId,
+            squadronId: input.squadronId,
             participantId: input.participantId,
           });
         }
@@ -582,9 +598,11 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             : input.provenance.kind === "forked-from"
               ? input.provenance.sourceParticipantId
               : null;
-        // Provenance can name a source outside the active epic. Placement still
-        // requires an active parent, but immutable lineage must not be erased
-        // merely because its source is absent or has since left membership.
+        if (provenanceParticipantId !== null) {
+          // Immutable provenance may retain a departed source, but it must name
+          // an identity that actually joined this squadron at least once.
+          yield* ensureProvenanceParticipant(input.squadronId, provenanceParticipantId);
+        }
         if (provenanceParticipantId === input.participantId) {
           return yield* new PlacementCycleError({
             participantId: input.participantId,
@@ -593,13 +611,13 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
           });
         }
         const placementParentId = yield* resolveCreationParent(input);
-        yield* ensureParent(input.epicId, placementParentId);
+        yield* ensureParent(input.squadronId, placementParentId);
         yield* assertAcyclic({
-          epicId: input.epicId,
+          squadronId: input.squadronId,
           participantId: input.participantId,
           requestedParentId: placementParentId,
         });
-        const seq = yield* allocateSeq(input.epicId);
+        const seq = yield* allocateSeq(input.squadronId);
         const provenanceKind = input.provenance.kind;
         const provenanceSource =
           input.provenance.kind === "unknown" ? null : input.provenance.source;
@@ -608,7 +626,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
               seq,
               command_id,
               request_fingerprint,
-              epic_id,
+              squadron_id,
               participant_id,
               kind,
               actor,
@@ -625,7 +643,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
               ${seq},
               ${input.commandId},
               ${fingerprint},
-              ${input.epicId},
+              ${input.squadronId},
               ${input.participantId},
               'participant.placement_created',
               ${input.actor},
@@ -642,7 +660,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
           `;
         yield* sql`
             INSERT INTO j5_a2a_participant_placement (
-              epic_id,
+              squadron_id,
               participant_id,
               provenance_kind,
               provenance_participant_id,
@@ -651,7 +669,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
               created_event_seq,
               updated_event_seq
             ) VALUES (
-              ${input.epicId},
+              ${input.squadronId},
               ${input.participantId},
               ${provenanceKind},
               ${provenanceParticipantId},
@@ -665,7 +683,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
           seq,
           command_id: input.commandId,
           request_fingerprint: fingerprint,
-          epic_id: input.epicId,
+          squadron_id: input.squadronId,
           participant_id: input.participantId,
           kind: "participant.placement_created",
           actor: input.actor,
@@ -679,7 +697,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
           placement_parent_id: placementParentId,
           created_at: input.createdAt,
         });
-        const placement = yield* selectPlacement(input.epicId, input.participantId);
+        const placement = yield* selectPlacement(input.squadronId, input.participantId);
         if (placement === null) {
           return yield* new PlacementStorageError({ operation: "read created placement" });
         }
@@ -693,28 +711,28 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
         const fingerprint = reparentFingerprint(input);
         const replayed = yield* replay(input.commandId, fingerprint);
         if (replayed !== null) return replayed;
-        yield* ensureEpic(input.epicId);
-        yield* ensureParticipant(input.epicId, input.participantId);
-        yield* ensureParent(input.epicId, input.placementParentId);
-        const current = yield* selectPlacement(input.epicId, input.participantId);
+        yield* ensureSquadron(input.squadronId);
+        yield* ensureParticipant(input.squadronId, input.participantId);
+        yield* ensureParent(input.squadronId, input.placementParentId);
+        const current = yield* selectPlacement(input.squadronId, input.participantId);
         if (current === null) {
           return yield* new PlacementParticipantNotFoundError({
-            epicId: input.epicId,
+            squadronId: input.squadronId,
             participantId: input.participantId,
           });
         }
         yield* assertAcyclic({
-          epicId: input.epicId,
+          squadronId: input.squadronId,
           participantId: input.participantId,
           requestedParentId: input.placementParentId,
         });
-        const seq = yield* allocateSeq(input.epicId);
+        const seq = yield* allocateSeq(input.squadronId);
         yield* sql`
           INSERT INTO j5_a2a_placement_event (
             seq,
             command_id,
             request_fingerprint,
-            epic_id,
+            squadron_id,
             participant_id,
             kind,
             actor,
@@ -731,7 +749,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             ${seq},
             ${input.commandId},
             ${fingerprint},
-            ${input.epicId},
+            ${input.squadronId},
             ${input.participantId},
             'participant.reparented',
             'human',
@@ -749,13 +767,13 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
         yield* sql`
           UPDATE j5_a2a_participant_placement
           SET placement_parent_id = ${input.placementParentId}, updated_event_seq = ${seq}
-          WHERE epic_id = ${input.epicId} AND participant_id = ${input.participantId}
+          WHERE squadron_id = ${input.squadronId} AND participant_id = ${input.participantId}
         `;
         const event = yield* eventFromRow({
           seq,
           command_id: input.commandId,
           request_fingerprint: fingerprint,
-          epic_id: input.epicId,
+          squadron_id: input.squadronId,
           participant_id: input.participantId,
           kind: "participant.reparented",
           actor: "human",
@@ -769,7 +787,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
           placement_parent_id: input.placementParentId,
           created_at: input.createdAt,
         });
-        const placement = yield* selectPlacement(input.epicId, input.participantId);
+        const placement = yield* selectPlacement(input.squadronId, input.participantId);
         if (placement === null) {
           return yield* new PlacementStorageError({ operation: "read reparented placement" });
         }
@@ -777,22 +795,22 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
       });
 
       const listParticipantsEffect = Effect.fn("j5.a2a.placement.listParticipants")(function* (
-        epicId: EpicId,
+        squadronId: SquadronId,
       ) {
-        yield* ensureEpic(epicId);
+        yield* ensureSquadron(squadronId);
         const rows = yield* sql<ParticipantRow>`
             SELECT
               m.payload,
-              m.epic_id,
+              m.squadron_id,
               m.participant_id,
               p.provenance_kind,
               p.provenance_participant_id,
               p.provenance_source,
               p.placement_parent_id
-            FROM j5_a2a_epic_membership m
+            FROM j5_a2a_squadron_membership m
             LEFT JOIN j5_a2a_participant_placement p
-              ON p.epic_id = m.epic_id AND p.participant_id = m.participant_id
-            WHERE m.epic_id = ${epicId}
+              ON p.squadron_id = m.squadron_id AND p.participant_id = m.participant_id
+            WHERE m.squadron_id = ${squadronId}
             ORDER BY m.participant_id
           `;
         return yield* Effect.forEach(
@@ -802,7 +820,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
               const participant = yield* decodeParticipant(row.payload);
               const id = participantIdOf(participant);
               return {
-                epicId,
+                squadronId,
                 participant,
                 participantId: id,
                 threadId: participant.kind === "agent" ? participant.threadId : null,
@@ -828,14 +846,14 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
         );
       });
 
-      const listEventsEffect = Effect.fn("j5.a2a.placement.listEvents")(function* (epicId: EpicId) {
-        yield* ensureEpic(epicId);
+      const listEventsEffect = Effect.fn("j5.a2a.placement.listEvents")(function* (squadronId: SquadronId) {
+        yield* ensureSquadron(squadronId);
         const rows = yield* sql<EventRow>`
           SELECT
             seq,
             command_id,
             request_fingerprint,
-            epic_id,
+            squadron_id,
             participant_id,
             kind,
             actor,
@@ -849,22 +867,22 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             placement_parent_id,
             created_at
           FROM j5_a2a_placement_event
-          WHERE epic_id = ${epicId}
+          WHERE squadron_id = ${squadronId}
           ORDER BY seq
         `;
         return yield* Effect.forEach(rows, eventFromRow, { concurrency: 1 });
       });
 
       const rebuildProjectionEffect = Effect.fn("j5.a2a.placement.rebuildProjection")(function* (
-        epicId: EpicId,
+        squadronId: SquadronId,
       ) {
-        yield* ensureEpic(epicId);
+        yield* ensureSquadron(squadronId);
         const rows = yield* sql<EventRow>`
             SELECT
               seq,
               command_id,
               request_fingerprint,
-              epic_id,
+              squadron_id,
               participant_id,
               kind,
               actor,
@@ -878,15 +896,15 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
               placement_parent_id,
               created_at
             FROM j5_a2a_placement_event
-            WHERE epic_id = ${epicId}
+            WHERE squadron_id = ${squadronId}
             ORDER BY seq
           `;
-        yield* sql`DELETE FROM j5_a2a_participant_placement WHERE epic_id = ${epicId}`;
+        yield* sql`DELETE FROM j5_a2a_participant_placement WHERE squadron_id = ${squadronId}`;
         for (const row of rows) {
           if (row.kind === "participant.placement_created") {
             yield* sql`
                 INSERT INTO j5_a2a_participant_placement (
-                  epic_id,
+                  squadron_id,
                   participant_id,
                   provenance_kind,
                   provenance_participant_id,
@@ -895,7 +913,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
                   created_event_seq,
                   updated_event_seq
                 ) VALUES (
-                  ${row.epic_id},
+                  ${row.squadron_id},
                   ${row.participant_id},
                   ${row.provenance_kind},
                   ${row.provenance_participant_id},
@@ -909,13 +927,13 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             yield* sql`
                 UPDATE j5_a2a_participant_placement
                 SET placement_parent_id = ${row.placement_parent_id}, updated_event_seq = ${row.seq}
-                WHERE epic_id = ${row.epic_id} AND participant_id = ${row.participant_id}
+                WHERE squadron_id = ${row.squadron_id} AND participant_id = ${row.participant_id}
               `;
           }
         }
         const placements = yield* sql<PlacementRow>`
             SELECT
-              epic_id,
+              squadron_id,
               participant_id,
               provenance_kind,
               provenance_participant_id,
@@ -924,7 +942,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
               created_event_seq,
               updated_event_seq
             FROM j5_a2a_participant_placement
-            WHERE epic_id = ${epicId}
+            WHERE squadron_id = ${squadronId}
             ORDER BY participant_id
           `;
         return yield* Effect.forEach(placements, placementFromRow, { concurrency: 1 });
@@ -964,19 +982,19 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             .withPermit(sql.withTransaction(reparentEffect(input, caller.principal)))
             .pipe(Effect.mapError(preserveDomainError("reparent participant")));
         },
-        readPlacement: ({ epicId, participantId }) =>
+        readPlacement: ({ squadronId, participantId }) =>
           Effect.gen(function* () {
-            yield* ensureEpic(epicId);
-            return yield* selectPlacement(epicId, participantId);
+            yield* ensureSquadron(squadronId);
+            return yield* selectPlacement(squadronId, participantId);
           }).pipe(Effect.mapError(preserveDomainError("read participant placement"))),
-        listParticipants: (epicId) =>
-          listParticipantsEffect(epicId).pipe(
+        listParticipants: (squadronId) =>
+          listParticipantsEffect(squadronId).pipe(
             Effect.mapError(preserveDomainError("list participant placements")),
           ),
-        listSubtree: ({ epicId, participantId }) =>
+        listSubtree: ({ squadronId, participantId }) =>
           Effect.gen(function* () {
-            yield* ensureParticipant(epicId, participantId);
-            const participants = yield* listParticipantsEffect(epicId);
+            yield* ensureParticipant(squadronId, participantId);
+            const participants = yield* listParticipantsEffect(squadronId);
             const byId = new Map(
               participants.map((participant) => [participant.participantId, participant]),
             );
@@ -995,7 +1013,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             const visit = (id: ParticipantId): Effect.Effect<void, PlacementGraphCorruptError> =>
               Effect.gen(function* () {
                 if (visiting.has(id)) {
-                  return yield* new PlacementGraphCorruptError({ epicId, path: [...path, id] });
+                  return yield* new PlacementGraphCorruptError({ squadronId, path: [...path, id] });
                 }
                 if (visited.has(id)) return;
                 visiting.add(id);
@@ -1010,13 +1028,13 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             yield* visit(participantId);
             return ordered;
           }).pipe(Effect.mapError(preserveDomainError("list placement subtree"))),
-        listEvents: (epicId) =>
-          listEventsEffect(epicId).pipe(
+        listEvents: (squadronId) =>
+          listEventsEffect(squadronId).pipe(
             Effect.mapError(preserveDomainError("list placement events")),
           ),
-        rebuildProjection: (epicId) =>
+        rebuildProjection: (squadronId) =>
           mutationPermit
-            .withPermit(sql.withTransaction(rebuildProjectionEffect(epicId)))
+            .withPermit(sql.withTransaction(rebuildProjectionEffect(squadronId)))
             .pipe(Effect.mapError(preserveDomainError("rebuild placement projection"))),
       });
     }),

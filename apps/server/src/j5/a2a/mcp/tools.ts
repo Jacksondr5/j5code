@@ -99,7 +99,7 @@ export const J5ListParticipantsTool = Tool.make("list_participants", {
 
 export const J5StopAgentTool = Tool.make("stop_agent", {
   description:
-    "Stop one J5 participant and every agent below it in the mutable placement tree, leaves first. Cascade never follows provenance: a fork placed beside its source is not stopped with that source.",
+    "Stop one J5 participant and every agent below it in the mutable placement tree, leaves first. The caller must be a current member of squadron_id. Cascade never follows provenance: a fork placed beside its source is not stopped with that source.",
   parameters: J5PlacementCascadeInput,
   success: J5PlacementCascadeResult,
   failure: J5McpFailure,
@@ -113,7 +113,7 @@ export const J5StopAgentTool = Tool.make("stop_agent", {
 
 export const J5ArchiveAgentTool = Tool.make("archive_agent", {
   description:
-    "Archive one J5 participant and every agent below it in the mutable placement tree, leaves first. Cascade never follows provenance: a fork placed beside its source is not archived with that source.",
+    "Archive one J5 participant and every agent below it in the mutable placement tree, leaves first. The caller must be a current member of squadron_id. Cascade never follows provenance: a fork placed beside its source is not archived with that source.",
   parameters: J5PlacementCascadeInput,
   success: J5PlacementCascadeResult,
   failure: J5McpFailure,

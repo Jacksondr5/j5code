@@ -19,11 +19,12 @@ import {
   PlacementCycleError,
   PlacementGraphCorruptError,
   PlacementHumanRequiredError,
+  PlacementParticipantNotFoundError,
   ParticipantPlacementService,
   layer as placementLayer,
 } from "./PlacementService.ts";
 import { runPlacementCascade } from "./PlacementCascadeService.ts";
-import { CommCommandId, EpicId, ParticipantId, type Participant } from "./contracts.ts";
+import { CommCommandId, SquadronId, ParticipantId, type Participant } from "./contracts.ts";
 import {
   PlacementCommandId,
   type ParticipantProvenance,
@@ -31,10 +32,11 @@ import {
 } from "./placementContracts.ts";
 
 const timestamp = "2026-08-16T16:00:00.000Z";
-const epicId = EpicId.make("epic:placement");
+const squadronId = SquadronId.make("squadron:placement");
 const isCycle = Schema.is(PlacementCycleError);
 const isGraphCorrupt = Schema.is(PlacementGraphCorruptError);
 const isHumanRequired = Schema.is(PlacementHumanRequiredError);
+const isParticipantNotFound = Schema.is(PlacementParticipantNotFoundError);
 const humanPrincipal = {
   sessionId: AuthSessionId.make("session:placement-human"),
   subject: "human:placement-test",
@@ -74,7 +76,7 @@ const joinParticipant = (index: number, participant: Participant) =>
     const ledger = yield* A2ALedger;
     yield* ledger.append({
       commandId: CommCommandId.make(`membership:${index}`),
-      epicId,
+      squadronId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.joined",
@@ -92,8 +94,8 @@ const prepare = (participants: ReadonlyArray<Participant>) =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
-    yield* ledger.createEpic({
-      epic: { id: epicId, name: "Placement tests", createdAt: timestamp },
+    yield* ledger.createSquadron({
+      squadron: { id: squadronId, name: "Placement tests", createdAt: timestamp },
     });
     for (const [index, participant] of participants.entries()) {
       yield* joinParticipant(index + 1, participant);
@@ -110,7 +112,7 @@ const record = (input: {
     const placements = yield* ParticipantPlacementService;
     return yield* placements.recordCreation({
       commandId: PlacementCommandId.make(`placement:${input.index}`),
-      epicId,
+      squadronId,
       participantId: input.participant.id,
       actor: "platform",
       provenance: input.provenance,
@@ -200,7 +202,7 @@ it.effect(
       const placements = yield* ParticipantPlacementService;
       const humanReparent = yield* placements.reparent(humanCaller, {
         commandId: PlacementCommandId.make("reparent:source-under-group"),
-        epicId,
+        squadronId,
         participantId: source.id,
         placementParentId: group.id,
         createdAt: timestamp,
@@ -224,13 +226,13 @@ it.effect(
 
       yield* placements.reparent(humanCaller, {
         commandId: PlacementCommandId.make("reparent:source-to-root"),
-        epicId,
+        squadronId,
         participantId: source.id,
         placementParentId: null,
         createdAt: timestamp,
       });
       assert.equal(
-        (yield* placements.readPlacement({ epicId, participantId: nestedFork.id }))
+        (yield* placements.readPlacement({ squadronId, participantId: nestedFork.id }))
           ?.placementParentId,
         group.id,
       );
@@ -251,7 +253,7 @@ it.effect(
       });
       const placements = yield* ParticipantPlacementService;
 
-      const rows = yield* placements.listParticipants(epicId);
+      const rows = yield* placements.listParticipants(squadronId);
       const nativeRow = rows.find((row) => row.participantId === native.id);
       const unrecordedRow = rows.find((row) => row.participantId === unrecorded.id);
       assert.deepStrictEqual(nativeRow?.provenance, {
@@ -262,6 +264,62 @@ it.effect(
       assert.notEqual(nativeRow?.provenance.kind, "spawned-by");
       assert.deepStrictEqual(unrecordedRow?.provenance, { kind: "unrecorded" });
     }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect("retains departed provenance but refuses a participant id that never joined", () =>
+  Effect.gen(function* () {
+    const departedParent = agent("departed-parent");
+    const child = agent("departed-child");
+    const fabricatedTarget = agent("fabricated-target");
+    const fabricatedSource = agent("never-joined-source");
+    yield* prepare([departedParent, child, fabricatedTarget]);
+    yield* record({
+      index: 1,
+      participant: departedParent,
+      provenance: { kind: "unknown", source: "native_or_unobserved" },
+    });
+    yield* (yield* A2ALedger).append({
+      commandId: CommCommandId.make("membership:departed-parent:left"),
+      squadronId,
+      acceptedAt: timestamp,
+      event: {
+        kind: "participant.left",
+        sender: departedParent.id,
+        receiver: null,
+        exchangeId: null,
+        correlationId: null,
+        payload: { participant: departedParent },
+        createdAt: timestamp,
+      },
+    });
+
+    const departedResult = yield* record({
+      index: 2,
+      participant: child,
+      provenance: spawnedBy(departedParent),
+      placement: { type: "root" },
+    });
+    assert.deepStrictEqual(departedResult.placement.provenance, spawnedBy(departedParent));
+    assert.equal(departedResult.placement.placementParentId, null);
+
+    const fabricatedError = yield* Effect.flip(
+      record({
+        index: 3,
+        participant: fabricatedTarget,
+        provenance: spawnedBy(fabricatedSource),
+        placement: { type: "root" },
+      }),
+    );
+    assert.isTrue(isParticipantNotFound(fabricatedError));
+    assert.include(fabricatedError.message, fabricatedSource.id);
+    assert.equal(
+      yield* (yield* ParticipantPlacementService).readPlacement({
+        squadronId,
+        participantId: fabricatedTarget.id,
+      }),
+      null,
+    );
+  }).pipe(Effect.provide(TestLayer)),
 );
 
 it.effect("replays placement creation without changing immutable provenance", () =>
@@ -277,7 +335,7 @@ it.effect("replays placement creation without changing immutable provenance", ()
     const placements = yield* ParticipantPlacementService;
     const input = {
       commandId: PlacementCommandId.make("placement:replay"),
-      epicId,
+      squadronId,
       participantId: child.id,
       actor: "agent" as const,
       provenance: spawnedBy(parent),
@@ -292,7 +350,7 @@ it.effect("replays placement creation without changing immutable provenance", ()
     assert.isFalse(replay.committed);
     assert.deepStrictEqual(replay.event, first.event);
     assert.deepStrictEqual(replay.placement.provenance, spawnedBy(parent));
-    assert.lengthOf(yield* placements.listEvents(epicId), 2);
+    assert.lengthOf(yield* placements.listEvents(squadronId), 2);
   }).pipe(Effect.provide(TestLayer)),
 );
 
@@ -313,7 +371,7 @@ it.effect(
       yield* record({ index: 3, participant: third, provenance: spawnedBy(second) });
       const placements = yield* ParticipantPlacementService;
 
-      const beforeAgentAttempt = (yield* placements.listEvents(epicId)).length;
+      const beforeAgentAttempt = (yield* placements.listEvents(squadronId)).length;
       const agentScope: McpInvocationScope = {
         environmentId: EnvironmentId.make("environment:placement-agent"),
         threadId: first.threadId,
@@ -327,7 +385,7 @@ it.effect(
           { kind: "mcp", scope: agentScope },
           {
             commandId: PlacementCommandId.make("reparent:agent-refused"),
-            epicId,
+            squadronId,
             participantId: second.id,
             placementParentId: null,
             createdAt: timestamp,
@@ -338,12 +396,12 @@ it.effect(
       assert.include(agentError.message, "Placement actor state is mcp-agent");
       assert.include(agentError.message, agentScope.providerSessionId);
       assert.include(agentError.message, agentScope.threadId);
-      assert.equal((yield* placements.listEvents(epicId)).length, beforeAgentAttempt);
+      assert.equal((yield* placements.listEvents(squadronId)).length, beforeAgentAttempt);
 
       const bearerError = yield* Effect.flip(
         placements.reparent(bearerCaller, {
           commandId: PlacementCommandId.make("reparent:bearer-refused"),
-          epicId,
+          squadronId,
           participantId: second.id,
           placementParentId: null,
           createdAt: timestamp,
@@ -352,12 +410,12 @@ it.effect(
       assert.isTrue(isHumanRequired(bearerError));
       assert.include(bearerError.message, "bearer-access-token");
       assert.include(bearerError.message, bearerCaller.principal.subject);
-      assert.equal((yield* placements.listEvents(epicId)).length, beforeAgentAttempt);
+      assert.equal((yield* placements.listEvents(squadronId)).length, beforeAgentAttempt);
 
       const cycleError = yield* Effect.flip(
         placements.reparent(humanCaller, {
           commandId: PlacementCommandId.make("reparent:cycle-refused"),
-          epicId,
+          squadronId,
           participantId: first.id,
           placementParentId: third.id,
           createdAt: timestamp,
@@ -366,7 +424,7 @@ it.effect(
       assert.isTrue(isCycle(cycleError));
       assert.include(cycleError.message, "Placement cycle state");
       assert.equal(
-        (yield* placements.readPlacement({ epicId, participantId: first.id }))?.placementParentId,
+        (yield* placements.readPlacement({ squadronId, participantId: first.id }))?.placementParentId,
         null,
       );
     }).pipe(Effect.provide(TestLayer)),
@@ -400,14 +458,14 @@ it.effect("detects corrupt stored cycles in mutation and subtree traversal", () 
         WHEN ${first.id} THEN ${second.id}
         WHEN ${second.id} THEN ${first.id}
       END
-      WHERE epic_id = ${epicId} AND participant_id IN (${first.id}, ${second.id})
+      WHERE squadron_id = ${squadronId} AND participant_id IN (${first.id}, ${second.id})
     `;
     const placements = yield* ParticipantPlacementService;
 
     const mutationError = yield* Effect.flip(
       placements.reparent(humanCaller, {
         commandId: PlacementCommandId.make("reparent:corrupt-graph"),
-        epicId,
+        squadronId,
         participantId: target.id,
         placementParentId: first.id,
         createdAt: timestamp,
@@ -417,7 +475,7 @@ it.effect("detects corrupt stored cycles in mutation and subtree traversal", () 
     assert.include(mutationError.message, "Placement graph state");
 
     const traversalError = yield* Effect.flip(
-      placements.listSubtree({ epicId, participantId: first.id }),
+      placements.listSubtree({ squadronId, participantId: first.id }),
     );
     assert.isTrue(isGraphCorrupt(traversalError));
     assert.include(traversalError.message, "Placement graph state");
@@ -459,13 +517,13 @@ it.effect("walks cascade targets by mutable placement rather than provenance", (
 
     const firstCascade = yield* runPlacementCascade({
       placement: placements,
-      epicId,
+      squadronId,
       participantId: firstRoot.id,
       operation: (participant) => Effect.succeed(participant.participantId),
     });
     const secondCascade = yield* runPlacementCascade({
       placement: placements,
-      epicId,
+      squadronId,
       participantId: secondRoot.id,
       operation: (participant) => Effect.succeed(participant.participantId),
     });
@@ -491,20 +549,20 @@ it.effect(
       const placements = yield* ParticipantPlacementService;
       yield* placements.reparent(humanCaller, {
         commandId: PlacementCommandId.make("reparent:rebuild-child"),
-        epicId,
+        squadronId,
         participantId: child.id,
         placementParentId: null,
         createdAt: timestamp,
       });
-      const childBefore = yield* placements.readPlacement({ epicId, participantId: child.id });
-      const parentBefore = yield* placements.readPlacement({ epicId, participantId: parent.id });
+      const childBefore = yield* placements.readPlacement({ squadronId, participantId: child.id });
+      const parentBefore = yield* placements.readPlacement({ squadronId, participantId: parent.id });
       assert.isNotNull(childBefore);
       assert.isNotNull(parentBefore);
       const before = [childBefore!, parentBefore!];
       const sql = yield* SqlClient.SqlClient;
-      yield* sql`DELETE FROM j5_a2a_participant_placement WHERE epic_id = ${epicId}`;
-      assert.equal(yield* placements.readPlacement({ epicId, participantId: child.id }), null);
-      const rebuilt = yield* placements.rebuildProjection(epicId);
+      yield* sql`DELETE FROM j5_a2a_participant_placement WHERE squadron_id = ${squadronId}`;
+      assert.equal(yield* placements.readPlacement({ squadronId, participantId: child.id }), null);
+      const rebuilt = yield* placements.rebuildProjection(squadronId);
       assert.deepStrictEqual(rebuilt, before);
     }).pipe(Effect.provide(TestLayer)),
 );

@@ -361,6 +361,20 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
     ];
     const before = yield* ledger.listMembership(squadronId);
     assert.deepStrictEqual(before, expected);
+    assert.equal(
+      yield* ledger.findHistoricalAgentParticipantId({
+        squadronId,
+        threadId: firstAgent.threadId,
+      }),
+      firstAgent.id,
+    );
+    assert.equal(
+      yield* ledger.findHistoricalAgentParticipantId({
+        squadronId,
+        threadId: ThreadId.make("thread:never-joined"),
+      }),
+      null,
+    );
 
     yield* sql`DELETE FROM j5_a2a_squadron_membership WHERE squadron_id = ${squadronId}`;
     const corrupted = yield* ledger.listMembership(squadronId);
