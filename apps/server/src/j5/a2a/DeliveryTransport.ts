@@ -118,6 +118,11 @@ export const live: Layer.Layer<
             });
           }
           const target = yield* threads.getThreadProjection(participant.threadId);
+          // Interject peer traffic into a busy agent's active turn so blocked-on-peer
+          // work resumes before silence classification. Queue mode starts immediately
+          // when idle without reintroducing ThreadManagement's implicit auto branch.
+          const mode =
+            ThreadManagement.latestSteerableRun(target) === undefined ? "queue" : "steer";
           const envelope =
             input.senderId === GLOBAL_HUMAN_PARTICIPANT_ID
               ? formatHumanEnvelope({
@@ -138,7 +143,7 @@ export const live: Layer.Layer<
             messageId: deliveryMessageId(input.messageId),
             text: envelope,
             attachments: [],
-            mode: "auto",
+            mode,
             createdBy: "agent",
             creationSource: "mcp",
           });
