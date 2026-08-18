@@ -226,6 +226,42 @@ it.effect("negative control: poisoned retry ids are detected as a double injecti
   }),
 );
 
+it.effect("serializes manual runOnce calls against a concurrent drain", () =>
+  Effect.gen(function* () {
+    const calls = yield* Ref.make(0);
+    const firstEntered = yield* Deferred.make<void>();
+    const releaseFirst = yield* Deferred.make<void>();
+    const transport: A2ADeliveryTransportShape = {
+      deliverAgent: () =>
+        Ref.updateAndGet(calls, (count) => count + 1).pipe(
+          Effect.flatMap((call) =>
+            call === 1
+              ? Deferred.succeed(firstEntered, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseFirst)),
+                )
+              : Effect.void,
+          ),
+        ),
+      deliverHuman: () => Effect.void,
+    };
+
+    yield* Effect.gen(function* () {
+      yield* seedSend(false);
+      const worker = yield* A2ADeliveryWorker;
+      const runOnceFiber = yield* worker.runOnce.pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Deferred.await(firstEntered);
+      const drainFiber = yield* worker.drain.pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Effect.yieldNow;
+      assert.equal(yield* Ref.get(calls), 1, "drain cannot claim the in-flight delivery");
+
+      yield* Deferred.succeed(releaseFirst, undefined);
+      assert.equal((yield* Fiber.join(runOnceFiber))?.state, "delivered");
+      assert.deepStrictEqual(yield* Fiber.join(drainFiber), []);
+      assert.equal(yield* Ref.get(calls), 1);
+    }).pipe(Effect.provide(makeTestLayer(transport)));
+  }),
+);
+
 it.effect("cross-epic half-write recovery records exactly one receiver entry", () =>
   Effect.gen(function* () {
     const result = yield* crashWindowScenario(false, true);

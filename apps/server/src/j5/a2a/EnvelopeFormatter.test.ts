@@ -42,6 +42,19 @@ it("renders epic-switch warnings with the abandoned exchange and peer", () => {
   assert.notInclude(rendered, "{{");
 });
 
+it("does not interpret caller text as an envelope template", () => {
+  const message = "Preserve this literal token: {{exchangeInstruction}}";
+  const rendered = formatPeerEnvelope({
+    senderId: ParticipantId.make("agent:sender"),
+    originEpicId: EpicId.make("epic:origin"),
+    exchangeId: ExchangeId.make("exchange:one"),
+    message,
+  });
+
+  assert.include(rendered, message);
+  assert.equal(rendered.match(/send_message\(/g)?.length, 1);
+});
+
 it("tells agents that human-origin exchanges require an explicit tool reply", () => {
   const rendered = formatHumanEnvelope({
     senderId: ParticipantId.make("human:global"),

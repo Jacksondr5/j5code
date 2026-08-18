@@ -465,7 +465,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
             exchangeState: closed ? "closed" : exchangeState,
             joinedExistingExchange:
               exchangeId !== null && !opened && !closed ? joinedExistingExchange : false,
-            durableAtSeq: result.receipt.resultSeq,
+            durableAtSeq: sent.seq,
           } satisfies SendMessageResult;
         });
 

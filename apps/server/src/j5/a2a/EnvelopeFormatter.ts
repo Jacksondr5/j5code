@@ -8,10 +8,7 @@ export const A2A_LIST_TOOL_DESCRIPTION = config.listToolDescription;
 export const A2A_JOIN_TOOL_DESCRIPTION = config.joinToolDescription;
 
 const render = (template: string, values: Readonly<Record<string, string>>): string =>
-  Object.entries(values).reduce(
-    (output, [name, value]) => output.replaceAll(`{{${name}}}`, value),
-    template,
-  );
+  template.replace(/\{\{([^{}]+)\}\}/g, (placeholder, name: string) => values[name] ?? placeholder);
 
 const deliveryInstruction = (input: {
   readonly senderId: ParticipantId;

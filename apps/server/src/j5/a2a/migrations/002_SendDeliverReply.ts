@@ -33,6 +33,10 @@ export default Effect.gen(function* () {
     ON j5_a2a_exchange(epic_id, sender_id, receiver_id)
     WHERE status = 'open'
   `;
+  yield* sql`
+    CREATE INDEX j5_a2a_exchange_id_idx
+    ON j5_a2a_exchange(exchange_id)
+  `;
 
   yield* sql`
     CREATE TABLE j5_a2a_delivery (
@@ -61,6 +65,10 @@ export default Effect.gen(function* () {
   yield* sql`
     CREATE INDEX j5_a2a_delivery_drain_idx
     ON j5_a2a_delivery(status, next_attempt_at, sent_seq)
+  `;
+  yield* sql`
+    CREATE INDEX j5_a2a_delivery_message_sender_idx
+    ON j5_a2a_delivery(message_id, sender_id)
   `;
   yield* sql`
     CREATE UNIQUE INDEX j5_a2a_delivery_one_reply_idx

@@ -165,7 +165,7 @@ export const layer: A2AEpicBootstrapLayer = Layer.effect(
               {
                 kind: "participant.left",
                 sender: null,
-                receiver: participantId,
+                receiver: membership.participant.id,
                 exchangeId: null,
                 correlationId: null,
                 payload: { participant: membership.participant },

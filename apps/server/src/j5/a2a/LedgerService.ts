@@ -365,7 +365,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
         }
         case "message.delivered": {
           const payload = yield* decodeMessageDelivered(event.payload);
-          yield* sql`
+          const rows = yield* sql<{ readonly message_id: string }>`
             UPDATE j5_a2a_delivery
             SET
               status = 'delivered',
@@ -375,12 +375,16 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
               delivered_seq = ${event.seq},
               updated_at = ${event.createdAt}
             WHERE epic_id = ${event.epicId} AND message_id = ${payload.messageId}
+            RETURNING message_id
           `;
+          if (rows[0] === undefined) {
+            return yield* new A2AStorageError({ operation: "project delivered message" });
+          }
           return;
         }
         case "message.delivery_failed": {
           const payload = yield* decodeMessageDeliveryFailed(event.payload);
-          yield* sql`
+          const rows = yield* sql<{ readonly message_id: string }>`
             UPDATE j5_a2a_delivery
             SET
               status = ${payload.alarmed ? "alarmed" : "retry_scheduled"},
@@ -389,7 +393,11 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
               next_attempt_at = ${payload.nextAttemptAt},
               updated_at = ${event.createdAt}
             WHERE epic_id = ${event.epicId} AND message_id = ${payload.messageId}
+            RETURNING message_id
           `;
+          if (rows[0] === undefined) {
+            return yield* new A2AStorageError({ operation: "project failed message delivery" });
+          }
           return;
         }
         case "message.received":

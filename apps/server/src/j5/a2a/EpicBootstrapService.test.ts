@@ -188,16 +188,18 @@ it.effect("requires explicit selection when legacy membership is ambiguous", () 
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const ledgerService = yield* A2ALedger;
-    const participant = {
-      kind: "agent" as const,
-      id: ParticipantId.make("agent:bootstrap:ambiguous"),
-      threadId,
-    };
+    const sql = yield* SqlClient.SqlClient;
     const previousEpicIds = [
       EpicId.make("epic:bootstrap:ambiguous:a"),
       EpicId.make("epic:bootstrap:ambiguous:b"),
     ];
+    const participants = previousEpicIds.map((_, index) => ({
+      kind: "agent" as const,
+      id: ParticipantId.make(`agent:bootstrap:ambiguous:${index}`),
+      threadId,
+    }));
     for (const [index, epicId] of previousEpicIds.entries()) {
+      const participant = participants[index]!;
       yield* ledgerService.createEpic({
         epic: { id: epicId, name: `Ambiguous ${index}`, createdAt: timestamp },
       });
@@ -238,7 +240,7 @@ it.effect("requires explicit selection when legacy membership is ambiguous", () 
       events: [
         {
           kind: "exchange.opened",
-          sender: participant.id,
+          sender: participants[0]!.id,
           receiver: senderPeerId,
           exchangeId: senderExchangeId,
           correlationId: null,
@@ -255,7 +257,7 @@ it.effect("requires explicit selection when legacy membership is ambiguous", () 
         {
           kind: "exchange.opened",
           sender: receiverPeerId,
-          receiver: participant.id,
+          receiver: participants[1]!.id,
           exchangeId: receiverExchangeId,
           correlationId: null,
           payload: { intent: "Mover owes its peer", urgency: null },
@@ -263,7 +265,7 @@ it.effect("requires explicit selection when legacy membership is ambiguous", () 
         },
         {
           kind: "exchange.opened",
-          sender: participant.id,
+          sender: participants[1]!.id,
           receiver: closedPeerId,
           exchangeId: closedExchangeId,
           correlationId: null,
@@ -273,7 +275,7 @@ it.effect("requires explicit selection when legacy membership is ambiguous", () 
         {
           kind: "exchange.closed",
           sender: closedPeerId,
-          receiver: participant.id,
+          receiver: participants[1]!.id,
           exchangeId: closedExchangeId,
           correlationId: null,
           payload: { replyMessageId: LedgerMessageId.make("message:bootstrap:closed") },
@@ -298,6 +300,29 @@ it.effect("requires explicit selection when legacy membership is ambiguous", () 
         { epicId: previousEpicIds[0], exchangeId: senderExchangeId, peerId: senderPeerId },
         { epicId: previousEpicIds[1], exchangeId: receiverExchangeId, peerId: receiverPeerId },
       ],
+    );
+    const leftEvents = yield* sql<{
+      readonly epic_id: string;
+      readonly receiver: string;
+      readonly payload: string;
+    }>`
+      SELECT epic_id, receiver, payload
+      FROM j5_a2a_comm_event
+      WHERE kind = 'participant.left'
+        AND epic_id IN (${previousEpicIds[0]!}, ${previousEpicIds[1]!})
+      ORDER BY epic_id
+    `;
+    assert.deepStrictEqual(
+      leftEvents.map((row) => ({
+        epicId: row.epic_id,
+        receiver: row.receiver,
+        participantId: (JSON.parse(row.payload) as { participant: { id: string } }).participant.id,
+      })),
+      previousEpicIds.map((epicId, index) => ({
+        epicId,
+        receiver: participants[index]!.id,
+        participantId: participants[index]!.id,
+      })),
     );
   }).pipe(Effect.provide(testLayer)),
 );

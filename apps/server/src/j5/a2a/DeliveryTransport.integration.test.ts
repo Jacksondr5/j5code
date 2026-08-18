@@ -54,9 +54,16 @@ import {
   deliveryMessageId,
   live as deliveryTransportLayer,
 } from "./DeliveryTransport.ts";
-import { formatPeerEnvelope } from "./EnvelopeFormatter.ts";
+import { formatHumanEnvelope, formatPeerEnvelope } from "./EnvelopeFormatter.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
-import { CommCommandId, EpicId, ExchangeId, LedgerMessageId, ParticipantId } from "./contracts.ts";
+import {
+  CommCommandId,
+  EpicId,
+  ExchangeId,
+  GLOBAL_HUMAN_PARTICIPANT_ID,
+  LedgerMessageId,
+  ParticipantId,
+} from "./contracts.ts";
 
 const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-j5-a2a-delivery-transport-",
@@ -82,6 +89,7 @@ const driver = ProviderDriverKind.make("codex");
 interface DeliveryInvocation {
   readonly messageId: MessageId;
   readonly mode: ThreadManagementSendMode;
+  readonly createdBy: "user" | "agent" | "system";
 }
 
 interface DeliveryHarness {
@@ -224,7 +232,7 @@ const makeTestLayer = (harness: DeliveryHarness) => {
         sendToThread: (input) =>
           Ref.update(harness.deliveryInvocations, (existing) => [
             ...existing,
-            { messageId: input.messageId, mode: input.mode },
+            { messageId: input.messageId, mode: input.mode, createdBy: input.createdBy },
           ]).pipe(Effect.andThen(threads.sendToThread(input))),
       });
     }),
@@ -439,6 +447,45 @@ it.effect("steers a busy recipient inside its active turn without queueing a lat
       assert.equal(steerInputs[0]?.runId, active.run.id);
       assert.equal(steerInputs[0]?.message.text, deliveredMessages[0]?.text);
       assert.isFalse(yield* worker.runOnce);
+    }).pipe(Effect.provide(makeTestLayer(harness)));
+  }),
+);
+
+it.effect("attributes human-origin delivery to the user actor", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const threads = yield* ThreadManagementService;
+      const transport = yield* A2ADeliveryTransport;
+      const target = yield* seedTarget("human-origin");
+      const humanMessageId = LedgerMessageId.make("message:j5-a2a-delivery-human-origin");
+      const message = "Human-authored request delivered through A2A.";
+
+      yield* transport.deliverAgent({
+        ...target.delivery,
+        messageId: humanMessageId,
+        senderId: GLOBAL_HUMAN_PARTICIPANT_ID,
+        message,
+      });
+
+      const upstreamMessageId = deliveryMessageId(humanMessageId);
+      const projection = yield* threads.getThreadProjection(target.threadId);
+      const delivered = projection.messages.find((candidate) => candidate.id === upstreamMessageId);
+      assert.equal(delivered?.createdBy, "user");
+      assert.equal(
+        delivered?.text,
+        formatHumanEnvelope({
+          senderId: GLOBAL_HUMAN_PARTICIPANT_ID,
+          exchangeId: target.exchangeId,
+          message,
+        }),
+      );
+      assert.deepStrictEqual(
+        (yield* Ref.get(harness.deliveryInvocations)).filter(
+          (invocation) => invocation.messageId === upstreamMessageId,
+        ),
+        [{ messageId: upstreamMessageId, mode: "queue", createdBy: "user" }],
+      );
     }).pipe(Effect.provide(makeTestLayer(harness)));
   }),
 );

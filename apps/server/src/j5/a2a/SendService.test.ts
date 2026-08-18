@@ -91,6 +91,18 @@ it.effect("opens once per sender-receiver pair, joins follow-ups, and one reply 
     assert.equal(reply.exchangeState, "closed");
     assert.deepStrictEqual(
       yield* service.send({
+        commandId: CommCommandId.make("command:exchange:reply"),
+        senderThreadId: receiver.threadId,
+        to: sender.id,
+        message: "Verified.",
+        exchangeId: first.exchangeId!,
+        acceptedAt: timestamp,
+      }),
+      reply,
+      "the same-epic reply command replays its original durable sequence",
+    );
+    assert.deepStrictEqual(
+      yield* service.send({
         commandId: CommCommandId.make("command:exchange:first"),
         senderThreadId: sender.threadId,
         to: receiver.id,

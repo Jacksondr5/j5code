@@ -68,7 +68,9 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'j5_a2a_comm_event_received_correlation_idx',
           'j5_a2a_comm_event_command_idx',
           'j5_a2a_exchange_open_pair_idx',
+          'j5_a2a_exchange_id_idx',
           'j5_a2a_delivery_drain_idx',
+          'j5_a2a_delivery_message_sender_idx',
           'j5_a2a_delivery_one_reply_idx'
         )
       ORDER BY name
@@ -114,8 +116,16 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       "WHERE status = 'open'",
     );
     assert.include(
+      indexesByName.get("j5_a2a_exchange_id_idx") ?? "",
+      "ON j5_a2a_exchange(exchange_id)",
+    );
+    assert.include(
       indexesByName.get("j5_a2a_delivery_drain_idx") ?? "",
       "ON j5_a2a_delivery(status, next_attempt_at, sent_seq)",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_delivery_message_sender_idx") ?? "",
+      "ON j5_a2a_delivery(message_id, sender_id)",
     );
     assert.include(
       indexesByName.get("j5_a2a_delivery_one_reply_idx") ?? "",

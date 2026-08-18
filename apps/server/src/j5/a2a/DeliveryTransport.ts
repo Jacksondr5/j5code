@@ -144,7 +144,7 @@ export const live: Layer.Layer<
             text: envelope,
             attachments: [],
             mode,
-            createdBy: "agent",
+            createdBy: input.senderId === GLOBAL_HUMAN_PARTICIPANT_ID ? "user" : "agent",
             creationSource: "mcp",
           });
         }).pipe(

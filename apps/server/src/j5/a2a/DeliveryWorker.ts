@@ -328,14 +328,13 @@ const makeLayer = (daemon: boolean) =>
         yield* PubSub.publish(milestones, milestone);
         return milestone;
       });
-      const runOnce: A2ADeliveryWorkerShape["runOnce"] = runOnceRaw.pipe(
-        Effect.mapError(workerError("run one delivery")),
-      );
+      const runOnceEffect = runOnceRaw.pipe(Effect.mapError(workerError("run one delivery")));
+      const runOnce: A2ADeliveryWorkerShape["runOnce"] = drainPermit.withPermit(runOnceEffect);
 
       const drainEffect = Effect.fn("j5.a2a.delivery.drain")(function* () {
         const completed: Array<DeliveryMilestone> = [];
         while (true) {
-          const milestone = yield* runOnce;
+          const milestone = yield* runOnceEffect;
           if (milestone === null) return completed;
           completed.push(milestone);
         }

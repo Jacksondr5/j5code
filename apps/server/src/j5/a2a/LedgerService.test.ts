@@ -450,3 +450,80 @@ it.effect("enforces one message.received correlation per receiver epic", () =>
     assert.isTrue(retried.committed, "the rolled-back command id remains reusable");
   }).pipe(Effect.provide(memoryLedgerLayer())),
 );
+
+it.effect("rejects delivery transitions without a projected message row", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const ledger = yield* A2ALedger;
+    const sql = yield* SqlClient.SqlClient;
+    const epicId = EpicId.make("epic:missing-delivery-projection");
+    yield* ledger.createEpic({
+      epic: { id: epicId, name: "Missing delivery projection", createdAt: timestamp },
+    });
+    const transitions: ReadonlyArray<{ readonly name: string; readonly event: CommEvent }> = [
+      {
+        name: "delivered",
+        event: {
+          kind: "message.delivered",
+          sender: ParticipantId.make("agent:delivery:sender"),
+          receiver: ParticipantId.make("agent:delivery:receiver"),
+          exchangeId: null,
+          correlationId: CorrelationId.make("correlation:missing-delivered"),
+          payload: {
+            messageId: LedgerMessageId.make("message:missing-delivered"),
+            attempt: 1,
+            channel: "agent",
+          },
+          createdAt: timestamp,
+        },
+      },
+      {
+        name: "delivery-failed",
+        event: {
+          kind: "message.delivery_failed",
+          sender: ParticipantId.make("agent:delivery:sender"),
+          receiver: ParticipantId.make("agent:delivery:receiver"),
+          exchangeId: null,
+          correlationId: CorrelationId.make("correlation:missing-delivery-failed"),
+          payload: {
+            messageId: LedgerMessageId.make("message:missing-delivery-failed"),
+            attempt: 1,
+            error: "forced missing projection",
+            nextAttemptAt: timestamp,
+            alarmed: false,
+          },
+          createdAt: timestamp,
+        },
+      },
+    ];
+
+    for (const [index, transition] of transitions.entries()) {
+      const commandId = CommCommandId.make(`command:missing-delivery:${transition.name}`);
+      const error = yield* Effect.flip(
+        ledger.appendEvents({
+          commandId,
+          epicId,
+          acceptedAt: timestamp,
+          events: [transition.event],
+        }),
+      );
+      assert.isTrue(isA2AStorageError(error));
+
+      const retried = yield* ledger.appendEvents({
+        commandId,
+        epicId,
+        acceptedAt: timestamp,
+        events: [messageEvent(index + 100)],
+      });
+      assert.isTrue(retried.committed, "the failed projection rolls back its command receipt");
+    }
+
+    const transitionRows = yield* sql<{ readonly count: number }>`
+      SELECT COUNT(*) AS count
+      FROM j5_a2a_comm_event
+      WHERE epic_id = ${epicId}
+        AND kind IN ('message.delivered', 'message.delivery_failed')
+    `;
+    assert.equal(transitionRows[0]?.count, 0);
+  }).pipe(Effect.provide(memoryLedgerLayer())),
+);
