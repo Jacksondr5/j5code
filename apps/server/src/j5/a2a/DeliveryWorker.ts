@@ -40,6 +40,7 @@ interface DeliveryRow {
   readonly receiver_squadron_id: string;
   readonly exchange_id: string | null;
   readonly exchange_role: "none" | "ask" | "followup" | "reply";
+  readonly envelope_channel: "peer" | "silence_notice";
   readonly correlation_id: string;
   readonly message_text: string;
   readonly status: "pending" | "retry_scheduled" | "delivered" | "alarmed";
@@ -154,6 +155,7 @@ const makeLayer = (daemon: boolean) =>
                 originSquadronId,
                 receiverSquadronId,
                 exchangeRole: row.exchange_role,
+                envelopeChannel: row.envelope_channel,
               },
             },
             createdAt: receivedAt,
@@ -210,6 +212,7 @@ const makeLayer = (daemon: boolean) =>
             receiverId,
             exchangeId,
             message: row.message_text,
+            envelopeChannel: row.envelope_channel,
             createdAt: row.created_at,
           });
         } else {
@@ -221,6 +224,7 @@ const makeLayer = (daemon: boolean) =>
             receiverId,
             exchangeId,
             message: row.message_text,
+            envelopeChannel: row.envelope_channel,
           });
         }
         yield* hooks.afterTransportSuccess({ squadronId: originSquadronId, messageId, attempt });
@@ -301,6 +305,7 @@ const makeLayer = (daemon: boolean) =>
             receiver_squadron_id,
             exchange_id,
             exchange_role,
+            envelope_channel,
             correlation_id,
             message_text,
             status,

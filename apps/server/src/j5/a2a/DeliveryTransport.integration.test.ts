@@ -320,6 +320,7 @@ const seedTarget = (suffix: string) =>
         receiverId,
         exchangeId,
         message,
+        envelopeChannel: "peer" as const,
       },
     };
   });

@@ -363,14 +363,27 @@ it.effect("closes a cross-squadron exchange through the paired reply entry", () 
         ORDER BY squadron_id
       `;
       assert.deepStrictEqual(
-        pairedPayloads.map((row) => ({
-          squadronId: row.squadron_id,
-          exchangeRole: (JSON.parse(row.payload) as { message: { exchangeRole: string } }).message
-            .exchangeRole,
-        })),
+        pairedPayloads.map((row) => {
+          const payload = JSON.parse(row.payload) as {
+            message: { envelopeChannel: string; exchangeRole: string };
+          };
+          return {
+            squadronId: row.squadron_id,
+            message: {
+              envelopeChannel: payload.message.envelopeChannel,
+              exchangeRole: payload.message.exchangeRole,
+            },
+          };
+        }),
         [
-          { squadronId: receiverSquadronId, exchangeRole: "ask" },
-          { squadronId: senderSquadronId, exchangeRole: "reply" },
+          {
+            squadronId: receiverSquadronId,
+            message: { envelopeChannel: "peer", exchangeRole: "ask" },
+          },
+          {
+            squadronId: senderSquadronId,
+            message: { envelopeChannel: "peer", exchangeRole: "reply" },
+          },
         ].sort((left, right) => left.squadronId.localeCompare(right.squadronId)),
       );
       assert.equal(yield* Ref.get(injections), 2);

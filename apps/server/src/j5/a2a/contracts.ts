@@ -29,7 +29,11 @@ export type LedgerMessageId = typeof LedgerMessageId.Type;
 export const Urgency = Schema.Literals(["blocking", "soon", "fyi"]);
 export type Urgency = typeof Urgency.Type;
 
+export const DeliveryEnvelopeChannel = Schema.Literals(["peer", "silence_notice"]);
+export type DeliveryEnvelopeChannel = typeof DeliveryEnvelopeChannel.Type;
+
 export const GLOBAL_HUMAN_PARTICIPANT_ID = ParticipantId.make("human:global");
+export const SILENCE_DETECTOR_PARTICIPANT_ID = ParticipantId.make("platform:silence-detector");
 
 export const AgentParticipant = Schema.Struct({
   kind: Schema.Literal("agent"),
@@ -182,6 +186,7 @@ export const MessageSentPayload = Schema.Struct({
   originSquadronId: SquadronId,
   receiverSquadronId: SquadronId,
   exchangeRole: Schema.Literals(["none", "ask", "followup", "reply"]),
+  envelopeChannel: DeliveryEnvelopeChannel,
 });
 export type MessageSentPayload = typeof MessageSentPayload.Type;
 

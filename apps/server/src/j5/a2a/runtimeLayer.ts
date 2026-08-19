@@ -4,6 +4,7 @@ import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import { layer as ledgerLayer } from "./LedgerService.ts";
 import { layer as sendServiceLayer } from "./SendService.ts";
+import { layer as silenceDetectorLayer } from "./SilenceDetector.ts";
 
 export const makeJ5A2ARuntimeLayer = (
   options: {
@@ -16,8 +17,11 @@ export const makeJ5A2ARuntimeLayer = (
   const deliveryWorkerProvided = deliveryWorkerLayer.pipe(
     Layer.provideMerge(deliveryTransportProvided),
   );
+  const silenceDetectorProvided = silenceDetectorLayer.pipe(
+    Layer.provideMerge(deliveryWorkerProvided),
+  );
 
-  return Layer.mergeAll(sendServiceLayer, deliveryWorkerProvided).pipe(
+  return Layer.mergeAll(sendServiceLayer, deliveryWorkerProvided, silenceDetectorProvided).pipe(
     Layer.provideMerge(ledgerProvided),
   );
 };

@@ -22,6 +22,7 @@ import { runJ5A2AMigrations } from "./Migrations.ts";
 import {
   CommCommandId,
   CorrelationId,
+  MessageSentPayload,
   Squadron,
   SquadronId,
   LedgerMessageId,
@@ -33,6 +34,7 @@ import {
 
 const timestamp = "2026-08-16T12:00:00.000Z";
 const isSquadron = Schema.is(Squadron);
+const decodeMessageSentPayload = Schema.decodeUnknownSync(MessageSentPayload);
 const isLedgerGapError = Schema.is(LedgerGapError);
 const isA2AStorageError = Schema.is(A2AStorageError);
 
@@ -79,6 +81,7 @@ it.effect("routes single-event append through command ids and A2 projections", (
           originSquadronId: squadronId,
           receiverSquadronId: squadronId,
           exchangeRole: "none",
+          envelopeChannel: "peer",
         },
         createdAt: timestamp,
       },
@@ -139,6 +142,18 @@ it("rejects a whitespace-only squadron name during contract validation", () => {
       id: SquadronId.make("squadron:blank-name"),
       name: "   ",
       createdAt: timestamp,
+    }),
+  );
+});
+
+it("requires an explicit envelope channel on every sent-message payload", () => {
+  assert.throws(() =>
+    decodeMessageSentPayload({
+      messageId: LedgerMessageId.make("message:missing-envelope-channel"),
+      text: "An implicit peer channel is not valid.",
+      originSquadronId: SquadronId.make("squadron:origin"),
+      receiverSquadronId: SquadronId.make("squadron:receiver"),
+      exchangeRole: "none",
     }),
   );
 });

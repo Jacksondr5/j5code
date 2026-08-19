@@ -33,10 +33,11 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 1, name: "EpicCommunicationLedger" },
       { migration_id: 2, name: "SendDeliverReply" },
       { migration_id: 3, name: "SquadronRename" },
+      { migration_id: 4, name: "SilenceNoticeChannel" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id]) => id),
-      [1, 2, 3],
+      [1, 2, 3, 4],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
@@ -44,6 +45,11 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
 it.effect("creates the exact namespaced ledger schema and receiver correlation constraint", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 3 });
+    const deliveriesBeforeA3 = yield* sql<{ readonly count: number }>`
+      SELECT COUNT(*) AS count FROM j5_a2a_delivery
+    `;
+    assert.deepStrictEqual(deliveriesBeforeA3, [{ count: 0 }]);
     yield* runJ5A2AMigrations();
     const tables = yield* sql<{ readonly name: string }>`
       SELECT name
@@ -56,7 +62,8 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'j5_a2a_squadron_membership',
           'j5_a2a_exchange',
           'j5_a2a_delivery',
-          'j5_a2a_human_inbox_data'
+          'j5_a2a_human_inbox_data',
+          'j5_a2a_silence_detector_cursor'
         )
       ORDER BY name
     `;
@@ -89,6 +96,13 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'comm_command_receipt_squadron_seq_idx'
         )
     `;
+    const deliveryColumns = yield* sql<{
+      readonly dflt_value: string | null;
+      readonly name: string;
+      readonly notnull: number;
+    }>`
+      PRAGMA table_info(j5_a2a_delivery)
+    `;
 
     assert.deepStrictEqual(tables, [
       { name: "j5_a2a_comm_command_receipt" },
@@ -96,6 +110,7 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       { name: "j5_a2a_delivery" },
       { name: "j5_a2a_exchange" },
       { name: "j5_a2a_human_inbox_data" },
+      { name: "j5_a2a_silence_detector_cursor" },
       { name: "j5_a2a_squadron" },
       { name: "j5_a2a_squadron_membership" },
     ]);
@@ -132,6 +147,13 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       indexesByName.get("j5_a2a_delivery_one_reply_idx") ?? "",
       "WHERE exchange_id IS NOT NULL AND exchange_role = 'reply'",
     );
+    const envelopeChannel = deliveryColumns.find((column) => column.name === "envelope_channel");
+    assert.equal(envelopeChannel?.notnull, 1);
+    assert.isNull(envelopeChannel?.dflt_value);
+    const cursor = yield* sql<{ readonly after_sequence: number | null }>`
+      SELECT after_sequence FROM j5_a2a_silence_detector_cursor WHERE singleton = 1
+    `;
+    assert.deepStrictEqual(cursor, [{ after_sequence: null }]);
     assert.deepStrictEqual(unprefixed, []);
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
@@ -169,7 +191,8 @@ it.effect("renames existing Squadron data without changing ledger semantics", ()
           'text', 'Preserve me',
           'originEpicId', 'legacy-home',
           'receiverEpicId', 'legacy-home',
-          'exchangeRole', 'none'
+          'exchangeRole', 'none',
+          'envelopeChannel', 'peer'
         ),
         '2026-08-18T00:00:00.000Z',
         'command:sent'
@@ -229,6 +252,7 @@ it.effect("renames existing Squadron data without changing ledger semantics", ()
             messageId: "message:sent",
             text: "Preserve me",
             exchangeRole: "none",
+            envelopeChannel: "peer",
             originSquadronId: "legacy-home",
             receiverSquadronId: "legacy-home",
           },
