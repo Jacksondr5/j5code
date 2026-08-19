@@ -1,4 +1,5 @@
 import { ThreadId } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 const Identifier = Schema.String.check(Schema.isNonEmpty());
@@ -28,6 +29,9 @@ export type LedgerMessageId = typeof LedgerMessageId.Type;
 
 export const Urgency = Schema.Literals(["blocking", "soon", "fyi"]);
 export type Urgency = typeof Urgency.Type;
+
+export const DeliveryEnvelopeChannel = Schema.Literals(["peer", "silence_notice"]);
+export type DeliveryEnvelopeChannel = typeof DeliveryEnvelopeChannel.Type;
 
 export const GLOBAL_HUMAN_PARTICIPANT_ID = ParticipantId.make("human:global");
 
@@ -182,6 +186,9 @@ export const MessageSentPayload = Schema.Struct({
   originSquadronId: SquadronId,
   receiverSquadronId: SquadronId,
   exchangeRole: Schema.Literals(["none", "ask", "followup", "reply"]),
+  // Rows written before A3 are peer messages. Keep that migration history
+  // decodable while requiring every newly constructed payload to be explicit.
+  envelopeChannel: DeliveryEnvelopeChannel.pipe(Schema.withDecodingDefault(Effect.succeed("peer"))),
 });
 export type MessageSentPayload = typeof MessageSentPayload.Type;
 

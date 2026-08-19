@@ -451,6 +451,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
                   originSquadronId: sender.squadronId,
                   receiverSquadronId: receiver.squadronId,
                   exchangeRole,
+                  envelopeChannel: "peer",
                 },
                 createdAt: input.acceptedAt,
               },

@@ -79,6 +79,7 @@ it.effect("routes single-event append through command ids and A2 projections", (
           originSquadronId: squadronId,
           receiverSquadronId: squadronId,
           exchangeRole: "none",
+          envelopeChannel: "peer",
         },
         createdAt: timestamp,
       },

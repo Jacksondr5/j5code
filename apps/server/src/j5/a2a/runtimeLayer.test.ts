@@ -8,6 +8,7 @@ import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
+import { A2ASilenceDetector } from "./SilenceDetector.ts";
 import { makeJ5A2ARuntimeLayer } from "./runtimeLayer.ts";
 
 it.effect("shares one ledger and thread-management instance across the runtime graph", () =>
@@ -29,9 +30,11 @@ it.effect("shares one ledger and thread-management instance across the runtime g
         Layer.tap(() => Effect.sync(() => (threadManagementBuilds += 1))),
       );
       const secondThreadConsumer = Layer.effectDiscard(ThreadManagementService.pipe(Effect.asVoid));
+      const silenceConsumer = Layer.effectDiscard(A2ASilenceDetector.pipe(Effect.asVoid));
       const runtime = makeJ5A2ARuntimeLayer({ ledger: countedLedger });
       yield* Layer.build(
-        Layer.mergeAll(runtime, secondThreadConsumer).pipe(
+        Layer.mergeAll(secondThreadConsumer, silenceConsumer).pipe(
+          Layer.provideMerge(runtime),
           Layer.provide(countedThreadManagement),
           Layer.provide(database),
         ),

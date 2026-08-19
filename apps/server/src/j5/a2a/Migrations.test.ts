@@ -33,10 +33,11 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 1, name: "EpicCommunicationLedger" },
       { migration_id: 2, name: "SendDeliverReply" },
       { migration_id: 3, name: "SquadronRename" },
+      { migration_id: 4, name: "SilenceNoticeChannel" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id]) => id),
-      [1, 2, 3],
+      [1, 2, 3, 4],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
@@ -176,6 +177,41 @@ it.effect("renames existing Squadron data without changing ledger semantics", ()
       )
     `;
     yield* sql`
+      INSERT INTO j5_a2a_delivery (
+        epic_id,
+        message_id,
+        command_id,
+        sent_seq,
+        sender_id,
+        receiver_id,
+        receiver_epic_id,
+        exchange_id,
+        exchange_role,
+        correlation_id,
+        message_text,
+        status,
+        attempts,
+        created_at,
+        updated_at
+      ) VALUES (
+        'legacy-home',
+        'message:sent',
+        'command:sent',
+        1,
+        'agent:sender',
+        'agent:receiver',
+        'legacy-home',
+        NULL,
+        'none',
+        'correlation:sent',
+        'Preserve me',
+        'pending',
+        0,
+        '2026-08-18T00:00:00.000Z',
+        '2026-08-18T00:00:00.000Z'
+      )
+    `;
+    yield* sql`
       INSERT INTO j5_a2a_comm_event (
         seq,
         epic_id,
@@ -254,6 +290,12 @@ it.effect("renames existing Squadron data without changing ledger semantics", ()
         )
     `;
     assert.deepStrictEqual(legacySchema, []);
+    const delivery = yield* sql<{ readonly envelope_channel: string }>`
+      SELECT envelope_channel
+      FROM j5_a2a_delivery
+      WHERE message_id = 'message:sent'
+    `;
+    assert.deepStrictEqual(delivery, [{ envelope_channel: "peer" }]);
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
 

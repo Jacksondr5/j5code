@@ -11,3 +11,5 @@ The named coordinated **home-squadron registrar + A6 creation integrations** fol
 For a cross-squadron send, the receiver ledger's idempotent `message.received` records durable acceptance of the sender's act before transport is attempted. It does not claim successful thread injection: delivery success, retries, and the terminal alarm remain in the sender squadron's delivery projection.
 
 Byte-equivalent rebuilds for the A2 exchange and delivery projections are deferred to the measured-projections milestone (M5). A2 keeps those tables derivable from the communication ledger but does not expose their rebuild operation.
+
+A3 persists an explicit delivery envelope channel. Existing delivery rows are backfilled as `peer`, which is the only path that existed before A3; current sends also write `peer` explicitly. Silence notices write `silence_notice`, reuse A2's versioned silence-notice formatter, and bypass peer/human wrapping in the shared transport.

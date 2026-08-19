@@ -8,6 +8,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { formatHumanEnvelope, formatPeerEnvelope } from "./EnvelopeFormatter.ts";
 import {
+  type DeliveryEnvelopeChannel,
   SquadronId,
   ExchangeId,
   GLOBAL_HUMAN_PARTICIPANT_ID,
@@ -44,6 +45,7 @@ export interface AgentDeliveryInput {
   readonly receiverId: ParticipantId;
   readonly exchangeId: ExchangeId | null;
   readonly message: string;
+  readonly envelopeChannel: DeliveryEnvelopeChannel;
 }
 
 export interface HumanDeliveryInput extends AgentDeliveryInput {
@@ -82,6 +84,32 @@ interface MembershipRow {
 }
 
 const decodeParticipant = Schema.decodeUnknownEffect(Schema.fromJsonString(Participant));
+
+const assertNever = (channel: never): never => {
+  throw new Error(`Unsupported A2A delivery envelope channel: ${String(channel)}`);
+};
+
+export const formatAgentDeliveryEnvelope = (input: AgentDeliveryInput): string => {
+  switch (input.envelopeChannel) {
+    case "peer":
+      return input.senderId === GLOBAL_HUMAN_PARTICIPANT_ID
+        ? formatHumanEnvelope({
+            senderId: input.senderId,
+            exchangeId: input.exchangeId,
+            message: input.message,
+          })
+        : formatPeerEnvelope({
+            senderId: input.senderId,
+            originSquadronId: input.originSquadronId,
+            exchangeId: input.exchangeId,
+            message: input.message,
+          });
+    case "silence_notice":
+      return input.message;
+    default:
+      return assertNever(input.envelopeChannel);
+  }
+};
 
 export const live: Layer.Layer<
   A2ADeliveryTransport,
@@ -123,19 +151,7 @@ export const live: Layer.Layer<
           // when idle without reintroducing ThreadManagement's implicit auto branch.
           const mode =
             ThreadManagement.latestSteerableRun(target) === undefined ? "queue" : "steer";
-          const envelope =
-            input.senderId === GLOBAL_HUMAN_PARTICIPANT_ID
-              ? formatHumanEnvelope({
-                  senderId: input.senderId,
-                  exchangeId: input.exchangeId,
-                  message: input.message,
-                })
-              : formatPeerEnvelope({
-                  senderId: input.senderId,
-                  originSquadronId: input.originSquadronId,
-                  exchangeId: input.exchangeId,
-                  message: input.message,
-                });
+          const envelope = formatAgentDeliveryEnvelope(input);
           yield* threads.sendToThread({
             projectId: target.thread.projectId,
             commandId: deliveryCommandId(input.messageId),
@@ -144,7 +160,12 @@ export const live: Layer.Layer<
             text: envelope,
             attachments: [],
             mode,
-            createdBy: input.senderId === GLOBAL_HUMAN_PARTICIPANT_ID ? "user" : "agent",
+            createdBy:
+              input.envelopeChannel === "silence_notice"
+                ? "system"
+                : input.senderId === GLOBAL_HUMAN_PARTICIPANT_ID
+                  ? "user"
+                  : "agent",
             creationSource: "mcp",
           });
         }).pipe(
