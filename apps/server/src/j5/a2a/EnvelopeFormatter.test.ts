@@ -18,7 +18,7 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
     message: "Please verify the worker.",
   });
 
-  assert.equal(A2A_ENVELOPE_VERSION, 4);
+  assert.equal(A2A_ENVELOPE_VERSION, 5);
   assert.include(rendered, "Cross-agent message");
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
   assert.include(rendered, "agent:sender");
@@ -63,8 +63,8 @@ it("tells agents that human-origin exchanges require an explicit tool reply", ()
   assert.include(rendered, "The human is not watching this chat");
   assert.include(rendered, 'exchange_id="exchange:human"');
   assert.include(A2A_SEND_TOOL_DESCRIPTION, "returns after the sender ledger commit");
-  assert.include(A2A_SEND_TOOL_DESCRIPTION, "cross-agent message");
-  assert.include(A2A_LIST_TOOL_DESCRIPTION, "cross-agent messaging participants");
+  assert.include(A2A_SEND_TOOL_DESCRIPTION, "Durably send one message");
+  assert.include(A2A_LIST_TOOL_DESCRIPTION, "List reachable message recipients");
   for (const description of [A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION]) {
     assert.include(description, "native thread without a registered home epic");
     assert.include(description, "wrapper-spawned agent");
