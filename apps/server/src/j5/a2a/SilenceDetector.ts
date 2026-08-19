@@ -152,16 +152,25 @@ const terminalRun = (stored: OrchestrationV2StoredEvent): OrchestrationV2Run | u
     : undefined;
 };
 
-const stablePart = (value: string | number) => encodeURIComponent(String(value));
+const stablePart = (value: string) => encodeURIComponent(value);
 
-const commandIdFor = (source: string | number, exchangeId: string) =>
-  CommCommandId.make(`command:j5:a2a:silence:${stablePart(source)}:${stablePart(exchangeId)}`);
+const noticeIdentity = (squadronId: string, exchangeId: string, deliveryMessageId: string) =>
+  `${stablePart(squadronId)}:${stablePart(exchangeId)}:${stablePart(deliveryMessageId)}`;
 
-const messageIdFor = (source: string | number, exchangeId: string) =>
-  LedgerMessageId.make(`message:j5:a2a:silence:${stablePart(source)}:${stablePart(exchangeId)}`);
+const commandIdFor = (squadronId: string, exchangeId: string, deliveryMessageId: string) =>
+  CommCommandId.make(
+    `command:j5:a2a:silence:${noticeIdentity(squadronId, exchangeId, deliveryMessageId)}`,
+  );
 
-const correlationIdFor = (source: string | number, exchangeId: string) =>
-  CorrelationId.make(`correlation:j5:a2a:silence:${stablePart(source)}:${stablePart(exchangeId)}`);
+const messageIdFor = (squadronId: string, exchangeId: string, deliveryMessageId: string) =>
+  LedgerMessageId.make(
+    `message:j5:a2a:silence:${noticeIdentity(squadronId, exchangeId, deliveryMessageId)}`,
+  );
+
+const correlationIdFor = (squadronId: string, exchangeId: string, deliveryMessageId: string) =>
+  CorrelationId.make(
+    `correlation:j5:a2a:silence:${noticeIdentity(squadronId, exchangeId, deliveryMessageId)}`,
+  );
 
 const noticeMessage = (payload: SilenceNoticePayload, exchangeId: ExchangeId): string => {
   switch (payload.state) {
@@ -327,7 +336,6 @@ const makeLayer = (daemon: boolean) =>
       const appendNotice = Effect.fn("j5.a2a.silence.appendNotice")(function* (
         exchange: ExchangeRow,
         payload: SilenceNoticePayload,
-        source: string,
       ) {
         yield* decodeSilenceNotice(payload);
         const prior = yield* sql<{ readonly count: number }>`
@@ -341,10 +349,22 @@ const makeLayer = (daemon: boolean) =>
         if ((prior[0]?.count ?? 0) > 0) return [];
 
         const exchangeId = ExchangeId.make(exchange.exchange_id);
-        const messageId = messageIdFor(source, exchange.exchange_id);
-        const correlationId = correlationIdFor(source, exchange.exchange_id);
+        const messageId = messageIdFor(
+          exchange.squadron_id,
+          exchange.exchange_id,
+          payload.deliveryMessageId,
+        );
+        const correlationId = correlationIdFor(
+          exchange.squadron_id,
+          exchange.exchange_id,
+          payload.deliveryMessageId,
+        );
         const result = yield* ledger.appendEvents({
-          commandId: commandIdFor(source, exchange.exchange_id),
+          commandId: commandIdFor(
+            exchange.squadron_id,
+            exchange.exchange_id,
+            payload.deliveryMessageId,
+          ),
           squadronId: SquadronId.make(exchange.squadron_id),
           acceptedAt: payload.observedAt,
           events: [
@@ -386,7 +406,6 @@ const makeLayer = (daemon: boolean) =>
       const inspectOpenDelivery = Effect.fn("j5.a2a.silence.inspectOpenDelivery")(function* (
         row: OpenDeliveryRow,
         observedAt: string,
-        source: string,
       ) {
         const subjectId = ParticipantId.make(row.receiver_id);
         const messageId = LedgerMessageId.make(row.message_id);
@@ -410,7 +429,7 @@ const makeLayer = (daemon: boolean) =>
         } else {
           return [];
         }
-        return yield* appendNotice(row, payload, source);
+        return yield* appendNotice(row, payload);
       });
 
       const handleDeliveryEventRaw = Effect.fn("j5.a2a.silence.handleDeliveryEvent")(function* (
@@ -447,11 +466,7 @@ const makeLayer = (daemon: boolean) =>
           LIMIT 2
         `;
         if (rows.length !== 1) return [];
-        const appended = yield* inspectOpenDelivery(
-          rows[0]!,
-          event.createdAt,
-          `delivery:${event.squadronId}:${event.seq}`,
-        );
+        const appended = yield* inspectOpenDelivery(rows[0]!, event.createdAt);
         if (appended.length > 0) yield* deliveryWorker.notify;
         return appended;
       });
@@ -492,13 +507,7 @@ const makeLayer = (daemon: boolean) =>
           `;
           const appended: Array<StoredCommEvent> = [];
           for (const row of rows) {
-            appended.push(
-              ...(yield* inspectOpenDelivery(
-                row,
-                row.delivered_at,
-                `reconcile:${row.squadron_id}:${row.message_id}`,
-              )),
-            );
+            appended.push(...(yield* inspectOpenDelivery(row, row.delivered_at)));
           }
           if (appended.length > 0) yield* deliveryWorker.notify;
           return appended;
@@ -549,9 +558,7 @@ const makeLayer = (daemon: boolean) =>
             delivery,
             DateTime.formatIso(stored.event.occurredAt),
           );
-          appended.push(
-            ...(yield* appendNotice(exchange, payload, `lifecycle:${stored.sequence}`)),
-          );
+          appended.push(...(yield* appendNotice(exchange, payload)));
         }
         if (appended.length > 0) yield* deliveryWorker.notify;
         return appended;

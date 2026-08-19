@@ -355,6 +355,51 @@ const seedInbound = Effect.fn("test.j5.a2a.silence.seedInbound")(function* (deli
   return { ...exchange, deliveryEvent };
 });
 
+const captureNoticeIdentity = (producer: "delivery" | "lifecycle") =>
+  Effect.gen(function* () {
+    yield* seed();
+    const exchange = yield* seedInbound(2);
+    const detector = yield* A2ASilenceDetector;
+    if (producer === "delivery") {
+      yield* detector.handleDeliveryEvent(exchange.deliveryEvent);
+    } else {
+      yield* detector.handleStoredEvent(terminalEvent("completed"));
+    }
+
+    const rows = yield* (yield* SqlClient.SqlClient)<{
+      readonly command_id: string;
+      readonly correlation_id: string;
+      readonly message_id: string;
+    }>`
+      SELECT command_id, correlation_id, message_id
+      FROM j5_a2a_delivery
+      WHERE envelope_channel = 'silence_notice'
+    `;
+    assert.lengthOf(rows, 1);
+    return { exchange, identity: rows[0]! };
+  }).pipe(Effect.provide(makeTestLayer()));
+
+it.effect("uses one receipt identity across delivery and lifecycle producers", () =>
+  Effect.gen(function* () {
+    const fromDelivery = yield* captureNoticeIdentity("delivery");
+    const fromLifecycle = yield* captureNoticeIdentity("lifecycle");
+
+    assert.deepStrictEqual(fromDelivery.identity, fromLifecycle.identity);
+    const noticeIdentity = [
+      squadronId,
+      fromDelivery.exchange.exchangeId!,
+      fromDelivery.exchange.messageId,
+    ]
+      .map(encodeURIComponent)
+      .join(":");
+    assert.deepStrictEqual(fromDelivery.identity, {
+      command_id: `command:j5:a2a:silence:${noticeIdentity}`,
+      correlation_id: `correlation:j5:a2a:silence:${noticeIdentity}`,
+      message_id: `message:j5:a2a:silence:${noticeIdentity}`,
+    });
+  }),
+);
+
 it.effect("emits processed mid-turn silence and dedupes a later lifecycle sequence", () =>
   Effect.gen(function* () {
     yield* seed();
@@ -375,13 +420,22 @@ it.effect("emits processed mid-turn silence and dedupes a later lifecycle sequen
     `;
     assert.deepStrictEqual(rows, [{ status: "open" }]);
     const deliveries = yield* sql<{
+      readonly command_id: string;
+      readonly correlation_id: string;
       readonly envelope_channel: string;
       readonly message_id: string;
       readonly message_text: string;
       readonly sender_id: string;
       readonly status: string;
     }>`
-      SELECT envelope_channel, message_id, message_text, sender_id, status
+      SELECT
+        command_id,
+        correlation_id,
+        envelope_channel,
+        message_id,
+        message_text,
+        sender_id,
+        status
       FROM j5_a2a_delivery
       WHERE envelope_channel = 'silence_notice'
     `;
@@ -392,6 +446,12 @@ it.effect("emits processed mid-turn silence and dedupes a later lifecycle sequen
     assert.notInclude(noticeDelivery.message_text, "[Cross-agent message from");
     assert.equal(noticeDelivery.sender_id, SILENCE_DETECTOR_PARTICIPANT_ID);
     assert.equal(noticeDelivery.status, "pending");
+    const noticeIdentity = [squadronId, exchange.exchangeId!, exchange.messageId]
+      .map(encodeURIComponent)
+      .join(":");
+    assert.equal(noticeDelivery.command_id, `command:j5:a2a:silence:${noticeIdentity}`);
+    assert.equal(noticeDelivery.message_id, `message:j5:a2a:silence:${noticeIdentity}`);
+    assert.equal(noticeDelivery.correlation_id, `correlation:j5:a2a:silence:${noticeIdentity}`);
 
     const milestones = yield* (yield* A2ADeliveryWorker).drain;
     assert.isTrue(
