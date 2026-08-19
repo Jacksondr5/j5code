@@ -73,7 +73,7 @@ it("tells agents that human-origin exchanges require an explicit tool reply", ()
     assert.notMatch(description, /ask the user|product workflow|list_participants again/i);
   }
   assert.notMatch(
-    [A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION].join("\n"),
+    [rendered, A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION].join("\n"),
     /\b(?:J5|A2A)\b/,
   );
 });
