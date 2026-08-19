@@ -45,6 +45,11 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
 it.effect("creates the exact namespaced ledger schema and receiver correlation constraint", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 3 });
+    const deliveriesBeforeA3 = yield* sql<{ readonly count: number }>`
+      SELECT COUNT(*) AS count FROM j5_a2a_delivery
+    `;
+    assert.deepStrictEqual(deliveriesBeforeA3, [{ count: 0 }]);
     yield* runJ5A2AMigrations();
     const tables = yield* sql<{ readonly name: string }>`
       SELECT name
@@ -145,6 +150,10 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
     const envelopeChannel = deliveryColumns.find((column) => column.name === "envelope_channel");
     assert.equal(envelopeChannel?.notnull, 1);
     assert.isNull(envelopeChannel?.dflt_value);
+    const cursor = yield* sql<{ readonly after_sequence: number | null }>`
+      SELECT after_sequence FROM j5_a2a_silence_detector_cursor WHERE singleton = 1
+    `;
+    assert.deepStrictEqual(cursor, [{ after_sequence: null }]);
     assert.deepStrictEqual(unprefixed, []);
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
