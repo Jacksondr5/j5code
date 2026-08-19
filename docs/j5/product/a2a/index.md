@@ -3,6 +3,8 @@ title: "A2A design session — grounding and decision register"
 kind: spec
 ---
 
+> **Terminology note (post-E6):** the grouping concept was renamed **epic → squadron** on 2026-08-17 (definition: `product/epic/`); the code rename landed in PR #8. "Epic" below is preserved as dated historical record — read it as "squadron." Filesystem paths are literal.
+
 # A2A design session (backlog item 2)
 
 Working artifact for the tech-plan session started 2026-08-16. This is the single home for the open decisions (it supersedes the open-questions list in `../communication-graph/`); the builder-facing plan artifact gets written once the register below is settled. Companion context: `../communication-graph/` (the product definition), `../../research/t3code/orchestration-v2/` (the base), `../../research/traycer/agent-to-agent/` (the steal list), `../../research/jackson-prior-art/fleet-interviews-synthesis/` (P1–P13 and the classification lens).

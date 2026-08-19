@@ -4,6 +4,8 @@ kind: story
 status: 1
 ---
 
+> **Terminology note (post-E6):** the grouping concept was renamed **epic → squadron** on 2026-08-17 (definition: `product/epic/`); the code rename landed in PR #8. "Epic" below is preserved as dated historical record — read it as "squadron." Filesystem paths are literal.
+
 # A2 PR #7 sitting log
 
 ## PR log

@@ -22,6 +22,10 @@ Audited 2026-08-19 on `j5/a3-silence-detector` at `fdd04688c7bbb781496003db8e386
 
 The independent Reviewer must perform a terminology-residue check across the A3 diff and reject newly introduced legacy `epic` wording outside necessary historical migration compatibility.
 
+## X1 — Squadron-local authority
+
+Settled by the Spawner on 2026-08-19: a Squadron permanently resides on one server. Authority never replicates; multi-server Squadron residency is a non-goal. A3 silence detection is therefore Squadron-local. Future D8 messages may cross servers through a double-entry seam, while read models merge client-side. This does not change A3 scope and authorizes no replication or multi-server hedge.
+
 ## Decision — existing J5-owned A2 evolution
 
 The existing A2 transport always renders agent delivery as peer or human traffic. Its persisted `message.sent` payload and delivery projection carry no envelope-channel value, despite the existing A2 `formatSilenceNoticeEnvelope` channel. A3 must not create a parallel injector or peer-wrap a silence notice.

@@ -3,6 +3,8 @@ title: "Product decision log"
 kind: spec
 ---
 
+> **Terminology note (post-E6):** the grouping concept was renamed **epic → squadron** on 2026-08-17 (definition: `product/epic/`); the code rename landed in PR #8. "Epic" below is preserved as dated historical record — read it as "squadron." Filesystem paths are literal.
+
 # Product decision log
 
 Running record of product-level decisions from Jackson. One row per decision; status distinguishes settled calls from directions still being pressure-tested.

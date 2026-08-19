@@ -15,8 +15,8 @@ The communication graph exists as a queryable, subscribable projection — the d
 ## Scope
 
 - **Graph projection**: nodes = participants (incl. the human); **edges = exchanges, never messages**, state `open | stalled(reason, trust) | answered | dropped`; plus delegation edges from v2 delegations (D1 — delegations to real child threads only). Stall reason/trust comes from A3's notices.
-- **Cross-epic edges** render in each epic's graph as external stubs joined by `correlation_id`.
-- **Read API**: per-epic cursor subscription — strictly ascending, exactly-once, gap-free relative to the cursor, documented caveat that snapshot end is a batching fact, not caught-up-to-now; plus a full-state reconciliation query (events + snapshot, never events alone).
+- **Cross-squadron edges** render in each squadron's graph as external stubs joined by `correlation_id`.
+- **Read API**: per-squadron cursor subscription — strictly ascending, exactly-once, gap-free relative to the cursor, documented caveat that snapshot end is a batching fact, not caught-up-to-now; plus a full-state reconciliation query (events + snapshot, never events alone).
 - **Playback**: the read API can reconstruct graph state as of any past ledger sequence.
 - Projection rebuild from the ledger must be **byte-equivalent** — a test, not an aspiration (measured-tables property: projections are disposable).
 

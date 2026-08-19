@@ -3,6 +3,8 @@ title: "A6 integration review — verdict at d44fad9ad (changes requested)"
 kind: review
 ---
 
+> **Terminology note (post-E6):** the grouping concept was renamed **epic → squadron** on 2026-08-17 (definition: `product/epic/`); the code rename landed in PR #8. "Epic" below is preserved as dated historical record — read it as "squadron." Filesystem paths are literal.
+
 # A6 integration review — verdict
 
 <user_quoted_section>Current verdict (fix round): CLEAN to open the PR at 87151a0a2137e4cff2d4f156d28ad789e2e37d54. G1, G2, G3, G5 resolved; G4's implementation is fixed but its test cannot fail, carried as one LOW. See §Fix round at the end. The round-1 detail below is the record of what was asked.</user_quoted_section>

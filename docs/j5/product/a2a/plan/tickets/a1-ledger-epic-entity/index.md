@@ -4,6 +4,8 @@ kind: ticket
 status: 2
 ---
 
+> **Terminology note (post-E6):** the grouping concept was renamed **epic → squadron** on 2026-08-17 (definition: `product/epic/`); the code rename landed in PR #8. "Epic" below is preserved as dated historical record — read it as "squadron." Filesystem paths are literal.
+
 <user_quoted_section>DONE 2026-08-17 — delivered by shakedown PR group d9445ab1 via PR #4, merged by Jackson as 521c50aa9 (reviewed head 79d60067). 5 findings fixed, 1 refuted, zero open; negative controls (deleted cursor row, corrupted membership projection) proven capable of failing. Group retired clean (prg group done, zero open asks). Retro at the Spawner's report (Director log): pre-PR liveness blind spot + watchdog outage alerting, both deferred by Jackson's call. Residual seams handed to A2/A5: runtime ledger/retry reassessment, snapshot/subscription join, receipt-rollback regression.</user_quoted_section>
 
 # A1 — Epic entity + communication ledger

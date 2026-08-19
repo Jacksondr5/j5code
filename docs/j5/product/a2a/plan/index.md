@@ -17,16 +17,16 @@ Drafted 2026-08-16 from the settled decision register (`../` — D1–D10, all c
 
 ## What v1 is NOT (scope fences)
 
-No graph UI or attention panes (item 4). No roles/teams objects (item 3 — placement ≠ team membership). No cross-machine delivery (deferred; nothing may *assume* single-host, but nothing implements multi-host). No deferred silence states (`waiting-on-external-gate`, `silent-tool-degradation`, PTY-quiet). No message kind tags (cut). No agent-initiated re-parenting (human-only, UI). No epic *container* features beyond the minimal entity below — terminals, artifacts, folders, worktree binding all stay out (future backlog items).
+No graph UI or attention panes (item 4). No roles/teams objects (item 3 — placement ≠ team membership). No cross-machine delivery (deferred; nothing may *assume* single-host, but nothing implements multi-host). No deferred silence states (`waiting-on-external-gate`, `silent-tool-degradation`, PTY-quiet). No message kind tags (cut). No agent-initiated re-parenting (human-only, UI). No squadron *container* features beyond the minimal entity below — terminals, artifacts, folders, worktree binding all stay out (future backlog items).
 
 ## Architecture
 
-One new event-sourced aggregate per epic — the **communication ledger** — with projections, a delivery worker, and a silence detector. All A2A state derives from the ledger; projections are disposable (measured-tables property).
+One new event-sourced aggregate per squadron — the **communication ledger** — with projections, a delivery worker, and a silence detector. All A2A state derives from the ledger; projections are disposable (measured-tables property).
 
 ```mermaid
 flowchart LR
     T["send tool call<br/>(agent or human UI)"] --> C["command handler<br/>+ idempotency receipt"]
-    C -->|one txn| L[("comm ledger<br/>(append-only, per epic)")]
+    C -->|one txn| L[("comm ledger<br/>(append-only, per squadron)")]
     L --> P["projections:<br/>exchange · delivery · inbox · graph edge"]
     L --> W["delivery worker<br/>(drainable)"]
     W -->|"agent: v2 thread injection<br/>human: inbox"| R["recipient"]
@@ -35,15 +35,15 @@ flowchart LR
     S -->|notices| L
 ```
 
-### Epic entity (M1) — added in Director review
+### Squadron entity (M1) — added in Director review
 
-T3 has **no epic object** (nearest native concepts: project/environment), and this whole design is per-epic — so M1 ships a **minimal epic entity**: `epic` (id, name, created_at) plus a membership projection derived from the ledger's own `participant.joined/left` events. Nothing more. Scoping ledgers to T3 projects instead was rejected: it would silently redefine the product's container concept, and item-4 dashboards need real epic ids. The full epic container (terminals, artifacts, folders) is deliberately future work; this entity is just enough for the ledger and dashboards to have an address.
+T3 has **no squadron object** (nearest native concepts: project/environment), and this whole design is per-squadron — so M1 ships a **minimal squadron entity**: `squadron` (id, name, created_at) plus a membership projection derived from the ledger's own `participant.joined/left` events. Nothing more. Scoping ledgers to T3 projects instead was rejected: it would silently redefine the product's container concept, and item-4 dashboards need real squadron ids. The full squadron container (terminals, artifacts, folders) is deliberately future work; this entity is just enough for the ledger and dashboards to have an address.
 
 ### Ledger (M1)
 
-`comm_event` table, per-epic monotonic sequence, append-only: `seq`, `epic_id`, `kind`, `sender`, `receiver`, `exchange_id?`, `correlation_id?` (cross-epic), `payload`, `created_at`. Event kinds: `exchange.opened`, `message.sent`, `message.delivered`, `message.delivery_failed`, `exchange.closed` (the reply), `silence.notice`, `participant.joined/left`. Rows are never edited; corrections are new rows.
+`comm_event` table, per-squadron monotonic sequence, append-only: `seq`, `squadron_id`, `kind`, `sender`, `receiver`, `exchange_id?`, `correlation_id?` (cross-squadron), `payload`, `created_at`. Event kinds: `exchange.opened`, `message.sent`, `message.delivered`, `message.delivery_failed`, `exchange.closed` (the reply), `silence.notice`, `participant.joined/left`. Rows are never edited; corrections are new rows.
 
-Participants: anything with its own thread — main agents, child agents (agent-created real threads), and **one global human node** (not per-epic; cross-epic exchanges reach the same user). Provider-native `ExecutionNode` subagents are not participants and never appear (D1).
+Participants: anything with its own thread — main agents, child agents (agent-created real threads), and **one global human node** (not per-squadron; cross-squadron exchanges reach the same user). Provider-native `ExecutionNode` subagents are not participants and never appear (D1).
 
 ### Exchanges (M2)
 
@@ -58,7 +58,7 @@ The ledger row is the primary act; delivery is an attempt recorded against it:
 3. Rows failing past the retry threshold surface as an alarm state in projections — an undelivered message is a **visible gap, never a silent loss**. This applies equally to one-shots (no exchange, but same delivery guarantees) — "was it delivered" and "was it answered" are independent guarantees.
 4. Startup reconciliation: on host restart, the worker re-drains anything sent-but-not-delivered. No RAM-only state anywhere.
 
-Cross-epic (D8): sender's epic gets the row first; the delivery worker writes the paired row into the receiver's epic ledger as part of delivery — deliberately an **async two-step, never one transaction** (collapsing it would smuggle in a single-host assumption). Hardening (Director review): the receiver-side paired row is a **distinct kind, `message.received`** (same payload, carrying `correlation_id` + origin epic — never a mirrored `message.sent`, which would misattribute the act); a **unique constraint on (receiver `epic_id`, `correlation_id`)** makes the paired write idempotent under worker retry. A half-completed cross-epic send is visible in the sender's ledger, not lost between them.
+Cross-squadron (D8): sender's squadron gets the row first; the delivery worker writes the paired row into the receiver's squadron ledger as part of delivery — deliberately an **async two-step, never one transaction** (collapsing it would smuggle in a single-host assumption). Hardening (Director review): the receiver-side paired row is a **distinct kind, `message.received`** (same payload, carrying `correlation_id` + origin squadron — never a mirrored `message.sent`, which would misattribute the act); a **unique constraint on (receiver `squadron_id`, `correlation_id`)** makes the paired write idempotent under worker retry. A half-completed cross-squadron send is visible in the sender's ledger, not lost between them.
 
 ### Envelopes (M2)
 
@@ -80,11 +80,11 @@ Notices inform the waiter; they never auto-close exchanges. No PTY/quiet watchdo
 
 ### Human node (M4)
 
-The inbox is necessarily a **cross-ledger projection**: one global human node + per-epic ledgers means it aggregates open human-addressed exchanges across *every* epic ledger on the host — a builder must not scope it per-epic and call it done. Inbox projection = open exchanges addressed to the human, ranked by urgency then age. The human's answer (typed in the app) **is** the closing reply event: captured verbatim, durable, linkable by id — and delivered to the asker through the normal pipeline. Loop closure is therefore *structural*: no manual "ask answered" step, no relay, no qualifier-shedding. Human→agent sends through the graph use the human-origin envelope; human silence emits no notices (unanswered-count and age are dashboard metrics, item 4).
+The inbox is necessarily a **cross-ledger projection**: one global human node + per-squadron ledgers means it aggregates open human-addressed exchanges across *every* squadron ledger on the host — a builder must not scope it per-squadron and call it done. Inbox projection = open exchanges addressed to the human, ranked by urgency then age. The human's answer (typed in the app) **is** the closing reply event: captured verbatim, durable, linkable by id — and delivered to the asker through the normal pipeline. Loop closure is therefore *structural*: no manual "ask answered" step, no relay, no qualifier-shedding. Human→agent sends through the graph use the human-origin envelope; human silence emits no notices (unanswered-count and age are dashboard metrics, item 4).
 
 ### Graph projection + read API (M5)
 
-Edge = exchange (never message), state open/stalled(reason,trust)/answered/dropped, plus delegation edges from v2 delegations (D1). Read API: per-epic cursor subscription — strictly ascending, exactly-once, gap-free relative to the cursor, with the documented caveat that *snapshot end is a batching fact, not caught-up-to-now* — plus a full-state reconciliation query (events + snapshot, never events alone). Cross-epic edges render in each epic as external stubs joined by `correlation_id`. Rebuilding any projection from the ledger must be byte-equivalent — this is a test, not an aspiration.
+Edge = exchange (never message), state open/stalled(reason,trust)/answered/dropped, plus delegation edges from v2 delegations (D1). Read API: per-squadron cursor subscription — strictly ascending, exactly-once, gap-free relative to the cursor, with the documented caveat that *snapshot end is a batching fact, not caught-up-to-now* — plus a full-state reconciliation query (events + snapshot, never events alone). Cross-squadron edges render in each squadron as external stubs joined by `correlation_id`. Rebuilding any projection from the ledger must be byte-equivalent — this is a test, not an aspiration.
 
 ### Agent tool surface
 
@@ -94,8 +94,8 @@ Minimal, one send verb (Traycer's shape): `send_message(to, message, expect_repl
 
 | M | Deliverable | Verification |
 | --- | --- | --- |
-| M1 | Ledger + minimal epic entity: tables, contracts, append/read, cursor contract, membership projection | Ordering/gap-free property tests; restart persistence; idempotent append via receipts; membership projection rebuilds from ledger |
-| M2 | Send/deliver/reply loop: pipeline, envelopes, exchange lifecycle, retries, startup reconciliation, cross-epic double-entry | Kill host mid-delivery → delivered exactly once after restart, **specifically covering the injected-but-unrecorded crash window** (v2 `clientRequestId` dedup proven, not assumed); cross-epic: crash between sender-row commit and receiver-row write → after restart exactly one paired row, sender ledger shows correct delivery state; forced delivery failure → visible alarm, never silent; exchange idempotent-open and one-reply-closes proven by test |
+| M1 | Ledger + minimal squadron entity: tables, contracts, append/read, cursor contract, membership projection | Ordering/gap-free property tests; restart persistence; idempotent append via receipts; membership projection rebuilds from ledger |
+| M2 | Send/deliver/reply loop: pipeline, envelopes, exchange lifecycle, retries, startup reconciliation, cross-squadron double-entry | Kill host mid-delivery → delivered exactly once after restart, **specifically covering the injected-but-unrecorded crash window** (v2 `clientRequestId` dedup proven, not assumed); cross-squadron: crash between sender-row commit and receiver-row write → after restart exactly one paired row, sender ledger shows correct delivery state; forced delivery failure → visible alarm, never silent; exchange idempotent-open and one-reply-closes proven by test |
 | M3 | Silence detector: five states | Scripted scenario per state (e.g. recipient turn ends silent → waiter gets authoritative notice; cancel → notice carries do-not-retry text); zero notices for healthy idle agents |
 | M4 | Human node: inbox model, urgency, verbatim answers | End-to-end: agent asks → inbox row → human answers → exchange closes → asker receives the exact text; unanswered inbox items never expire silently |
 | M5 | Graph projection + read API | Projection rebuilt from ledger is byte-equal; cursor subscription exactly-once under reconnect; playback renders a past state correctly |

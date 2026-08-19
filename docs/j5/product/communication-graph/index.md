@@ -3,6 +3,8 @@ title: "The Communication Graph — definition"
 kind: spec
 ---
 
+> **Terminology note (post-E6):** the grouping concept was renamed **epic → squadron** on 2026-08-17 (definition: `product/epic/`); the code rename landed in PR #8. "Epic" below is preserved as dated historical record — read it as "squadron." Filesystem paths are literal.
+
 # The Communication Graph
 
 Draft for Jackson (2026-08-14). Purpose: define what the communication graph *is* so we can close the "human as first-class node" question against something concrete. Grounded in the research: Traycer's `epic.communicationGraph.subscribe` (exactly-once, gap-free, playback) and typed-silence system; T3 v2's relationship graph and `delegate_task`.
