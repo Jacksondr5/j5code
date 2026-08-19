@@ -5,7 +5,6 @@ import type { EpicId, ExchangeId, ParticipantId } from "./contracts.ts";
 export const A2A_ENVELOPE_VERSION = config.version;
 export const A2A_SEND_TOOL_DESCRIPTION = config.sendToolDescription;
 export const A2A_LIST_TOOL_DESCRIPTION = config.listToolDescription;
-export const A2A_JOIN_TOOL_DESCRIPTION = config.joinToolDescription;
 
 const render = (template: string, values: Readonly<Record<string, string>>): string =>
   template.replace(/\{\{([^{}]+)\}\}/g, (placeholder, name: string) => values[name] ?? placeholder);
@@ -20,17 +19,6 @@ const deliveryInstruction = (input: {
         senderId: input.senderId,
         exchangeId: input.exchangeId,
       });
-
-export const formatEpicSwitchWarning = (input: {
-  readonly epicId: EpicId;
-  readonly exchangeId: ExchangeId;
-  readonly peerId: ParticipantId;
-}): string =>
-  render(config.epicSwitchWarning, {
-    epicId: input.epicId,
-    exchangeId: input.exchangeId,
-    peerId: input.peerId,
-  });
 
 export const formatPeerEnvelope = (input: {
   readonly senderId: ParticipantId;

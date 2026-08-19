@@ -129,7 +129,6 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       // that later J5 milestones extend inside the fork-owned toolkit.
       expect(toolNames).toContain("send_message");
       expect(toolNames).toContain("list_participants");
-      expect(toolNames).toContain("join_epic");
 
       // The handoff tool mutates thread state, reaches the network (origin
       // fetch), and runs project setup scripts, so its MCP hints must not

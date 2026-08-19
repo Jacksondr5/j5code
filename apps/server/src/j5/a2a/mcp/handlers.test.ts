@@ -9,11 +9,10 @@ import * as Stream from "effect/Stream";
 
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
-import { A2AEpicBootstrap } from "../EpicBootstrapService.ts";
 import { A2ASendService } from "../SendService.ts";
-import { EpicId, LedgerMessageId, ParticipantId, type SendMessageInput } from "../contracts.ts";
+import { LedgerMessageId, ParticipantId, type SendMessageInput } from "../contracts.ts";
 import { J5ToolkitHandlersLive } from "./handlers.ts";
-import { J5Toolkit } from "./tools.ts";
+import { J5Toolkit, type J5SendMessageInput } from "./tools.ts";
 
 const invocation = {
   environmentId: EnvironmentId.make("environment:j5:mcp-handler"),
@@ -24,11 +23,13 @@ const invocation = {
   issuedAt: 1,
 };
 
-it.effect("derives send idempotency and epic bootstrap identity from authenticated scope", () =>
+it.effect("derives send idempotency and sender identity from authenticated scope", () =>
   Effect.gen(function* () {
+    assert.deepStrictEqual(Object.keys(J5Toolkit.tools).sort(), [
+      "list_participants",
+      "send_message",
+    ]);
     const sends = yield* Ref.make<ReadonlyArray<SendMessageInput>>([]);
-    const bootstrapThreads = yield* Ref.make<ReadonlyArray<ThreadId>>([]);
-    const epicId = EpicId.make("epic:j5:mcp-handler");
     const participantId = ParticipantId.make("agent:j5:mcp-handler");
     const sendService = Layer.succeed(
       A2ASendService,
@@ -46,24 +47,8 @@ it.effect("derives send idempotency and epic bootstrap identity from authenticat
         listParticipants: () => Effect.succeed([]),
       }),
     );
-    const bootstrapService = Layer.succeed(
-      A2AEpicBootstrap,
-      A2AEpicBootstrap.of({
-        joinEpic: (input) =>
-          Ref.update(bootstrapThreads, (threads) => [...threads, input.senderThreadId]).pipe(
-            Effect.as({
-              epicId: input.epicId ?? epicId,
-              participantId,
-              state: "selected" as const,
-              previousEpicIds: [],
-              openExchangeWarnings: [],
-            }),
-          ),
-      }),
-    );
     const dependencies = Layer.mergeAll(
       sendService,
-      bootstrapService,
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       NodeServices.layer,
     );
@@ -71,9 +56,9 @@ it.effect("derives send idempotency and epic bootstrap identity from authenticat
 
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
-      const call = (name: "send_message" | "join_epic", args: Record<string, unknown>) =>
+      const call = (args: J5SendMessageInput) =>
         toolkit
-          .handle(name, args)
+          .handle("send_message", args)
           .pipe(
             Stream.unwrap,
             Stream.run(Sink.last()),
@@ -85,15 +70,12 @@ it.effect("derives send idempotency and epic bootstrap identity from authenticat
         message: "Idempotent MCP send",
         client_request_id: "logical-send-1",
       };
-      yield* call("send_message", sendArguments);
-      yield* call("send_message", sendArguments);
+      yield* call(sendArguments);
+      yield* call(sendArguments);
       const captured = yield* Ref.get(sends);
       assert.lengthOf(captured, 2);
       assert.equal(captured[0]?.commandId, captured[1]?.commandId);
       assert.equal(captured[0]?.senderThreadId, invocation.threadId);
-
-      yield* call("join_epic", { epic_id: epicId });
-      assert.deepStrictEqual(yield* Ref.get(bootstrapThreads), [invocation.threadId]);
     }).pipe(Effect.provide(layer));
   }),
 );

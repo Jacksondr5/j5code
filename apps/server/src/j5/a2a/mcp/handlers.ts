@@ -4,7 +4,6 @@ import * as Effect from "effect/Effect";
 
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
-import { A2AEpicBootstrap } from "../EpicBootstrapService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { CommCommandId } from "../contracts.ts";
 import { J5Toolkit, type J5McpFailure } from "./tools.ts";
@@ -58,17 +57,6 @@ const handlers = {
       const scope = yield* McpInvocationContext;
       const service = yield* A2ASendService;
       return { participants: yield* service.listParticipants(scope.threadId) };
-    }).pipe(Effect.mapError(failure)),
-  join_epic: (input) =>
-    Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
-      const service = yield* A2AEpicBootstrap;
-      const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
-      return yield* service.joinEpic({
-        senderThreadId: scope.threadId,
-        ...(input.epic_id === undefined ? {} : { epicId: input.epic_id }),
-        acceptedAt,
-      });
     }).pipe(Effect.mapError(failure)),
 } satisfies Parameters<typeof J5Toolkit.toLayer>[0];
 

@@ -2,10 +2,8 @@ import { assert, it } from "@effect/vitest";
 
 import {
   A2A_ENVELOPE_VERSION,
-  A2A_JOIN_TOOL_DESCRIPTION,
   A2A_LIST_TOOL_DESCRIPTION,
   A2A_SEND_TOOL_DESCRIPTION,
-  formatEpicSwitchWarning,
   formatHumanEnvelope,
   formatPeerEnvelope,
   formatSilenceNoticeEnvelope,
@@ -42,20 +40,6 @@ it("labels platform-authored silence without internal product branding", () => {
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
 });
 
-it("renders epic-switch warnings with the abandoned exchange and peer", () => {
-  const rendered = formatEpicSwitchWarning({
-    epicId: EpicId.make("epic:previous"),
-    exchangeId: ExchangeId.make("exchange:abandoned"),
-    peerId: ParticipantId.make("agent:waiting-peer"),
-  });
-
-  assert.include(rendered, "epic:previous");
-  assert.include(rendered, "exchange:abandoned");
-  assert.include(rendered, "agent:waiting-peer");
-  assert.include(rendered, "not cancelled or transferred");
-  assert.notInclude(rendered, "{{");
-});
-
 it("does not interpret caller text as an envelope template", () => {
   const message = "Preserve this literal token: {{exchangeInstruction}}";
   const rendered = formatPeerEnvelope({
@@ -81,10 +65,8 @@ it("tells agents that human-origin exchanges require an explicit tool reply", ()
   assert.include(A2A_SEND_TOOL_DESCRIPTION, "returns after the sender ledger commit");
   assert.include(A2A_SEND_TOOL_DESCRIPTION, "cross-agent message");
   assert.include(A2A_LIST_TOOL_DESCRIPTION, "cross-agent messaging participants");
-  assert.include(A2A_JOIN_TOOL_DESCRIPTION, "authenticated thread");
-  assert.include(A2A_JOIN_TOOL_DESCRIPTION, "open exchange ID and peer");
   assert.notMatch(
-    [A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION, A2A_JOIN_TOOL_DESCRIPTION].join("\n"),
+    [A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION].join("\n"),
     /\b(?:J5|A2A)\b/,
   );
 });

@@ -3,18 +3,11 @@ import * as Schema from "effect/Schema";
 
 import * as Crypto from "effect/Crypto";
 import * as McpInvocationContext from "../../../mcp/McpInvocationContext.ts";
-import {
-  A2A_JOIN_TOOL_DESCRIPTION,
-  A2A_LIST_TOOL_DESCRIPTION,
-  A2A_SEND_TOOL_DESCRIPTION,
-} from "../EnvelopeFormatter.ts";
+import { A2A_LIST_TOOL_DESCRIPTION, A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
-import { A2AEpicBootstrap } from "../EpicBootstrapService.ts";
 import { A2ASendService } from "../SendService.ts";
 import {
-  EpicId,
   ExchangeId,
-  JoinEpicResult,
   ParticipantDirectoryRow,
   ParticipantId,
   SendMessageResult,
@@ -42,15 +35,10 @@ export const J5ListParticipantsResult = Schema.Struct({
   participants: Schema.Array(ParticipantDirectoryRow),
 });
 
-export const J5JoinEpicInput = Schema.Struct({
-  epic_id: Schema.optional(EpicId),
-});
-
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
   A2ASendService,
   A2ADeliveryWorker,
-  A2AEpicBootstrap,
   Crypto.Crypto,
 ];
 
@@ -81,19 +69,5 @@ export const J5ListParticipantsTool = Tool.make("list_participants", {
   .annotate(Tool.Idempotent, true)
   .annotate(Tool.OpenWorld, false);
 
-export const J5JoinEpicTool = Tool.make("join_epic", {
-  description: A2A_JOIN_TOOL_DESCRIPTION,
-  parameters: J5JoinEpicInput,
-  success: JoinEpicResult,
-  failure: J5McpFailure,
-  failureMode: "return",
-  dependencies,
-})
-  .annotate(Tool.Title, "Join a cross-agent messaging epic")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, true)
-  .annotate(Tool.Idempotent, true)
-  .annotate(Tool.OpenWorld, false);
-
 /** Shared J5 toolkit bootstrap. Later J5 milestones append their tools here. */
-export const J5Toolkit = Toolkit.make(J5SendMessageTool, J5ListParticipantsTool, J5JoinEpicTool);
+export const J5Toolkit = Toolkit.make(J5SendMessageTool, J5ListParticipantsTool);

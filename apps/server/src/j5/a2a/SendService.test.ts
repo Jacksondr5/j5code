@@ -275,6 +275,39 @@ it.effect("rolls back the send receipt when its projection write fails", () =>
   }).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("fails closed when a native thread has no provisioned epic membership", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const service = yield* A2ASendService;
+    const sql = yield* SqlClient.SqlClient;
+    const nativeThreadId = ThreadId.make("thread:native-without-home-epic");
+
+    const listError = yield* Effect.flip(service.listParticipants(nativeThreadId));
+    assert.equal(listError._tag, "A2ASenderNotJoinedError");
+    assert.include(listError.message, "no provisioned epic membership");
+    assert.include(listError.message, "Ask the user to create an epic");
+    assert.include(listError.message, "list_participants");
+
+    const sendError = yield* Effect.flip(
+      service.send({
+        commandId: CommCommandId.make("command:native-without-home-epic"),
+        senderThreadId: nativeThreadId,
+        to: receiver.id,
+        message: "This must fail without provisioning.",
+        acceptedAt: timestamp,
+      }),
+    );
+    assert.equal(sendError._tag, "A2ASenderNotJoinedError");
+
+    const state = yield* sql<{ readonly epics: number; readonly events: number }>`
+      SELECT
+        (SELECT COUNT(*) FROM j5_a2a_epic) AS epics,
+        (SELECT COUNT(*) FROM j5_a2a_comm_event) AS events
+    `;
+    assert.deepStrictEqual(state, [{ epics: 0, events: 0 }]);
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("lists membership-derived participant capabilities", () =>
   Effect.gen(function* () {
     const epicId = yield* setupSameEpic();
