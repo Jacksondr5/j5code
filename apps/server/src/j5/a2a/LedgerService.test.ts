@@ -323,15 +323,6 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
         createdAt: timestamp,
       },
       {
-        kind: "participant.joined",
-        sender: null,
-        receiver: secondAgent.id,
-        exchangeId: null,
-        correlationId: null,
-        payload: { participant: secondAgent },
-        createdAt: timestamp,
-      },
-      {
         kind: "participant.left",
         sender: firstAgent.id,
         receiver: null,
@@ -350,7 +341,7 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
         squadronId,
         participant: secondAgent,
         joinedSeq: 3,
-        updatedSeq: 4,
+        updatedSeq: 3,
       },
       {
         squadronId,

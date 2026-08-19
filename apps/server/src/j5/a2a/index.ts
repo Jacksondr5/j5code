@@ -1,5 +1,21 @@
 export * from "./contracts.ts";
 export * from "./decider.ts";
+export {
+  A2AAmbiguousHomeError,
+  A2AHomeCommandConflictError,
+  A2AHomeConflictError,
+  A2AHomeNotFoundError,
+  A2AHomeRegistrar,
+  layer as homeRegistrarLayer,
+  participantIdForThread,
+} from "./HomeRegistrar.ts";
+export type {
+  A2AHomeLookupError,
+  A2AHomeRegistrarShape,
+  A2AHomeRegistrationError,
+  RegisteredThreadHome,
+  RegisterAtCreationInput,
+} from "./HomeRegistrar.ts";
 export * from "./LedgerService.ts";
 export * from "./Migrations.ts";
 export {

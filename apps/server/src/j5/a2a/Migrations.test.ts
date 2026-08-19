@@ -34,10 +34,11 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 2, name: "SendDeliverReply" },
       { migration_id: 3, name: "SquadronRename" },
       { migration_id: 4, name: "SilenceNoticeChannel" },
+      { migration_id: 5, name: "ImmutableThreadHome" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id]) => id),
-      [1, 2, 3, 4],
+      [1, 2, 3, 4, 5],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
@@ -79,7 +80,8 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'j5_a2a_exchange_id_idx',
           'j5_a2a_delivery_drain_idx',
           'j5_a2a_delivery_message_sender_idx',
-          'j5_a2a_delivery_one_reply_idx'
+          'j5_a2a_delivery_one_reply_idx',
+          'j5_a2a_comm_event_agent_home_thread_idx'
         )
       ORDER BY name
     `;
@@ -146,6 +148,14 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
     assert.include(
       indexesByName.get("j5_a2a_delivery_one_reply_idx") ?? "",
       "WHERE exchange_id IS NOT NULL AND exchange_role = 'reply'",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_comm_event_agent_home_thread_idx") ?? "",
+      "json_extract(payload, '$.participant.threadId')",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_comm_event_agent_home_thread_idx") ?? "",
+      "WHERE kind = 'participant.joined'",
     );
     const envelopeChannel = deliveryColumns.find((column) => column.name === "envelope_channel");
     assert.equal(envelopeChannel?.notnull, 1);

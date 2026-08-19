@@ -286,12 +286,10 @@ it.effect("fails closed when a native thread has no provisioned squadron members
     assert.equal(listError._tag, "A2ASenderNotJoinedError");
     assert.include(listError.message, "native thread");
     assert.include(listError.message, "no registered home squadron");
-    assert.include(listError.message, "wrapper-spawned agent");
-    assert.include(listError.message, "controlled test seeding");
-    assert.include(
-      listError.message,
-      "home-squadron registrar + A6 creation integrations follow-up",
-    );
+    assert.include(listError.message, "No native user-created-thread hook");
+    assert.include(listError.message, "internal registrar");
+    assert.include(listError.message, "A6 creation wrapper");
+    assert.include(listError.message, "controlled tests may seed membership directly");
     assert.include(listError.message, "Stop this messaging attempt");
     assert.notMatch(listError.message, /ask the user|product workflow|list_participants again/i);
 
@@ -364,11 +362,15 @@ it.effect("lists membership-derived participant capabilities", () =>
   }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("marks ambiguous participant rows unavailable before send", () =>
+it.effect("marks duplicate participant identities unavailable before send", () =>
   Effect.gen(function* () {
     yield* setupSameSquadron();
     const ledgerService = yield* A2ALedger;
     const duplicateSquadronId = SquadronId.make("squadron:exchange:duplicate-receiver");
+    const duplicateReceiver = {
+      ...receiver,
+      threadId: ThreadId.make("thread:receiver:duplicate-identity"),
+    };
     yield* ledgerService.createSquadron({
       squadron: { id: duplicateSquadronId, name: "Duplicate receiver", createdAt: timestamp },
     });
@@ -383,7 +385,7 @@ it.effect("marks ambiguous participant rows unavailable before send", () =>
           receiver: receiver.id,
           exchangeId: null,
           correlationId: null,
-          payload: { participant: receiver },
+          payload: { participant: duplicateReceiver },
           createdAt: timestamp,
         },
       ],

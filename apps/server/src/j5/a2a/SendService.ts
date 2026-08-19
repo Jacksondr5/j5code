@@ -21,6 +21,7 @@ import {
   type SendMessageResult,
   participantId,
 } from "./contracts.ts";
+import { type A2AHomeLookupError, resolveThreadHome } from "./HomeRegistrar.ts";
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 
 export class A2ASenderNotJoinedError extends Schema.TaggedErrorClass<A2ASenderNotJoinedError>()(
@@ -28,7 +29,7 @@ export class A2ASenderNotJoinedError extends Schema.TaggedErrorClass<A2ASenderNo
   { threadId: Schema.String },
 ) {
   override get message(): string {
-    return `Cross-agent messaging is unavailable for native thread ${this.threadId} because it has no registered home squadron. Participation currently requires a wrapper-spawned agent that already has a home squadron or controlled test seeding. Native user-created home provisioning is deferred to the home-squadron registrar + A6 creation integrations follow-up. Stop this messaging attempt.`;
+    return `Cross-agent messaging is unavailable for native thread ${this.threadId} because it has no registered home squadron. No native user-created-thread hook consumes the internal registrar at this head. The sanctioned future production path is the A6 creation wrapper; controlled tests may seed membership directly. Stop this messaging attempt.`;
   }
 }
 
@@ -119,6 +120,7 @@ export class A2AExchangeAlreadyAnsweredError extends Schema.TaggedErrorClass<A2A
 
 export type A2ASendError =
   | A2ALedgerError
+  | A2AHomeLookupError
   | Schema.SchemaError
   | SqlError
   | A2ASenderNotJoinedError
@@ -196,15 +198,21 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
       const senderMembership = Effect.fn("j5.a2a.send.senderMembership")(function* (
         threadId: ThreadId,
       ) {
-        const matches = (yield* membershipRows()).filter((row) => row.thread_id === threadId);
+        const home = yield* resolveThreadHome(sql, threadId).pipe(
+          Effect.catchTag("A2AHomeNotFoundError", () =>
+            Effect.fail(new A2ASenderNotJoinedError({ threadId })),
+          ),
+        );
+        const matches = (yield* membershipRows()).filter(
+          (row) =>
+            row.squadron_id === home.squadronId &&
+            row.participant_id === home.participantId &&
+            row.thread_id === threadId,
+        );
         if (matches.length !== 1) {
           return yield* new A2ASenderNotJoinedError({ threadId });
         }
-        const row = matches[0]!;
-        return {
-          squadronId: SquadronId.make(row.squadron_id),
-          participantId: row.participant_id as ParticipantId,
-        };
+        return home;
       });
 
       const participantMembership = Effect.fn("j5.a2a.send.participantMembership")(function* (
