@@ -2,5 +2,3 @@
 title: "Product"
 kind: spec
 ---
-
-

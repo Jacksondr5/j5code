@@ -5,7 +5,7 @@ kind: spec
 
 # Fork viability: T3 Code as foundation
 
-**Re-assessment under Jackson's framing:** *fork the codebase as a foundation for adding multi-agent orchestration*, not *fork the product including its cloud*.
+**Re-assessment under Jackson's framing:** _fork the codebase as a foundation for adding multi-agent orchestration_, not _fork the product including its cloud_.
 
 <user_quoted_section>Bottom line up front: Jackson is right, and my earlier verdict was weak.
 It rested on two things. The first — operational inheritance (relay, Clerk, APNs, release infra) — he correctly identifies as swappable cost, and the code confirms the swap is much cheaper than I implied. The second — "the orchestration core is the part you'd have to rewrite anyway" — I asserted without verifying. Having now verified it: it is largely false. Three of the four capabilities he wants are additive against the existing grain, and one of them is already built.
@@ -30,18 +30,18 @@ T3CODE_HOSTED_APP_URL             # optional, defaults to https://app.t3.codes
 T3CODE_MOBILE_OTLP_TRACES_{URL,DATASET,TOKEN}   # optional, ingest-only
 ```
 
-`.env.example` states outright: *"These are the same public identifiers baked into official release builds, not secrets. Remove or comment them out to build with cloud features disabled."*
+`.env.example` states outright: _"These are the same public identifiers baked into official release builds, not secrets. Remove or comment them out to build with cloud features disabled."_
 
-**Critically: absent config degrades, it does not break.** From `docs/internals/t3-connect.md` — *"When any client-facing public value is absent, cloud UI is omitted."* And the `t3 connect` command group is still registered, with a hidden fallback command that reports the missing configuration rather than silently vanishing from help. So a fresh clone with no `.env` is a fully working local/LAN/Tailscale/SSH product with the cloud paths cleanly switched off.
+**Critically: absent config degrades, it does not break.** From `docs/internals/t3-connect.md` — _"When any client-facing public value is absent, cloud UI is omitted."_ And the `t3 connect` command group is still registered, with a hidden fallback command that reports the missing configuration rather than silently vanishing from help. So a fresh clone with no `.env` is a fully working local/LAN/Tailscale/SSH product with the cloud paths cleanly switched off.
 
 ### Per-item swap effort
 
-| Item | What's actually hardcoded | Real effort |
-| --- | --- | --- |
-| **(a) Relay** | Nothing in app code. `infra/relay` is 78 files deployed by Alchemy reading `RELAY_DOMAIN`, `RELAY_API_ZONE_NAME`, `RELAY_TUNNEL_ZONE_NAME`, `CLERK_PUBLISHABLE_KEY`, `CLERK_JWT_AUDIENCE` via Effect `Config`. **"There are no checked-in deployment defaults."** `vp run --filter t3code-relay deploy` auto-writes the deployed URL back into root `.env`. | **Low.** Needs a Cloudflare account + PlanetScale. Note the prod Alchemy stage owns the retained PlanetScale DB and non-prod stages branch from it — so deploy `prod` first. A day, mostly waiting on DNS/zone setup. |
-| **(b) Clerk** | Only the publishable key, JWT template name, and CLI OAuth client id — all env. Setup is documented step-by-step: create the `t3-relay` JWT template with `{"aud":"t3-code-relay"}`, create a **public** OAuth app with PKCE, add two redirect URIs (`http://127.0.0.1:34338/callback` and `<hosted>/connect/callback`), enable `openid`/`profile`/`email`. | **Low.** Jackson has a tenant. Half a day of dashboard work following `t3-connect.md`. One gotcha the docs flag: omitting the hosted callback URI silently breaks headless and SSH authorization. |
-| **(c) APNs** | Certs/keys are relay-side runtime config (`ApnsProviderTokens`, `apnsJwt`). Nothing baked into app code. | **Low–medium.** Standard Apple Developer work. Only needed if we want push + Live Activities, which are relay-dependent anyway. Deferrable. |
-| **(d) Release infra** | `DESKTOP_APP_ID = "com.t3tools.t3code"` in `scripts/build-desktop-artifact.ts`; `com.t3tools.t3code{,.dev,.preview}` in `apps/mobile/app.config.ts`; `t3code://app` / `t3code-dev://app` custom schemes, including in the server's `DESKTOP_RENDERER_ORIGINS` CORS allowlist (`apps/server/src/http.ts:45`). | **Low if skipping.** Personal-first means `vp run dev` and an unsigned local desktop build. Renaming bundle IDs is a ~6-site find-and-replace, but do it *early* — macOS caches Shared Web Credentials per app/version pair, and passkey/associated-domain config is bundle-ID-bound. |
+| Item                  | What's actually hardcoded                                                                                                                                                                                                                                                                                                                                   | Real effort                                                                                                                                                                                                                                                                           |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **(a) Relay**         | Nothing in app code. `infra/relay` is 78 files deployed by Alchemy reading `RELAY_DOMAIN`, `RELAY_API_ZONE_NAME`, `RELAY_TUNNEL_ZONE_NAME`, `CLERK_PUBLISHABLE_KEY`, `CLERK_JWT_AUDIENCE` via Effect `Config`. **"There are no checked-in deployment defaults."** `vp run --filter t3code-relay deploy` auto-writes the deployed URL back into root `.env`. | **Low.** Needs a Cloudflare account + PlanetScale. Note the prod Alchemy stage owns the retained PlanetScale DB and non-prod stages branch from it — so deploy `prod` first. A day, mostly waiting on DNS/zone setup.                                                                 |
+| **(b) Clerk**         | Only the publishable key, JWT template name, and CLI OAuth client id — all env. Setup is documented step-by-step: create the `t3-relay` JWT template with `{"aud":"t3-code-relay"}`, create a **public** OAuth app with PKCE, add two redirect URIs (`http://127.0.0.1:34338/callback` and `<hosted>/connect/callback`), enable `openid`/`profile`/`email`. | **Low.** Jackson has a tenant. Half a day of dashboard work following `t3-connect.md`. One gotcha the docs flag: omitting the hosted callback URI silently breaks headless and SSH authorization.                                                                                     |
+| **(c) APNs**          | Certs/keys are relay-side runtime config (`ApnsProviderTokens`, `apnsJwt`). Nothing baked into app code.                                                                                                                                                                                                                                                    | **Low–medium.** Standard Apple Developer work. Only needed if we want push + Live Activities, which are relay-dependent anyway. Deferrable.                                                                                                                                           |
+| **(d) Release infra** | `DESKTOP_APP_ID = "com.t3tools.t3code"` in `scripts/build-desktop-artifact.ts`; `com.t3tools.t3code{,.dev,.preview}` in `apps/mobile/app.config.ts`; `t3code://app` / `t3code-dev://app` custom schemes, including in the server's `DESKTOP_RENDERER_ORIGINS` CORS allowlist (`apps/server/src/http.ts:45`).                                                | **Low if skipping.** Personal-first means `vp run dev` and an unsigned local desktop build. Renaming bundle IDs is a ~6-site find-and-replace, but do it _early_ — macOS caches Shared Web Credentials per app/version pair, and passkey/associated-domain config is bundle-ID-bound. |
 
 ### Hardcoded URL inventory (complete)
 
@@ -67,12 +67,12 @@ None of these are blockers. (1) and (2) are the only ones that cost money, and o
 **The literal assumption is small and localized.** In `packages/contracts/src/orchestration.ts`, `OrchestrationThread` carries exactly one:
 
 ```ts
-session: Schema.NullOr(OrchestrationSession)
+session: Schema.NullOr(OrchestrationSession);
 ```
 
 One session per thread. `ProviderService` routes by thread → session; the projector maintains it. That is the one-thread-one-agent model, and it is one field.
 
-**But here's what changes the picture entirely: T3 already runs N agents under one thread.** Subagents and workflows are *not* sessions. They arrive as `thread.activity.append` commands carrying `TaskAgentLinkage`, and are folded into a roster. So the fleet already lives in the activity stream, not the session model. **T3's data model does not actually assume one agent per thread — it assumes one *provider session* per thread, with arbitrarily many agents beneath it.**
+**But here's what changes the picture entirely: T3 already runs N agents under one thread.** Subagents and workflows are _not_ sessions. They arrive as `thread.activity.append` commands carrying `TaskAgentLinkage`, and are folded into a roster. So the fleet already lives in the activity stream, not the session model. **T3's data model does not actually assume one agent per thread — it assumes one _provider session_ per thread, with arbitrarily many agents beneath it.**
 
 That is a much weaker constraint than I implied, and it is the single most important correction to my earlier verdict.
 
@@ -88,12 +88,12 @@ The decider (1,402 lines) is a **flat switch over ~40 command types**. The proje
 
 ### Per-capability blast radius
 
-| Capability | Verdict | Blast radius |
-| --- | --- | --- |
-| **(i) Epic container** grouping threads + terminals + artifacts | **Additive** | New `epic` aggregate kind (1 literal), ~4 new cases in `commandToAggregateRef`, new command/event pairs in `decider.ts`, new cases in `projector.ts`, a new `epics[]` array on `OrchestrationReadModel`, one new `ProjectionEpics` service, one migration, new client atoms. Terminals are already thread-scoped (`packages/contracts/src/terminal.ts` keys everything by `threadId`), so epic→thread→terminal composes. **No existing event vocabulary changes.** Estimate: 1–2 weeks. |
-| **(ii) Peer A2A broker with MCP surface** | **Mostly already built** | `apps/server/src/mcp/` ships a working authenticated MCP server: `McpHttpServer.ts` (provider-scoped bearer credentials, `invalid_mcp_credential` 401s, `www-authenticate`), `McpSessionRegistry`, `McpInvocationContext`, `McpProviderSession`, and a **`toolkits/` pattern** already used to expose preview automation to agents (`PreviewAutomationBroker`, `toolkits/preview/{tools,handlers}.ts`). Adding an A2A toolkit means a new `toolkits/a2a/` directory following an existing, tested pattern. The message broker itself is a new aggregate + reactor. **This is the capability I most underestimated.** Estimate: 2–3 weeks. |
-| **(iii) First-class peer agents (spawn/configure/fork/archive)** | **Largely exists** | If a peer agent ≈ a thread, the lifecycle is *already shipped*: `thread.create` (spawn), `thread.meta.update` + `thread.runtime-mode.set` + `thread.interaction-mode.set` (configure), `thread.archive`/`unarchive`/`delete` (archive), and **fork is checkpoints** — `CheckpointStore` already captures hidden git refs per turn and `thread.checkpoint.revert` reverts both workspace *and* provider conversation. Fork = create a thread seeded from another's checkpoint ref. Plus `pin`/`snooze`/`settle` give you fleet triage for free. What's genuinely missing is **addressability** (an agent identity that isn't a thread id) and **inbox semantics** — both of which are (ii). Estimate: 2–3 weeks on top of (ii). |
-| **(iv) Cross-machine routing** | **Against the grain — build above, not inside** | This is the one real conflict. `docs/internals/remote.md` states the invariant plainly: *"T3 has one runtime boundary… Remoteness is expressed at the connection layer, never by splitting the runtime."* `RepositoryIdentity` exists but is documented as *"never for routing."* A client holds a catalog and connects to **one environment at a time**; there is no cross-environment state sync, and the docs list richer multi-environment UI under unbuilt Future Work. Fighting this inside the server means contradicting the design's central premise. **The right move is a routing/registry layer *above* T3 environments** — which is additive, and which we'd have to build in a greenfield too. Estimate: unchanged by the fork decision. |
+| Capability                                                       | Verdict                                         | Blast radius                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **(i) Epic container** grouping threads + terminals + artifacts  | **Additive**                                    | New `epic` aggregate kind (1 literal), ~4 new cases in `commandToAggregateRef`, new command/event pairs in `decider.ts`, new cases in `projector.ts`, a new `epics[]` array on `OrchestrationReadModel`, one new `ProjectionEpics` service, one migration, new client atoms. Terminals are already thread-scoped (`packages/contracts/src/terminal.ts` keys everything by `threadId`), so epic→thread→terminal composes. **No existing event vocabulary changes.** Estimate: 1–2 weeks.                                                                                                                                                                                                                                                                |
+| **(ii) Peer A2A broker with MCP surface**                        | **Mostly already built**                        | `apps/server/src/mcp/` ships a working authenticated MCP server: `McpHttpServer.ts` (provider-scoped bearer credentials, `invalid_mcp_credential` 401s, `www-authenticate`), `McpSessionRegistry`, `McpInvocationContext`, `McpProviderSession`, and a **`toolkits/` pattern** already used to expose preview automation to agents (`PreviewAutomationBroker`, `toolkits/preview/{tools,handlers}.ts`). Adding an A2A toolkit means a new `toolkits/a2a/` directory following an existing, tested pattern. The message broker itself is a new aggregate + reactor. **This is the capability I most underestimated.** Estimate: 2–3 weeks.                                                                                                              |
+| **(iii) First-class peer agents (spawn/configure/fork/archive)** | **Largely exists**                              | If a peer agent ≈ a thread, the lifecycle is _already shipped_: `thread.create` (spawn), `thread.meta.update` + `thread.runtime-mode.set` + `thread.interaction-mode.set` (configure), `thread.archive`/`unarchive`/`delete` (archive), and **fork is checkpoints** — `CheckpointStore` already captures hidden git refs per turn and `thread.checkpoint.revert` reverts both workspace _and_ provider conversation. Fork = create a thread seeded from another's checkpoint ref. Plus `pin`/`snooze`/`settle` give you fleet triage for free. What's genuinely missing is **addressability** (an agent identity that isn't a thread id) and **inbox semantics** — both of which are (ii). Estimate: 2–3 weeks on top of (ii).                         |
+| **(iv) Cross-machine routing**                                   | **Against the grain — build above, not inside** | This is the one real conflict. `docs/internals/remote.md` states the invariant plainly: _"T3 has one runtime boundary… Remoteness is expressed at the connection layer, never by splitting the runtime."_ `RepositoryIdentity` exists but is documented as _"never for routing."_ A client holds a catalog and connects to **one environment at a time**; there is no cross-environment state sync, and the docs list richer multi-environment UI under unbuilt Future Work. Fighting this inside the server means contradicting the design's central premise. **The right move is a routing/registry layer _above_ T3 environments** — which is additive, and which we'd have to build in a greenfield too. Estimate: unchanged by the fork decision. |
 
 **3 of 4 additive; 1 unaffected by the choice.**
 
@@ -105,7 +105,7 @@ This one is genuine and I want to state it precisely.
 
 ```ts
 const worker = Effect.forever(Queue.take(commandQueue).pipe(Effect.flatMap(processEnvelope)));
-yield* Effect.forkScoped(worker);
+yield * Effect.forkScoped(worker);
 ```
 
 **One unbounded queue, one worker fiber, all aggregates.** Every command — across every thread, every project — serializes through a single fiber, and each envelope performs a full SQL transaction (append events + apply projections + write receipt).
@@ -130,11 +130,11 @@ Mitigating facts, in fairness:
 
 ### Velocity
 
-| Window | Commits |
-| --- | --- |
-| Last 90 days | **1,051** |
-| Recent weeks (29–32) | 116, 142, 150, 110 → **~130/week** |
-| New migrations in 90d | 13 |
+| Window                | Commits                            |
+| --------------------- | ---------------------------------- |
+| Last 90 days          | **1,051**                          |
+| Recent weeks (29–32)  | 116, 142, 150, 110 → **~130/week** |
+| New migrations in 90d | 13                                 |
 
 Contributors are concentrated: Julius Marminge 506, Theo Browne 161, then a long tail. Two people write ~63% of commits. Plus a `t3-code[bot]` with 34.
 
@@ -142,18 +142,18 @@ Contributors are concentrated: Julius Marminge 506, Theo Browne 161, then a long
 
 Aggregate velocity is intimidating, but per-file churn in the orchestration **core** is low:
 
-| File | Commits / 90d |
-| --- | --- |
-| `apps/server/src/ws.ts` | **55** |
-| `packages/contracts/src/rpc.ts` | **23** |
-| `packages/contracts/src/orchestration.ts` | **21** |
-| `ProviderRuntimeIngestion.ts` | 14 |
-| `orchestration/decider.ts` | **11** |
-| `orchestration/projector.ts` | **8** |
-| `Layers/OrchestrationEngine.ts` | **3** |
-| `client-runtime/state/subagentRuntime.ts` | **2** |
+| File                                      | Commits / 90d |
+| ----------------------------------------- | ------------- |
+| `apps/server/src/ws.ts`                   | **55**        |
+| `packages/contracts/src/rpc.ts`           | **23**        |
+| `packages/contracts/src/orchestration.ts` | **21**        |
+| `ProviderRuntimeIngestion.ts`             | 14            |
+| `orchestration/decider.ts`                | **11**        |
+| `orchestration/projector.ts`              | **8**         |
+| `Layers/OrchestrationEngine.ts`           | **3**         |
+| `client-runtime/state/subagentRuntime.ts` | **2**         |
 
-**The pure core is nearly static. The churn is at the edges** — `ws.ts` and `rpc.ts` grow because features get added, and `orchestration.ts` grows because schemas get added. Those are *append-heavy* files, and appends merge far better than rewrites.
+**The pure core is nearly static. The churn is at the edges** — `ws.ts` and `rpc.ts` grow because features get added, and `orchestration.ts` grows because schemas get added. Those are _append-heavy_ files, and appends merge far better than rewrites.
 
 This substantially improves the tracking picture. If our additions are new aggregates in new files plus new switch cases, the recurring conflicts are: migration number collisions (13/90d — trivial renumbering), new cases landing near ours in the two big switches (mechanical), and `rpc.ts`/`ws.ts` method-list appends (mechanical).
 
@@ -165,9 +165,9 @@ The caveat is discipline-dependent: this holds only if we resist modifying the d
 
 Genuinely ambiguous, and worth naming honestly:
 
-**Argument for waiting:** v2 replaces the client-side subagent fold with a server-side projection. That is precisely the subsystem we care most about. Forking now means either carrying `subagentRuntime.ts` (self-labelled *"when the v1 orchestrator is retired this file is deleted"*) or diverging exactly where upstream is about to move.
+**Argument for waiting:** v2 replaces the client-side subagent fold with a server-side projection. That is precisely the subsystem we care most about. Forking now means either carrying `subagentRuntime.ts` (self-labelled _"when the v1 orchestrator is retired this file is deleted"_) or diverging exactly where upstream is about to move.
 
-**Argument for forking now:** the v2 field names and transition semantics are already frozen — *"Field names and transition semantics copy the v2 stack (#4779) exactly so that swap is mechanical."* So we can build against the v2 shape today and skip v1 entirely. And the `.plans/` directory shows this team runs big migrations as documented, phased cutovers (`14-server-authoritative-event-sourcing-cleanup.md`, `spec-1-1-cutover-plan.md`), so v2 will land as a coherent series we can rebase onto rather than a slow smear.
+**Argument for forking now:** the v2 field names and transition semantics are already frozen — _"Field names and transition semantics copy the v2 stack (#4779) exactly so that swap is mechanical."_ So we can build against the v2 shape today and skip v1 entirely. And the `.plans/` directory shows this team runs big migrations as documented, phased cutovers (`14-server-authoritative-event-sourcing-cleanup.md`, `spec-1-1-cutover-plan.md`), so v2 will land as a coherent series we can rebase onto rather than a slow smear.
 
 **My read: fork now, but build the server-side subagent projection ourselves rather than adopting the v1 fold.** We want a server projection regardless — it's the right architecture and it's where upstream is going. That converts the migration from a liability into a non-event.
 
@@ -180,7 +180,7 @@ There is no v2 roadmap in `.plans/` (it's a historical record, not forward-looki
 This codebase is **built to be edited by agents**, and it shows:
 
 - **`AGENTS.md`** (12.7 KB) — glossary, taste rules, "hit every surface" checklist, explicit failure modes, verification policy.
-- **`.repos/effect-smol/LLMS.md`** (382 lines) — vendored Effect guidance agents are instructed to read *before writing Effect code*.
+- **`.repos/effect-smol/LLMS.md`** (382 lines) — vendored Effect guidance agents are instructed to read _before writing Effect code_.
 - **`oxlint-plugin-t3code`** — four architectural invariants enforced as lint (`no-global-process-runtime`, `no-manual-effect-runtime-in-tests`, `no-inline-schema-compile`, `namespace-node-imports`). Agents get mechanical feedback on style violations.
 - **822 test files, ~1 line of test per 2 lines of source** — a real safety net for agent-driven change.
 - **Consistent house style.** Logic/view splits (`*.logic.ts` + `*.logic.test.ts`), flat switches, per-domain projection services, `Effect.fn("name")` tracing wrappers. Highly pattern-matchable — an agent can read one adapter and write the next.
@@ -190,7 +190,7 @@ This is a better agent on-ramp than almost any codebase of this size, and it dir
 
 ### Dependency stability: the actual risk
 
-This is where I'd push back, and it's a *different* risk than the one I named before:
+This is where I'd push back, and it's a _different_ risk than the one I named before:
 
 - **Effect is on `4.0.0-beta.103` — a prerelease**, catalog-pinned across every `@effect/*` package.
 - **Effect itself is patched**: `patches/effect@4.0.0-beta.103.patch`, plus `@effect__vitest@4.0.0-beta.103.patch`.
@@ -200,7 +200,7 @@ This is where I'd push back, and it's a *different* risk than the one I named be
 
 Beta-to-stable in Effect 4 will involve breaking changes, and we'd absorb them on upstream's schedule or our own. The patches mean we're already off the published artifacts.
 
-**Honest framing:** this is a real risk, but it's a risk *T3 carries too* — and they have two full-time maintainers absorbing it. If we track upstream, we largely inherit their fixes for free. If we hard-fork, we own it alone. **This argues for tracking, not against forking.** That's the opposite of what I said last time.
+**Honest framing:** this is a real risk, but it's a risk _T3 carries too_ — and they have two full-time maintainers absorbing it. If we track upstream, we largely inherit their fixes for free. If we hard-fork, we own it alone. **This argues for tracking, not against forking.** That's the opposite of what I said last time.
 
 ## 5. Middle paths
 
@@ -210,7 +210,7 @@ Beta-to-stable in Effect 4 will involve breaking changes, and we'd absorb them o
 
 **Benefit:** Clean boundary; upstream churn is irrelevant; we could even run against an unmodified T3.
 
-**Why it fails:** The WS contract is **client-facing**, and client-dispatchable commands are deliberately a *subset*. `thread.message.assistant.delta`, `thread.session.set`, and `thread.turn.diff.complete` are internal, produced only by server-side reactors. Per-method scope enforcement (`RPC_REQUIRED_SCOPES`) is designed to prevent exactly the kind of privileged access an orchestrator needs. And the epic aggregate has nowhere to live — you'd end up maintaining a shadow data model outside the event log, which forfeits the event-sourcing guarantee that made T3 attractive.
+**Why it fails:** The WS contract is **client-facing**, and client-dispatchable commands are deliberately a _subset_. `thread.message.assistant.delta`, `thread.session.set`, and `thread.turn.diff.complete` are internal, produced only by server-side reactors. Per-method scope enforcement (`RPC_REQUIRED_SCOPES`) is designed to prevent exactly the kind of privileged access an orchestrator needs. And the epic aggregate has nowhere to live — you'd end up maintaining a shadow data model outside the event log, which forfeits the event-sourcing guarantee that made T3 attractive.
 
 **Verdict: attractive on paper, structurally wrong.** Good for a prototype; a dead end as architecture.
 
@@ -220,7 +220,7 @@ Beta-to-stable in Effect 4 will involve breaking changes, and we'd absorb them o
 
 **Benefit:** No fork discipline needed; we own our tree.
 
-**Why it's weaker than it looks:** You take the two easy packages and rebuild the hard part — provider integration, which is exactly what Jackson wants to *avoid* rebuilding. And you lose the 822-test safety net for everything you didn't vendor.
+**Why it's weaker than it looks:** You take the two easy packages and rebuild the hard part — provider integration, which is exactly what Jackson wants to _avoid_ rebuilding. And you lose the 822-test safety net for everything you didn't vendor.
 
 **Verdict: viable for `effect-acp` alone if we go greenfield.** Not a substitute for the fork.
 
@@ -234,12 +234,12 @@ Beta-to-stable in Effect 4 will involve breaking changes, and we'd absorb them o
 
 ### Comparison
 
-| Path | Time to "Traycer-grade orchestration on T3 substrate" | Ongoing cost | Risk profile |
-| --- | --- | --- | --- |
-| **Greenfield + port patterns** | **6–9 months** (provider integration alone is months, ×5 harnesses) | None | Low risk, high cost, and we rebuild solved problems |
-| **(a) Freeze + external service** | 2–3 months to a prototype, then structural wall | Low | Forfeits the event log; dead-ends |
-| **(b) Vendor packages** | **5–8 months** | Low | Rebuilds the hard part anyway |
-| **(c) Tracking fork** | **2–3 months** | ~2–4 days/month rebase | Medium: queue ceiling, Effect beta, rebase discipline |
+| Path                              | Time to "Traycer-grade orchestration on T3 substrate"               | Ongoing cost           | Risk profile                                          |
+| --------------------------------- | ------------------------------------------------------------------- | ---------------------- | ----------------------------------------------------- |
+| **Greenfield + port patterns**    | **6–9 months** (provider integration alone is months, ×5 harnesses) | None                   | Low risk, high cost, and we rebuild solved problems   |
+| **(a) Freeze + external service** | 2–3 months to a prototype, then structural wall                     | Low                    | Forfeits the event log; dead-ends                     |
+| **(b) Vendor packages**           | **5–8 months**                                                      | Low                    | Rebuilds the hard part anyway                         |
+| **(c) Tracking fork**             | **2–3 months**                                                      | ~2–4 days/month rebase | Medium: queue ceiling, Effect beta, rebase discipline |
 
 ## 6. Verdict
 
@@ -271,7 +271,7 @@ This recommendation is **conditional**. Violate these and the calculus inverts:
 
 - Infra swap (env config; revert by changing `.env`)
 - Relay/Clerk/APNs choices (all vendor-swappable)
-- Tracking cadence — a tracking fork can *become* a hard fork at any time, for free
+- Tracking cadence — a tracking fork can _become_ a hard fork at any time, for free
 
 **One-way, or expensive to reverse:**
 
@@ -279,7 +279,7 @@ This recommendation is **conditional**. Violate these and the calculus inverts:
 - **Command queue partitioning**, if we hit the ceiling. Refactoring the single-writer invariant touches the most delicate file in the repo and diverges us permanently from upstream's engine.
 - **Divergence debt.** Every in-place modification compounds. There's a point of no return where rebasing costs more than maintaining alone — discipline is what keeps us short of it.
 
-**Notably: the fork itself is *not* a one-way door.** That's the crux of the revised verdict. A tracking fork that goes badly degrades into a hard fork, which is exactly where the greenfield path starts — minus five working provider integrations. The downside is bounded; the upside is months.
+**Notably: the fork itself is _not_ a one-way door.** That's the crux of the revised verdict. A tracking fork that goes badly degrades into a hard fork, which is exactly where the greenfield path starts — minus five working provider integrations. The downside is bounded; the upside is months.
 
 ### What I got wrong
 
@@ -287,60 +287,60 @@ For the record, so the reasoning is auditable:
 
 - I weighted **operational inheritance** as a primary argument. It's a 2–4 day cost, mostly vendor setup, and the code is exemplary about keeping it in env config. Jackson called this correctly.
 - I asserted that **"the product shapes diverge… that difference lives in the orchestration core — the part you'd have to rewrite anyway."** Having actually read the decider, projector, engine, and aggregate resolution: the core is a flat, append-friendly switch set with an 18-line aggregate mapper, and T3 already runs many agents under one thread. The divergence is additive.
-- I cited the **Effect beta and toolchain** as reasons *against* forking. They're reasons *for tracking* — upstream absorbs that churn with two full-time maintainers, and a hard fork would leave us carrying it alone.
+- I cited the **Effect beta and toolchain** as reasons _against_ forking. They're reasons _for tracking_ — upstream absorbs that churn with two full-time maintainers, and a hard fork would leave us carrying it alone.
 - I **missed the MCP server entirely** in the first pass, which is the closest thing in the repo to a pre-built A2A substrate.
 
 The risks I named were mostly wrong. The real ones are the **global command queue**, the **Effect 4 beta commitment**, and **rebase discipline** — and only the first could still flip this decision.
 
 ## 7. Timing addendum: fork point vs orchestration-v2
 
-*Added after a peer subagent surfaced PR #2829. Verified directly against `origin/t3code/codex-turn-mapping` @ `77168d081` (2026-08-14), 230 commits ahead of `main`, **6 behind** — reconciled daily.*
+_Added after a peer subagent surfaced PR #2829. Verified directly against `origin/t3code/codex-turn-mapping` @ `77168d081` (2026-08-14), 230 commits ahead of `main`, **6 behind** — reconciled daily._
 
-My §3 claim *"no v2 roadmap exists in `.plans/` — don't block on it"* was wrong. I checked `.plans/` on `main`, where it is a historical archive. The v2 plan lives **on the branch**. That is a research error, and it changes the fork point.
+My §3 claim _"no v2 roadmap exists in `.plans/` — don't block on it"_ was wrong. I checked `.plans/` on `main`, where it is a historical archive. The v2 plan lives **on the branch**. That is a research error, and it changes the fork point.
 
 ### 7.0 What the branch actually is
 
-| Measure | Value |
-| --- | --- |
-| Diff vs `main` | **858 files, +175,901 / −83,159** |
-| Test files (branch vs main) | **913 vs 822** (+91) |
-| v2 test files | **67**, plus replay-backed fixtures |
-| Shape status (per `.plans/21-...md`) | **1, 2, 3, 4.0, 4.5 all "complete"** |
-| Blocking | Stage 5 (existing-user v1→v2 state migration), explicitly out of scope |
+| Measure                              | Value                                                                  |
+| ------------------------------------ | ---------------------------------------------------------------------- |
+| Diff vs `main`                       | **858 files, +175,901 / −83,159**                                      |
+| Test files (branch vs main)          | **913 vs 822** (+91)                                                   |
+| v2 test files                        | **67**, plus replay-backed fixtures                                    |
+| Shape status (per `.plans/21-...md`) | **1, 2, 3, 4.0, 4.5 all "complete"**                                   |
+| Blocking                             | Stage 5 (existing-user v1→v2 state migration), explicitly out of scope |
 
-Shape 4.5's status line is unambiguous: *"complete. Production web and mobile now consume the scoped V2 projection directly, and the temporary Shape 4.0 parity facade, V1 client RPC surface, and V2 debug route have been removed."*
+Shape 4.5's status line is unambiguous: _"complete. Production web and mobile now consume the scoped V2 projection directly, and the temporary Shape 4.0 parity facade, V1 client RPC surface, and V2 debug route have been removed."_
 
-One nuance worth correcting in the peer's summary: Shape 3 did not delete the event-sourcing platform. Its status line reads *"removes the V1 agent runtime, **restores the existing application event-sourcing data plane, and installs V2 behind it instead of replacing it**."* The cut is to the **agent runtime**, not the persistence architecture.
+One nuance worth correcting in the peer's summary: Shape 3 did not delete the event-sourcing platform. Its status line reads _"removes the V1 agent runtime, **restores the existing application event-sourcing data plane, and installs V2 behind it instead of replacing it**."_ The cut is to the **agent runtime**, not the persistence architecture.
 
 ### 7.1 Fork point: **the v2 branch.** Not `main`. Not wait-for-merge.
 
 #### The hard cut is surgical — measured, not assumed
 
-| Subsystem | Files changed / total | Survives? |
-| --- | --- | --- |
-| `infra/relay` | **0 / 78** | ✅ untouched |
-| `packages/ssh` | **0 / 11** | ✅ untouched |
-| `packages/tailscale` | **0 / 5** | ✅ untouched |
-| `apps/server/src/terminal` | **0 / 8** | ✅ untouched |
-| `apps/desktop/src/ssh` | **0 / 4** | ✅ untouched |
-| `apps/server/src/auth` | **1 / 18** | ✅ ~untouched |
-| `packages/shared` | 14 / 106 | ✅ mostly survives |
-| `apps/server/src/mcp` | 17 / 26 | ⚠️ v2 adds the orchestration toolkit here |
-| `apps/server` overall | **533 changed** | ❌ rewritten |
-| `apps/web` / `client-runtime` / `mobile` | 136 / 65 / 63 | ❌ cut over |
-| `packages/contracts` | 34 | ❌ new v2 contracts |
+| Subsystem                                | Files changed / total | Survives?                                 |
+| ---------------------------------------- | --------------------- | ----------------------------------------- |
+| `infra/relay`                            | **0 / 78**            | ✅ untouched                              |
+| `packages/ssh`                           | **0 / 11**            | ✅ untouched                              |
+| `packages/tailscale`                     | **0 / 5**             | ✅ untouched                              |
+| `apps/server/src/terminal`               | **0 / 8**             | ✅ untouched                              |
+| `apps/desktop/src/ssh`                   | **0 / 4**             | ✅ untouched                              |
+| `apps/server/src/auth`                   | **1 / 18**            | ✅ ~untouched                             |
+| `packages/shared`                        | 14 / 106              | ✅ mostly survives                        |
+| `apps/server/src/mcp`                    | 17 / 26               | ⚠️ v2 adds the orchestration toolkit here |
+| `apps/server` overall                    | **533 changed**       | ❌ rewritten                              |
+| `apps/web` / `client-runtime` / `mobile` | 136 / 65 / 63         | ❌ cut over                               |
+| `packages/contracts`                     | 34                    | ❌ new v2 contracts                       |
 
 **The entire remote/auth/relay/terminal/SSH/Tailscale platform — the substrate that made this fork attractive — survives the hard cut untouched.** That is the "genuinely orthogonal" bucket, and it is large.
 
-#### But our planned work is *not* in that bucket
+#### But our planned work is _not_ in that bucket
 
-| Our work | Orthogonal? | Fate if built on `main` |
-| --- | --- | --- |
-| **Epic aggregate** | ❌ orchestration-adjacent | Built against a decider/projector/read-model that Shape 3 deletes. **Invalidated.** |
-| **A2A toolkit** | ❌ lands in `apps/server/src/mcp` (17/26 changed) | Collides with v2's orchestration toolkit, and is largely **superseded** by it (§7.2). |
-| **Peer lifecycle** | ❌ built on thread lifecycle | v2 replaces `Thread→Turn` with `AppThread→Run→RunAttempt→ExecutionNode`. **Invalidated.** |
-| Infra swap, bundle rename | ✅ | Survives any base. |
-| Cross-machine routing layer | ✅ (above the environment boundary) | Survives any base. |
+| Our work                    | Orthogonal?                                       | Fate if built on `main`                                                                   |
+| --------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **Epic aggregate**          | ❌ orchestration-adjacent                         | Built against a decider/projector/read-model that Shape 3 deletes. **Invalidated.**       |
+| **A2A toolkit**             | ❌ lands in `apps/server/src/mcp` (17/26 changed) | Collides with v2's orchestration toolkit, and is largely **superseded** by it (§7.2).     |
+| **Peer lifecycle**          | ❌ built on thread lifecycle                      | v2 replaces `Thread→Turn` with `AppThread→Run→RunAttempt→ExecutionNode`. **Invalidated.** |
+| Infra swap, bundle rename   | ✅                                                | Survives any base.                                                                        |
+| Cross-machine routing layer | ✅ (above the environment boundary)               | Survives any base.                                                                        |
 
 **Essentially 100% of the orchestration work in my §2 estimate would be written against code upstream deletes.** Forking `main` now is the one option clearly ruled out.
 
@@ -348,9 +348,9 @@ One nuance worth correcting in the peer's summary: Shape 3 did not delete the ev
 
 **Upstream's release gate is fresh-state-only. We are fresh-state.**
 
-Stage 5 — migrating installations that already contain v1 threads — is the sole undecided blocker, and the plan is explicit: *"Shapes 4.0 and 4.5 target a fully working V2 application on fresh V2 state while preserving legacy rows and files untouched."* T3 cannot ship v2 to 100k existing users without solving a data migration. **We have no users and no v1 data.** The thing blocking them is precisely the thing we do not need.
+Stage 5 — migrating installations that already contain v1 threads — is the sole undecided blocker, and the plan is explicit: _"Shapes 4.0 and 4.5 target a fully working V2 application on fresh V2 state while preserving legacy rows and files untouched."_ T3 cannot ship v2 to 100k existing users without solving a data migration. **We have no users and no v1 data.** The thing blocking them is precisely the thing we do not need.
 
-We can build on v2 *before upstream can ship it*, and the `LegacyV1ThreadImporter` (#4400) already on the branch means even the migration groundwork exists if we ever want it.
+We can build on v2 _before upstream can ship it_, and the `LegacyV1ThreadImporter` (#4400) already on the branch means even the migration groundwork exists if we ever want it.
 
 Supporting evidence: the branch is 6 commits behind `main` and reconciled daily; new features are landing directly on it (#5589 worktrees, #5544 thread handoff, #5499 session import, #5003 GitHub waitpoints), which is what a team does with a branch it considers the future, not a spike.
 
@@ -358,15 +358,15 @@ Supporting evidence: the branch is 6 commits behind `main` and reconciled daily;
 
 **Squash-merge risk.** If #2829 lands as a squash, our base commit vanishes from upstream history and rebasing becomes a manual replay rather than a clean rebase.
 
-Mitigation, which is just §6's discipline applied earlier: keep our additions in **new files** (new aggregate, new toolkit, new projection). A squash merge is then survivable — we cherry-pick our own commits onto the new base. Rebase pain is proportional to how much we edited *existing* files, which the discipline already drives toward zero.
+Mitigation, which is just §6's discipline applied earlier: keep our additions in **new files** (new aggregate, new toolkit, new projection). A squash merge is then survivable — we cherry-pick our own commits onto the new base. Rebase pain is proportional to how much we edited _existing_ files, which the discipline already drives toward zero.
 
 #### Recommended sequencing — start now, absorb the merge as a small delta
 
-| Phase | Base | Work |
-| --- | --- | --- |
-| **1 (now, ~2–4 wks)** | branch, read-only | Infra swap (§1), bundle rename, read the 9 `docs/orchestration-v2/` design docs, design epic + artifacts + roles against **v2 contracts**, prototype the A2A peer layer against the existing orchestrator MCP. Almost all base-independent. |
-| **2 (on #2829 merge)** | merged `main` | Rebase; build the orchestration-adjacent work — epic aggregate, peer semantics, roles — against a settled v2. |
-| **3** | merged `main` | Cross-machine routing layer above the environment boundary. |
+| Phase                  | Base              | Work                                                                                                                                                                                                                                        |
+| ---------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1 (now, ~2–4 wks)**  | branch, read-only | Infra swap (§1), bundle rename, read the 9 `docs/orchestration-v2/` design docs, design epic + artifacts + roles against **v2 contracts**, prototype the A2A peer layer against the existing orchestrator MCP. Almost all base-independent. |
+| **2 (on #2829 merge)** | merged `main`     | Rebase; build the orchestration-adjacent work — epic aggregate, peer semantics, roles — against a settled v2.                                                                                                                               |
+| **3**                  | merged `main`     | Cross-machine routing layer above the environment boundary.                                                                                                                                                                                 |
 
 This never writes a line against v1, starts immediately, and shrinks the merge to a small delta.
 
@@ -376,7 +376,7 @@ Verified against `docs/orchestration-v2/orchestrator-mcp-server.md` on the branc
 
 #### Free
 
-- **`delegate_task`** — spawn an app-owned child agent on *any* provider instance, durable result, optional `role` instruction in the same call. Notably: *"The child receives only the supplied task prompt… Parent conversation history is not copied into the child."* That context-isolation decision is one we'd have had to make and get right.
+- **`delegate_task`** — spawn an app-owned child agent on _any_ provider instance, durable result, optional `role` instruction in the same call. Notably: _"The child receives only the supplied task prompt… Parent conversation history is not copied into the child."_ That context-isolation decision is one we'd have had to make and get right.
 - **`task_status` / `task_cancel`**, **`create_threads`**, **`t3_thread_start` / `list` / `read` / `send` / `wait` / `interrupt`**.
 - **Send modes: auto / queue / steer / restart** — including steer-by-cancel-and-restart for providers without native steering. This is subtle, provider-specific work.
 - **Scheduled tasks.**
@@ -390,20 +390,20 @@ Verified against `docs/orchestration-v2/orchestrator-mcp-server.md` on the branc
 
 #### Still ours
 
-- **Peer-to-peer messaging with typed silence.** v2's addressing is **hierarchical** — parent delegates to child, waits for a durable result. Traycer's model is peer↔peer with `expectReply` semantics and typed silence (a peer that processes without reporting back). `t3_thread_send` + `wait` is the right primitive, but the *addressing and reply-obligation model* is ours.
+- **Peer-to-peer messaging with typed silence.** v2's addressing is **hierarchical** — parent delegates to child, waits for a durable result. Traycer's model is peer↔peer with `expectReply` semantics and typed silence (a peer that processes without reporting back). `t3_thread_send` + `wait` is the right primitive, but the _addressing and reply-obligation model_ is ours.
 - **Epic container + artifacts.** v2 has project→thread plus a relationship graph. No epic/story grouping, no artifact concept.
 - **Roles as first-class.** v2's `role` is an optional instruction string on `delegate_task`. Traycer-grade roles — agent types with tool policies, model/effort defaults, a selection guide — are ours.
 - **Cross-machine routing.** Still explicitly absent; still a layer above the environment boundary.
 
 #### Effect on the estimate: **shrinks and shifts**
 
-| Component | §2 estimate | Revised |
-| --- | --- | --- |
-| A2A broker + MCP | 2–3 wks | **~1 wk** (peer semantics + typed silence on existing tools) |
-| Peer lifecycle | 2–3 wks | **~1 wk** (delegate/fork/relationship graph/context transfer exist) |
-| Epic container + artifacts | 1–2 wks | **2–3 wks** (artifacts added; no v2 equivalent) |
-| Roles | folded in | **~1 wk** |
-| Cross-machine routing | unchanged | unchanged |
+| Component                  | §2 estimate | Revised                                                             |
+| -------------------------- | ----------- | ------------------------------------------------------------------- |
+| A2A broker + MCP           | 2–3 wks     | **~1 wk** (peer semantics + typed silence on existing tools)        |
+| Peer lifecycle             | 2–3 wks     | **~1 wk** (delegate/fork/relationship graph/context transfer exist) |
+| Epic container + artifacts | 1–2 wks     | **2–3 wks** (artifacts added; no v2 equivalent)                     |
+| Roles                      | folded in   | **~1 wk**                                                           |
+| Cross-machine routing      | unchanged   | unchanged                                                           |
 
 **Build effort: ~2–3 months → ~6–10 weeks.** But it is now **gated on the merge** for the orchestration-adjacent portion. Calendar time is roughly flat; delivered scope is materially higher, because we inherit delegation, steering, context transfer, and five-provider MCP injection rather than building them.
 
@@ -412,7 +412,7 @@ Verified against `docs/orchestration-v2/orchestrator-mcp-server.md` on the branc
 **Coherent enough to build against. Credible self-report.**
 
 - **913 tests** on the branch vs 822 on `main`; 67 v2 test files; replay-backed fixtures with named scenarios (`thread_fork_native_prior_turn`).
-- **The TODO is honest, and that is the strongest credibility signal.** It carries genuinely unchecked boxes — projection rendering for rollback state, interrupt edge cases (*"provider emits chunks after interrupt requested"*), queue/steer projection tests — while marking five shapes complete. Aspirational plans don't leave specific boxes unticked; they claim uniform completion. The unchecked items are **projection-hardening edge cases, not core mechanics.**
+- **The TODO is honest, and that is the strongest credibility signal.** It carries genuinely unchecked boxes — projection rendering for rollback state, interrupt edge cases (_"provider emits chunks after interrupt requested"_), queue/steer projection tests — while marking five shapes complete. Aspirational plans don't leave specific boxes unticked; they claim uniform completion. The unchecked items are **projection-hardening edge cases, not core mechanics.**
 - **Actively reconciled**: 6 commits behind `main`, latest reconcile 2026-08-14. New features landing on it directly.
 
 **Caveats:** it is a draft PR at 858 files — review could still force changes; `Orchestrator.ts` is **7,253 lines**, a genuine maintainability concern and the single largest file in either tree; and Stage 5 remains undecided (irrelevant to us, material to upstream's timeline).

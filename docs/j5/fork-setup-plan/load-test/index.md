@@ -50,37 +50,37 @@ The 250 ms p95 / 1,000 ms batch thresholds are an operational definition of “f
 
 Five fresh runs were recorded. Values below are medians across runs; ranges show observed minima and maxima.
 
-| Measurement | One active thread | 30 active threads |
-| --- | --- | --- |
-| Dispatch p50 | 1.102 ms (0.960–1.297) | 0.700 ms (0.691–0.844) |
-| Dispatch p95 | 3.404 ms (3.068–3.831) | 1.017 ms (0.821–1.101) |
-| Whole batch | sequential samples, not timed as one batch | 22.809 ms (21.914–25.534) |
-| Concurrent creation p95 | — | 1.352 ms (0.993–1.642) |
-| Concurrent creation batch | — | 19.991 ms (19.781–24.503) |
+| Measurement               | One active thread                          | 30 active threads         |
+| ------------------------- | ------------------------------------------ | ------------------------- |
+| Dispatch p50              | 1.102 ms (0.960–1.297)                     | 0.700 ms (0.691–0.844)    |
+| Dispatch p95              | 3.404 ms (3.068–3.831)                     | 1.017 ms (0.821–1.101)    |
+| Whole batch               | sequential samples, not timed as one batch | 22.809 ms (21.914–25.534) |
+| Concurrent creation p95   | —                                          | 1.352 ms (0.993–1.642)    |
+| Concurrent creation batch | —                                          | 19.991 ms (19.781–24.503) |
 
 The 30-key p95 was 25–32% of the single-key sequential p95 in these runs. That direction is expected from independent keyed dispatch plus SQLite/runtime warmup; it is not evidence that concurrency makes individual work intrinsically faster.
 
 ### Memory and event store
 
-| Measurement | Result |
-| --- | --- |
-| Median peak RSS growth | 5,881,856 bytes (5.61 MiB) |
-| Peak RSS growth range | 5,799,936–8,241,152 bytes |
-| Unified v2 events | 1 before → 91 after; exactly 90 measured events |
-| Stored-event result reconciliation | 90 returned / 90 durable |
-| SQLite + WAL + SHM growth | 4,205,552 bytes (4.01 MiB), identical in all five runs |
+| Measurement                        | Result                                                 |
+| ---------------------------------- | ------------------------------------------------------ |
+| Median peak RSS growth             | 5,881,856 bytes (5.61 MiB)                             |
+| Peak RSS growth range              | 5,799,936–8,241,152 bytes                              |
+| Unified v2 events                  | 1 before → 91 after; exactly 90 measured events        |
+| Stored-event result reconciliation | 90 returned / 90 durable                               |
+| SQLite + WAL + SHM growth          | 4,205,552 bytes (4.01 MiB), identical in all five runs |
 
 The stable 4.01 MiB delta is primarily SQLite/WAL allocation footprint for this short fresh-database run, not an estimate of per-event payload size. The exact event reconciliation shows no dropped or duplicated command events. RSS stayed at the allocator's post-run high-water mark; a five-run fresh-process test cannot prove or disprove a long-soak leak. No superlinear growth or contention signal appeared within this ticket's scope.
 
 ## Provider support matrix
 
-| Driver | Day-one status | Observed CLI | In-app proof |
-| --- | --- | --- | --- |
-| `codex` | **Usable** | `codex-cli 0.147.0`; J5 discovery: installed, authenticated, ready | T2 completed a real J5 Codex turn with GPT-5.6-Sol and an exact response. A fresh ephemeral/read-only direct smoke also exited 0. |
-| `claudeAgent` | **Usable** | Claude Code 2.1.232; J5 discovery: installed, authenticated, ready | Fresh isolated J5 turn completed through `claudeAgent` / Claude Fable 5 in 9.8 s with exact response `J5 Claude provider smoke complete.` The durable run status is `completed`; both messages are non-streaming. |
-| `cursor` | Not usable today | CLI absent; J5 cache says not installed and driver disabled | Not run; out of scope to install an unavailable provider. |
-| `grok` | Not usable today | CLI absent; J5 discovery reports `grok` not on PATH | Not run. |
-| `opencode` | Not usable today | CLI absent; J5 discovery reports `opencode` not on PATH | Not run. |
+| Driver        | Day-one status   | Observed CLI                                                       | In-app proof                                                                                                                                                                                                      |
+| ------------- | ---------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `codex`       | **Usable**       | `codex-cli 0.147.0`; J5 discovery: installed, authenticated, ready | T2 completed a real J5 Codex turn with GPT-5.6-Sol and an exact response. A fresh ephemeral/read-only direct smoke also exited 0.                                                                                 |
+| `claudeAgent` | **Usable**       | Claude Code 2.1.232; J5 discovery: installed, authenticated, ready | Fresh isolated J5 turn completed through `claudeAgent` / Claude Fable 5 in 9.8 s with exact response `J5 Claude provider smoke complete.` The durable run status is `completed`; both messages are non-streaming. |
+| `cursor`      | Not usable today | CLI absent; J5 cache says not installed and driver disabled        | Not run; out of scope to install an unavailable provider.                                                                                                                                                         |
+| `grok`        | Not usable today | CLI absent; J5 discovery reports `grok` not on PATH                | Not run.                                                                                                                                                                                                          |
+| `opencode`    | Not usable today | CLI absent; J5 discovery reports `opencode` not on PATH            | Not run.                                                                                                                                                                                                          |
 
 Claude Code displayed an available 2.1.233 update, but installed 2.1.232 passed the adapter smoke; no provider version was changed or globally pinned. Codex 0.147.0 also passed without a J5-specific version pin.
 

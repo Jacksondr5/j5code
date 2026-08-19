@@ -11,10 +11,10 @@ Relevant beyond A1: **A7 (upstream rebase) inherits the consequence**, and A2–
 
 ## The decision
 
-|  |  |
-| --- | --- |
-| **Chosen** | A J5-owned migrator with its own tracking table and its own id space starting at 1 |
-| **Rejected** | Appending `[50, "J5A2ALedger", …]` to upstream's `migrationEntries` |
+|                            |                                                                                                                                                |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Chosen**                 | A J5-owned migrator with its own tracking table and its own id space starting at 1                                                             |
+| **Rejected**               | Appending `[50, "J5A2ALedger", …]` to upstream's `migrationEntries`                                                                            |
 | **Upstream files touched** | One appended startup call in `apps/server/src/persistence/Layers/Sqlite.ts`. `apps/server/src/persistence/Migrations.ts` stays byte-unmodified |
 
 ## Why the obvious route is unsafe
@@ -39,7 +39,7 @@ flowchart TD
     style C fill:#ef6c00,color:#fff
 ```
 
-Step **C** is loud and therefore survivable. Step **F** is the one that decided this: a schema the application believes is migrated but isn't, with no error raised anywhere — and it recurs at *every* upstream advance, not only #2829.
+Step **C** is loud and therefore survivable. Step **F** is the one that decided this: a schema the application believes is migrated but isn't, with no error raised anywhere — and it recurs at _every_ upstream advance, not only #2829.
 
 ## Why the chosen route costs less
 
@@ -57,4 +57,4 @@ Step **C** is loud and therefore survivable. Step **F** is the one that decided 
 
 ## Carried, not closed
 
-The one upstream file still in play is `Layers/Sqlite.ts:40`, where the J5 migration call is appended after `runMigrations()`. That line is a rebase conflict candidate every time upstream edits its persistence setup — a *visible* conflict, which is the trade accepted here in exchange for removing the silent one.
+The one upstream file still in play is `Layers/Sqlite.ts:40`, where the J5 migration call is appended after `runMigrations()`. That line is a rebase conflict candidate every time upstream edits its persistence setup — a _visible_ conflict, which is the trade accepted here in exchange for removing the silent one.

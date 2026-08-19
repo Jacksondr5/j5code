@@ -17,17 +17,17 @@ Rulings baked in (Jackson, 2026-08-17): association auto-first, agent-driven exp
 
 J5 Code is a fork of T3 Code being extended into a **fleet-management platform**: one person running many long-lived AI agents that build code, open PRs, and watch production. This issue is the first workstream of the fleet dashboard: a pane inside the app showing the **pull requests the agent fleet is working on**, with one action — nudging an agent about a PR.
 
-**The governing product principle — this shapes every choice below:** J5 Code builds *primitives* that make agent workflows successful. It must never codify any particular workflow's methodology into the product. The prior art below comes from a specific three-agent PR workflow ("PR Groups") with its own playbook rules and readiness gates — that playbook is *one workflow expressible on the primitives*, never the product's opinion. When you face a design choice, ask "what generic capability does this need," not "how do I productize that workflow." Concretely: the prior-art dashboard computes ten workflow-specific "readiness gates" — **those do not ship**. The pane shows raw measured facts; workflow-defined checks become a separate, generic primitive later.
+**The governing product principle — this shapes every choice below:** J5 Code builds _primitives_ that make agent workflows successful. It must never codify any particular workflow's methodology into the product. The prior art below comes from a specific three-agent PR workflow ("PR Groups") with its own playbook rules and readiness gates — that playbook is _one workflow expressible on the primitives_, never the product's opinion. When you face a design choice, ask "what generic capability does this need," not "how do I productize that workflow." Concretely: the prior-art dashboard computes ten workflow-specific "readiness gates" — **those do not ship**. The pane shows raw measured facts; workflow-defined checks become a separate, generic primitive later.
 
 **Prior art (public, study it):** `github.com/Jacksondr5/pr-group-dashboard` — a zero-dependency Node/SQLite board built to run a real fleet of PR-working agents. Its README is a compressed field manual of operational lessons; the design principles below are distilled from it and from interviews with the agents that used it.
 
 ## Principles (inherited from prior art; treat as requirements)
 
 1. **Measured, not recalled.** Every fact on screen is measured from GitHub or from platform state by code — never asserted by an agent from memory, never cached silently past its freshness.
-2. **Never guess.** `mergeable: UNKNOWN` renders as "?", a not-yet-polled row renders as "measuring…", an unreachable API renders as a loud staleness clock. A plausible fake is strictly worse than a visible gap. No state may ever *look* green because data was missing.
+2. **Never guess.** `mergeable: UNKNOWN` renders as "?", a not-yet-polled row renders as "measuring…", an unreachable API renders as a loud staleness clock. A plausible fake is strictly worse than a visible gap. No state may ever _look_ green because data was missing.
 3. **Provenance is visible.** Measured facts (from GitHub) and asserted facts (a human clicked "associate") are stored and rendered distinguishably. Measured tables must be safely wipe-and-rebuildable.
 4. **A broken poller goes quiet, not loud-wrong.** If GitHub or platform state is unreachable, keep the last data with a staleness indicator — never render an outage as "everything is fine" or "everything is dead."
-5. **State is read-only; actions route through agents.** The pane never acts on GitHub (no merge, no comment, no close). Its one action sends a *message to an agent* through the app's normal agent-messaging path, so the UI can never hold state the agents don't know about.
+5. **State is read-only; actions route through agents.** The pane never acts on GitHub (no merge, no comment, no close). Its one action sends a _message to an agent_ through the app's normal agent-messaging path, so the UI can never hold state the agents don't know about.
 
 ## Scope
 

@@ -31,20 +31,20 @@ graph TB
 
 ## Tech stack
 
-| Layer | Choice |
-| --- | --- |
-| Language | TypeScript throughout; **Rust** for `native/resource-monitor`; **C ABI** (`libghostty-vt`) for terminals |
-| Runtime | Node `^24.13.1` |
-| Effect system | `effect` (the `effect-smol` beta line, `4.0.0-beta.103` catalog) — Effect is used pervasively on the server and in `client-runtime` |
-| Build | **Vite+ (`vp`)** as the monorepo task runner, formatter, linter, and test runner; `@effect/tsgo` / `@typescript/native-preview` for typechecking |
-| Package manager | pnpm 11.10.0, workspace catalog for version pinning |
-| Client state | `@effect/atom-react` (Atom factories), TanStack Router (`routeTree.gen.ts`) |
-| Lists | `@legendapp/list` (shared web + mobile) |
-| Diffs | `@pierre/diffs` + a web worker pool |
-| DB | SQLite (`NodeSqliteClient.ts`); relay uses PlanetScale |
-| Auth (cloud) | Clerk (web, desktop via `@clerk/electron`, mobile via `@clerk/expo`) |
-| Cloud infra | Cloudflare Workers + tunnels, deployed with **Alchemy** |
-| Lint | oxlint + a **custom in-repo plugin** (`oxlint-plugin-t3code`) |
+| Layer           | Choice                                                                                                                                           |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Language        | TypeScript throughout; **Rust** for `native/resource-monitor`; **C ABI** (`libghostty-vt`) for terminals                                         |
+| Runtime         | Node `^24.13.1`                                                                                                                                  |
+| Effect system   | `effect` (the `effect-smol` beta line, `4.0.0-beta.103` catalog) — Effect is used pervasively on the server and in `client-runtime`              |
+| Build           | **Vite+ (`vp`)** as the monorepo task runner, formatter, linter, and test runner; `@effect/tsgo` / `@typescript/native-preview` for typechecking |
+| Package manager | pnpm 11.10.0, workspace catalog for version pinning                                                                                              |
+| Client state    | `@effect/atom-react` (Atom factories), TanStack Router (`routeTree.gen.ts`)                                                                      |
+| Lists           | `@legendapp/list` (shared web + mobile)                                                                                                          |
+| Diffs           | `@pierre/diffs` + a web worker pool                                                                                                              |
+| DB              | SQLite (`NodeSqliteClient.ts`); relay uses PlanetScale                                                                                           |
+| Auth (cloud)    | Clerk (web, desktop via `@clerk/electron`, mobile via `@clerk/expo`)                                                                             |
+| Cloud infra     | Cloudflare Workers + tunnels, deployed with **Alchemy**                                                                                          |
+| Lint            | oxlint + a **custom in-repo plugin** (`oxlint-plugin-t3code`)                                                                                    |
 
 ## Monorepo layout
 
@@ -71,7 +71,7 @@ oxlint-plugin-t3code   custom lint rules
 .repos/                vendored READ-ONLY reference repos (effect-smol, alchemy-effect)
 ```
 
-`.repos/` is a notable convention: upstream sources vendored for agents to *read patterns from* and forbidden to import or edit. AGENTS.md: *"Prefer their patterns over invented ones."*
+`.repos/` is a notable convention: upstream sources vendored for agents to _read patterns from_ and forbidden to import or edit. AGENTS.md: _"Prefer their patterns over invented ones."_
 
 ## The wire: Effect RPC, not a hand-rolled push bus
 
@@ -122,7 +122,7 @@ sequenceDiagram
 
 **Command/event naming is disciplined**: commands are imperative (`thread.turn.start`), events are past tense (`thread.turn-start-requested`, `thread.created`). Some commands are client-dispatchable; others (`thread.message.assistant.delta`, `thread.turn.diff.complete`) are internal and only produced by server-side reactors.
 
-Glossary shortcut from the docs: *"`requested` → intent recorded. `completed` → result applied. `receipt` → async milestone signal, for tests."*
+Glossary shortcut from the docs: _"`requested` → intent recorded. `completed` → result applied. `receipt` → async milestone signal, for tests."_
 
 ## Reactors and drainable workers
 
@@ -134,7 +134,7 @@ Follow-up work runs in queue-backed workers built on `packages/shared/src/Draina
 
 `DrainableWorker` pairs a transactional queue with a transactional count of outstanding items: `enqueue` atomically offers and increments, processing decrements, `drain` retries until the count reaches zero. All three expose `drain`, so tests await "queue empty **and** current item finished" rather than sleeping.
 
-**`RuntimeReceiptBus`** publishes typed async-milestone receipts (`checkpoint.baseline.captured`, `checkpoint.diff.finalized`, `turn.processing.quiesced`). Notably, `RuntimeReceiptBusLive` — the production layer — **publishes nothing**; only the test layer is PubSub-backed. The docs are explicit: *"Do not build production behavior on receipts."* This is a mature refinement of the March design: the mechanism was kept for determinism in tests and deliberately denied any production role.
+**`RuntimeReceiptBus`** publishes typed async-milestone receipts (`checkpoint.baseline.captured`, `checkpoint.diff.finalized`, `turn.processing.quiesced`). Notably, `RuntimeReceiptBusLive` — the production layer — **publishes nothing**; only the test layer is PubSub-backed. The docs are explicit: _"Do not build production behavior on receipts."_ This is a mature refinement of the March design: the mechanism was kept for determinism in tests and deliberately denied any production role.
 
 ## Provider drivers
 
@@ -143,7 +143,7 @@ Two registries separate configuration from live processes:
 - `ProviderInstanceRegistry` keys configured instances by `ProviderInstanceId`; creating one looks up the driver by `driverKind`, decodes `entry.config` with **that driver's own schema**, opens a child scope, and calls `driver.create`.
 - `ProviderAdapterRegistry` resolves an instance ID to its live adapter.
 
-`ProviderService` sits on top and routes session/turn operations for a *thread*, so callers name a thread, not an agent. The adapter contract (`ProviderAdapter.ts`) is ~15 members: `startSession`, `sendTurn`, `interruptTurn`, `respondToRequest`, `respondToUserInput`, `stopSession`, `listSessions`, `hasSession`, `readThread`, `rollbackThread`, `stopAll`, plus `provider`, `capabilities`, and `streamEvents`.
+`ProviderService` sits on top and routes session/turn operations for a _thread_, so callers name a thread, not an agent. The adapter contract (`ProviderAdapter.ts`) is ~15 members: `startSession`, `sendTurn`, `interruptTurn`, `respondToRequest`, `respondToUserInput`, `stopSession`, `listSessions`, `hasSession`, `readThread`, `rollbackThread`, `stopAll`, plus `provider`, `capabilities`, and `streamEvents`.
 
 ## Persistence
 
@@ -156,7 +156,7 @@ Two families of tables:
 
 Migration history reads as a performance changelog: `019_ProjectionSnapshotLookupIndexes`, `029_ProjectionThreadDetailOrderingIndexes`, `030_ProjectionThreadShellArchiveIndexes`, `037_ProjectionTurnsKeysetIndex`. Also `031_AuthAuthorizationScopes` — a deliberate **hard cutover** from role-bearing to scoped auth records that deletes existing pairing links and sessions rather than silently mapping old `owner`/`client` roles to new capabilities. Correct call, and documented as such.
 
-State lives under a T3 home directory; worktree dev state defaults to a gitignored `.t3` that *deliberately outranks* an ambient `T3CODE_HOME` so agents can't land on shared state by accident.
+State lives under a T3 home directory; worktree dev state defaults to a gitignored `.t3` that _deliberately outranks_ an ambient `T3CODE_HOME` so agents can't land on shared state by accident.
 
 ## Client runtime
 
@@ -166,7 +166,7 @@ Hard rules from `docs/internals/connection-runtime.md`:
 
 - The **supervisor is the only retry owner**. Transient failures retry forever with exponential backoff capped at 16s; a connection stable for 30s resets accumulated backoff. Auth/config failures stay blocked until an external wakeup.
 - React components never construct transports, retry loops, or RPC clients.
-- The UI does **not** infer connection health from cached data or the existence of a transport object. `connected` means the socket opened *and* the initial config RPC succeeded.
+- The UI does **not** infer connection health from cached data or the existence of a transport object. `connected` means the socket opened _and_ the initial config RPC succeeded.
 - Shell and thread synchronization are independent data states. "A healthy RPC transport with a failed shell subscription is shown as connected with a synchronization error, not as a reconnect that is not actually scheduled." — this is the anti-lying-spinner rule made structural.
 - The package **has no root export**; consumers must import explicit subpaths. Non-exported files are implementation details by construction.
 

@@ -11,7 +11,7 @@ How Traycer structures work: Epics as containers, the artifact model, multi-fold
 
 ## 1. The Epic
 
-An **Epic** is the unit of organization: one durable container holding agents, terminals, artifacts, and workspace folders, plus its collaborator set. There are two modes — *regular* for quick one-off tasks, *Epic mode* for structured multi-step work.
+An **Epic** is the unit of organization: one durable container holding agents, terminals, artifacts, and workspace folders, plus its collaborator set. There are two modes — _regular_ for quick one-off tasks, _Epic mode_ for structured multi-step work.
 
 ```mermaid
 flowchart TB
@@ -39,7 +39,7 @@ The persisted record (`protocol/src/persistence/_internal/epic-schemas.ts`, sche
 }
 ```
 
-This is the *materialized* shape — the plain-JSON equivalent the versioning framework diffs. On disk it's Yjs: `Y.XmlFragment` for artifact bodies, `Y.Array` for chat messages/events, `Y.Map` for the keyed collections.
+This is the _materialized_ shape — the plain-JSON equivalent the versioning framework diffs. On disk it's Yjs: `Y.XmlFragment` for artifact bodies, `Y.Array` for chat messages/events, `Y.Map` for the keyed collections.
 
 Note V200 collapsed what V100 stored as four parallel maps (specs/tickets/stories/reviews) into one `artifacts` map with a `kind` discriminator, and converted legacy "executions" into tickets with nested spec/review children. A migration chain terminates at V200. Consolidating four near-identical collections into one discriminated map was the right cleanup.
 
@@ -48,16 +48,17 @@ Note V200 collapsed what V100 stored as four parallel maps (specs/tickets/storie
 Four kinds sharing a base:
 
 ```ts
-{ id, folderName, title, artifactRoomId, createdAt, updatedAt,
-  createdManually, parentId }
+{
+  (id, folderName, title, artifactRoomId, createdAt, updatedAt, createdManually, parentId);
+}
 ```
 
-| Kind | Extra fields | Purpose |
-| --- | --- | --- |
-| `spec` | — | Durable context: decision logs, walkthroughs, planning docs |
-| `ticket` | `assignee`, `status` | Implementation work |
-| `story` | `assignee`, `status` | Groups related artifacts, nothing more |
-| `review` | — | Review comments / critique |
+| Kind     | Extra fields         | Purpose                                                     |
+| -------- | -------------------- | ----------------------------------------------------------- |
+| `spec`   | —                    | Durable context: decision logs, walkthroughs, planning docs |
+| `ticket` | `assignee`, `status` | Implementation work                                         |
+| `story`  | `assignee`, `status` | Groups related artifacts, nothing more                      |
+| `review` | —                    | Review comments / critique                                  |
 
 `status` is an integer from a **separately versioned** `ticket-status` record in the common registry, so the status vocabulary evolves independently of the artifact shape. Good seam.
 
@@ -71,14 +72,16 @@ Bodies do **not** live in the Epic root doc. Each artifact's body is a root `Y.X
 
 ```ts
 export const ARTIFACT_BODY_FRAGMENT_PREFIX = "artifact-body:";
-export function artifactBodyFragmentName(id: string) { return `${PREFIX}${id}`; }
+export function artifactBodyFragmentName(id: string) {
+  return `${PREFIX}${id}`;
+}
 ```
 
-with an explicit instruction that *"every consumer that resolves an artifact body must derive the fragment name from this helper rather than hard-coding the prefix."*
+with an explicit instruction that _"every consumer that resolves an artifact body must derive the fragment name from this helper rather than hard-coding the prefix."_
 
 `epic.subscribe` multiplexes both scopes over one subscription: root-scoped frames carry no `artifactRoomId` (root is implicit), room-scoped frames must carry one. Room frames include `hostArtifactRoomStateVectorBase64` so the client can advance per-room coverage without waiting for a full snapshot, and an `artifactRoomState` frame (`unavailable`/`retrying`/`ready`) drives per-artifact availability UI.
 
-**Why this matters for us:** they clearly hit a scaling wall with everything in one doc and split artifact bodies out. The lesson they did *not* apply is that **chat messages were left behind in the root doc** — see the [performance deep dive](../performance/index.md). Splitting bodies into rooms is the correct pattern; it should have been applied to messages too.
+**Why this matters for us:** they clearly hit a scaling wall with everything in one doc and split artifact bodies out. The lesson they did _not_ apply is that **chat messages were left behind in the root doc** — see the [performance deep dive](../performance/index.md). Splitting bodies into rooms is the correct pattern; it should have been applied to messages too.
 
 An `earlyMeta` frame is emitted **before** Tiptap/cloud sync completes so the renderer can paint workspace-derived UI (git status, file tree, repo chip, permissions) without waiting for the snapshot — and it deliberately omits fields that are only knowable after the room opens, rather than sending placeholders. Careful loading-state design.
 
@@ -138,11 +141,11 @@ stateDiagram-v2
 
 Setup states: `not_required` · `pending` · `running` · `succeeded` · `failed` · `cancelled`, with `worktree.retrySetup` and per-repo setup scripts (`worktree.setRepoScripts`).
 
-**Submodule ownership** is the sharpest detail. `worktreeOwnedSubmoduleSchema` records `{repoIdentifier, branch}` for each submodule the binding *created* a branch for during setup — deliberately distinct from whatever live checkout state a later probe finds. It exists so the merge rollup can require **every** owned branch (superproject + each submodule) to have landed — a true AND. A detached or pinned submodule with no branch is *not owned* and never recorded. Distinguishing "what I created" from "what I observe" is exactly the kind of thing that's obvious in hindsight and painful to retrofit.
+**Submodule ownership** is the sharpest detail. `worktreeOwnedSubmoduleSchema` records `{repoIdentifier, branch}` for each submodule the binding _created_ a branch for during setup — deliberately distinct from whatever live checkout state a later probe finds. It exists so the merge rollup can require **every** owned branch (superproject + each submodule) to have landed — a true AND. A detached or pinned submodule with no branch is _not owned_ and never recorded. Distinguishing "what I created" from "what I observe" is exactly the kind of thing that's obvious in hindsight and painful to retrofit.
 
-RPC surface: `create`, `createPaths`, `import`, `delete`, `deleteByPath`, `retrySetup`, `setEntryMode`, `setRepoScripts`, `getBinding`, `listAllForHost`, `listBindingsForEpic`, `listByWorkspacePaths`, `listBranches`, plus `worktree.changed` / `worktree.delete` streams. Settings → Worktrees is a full manager (paginated, filtered, tiered enrichment, PR chips, bulk delete) — and, tellingly, one of only two `perf(...)` commits in the repo was *"manual-refresh worktree settings and batch enrichment RPCs"*.
+RPC surface: `create`, `createPaths`, `import`, `delete`, `deleteByPath`, `retrySetup`, `setEntryMode`, `setRepoScripts`, `getBinding`, `listAllForHost`, `listBindingsForEpic`, `listByWorkspacePaths`, `listBranches`, plus `worktree.changed` / `worktree.delete` streams. Settings → Worktrees is a full manager (paginated, filtered, tiered enrichment, PR chips, bulk delete) — and, tellingly, one of only two `perf(...)` commits in the repo was _"manual-refresh worktree settings and batch enrichment RPCs"_.
 
-**Privacy note:** binding state is host-local (SQLite) and explicitly never synced — *"cloud collaborators must not see another collaborator's local paths or setup status."*
+**Privacy note:** binding state is host-local (SQLite) and explicitly never synced — _"cloud collaborators must not see another collaborator's local paths or setup status."_
 
 ## 6. Host binding — the load-bearing rule
 
@@ -159,12 +162,12 @@ Reachability is checked **at tab-open time only**, never reactively. There is de
 
 The renderer addresses **two host scopes simultaneously**:
 
-| Scope | Accessor | Used by |
-| --- | --- | --- |
-| **Default host** | `useReactiveActiveHostId()` / `useHostClient()` | Epic list, opening artifacts, notifications, host-status footer |
-| **Tab-scoped host** | `useTabHostId()` from `<TabHostProvider>` | Everything inside a chat or terminal tab |
+| Scope               | Accessor                                        | Used by                                                         |
+| ------------------- | ----------------------------------------------- | --------------------------------------------------------------- |
+| **Default host**    | `useReactiveActiveHostId()` / `useHostClient()` | Epic list, opening artifacts, notifications, host-status footer |
+| **Tab-scoped host** | `useTabHostId()` from `<TabHostProvider>`       | Everything inside a chat or terminal tab                        |
 
-With the standing instruction: *"When adding a query/mutation hook, decide explicitly which scope it serves. Don't write a hook that silently switches scopes based on render context."*
+With the standing instruction: _"When adding a query/mutation hook, decide explicitly which scope it serves. Don't write a hook that silently switches scopes based on render context."_
 
 **This is the single best organizational decision in the codebase.** Immutable per-tab host binding + clone-not-migrate + open-time-only reachability eliminates an entire class of bugs (half-migrated tabs, reactive host thrash, PTYs that appear to move). Multi-machine agent fleets is our headline feature — we should adopt this rule wholesale.
 
@@ -172,20 +175,20 @@ A `LEGACY_HOST_ID = "legacy"` sentinel marks chats migrated from v1.0.0 task-cha
 
 ## 7. Persistence: where everything actually lives
 
-| Data | Store | Sync | Notes |
-| --- | --- | --- | --- |
-| Epic metadata, artifact metadata, chat + TUI agent records, `parentId` trees | Root Epic **Y.Doc** | Cloud (Tiptap rooms) | CRDT, cross-device |
-| Artifact **bodies** | Per-room **Y.Doc** (`artifact-body:{id}`) | Cloud | Separate rooms |
-| Chat **messages / content blocks** | Flat `YKeyValue` collections in the root doc | Cloud | ⚠ GUI never reads these from the doc — `chat.subscribe` streams `Message[]`. See perf deep dive. |
-| Comment threads | Root Y.Doc update channel | Cloud | No typed frame |
-| Awareness (cursors, presence, `agentWorking`) | Yjs Awareness | Cloud-merged | One entry per host; union is the cross-host active-agent view |
-| Worktree bindings, setup state | Host **SQLite** | **Never** | Host-local by design |
-| Provider credentials | Shared credentials file, WAL + lock | Never | Adversarial fuzz tests exist |
-| Canvas layout, tabs, drafts, settings | Renderer **Zustand + persist** (localStorage / idb-keyval) | Per-device | Persist-lifecycle bridge providers |
-| Turn checkpoints | Checkpoint manifests | Cloud | Powers rewind/revert |
-| Notifications | Host + merged renderer store | Partly | `merged-notifications.ts` |
+| Data                                                                         | Store                                                      | Sync                 | Notes                                                                                            |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------ |
+| Epic metadata, artifact metadata, chat + TUI agent records, `parentId` trees | Root Epic **Y.Doc**                                        | Cloud (Tiptap rooms) | CRDT, cross-device                                                                               |
+| Artifact **bodies**                                                          | Per-room **Y.Doc** (`artifact-body:{id}`)                  | Cloud                | Separate rooms                                                                                   |
+| Chat **messages / content blocks**                                           | Flat `YKeyValue` collections in the root doc               | Cloud                | ⚠ GUI never reads these from the doc — `chat.subscribe` streams `Message[]`. See perf deep dive. |
+| Comment threads                                                              | Root Y.Doc update channel                                  | Cloud                | No typed frame                                                                                   |
+| Awareness (cursors, presence, `agentWorking`)                                | Yjs Awareness                                              | Cloud-merged         | One entry per host; union is the cross-host active-agent view                                    |
+| Worktree bindings, setup state                                               | Host **SQLite**                                            | **Never**            | Host-local by design                                                                             |
+| Provider credentials                                                         | Shared credentials file, WAL + lock                        | Never                | Adversarial fuzz tests exist                                                                     |
+| Canvas layout, tabs, drafts, settings                                        | Renderer **Zustand + persist** (localStorage / idb-keyval) | Per-device           | Persist-lifecycle bridge providers                                                               |
+| Turn checkpoints                                                             | Checkpoint manifests                                       | Cloud                | Powers rewind/revert                                                                             |
+| Notifications                                                                | Host + merged renderer store                               | Partly               | `merged-notifications.ts`                                                                        |
 
-`AGENT_WORKING_AWARENESS_FIELD = "agentWorking"` is worth noting: each host publishes the ids of its locally-working agents into awareness, and the cloud-merged awareness (one entry per host) gives every client the **cross-host union** — so the Active Agents panel shows working agents regardless of which machine runs them. Awareness is the right transport for this: ephemeral, presence-shaped, auto-cleaned on disconnect. Contrast with message *delivery*, which has no cross-host path at all.
+`AGENT_WORKING_AWARENESS_FIELD = "agentWorking"` is worth noting: each host publishes the ids of its locally-working agents into awareness, and the cloud-merged awareness (one entry per host) gives every client the **cross-host union** — so the Active Agents panel shows working agents regardless of which machine runs them. Awareness is the right transport for this: ephemeral, presence-shaped, auto-cleaned on disconnect. Contrast with message _delivery_, which has no cross-host path at all.
 
 ## 8. Assessment
 
@@ -213,7 +216,7 @@ A `LEGACY_HOST_ID = "legacy"` sentinel marks chats migrated from v1.0.0 task-cha
 
 `feat(gui-app,protocol,cli): remove Epic Mode (#749)`, with `feat(protocol): default agent mode to regular instead of epic (#628)` preceding it. `agentModeSchema = z.enum(["regular","epic"])` still exists in the protocol (reserved for compatibility with persisted records), but Epic Mode is gone as a user-facing surface.
 
-This is a notable product signal: the "regular vs structured multi-step" mode split I documented in §1 was **tried and withdrawn**. Worth weighing before we build a two-mode product — Traycer shipped it, lived with it, and cut it. The Epic *container* remains; only the mode distinction went away.
+This is a notable product signal: the "regular vs structured multi-step" mode split I documented in §1 was **tried and withdrawn**. Worth weighing before we build a two-mode product — Traycer shipped it, lived with it, and cut it. The Epic _container_ remains; only the mode distinction went away.
 
 ### Chat-sync v2 — transcripts leave the CRDT
 
@@ -223,7 +226,7 @@ New records `chat-head` and `chat-shard` (`protocol/src/persistence/chat-sync/`)
 
 <user_quoted_section>"A published chat is a small mutable head plus a set of immutable, content-addressed shards. Unlike epic, neither lives in a Yjs doc… shards hold the transcript, so an append rewrites one cohort rather than the whole chat."</user_quoted_section>
 
-Partitioned by evolution speed: the head's `core` *"evolves at reader speed"* (what cloud renderers and clone targets interpret); `hostPrivate` is opaque to the protocol and *"evolves at host speed"*. Both records use **residual bags** so unmodeled keys survive an older reader's re-publication, and both carry a self-identifying `schemaVersion` pinned to a literal.
+Partitioned by evolution speed: the head's `core` _"evolves at reader speed"_ (what cloud renderers and clone targets interpret); `hostPrivate` is opaque to the protocol and _"evolves at host speed"_. Both records use **residual bags** so unmodeled keys survive an older reader's re-publication, and both carry a self-identifying `schemaVersion` pinned to a literal.
 
 The epic Y.Doc **still** carries `chats` — this is a cutover in progress (hence "CDC cut plan"), not a completed migration. But the direction is unambiguous and correct: **the transcript is append-heavy immutable data and does not belong in a CRDT.** I'd now recommend this shape over my original "per-chat CRDT room" suggestion.
 

@@ -9,7 +9,7 @@ Captured verbatim-in-spirit from Jackson (2026-08-14). This is the intent behind
 
 ## The journey that led here
 
-1. **T3 Code first.** Big workflow win: effortless switching between repos/projects, and a far better interface for running agents in parallel. But its UX is oriented toward *switching between projects and focusing on one agent at a time* — parallelism without fleet management.
+1. **T3 Code first.** Big workflow win: effortless switching between repos/projects, and a far better interface for running agents in parallel. But its UX is oriented toward _switching between projects and focusing on one agent at a time_ — parallelism without fleet management.
 2. **Traycer second.** The peer-to-peer capabilities were the unlock — significantly more complex work became tractable. It also opened an entirely new domain: **agentic monitoring**.
 
 ## The working fleet today: observability operations via Dynatrace
@@ -44,11 +44,11 @@ flowchart TD
 
 Each big-picture lead runs teams of **PR Groups**: 3 agents that build code changes and manage PRs end-to-end.
 
-| Role | Responsibility |
-| --- | --- |
-| **Builder** | Builds the code, tests it |
+| Role         | Responsibility                                                     |
+| ------------ | ------------------------------------------------------------------ |
+| **Builder**  | Builds the code, tests it                                          |
 | **Reviewer** | Independent review; responds to human/agent reviews left on the PR |
-| **Sitter** | Monitors the PR, communicates outside the group, triages CI issues |
+| **Sitter**   | Monitors the PR, communicates outside the group, triages CI issues |
 
 Why it's the canonical example: it **requires defined roles** (each agent knows how to act and how to interact with the others) **and A2A communication** to function — the two combine into complex goals achieved with minimal human intervention. And it generates the scale problem that forces the dashboard: enough parallel groups that Jackson needs at-a-glance "what are my agents doing, what state are the PRs in."
 
@@ -62,9 +62,9 @@ The human sits at the top of a management hierarchy, not at the center of a hub-
 
 ## Product implications (Product lead's read — check designs against these)
 
-1. **Roles + A2A are one load-bearing pair, not two features.** The PR Group only works because role definitions tell agents how to interact *with each other*. Role definitions should be able to reference counterpart roles ("as Sitter, escalate CI failures to Builder; only escalate to your lead when…"). Backlog items 2 and 3 must be designed together.
-2. **Machine events are first-class fleet inputs.** The Dynatrace fleet is *driven by a cron job*, not by a human prompt. Work enters the fleet from schedules, alerts, PR comments, CI results. The platform needs non-human triggers as real citizens — and the communication graph should show them as sources (the "external systems as nodes" door we left open).
+1. **Roles + A2A are one load-bearing pair, not two features.** The PR Group only works because role definitions tell agents how to interact _with each other_. Role definitions should be able to reference counterpart roles ("as Sitter, escalate CI failures to Builder; only escalate to your lead when…"). Backlog items 2 and 3 must be designed together.
+2. **Machine events are first-class fleet inputs.** The Dynatrace fleet is _driven by a cron job_, not by a human prompt. Work enters the fleet from schedules, alerts, PR comments, CI results. The platform needs non-human triggers as real citizens — and the communication graph should show them as sources (the "external systems as nodes" door we left open).
 3. **Fleets are long-lived organizations, not task executions.** Leads and their teams persist for weeks. This validates: durable communication log, idle-as-real-state, stall detection over completion tracking.
-4. **The hierarchy is deep — attention must aggregate.** Jackson ↔ Director ↔ leads ↔ PR Groups is 3+ levels. The attention queue can't just be "threads addressed to Jackson"; escalations bubble through middle managers, and the dashboard must make *the whole tree's* blocked-state legible, not just the top edge.
+4. **The hierarchy is deep — attention must aggregate.** Jackson ↔ Director ↔ leads ↔ PR Groups is 3+ levels. The attention queue can't just be "threads addressed to Jackson"; escalations bubble through middle managers, and the dashboard must make _the whole tree's_ blocked-state legible, not just the top edge.
 5. **Cost is a product surface.** One lead exists specifically to keep the fleet within budget. Token/cost rollups per team/subtree belong in the dashboard, not in a settings page.
 6. **Beyond-coding is the bar.** Every design should pass the test: "does this work for the monitoring fleet, or only for coding fleets?" (E.g. PR panes are one instantiation of a more general "external artifact an agent team is responsible for" — incidents and dashboards are others.)

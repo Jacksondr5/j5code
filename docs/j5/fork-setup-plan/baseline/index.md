@@ -9,22 +9,22 @@ Recorded 2026-08-15 on macOS 26.6.1 arm64 from `/Users/jackson/repos/jacksondr5/
 
 ## Source
 
-| Item | Value |
-| --- | --- |
-| Upstream pin | `993407dd9e57f1edf2f5681d70140bfefeca93cc` |
-| Checked-out branch | `j5/main` |
-| J5 HEAD during baseline | `09d4b61c94dc7bc6a19e5bb81e3ffc8f55a59874` (`FORK.md` only) |
-| Runtime source changes before baseline | None |
+| Item                                   | Value                                                       |
+| -------------------------------------- | ----------------------------------------------------------- |
+| Upstream pin                           | `993407dd9e57f1edf2f5681d70140bfefeca93cc`                  |
+| Checked-out branch                     | `j5/main`                                                   |
+| J5 HEAD during baseline                | `09d4b61c94dc7bc6a19e5bb81e3ffc8f55a59874` (`FORK.md` only) |
+| Runtime source changes before baseline | None                                                        |
 
 ## Prerequisites and install
 
-| Tool | Baseline version / decision |
-| --- | --- |
-| Node | `24.14.0`, selected with existing `fnm 1.39.0` from new `.nvmrc` |
-| pnpm | `11.10.0`, matching `packageManager` |
-| Vite Plus | Repo-local `vite-plus 0.2.2`; no global install, account, license, or authentication required |
-| Rust | `rustc 1.94.0`, `cargo 1.94.0` (present; not needed by the JavaScript suite) |
-| Browser automation | Playwright CLI wrapper using the repository dev server's one-time pairing URL |
+| Tool               | Baseline version / decision                                                                   |
+| ------------------ | --------------------------------------------------------------------------------------------- |
+| Node               | `24.14.0`, selected with existing `fnm 1.39.0` from new `.nvmrc`                              |
+| pnpm               | `11.10.0`, matching `packageManager`                                                          |
+| Vite Plus          | Repo-local `vite-plus 0.2.2`; no global install, account, license, or authentication required |
+| Rust               | `rustc 1.94.0`, `cargo 1.94.0` (present; not needed by the JavaScript suite)                  |
+| Browser automation | Playwright CLI wrapper using the repository dev server's one-time pairing URL                 |
 
 Install command:
 
@@ -40,10 +40,10 @@ The original setup plan expected Bun. The reviewed upstream advance migrated con
 
 ## Builds
 
-| Command | Result | Coverage |
-| --- | --- | --- |
-| `fnm exec --using=24.14.0 pnpm build` | Pass | Full repository build: web, marketing, server, desktop |
-| `fnm exec --using=24.14.0 pnpm build:desktop` | Pass | Web → server bundle → Electron main/preload pipeline |
+| Command                                       | Result | Coverage                                               |
+| --------------------------------------------- | ------ | ------------------------------------------------------ |
+| `fnm exec --using=24.14.0 pnpm build`         | Pass   | Full repository build: web, marketing, server, desktop |
+| `fnm exec --using=24.14.0 pnpm build:desktop` | Pass   | Web → server bundle → Electron main/preload pipeline   |
 
 Observed non-fatal upstream warnings: web chunks over 500 kB; Vite/Rolldown plugin timing hints; sourcemap warnings from declaration-generation transforms; the Cursor SDK's optional `bun:sqlite` import was externalized under Node; one Effect Node HTTP module is both statically and dynamically imported. No build task failed.
 
@@ -83,21 +83,21 @@ fnm exec --using=24.14.0 pnpm exec vp run -r --log grouped --verbose test
 
 Overall: **14/14 workspace tasks passed; 929 test files passed, 4 skipped; 8,598 tests passed, 10 skipped; 0 failures.** With no failures, there are no `upstream-known` failure classifications to carry forward.
 
-| Workspace | Test files | Tests | Result |
-| --- | --- | --- | --- |
-| `effect-codex-app-server` | 5 passed | 22 passed | Pass |
-| `@t3tools/contracts` | 24 passed | 286 passed | Pass |
-| `effect-acp` | 5 passed | 37 passed | Pass |
-| `@t3tools/shared` | 46 passed | 385 passed | Pass |
-| `@t3tools/tailscale` | 1 passed | 13 passed | Pass |
-| `@t3tools/oxlint-plugin-t3code` | 4 passed | 35 passed | Pass |
-| `@t3tools/ssh` | 4 passed | 26 passed | Pass |
-| `@t3tools/scripts` | 18 passed | 232 passed | Pass |
-| `@t3tools/client-runtime` | 57 passed | 674 passed | Pass |
-| `@t3tools/desktop` | 61 passed | 553 passed | Pass |
-| `@t3tools/mobile` | 117 passed | 740 passed | Pass |
-| `t3code-relay` | 27 passed | 209 passed | Pass |
-| `@t3tools/web` | 269 passed | 2,589 passed | Pass |
-| `t3` server | 291 passed, 4 skipped | 2,797 passed, 10 skipped | Pass |
+| Workspace                       | Test files            | Tests                    | Result |
+| ------------------------------- | --------------------- | ------------------------ | ------ |
+| `effect-codex-app-server`       | 5 passed              | 22 passed                | Pass   |
+| `@t3tools/contracts`            | 24 passed             | 286 passed               | Pass   |
+| `effect-acp`                    | 5 passed              | 37 passed                | Pass   |
+| `@t3tools/shared`               | 46 passed             | 385 passed               | Pass   |
+| `@t3tools/tailscale`            | 1 passed              | 13 passed                | Pass   |
+| `@t3tools/oxlint-plugin-t3code` | 4 passed              | 35 passed                | Pass   |
+| `@t3tools/ssh`                  | 4 passed              | 26 passed                | Pass   |
+| `@t3tools/scripts`              | 18 passed             | 232 passed               | Pass   |
+| `@t3tools/client-runtime`       | 57 passed             | 674 passed               | Pass   |
+| `@t3tools/desktop`              | 61 passed             | 553 passed               | Pass   |
+| `@t3tools/mobile`               | 117 passed            | 740 passed               | Pass   |
+| `t3code-relay`                  | 27 passed             | 209 passed               | Pass   |
+| `@t3tools/web`                  | 269 passed            | 2,589 passed             | Pass   |
+| `t3` server                     | 291 passed, 4 skipped | 2,797 passed, 10 skipped | Pass   |
 
 The server package runs files serially by upstream configuration and completed in 409.21 seconds. Its only repeated runtime output was Node's experimental SQLite warning. The scripts package also emitted Node's `fs.F_OK` deprecation warning. Neither affected results.

@@ -7,12 +7,12 @@ title: "A3 sitter initial audit"
 
 Audited 2026-08-19 on `j5/a3-silence-detector` at `fdd04688c7bbb781496003db8e3868cadc00e20d` (`origin/j5/main`, clean worktree).
 
-| Check | Result |
-| --- | --- |
-| A2 boundary | Existing `formatSilenceNoticeEnvelope` and `silence.notice` ledger kind are present. A3 consumes that channel; it does not change its rendering or delivery pipeline. |
-| Terminology | The live A2 surface uses `Squadron`; remaining `epic` identifiers are migration history only. A3 additions must use Squadron terminology. |
-| Fork boundary | `FORK.md` permits new J5-owned files and only the enumerated upstream integration cases. No A3 exception is authorized. |
-| Fixtures | Direct membership seeding is allowed only in tests; production membership provisioning remains out of scope. |
+| Check         | Result                                                                                                                                                                |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A2 boundary   | Existing `formatSilenceNoticeEnvelope` and `silence.notice` ledger kind are present. A3 consumes that channel; it does not change its rendering or delivery pipeline. |
+| Terminology   | The live A2 surface uses `Squadron`; remaining `epic` identifiers are migration history only. A3 additions must use Squadron terminology.                             |
+| Fork boundary | `FORK.md` permits new J5-owned files and only the enumerated upstream integration cases. No A3 exception is authorized.                                               |
+| Fixtures      | Direct membership seeding is allowed only in tests; production membership provisioning remains out of scope.                                                          |
 
 ## Acceptance hold
 

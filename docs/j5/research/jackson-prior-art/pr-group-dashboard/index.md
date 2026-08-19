@@ -19,7 +19,7 @@ Two classes of table, documented in `schema.sql` itself:
 
 <user_quoted_section>MEASURED - the pollers own these. Wiped and rebuilt freely. Disposable.ASSERTED - agent-authored via the prg CLI. The pollers NEVER touch these.</user_quoted_section>
 
-Pollers write only measured tables (`agent`, `pr_group`, `pr`, `review*`, `check_run`); agents write only asserted tables (`ask`, `decision`, `finding`) through `prg`. GitHub state can be wiped with zero risk to agent-authored content. The UI can always tell the user *which kind of fact* it is showing — `prg gates` even prints them under separate headers ("MEASURED FROM GITHUB" vs "MEASURED FROM THE BOARD — from rows agents entered") with the caveat: *"verifies that a ruling was RECORDED, not that the ruling was his."*
+Pollers write only measured tables (`agent`, `pr_group`, `pr`, `review*`, `check_run`); agents write only asserted tables (`ask`, `decision`, `finding`) through `prg`. GitHub state can be wiped with zero risk to agent-authored content. The UI can always tell the user _which kind of fact_ it is showing — `prg gates` even prints them under separate headers ("MEASURED FROM GITHUB" vs "MEASURED FROM THE BOARD — from rows agents entered") with the caveat: _"verifies that a ruling was RECORDED, not that the ruling was his."_
 
 ### 2. Read-only by design
 
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS ask (
 );
 ```
 
-Lifecycle: any roster seat files it (`prg ask --urgency blocking|soon|fyi --title …` — Builder and Reviewer file directly, not routed through the Sitter, because "the DB is a list, not a channel"); it renders on the group's card under **"Needs you — take to <Spawner>"** with a copy button; Jackson answers through the Spawner conversation; the group records the answer (`prg ask answered --id N --answer …`). The CLI prints, at creation: *"Jackson cannot clear this himself — close it when he answers."*
+Lifecycle: any roster seat files it (`prg ask --urgency blocking|soon|fyi --title …` — Builder and Reviewer file directly, not routed through the Sitter, because "the DB is a list, not a channel"); it renders on the group's card under **"Needs you — take to <Spawner>"** with a copy button; Jackson answers through the Spawner conversation; the group records the answer (`prg ask answered --id N --answer …`). The CLI prints, at creation: _"Jackson cannot clear this himself — close it when he answers."_
 
 The answered ask then becomes **evidence**: gate 7 (deferral discipline) accepts an answered ask as proof Jackson ruled on a deferral; a self-typed ticket id is reported separately, "never as equivalent."
 
@@ -59,19 +59,19 @@ The answered ask then becomes **evidence**: gate 7 (deferral discipline) accepts
 
 `active` from `traycer agent list` "flaps within seconds" (the baton moves Builder → Sitter → Reviewer inside a minute), so polling it samples busy groups as idle. Instead (`lib/traycer.js` + README):
 
-| State | Detection |
-| --- | --- |
-| `working` | `active: true` right now |
-| `idle` | transcript ends with a finished `assistant_response` |
+| State     | Detection                                             |
+| --------- | ----------------------------------------------------- |
+| `working` | `active: true` right now                              |
+| `idle`    | transcript ends with a finished `assistant_response`  |
 | `stalled` | transcript ends with an **unanswered `user_message`** |
-| `gone` | absent from `agent list`, or transcript 404s |
+| `gone`    | absent from `agent list`, or transcript 404s          |
 
-`stalled` is the one that matters — "the 'yeah, the Reviewer is working on that' case where the Reviewer actually died." The parser also extracts *who* sent the unanswered message and whether it carried a `responseId` — **"another agent is blocked waiting, and the card says so."**
+`stalled` is the one that matters — "the 'yeah, the Reviewer is working on that' case where the Reviewer actually died." The parser also extracts _who_ sent the unanswered message and whether it carried a `responseId` — **"another agent is blocked waiting, and the card says so."**
 
 Anti-false-positive machinery, all learned from live operation:
 
 - **2-minute grace** (`PRG_STALL_GRACE_MS`) before the board shouts; below it renders as a quiet "just messaged". Observed transients cleared within one ~20s poll; real deaths persisted for hours.
-- **The clock is `unanswered_since`** — how long *the board has observed* the message unanswered — never silence-since-last-turn (a healthy agent idle 5h that just received a message would be flagged instantly on the wrong measure).
+- **The clock is `unanswered_since`** — how long _the board has observed_ the message unanswered — never silence-since-last-turn (a healthy agent idle 5h that just received a message would be flagged instantly on the wrong measure).
 - Once escalated, the card reports two facts separately: "unanswered for at least 1h" (observed floor) and "its last turn ended 11h ago" (real timestamp) — never conflated.
 - Real turn timestamps come from scraping Traycer's **undocumented host log** (`~/.traycer/host/host.log`) incrementally by byte offset, because `traycer agent list` returns no timestamps at all. Strictly best-effort; "nothing depends on it."
 - **A broken poller goes quiet, not loud-wrong**: if the Traycer CLI returns nothing, the poller skips the write entirely — "a broken poller must go quiet, not report a fleet-wide outage." The UI's staleness clock surfaces the problem instead.
@@ -86,7 +86,7 @@ Same instinct throughout: `mergeable: UNKNOWN` renders as "?"; a stub PR row sho
 
 ## Attention hierarchy — how the board ranks
 
-The board is a status wall with an attention queue built into its *sort order and badges* rather than as a separate pane:
+The board is a status wall with an attention queue built into its _sort order and badges_ rather than as a separate pane:
 
 - Group rank: **stalled (0) → blocking asks (1) → normal (2) → unstaffed (3)** (`server.js` `rank()`).
 - Header rollup: "N groups across M epics · **1 stuck** · **7 asks**"; collapsed sections keep their counts — "hiding a section never hides urgency."

@@ -7,7 +7,7 @@ kind: spec
 
 Studied at commit `55bd702ca71b96adafbb2139736c20696971ba20` ("temp", 2026-08-14) of `Jacksondr5/pr-group`. History runs 2026-08-10 → 2026-08-14; commit messages show the playbooks have already been through live runs and retro-driven revision ("fold in retro items from the first live runs", "Jackson's communication clamp — deliberate overcorrection", "dashboard integration — the board replaces status entirely").
 
-**What the repo actually is:** there is no code in it. It is 13 markdown playbooks (~1,180 lines) — a numbered phase sequence (`00-roles` → `07-retire`) plus a `reference/` directory. The *runtime* lives outside the repo and is referenced by absolute path:
+**What the repo actually is:** there is no code in it. It is 13 markdown playbooks (~1,180 lines) — a numbered phase sequence (`00-roles` → `07-retire`) plus a `reference/` directory. The _runtime_ lives outside the repo and is referenced by absolute path:
 
 - **Watchdog:** `~/.traycer/pr-sitter/watchdog.sh` — ~150 lines of bash on a LaunchAgent (`ai.fh.pr-sitter-watchdog`), ~10-minute timer, with a JSON registry at `~/.traycer/pr-sitter/registry/<repo>-<pr>.json`.
 - **Dashboard:** `~/.pr-group-dashboard/bin/prg` CLI + a board Jackson reads at `http://localhost:7317`.
@@ -20,13 +20,13 @@ Note: it is a **four**-role system, not three. Builder / Reviewer / Sitter are t
 
 ## 1. How the roles are defined
 
-Roles are defined entirely in prose playbooks. `00-roles.md` is the identity document every agent reads at bring-up; `01-spawn.md` contains per-role **brief templates** the Spawner fills in and sends as the spawn message. There is no config format, no YAML, no per-role system-prompt file — the role *is* the brief plus the memorized playbook.
+Roles are defined entirely in prose playbooks. `00-roles.md` is the identity document every agent reads at bring-up; `01-spawn.md` contains per-role **brief templates** the Spawner fills in and sends as the spawn message. There is no config format, no YAML, no per-role system-prompt file — the role _is_ the brief plus the memorized playbook.
 
 The framing is explicitly anti-rulebook:
 
 <user_quoted_section>"All of the documents in this directory are a map, not a rulebook. It is not a permission system. There is real value in all four of you talking to each other. Use judgment; the nine hard rules below are the only lines that don't bend."</user_quoted_section>
 
-And the README explains why the docs exist at all — the core failure they fix is *mutual legibility*, not discipline:
+And the README explains why the docs exist at all — the core failure they fix is _mutual legibility_, not discipline:
 
 <user_quoted_section>"They exist because the failure they fix wasn't agents breaking rules — it was agents not knowing who the others were or what each owned, so they hesitated, escalated things already settled, or did the same work twice. Knowing the shape of the group is most of the value."</user_quoted_section>
 
@@ -34,12 +34,12 @@ North star (README): "**communicate to help everyone drive towards great code.**
 
 ### The role table (verbatim ownership column, `00-roles.md`)
 
-| Role | Owns |
-| --- | --- |
-| **Builder** | "The code. **The only agent that commits** — any branch, including formatting and rebases" |
-| **Reviewer** | "An independent correctness verdict. May block. May expand scope. On GitHub it posts **replies only**" |
-| **Sitter** | "Coordination and triage. Default address for everything routine. PR metadata, thread state, CI interpretation, the open-findings list. **Never commits, never merges**" |
-| **Spawner** | "Program law — contracts, scope, sequencing, merge order, accepted risk. Decides what reaches Jackson. Breaks ties about *what the system should do*" |
+| Role         | Owns                                                                                                                                                                     |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Builder**  | "The code. **The only agent that commits** — any branch, including formatting and rebases"                                                                               |
+| **Reviewer** | "An independent correctness verdict. May block. May expand scope. On GitHub it posts **replies only**"                                                                   |
+| **Sitter**   | "Coordination and triage. Default address for everything routine. PR metadata, thread state, CI interpretation, the open-findings list. **Never commits, never merges**" |
+| **Spawner**  | "Program law — contracts, scope, sequencing, merge order, accepted risk. Decides what reaches Jackson. Breaks ties about _what the system should do_"                    |
 
 Followed immediately by: "**Jackson merges.** Always."
 
@@ -82,11 +82,11 @@ And a prompt-engineering observation baked into process:
 
 <user_quoted_section>"Keep them roughly this length — a long, numbered, prescriptive brief gets you a long, numbered, prescriptive output. An agent will mirror the structure you hand it, so if you write seven numbered focus areas you'll get a review with seven headings."</user_quoted_section>
 
-Also notable: "**Some things go in all three briefs, not just the brief of whoever will type them.** The agent that *owns a check* needs the rule as much as the agent that performs the action" — e.g. the PR title format goes to everyone because the Sitter enforces it even though the Builder types it.
+Also notable: "**Some things go in all three briefs, not just the brief of whoever will type them.** The agent that _owns a check_ needs the rule as much as the agent that performs the action" — e.g. the PR title format goes to everyone because the Sitter enforces it even though the Builder types it.
 
 ### Reviewer behavior on the open PR (`04-rounds.md`)
 
-The single most distinctive product decision: **the Reviewer never posts a review of its own to the PR.** Its verdict is internal (to Builder + Sitter records); the PR thread carries *only replies* to CodeRabbit and humans:
+The single most distinctive product decision: **the Reviewer never posts a review of its own to the PR.** Its verdict is internal (to Builder + Sitter records); the PR thread carries _only replies_ to CodeRabbit and humans:
 
 <user_quoted_section>"| Your verdict, first pass or delta | Internal. It goes to the Builder and the Sitter's records — never the PR || Anything else — status, delta confirmation, summary, 'review clean' | Nothing. There is no post for these |"
 "Investigate privately; post conclusions. A PR thread is a landing zone for decisions, not a lab notebook... a sequence like 'two things gate this' → 'correcting my previous comment' → 'I was wrong' → 'new verdict' reads as thrashing to a human scrolling the thread, even when the investigation behind it is excellent."
@@ -99,14 +99,14 @@ Findings sent to the Builder have a mandated shape — "lead with the ask, not t
 Five distinct channels, each with an explicit audience and noise budget:
 
 1. **Traycer A2A messages** (`traycer_send_message`) — all intra-group traffic: findings, baton handoffs, head moves, CI interpretation. Free-form; "the group talks to itself... with a high degree of independence."
-2. **GitHub PR threads** — the *outward-facing* channel to CodeRabbit and human colleagues. Heavily rationed (replies only, attribution line, one post per settled disposition). Posts go out under Jackson's own login (`Jacksondr5`), which is why hard rule 7's byte-identical marker line exists — it is literally the only way to distinguish agent posts from Jackson's.
-3. **The dashboard** (`prg` CLI + local web board) — the channel to *Jackson*. Asks, decisions, deferrals, the findings ledger, group roster, liveness. "Jackson reads the board... **instead of asking agents how it's going**." Board is deliberately read-only to him; agents must close every loop (`prg ask answered`).
-4. **The watchdog + registry** — the *event* channel: JSON files that tell the watchdog which agent to wake about which PR, and cursor timestamps that gate re-wakes.
+2. **GitHub PR threads** — the _outward-facing_ channel to CodeRabbit and human colleagues. Heavily rationed (replies only, attribution line, one post per settled disposition). Posts go out under Jackson's own login (`Jacksondr5`), which is why hard rule 7's byte-identical marker line exists — it is literally the only way to distinguish agent posts from Jackson's.
+3. **The dashboard** (`prg` CLI + local web board) — the channel to _Jackson_. Asks, decisions, deferrals, the findings ledger, group roster, liveness. "Jackson reads the board... **instead of asking agents how it's going**." Board is deliberately read-only to him; agents must close every loop (`prg ask answered`).
+4. **The watchdog + registry** — the _event_ channel: JSON files that tell the watchdog which agent to wake about which PR, and cursor timestamps that gate re-wakes.
 5. **The Sitter's Traycer artifact** — per-PR memory: a timestamped `## PR log` "for whoever picks this up after you, including a human."
 
 ### The noise-control regime
 
-Communication *upward* is aggressively clamped (a commit calls it "Jackson's communication clamp — deliberate overcorrection"). The Sitter may send the Spawner exactly: **DECISION**, **BLOCKED**, and **PR READY FOR MERGE / DONE**. Rationale, verbatim:
+Communication _upward_ is aggressively clamped (a commit calls it "Jackson's communication clamp — deliberate overcorrection"). The Sitter may send the Spawner exactly: **DECISION**, **BLOCKED**, and **PR READY FOR MERGE / DONE**. Rationale, verbatim:
 
 <user_quoted_section>"Everything you send the Spawner surfaces in Jackson's conversation view with it — your traffic is directly the human's noise, and it has buried things he actually needed to act on in the past."</user_quoted_section>
 
@@ -116,7 +116,7 @@ There's an entire section policing Traycer's `expectReply` flag:
 
 <user_quoted_section>"Set expectReply: true only if you can write down the question you need answered.... It is not a read receipt, not a request for confirmation, and not 'tell me when you're done'... Acknowledgments are a symptom of a misused flag, not a politeness requirement."</user_quoted_section>
 
-Non-events are explicitly non-messages: the Sitter does *not* tell the Spawner the PR opened ("the PR's existence is visible on the dashboard the moment you attach it"), and a backport opening is likewise announced only via `prg pr attach --role backport`.
+Non-events are explicitly non-messages: the Sitter does _not_ tell the Spawner the PR opened ("the PR's existence is visible on the dashboard the moment you attach it"), and a backport opening is likewise announced only via `prg pr attach --role backport`.
 
 ### Communication flow
 
@@ -160,17 +160,17 @@ flowchart TB
 
 ## 3. Lifecycle
 
-**Spawn (`01-spawn.md`).** The Spawner settles goal/scope/base-branch first ("Make it checkable, not aspirational... If you don't have this, push back"), then spawns Builder + Reviewer + Sitter *together, before the PR exists*, all bound to **the Builder's worktree** — because "a Reviewer on the wrong worktree doesn't get errors, it gets **wrong answers**... That exact failure shipped a wrong approve-as-is verdict once; CI caught it, not the reviewer." Agents are named for the ticket, not the PR (the PR doesn't exist yet and "agents cannot be renamed after creation"). Then `prg group register` — the Spawner must do it because "you are the only agent that certainly knows all three ids." Then: "step back. Silence from a PR group is the expected state, not a problem to investigate."
+**Spawn (`01-spawn.md`).** The Spawner settles goal/scope/base-branch first ("Make it checkable, not aspirational... If you don't have this, push back"), then spawns Builder + Reviewer + Sitter _together, before the PR exists_, all bound to **the Builder's worktree** — because "a Reviewer on the wrong worktree doesn't get errors, it gets **wrong answers**... That exact failure shipped a wrong approve-as-is verdict once; CI caught it, not the reviewer." Agents are named for the ticket, not the PR (the PR doesn't exist yet and "agents cannot be renamed after creation"). Then `prg group register` — the Spawner must do it because "you are the only agent that certainly knows all three ids." Then: "step back. Silence from a PR group is the expected state, not a problem to investigate."
 
-**Pre-PR (`02-pre-pr.md`).** A strict alternation: Builder builds → hands off → Reviewer reviews a *stationary* tree → findings to Builder → fix or refute. The Sitter holds the baton (a hand-rolled mutex over a shared worktree). Gate: "**An unresolved high or medium finding blocks opening the PR.**" Escape hatch: Builder can ask the Sitter to open a *draft PR* just to run CI when local checks are slow/flaky. Incident exception: hotfixes run review and CI in parallel.
+**Pre-PR (`02-pre-pr.md`).** A strict alternation: Builder builds → hands off → Reviewer reviews a _stationary_ tree → findings to Builder → fix or refute. The Sitter holds the baton (a hand-rolled mutex over a shared worktree). Gate: "**An unresolved high or medium finding blocks opening the PR.**" Escape hatch: Builder can ask the Sitter to open a _draft PR_ just to run CI when local checks are slow/flaky. Incident exception: hotfixes run review and CI in parallel.
 
 **PR open (`03-pr-open.md`).** The Sitter creates the PR (owns title/description format), writes its watchdog registry entry, runs `prg pr attach` ("An unattached PR doesn't exist as far as Jackson is concerned"), and creates its per-PR artifact. From here on, its wake discipline is the **state card**: "a short list of facts you re-derive at the top of every wake, never answer from memory" — mostly automated as `prg gates --pr <n>`, plus two irreducibly internal facts: the Reviewer's standing verdict and its anchored SHA, and "**Who owns the next action.** If you can't name the owner, the PR is drifting and you're the one who hasn't noticed."
 
 **Triggers.** The watchdog polls GitHub every ~10 minutes per registry entry and wakes the Sitter via Traycer message on: `updated_at` > cursor, `mergeable_state == dirty` (once per episode), or merge/close (nudge to finalize, then FORCED-DONE to the coordinator). Crucially, **CI completions and conflicts emit no GitHub events**, so the Sitter must poll `check-runs` and `mergeStateStatus` itself on every wake. The dashboard poller independently measures gates 1-6 continuously.
 
-**Rounds (`04-rounds.md`).** Event routing table: CI failure → Sitter diagnoses before routing ("Never forward a raw red check"), Builder decides on flakes; CodeRabbit review → Reviewer triages all items, routes fixes, posts *once per thread after the Builder pushes*; human review → same shape "more deference" ("Defer to humans on context and priorities. Verify everyone's facts against the tree"); deferral → Sitter → Spawner → Jackson. Deferrals are deliberately rare: "The cheapest moment to fix a finding is **now, in this PR, while the context is loaded.**"
+**Rounds (`04-rounds.md`).** Event routing table: CI failure → Sitter diagnoses before routing ("Never forward a raw red check"), Builder decides on flakes; CodeRabbit review → Reviewer triages all items, routes fixes, posts _once per thread after the Builder pushes_; human review → same shape "more deference" ("Defer to humans on context and priorities. Verify everyone's facts against the tree"); deferral → Sitter → Spawner → Jackson. Deferrals are deliberately rare: "The cheapest moment to fix a finding is **now, in this PR, while the context is loaded.**"
 
-**Ready (`05-ready.md`).** Ten gates. 1-6 are machine-measured (`prg gates` — human `APPROVED` via `reviewDecision`, CI green *on the exact head with a run that exists*, mergeability at alert time, base is a real merge target, threads resolved, every CodeRabbit finding disposed). 7-10 are judgment: Jackson-ruled deferrals, **a negative control** ("feed it something that should fail, and confirm it does"), named coverage limitations, and code CI structurally cannot reach. READY goes on the board as a blocking ask *and* up as a DECISION; "The Spawner tells Jackson. **Jackson merges.**" Plus: "Being stricter than this list is correct... This list is a floor, not a ceiling."
+**Ready (`05-ready.md`).** Ten gates. 1-6 are machine-measured (`prg gates` — human `APPROVED` via `reviewDecision`, CI green _on the exact head with a run that exists_, mergeability at alert time, base is a real merge target, threads resolved, every CodeRabbit finding disposed). 7-10 are judgment: Jackson-ruled deferrals, **a negative control** ("feed it something that should fail, and confirm it does"), named coverage limitations, and code CI structurally cannot reach. READY goes on the board as a blocking ask _and_ up as a DECISION; "The Spawner tells Jackson. **Jackson merges.**" Plus: "Being stricter than this list is correct... This list is a floor, not a ceiling."
 
 **Backport (`06-backport.md`).** A `release/**` merge auto-opens a backport PR to `main`; **the same group takes it over** (new registry entry, `prg pr attach --role backport`, no new group). First act: grep the diff for committed conflict markers before reading any CI, because the workflow commits raw `<<<<<<<` markers by design and the resulting red CI cascade "tells you nothing." The one rule: "**Never change functionality on a backport.**"
 
@@ -180,7 +180,7 @@ flowchart TB
 
 Jackson appears in exactly four ways:
 
-1. **The board is his status view.** He never asks "how's it going" — gates 1-6, liveness, and the asks queue are on the screen. The "never-ask test": "*could a script find this out by reading GitHub?* If `prg gates` lists it under MEASURED, it is already on his screen, and filing it buries the things that aren't."
+1. **The board is his status view.** He never asks "how's it going" — gates 1-6, liveness, and the asks queue are on the screen. The "never-ask test": "_could a script find this out by reading GitHub?_ If `prg gates` lists it under MEASURED, it is already on his screen, and filing it buries the things that aren't."
 2. **Asks are the "send question/task to the human" mechanism** — and yes, it exists here, not just in the dashboard repo; the playbooks are its usage contract. `prg ask --urgency blocking|soon|fyi`. Design rationale, verbatim: "Messages get missed once and are gone; **a row survives until someone acts on it.**" Only things "**only a human judgement can supply** — a ruling, a tie-break, a ticket go-ahead, an environment action" qualify. The board is read-only to Jackson "because an item he cleared silently would leave the group believing it was never answered" — he answers in conversation, and the Sitter records it with `prg ask answered`, forcing the agents to close every loop.
 3. **He holds the irreducible authorities:** merge (always), GitHub approval (agents can't approve — they post from his account), rulings on every deferral (gate 7), Jira ticket creation (hard rule 9), and reversals of his own prior statements (a Spawner can't).
 4. **Retro items** flow up once at DONE, unfiltered: "the group sees friction that nobody above it can, and it's the only channel that carries it."

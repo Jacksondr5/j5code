@@ -19,10 +19,10 @@ Raw token-bearing pairing output remains only inside the disposable evidence bas
 
 ## Real-provider exchange
 
-| Participant | Provider | Result |
-| --- | --- | --- |
-| Sender | Codex, GPT-5.6-Sol | Explicitly joined, listed participants, sent one reply-expected A2A ask, then observed the reply. |
-| Receiver | Claude Fable 5 | Explicitly joined, received the rendered envelope, replied once carrying the injected exchange id. |
+| Participant | Provider           | Result                                                                                             |
+| ----------- | ------------------ | -------------------------------------------------------------------------------------------------- |
+| Sender      | Codex, GPT-5.6-Sol | Explicitly joined, listed participants, sent one reply-expected A2A ask, then observed the reply.  |
+| Receiver    | Claude Fable 5     | Explicitly joined, received the rendered envelope, replied once carrying the injected exchange id. |
 
 The observed tool sequence was one `join_epic` per participant, sender `list_participants`, one sender `send_message` with `expect_reply=true`, and one receiver `send_message` carrying the exchange id. The sender made no second send.
 

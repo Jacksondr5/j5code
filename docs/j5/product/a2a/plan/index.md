@@ -5,7 +5,7 @@ kind: spec
 
 # A2A v1 plan
 
-Drafted 2026-08-16 from the settled decision register (`../` — D1–D10, all closed). This document tells a builder *what to build and why it has this shape*; the register holds the decisions and rationale; the grounding section there explains the four-layer model. Read both before starting. Product definition: `../../communication-graph/`.
+Drafted 2026-08-16 from the settled decision register (`../` — D1–D10, all closed). This document tells a builder _what to build and why it has this shape_; the register holds the decisions and rationale; the grounding section there explains the four-layer model. Read both before starting. Product definition: `../../communication-graph/`.
 
 ## Base (confirmed by the Director, 2026-08-16)
 
@@ -17,7 +17,7 @@ Drafted 2026-08-16 from the settled decision register (`../` — D1–D10, all c
 
 ## What v1 is NOT (scope fences)
 
-No graph UI or attention panes (item 4). No roles/teams objects (item 3 — placement ≠ team membership). No cross-machine delivery (deferred; nothing may *assume* single-host, but nothing implements multi-host). No deferred silence states (`waiting-on-external-gate`, `silent-tool-degradation`, PTY-quiet). No message kind tags (cut). No agent-initiated re-parenting (human-only, UI). No squadron *container* features beyond the minimal entity below — terminals, artifacts, folders, worktree binding all stay out (future backlog items).
+No graph UI or attention panes (item 4). No roles/teams objects (item 3 — placement ≠ team membership). No cross-machine delivery (deferred; nothing may _assume_ single-host, but nothing implements multi-host). No deferred silence states (`waiting-on-external-gate`, `silent-tool-degradation`, PTY-quiet). No message kind tags (cut). No agent-initiated re-parenting (human-only, UI). No squadron _container_ features beyond the minimal entity below — terminals, artifacts, folders, worktree binding all stay out (future backlog items).
 
 ## Architecture
 
@@ -68,23 +68,23 @@ One formatter, per-channel renderings (wording can never drift between surfaces 
 
 Subscribes to run-lifecycle events; notices are appended to the ledger and delivered to the waiter through the same pipeline. v1 states (D6):
 
-| State | Derivation |
-| --- | --- |
-| `turn-ended-no-reply` | Recipient's turn ended; open exchange delivered before turn end; no closing reply. Sub-split via timestamps: *processed* (delivered before turn start) vs *never-processed* (no turn since delivery) |
-| `errored` | Turn ended on error; raw detail attached |
-| `stopped/cancelled` | Lifecycle stop/cancel; notice carries **do-not-retry, do-not-replace** instruction text |
-| `awaiting-human` | Recipient has an open exchange addressed to the human. *Human-knows* = inbox row delivered; *human-doesn't-know* = inbox delivery failed (alarm state) |
-| `blocked-on-peer` | Recipient has its own open outbound exchange; the notice payload stores the named peer's id **structurally** (not just prose), so item 4 can later detect blocked-on-peer *cycles* (A↔B mutual deadlock — detection deferred, not v1) without a ledger migration |
+| State                 | Derivation                                                                                                                                                                                                                                                       |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `turn-ended-no-reply` | Recipient's turn ended; open exchange delivered before turn end; no closing reply. Sub-split via timestamps: _processed_ (delivered before turn start) vs _never-processed_ (no turn since delivery)                                                             |
+| `errored`             | Turn ended on error; raw detail attached                                                                                                                                                                                                                         |
+| `stopped/cancelled`   | Lifecycle stop/cancel; notice carries **do-not-retry, do-not-replace** instruction text                                                                                                                                                                          |
+| `awaiting-human`      | Recipient has an open exchange addressed to the human. _Human-knows_ = inbox row delivered; _human-doesn't-know_ = inbox delivery failed (alarm state)                                                                                                           |
+| `blocked-on-peer`     | Recipient has its own open outbound exchange; the notice payload stores the named peer's id **structurally** (not just prose), so item 4 can later detect blocked-on-peer _cycles_ (A↔B mutual deadlock — detection deferred, not v1) without a ledger migration |
 
 Notices inform the waiter; they never auto-close exchanges. No PTY/quiet watchdog tier — we have real events.
 
 ### Human node (M4)
 
-The inbox is necessarily a **cross-ledger projection**: one global human node + per-squadron ledgers means it aggregates open human-addressed exchanges across *every* squadron ledger on the host — a builder must not scope it per-squadron and call it done. Inbox projection = open exchanges addressed to the human, ranked by urgency then age. The human's answer (typed in the app) **is** the closing reply event: captured verbatim, durable, linkable by id — and delivered to the asker through the normal pipeline. Loop closure is therefore *structural*: no manual "ask answered" step, no relay, no qualifier-shedding. Human→agent sends through the graph use the human-origin envelope; human silence emits no notices (unanswered-count and age are dashboard metrics, item 4).
+The inbox is necessarily a **cross-ledger projection**: one global human node + per-squadron ledgers means it aggregates open human-addressed exchanges across _every_ squadron ledger on the host — a builder must not scope it per-squadron and call it done. Inbox projection = open exchanges addressed to the human, ranked by urgency then age. The human's answer (typed in the app) **is** the closing reply event: captured verbatim, durable, linkable by id — and delivered to the asker through the normal pipeline. Loop closure is therefore _structural_: no manual "ask answered" step, no relay, no qualifier-shedding. Human→agent sends through the graph use the human-origin envelope; human silence emits no notices (unanswered-count and age are dashboard metrics, item 4).
 
 ### Graph projection + read API (M5)
 
-Edge = exchange (never message), state open/stalled(reason,trust)/answered/dropped, plus delegation edges from v2 delegations (D1). Read API: per-squadron cursor subscription — strictly ascending, exactly-once, gap-free relative to the cursor, with the documented caveat that *snapshot end is a batching fact, not caught-up-to-now* — plus a full-state reconciliation query (events + snapshot, never events alone). Cross-squadron edges render in each squadron as external stubs joined by `correlation_id`. Rebuilding any projection from the ledger must be byte-equivalent — this is a test, not an aspiration.
+Edge = exchange (never message), state open/stalled(reason,trust)/answered/dropped, plus delegation edges from v2 delegations (D1). Read API: per-squadron cursor subscription — strictly ascending, exactly-once, gap-free relative to the cursor, with the documented caveat that _snapshot end is a batching fact, not caught-up-to-now_ — plus a full-state reconciliation query (events + snapshot, never events alone). Cross-squadron edges render in each squadron as external stubs joined by `correlation_id`. Rebuilding any projection from the ledger must be byte-equivalent — this is a test, not an aspiration.
 
 ### Agent tool surface
 
@@ -92,15 +92,15 @@ Minimal, one send verb (Traycer's shape): `send_message(to, message, expect_repl
 
 ## Milestones (each independently verifiable; formal ticket breakdown is a separate pass)
 
-| M | Deliverable | Verification |
-| --- | --- | --- |
-| M1 | Ledger + minimal squadron entity: tables, contracts, append/read, cursor contract, membership projection | Ordering/gap-free property tests; restart persistence; idempotent append via receipts; membership projection rebuilds from ledger |
-| M2 | Send/deliver/reply loop: pipeline, envelopes, exchange lifecycle, retries, startup reconciliation, cross-squadron double-entry | Kill host mid-delivery → delivered exactly once after restart, **specifically covering the injected-but-unrecorded crash window** (v2 `clientRequestId` dedup proven, not assumed); cross-squadron: crash between sender-row commit and receiver-row write → after restart exactly one paired row, sender ledger shows correct delivery state; forced delivery failure → visible alarm, never silent; exchange idempotent-open and one-reply-closes proven by test |
-| M3 | Silence detector: five states | Scripted scenario per state (e.g. recipient turn ends silent → waiter gets authoritative notice; cancel → notice carries do-not-retry text); zero notices for healthy idle agents |
-| M4 | Human node: inbox model, urgency, verbatim answers | End-to-end: agent asks → inbox row → human answers → exchange closes → asker receives the exact text; unanswered inbox items never expire silently |
-| M5 | Graph projection + read API | Projection rebuilt from ledger is byte-equal; cursor subscription exactly-once under reconnect; playback renders a past state correctly |
+| M   | Deliverable                                                                                                                    | Verification                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| M1  | Ledger + minimal squadron entity: tables, contracts, append/read, cursor contract, membership projection                       | Ordering/gap-free property tests; restart persistence; idempotent append via receipts; membership projection rebuilds from ledger                                                                                                                                                                                                                                                                                                                                  |
+| M2  | Send/deliver/reply loop: pipeline, envelopes, exchange lifecycle, retries, startup reconciliation, cross-squadron double-entry | Kill host mid-delivery → delivered exactly once after restart, **specifically covering the injected-but-unrecorded crash window** (v2 `clientRequestId` dedup proven, not assumed); cross-squadron: crash between sender-row commit and receiver-row write → after restart exactly one paired row, sender ledger shows correct delivery state; forced delivery failure → visible alarm, never silent; exchange idempotent-open and one-reply-closes proven by test |
+| M3  | Silence detector: five states                                                                                                  | Scripted scenario per state (e.g. recipient turn ends silent → waiter gets authoritative notice; cancel → notice carries do-not-retry text); zero notices for healthy idle agents                                                                                                                                                                                                                                                                                  |
+| M4  | Human node: inbox model, urgency, verbatim answers                                                                             | End-to-end: agent asks → inbox row → human answers → exchange closes → asker receives the exact text; unanswered inbox items never expire silently                                                                                                                                                                                                                                                                                                                 |
+| M5  | Graph projection + read API                                                                                                    | Projection rebuilt from ledger is byte-equal; cursor subscription exactly-once under reconnect; playback renders a past state correctly                                                                                                                                                                                                                                                                                                                            |
 
-Negative controls are required at every milestone (gate-8 discipline): every verification must be shown *capable of failing* — feed the delivery test a poisoned injection, the gap-free test a deleted row, before trusting a pass.
+Negative controls are required at every milestone (gate-8 discipline): every verification must be shown _capable of failing_ — feed the delivery test a poisoned injection, the gap-free test a deleted row, before trusting a pass.
 
 ## Build-time open items (not design blockers)
 

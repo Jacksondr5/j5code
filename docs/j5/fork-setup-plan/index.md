@@ -15,7 +15,7 @@ kind: spec
 
 - Fork `pingdotgg/t3code` into Jackson's GitHub; pin the working branch to a recorded reviewed tip of `t3code/codex-turn-mapping` (currently `993407dd9`, deliberately advanced 2026-08-15 after a force rewrite).
 - Remotes: `upstream` (pingdotgg) + `origin` (ours). Our work lands on branches off the pinned tip.
-- Rebase cadence: while #2829 remains open and moving, advance the pin *deliberately* (weekly, reviewed) rather than chasing daily reconciles. After #2829 merges to main, switch to monthly rebases on upstream release tags. Squash-merge mitigation: all our changes in new files (add-don't-modify), so they cherry-pick cleanly onto any new base.
+- Rebase cadence: while #2829 remains open and moving, advance the pin _deliberately_ (weekly, reviewed) rather than chasing daily reconciles. After #2829 merges to main, switch to monthly rebases on upstream release tags. Squash-merge mitigation: all our changes in new files (add-don't-modify), so they cherry-pick cleanly onto any new base.
 - Write the discipline down in the fork: a short `FORK.md` — add-don't-modify rules, rebase runbook, what upstream files are off-limits to edit.
 
 ## Rebrand (minimal-churn)
@@ -27,13 +27,13 @@ kind: spec
 
 All cloud config flows through `scripts/lib/public-config.ts` (7 public values); absent config degrades gracefully — local/LAN/Tailscale/SSH is a fully working product with no `.env` at all.
 
-| Dependency | What it's for | Our call (initial) |
-| --- | --- | --- |
+| Dependency                                  | What it's for                                                                                                                                                         | Our call (initial)                                                                                                                                                                               |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Cloudflare relay + tunnel + **PlanetScale** | T3 Connect relay only — the Worker (`infra/relay`) brokers credentials/endpoints for internet access without VPN; PlanetScale is that Worker's database, nothing else | **Skip — don't deploy the relay.** Tailscale + SSH cover Jackson's multi-machine reality. Investigation task below confirms scope + a local-friendly fallback (D1/SQLite) if we ever want relay. |
-| Clerk | Auth for relay/cloud features | **Skip for now** (nothing needs it without the relay). Jackson's existing tenant slots in later. |
-| Expo/EAS, APNs | Mobile builds + push/Live Activities | **Defer** until we want mobile. |
-| Axiom | Telemetry | **Leave unset** (off). |
-| Tailscale, SSH | Remote access, server-managed | **Keep** — no accounts needed beyond Jackson's existing Tailnet. |
+| Clerk                                       | Auth for relay/cloud features                                                                                                                                         | **Skip for now** (nothing needs it without the relay). Jackson's existing tenant slots in later.                                                                                                 |
+| Expo/EAS, APNs                              | Mobile builds + push/Live Activities                                                                                                                                  | **Defer** until we want mobile.                                                                                                                                                                  |
+| Axiom                                       | Telemetry                                                                                                                                                             | **Leave unset** (off).                                                                                                                                                                           |
+| Tailscale, SSH                              | Remote access, server-managed                                                                                                                                         | **Keep** — no accounts needed beyond Jackson's existing Tailnet.                                                                                                                                 |
 
 **Investigation task (Jackson's callout):** read `infra/relay` end-to-end — enumerate the PlanetScale schema and queries, confirm nothing outside the relay path touches it, and assess porting the Worker to D1/SQLite for a self-hosted relay later. Output: a short sub-artifact here with a keep/skip/port recommendation. Preliminary read from research: relay-only, safely skippable.
 

@@ -15,19 +15,19 @@ The provider spawns the fleet — Claude Code's Task/subagent tooling, Codex's c
 
 This is a genuinely useful division for us:
 
-| Concern | Who owns it in T3 | Who'd own it for us |
-| --- | --- | --- |
-| Deciding to spawn N agents | The provider / the prompt | Traycer-style orchestration |
-| Spawning + running them | The provider CLI | The provider CLI |
-| Lifecycle events on the wire | T3 contracts (`TaskAgentLinkage`) | Steal wholesale |
-| Fold into a roster | `subagentRuntime.ts` | Steal the invariants |
-| Rendering the fleet | `AgentsPanel.tsx` | Steal the visual rules |
+| Concern                      | Who owns it in T3                 | Who'd own it for us         |
+| ---------------------------- | --------------------------------- | --------------------------- |
+| Deciding to spawn N agents   | The provider / the prompt         | Traycer-style orchestration |
+| Spawning + running them      | The provider CLI                  | The provider CLI            |
+| Lifecycle events on the wire | T3 contracts (`TaskAgentLinkage`) | Steal wholesale             |
+| Fold into a roster           | `subagentRuntime.ts`              | Steal the invariants        |
+| Rendering the fleet          | `AgentsPanel.tsx`                 | Steal the visual rules      |
 
 T3 solves the observability half well enough that we should treat it as a reference implementation and put our differentiation in the orchestration half.
 
 ## The data model
 
-`packages/contracts/src/providerRuntime.ts` defines **`TaskAgentLinkage`** — optional identity fields carried on *every* task lifecycle payload:
+`packages/contracts/src/providerRuntime.ts` defines **`TaskAgentLinkage`** — optional identity fields carried on _every_ task lifecycle payload:
 
 ```
 taskType, agentKind, agentId, title, role, model, effort, toolUseId,
@@ -54,7 +54,7 @@ classifyTaskAgentKind({taskType, agentId}) -> "agent" | "background"
 
 <user_quoted_section>"A deliberate denylist: the SDK's agent-flavored type names drift (subagent, local_agent, local_workflow, …) and an allowlist silently dropped real subagents when 'local_agent' appeared."</user_quoted_section>
 
-An allowlist fails **closed and silently** against a vocabulary you don't control. When your upstream is a third-party SDK whose type names drift, denylist. Also note the nesting rule: a task launched from inside a subagent (`agentId` set) is agent-internal background work *unless it is itself agent-flavored* — a nested agent can outlive its parent and stays in the roster.
+An allowlist fails **closed and silently** against a vocabulary you don't control. When your upstream is a third-party SDK whose type names drift, denylist. Also note the nesting rule: a task launched from inside a subagent (`agentId` set) is agent-internal background work _unless it is itself agent-flavored_ — a nested agent can outlive its parent and stays in the roster.
 
 Classification is **stamped server-side at ingestion** (`agentKind`) so persisted rows are self-describing; clients trust the stamp outright and only fall back to heuristics for legacy pre-stamp rows.
 
@@ -74,14 +74,14 @@ Eight statuses: `pending`, `running`, `waiting`, `idle`, `completed`, `failed`, 
 
 The file's header comment lists them with PR numbers (#4220, #3650, #4662):
 
-| Invariant | Why |
-| --- | --- |
-| **Reusable identity vs one-shot activations** | An agent id can be resumed; `activationCount` distinguishes "same agent again" from "new agent". |
-| **`idle` is a real nonterminal state** | A resting agent is resumable, not done. The panel renders it muted — live testing showed a "sky" (in-progress blue) idle dot reads as *stuck*. |
-| **Provider-specific usage merges** | Each provider reports token usage differently; merging is per-provider (`packages/shared/src/usageMerge.ts`). |
-| **First-write terminal timestamps** | `completedAt` is written once; a duplicate terminal event must not move it. |
-| **Reactivation clears terminal detail** | Resuming a completed agent must clear its old result/error. |
-| **Order-robust folding** | *"Completion can create an agent; a late start only fills metadata."* Events arrive out of order. Do not assume a start precedes a finish. |
+| Invariant                                     | Why                                                                                                                                            |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Reusable identity vs one-shot activations** | An agent id can be resumed; `activationCount` distinguishes "same agent again" from "new agent".                                               |
+| **`idle` is a real nonterminal state**        | A resting agent is resumable, not done. The panel renders it muted — live testing showed a "sky" (in-progress blue) idle dot reads as _stuck_. |
+| **Provider-specific usage merges**            | Each provider reports token usage differently; merging is per-provider (`packages/shared/src/usageMerge.ts`).                                  |
+| **First-write terminal timestamps**           | `completedAt` is written once; a duplicate terminal event must not move it.                                                                    |
+| **Reactivation clears terminal detail**       | Resuming a completed agent must clear its old result/error.                                                                                    |
+| **Order-robust folding**                      | _"Completion can create an agent; a late start only fills metadata."_ Events arrive out of order. Do not assume a start precedes a finish.     |
 
 That last one is the single most valuable line in the file for us.
 
@@ -91,7 +91,7 @@ The header is explicit:
 
 <user_quoted_section>"This module is deliberately legacy-bridge code. When orchestration-v2's subagent projection is available for a thread, deriveAgentPanelModel prefers it (see the v2Projection parameter) and the fold is skipped; when the v1 orchestrator is retired this file is deleted. Field names and transition semantics copy the v2 stack (#4779) exactly so that swap is mechanical."</user_quoted_section>
 
-So: **copy the shape and the invariants, don't copy the architecture.** The direction of travel is a *server-side* subagent projection, with the client fold as a compatibility shim. If we build fresh, build the server projection — that's where T3 is going.
+So: **copy the shape and the invariants, don't copy the architecture.** The direction of travel is a _server-side_ subagent projection, with the client fold as a compatibility shim. If we build fresh, build the server projection — that's where T3 is going.
 
 ## The Agents panel — visual rules
 
@@ -101,11 +101,11 @@ So: **copy the shape and the invariants, don't copy the architecture.** The dire
 - **"Agent rows reserve three fixed lines for identity, activity, and metrics; changing data must never change their height."** Fixed-height rows mean no layout thrash and no scroll jump during a 20-agent fan-out. This is the same discipline as the chat list's virtualization stability.
 - **"Workflow expansion is presentation state. A live run stays expanded when it settles."** State changes must not collapse what you're watching.
 - **"Static status dots, DOM-write elapsed timers, plain token counters."** Elapsed timers write directly to the DOM instead of re-rendering React every second; dots don't animate. This is AGENTS.md's "no continuously repainting animations; they peg the GPU on high-refresh displays" applied concretely.
-- **All in-flight states present as one "Working" pill.** `pending`/`running`/`waiting` collapse to a single steady state; detail belongs in the activity sub-line. Rationale: *"a stalled/waiting/queued subagent is still the fleet doing its job, not a user problem."* Only settled states differentiate.
+- **All in-flight states present as one "Working" pill.** `pending`/`running`/`waiting` collapse to a single steady state; detail belongs in the activity sub-line. Rationale: _"a stalled/waiting/queued subagent is still the fleet doing its job, not a user problem."_ Only settled states differentiate.
 
 Structure: `PhaseRail` → `PhaseSection` per phase → `AgentRow` per agent; `ExpandedWorkflowSection` / `CollapsedWorkflowSection`; collapsed groups show a one-line summary with rolled-up tokens and elapsed time.
 
-**`WorkflowScriptView`** fetches the workflow script through `orchestration.getWorkflowScript` — the comment notes this is deliberately *"never a raw filesystem read from the client."* Even for a developer tool, the client doesn't get arbitrary FS reach; it goes through a contained, scoped RPC. Good instinct to inherit.
+**`WorkflowScriptView`** fetches the workflow script through `orchestration.getWorkflowScript` — the comment notes this is deliberately _"never a raw filesystem read from the client."_ Even for a developer tool, the client doesn't get arbitrary FS reach; it goes through a contained, scoped RPC. Good instinct to inherit.
 
 The chat timeline itself carries only **one CTA row per spawn batch** — the roster renders in exactly one place. That's the answer to "how do I show 20 agents without destroying the conversation."
 
@@ -113,13 +113,13 @@ The chat timeline itself carries only **one CTA row per spawn batch** — the ro
 
 `BUILT_IN_DRIVERS` in `apps/server/src/provider/builtInDrivers.ts`, ordered `[Codex, Claude, Cursor, Grok, OpenCode]` (order affects UI tie-breaking only).
 
-| Driver | Transport | Notes |
-| --- | --- | --- |
-| `codex` | `packages/effect-codex-app-server` | Richest integration: `CodexSessionRuntime`, `CodexCollabRuntime` + `CodexCollabWire` (collaboration/child-agent wire), `CodexDeveloperInstructions`, `CodexHomeLayout`, `codexModelOptions` |
-| `claudeAgent` | `ClaudeAdapter` | `ClaudeCapabilitiesProbe` (feature-detects the installed CLI), `ClaudeExecutable`, `ClaudeHome`, `ClaudeSkills` |
-| `cursor` | **ACP** (`packages/effect-acp`) | `CursorAcpSupport` shim |
-| `grok` | **ACP** | `GrokAcpSupport` shim; also `GrokTextGeneration` |
-| `opencode` | `opencodeRuntime.ts` + CLI parsers | `makeManagedServerProvider` — managed server lifecycle |
+| Driver        | Transport                          | Notes                                                                                                                                                                                       |
+| ------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `codex`       | `packages/effect-codex-app-server` | Richest integration: `CodexSessionRuntime`, `CodexCollabRuntime` + `CodexCollabWire` (collaboration/child-agent wire), `CodexDeveloperInstructions`, `CodexHomeLayout`, `codexModelOptions` |
+| `claudeAgent` | `ClaudeAdapter`                    | `ClaudeCapabilitiesProbe` (feature-detects the installed CLI), `ClaudeExecutable`, `ClaudeHome`, `ClaudeSkills`                                                                             |
+| `cursor`      | **ACP** (`packages/effect-acp`)    | `CursorAcpSupport` shim                                                                                                                                                                     |
+| `grok`        | **ACP**                            | `GrokAcpSupport` shim; also `GrokTextGeneration`                                                                                                                                            |
+| `opencode`    | `opencodeRuntime.ts` + CLI parsers | `makeManagedServerProvider` — managed server lifecycle                                                                                                                                      |
 
 ### `packages/effect-acp`
 

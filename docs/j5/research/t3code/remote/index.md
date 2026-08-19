@@ -27,7 +27,7 @@ graph TB
 
 **`ExecutionEnvironment`** = one running T3 server. Identified by a stable `environmentId` persisted at `<stateDir>/environment-id`, generated on first start (`apps/server/src/environment/ServerEnvironment.ts`). Desktop, mobile, and web all reason about the same concept.
 
-**There is no state sync between environments.** This is the key architectural fact and it is deliberate. A client holds a *catalog* of known environments and connects to one at a time. `RepositoryIdentity` exists purely as a best-effort logical repo grouping for UI correlation — the docs say **"never for routing."** A local clone and a remote clone are different projects that happen to share a `RepositoryIdentity`; threads bind to one project in one environment.
+**There is no state sync between environments.** This is the key architectural fact and it is deliberate. A client holds a _catalog_ of known environments and connects to one at a time. `RepositoryIdentity` exists purely as a best-effort logical repo grouping for UI correlation — the docs say **"never for routing."** A local clone and a remote clone are different projects that happen to share a `RepositoryIdentity`; threads bind to one project in one environment.
 
 For our project: if we want cross-machine thread sync or a global inbox spanning environments, **T3 does not have it** and its docs list "richer multi-environment UI" under Future Work. That's an open space, and also a warning about how much complexity T3 chose to avoid.
 
@@ -35,14 +35,14 @@ For our project: if we want cross-machine thread sync or a global inbox spanning
 
 `packages/client-runtime/src/connection/model.ts` — four tags, the real access taxonomy:
 
-| Target | Used for | Persisted? |
-| --- | --- | --- |
+| Target                    | Used for                                                            | Persisted?            |
+| ------------------------- | ------------------------------------------------------------------- | --------------------- |
 | `PrimaryConnectionTarget` | Platform-managed local server (desktop backend, CLI-served web app) | No — platform-managed |
-| `BearerConnectionTarget` | Any manually paired endpoint over direct HTTP/WS | Yes |
-| `RelayConnectionTarget` | Managed T3 Connect relay tunnels | Yes |
-| `SshConnectionTarget` | Desktop-managed SSH environments | Yes |
+| `BearerConnectionTarget`  | Any manually paired endpoint over direct HTTP/WS                    | Yes                   |
+| `RelayConnectionTarget`   | Managed T3 Connect relay tunnels                                    | Yes                   |
+| `SshConnectionTarget`     | Desktop-managed SSH environments                                    | Yes                   |
 
-**Tailscale is deliberately not a target kind.** A Tailscale URL pairs through the ordinary bearer path (`preparePairingRegistration` in `connection/onboarding.ts`). Tailscale is an endpoint *provider* and transport, not a distinct runtime concept. Good taxonomy discipline — the axis that matters is "how do I speak WebSocket," not "what product got me there."
+**Tailscale is deliberately not a target kind.** A Tailscale URL pairs through the ordinary bearer path (`preparePairingRegistration` in `connection/onboarding.ts`). Tailscale is an endpoint _provider_ and transport, not a distinct runtime concept. Good taxonomy discipline — the axis that matters is "how do I speak WebSocket," not "what product got me there."
 
 ## Advertised endpoints
 
@@ -54,7 +54,7 @@ A server or desktop authors `AdvertisedEndpoint` candidates: an HTTP + WS base U
 
 1. saved `defaultEndpointKey` override → 2. first `isDefault` → 3. first non-`loopback` → 4. first hosted-HTTPS-compatible → 5. nothing.
 
-**There is no unconditional loopback fallback.** Loopback only wins via explicit override or `isDefault`. That prevents the classic "works on my machine, silently connects to localhost for everyone else" failure. Overrides persist by *stable endpoint kind* rather than raw URL, because LAN addresses change with networks; Tailscale uses provider-specific stable keys (`tailscale-ip:`, `tailscale-magicdns:`).
+**There is no unconditional loopback fallback.** Loopback only wins via explicit override or `isDefault`. That prevents the classic "works on my machine, silently connects to localhost for everyone else" failure. Overrides persist by _stable endpoint kind_ rather than raw URL, because LAN addresses change with networks; Tailscale uses provider-specific stable keys (`tailscale-ip:`, `tailscale-magicdns:`).
 
 ## Auth — the part that was broken in March
 
@@ -62,27 +62,27 @@ Capability-based, OAuth-shaped. `docs/internals/environment-auth.md`.
 
 ### Scopes
 
-| Scope | Permission |
-| --- | --- |
-| `orchestration:read` | Read snapshots, status, events, config, filesystem/VCS state |
-| `orchestration:operate` | Dispatch user operations, mutate workspace state |
-| `terminal:operate` | Create/attach/input/resize/clear/restart/terminate terminals |
-| `review:write` | Read review diff previews for composing feedback |
-| `access:read` | Inspect pairing links and client sessions |
-| `access:write` | Create or revoke pairing links and client sessions |
-| `relay:read` | Inspect managed relay connectivity |
-| `relay:write` | Link, configure, unlink managed relay connectivity |
+| Scope                   | Permission                                                   |
+| ----------------------- | ------------------------------------------------------------ |
+| `orchestration:read`    | Read snapshots, status, events, config, filesystem/VCS state |
+| `orchestration:operate` | Dispatch user operations, mutate workspace state             |
+| `terminal:operate`      | Create/attach/input/resize/clear/restart/terminate terminals |
+| `review:write`          | Read review diff previews for composing feedback             |
+| `access:read`           | Inspect pairing links and client sessions                    |
+| `access:write`          | Create or revoke pairing links and client sessions           |
+| `relay:read`            | Inspect managed relay connectivity                           |
+| `relay:write`           | Link, configure, unlink managed relay connectivity           |
 
 Ordinary pairing links grant the first four plus `relay:read`. Desktop bootstrap and CLI admin bootstrap credentials additionally grant `access:read`, `access:write`, `relay:write`. **Requested scopes must be a subset of the bootstrap grant** — a paired client cannot escalate to `access:write`.
 
 ### Four authentication flows
 
 1. **Browser session** — `POST /api/auth/browser-session` consumes a one-time bootstrap credential and sets an HTTP-only cookie. The session secret is never exposed to browser JavaScript.
-2. **Bearer access token** — `POST /oauth/token` using **RFC 8693 token exchange** (`grant_type=urn:ietf:params:oauth:grant-type:token-exchange`, `subject_token_type=urn:t3:params:oauth:token-type:environment-bootstrap`). 30-day default TTL. Clients may pass `client_label`/`client_device_type`/`client_os` as *presentation hints only* — explicitly not used for authorization, with transport metadata derived server-side.
+2. **Bearer access token** — `POST /oauth/token` using **RFC 8693 token exchange** (`grant_type=urn:ietf:params:oauth:grant-type:token-exchange`, `subject_token_type=urn:t3:params:oauth:token-type:environment-bootstrap`). 30-day default TTL. Clients may pass `client_label`/`client_device_type`/`client_os` as _presentation hints only_ — explicitly not used for authorization, with transport metadata derived server-side.
 3. **DPoP-bound access token** — same endpoint; a `DPoP` header is verified by `verifyRequestDpopProof`, the JWK thumbprint is stored on the session, and the token is issued with method `dpop-access-token` and a **1-hour** TTL. An invalid proof gets a DPoP challenge header, not a bearer fallback. **Relay-brokered clients use this mode so a leaked token cannot be replayed without the key.** `sessionMethods` in the descriptor advertises support, so clients discover rather than assume.
-4. **WebSocket ticket** — `POST /api/auth/websocket-ticket` takes any authenticated session (credential in *headers*) and returns a short-lived, single-purpose ticket, default **5-minute** TTL. Only that ticket is appended to the socket URL as `wsTicket`.
+4. **WebSocket ticket** — `POST /api/auth/websocket-ticket` takes any authenticated session (credential in _headers_) and returns a short-lived, single-purpose ticket, default **5-minute** TTL. Only that ticket is appended to the socket URL as `wsTicket`.
 
-The March flaw is now structurally impossible: long-lived credentials and cookies never appear in WebSocket URLs, and **every RPC method independently enforces its scope** via `RPC_REQUIRED_SCOPES`. *"Creating a ticket is not authorization to call every RPC method."*
+The March flaw is now structurally impossible: long-lived credentials and cookies never appear in WebSocket URLs, and **every RPC method independently enforces its scope** via `RPC_REQUIRED_SCOPES`. _"Creating a ticket is not authorization to call every RPC method."_
 
 Migration `031_AuthAuthorizationScopes` was a **hard cutover** — it deletes existing pairing links and sessions rather than mapping old `owner`/`client` roles onto new capabilities. Everyone re-pairs. The right call, and documented as intentional.
 
@@ -199,7 +199,7 @@ From `docs/internals/connection-runtime.md` — the supervisor is the only retry
 
 ### Wakeup handling — the subtle part
 
-- **During establishment**, plain application activation is consumed and **ignored**: *"Restarting an in-flight attempt because the app came to the foreground would only delay it."*
+- **During establishment**, plain application activation is consumed and **ignored**: _"Restarting an in-flight attempt because the app came to the foreground would only delay it."_
 - The exception is `application-active-reconnect`, which mobile emits after a **meaningful background suspension** — it interrupts establishment and resets the retry ladder, because the OS may have silently killed the socket underneath the attempt.
 - Credential changes interrupt establishment **only for relay targets**, where a new credential changes what's being established.
 - While waiting out backoff, activation **resets the ladder** so a foregrounded app reconnects immediately.
@@ -207,7 +207,7 @@ From `docs/internals/connection-runtime.md` — the supervisor is the only retry
 
 This is a mobile-reality-shaped state machine, and it's the kind of thing that takes a year of user reports to get right. Worth reading `supervisor.ts` directly before we write ours.
 
-Subscription failures are handled separately in `rpc/client.ts`: a **transport** failure ends the inner subscription without resubscribing (the outer stream waits for the supervisor to supply a replacement session); a **handled domain** failure runs `onExpectedFailure` and optionally resubscribes on the *same* session. **"A healthy transport is never torn down for a domain failure."**
+Subscription failures are handled separately in `rpc/client.ts`: a **transport** failure ends the inner subscription without resubscribing (the outer stream waits for the supervisor to supply a replacement session); a **handled domain** failure runs `onExpectedFailure` and optionally resubscribes on the _same_ session. **"A healthy transport is never torn down for a domain failure."**
 
 ## Version coordination
 

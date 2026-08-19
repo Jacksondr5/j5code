@@ -7,10 +7,10 @@ Independent review of PR #8 (`refactor(j5): rename A2A epics to squadrons`) at h
 
 ## Dispositions
 
-| # | Finding | CodeRabbit verdict | Refutation verdict |
-| --- | --- | --- | --- |
-| 1 | [r3809567395](https://github.com/Jacksondr5/j5code/pull/8#discussion_r3809567395) — migration 003 must guard missing legacy `originEpicId`/`receiverEpicId` | **Refute** — mechanism real, consequence not reachable | **Accept, with one correction and one addition** |
-| 2 | [r3809567391](https://github.com/Jacksondr5/j5code/pull/8#discussion_r3809567391) — envelope descriptions must be participant-neutral | **Refute** — out of scope, owner-gated | **Accept, but drop the "descriptions govern agent callers" framing as the lead** |
+| #   | Finding                                                                                                                                                     | CodeRabbit verdict                                     | Refutation verdict                                                               |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| 1   | [r3809567395](https://github.com/Jacksondr5/j5code/pull/8#discussion_r3809567395) — migration 003 must guard missing legacy `originEpicId`/`receiverEpicId` | **Refute** — mechanism real, consequence not reachable | **Accept, with one correction and one addition**                                 |
+| 2   | [r3809567391](https://github.com/Jacksondr5/j5code/pull/8#discussion_r3809567391) — envelope descriptions must be participant-neutral                       | **Refute** — out of scope, owner-gated                 | **Accept, but drop the "descriptions govern agent callers" framing as the lead** |
 
 ## Finding 1 — legacy payload key guard (`003_SquadronRename.ts:31-59`)
 
@@ -63,7 +63,7 @@ Three verified grounds, in the order they should be argued:
 
 ### Correction to the drafted refutation
 
-Lead with (1), not with "descriptions govern authenticated agent callers." The caller-audience argument is true but it does not make the sentence accurate — it only makes the imprecision low-impact, and posting it as the primary rebuttal invites a correct counter. Frame the disposition as *settled and owner-gated*, not as *the bot is wrong about the text*. Acknowledging the nit in one clause ("if the wording is revisited, it is a separate copy change with a version bump") costs nothing and is the honest position.
+Lead with (1), not with "descriptions govern authenticated agent callers." The caller-audience argument is true but it does not make the sentence accurate — it only makes the imprecision low-impact, and posting it as the primary rebuttal invites a correct counter. Frame the disposition as _settled and owner-gated_, not as _the bot is wrong about the text_. Acknowledging the nit in one clause ("if the wording is revisited, it is a separate copy change with a version bump") costs nothing and is the honest position.
 
 ## Other observation (not raised by CodeRabbit)
 

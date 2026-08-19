@@ -8,7 +8,7 @@ access to that workspace.
 
 **The mirror is a snapshot, not the working medium.** Design sessions continue
 in the workspace; settled changes land here through docs PRs. Each document
-describes the codebase and decisions *as of when it was written* — check dates
+describes the codebase and decisions _as of when it was written_ — check dates
 before treating details as current. Documents carry YAML frontmatter from the
 source system (`kind`: spec = durable context, ticket/story = work items with
 `status` 0/1/2 = todo/in-progress/done); it is preserved for fidelity.

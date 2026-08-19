@@ -20,19 +20,19 @@ The genuinely infeasible parts are narrower than "A6", and both are already insi
 
 ## Seams, measured
 
-| # | Seam | Evidence at head `521c50aa9` | Cost to upstream |
-| --- | --- | --- | --- |
-| 1 | J5 MCP toolkit needs no capability-contract change | `McpSessionRegistry.ts:131` issues every scope `new Set(ALL_MCP_CAPABILITIES)`; the only `requireMcpCapability` caller in the tree is preview (`toolkits/preview/handlers.ts:40`). Orchestrator and worktree toolkits are ungated. | none |
-| 2 | Toolkit registration | `McpHttpServer.ts:225-245` — `McpServer.toolkit(X).pipe(Layer.provide(XHandlersLive), Layer.provide(XService.layer))` plus one entry in the final `Layer.mergeAll` | one import + one list entry (same shape as A1's `persistence/Layers/Sqlite.ts` append) |
-| 3 | Creation by composition, not extension | `OrchestratorMcpServiceShape` exposes `delegateTask(scope, input)` (`OrchestratorMcpService.ts:97`) and `createThreads` (`:109`) as public methods over `McpInvocationScope`; a J5 handler layer provides `OrchestratorMcpService.layer` exactly as `OrchestratorToolkitRegistrationLive` does | none — calling upstream is not modifying it |
-| 4 | Placement-following cascade | `thread.archive` (`contracts/orchestrationV2.ts:1970-1973`) carries a single `threadId`; `ThreadLifecycleService.archive` (`:40, :91`) is a per-thread dispatch; `ThreadManagementService` has no child walk (only an already-archived check at `:469`) | none |
-| 5 | Provenance without a write hook | `OrchestrationV2AppThreadLineage` (`contracts/orchestrationV2.ts:81-84`) — `parentThreadId` / `relationshipToParent` / `rootThreadId` — recorded by upstream at creation, carried on the thread projection (`ProjectionStore.ts:865`) | none — read-only derivation |
+| #   | Seam                                               | Evidence at head `521c50aa9`                                                                                                                                                                                                                                                                   | Cost to upstream                                                                       |
+| --- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| 1   | J5 MCP toolkit needs no capability-contract change | `McpSessionRegistry.ts:131` issues every scope `new Set(ALL_MCP_CAPABILITIES)`; the only `requireMcpCapability` caller in the tree is preview (`toolkits/preview/handlers.ts:40`). Orchestrator and worktree toolkits are ungated.                                                             | none                                                                                   |
+| 2   | Toolkit registration                               | `McpHttpServer.ts:225-245` — `McpServer.toolkit(X).pipe(Layer.provide(XHandlersLive), Layer.provide(XService.layer))` plus one entry in the final `Layer.mergeAll`                                                                                                                             | one import + one list entry (same shape as A1's `persistence/Layers/Sqlite.ts` append) |
+| 3   | Creation by composition, not extension             | `OrchestratorMcpServiceShape` exposes `delegateTask(scope, input)` (`OrchestratorMcpService.ts:97`) and `createThreads` (`:109`) as public methods over `McpInvocationScope`; a J5 handler layer provides `OrchestratorMcpService.layer` exactly as `OrchestratorToolkitRegistrationLive` does | none — calling upstream is not modifying it                                            |
+| 4   | Placement-following cascade                        | `thread.archive` (`contracts/orchestrationV2.ts:1970-1973`) carries a single `threadId`; `ThreadLifecycleService.archive` (`:40, :91`) is a per-thread dispatch; `ThreadManagementService` has no child walk (only an already-archived check at `:469`)                                        | none                                                                                   |
+| 5   | Provenance without a write hook                    | `OrchestrationV2AppThreadLineage` (`contracts/orchestrationV2.ts:81-84`) — `parentThreadId` / `relationshipToParent` / `rootThreadId` — recorded by upstream at creation, carried on the thread projection (`ProjectionStore.ts:865`)                                                          | none — read-only derivation                                                            |
 
 ## Where the audit's rows fail
 
-**Row 2, "Immutable spawn provenance — an after-the-fact J5 record cannot guarantee automatic, atomic provenance."** Correct about a J5 *write*, but J5 does not need to write it. Upstream already records the spawn fact immutably at creation (seam 5). Deriving provenance read-only from lineage is automatic and atomic *because upstream's own creation transaction is*, and it covers every spawn — including ones made through built-in tools a J5 wrapper never sees. This is strictly better coverage than a wrapper-written row, which is exactly the version that would have the gap the row describes.
+**Row 2, "Immutable spawn provenance — an after-the-fact J5 record cannot guarantee automatic, atomic provenance."** Correct about a J5 _write_, but J5 does not need to write it. Upstream already records the spawn fact immutably at creation (seam 5). Deriving provenance read-only from lineage is automatic and atomic _because upstream's own creation transaction is_, and it covers every spawn — including ones made through built-in tools a J5 wrapper never sees. This is strictly better coverage than a wrapper-written row, which is exactly the version that would have the gap the row describes.
 
-**Row 3, "Cascade follows placement — existing lifecycle commands have no J5 placement lookup/hook."** The mechanism is right and the conclusion inverts it. Upstream archive has **no cascade at all** (seam 4), so there is no existing cascade to redirect and no upstream semantic to override. A6's cascade is a *new J5 command* that walks the J5 placement tree and issues N unchanged per-thread archive calls. The absence of an upstream hook is what makes this additive, not what blocks it.
+**Row 3, "Cascade follows placement — existing lifecycle commands have no J5 placement lookup/hook."** The mechanism is right and the conclusion inverts it. Upstream archive has **no cascade at all** (seam 4), so there is no existing cascade to redirect and no upstream semantic to override. A6's cascade is a _new J5 command_ that walks the J5 placement tree and issues N unchanged per-thread archive calls. The absence of an upstream hook is what makes this additive, not what blocks it.
 
 **Row 1, `placement` on creation, stands.** The agent-facing inputs are protected-contract types. Upheld.
 
@@ -67,23 +67,23 @@ The Director resolved A6 under existing FORK.md, matching the feasibility findin
 
 My original recommendation (derive provenance from lineage for every spawn) is **withdrawn**; the ruling is stricter and correct. Only three code paths write lineage in the whole tree, which makes the mapping mechanical rather than a judgment call:
 
-| Upstream fact | Provenance | Writer |
-| --- | --- | --- |
-| `relationshipToParent === "subagent"` | derived: spawner = `lineage.parentThreadId` | `SubagentProjection.ts:64` |
-| J5 wrapper performed the create | recorded: spawner = calling thread | J5-owned |
-| `relationshipToParent === null` (ordinary/native) | **explicit `unknown`**, never inferred | no writer — root lineage by default |
-| `relationshipToParent === "fork"` | **open — see §4** | `ThreadForkService.ts:74` |
+| Upstream fact                                     | Provenance                                  | Writer                              |
+| ------------------------------------------------- | ------------------------------------------- | ----------------------------------- |
+| `relationshipToParent === "subagent"`             | derived: spawner = `lineage.parentThreadId` | `SubagentProjection.ts:64`          |
+| J5 wrapper performed the create                   | recorded: spawner = calling thread          | J5-owned                            |
+| `relationshipToParent === null` (ordinary/native) | **explicit `unknown`**, never inferred      | no writer — root lineage by default |
+| `relationshipToParent === "fork"`                 | **open — see §4**                           | `ThreadForkService.ts:74`           |
 
 ## 2. The inference trap this ruling exists to prevent
 
-Native top-level creates *do* leave a parent linkage in the v2 stream — just not in lineage. `OrchestratorMcpService.ts:1437` dispatches `thread.created.record` with `parentThreadId: scope.threadId` for `create_threads` / `t3_thread_start`, materializing a `thread_created` turn item in the caller's timeline (`contracts/orchestrationV2.ts:1022-1027`).
+Native top-level creates _do_ leave a parent linkage in the v2 stream — just not in lineage. `OrchestratorMcpService.ts:1437` dispatches `thread.created.record` with `parentThreadId: scope.threadId` for `create_threads` / `t3_thread_start`, materializing a `thread_created` turn item in the caller's timeline (`contracts/orchestrationV2.ts:1022-1027`).
 
 - Reading `thread.lineage` → native create yields `null` → correct `unknown`.
 - Reading `thread.created.record` commands or `thread_created` turn items → native create yields the caller → **inferred spawner, forbidden**.
 
 Both plausibly answer "who created this thread." One is recorded lineage, the other a timeline breadcrumb.
 
-**Required discriminating control:** a fixture exercising only `delegate_task` passes under *both* the correct and the forbidden implementation. The control that discriminates is a `create_threads` / `t3_thread_start` spawn of B from A asserting `provenance(B) === unknown` and specifically not A, paired with a delegated case asserting `provenance(child) === parent`. Neither test alone separates the implementations.
+**Required discriminating control:** a fixture exercising only `delegate_task` passes under _both_ the correct and the forbidden implementation. The control that discriminates is a `create_threads` / `t3_thread_start` spawn of B from A asserting `provenance(B) === unknown` and specifically not A, paired with a delegated case asserting `provenance(child) === parent`. Neither test alone separates the implementations.
 
 ## 3. Registration lane — A2 owns it
 
@@ -99,18 +99,18 @@ Sharper than my `unknown` recommendation: it keeps the fork fact instead of disc
 
 ### The two tempting-but-wrong signals
 
-**`parentThreadId` does not discriminate.** `ThreadForkService.ts:72-79` gives a fork `parentThreadId: source.id` *and* `relationshipToParent: "fork"` *and* `forkedFrom: {type:"run", ...}`. A fork carries a non-null lineage parent exactly like a delegated child. Keying on `parentThreadId !== null` coerces forks into `spawned-by` — the named failure. The discriminator is `relationshipToParent`.
+**`parentThreadId` does not discriminate.** `ThreadForkService.ts:72-79` gives a fork `parentThreadId: source.id` _and_ `relationshipToParent: "fork"` _and_ `forkedFrom: {type:"run", ...}`. A fork carries a non-null lineage parent exactly like a delegated child. Keying on `parentThreadId !== null` coerces forks into `spawned-by` — the named failure. The discriminator is `relationshipToParent`.
 
 **`rootThreadId` contradicts the placement rule in one case.** A fork inherits the source's root (`ThreadForkService.ts:75`), not self. For a source S that is itself root: upstream says the fork's `rootThreadId` is S, while the ruling says sibling-of-S → S has no placement parent → the fork is **root**. An implementation reading `rootThreadId` as a placement hint places the fork **under S**, the forbidden "child of source", and only in this case.
 
 ### Controls — which ones actually discriminate
 
-| Control | Discriminates? |
-| --- | --- |
+| Control                                                                                              | Discriminates?                                                                                                          |
+| ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | delegated → `spawned-by` **and** fork → `forked-from`, cases identical except `relationshipToParent` | **yes** — fork-only passes under "everything is `forked-from`"; delegate-only passes under "everything is `spawned-by`" |
-| fork of a **root** thread → placement root, not child of source | **yes** — a fork of a non-root source passes under both correct and `rootThreadId`-derived implementations |
-| reparent S under X, then fork S → fork's placement parent is X | **yes** — proves sibling is computed from *placement*, not provenance |
-| native create → `unknown` | confirms (see §2 for the control that discriminates this one) |
+| fork of a **root** thread → placement root, not child of source                                      | **yes** — a fork of a non-root source passes under both correct and `rootThreadId`-derived implementations              |
+| reparent S under X, then fork S → fork's placement parent is X                                       | **yes** — proves sibling is computed from _placement_, not provenance                                                   |
+| native create → `unknown`                                                                            | confirms (see §2 for the control that discriminates this one)                                                           |
 
 ### Consequences to document
 

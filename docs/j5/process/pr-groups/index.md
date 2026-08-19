@@ -38,14 +38,14 @@ flowchart TB
 
 ## Installation on this machine (done 2026-08-16)
 
-| Piece | Where | State |
-| --- | --- | --- |
-| Playbooks | `~/repos/jacksondr5/pr-group`, symlinked at `~/.pr-group` | cloned from `Jacksondr5/pr-group` |
-| Dashboard + `prg` | `~/repos/jacksondr5/pr-group-dashboard`, symlinked at `~/.pr-group-dashboard` | cloned from `Jacksondr5/pr-group-dashboard` |
-| Board service | `~/Library/LaunchAgents/ai.fh.pr-group-dashboard.plist`, `http://localhost:7317` | running (self-polls: agents 20s, GitHub 60s) |
-| `prg` on PATH | `/opt/homebrew/bin/prg` (wrapper → `~/.pr-group-dashboard/bin/prg`) | verified: `prg gates` measures live |
-| Watchdog | `~/.traycer/pr-sitter/watchdog.sh` + `ai.fh.pr-sitter-watchdog` LaunchAgent | pre-existing, running; reads `epic_id` per registry entry, so j5code entries need no watchdog change |
-| Dashboard identity | Traycer agent `60be3b6a-7997-4446-8984-12d762a7d2d9` — "PR Group Dashboard (identity pin — do not archive)" | pinned in `.env` and the plist; archiving it makes liveness polling go quiet (fails safe) |
+| Piece              | Where                                                                                                       | State                                                                                                |
+| ------------------ | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Playbooks          | `~/repos/jacksondr5/pr-group`, symlinked at `~/.pr-group`                                                   | cloned from `Jacksondr5/pr-group`                                                                    |
+| Dashboard + `prg`  | `~/repos/jacksondr5/pr-group-dashboard`, symlinked at `~/.pr-group-dashboard`                               | cloned from `Jacksondr5/pr-group-dashboard`                                                          |
+| Board service      | `~/Library/LaunchAgents/ai.fh.pr-group-dashboard.plist`, `http://localhost:7317`                            | running (self-polls: agents 20s, GitHub 60s)                                                         |
+| `prg` on PATH      | `/opt/homebrew/bin/prg` (wrapper → `~/.pr-group-dashboard/bin/prg`)                                         | verified: `prg gates` measures live                                                                  |
+| Watchdog           | `~/.traycer/pr-sitter/watchdog.sh` + `ai.fh.pr-sitter-watchdog` LaunchAgent                                 | pre-existing, running; reads `epic_id` per registry entry, so j5code entries need no watchdog change |
+| Dashboard identity | Traycer agent `60be3b6a-7997-4446-8984-12d762a7d2d9` — "PR Group Dashboard (identity pin — do not archive)" | pinned in `.env` and the plist; archiving it makes liveness polling go quiet (fails safe)            |
 
 `.env` (not committed): `TRAYCER_EPIC_ID=5690b096…` (this epic, as connection anchor — the board spans all epics), `TRAYCER_AGENT_ID=60be3b6a…`, `PRG_AGENT_LOGIN=Jacksondr5`, `PRG_DEFAULT_REPO=Jacksondr5/j5code`. Bitbucket is unused here.
 
@@ -62,7 +62,7 @@ The nine hard rules of `00-roles.md` apply unchanged. j5code specifics:
 5. **One group per ticket.** The group is spawned before the PR exists, all three seats bound to the Builder's worktree, and registered at spawn (`prg group register`). No backport flow exists on j5code (no `release/**` branches) — `06-backport.md` is dormant here.
 6. **CodeRabbit is active on j5code.** Gate 6 requires an evidence-backed disposition of every CodeRabbit thread on the exact PR head, using the `04-rounds.md` triage flow. The independent Reviewer's verdict and the readiness correction for GitHub approval remain required; neither substitutes for bot triage.
 7. **Attribution line on every GitHub post** (hard rule 7): posts go out under `Jacksondr5`, opening byte-identical with `Posted by an AI agent on Jackson's behalf`.
-8. **Jackson merges. Always.** READY goes up only after `prg gates` shows 1–6 green and the judgment gates (negative control included) are asserted with evidence. **Readiness correction (Jackson, 2026-08-16, during the A1 shakedown): a separate human GitHub *approval* is NOT required for these builds — disposed CodeRabbit comments + green applicable checks are sufficient external-review evidence (a known gate-1 mismatch to read accordingly). The group's independent Reviewer verdict and judgment-gate evidence are still required. Jackson still performs every merge.**
+8. **Jackson merges. Always.** READY goes up only after `prg gates` shows 1–6 green and the judgment gates (negative control included) are asserted with evidence. **Readiness correction (Jackson, 2026-08-16, during the A1 shakedown): a separate human GitHub _approval_ is NOT required for these builds — disposed CodeRabbit comments + green applicable checks are sufficient external-review evidence (a known gate-1 mismatch to read accordingly). The group's independent Reviewer verdict and judgment-gate evidence are still required. Jackson still performs every merge.**
 9. **Upstream-pin discipline:** groups never advance the pin in `FORK.md` as a side effect. Rebases onto a new upstream base are their own deliberate, reviewed change — out of scope for any feature group.
 
 ### Required board writes (the group owes these)

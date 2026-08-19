@@ -39,13 +39,13 @@ The client fetches the snapshot over HTTP (`threadSnapshotHttp.ts`, `shellSnapsh
 
 <user_quoted_section>"Attach live delivery before reading either replay or snapshot state. Otherwise an event published while the snapshot is loading is lost."</user_quoted_section>
 
-The live PubSub stream is forked into an **unbounded queue bound to the stream's scope** *first*; then catch-up replay is emitted, then the buffered/ongoing live events. Overlapping events are deduped by sequence on the client. This is the classic snapshot/stream race and it's solved in the correct order with the reason written down.
+The live PubSub stream is forked into an **unbounded queue bound to the stream's scope** _first_; then catch-up replay is emitted, then the buffered/ongoing live events. Overlapping events are deduped by sequence on the client. This is the classic snapshot/stream race and it's solved in the correct order with the reason written down.
 
 ### 3. Replay gap cap — from a real outage
 
 <user_quoted_section>"A stale cached cursor can sit hundreds of thousands of global events behind — replaying that decodes every intervening event (including every other thread's tool payloads) only to discard almost all of them, which has OOM-killed servers on large databases. A truncated replay would silently drop this thread's events, so past the gap cap we reset the client with a fresh thread snapshot instead."</user_quoted_section>
 
-`THREAD_RESUME_MAX_GAP`. Note the reasoning: truncating would be *silently wrong*, so the fallback is the correct-but-expensive path, not the cheap-but-lossy one.
+`THREAD_RESUME_MAX_GAP`. Note the reasoning: truncating would be _silently wrong_, so the fallback is the correct-but-expensive path, not the cheap-but-lossy one.
 
 ### 4. Windowed snapshots, opt-in
 
@@ -63,7 +63,7 @@ Backward compatibility handled by capability rather than version sniffing.
 - Turnless rows (user messages, turnless activities) are bounded to the **matching turn-anchor time range** so they land on the same page.
 - Each page carries a thread-scoped **watermark**, read inside the same transaction as the rows so the page boundary is consistent.
 - A malformed or foreign-thread cursor **falls back to the first page rather than failing** — a stale cursor after a revert degrades gracefully.
-- An explicitly documented tradeoff: a fan-out group can split across pages, and the cursor continues the same group, *"at the cost of splitting the fan-out group across pages."* Named, not hidden.
+- An explicitly documented tradeoff: a fan-out group can split across pages, and the cursor continues the same group, _"at the cost of splitting the fan-out group across pages."_ Named, not hidden.
 
 Backed by migrations `019_ProjectionSnapshotLookupIndexes`, `029_ProjectionThreadDetailOrderingIndexes`, `030_ProjectionThreadShellArchiveIndexes`, `037_ProjectionTurnsKeysetIndex`.
 
@@ -72,7 +72,7 @@ Backed by migrations `019_ProjectionSnapshotLookupIndexes`, `029_ProjectionThrea
 ## Wire discipline
 
 - **Per-subscription server streams.** ~17 stream methods; a client subscribes only to what it renders.
-- **Buffered assistant delivery.** A thread in `buffered` mode accumulates assistant text instead of emitting every delta. Not held to turn end: `MAX_BUFFERED_ASSISTANT_CHARS = 24,000` — the append that *would* exceed it invalidates the buffer and spills the whole accumulated text as one delta; it also flushes at approval and user-input boundaries (`flushBufferedAssistantMessagesForTurn`). A bounded-latency, bounded-frames compromise.
+- **Buffered assistant delivery.** A thread in `buffered` mode accumulates assistant text instead of emitting every delta. Not held to turn end: `MAX_BUFFERED_ASSISTANT_CHARS = 24,000` — the append that _would_ exceed it invalidates the buffer and spills the whole accumulated text as one delta; it also flushes at approval and user-input boundaries (`flushBufferedAssistantMessagesForTurn`). A bounded-latency, bounded-frames compromise.
 - **`timelineBypass`** keeps child-agent activity off the parent timeline entirely.
 - **`MAX_VISIBLE_WORK_LOG_ENTRIES = 1`** — the work log collapses to one visible entry with overflow folded.
 - **Client activity + host power state reporting** (`server.reportClientActivity`, `reportHostPowerState`, `subscribeBackgroundPolicy`) — the server adapts what it sends based on whether anyone is watching and whether the host is on battery.
@@ -83,7 +83,7 @@ Backed by migrations `019_ProjectionSnapshotLookupIndexes`, `029_ProjectionThrea
 
 The March custom hybrid virtualizer with a CI-asserted height estimator is **gone**. Current: **`@legendapp/list`** (`LegendList`), the same library on web and mobile, plus a shared anchoring helper `resolveChatListAnchoredEndSpace` in `packages/shared/src/chatList.ts` — so anchoring behaves identically on both surfaces instead of drifting.
 
-`MessagesTimeline.tsx` is 2,377 lines with logic split into a separately-tested `MessagesTimeline.logic.ts` (713 lines). The logic file preserves **row-reference stability for virtualization**: *"unchanged plan keeps its row reference (virtualization stability)."* Referential stability is what keeps a virtualizer from remeasuring.
+`MessagesTimeline.tsx` is 2,377 lines with logic split into a separately-tested `MessagesTimeline.logic.ts` (713 lines). The logic file preserves **row-reference stability for virtualization**: _"unchanged plan keeps its row reference (virtualization stability)."_ Referential stability is what keeps a virtualizer from remeasuring.
 
 Component-level: `memo`, `useCallback`, `useMemo`, `createContext`/`use` throughout; `EMPTY_AGENT_PANEL_MODEL` and `NOOP_OPEN_AGENTS` hoisted to module scope so default props don't allocate per render.
 
@@ -117,11 +117,11 @@ There is also an `os-jank.ts` module in the server, which suggests they detect a
 
 All three reactors (`ProviderRuntimeIngestion`, `ProviderCommandReactor`, `CheckpointReactor`) expose `drain`. There's also a `KeyedCoalescingWorker` for per-key coalescing.
 
-**`RuntimeReceiptBus`** survives with a sharpened role: typed async-milestone receipts (`checkpoint.baseline.captured`, `checkpoint.diff.finalized`, `turn.processing.quiesced`), but **`RuntimeReceiptBusLive` publishes nothing** — only the test layer is PubSub-backed, and the docs say *"Do not build production behavior on receipts."* The determinism mechanism was kept for tests and explicitly denied production semantics, so it can never become load-bearing by accident. This is a *better* design than March's.
+**`RuntimeReceiptBus`** survives with a sharpened role: typed async-milestone receipts (`checkpoint.baseline.captured`, `checkpoint.diff.finalized`, `turn.processing.quiesced`), but **`RuntimeReceiptBusLive` publishes nothing** — only the test layer is PubSub-backed, and the docs say _"Do not build production behavior on receipts."_ The determinism mechanism was kept for tests and explicitly denied production semantics, so it can never become load-bearing by accident. This is a _better_ design than March's.
 
 The rule in AGENTS.md:
 
-<user_quoted_section>*"The server is event-sourced and its async flows emit typed receipts. Wait on receipts and worker drains, never on sleeps or polling. A test that needs a timeout to pass is wrong."*</user_quoted_section>
+<user*quoted_section>*"The server is event-sourced and its async flows emit typed receipts. Wait on receipts and worker drains, never on sleeps or polling. A test that needs a timeout to pass is wrong."\_</user_quoted_section>
 
 ## Error handling
 
@@ -134,11 +134,11 @@ The rule in AGENTS.md:
 
 ## Testing
 
-| Metric | Value |
-| --- | --- |
-| In-repo test files | **822** |
-| Test LOC | ~231k (of ~713k total TS/TSX) |
-| Ratio | roughly **1 line of test per 2 lines of source** |
+| Metric             | Value                                            |
+| ------------------ | ------------------------------------------------ |
+| In-repo test files | **822**                                          |
+| Test LOC           | ~231k (of ~713k total TS/TSX)                    |
+| Ratio              | roughly **1 line of test per 2 lines of source** |
 
 Distribution: web 252, server 232, mobile 108, desktop 59, client-runtime 47, shared 42, relay 27, contracts 19, effect-acp 5, ssh 4, codex-app-server 4, plus ~20 for build scripts and 4 for the lint plugin.
 
@@ -150,7 +150,7 @@ Notable practices:
 - `@effect/vitest` with deterministic service layers.
 - Required connection-runtime coverage is enumerated in the docs as a contract: offline startup, forever-retry with 16s cap, explicit retry interrupting backoff, auth wakeups, involuntary close, explicit removal clearing owned state, relay token reuse/refresh, progressive relay discovery, cache hydration, durable subscriptions switching sessions, idempotent queued-command metadata.
 - Integration tests exist where they matter (`CodexCollabRuntime.integration.test.ts`), plus `acp-mock-agent.ts` for testing ACP without a real CLI.
-- **Local-scope testing is mandated**: *"Do not run repo-wide checks... CI owns the full suite."*
+- **Local-scope testing is mandated**: _"Do not run repo-wide checks... CI owns the full suite."_
 
 ## CI
 
@@ -159,7 +159,7 @@ Notable practices:
 1. **Check** — `vp check` (format + lint), `vpr typecheck`, plus a desktop pipeline build that **verifies the preload bundle exists and still exports its expected symbols** (a real Electron footgun, gated).
 2. **Test** — `vp run test` across the workspace.
 3. **Mobile Native Static Analysis** — on macOS, wrapping `scripts/mobile-native-static-check.ts`.
-4. **Release Smoke** — exercises release-only workflow steps via `scripts/release-smoke.ts`, *"so release breakage surfaces on PRs rather than at tag time."* Excellent idea.
+4. **Release Smoke** — exercises release-only workflow steps via `scripts/release-smoke.ts`, _"so release breakage surfaces on PRs rather than at tag time."_ Excellent idea.
 
 Others: `deploy-relay`, `mobile-eas-preview`, `mobile-eas-production`, `mobile-fingerprint-check`, `mobile-showcase-screenshots`, `web-preview`, `pr-size`, `pr-vouch`, `issue-labels`, `thread-transfer-report`. `release.yml` builds macOS arm64/x64, Linux x64, and Windows x64 from one `v*.*.*` tag, auto-enabling signing only when credentials are present and still releasing unsigned artifacts otherwise.
 
@@ -167,12 +167,12 @@ Others: `deploy-relay`, `mobile-eas-preview`, `mobile-eas-production`, `mobile-f
 
 `oxlint-plugin-t3code` — four repo-specific rules, each with a test:
 
-| Rule | Enforces |
-| --- | --- |
-| `no-global-process-runtime` | No ambient global Effect runtime |
-| `no-manual-effect-runtime-in-tests` | Tests use the provided harness, not hand-rolled runtimes |
-| `no-inline-schema-compile` | Schemas aren't compiled inline in hot paths (a real perf trap) |
-| `namespace-node-imports` | Consistent Node import style |
+| Rule                                | Enforces                                                       |
+| ----------------------------------- | -------------------------------------------------------------- |
+| `no-global-process-runtime`         | No ambient global Effect runtime                               |
+| `no-manual-effect-runtime-in-tests` | Tests use the provided harness, not hand-rolled runtimes       |
+| `no-inline-schema-compile`          | Schemas aren't compiled inline in hot paths (a real perf trap) |
+| `namespace-node-imports`            | Consistent Node import style                                   |
 
 Encoding architectural invariants as lint rules is exactly the right move for a codebase mostly edited by agents.
 
@@ -182,8 +182,8 @@ Justification at ~16k files / 482k LOC of source:
 
 **Strong**
 
-- **`: any` appears 6 times in non-test source across 482k LOC.** That is an extraordinary number, and it's backed by an explicit norm (*"Inferred types over annotations. `any` is the enemy."*).
-- **Comments explain *why*, and cite the incident.** Invariants reference the PR/issue that motivated them (#4220, #3650, #4662, #4779, #5051). Tradeoffs are named rather than hidden. This is the single most impressive property of the codebase.
+- **`: any` appears 6 times in non-test source across 482k LOC.** That is an extraordinary number, and it's backed by an explicit norm (_"Inferred types over annotations. `any` is the enemy."_).
+- **Comments explain _why_, and cite the incident.** Invariants reference the PR/issue that motivated them (#4220, #3650, #4662, #4779, #5051). Tradeoffs are named rather than hidden. This is the single most impressive property of the codebase.
 - **Documentation is current and honest.** `docs/internals/` matched the code everywhere I checked, has a maintained glossary with file links, and keeps a "Future work — these remain unbuilt, listed to keep the model honest" section.
 - **Clean boundaries.** Contracts have no heavy runtime logic; `shared` has no barrel; `client-runtime` has no root export; complexity is pushed to adapter boundaries; orchestration is pure; the UI is dumb.
 - **Type-level enforcement** where possible (`BuiltInDriversEnv` union making a missing runtime service a compile error).
@@ -198,17 +198,17 @@ Justification at ~16k files / 482k LOC of source:
 - **Effect-heavy.** Idiomatic and consistent, but it is a steep prerequisite. The repo has to vendor `effect-smol` into `.repos/` and instruct agents to read `LLMS.md` before writing Effect — that's a real signal about the learning curve. It's also on a **beta** line (`4.0.0-beta.103`).
 - **Bleeding-edge toolchain.** Vite+ (`vp`), `@effect/tsgo`, `@typescript/native-preview`, pnpm 11, Node 24, and **16 patch files** in `patches/`. Fast and pleasant for them; a supply-chain and stability risk for a fork.
 - **Cloud coupling.** T3 Connect is Clerk + Cloudflare + PlanetScale + Alchemy + APNs. Disabled in a fresh clone, and the local/LAN/Tailscale/SSH paths work without it — but the flagship remote experience does not.
-- **Contribution is closed.** *"We are (mostly) not accepting contributions yet. Big features will not be."* Upstreaming fixes is not a viable strategy.
+- **Contribution is closed.** _"We are (mostly) not accepting contributions yet. Big features will not be."_ Upstreaming fixes is not a viable strategy.
 
 ## Fork viability: **No — port the patterns.** (March verdict re-confirmed, and strengthened)
 
-Legally trivial: **MIT**, and the project explicitly blesses forking (*"If we ever go the wrong direction, we want you to have everything you need to fork"*). A large number of users already run forks.
+Legally trivial: **MIT**, and the project explicitly blesses forking (_"If we ever go the wrong direction, we want you to have everything you need to fork"_). A large number of users already run forks.
 
 Practically wrong for us:
 
 1. **You inherit operations, not a head start.** A meaningful fork means running your own relay (Cloudflare Workers + PlanetScale + Alchemy), your own Clerk tenant, your own APNs certificates, your own signed desktop release pipeline across three platforms, and your own App Store + Play Store listings.
 2. **Merge pain is permanent.** ~1,479 commits in five months on a repo that rejects big external features. Every rebase is yours to own, forever.
-3. **The product shapes diverge.** T3 is one-thread-one-agent with fleet *observability*. We are building fleet *orchestration*. That difference lives in the orchestration core — the part you'd have to rewrite anyway, and the part currently mid-migration to v2.
+3. **The product shapes diverge.** T3 is one-thread-one-agent with fleet _observability_. We are building fleet _orchestration_. That difference lives in the orchestration core — the part you'd have to rewrite anyway, and the part currently mid-migration to v2.
 4. **The toolchain is a liability outside their team.** Beta Effect, Vite+, native-preview TS, 16 patches. Excellent when the authors are in the room; a maintenance tax when they aren't.
 5. **The patterns are the value, and they're free.** Everything worth having — the read path, the adapter contract, `DrainableWorker`, the auth model, the supervisor state machine, the subagent invariants — is a design you can read in an afternoon and implement in your own stack. That's the actual transferable asset, and taking it costs you no operational surface at all.
 

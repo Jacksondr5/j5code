@@ -13,30 +13,30 @@ The feature we most want to learn from. This is my exhaustive reconstruction fro
 
 ## 0. The one-paragraph version
 
-Agents in an Epic address each other by id through a host-local **broker**. A send is fire-and-forget; a *reply-expected* send mints a **thread id** (`responseId`) that the receiver must echo to close the thread. The broker tracks open threads and — this is the part everyone else misses — **actively notifies the sender when the counterparty goes silent, with a typed reason distinguishing "turn ended", "process exited", "user stopped it", "it errored", "it's blocked on a human", and "it was cancelled outright"**. Delivery reaches GUI agents natively through an MCP bridge and TUI agents through a background `traycer monitor` process wired to the harness's own lifecycle hooks.
+Agents in an Epic address each other by id through a host-local **broker**. A send is fire-and-forget; a _reply-expected_ send mints a **thread id** (`responseId`) that the receiver must echo to close the thread. The broker tracks open threads and — this is the part everyone else misses — **actively notifies the sender when the counterparty goes silent, with a typed reason distinguishing "turn ended", "process exited", "user stopped it", "it errored", "it's blocked on a human", and "it was cancelled outright"**. Delivery reaches GUI agents natively through an MCP bridge and TUI agents through a background `traycer monitor` process wired to the harness's own lifecycle hooks.
 
-## 1. The MCP surface *[observed]*
+## 1. The MCP surface _[observed]_
 
 The host serves an MCP server named **`traycer_a2a`**, injected into every agent's tool namespace. 17 tools:
 
 ### Messaging
 
-| Tool | Purpose |
-| --- | --- |
-| `traycer_send_message` | Send to a peer. `{toAgentId, message, expectReply?, responseId?}`. Async — *"returns as soon as the message is queued, and any reply arrives later as a new incoming message, never as this tool's result."* |
-| `traycer_get_transcript` | Read another agent's conversation as an XML-tagged string. |
-| `traycer_list_agents` | Enumerate reachable agents; `scope: "user" \| "all"`. |
-| `traycer_get_self` | Authoritative "which agent am I". |
+| Tool                     | Purpose                                                                                                                                                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `traycer_send_message`   | Send to a peer. `{toAgentId, message, expectReply?, responseId?}`. Async — _"returns as soon as the message is queued, and any reply arrives later as a new incoming message, never as this tool's result."_ |
+| `traycer_get_transcript` | Read another agent's conversation as an XML-tagged string.                                                                                                                                                   |
+| `traycer_list_agents`    | Enumerate reachable agents; `scope: "user" \| "all"`.                                                                                                                                                        |
+| `traycer_get_self`       | Authoritative "which agent am I".                                                                                                                                                                            |
 
 ### Lifecycle
 
-| Tool | Purpose |
-| --- | --- |
-| `traycer_create_agent` | Spawn a child agent (harness, model, effort, fast mode, profile, permission mode, workspace, surface). |
+| Tool                      | Purpose                                                                                                             |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `traycer_create_agent`    | Spawn a child agent (harness, model, effort, fast mode, profile, permission mode, workspace, surface).              |
 | `traycer_configure_agent` | Atomically re-point an existing agent's harness/model/profile/effort/permission mode **from its next turn onward**. |
-| `traycer_fork_agent` | Fork an agent from its latest checkpoint into a new agent. **No protocol contract exists for this.** |
-| `traycer_archive_agent` | Retire an agent. **No protocol contract exists for this.** |
-| `traycer_stop_agent` | Stop a running agent, optionally cascading to descendants, optionally archiving. |
+| `traycer_fork_agent`      | Fork an agent from its latest checkpoint into a new agent. **No protocol contract exists for this.**                |
+| `traycer_archive_agent`   | Retire an agent. **No protocol contract exists for this.**                                                          |
+| `traycer_stop_agent`      | Stop a running agent, optionally cascading to descendants, optionally archiving.                                    |
 
 ### Environment
 
@@ -46,7 +46,7 @@ The host serves an MCP server named **`traycer_a2a`**, injected into every agent
 
 ## 2. Who may participate
 
-Single source of truth, `protocol/src/host/agent/shared.ts:190` *[contract]*:
+Single source of truth, `protocol/src/host/agent/shared.ts:190` _[contract]_:
 
 ```ts
 export function canParticipateInA2A(target: {
@@ -60,9 +60,9 @@ export function canParticipateInA2A(target: {
 
 Every GUI agent participates (A2A is provider-native via the MCP bridge). Among TUI agents **only Claude Code** does, because it is the only one with a monitor-backed inbox and reply path. Codex/OpenCode/Cursor TUI agents have no inbox transport — they are discoverable and their transcripts readable, but they cannot send or receive.
 
-The doc-comment is careful to add that this is *purely* the A2A gate and deliberately **not** the gate for activity tracking: every agent, including non-participating TUI ones, still contributes activity to the awareness signal. Good separation.
+The doc-comment is careful to add that this is _purely_ the A2A gate and deliberately **not** the gate for activity tracking: every agent, including non-participating TUI ones, still contributes activity to the awareness signal. Good separation.
 
-## 3. Addressing and discovery — `agent.list@1.0` *[contract]*
+## 3. Addressing and discovery — `agent.list@1.0` _[contract]_
 
 Returns a flat array (not a keyed map — deliberately, to match the rest of the `list*` family). Per row:
 
@@ -79,11 +79,11 @@ Returns a flat array (not a keyed map — deliberately, to match the rest of the
 
 Three details worth stealing:
 
-- **Per-row capability booleans.** The caller is told what it may do with each peer rather than discovering it by failing. The README's phrasing matches: *"Every agent can be referenced; reading a transcript and delivering a message are narrower."*
-- **`active` is precisely defined and precisely narrow.** Sourced from the activity tracker's `hasActivity`, and the doc-comment explicitly states *"NOT effective-active: an agent merely owing an A2A reply is not 'working'."* That distinction prevents a whole class of deadlock-detection bugs.
-- **Locality is explicit.** `isLocal` means "this responding host minted the session". Cross-host rows are returned for **read-only enumeration**, but `agent.sendMessage` rejects them with `RECEIVER_NOT_LOCAL`. The Y.Doc replicates agent *records* cross-host; the message *transport* does not. They shipped the honest partial version rather than faking it.
+- **Per-row capability booleans.** The caller is told what it may do with each peer rather than discovering it by failing. The README's phrasing matches: _"Every agent can be referenced; reading a transcript and delivering a message are narrower."_
+- **`active` is precisely defined and precisely narrow.** Sourced from the activity tracker's `hasActivity`, and the doc-comment explicitly states _"NOT effective-active: an agent merely owing an A2A reply is not 'working'."_ That distinction prevents a whole class of deadlock-detection bugs.
+- **Locality is explicit.** `isLocal` means "this responding host minted the session". Cross-host rows are returned for **read-only enumeration**, but `agent.sendMessage` rejects them with `RECEIVER_NOT_LOCAL`. The Y.Doc replicates agent _records_ cross-host; the message _transport_ does not. They shipped the honest partial version rather than faking it.
 
-## 4. Sending — `agent.sendMessage@1.0` *[contract]*
+## 4. Sending — `agent.sendMessage@1.0` _[contract]_
 
 ```ts
 request:  { senderAgentId, epicId, receiverAgentId, prompt,
@@ -91,17 +91,17 @@ request:  { senderAgentId, epicId, receiverAgentId, prompt,
 response: { responseId: string | null }
 ```
 
-Deliberately distinct from `chat.subscribe`'s `send`: that streams a turn back to a UI client, this *hands a prompt to another agent's runtime and returns immediately*.
+Deliberately distinct from `chat.subscribe`'s `send`: that streams a turn back to a UI client, this _hands a prompt to another agent's runtime and returns immediately_.
 
 The three-state semantics of the `(expectReply, responseId)` pair:
 
-| `expectReply` | `responseId` | Meaning |
-| --- | --- | --- |
-| `true` | `null` | Open a thread. Broker mints and returns a `responseId`. **Idempotent per sender→receiver pair.** |
-| `false` | non-null | **Close** the open thread named by that id — this is the reply. |
-| `false` | `null` | One-shot delivery, uncorrelated. |
+| `expectReply` | `responseId` | Meaning                                                                                          |
+| ------------- | ------------ | ------------------------------------------------------------------------------------------------ |
+| `true`        | `null`       | Open a thread. Broker mints and returns a `responseId`. **Idempotent per sender→receiver pair.** |
+| `false`       | non-null     | **Close** the open thread named by that id — this is the reply.                                  |
+| `false`       | `null`       | One-shot delivery, uncorrelated.                                                                 |
 
-That `expectReply=true` is *idempotent per sender→receiver pair* is the subtle bit: an agent that asks the same peer twice joins its existing thread instead of opening a second one. The MCP tool description confirms the intent — *"Repeat expectReply sends to the same agent join its open thread (same response id) instead of opening parallel requests."*
+That `expectReply=true` is _idempotent per sender→receiver pair_ is the subtle bit: an agent that asks the same peer twice joins its existing thread instead of opening a second one. The MCP tool description confirms the intent — _"Repeat expectReply sends to the same agent join its open thread (same response id) instead of opening parallel requests."_
 
 ## 5. The thread contract — the actual innovation
 
@@ -109,7 +109,7 @@ A `responseId` names **the sender's whole thread with that peer, not one message
 
 <user_quoted_section>"The responseId names this sender's thread, not this single message: follow-up messages may arrive with the same responseId, and one reply with it answers everything on the thread. Only a reply carrying the responseId completes the request — a fresh message does not."</user_quoted_section>
 
-This is a genuinely good piece of protocol design *expressed as prompt text*. It preempts the two failure modes LLM agents actually exhibit: replying to each message separately (thread never closes, N notices fire), and replying with a fresh message that doesn't carry the id (sender waits forever).
+This is a genuinely good piece of protocol design _expressed as prompt text_. It preempts the two failure modes LLM agents actually exhibit: replying to each message separately (thread never closes, N notices fire), and replying with a fresh message that doesn't carry the id (sender waits forever).
 
 ### Message envelope rendering
 
@@ -141,11 +141,11 @@ Sender label degrades cleanly: `title` → falls back to bare id; harness suffix
 
 ### GUI agents — MCP bridge, no broker inbox
 
-Native provider tool call. The message becomes a turn on the receiving chat. *[documented]* The inbox contract notes GUI agents *"have no truncation problem and never route through the broker inbox."*
+Native provider tool call. The message becomes a turn on the receiving chat. _[documented]_ The inbox contract notes GUI agents _"have no truncation problem and never route through the broker inbox."_
 
 ### TUI agents — broker inbox + `traycer monitor`
 
-`agent.inbox.subscribe@1.0` is a **streaming** RPC consumed by a background `traycer monitor` process spawned inside the Claude Code TUI session. Documented delivery model *[documented]*:
+`agent.inbox.subscribe@1.0` is a **streaming** RPC consumed by a background `traycer monitor` process spawned inside the Claude Code TUI session. Documented delivery model _[documented]_:
 
 1. `agent.sendMessage` enqueues a `MailboxEnvelope` on the broker's **per-receiver inbox queue (RAM-only)**.
 2. Each enqueue fires `onInboxChange`; the stream resolver drains and pushes each envelope as a `message` frame.
@@ -154,8 +154,8 @@ Native provider tool call. The message becomes a turn on the receiving chat. *[d
 
 Two design points worth noting:
 
-- **Monitor presence is the authoritative reachability signal.** The resolver registers/unregisters the agent with the host's `AgentActivityTracker` on stream open/close, explicitly *"replacing the older PTY-data heuristic from `TerminalSessionManager`"*. They moved from inferring liveness from terminal output to an explicit protocol signal — the right call.
-- **`agent.inbox.read@1.0` exists purely as a truncation-recovery path.** The monitor surfaces messages through a harness *background-output notification*, which the harness truncates. So there is a unary read returning the broker's retained ring (full bodies, oldest first) reachable via `traycer agent inbox`, whose stdout isn't capped. This is a real-world integration wart handled explicitly rather than ignored.
+- **Monitor presence is the authoritative reachability signal.** The resolver registers/unregisters the agent with the host's `AgentActivityTracker` on stream open/close, explicitly _"replacing the older PTY-data heuristic from `TerminalSessionManager`"_. They moved from inferring liveness from terminal output to an explicit protocol signal — the right call.
+- **`agent.inbox.read@1.0` exists purely as a truncation-recovery path.** The monitor surfaces messages through a harness _background-output notification_, which the harness truncates. So there is a unary read returning the broker's retained ring (full bodies, oldest first) reachable via `traycer agent inbox`, whose stdout isn't capped. This is a real-world integration wart handled explicitly rather than ignored.
 
 ### TUI lifecycle via harness hooks
 
@@ -169,7 +169,7 @@ Ambient context is passed by environment: `TRAYCER_AGENT_ID`, `TRAYCER_EPIC_ID` 
 
 ## 7. Stalled-counterparty notices — the best idea in the feature
 
-When a sender has an open `expectReply` thread and the receiver goes quiet, the broker pushes an **`inactivity` notice** (`agentInboxNoticeSchema`) — a distinct frame kind so *"the agent sees a clearly-marked system signal rather than something that looks like a peer message."*
+When a sender has an open `expectReply` thread and the receiver goes quiet, the broker pushes an **`inactivity` notice** (`agentInboxNoticeSchema`) — a distinct frame kind so _"the agent sees a clearly-marked system signal rather than something that looks like a peer message."_
 
 ```ts
 {
@@ -184,28 +184,28 @@ When a sender has an open `expectReply` thread and the receiver goes quiet, the 
 }
 ```
 
-The seven reasons, with the doc's own trust annotations *[contract]*:
+The seven reasons, with the doc's own trust annotations _[contract]_:
 
-| Reason | Meaning | Trust |
-| --- | --- | --- |
-| `turn-ended` | Receiver's turn ended (Stop hook) with no reply | **Accurate, primary signal** |
-| `exited` | Receiver's process exited without replying | Definitive for this run |
-| `quiet` | Watchdog backstop: long PTY silence | **Advisory** — may still be mid-turn; check its transcript |
-| `user-stopped` | User stopped the turn; will not resume on its own | Thread stays open |
-| `errored` | Turn ended on an error (e.g. rate limit); raw text in `detail` | — |
-| `awaiting-input` | Mid-turn but **blocked on a human** (asked a question / wants approval) | Won't reply until a person responds |
-| `receiver-cancelled` | Agent stopped outright; message **dropped undelivered**, thread closed | *"Informational only: the sender must not re-send or spawn a replacement"* |
+| Reason               | Meaning                                                                 | Trust                                                                      |
+| -------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `turn-ended`         | Receiver's turn ended (Stop hook) with no reply                         | **Accurate, primary signal**                                               |
+| `exited`             | Receiver's process exited without replying                              | Definitive for this run                                                    |
+| `quiet`              | Watchdog backstop: long PTY silence                                     | **Advisory** — may still be mid-turn; check its transcript                 |
+| `user-stopped`       | User stopped the turn; will not resume on its own                       | Thread stays open                                                          |
+| `errored`            | Turn ended on an error (e.g. rate limit); raw text in `detail`          | —                                                                          |
+| `awaiting-input`     | Mid-turn but **blocked on a human** (asked a question / wants approval) | Won't reply until a person responds                                        |
+| `receiver-cancelled` | Agent stopped outright; message **dropped undelivered**, thread closed  | _"Informational only: the sender must not re-send or spawn a replacement"_ |
 
 Why this matters more than it looks:
 
 1. **It distinguishes "not done yet" from "never coming".** `quiet` is explicitly advisory; `turn-ended` is authoritative. Most multi-agent systems have one undifferentiated timeout and therefore cannot tell an agent whether to keep waiting.
 2. **`awaiting-input` breaks the classic deadlock.** Agent A waits on B; B is waiting on a human. Without this signal A waits forever. With it, A knows to escalate to the user instead.
-3. **The notice carries instructions, not just data.** `receiver-cancelled` explicitly tells the sender *not* to retry or spawn a replacement, and contrasts itself with `user-stopped` where the thread stays open. It's teaching the LLM the correct recovery behavior at the moment of failure.
+3. **The notice carries instructions, not just data.** `receiver-cancelled` explicitly tells the sender _not_ to retry or spawn a replacement, and contrasts itself with `user-stopped` where the thread stays open. It's teaching the LLM the correct recovery behavior at the moment of failure.
 4. **`droppedReceivers` batches.** One `agent.stop` cascade that kills three agents a sender was waiting on produces **one** notice listing all three, not three notices. `receiverAgentId`/`responseId` mirror the first entry for schema uniformity.
 
 This is the design I would most want to reproduce.
 
-## 8. Spawning children — `agent.create` v1 → v2 → v3 *[contract]*
+## 8. Spawning children — `agent.create` v1 → v2 → v3 _[contract]_
 
 ```ts
 {
@@ -228,14 +228,14 @@ Inheritance ladder: both `surface` and `harnessId` null → inherit sender's; `h
 
 ### Profile selection — the design to steal
 
-`agent.create@1.0` had `profileId: string | null`, where `null` meant "inherit sender". That conflates three different intents. v2.0 replaced it with a discriminated union and — notably — shipped a **new major** specifically to *remove* a field:
+`agent.create@1.0` had `profileId: string | null`, where `null` meant "inherit sender". That conflates three different intents. v2.0 replaced it with a discriminated union and — notably — shipped a **new major** specifically to _remove_ a field:
 
 ```ts
 type ProfileSelection =
-  | { kind: "last_used" }       // resolve caller's per-user/per-provider last-used
-  | { kind: "ambient" }         // explicitly the provider's ambient CLI login
-  | { kind: "profile"; profileId }  // pin a managed profile
-  | { kind: "inherit_sender" }  // bridge-only: what v1.0's null upgrades to
+  | { kind: "last_used" } // resolve caller's per-user/per-provider last-used
+  | { kind: "ambient" } // explicitly the provider's ambient CLI login
+  | { kind: "profile"; profileId } // pin a managed profile
+  | { kind: "inherit_sender" }; // bridge-only: what v1.0's null upgrades to
 ```
 
 Guardrails that make it airtight:
@@ -243,27 +243,27 @@ Guardrails that make it airtight:
 - `AMBIENT_PROFILE_ID_SENTINEL = "ambient"` is **refused** as a managed `profileId` via a Zod `.refine()`, so the two arms can never claim the same identity through disagreeing shapes.
 - `inherit_sender` is **bridge-only** — never offered by any new discovery, rate-limit, configuration, tool, or CLI contract.
 - `last_used` and `ambient` have **no v1.0-representable value**, so they can never downgrade to `agent.create@1.0`.
-- A separate `ConcreteProfileSelection` (just `ambient | profile`) is used everywhere a caller must name a *resolvable* profile — excluding `last_used` (a preference lookup, not a selection) and `inherit_sender`.
+- A separate `ConcreteProfileSelection` (just `ambient | profile`) is used everywhere a caller must name a _resolvable_ profile — excluding `last_used` (a preference lookup, not a selection) and `inherit_sender`.
 
 Two union types for two different questions ("what do you want?" vs "which one, concretely?") is exactly right.
 
 ### Privacy guardrail
 
-`agentProviderProfileSummarySchema` is *"deliberately narrow — a projection of `ProviderProfile`, not a reuse of its wire type — so email, account UUID, tier identity, config paths, environment overrides, CLI candidates, and credential-derived labels never reach an agent."* An explicit, documented data-minimization boundary between host state and agent-visible state. We need this from day one.
+`agentProviderProfileSummarySchema` is _"deliberately narrow — a projection of `ProviderProfile`, not a reuse of its wire type — so email, account UUID, tier identity, config paths, environment overrides, CLI candidates, and credential-derived labels never reach an agent."_ An explicit, documented data-minimization boundary between host state and agent-visible state. We need this from day one.
 
-## 9. Reconfiguring — `agent.configure@1.0/2.0` *[contract]*
+## 9. Reconfiguring — `agent.configure@1.0/2.0` _[contract]_
 
 Atomically switches harness/model/profile/effort/fast-mode/permission-mode for an existing GUI agent, **effective from its next turn**. The in-progress turn and anything already queued keep the settings they started with; nothing is interrupted or re-run.
 
-Semantics *[observed, from the tool description]*:
+Semantics _[observed, from the tool description]_:
 
 - Workspace rebind is **refused while a turn is running** — the caller is told to use `fork` into the new worktree instead.
 - Terminal agents cannot be reconfigured in place.
 - Response echoes the full resolved settings tuple plus `warnings`.
 
-Note the `configure` vs `fork` split: *change this agent going forward* vs *branch it*. Because `configure` refuses mid-turn workspace changes and points at `fork`, the two compose into a complete story with no invalid intermediate state.
+Note the `configure` vs `fork` split: _change this agent going forward_ vs _branch it_. Because `configure` refuses mid-turn workspace changes and points at `fork`, the two compose into a complete story with no invalid intermediate state.
 
-## 10. Stopping — `agent.stop@1.0` *[contract]*
+## 10. Stopping — `agent.stop@1.0` _[contract]_
 
 ```ts
 { epicId, agentId, cascade: boolean } → { stoppedAgentIds: string[] }
@@ -276,9 +276,9 @@ Design notes:
 
 - **`surface` is deliberately absent.** The resolver reads it from storage to choose turn-abort vs SIGINT. Only `agent.create` carries `surface`, because no record exists yet. Consistent addressing rule across the whole family.
 - **Fan-out is the resolver's job, not the caller's** — the caller names one agent; the response reports the set actually stopped.
-- **Stopping is not terminal.** *"In-flight broker traffic is purged under a transient cancel-guard so the subtree can't revive itself, but a later message wakes any of these agents normally."* The cancel-guard preventing self-revival during a cascade is a detail you only get right after being bitten.
+- **Stopping is not terminal.** _"In-flight broker traffic is purged under a transient cancel-guard so the subtree can't revive itself, but a later message wakes any of these agents normally."_ The cancel-guard preventing self-revival during a cascade is a detail you only get right after being bitten.
 
-The live tool surface adds richer reporting *[observed]*: `stoppedAgentIds`, `archivedAgentIds`, `notArchivedAgentIds`, `skippedAgentIds` (other user / other host), `failedAgentIds` (teardown threw — *"treat those as unfinished rather than idle"*). It also documents that a terminal agent's CLI interrupt is **advisory**, so its stop can't be confirmed and it's never archived in the same call. Honest about what it cannot guarantee.
+The live tool surface adds richer reporting _[observed]_: `stoppedAgentIds`, `archivedAgentIds`, `notArchivedAgentIds`, `skippedAgentIds` (other user / other host), `failedAgentIds` (teardown threw — _"treat those as unfinished rather than idle"_). It also documents that a terminal agent's CLI interrupt is **advisory**, so its stop can't be confirmed and it's never archived in the same call. Honest about what it cannot guarantee.
 
 ## 11. Hierarchy storage
 
@@ -297,21 +297,21 @@ flowchart TD
 Consequences:
 
 - Hierarchy **replicates cross-host and cross-device for free** — it's CRDT state, not broker state. `agent.list` returns titles for cross-host rows precisely because they come from the Y.Doc.
-- The broker holds only *ephemeral* state (RAM-only inbox queues, open threads, sweep timers). Durable structure lives in the doc. Clean split: **the broker owns delivery, the doc owns identity.**
+- The broker holds only _ephemeral_ state (RAM-only inbox queues, open threads, sweep timers). Durable structure lives in the doc. Clean split: **the broker owns delivery, the doc owns identity.**
 - But: GUI and TUI agents live in **two parallel maps** with two parallel `parentId` graphs. A mixed-surface tree requires walking both. This is why `agent.list` flattens them into one array with a `surface` discriminator — the unification happens at the RPC layer rather than in storage. If I were designing this fresh I would use one `agents` map with a `surface` field.
 
 ## 12. Cross-host reality check
 
-| Capability | Same host | Cross host |
-| --- | --- | --- |
-| Appear in `agent.list` | ✅ | ✅ (from Y.Doc) |
-| Title / lineage visible | ✅ | ✅ |
-| `folderPaths`, `active`, `isWorktree` | ✅ | ❌ (local-only, empty/false) |
-| `agent.sendMessage` | ✅ | ❌ `RECEIVER_NOT_LOCAL` |
-| `agent.getTranscript` | ✅ | TUI: ❌ (host-local session store + credentials) |
-| `agent.stop` | ✅ | ❌ (own host only) |
+| Capability                            | Same host | Cross host                                       |
+| ------------------------------------- | --------- | ------------------------------------------------ |
+| Appear in `agent.list`                | ✅        | ✅ (from Y.Doc)                                  |
+| Title / lineage visible               | ✅        | ✅                                               |
+| `folderPaths`, `active`, `isWorktree` | ✅        | ❌ (local-only, empty/false)                     |
+| `agent.sendMessage`                   | ✅        | ❌ `RECEIVER_NOT_LOCAL`                          |
+| `agent.getTranscript`                 | ✅        | TUI: ❌ (host-local session store + credentials) |
+| `agent.stop`                          | ✅        | ❌ (own host only)                               |
 
-The doc-comment names the reason plainly: *"the epic Y.Doc already replicates artifact records cross-host, but the message-delivery transport does not."* A relay/mailbox transport is anticipated but unbuilt.
+The doc-comment names the reason plainly: _"the epic Y.Doc already replicates artifact records cross-host, but the message-delivery transport does not."_ A relay/mailbox transport is anticipated but unbuilt.
 
 ## 13. What to steal, concretely
 
@@ -333,7 +333,7 @@ The doc-comment names the reason plainly: *"the epic Y.Doc already replicates ar
 3. **Don't rely on an out-of-band background process for inbox delivery.** The `traycer monitor` + truncation + `agent.inbox.read` recovery chain is three mechanisms compensating for one integration constraint.
 4. **Make thread state durable and inspectable.** RAM-only queues mean a host restart silently drops in-flight threads. Persist open threads; give the user a UI for "who is waiting on whom".
 5. **Ship `fork`/`archive` as versioned contracts**, not tools that outran the protocol.
-6. **Add explicit deadlock/cycle detection.** The notice system detects *silence*, not *cycles*. A→B→A with both expecting replies is not caught.
+6. **Add explicit deadlock/cycle detection.** The notice system detects _silence_, not _cycles_. A→B→A with both expecting replies is not caught.
 
 ## 15. Delta: what changed by `ad605aa9` (2026-08-14)
 
@@ -350,15 +350,15 @@ The doc-comment names the reason plainly: *"the epic Y.Doc already replicates ar
 `agent.roles.claim` / `agent.roles.list` / `agent.roles.relinquish`, persisted in the epic record as `roleClaims`:
 
 ```ts
-roleClaimSchema = { claimId: uuid, agentId, userId, role, scope, claimedAt }
+roleClaimSchema = { claimId: uuid, agentId, userId, role, scope, claimedAt };
 ```
 
-Purpose, from the schema: *"Agents self-designate a role over a Task-local scope so peers can avoid duplicating responsibility; unrelated to the collaborator ACL."*
+Purpose, from the schema: _"Agents self-designate a role over a Task-local scope so peers can avoid duplicating responsibility; unrelated to the collaborator ACL."_
 
 Two details worth stealing:
 
-- **`roleClaimIdentityKey`** normalizes case and whitespace so `Planner` and `planner` are the same claim and near-duplicates get caught — *"derived on demand and never persisted, so it cannot drift from the stored text."* It also explicitly documents that this is `toLowerCase()`, **not** Unicode casefolding, and claims no casefold semantics. That kind of precision about what a normalization does *not* guarantee is rare.
-- The map key **is** the `claimId`, enforced by a Zod `.refine()` — *"a key/value mismatch [is] a parse error instead of a silently-valid malformed record."*
+- **`roleClaimIdentityKey`** normalizes case and whitespace so `Planner` and `planner` are the same claim and near-duplicates get caught — _"derived on demand and never persisted, so it cannot drift from the stored text."_ It also explicitly documents that this is `toLowerCase()`, **not** Unicode casefolding, and claims no casefold semantics. That kind of precision about what a normalization does _not_ guarantee is rare.
+- The map key **is** the `claimId`, enforced by a Zod `.refine()` — _"a key/value mismatch [is] a parse error instead of a silently-valid malformed record."_
 
 This directly addresses the "two agents both decide they're the reviewer" failure mode, which is a real problem for fleets. **Add to the steal list.**
 
@@ -371,7 +371,7 @@ This directly addresses the "two agents both decide they're the reviewer" failur
 
 Plus a deliberate **representability exception**: a stored row whose `kind` the serving host cannot represent in this contract version is skipped and the cursor advances past it — stated explicitly rather than left as an accident.
 
-**This is the single most valuable *new* idea in the delta for our product.** A fleet manager needs to answer "who asked whom what, and when did it stall" — and Traycer built it as a first-class, cursor-based, exactly-once event log with playback rather than as log scraping. Steal the shape *and* the honesty about what `snapshot` does not promise.
+**This is the single most valuable _new_ idea in the delta for our product.** A fleet manager needs to answer "who asked whom what, and when did it stall" — and Traycer built it as a first-class, cursor-based, exactly-once event log with playback rather than as log scraping. Steal the shape _and_ the honesty about what `snapshot` does not promise.
 
 ### New: `agent.inbox.ack` and `agent.activity.subscribe`
 

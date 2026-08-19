@@ -11,11 +11,11 @@ Status: additive-composition feasibility spike authorized. Audited against workt
 
 Strict FORK add-don't-modify makes the A6 acceptance criteria infeasible. A J5-owned projection can store an independent placement tree after a thread is created, but it cannot truthfully add placement to the real creation surface or make existing stop/archive cascades follow that tree.
 
-| Required behavior | Current owner | Why J5-only code cannot supply it |
-| --- | --- | --- |
-| `placement` on agent/thread creation | `packages/contracts/src/orchestrationV2.ts`, `ThreadLaunchService`, `Orchestrator` | The v2 command schema and dispatch path own creation; `thread.create` currently builds root lineage directly. |
-| Immutable spawn provenance | v2 creation commands/events | The source creation fact is emitted by v2, including delegated and fork paths; an after-the-fact J5 record cannot guarantee automatic, atomic provenance. |
-| Cascade follows placement | `ThreadLifecycleService` and v2 archive/delete handling | Existing lifecycle commands act on a thread and have no J5 placement lookup/hook. |
+| Required behavior                    | Current owner                                                                      | Why J5-only code cannot supply it                                                                                                                         |
+| ------------------------------------ | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `placement` on agent/thread creation | `packages/contracts/src/orchestrationV2.ts`, `ThreadLaunchService`, `Orchestrator` | The v2 command schema and dispatch path own creation; `thread.create` currently builds root lineage directly.                                             |
+| Immutable spawn provenance           | v2 creation commands/events                                                        | The source creation fact is emitted by v2, including delegated and fork paths; an after-the-fact J5 record cannot guarantee automatic, atomic provenance. |
+| Cascade follows placement            | `ThreadLifecycleService` and v2 archive/delete handling                            | Existing lifecycle commands act on a thread and have no J5 placement lookup/hook.                                                                         |
 
 There is a narrow composition seam, but it is not available under the no-protected-file-edit rule: MCP sessions already grant all capabilities, public `OrchestratorMcpService` methods compose over upstream creation, and per-thread lifecycle operations permit a J5 placement walk. Reaching a J5 tool still needs one protected appended registration entry in `McpHttpServer.ts`; built-in creation and native UI remain unchanged.
 
@@ -71,7 +71,7 @@ The rebase is semantic, not a standalone cherry-pick: the integration range modi
 
 ## Open findings
 
-| ID | Finding | Owner | Status |
-| --- | --- | --- | --- |
-| A6-F1 | D10/A6 says mutable-placement cycle checking can reuse a v2 relationship-graph approach. At this pin no cycle logic exists: v2 lineage is immutable and acyclic by construction. Any future mutable J5 placement pointer needs an explicit new cycle-check algorithm. | Spawner / future A6 | Open |
-| A6-F2 | Fork provenance was not covered by the resumed delegated/wrapper/native trichotomy. Director ruling: use a separate immutable `forked-from` kind, never `spawned-by`; place a fork as a sibling of its source (same placement parent, otherwise root). | Builder | Resolved — board decision #3 |
+| ID    | Finding                                                                                                                                                                                                                                                               | Owner               | Status                       |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | ---------------------------- |
+| A6-F1 | D10/A6 says mutable-placement cycle checking can reuse a v2 relationship-graph approach. At this pin no cycle logic exists: v2 lineage is immutable and acyclic by construction. Any future mutable J5 placement pointer needs an explicit new cycle-check algorithm. | Spawner / future A6 | Open                         |
+| A6-F2 | Fork provenance was not covered by the resumed delegated/wrapper/native trichotomy. Director ruling: use a separate immutable `forked-from` kind, never `spawned-by`; place a fork as a sibling of its source (same placement parent, otherwise root).                | Builder             | Resolved — board decision #3 |

@@ -10,7 +10,7 @@ status: 0
 
 ## Goal
 
-When an agent that owes a reply goes quiet, the waiter learns *why* — from platform-measured facts, never from anything the quiet agent was supposed to say.
+When an agent that owes a reply goes quiet, the waiter learns _why_ — from platform-measured facts, never from anything the quiet agent was supposed to say.
 
 ## Scope
 

@@ -29,18 +29,18 @@ No server, web, desktop, mobile, contracts, or ordinary persistence code imports
 
 All ten tables belong to the relay's three functions: account-to-environment control plane, managed Cloudflare tunnels, and mobile activity delivery/security. There are no application projects, threads, provider sessions, or local T3 state tables here.
 
-| Table | Writes / reads | Relay function |
-| --- | --- | --- |
-| `relay_environment_links` | upsert, active-list/get, soft-revoke; joins to credentials/activity/tunnel counts | Maps a Clerk user to a signed environment and advertised endpoint |
-| `relay_environment_credentials` | insert then revoke prior credentials; hash lookup with `EXISTS` active-link check; conditional revoke with `NOT EXISTS` | Authenticates an environment back to the relay |
-| `relay_managed_endpoint_allocations` | reserve/upsert-like claim, record tunnel/DNS, optimistic generation updates, conditional delete | Tracks Cloudflare Tunnel and DNS allocation lifecycle |
-| `relay_managed_tunnel_limits` | per-user override lookup plus joined active-tunnel count | Limits hosted managed tunnels (default three) |
-| `relay_dpop_proofs` | insert-on-conflict replay nonce, expiry delete | One-time DPoP / link challenge replay protection |
-| `relay_mobile_devices` | claim globally unique push tokens, per-device upsert/list/delete | iOS registration and notification preferences |
-| `relay_live_activities` | register/upsert, delivery-state update, target listing/delete | APNs Live Activity token and lifecycle state |
-| `relay_agent_activity_rows` | upsert/remove, user-scoped joined list, terminal JSON-state prune | Temporary per-thread state for notification aggregates |
-| `relay_delivery_attempts` | insert, idempotency claim/reclaim, completion update | APNs delivery deduplication and diagnostics |
-| `relay_migrations` | Drizzle/Alchemy migration ledger | Schema deployment bookkeeping |
+| Table                                | Writes / reads                                                                                                          | Relay function                                                    |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `relay_environment_links`            | upsert, active-list/get, soft-revoke; joins to credentials/activity/tunnel counts                                       | Maps a Clerk user to a signed environment and advertised endpoint |
+| `relay_environment_credentials`      | insert then revoke prior credentials; hash lookup with `EXISTS` active-link check; conditional revoke with `NOT EXISTS` | Authenticates an environment back to the relay                    |
+| `relay_managed_endpoint_allocations` | reserve/upsert-like claim, record tunnel/DNS, optimistic generation updates, conditional delete                         | Tracks Cloudflare Tunnel and DNS allocation lifecycle             |
+| `relay_managed_tunnel_limits`        | per-user override lookup plus joined active-tunnel count                                                                | Limits hosted managed tunnels (default three)                     |
+| `relay_dpop_proofs`                  | insert-on-conflict replay nonce, expiry delete                                                                          | One-time DPoP / link challenge replay protection                  |
+| `relay_mobile_devices`               | claim globally unique push tokens, per-device upsert/list/delete                                                        | iOS registration and notification preferences                     |
+| `relay_live_activities`              | register/upsert, delivery-state update, target listing/delete                                                           | APNs Live Activity token and lifecycle state                      |
+| `relay_agent_activity_rows`          | upsert/remove, user-scoped joined list, terminal JSON-state prune                                                       | Temporary per-thread state for notification aggregates            |
+| `relay_delivery_attempts`            | insert, idempotency claim/reclaim, completion update                                                                    | APNs delivery deduplication and diagnostics                       |
+| `relay_migrations`                   | Drizzle/Alchemy migration ledger                                                                                        | Schema deployment bookkeeping                                     |
 
 The endpoint-level health route is simply `SELECT 1`; all other database access is contained in `infra/relay/src/{auth,environments,agentActivity}`. The Worker constructs every persistence layer in `src/worker.ts`; no other process has a database binding.
 
@@ -48,23 +48,23 @@ The endpoint-level health route is simply `SELECT 1`; all other database access 
 
 We lose **T3 Connect**, the hosted convenience/control plane, rather than the direct T3 Code data plane. The relay README explicitly says normal API and WebSocket traffic goes directly between a connected client and the selected environment; the relay is not in that hot path.
 
-| Lost without relay | What that means |
-| --- | --- |
-| Cloud-account sign-in and linked-environment discovery | No Clerk-backed list of environments shared across web/mobile/desktop clients |
-| `t3 connect` linking and short-lived relay-issued connection credentials | No cloud-mediated environment enrollment or DPoP connection/status minting |
-| Managed public endpoint | No relay-provisioned Cloudflare Tunnel, custom DNS hostname, or hosted per-user tunnel limit |
-| Mobile relay features | No environment activity publication to relay, APNs notifications, or Live Activities |
-| Relay-only tracing | No Axiom relay/client trace configuration |
+| Lost without relay                                                       | What that means                                                                              |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| Cloud-account sign-in and linked-environment discovery                   | No Clerk-backed list of environments shared across web/mobile/desktop clients                |
+| `t3 connect` linking and short-lived relay-issued connection credentials | No cloud-mediated environment enrollment or DPoP connection/status minting                   |
+| Managed public endpoint                                                  | No relay-provisioned Cloudflare Tunnel, custom DNS hostname, or hosted per-user tunnel limit |
+| Mobile relay features                                                    | No environment activity publication to relay, APNs notifications, or Live Activities         |
+| Relay-only tracing                                                       | No Axiom relay/client trace configuration                                                    |
 
 This does not block Jackson's intended initial path: local usage, LAN/pairing, Tailscale HTTPS/Serve, and the desktop's SSH-managed connection path are implemented independently. The web/mobile cloud components gate on a complete trio of Clerk publishable key, Clerk JWT template, and secure relay URL; without them they return no onboarding/sign-in/cloud-link UI. The server similarly computes `hasCloudPublicConfig` as false, so its `t3 connect` cloud command path is not enabled. This is graceful feature omission, not a partially configured relay call.
 
 ## Port-later assessment
 
-| Target | Feasibility | Required work / caution |
-| --- | --- | --- |
-| Generic Postgres | **Best later option** | Keep the existing Postgres schema and most query code; replace PlanetScale provisioning, role/branch lifecycle, and Hyperdrive-specific wiring with a standard connection strategy appropriate to the chosen host. The code already uses `@effect/sql-pg` and `drizzle-orm/pg-core`. |
-| Cloudflare D1 | **Feasible, moderate rewrite** | Replace `@effect/sql-pg`, Hyperdrive, `pgTable`, and Postgres migrations with D1/SQLite equivalents and bind D1 in the Worker. Port `jsonb` to text/JSON, PostgreSQL JSON extraction (`state_json ->> 'phase'`), `pg-core` `QueryBuilder`, and verify every `RETURNING`, `ON CONFLICT`, `excluded`, `coalesce`, join, and transaction path against D1. The unlink flow requires a real atomic transaction for link revocation plus credential revocation. |
-| Plain SQLite | **Feasible only with a host change** | The present Cloudflare Worker has no filesystem database binding. Run the relay as a Node/Bun service with an SQLite Effect/Drizzle driver, or use a remote SQLite-compatible service. It inherits the D1 dialect rewrite but also replaces Worker/queue/cron infrastructure. |
+| Target           | Feasibility                          | Required work / caution                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Generic Postgres | **Best later option**                | Keep the existing Postgres schema and most query code; replace PlanetScale provisioning, role/branch lifecycle, and Hyperdrive-specific wiring with a standard connection strategy appropriate to the chosen host. The code already uses `@effect/sql-pg` and `drizzle-orm/pg-core`.                                                                                                                                                                      |
+| Cloudflare D1    | **Feasible, moderate rewrite**       | Replace `@effect/sql-pg`, Hyperdrive, `pgTable`, and Postgres migrations with D1/SQLite equivalents and bind D1 in the Worker. Port `jsonb` to text/JSON, PostgreSQL JSON extraction (`state_json ->> 'phase'`), `pg-core` `QueryBuilder`, and verify every `RETURNING`, `ON CONFLICT`, `excluded`, `coalesce`, join, and transaction path against D1. The unlink flow requires a real atomic transaction for link revocation plus credential revocation. |
+| Plain SQLite     | **Feasible only with a host change** | The present Cloudflare Worker has no filesystem database binding. Run the relay as a Node/Bun service with an SQLite Effect/Drizzle driver, or use a remote SQLite-compatible service. It inherits the D1 dialect rewrite but also replaces Worker/queue/cron infrastructure.                                                                                                                                                                             |
 
 The SQL is mostly portable relational SQL, with conflict upserts, conditional updates/deletes, joins, and `RETURNING`. The three concrete Postgres-specific points above are why this is not a configuration switch. No schema feature appears to require PlanetScale itself, and the persisted state is modest enough that a fresh migration is preferable to cross-provider data import for a personal relay.
 

@@ -11,15 +11,15 @@ Every user-facing feature on `main` @ `c9063f03e`, with a short note on how each
 
 **Five built-in drivers**, registered in `apps/server/src/provider/builtInDrivers.ts` as `BUILT_IN_DRIVERS`:
 
-| Driver kind | CLI it wraps | Transport |
-| --- | --- | --- |
-| `codex` | Codex CLI | `packages/effect-codex-app-server` (app-server protocol) |
-| `claudeAgent` | Claude Code | `ClaudeAdapter` + capabilities probe, Claude home/skills/executable resolution |
-| `cursor` | Cursor CLI (`agent`) | **ACP** via `packages/effect-acp` |
-| `grok` | Grok Build CLI | **ACP** via `packages/effect-acp` |
-| `opencode` | OpenCode | `opencodeRuntime.ts` + CLI parsers |
+| Driver kind   | CLI it wraps         | Transport                                                                      |
+| ------------- | -------------------- | ------------------------------------------------------------------------------ |
+| `codex`       | Codex CLI            | `packages/effect-codex-app-server` (app-server protocol)                       |
+| `claudeAgent` | Claude Code          | `ClaudeAdapter` + capabilities probe, Claude home/skills/executable resolution |
+| `cursor`      | Cursor CLI (`agent`) | **ACP** via `packages/effect-acp`                                              |
+| `grok`        | Grok Build CLI       | **ACP** via `packages/effect-acp`                                              |
+| `opencode`    | OpenCode             | `opencodeRuntime.ts` + CLI parsers                                             |
 
-Anything configured but not in the array surfaces as an `"unavailable"` shadow snapshot rather than vanishing. Multiple *instances* per driver are supported (`ProviderInstanceId`), which is how multi-account Codex and Claude work (`docs/user/providers-codex.md`, `providers-claude.md`).
+Anything configured but not in the array surfaces as an `"unavailable"` shadow snapshot rather than vanishing. Multiple _instances_ per driver are supported (`ProviderInstanceId`), which is how multi-account Codex and Claude work (`docs/user/providers-codex.md`, `providers-claude.md`).
 
 Users bring their own subscriptions; T3 sells nothing and stores no provider credentials of its own — it drives the CLIs already authenticated on the machine.
 
@@ -39,7 +39,7 @@ Users bring their own subscriptions; T3 sells nothing and stores no provider cre
 
 This is T3's answer to "I have a lot of agents running":
 
-- **Pin** (with explicit reorder — `thread.pin.reorder`, backed by a `pin_order_key` column), **snooze/unsnooze**, **settle/unsettle**, **archive/unarchive**, delete. AGENTS.md makes the reverse state mandatory: *"Snooze needs unsnooze. Close needs reopen. A one-way door is a bug."*
+- **Pin** (with explicit reorder — `thread.pin.reorder`, backed by a `pin_order_key` column), **snooze/unsnooze**, **settle/unsettle**, **archive/unarchive**, delete. AGENTS.md makes the reverse state mandatory: _"Snooze needs unsnooze. Close needs reopen. A one-way door is a bug."_
 - **Thread search** (`orchestration.searchThreads`) and a documented thread sidebar (`docs/user/thread-sidebar.md`) with project grouping.
 - **Status indicators** per thread in the sidebar, driven by projected session status rather than inferred from cached data.
 - **Archived shell snapshots** (`orchestration.getArchivedShellSnapshot`) so archived work is still readable.
@@ -50,11 +50,11 @@ The **Agents right panel** (`apps/web/src/components/AgentsPanel.tsx`) — the r
 
 ## Version control
 
-- **Checkpointing.** Each turn is bracketed by workspace checkpoints stored as **hidden git refs** via the VCS driver (`CheckpointStore.ts`). This powers exact per-turn diffs and `thread.checkpoint.revert`, which reverts *both* the workspace and the provider conversation.
+- **Checkpointing.** Each turn is bracketed by workspace checkpoints stored as **hidden git refs** via the VCS driver (`CheckpointStore.ts`). This powers exact per-turn diffs and `thread.checkpoint.revert`, which reverts _both_ the workspace and the provider conversation.
 - **Turn diff and full-thread diff** (`orchestration.getTurnDiff`, `getFullThreadDiff`), rendered with `@pierre/diffs` through a **worker pool** (`DiffWorkerPoolProvider.tsx`) so diff computation stays off the main thread.
 - **Worktrees** — create/remove per thread (`vcs.createWorktree`), so parallel threads get isolated working trees.
 - **Branch toolbar** — branch selector, environment selector, env-mode selector.
-- **Stacked git actions** (`git.runStackedAction`, a *streaming* RPC), plus pull, refresh status, list refs, create ref, switch ref, init.
+- **Stacked git actions** (`git.runStackedAction`, a _streaming_ RPC), plus pull, refresh status, list refs, create ref, switch ref, init.
 - **Live VCS status** via `subscribeVcsStatus`.
 - **Source control integrations** (`docs/user/source-control.md`): repository lookup, clone, publish.
 

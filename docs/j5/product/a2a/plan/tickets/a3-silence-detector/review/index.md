@@ -34,23 +34,23 @@ Measured: clean tree, local == remote, two commits off `fdd04688c`, all 17 files
 
 Both high-severity regressions were injected back into `SilenceDetector.ts` at this head and the suite re-run:
 
-| Injected revert | Test outcome |
-| --- | --- |
+| Injected revert                                         | Test outcome                                                           |
+| ------------------------------------------------------- | ---------------------------------------------------------------------- |
 | `processingState(…, run.completedAt)` → `run.startedAt` | mid-turn test fails: `expected 'never-processed' to equal 'processed'` |
-| `afterSequence: checkpoint` → `afterSequence: 0` | daemon test fails: `expected +0 to equal 75` |
+| `afterSequence: checkpoint` → `afterSequence: 0`        | daemon test fails: `expected +0 to equal 75`                           |
 
 Tree restored, head unchanged, suite green. Both guards discriminate — they are not tests that merely pass.
 
 ### Disposition
 
-| id | was | now | evidence |
-| --- | --- | --- | --- |
-| #35 | high | fixed | `processingState` compares delivery to `run.completedAt`, so a mid-turn steer is `processed`; genuine `never-processed` moved to `inspectOpenDelivery` via `runCoversDelivery`, with nullable `runId`. A run started *by* the delivery (`userMessageId` match) or still in flight counts as covering, so `run === undefined` really means "no turn since delivery". |
+| id  | was  | now   | evidence                                                                                                                                                                                                                                                                                                                                                                                         |
+| --- | ---- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| #35 | high | fixed | `processingState` compares delivery to `run.completedAt`, so a mid-turn steer is `processed`; genuine `never-processed` moved to `inspectOpenDelivery` via `runCoversDelivery`, with nullable `runId`. A run started _by_ the delivery (`userMessageId` match) or still in flight counts as covering, so `run === undefined` really means "no turn since delivery".                              |
 | #36 | high | fixed | Migration 004 adds a singleton durable cursor. First init reads the `orchestration_v2_events` high-water mark — table name confirmed genuine at `persistence/Migrations/041_OrchestrationV2.ts:9` — reconciles open delivered exchanges, then tails from the cursor. Replay tail bounded to 127 events; cursor writes monotonic; reconcile-before-write means a failed reconcile re-initializes. |
-| #37 | med | fixed | Carrier sender is now `SILENCE_DETECTOR_PARTICIPANT_ID` (`platform:silence-detector`). `silence.notice.sender` stays null, transport still `createdBy: "system"`. The platform id has no membership row, so it correctly never appears in `list_participants`. |
-| #38 | med | fixed | Daemon test drives the real `streamStoredEventsFrom` boundary through the production layer against real SQLite, forces the first stream to die, proves retry and durable cursor advance. Silent death replaced by logged retry; delivery-stream failures warn and reconcile. |
-| #39 | med | fixed | `dependencyNotice` orders candidates `created_at DESC`; test asserts the newer of two peer exchanges structurally. |
-| #40 | med | fixed | Dedupe test uses terminal sequences 100 then 101, so the `commandId` receipt cannot mask the `prior`-delivery guard. |
+| #37 | med  | fixed | Carrier sender is now `SILENCE_DETECTOR_PARTICIPANT_ID` (`platform:silence-detector`). `silence.notice.sender` stays null, transport still `createdBy: "system"`. The platform id has no membership row, so it correctly never appears in `list_participants`.                                                                                                                                   |
+| #38 | med  | fixed | Daemon test drives the real `streamStoredEventsFrom` boundary through the production layer against real SQLite, forces the first stream to die, proves retry and durable cursor advance. Silent death replaced by logged retry; delivery-stream failures warn and reconcile.                                                                                                                     |
+| #39 | med  | fixed | `dependencyNotice` orders candidates `created_at DESC`; test asserts the newer of two peer exchanges structurally.                                                                                                                                                                                                                                                                               |
+| #40 | med  | fixed | Dedupe test uses terminal sequences 100 then 101, so the `commandId` receipt cannot mask the `prior`-delivery guard.                                                                                                                                                                                                                                                                             |
 
 ### New — #41 (medium, open)
 

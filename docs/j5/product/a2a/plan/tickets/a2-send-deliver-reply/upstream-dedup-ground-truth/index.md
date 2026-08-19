@@ -21,18 +21,18 @@ such field. `OrchestratorMcpService.sendToThread` (`apps/server/src/mcp/Orchestr
 converts it into a `commandId` + `messageId` via `stableCommandId` (line 425) and
 `stableOperationMessageId` (line 475) before calling the internal service.
 
-The gate's intent still holds — the internal path *is* deterministically dedupable — but the key is the
+The gate's intent still holds — the internal path _is_ deterministically dedupable — but the key is the
 **`commandId`**. A2 derives `commandId` (and `messageId`, see below) from the ledger message id and
 calls `ThreadManagementService` directly. Routing through the MCP tool surface to reach a dedup key that
 can be set directly would be a workaround.
 
 ## Where dedup lives
 
-| Layer | File | Behavior |
-| --- | --- | --- |
-| Dispatch guard | `Orchestrator.ts:6847-6904` | Reads `commandReceipts.getByCommandId` **before** planning. Accepted receipt → returns stored events, never re-plans or re-commits. |
-| Commit guard | `EventSink.ts:394-411` | `insertIfAbsent` on the receipt; loser returns `committed: false` with the original stored events. |
-| Cross-thread guard | `Orchestrator.ts:6880`, `canReplayCommandReceipt` (line 152) | A receipt may only be replayed for the thread it was recorded against; otherwise `OrchestratorCommandIdConflictError`. |
+| Layer              | File                                                         | Behavior                                                                                                                            |
+| ------------------ | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Dispatch guard     | `Orchestrator.ts:6847-6904`                                  | Reads `commandReceipts.getByCommandId` **before** planning. Accepted receipt → returns stored events, never re-plans or re-commits. |
+| Commit guard       | `EventSink.ts:394-411`                                       | `insertIfAbsent` on the receipt; loser returns `committed: false` with the original stored events.                                  |
+| Cross-thread guard | `Orchestrator.ts:6880`, `canReplayCommandReceipt` (line 152) | A receipt may only be replayed for the thread it was recorded against; otherwise `OrchestratorCommandIdConflictError`.              |
 
 Receipt retention is safe: `ProjectionMaintenance.ts:361-375` prunes
 `orchestration_command_receipts`, but only `command_type = 'legacy'` rows on fully-imported v1 threads.
@@ -64,24 +64,24 @@ semantic refusal.
 
 This forces a retry-design choice that must be made explicitly:
 
-| Option | Guarantee | Cost |
-| --- | --- | --- |
-| Stable `commandId` across all retries | Strict exactly-once | A transient planning failure is terminal for that message; must surface as the alarm state, never an infinite loop against a poisoned id |
-| Per-attempt `commandId` | Survives poisoning | Attempt counter must be durably committed (`message.delivery_failed`) *before* the next attempt, or a crash-window re-drain bumps the attempt and double-injects. **Residual hole:** `sendToThread` can fail *after* `commitCommand` succeeded (projection check, lines 528-537), so a recorded failure does not prove nothing was injected — bumping the id there double-injects. |
+| Option                                | Guarantee           | Cost                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stable `commandId` across all retries | Strict exactly-once | A transient planning failure is terminal for that message; must surface as the alarm state, never an infinite loop against a poisoned id                                                                                                                                                                                                                                           |
+| Per-attempt `commandId`               | Survives poisoning  | Attempt counter must be durably committed (`message.delivery_failed`) _before_ the next attempt, or a crash-window re-drain bumps the attempt and double-injects. **Residual hole:** `sendToThread` can fail _after_ `commitCommand` succeeded (projection check, lines 528-537), so a recorded failure does not prove nothing was injected — bumping the id there double-injects. |
 
 ## A1 carry-forwards that land on A2
 
 - **The `A2ALedger` layer is not provided at runtime.** Outside `src/j5/a2a/`, the only reference to J5
-A2A code is `persistence/Layers/Sqlite.ts:10`, which runs migrations. A1 shipped tables without a
-runtime service. A2 owns the wiring.
+  A2A code is `persistence/Layers/Sqlite.ts:10`, which runs migrations. A1 shipped tables without a
+  runtime service. A2 owns the wiring.
 - **Receipt rollback needs a committed regression.** `LedgerService.ts:267-283` reserves the receipt row
-before inserting the event, inside one transaction. A2's `message.received` path can fail that insert
-on the unique index (`migrations/001_EpicCommunicationLedger.ts:41-45`). If the receipt ever survived a
-failed event insert, a replayed `commandId` would return a receipt pointing at a nonexistent event.
-A1 only probed this with a throwaway.
+  before inserting the event, inside one transaction. A2's `message.received` path can fail that insert
+  on the unique index (`migrations/001_EpicCommunicationLedger.ts:41-45`). If the receipt ever survived a
+  failed event insert, a replayed `commandId` would return a receipt pointing at a nonexistent event.
+  A1 only probed this with a throwaway.
 - **`readEvents` gap contract.** `LedgerService.ts:451` raises `LedgerGapError` when a page returns empty
-while `afterSeq < snapshotEnd`. A drain loop that filters by kind in SQL while reusing this cursor
-contract will trip it.
+  while `afterSeq < snapshotEnd`. A drain loop that filters by kind in SQL while reusing this cursor
+  contract will trip it.
 
 ## The authorized MCP registration case (Director ruling, 2026-08-16)
 
@@ -89,12 +89,12 @@ A2 and A6 share **one** append-only registration case in `apps/server/src/mcp/Mc
 `server.ts` only if essential, J5-commented and recorded in FORK.md. Baseline at `521c50aa9` so the
 "append-only" shape is measurable:
 
-| Element | Baseline location |
-| --- | --- |
-| Toolkit + handler imports | lines 17-29 |
-| One registration const per toolkit | `PreviewToolkitRegistrationLive` 220, `OrchestratorToolkitRegistrationLive` 225, `WorktreeToolkitRegistrationLive` 230 |
-| Transport, carrying `McpAuthMiddlewareLive` | 235-240 — auth applies to anything in the final mergeAll |
-| `export const layer = Layer.mergeAll(...)` | 242-246 |
+| Element                                     | Baseline location                                                                                                      |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Toolkit + handler imports                   | lines 17-29                                                                                                            |
+| One registration const per toolkit          | `PreviewToolkitRegistrationLive` 220, `OrchestratorToolkitRegistrationLive` 225, `WorktreeToolkitRegistrationLive` 230 |
+| Transport, carrying `McpAuthMiddlewareLive` | 235-240 — auth applies to anything in the final mergeAll                                                               |
+| `export const layer = Layer.mergeAll(...)`  | 242-246                                                                                                                |
 
 In-bounds diff: **2 import lines + 1 exported const + 1 appended mergeAll entry.** Reordering the
 mergeAll, restructuring `McpTransportLive`, or touching auth middleware is outside the ruling.
@@ -107,17 +107,16 @@ further protected-file registration edits. That makes the aggregate shape a cont
 `McpServer.toolkit()` returns a plain Layer whose `McpServer` requirement is already satisfied by
 `Layer.provideMerge(McpTransportLive)` at 246.
 
-Two boundaries that are *not* covered by the ruling:
+Two boundaries that are _not_ covered by the ruling:
 
 - **Capabilities.** `McpInvocationContext.ts:10` is `ALL_MCP_CAPABILITIES = ["preview","orchestration", "worktree"]`. Adding an `"a2a"` capability edits a third protected file — a Sitter-routed DECISION.
-Note `requireMcpCapability` (line 27) is hardcoded to `"preview"`; the orchestrator and worktree
-toolkits authorize by thread scoping (`loadScopedThread`) instead, which is the in-bounds pattern.
+  Note `requireMcpCapability` (line 27) is hardcoded to `"preview"`; the orchestrator and worktree
+  toolkits authorize by thread scoping (`loadScopedThread`) instead, which is the in-bounds pattern.
 - **The delivery worker does not belong in the MCP registration.** It needs startup reconciliation and a
-background drain, so it belongs in the runtime: one appended `Layer.provideMerge` alongside
-`RuntimeCoreDependenciesBaseLive` (`server.ts:346`), where `SqlClient` (via `PersistenceLayerLive`,
-  354. and `ThreadManagement` (via `OrchestrationApplicationLayerLive`, 341) are both visible. Hiding a
-background worker inside the MCP toolkit layer to avoid the `server.ts` line would tie its lifecycle to
-the MCP transport — gaming the constraint rather than honoring it.
+  background drain, so it belongs in the runtime: one appended `Layer.provideMerge` alongside
+  `RuntimeCoreDependenciesBaseLive` (`server.ts:346`), where `SqlClient` (via `PersistenceLayerLive`, 354. and `ThreadManagement` (via `OrchestrationApplicationLayerLive`, 341) are both visible. Hiding a
+  background worker inside the MCP toolkit layer to avoid the `server.ts` line would tie its lifecycle to
+  the MCP transport — gaming the constraint rather than honoring it.
 
 **Sender identity is a security boundary.** `McpInvocationScope` (`McpInvocationContext.ts:13`) carries
 `threadId`, `environmentId`, `providerSessionId`, `providerInstanceId`. The J5 `send_message` tool must

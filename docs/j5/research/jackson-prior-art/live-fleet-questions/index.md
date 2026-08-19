@@ -7,7 +7,7 @@ kind: spec
 
 <user_quoted_section>Canonical copy: Jacksondr5/pr-group @ ebe18cf, interviews/ directory — per-role questionnaires (now also toolsmith, triage, coordinator/leads), stats.sh, and answer instructions. Agents write answers to interviews/answers/&lt;questionnaire&gt;-&lt;agent-id-prefix&gt;.md and push to main; we read them from there. This artifact remains as the rationale record (the "what each block feeds" mapping below, extended: toolsmith → agent-proof tool design + missing-platform-API ranking; triage → machine-triggered work UX + escalation context; coordinator → org lifecycle, attention aggregation through middle managers, cost surface).</user_quoted_section>
 
-The public repos were scrubbed of operational data; the running agents on Jackson's work laptop hold the experiential knowledge. Each block below is written to be **forwarded as-is** to the named agent. Answers should come back through Jackson; sanitized examples (fake PR numbers, generic component names) are fine everywhere — we want the *shape* of the experience, never company specifics.
+The public repos were scrubbed of operational data; the running agents on Jackson's work laptop hold the experiential knowledge. Each block below is written to be **forwarded as-is** to the named agent. Answers should come back through Jackson; sanitized examples (fake PR numbers, generic component names) are fine everywhere — we want the _shape_ of the experience, never company specifics.
 
 Priorities if time is short: the Spawner block and the SQL block are the highest-value; then the Sitter block.
 
@@ -87,13 +87,13 @@ SQL
 
 ## What each block feeds
 
-| Source | Feeds |
-| --- | --- |
-| Spawner Q1–2 | Attention-queue design; what the dashboard must make ambient; escalation UX for middle managers |
-| Spawner Q3 | Validation (or extension) of the typed-silence taxonomy and recovery affordances |
-| Spawner Q4–5, member Q4 | Live role config (item 3); which norms become platform mechanisms |
-| Sitter Q1–3 | Human-inbox UX: intent summaries, urgency taxonomy, what "blocked on human" really does to a team |
-| Sitter Q4–5 | Machine events as first-class triggers; cross-group communication patterns |
-| Builder/Reviewer Q1 | The role-definition/spawn-brief schema |
-| Builder/Reviewer Q2–3 | Workspace mutex design; whether role *isolation* needs platform support (reviewer independence) |
-| SQL | Real volumes and latencies to size the inbox, stall thresholds, and dashboard density against |
+| Source                  | Feeds                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------- |
+| Spawner Q1–2            | Attention-queue design; what the dashboard must make ambient; escalation UX for middle managers   |
+| Spawner Q3              | Validation (or extension) of the typed-silence taxonomy and recovery affordances                  |
+| Spawner Q4–5, member Q4 | Live role config (item 3); which norms become platform mechanisms                                 |
+| Sitter Q1–3             | Human-inbox UX: intent summaries, urgency taxonomy, what "blocked on human" really does to a team |
+| Sitter Q4–5             | Machine events as first-class triggers; cross-group communication patterns                        |
+| Builder/Reviewer Q1     | The role-definition/spawn-brief schema                                                            |
+| Builder/Reviewer Q2–3   | Workspace mutex design; whether role _isolation_ needs platform support (reviewer independence)   |
+| SQL                     | Real volumes and latencies to size the inbox, stall thresholds, and dashboard density against     |
