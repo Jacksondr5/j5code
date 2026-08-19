@@ -58,7 +58,7 @@ import { formatHumanEnvelope, formatPeerEnvelope } from "./EnvelopeFormatter.ts"
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import {
   CommCommandId,
-  EpicId,
+  SquadronId,
   ExchangeId,
   GLOBAL_HUMAN_PARTICIPANT_ID,
   LedgerMessageId,
@@ -259,7 +259,7 @@ const seedTarget = (suffix: string) =>
     const ledger = yield* A2ALedger;
     const threadId = ThreadId.make(`thread:j5-a2a-delivery-${suffix}`);
     const projectId = ProjectId.make(`project:j5-a2a-delivery-${suffix}`);
-    const epicId = EpicId.make(`epic:j5-a2a-delivery-${suffix}`);
+    const squadronId = SquadronId.make(`squadron:j5-a2a-delivery-${suffix}`);
     const senderId = ParticipantId.make(`agent:j5-a2a-delivery-${suffix}-sender`);
     const receiverId = ParticipantId.make(`agent:j5-a2a-delivery-${suffix}-receiver`);
     const exchangeId = ExchangeId.make(`exchange:j5-a2a-delivery-${suffix}`);
@@ -281,12 +281,12 @@ const seedTarget = (suffix: string) =>
       branch: null,
       worktreePath: `/tmp/j5-a2a-delivery-${suffix}`,
     });
-    yield* ledger.createEpic({
-      epic: { id: epicId, name: `J5 A2A ${suffix} delivery`, createdAt },
+    yield* ledger.createSquadron({
+      squadron: { id: squadronId, name: `J5 A2A ${suffix} delivery`, createdAt },
     });
     yield* ledger.appendEvents({
       commandId: CommCommandId.make(`command:j5-a2a-delivery-${suffix}-join-target`),
-      epicId,
+      squadronId,
       acceptedAt: createdAt,
       events: [
         {
@@ -306,15 +306,15 @@ const seedTarget = (suffix: string) =>
     return {
       threadId,
       projectId,
-      epicId,
+      squadronId,
       senderId,
       receiverId,
       exchangeId,
       messageId,
       message,
       delivery: {
-        originEpicId: epicId,
-        receiverEpicId: epicId,
+        originSquadronId: squadronId,
+        receiverSquadronId: squadronId,
         messageId,
         senderId,
         receiverId,
@@ -345,7 +345,7 @@ it.effect("starts an idle recipient immediately without the implicit auto mode",
         deliveredMessages[0]?.text,
         formatPeerEnvelope({
           senderId: target.senderId,
-          originEpicId: target.epicId,
+          originSquadronId: target.squadronId,
           exchangeId: target.exchangeId,
           message: target.message,
         }),
@@ -421,7 +421,7 @@ it.effect("steers a busy recipient inside its active turn without queueing a lat
         deliveredMessages[0]?.text,
         formatPeerEnvelope({
           senderId: target.senderId,
-          originEpicId: target.epicId,
+          originSquadronId: target.squadronId,
           exchangeId: target.exchangeId,
           message: target.message,
         }),

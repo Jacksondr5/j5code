@@ -22,8 +22,8 @@ import { runJ5A2AMigrations } from "./Migrations.ts";
 import {
   CommCommandId,
   CorrelationId,
-  Epic,
-  EpicId,
+  Squadron,
+  SquadronId,
   LedgerMessageId,
   ParticipantId,
   type AppendCommEventCommand,
@@ -32,7 +32,7 @@ import {
 } from "./contracts.ts";
 
 const timestamp = "2026-08-16T12:00:00.000Z";
-const isEpic = Schema.is(Epic);
+const isSquadron = Schema.is(Squadron);
 const isLedgerGapError = Schema.is(LedgerGapError);
 const isA2AStorageError = Schema.is(A2AStorageError);
 
@@ -57,15 +57,15 @@ it.effect("routes single-event append through command ids and A2 projections", (
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
-    const epicId = EpicId.make("epic:single-append-projection");
+    const squadronId = SquadronId.make("squadron:single-append-projection");
     const commandId = CommCommandId.make("command:single-append-projection");
     const messageId = LedgerMessageId.make("message:single-append-projection");
-    yield* ledger.createEpic({
-      epic: { id: epicId, name: "Single append projection", createdAt: timestamp },
+    yield* ledger.createSquadron({
+      squadron: { id: squadronId, name: "Single append projection", createdAt: timestamp },
     });
     yield* ledger.append({
       commandId,
-      epicId,
+      squadronId,
       acceptedAt: timestamp,
       event: {
         kind: "message.sent",
@@ -76,8 +76,8 @@ it.effect("routes single-event append through command ids and A2 projections", (
         payload: {
           messageId,
           text: "Single append remains deliverable.",
-          originEpicId: epicId,
-          receiverEpicId: epicId,
+          originSquadronId: squadronId,
+          receiverSquadronId: squadronId,
           exchangeRole: "none",
         },
         createdAt: timestamp,
@@ -100,43 +100,43 @@ it.effect("routes single-event append through command ids and A2 projections", (
 );
 
 const appendCommand = (
-  epicId: EpicId,
+  squadronId: SquadronId,
   index: number,
   event: CommEvent = messageEvent(index),
 ): AppendCommEventCommand => ({
-  commandId: CommCommandId.make(`command:${epicId}:${index}`),
-  epicId,
+  commandId: CommCommandId.make(`command:${squadronId}:${index}`),
+  squadronId,
   acceptedAt: timestamp,
   event,
 });
 
-it.effect("creates, lists, and reads minimal epics", () =>
+it.effect("creates, lists, and reads minimal squadrons", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
     const first = {
-      id: EpicId.make("epic:first"),
-      name: "First epic",
+      id: SquadronId.make("squadron:first"),
+      name: "First squadron",
       createdAt: timestamp,
     };
     const second = {
-      id: EpicId.make("epic:second"),
-      name: "Second epic",
+      id: SquadronId.make("squadron:second"),
+      name: "Second squadron",
       createdAt: "2026-08-16T12:00:01.000Z",
     };
 
-    yield* ledger.createEpic({ epic: second });
-    yield* ledger.createEpic({ epic: first });
+    yield* ledger.createSquadron({ squadron: second });
+    yield* ledger.createSquadron({ squadron: first });
 
-    assert.deepStrictEqual(yield* ledger.readEpic(first.id), first);
-    assert.deepStrictEqual(yield* ledger.listEpics(), [first, second]);
+    assert.deepStrictEqual(yield* ledger.readSquadron(first.id), first);
+    assert.deepStrictEqual(yield* ledger.listSquadrons(), [first, second]);
   }).pipe(Effect.provide(memoryLedgerLayer())),
 );
 
-it("rejects a whitespace-only epic name during contract validation", () => {
+it("rejects a whitespace-only squadron name during contract validation", () => {
   assert.isFalse(
-    isEpic({
-      id: EpicId.make("epic:blank-name"),
+    isSquadron({
+      id: SquadronId.make("squadron:blank-name"),
       name: "   ",
       createdAt: timestamp,
     }),
@@ -147,14 +147,16 @@ it.effect("replays an append command from its durable receipt without adding a r
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
-    const epicId = EpicId.make("epic:idempotency");
-    yield* ledger.createEpic({ epic: { id: epicId, name: "Idempotency", createdAt: timestamp } });
-    const command = appendCommand(epicId, 1);
+    const squadronId = SquadronId.make("squadron:idempotency");
+    yield* ledger.createSquadron({
+      squadron: { id: squadronId, name: "Idempotency", createdAt: timestamp },
+    });
+    const command = appendCommand(squadronId, 1);
 
     const first = yield* ledger.append(command);
     const replay = yield* ledger.append(command);
     const page = yield* ledger.readEvents({
-      epicId,
+      squadronId,
       cursor: { afterSeq: 0 },
       limit: 10,
     });
@@ -167,13 +169,13 @@ it.effect("replays an append command from its durable receipt without adding a r
   }).pipe(Effect.provide(memoryLedgerLayer())),
 );
 
-it.effect("publishes committed events in their per-epic sequence order", () =>
+it.effect("publishes committed events in their per-squadron sequence order", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
-    const epicId = EpicId.make("epic:published-order");
-    yield* ledger.createEpic({
-      epic: { id: epicId, name: "Published order", createdAt: timestamp },
+    const squadronId = SquadronId.make("squadron:published-order");
+    yield* ledger.createSquadron({
+      squadron: { id: squadronId, name: "Published order", createdAt: timestamp },
     });
     const committed = yield* ledger.subscribeCommitted;
     const observedFiber = yield* committed.pipe(
@@ -183,7 +185,7 @@ it.effect("publishes committed events in their per-epic sequence order", () =>
     );
 
     yield* Effect.all(
-      [1, 2, 3].map((index) => ledger.append(appendCommand(epicId, index))),
+      [1, 2, 3].map((index) => ledger.append(appendCommand(squadronId, index))),
       { concurrency: "unbounded" },
     );
     const observed = yield* Fiber.join(observedFiber);
@@ -205,17 +207,19 @@ it.effect.prop(
     Effect.gen(function* () {
       yield* runJ5A2AMigrations();
       const ledger = yield* A2ALedger;
-      const epicId = EpicId.make("epic:property");
-      yield* ledger.createEpic({ epic: { id: epicId, name: "Property", createdAt: timestamp } });
+      const squadronId = SquadronId.make("squadron:property");
+      yield* ledger.createSquadron({
+        squadron: { id: squadronId, name: "Property", createdAt: timestamp },
+      });
       for (let index = 1; index <= eventCount; index += 1) {
-        yield* ledger.append(appendCommand(epicId, index));
+        yield* ledger.append(appendCommand(squadronId, index));
       }
 
       const sequences: Array<number> = [];
       let cursor: LedgerCursor = { afterSeq: 0 };
       let complete = false;
       while (!complete) {
-        const page = yield* ledger.readEvents({ epicId, cursor, limit: pageSize });
+        const page = yield* ledger.readEvents({ squadronId, cursor, limit: pageSize });
         sequences.push(...page.events.map((event) => event.seq));
         cursor = page.nextCursor;
         complete = page.complete;
@@ -235,17 +239,17 @@ it.effect("negative control: a deleted ledger row fails the gap-free read", () =
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
-    const epicId = EpicId.make("epic:gap-negative-control");
-    yield* ledger.createEpic({
-      epic: { id: epicId, name: "Gap negative control", createdAt: timestamp },
+    const squadronId = SquadronId.make("squadron:gap-negative-control");
+    yield* ledger.createSquadron({
+      squadron: { id: squadronId, name: "Gap negative control", createdAt: timestamp },
     });
     for (let index = 1; index <= 3; index += 1) {
-      yield* ledger.append(appendCommand(epicId, index));
+      yield* ledger.append(appendCommand(squadronId, index));
     }
 
-    yield* sql`DELETE FROM j5_a2a_comm_event WHERE epic_id = ${epicId} AND seq = 2`;
+    yield* sql`DELETE FROM j5_a2a_comm_event WHERE squadron_id = ${squadronId} AND seq = 2`;
     const error = yield* Effect.flip(
-      ledger.readEvents({ epicId, cursor: { afterSeq: 0 }, limit: 10 }),
+      ledger.readEvents({ squadronId, cursor: { afterSeq: 0 }, limit: 10 }),
     );
 
     assert.isTrue(isLedgerGapError(error));
@@ -261,8 +265,10 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
-    const epicId = EpicId.make("epic:membership");
-    yield* ledger.createEpic({ epic: { id: epicId, name: "Membership", createdAt: timestamp } });
+    const squadronId = SquadronId.make("squadron:membership");
+    yield* ledger.createSquadron({
+      squadron: { id: squadronId, name: "Membership", createdAt: timestamp },
+    });
     const firstAgent = {
       kind: "agent" as const,
       id: ParticipantId.make("agent:first"),
@@ -321,62 +327,64 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
       },
     ];
     for (const [index, event] of membershipEvents.entries()) {
-      yield* ledger.append(appendCommand(epicId, index + 1, event));
+      yield* ledger.append(appendCommand(squadronId, index + 1, event));
     }
 
     const expected = [
       {
-        epicId,
+        squadronId,
         participant: secondAgent,
         joinedSeq: 3,
         updatedSeq: 4,
       },
       {
-        epicId,
+        squadronId,
         participant: { kind: "human" as const },
         joinedSeq: 2,
         updatedSeq: 2,
       },
     ];
-    const before = yield* ledger.listMembership(epicId);
+    const before = yield* ledger.listMembership(squadronId);
     assert.deepStrictEqual(before, expected);
 
-    yield* sql`DELETE FROM j5_a2a_epic_membership WHERE epic_id = ${epicId}`;
-    const corrupted = yield* ledger.listMembership(epicId);
+    yield* sql`DELETE FROM j5_a2a_squadron_membership WHERE squadron_id = ${squadronId}`;
+    const corrupted = yield* ledger.listMembership(squadronId);
     assert.deepStrictEqual(corrupted, []);
     assert.notEqual(corrupted.length, expected.length);
 
-    const rebuilt = yield* ledger.rebuildMembership(epicId);
+    const rebuilt = yield* ledger.rebuildMembership(squadronId);
     assert.deepStrictEqual(rebuilt, expected);
     const encode = Schema.encodeEffect(Schema.fromJsonString(Schema.Json));
     assert.equal(yield* encode(rebuilt), yield* encode(before));
   }).pipe(Effect.provide(memoryLedgerLayer())),
 );
 
-it.effect("persists epics, events, and receipts across a database restart", () =>
+it.effect("persists squadrons, events, and receipts across a database restart", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "j5-a2a-ledger-" });
       const filename = path.join(directory, "state.sqlite");
-      const epicId = EpicId.make("epic:restart");
-      const command = appendCommand(epicId, 1);
+      const squadronId = SquadronId.make("squadron:restart");
+      const command = appendCommand(squadronId, 1);
       const firstProcess = Effect.gen(function* () {
         yield* runJ5A2AMigrations();
         const ledger = yield* A2ALedger;
-        yield* ledger.createEpic({ epic: { id: epicId, name: "Restart", createdAt: timestamp } });
+        yield* ledger.createSquadron({
+          squadron: { id: squadronId, name: "Restart", createdAt: timestamp },
+        });
         const result = yield* ledger.append(command);
         assert.isTrue(result.committed);
       }).pipe(Effect.provide(fileLedgerLayer(filename)));
       const secondProcess = Effect.gen(function* () {
         yield* runJ5A2AMigrations();
         const ledger = yield* A2ALedger;
-        assert.equal((yield* ledger.readEpic(epicId)).name, "Restart");
+        assert.equal((yield* ledger.readSquadron(squadronId)).name, "Restart");
         const replay = yield* ledger.append(command);
         assert.isFalse(replay.committed);
         const page = yield* ledger.readEvents({
-          epicId,
+          squadronId,
           cursor: { afterSeq: 0 },
           limit: 10,
         });
@@ -391,14 +399,16 @@ it.effect("persists epics, events, and receipts across a database restart", () =
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect("enforces one message.received correlation per receiver epic", () =>
+it.effect("enforces one message.received correlation per receiver squadron", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
-    const epicId = EpicId.make("epic:receiver");
+    const squadronId = SquadronId.make("squadron:receiver");
     const correlationId = CorrelationId.make("correlation:shared");
-    yield* ledger.createEpic({ epic: { id: epicId, name: "Receiver", createdAt: timestamp } });
+    yield* ledger.createSquadron({
+      squadron: { id: squadronId, name: "Receiver", createdAt: timestamp },
+    });
     const receivedEvent: CommEvent = {
       kind: "message.received",
       sender: ParticipantId.make("agent:external"),
@@ -406,17 +416,17 @@ it.effect("enforces one message.received correlation per receiver epic", () =>
       exchangeId: null,
       correlationId,
       payload: {
-        originEpicId: EpicId.make("epic:origin"),
+        originSquadronId: SquadronId.make("squadron:origin"),
         message: "hello",
       },
       createdAt: timestamp,
     };
-    yield* ledger.append(appendCommand(epicId, 1, receivedEvent));
-    const failedCommand = CommCommandId.make(`command:${epicId}:2`);
+    yield* ledger.append(appendCommand(squadronId, 1, receivedEvent));
+    const failedCommand = CommCommandId.make(`command:${squadronId}:2`);
     const error = yield* Effect.flip(
       ledger.appendEvents({
         commandId: failedCommand,
-        epicId,
+        squadronId,
         acceptedAt: timestamp,
         events: [receivedEvent],
       }),
@@ -425,7 +435,7 @@ it.effect("enforces one message.received correlation per receiver epic", () =>
     const rows = yield* sql<{ readonly count: number }>`
       SELECT COUNT(*) AS count
       FROM j5_a2a_comm_event
-      WHERE epic_id = ${epicId} AND kind = 'message.received'
+      WHERE squadron_id = ${squadronId} AND kind = 'message.received'
     `;
     assert.equal(rows[0]?.count, 1);
 
@@ -438,7 +448,7 @@ it.effect("enforces one message.received correlation per receiver epic", () =>
 
     const retried = yield* ledger.appendEvents({
       commandId: failedCommand,
-      epicId,
+      squadronId,
       acceptedAt: timestamp,
       events: [
         {
@@ -456,9 +466,9 @@ it.effect("rejects delivery transitions without a projected message row", () =>
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
-    const epicId = EpicId.make("epic:missing-delivery-projection");
-    yield* ledger.createEpic({
-      epic: { id: epicId, name: "Missing delivery projection", createdAt: timestamp },
+    const squadronId = SquadronId.make("squadron:missing-delivery-projection");
+    yield* ledger.createSquadron({
+      squadron: { id: squadronId, name: "Missing delivery projection", createdAt: timestamp },
     });
     const transitions: ReadonlyArray<{ readonly name: string; readonly event: CommEvent }> = [
       {
@@ -502,7 +512,7 @@ it.effect("rejects delivery transitions without a projected message row", () =>
       const error = yield* Effect.flip(
         ledger.appendEvents({
           commandId,
-          epicId,
+          squadronId,
           acceptedAt: timestamp,
           events: [transition.event],
         }),
@@ -511,7 +521,7 @@ it.effect("rejects delivery transitions without a projected message row", () =>
 
       const retried = yield* ledger.appendEvents({
         commandId,
-        epicId,
+        squadronId,
         acceptedAt: timestamp,
         events: [messageEvent(index + 100)],
       });
@@ -521,7 +531,7 @@ it.effect("rejects delivery transitions without a projected message row", () =>
     const transitionRows = yield* sql<{ readonly count: number }>`
       SELECT COUNT(*) AS count
       FROM j5_a2a_comm_event
-      WHERE epic_id = ${epicId}
+      WHERE squadron_id = ${squadronId}
         AND kind IN ('message.delivered', 'message.delivery_failed')
     `;
     assert.equal(transitionRows[0]?.count, 0);

@@ -19,7 +19,7 @@ import {
   CommCommandId,
   type CommEvent,
   CorrelationId,
-  EpicId,
+  SquadronId,
   ExchangeId,
   GLOBAL_HUMAN_PARTICIPANT_ID,
   LedgerMessageId,
@@ -32,12 +32,12 @@ import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 export const A2A_DELIVERY_CONFIG_VERSION = config.version;
 
 interface DeliveryRow {
-  readonly epic_id: string;
+  readonly squadron_id: string;
   readonly message_id: string;
   readonly sent_seq: number;
   readonly sender_id: string;
   readonly receiver_id: string;
-  readonly receiver_epic_id: string;
+  readonly receiver_squadron_id: string;
   readonly exchange_id: string | null;
   readonly exchange_role: "none" | "ask" | "followup" | "reply";
   readonly correlation_id: string;
@@ -48,14 +48,14 @@ interface DeliveryRow {
 }
 
 interface OpenExchangeRow {
-  readonly epic_id: string;
+  readonly squadron_id: string;
   readonly exchange_id: string;
   readonly sender_id: string;
   readonly receiver_id: string;
 }
 
 export interface DeliveryAttempt {
-  readonly epicId: EpicId;
+  readonly squadronId: SquadronId;
   readonly messageId: LedgerMessageId;
   readonly attempt: number;
 }
@@ -134,9 +134,9 @@ const makeLayer = (daemon: boolean) =>
       const appendReceiverEntry = Effect.fn("j5.a2a.delivery.appendReceiverEntry")(function* (
         row: DeliveryRow,
       ) {
-        if (row.epic_id === row.receiver_epic_id) return;
-        const originEpicId = EpicId.make(row.epic_id);
-        const receiverEpicId = EpicId.make(row.receiver_epic_id);
+        if (row.squadron_id === row.receiver_squadron_id) return;
+        const originSquadronId = SquadronId.make(row.squadron_id);
+        const receiverSquadronId = SquadronId.make(row.receiver_squadron_id);
         const exchangeId = row.exchange_id === null ? null : ExchangeId.make(row.exchange_id);
         const receivedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         const events: Array<CommEvent> = [
@@ -147,12 +147,12 @@ const makeLayer = (daemon: boolean) =>
             exchangeId,
             correlationId: CorrelationId.make(row.correlation_id),
             payload: {
-              originEpicId,
+              originSquadronId,
               message: {
                 messageId: row.message_id,
                 text: row.message_text,
-                originEpicId,
-                receiverEpicId,
+                originSquadronId,
+                receiverSquadronId,
                 exchangeRole: row.exchange_role,
               },
             },
@@ -161,9 +161,9 @@ const makeLayer = (daemon: boolean) =>
         ];
         if (exchangeId !== null) {
           const exchanges = yield* sql<OpenExchangeRow>`
-            SELECT epic_id, exchange_id, sender_id, receiver_id
+            SELECT squadron_id, exchange_id, sender_id, receiver_id
             FROM j5_a2a_exchange
-            WHERE epic_id = ${receiverEpicId}
+            WHERE squadron_id = ${receiverSquadronId}
               AND exchange_id = ${exchangeId}
               AND status = 'open'
               AND sender_id = ${row.receiver_id}
@@ -184,7 +184,7 @@ const makeLayer = (daemon: boolean) =>
         }
         yield* ledger.appendEvents({
           commandId: commandId("receive", LedgerMessageId.make(row.message_id)),
-          epicId: receiverEpicId,
+          squadronId: receiverSquadronId,
           acceptedAt: receivedAt,
           events,
         });
@@ -194,8 +194,8 @@ const makeLayer = (daemon: boolean) =>
         row: DeliveryRow,
         attempt: number,
       ) {
-        const originEpicId = EpicId.make(row.epic_id);
-        const receiverEpicId = EpicId.make(row.receiver_epic_id);
+        const originSquadronId = SquadronId.make(row.squadron_id);
+        const receiverSquadronId = SquadronId.make(row.receiver_squadron_id);
         const messageId = LedgerMessageId.make(row.message_id);
         const senderId = ParticipantId.make(row.sender_id);
         const receiverId = ParticipantId.make(row.receiver_id);
@@ -203,8 +203,8 @@ const makeLayer = (daemon: boolean) =>
         yield* appendReceiverEntry(row);
         if (receiverId === GLOBAL_HUMAN_PARTICIPANT_ID) {
           yield* transport.deliverHuman({
-            originEpicId,
-            receiverEpicId,
+            originSquadronId,
+            receiverSquadronId,
             messageId,
             senderId,
             receiverId,
@@ -214,8 +214,8 @@ const makeLayer = (daemon: boolean) =>
           });
         } else {
           yield* transport.deliverAgent({
-            originEpicId,
-            receiverEpicId,
+            originSquadronId,
+            receiverSquadronId,
             messageId,
             senderId,
             receiverId,
@@ -223,11 +223,11 @@ const makeLayer = (daemon: boolean) =>
             message: row.message_text,
           });
         }
-        yield* hooks.afterTransportSuccess({ epicId: originEpicId, messageId, attempt });
+        yield* hooks.afterTransportSuccess({ squadronId: originSquadronId, messageId, attempt });
         const deliveredAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         yield* ledger.appendEvents({
           commandId: commandId("delivered", messageId),
-          epicId: originEpicId,
+          squadronId: originSquadronId,
           acceptedAt: deliveredAt,
           events: [
             {
@@ -261,7 +261,7 @@ const makeLayer = (daemon: boolean) =>
         const messageId = LedgerMessageId.make(row.message_id);
         yield* ledger.appendEvents({
           commandId: commandId("failed", messageId, attempt),
-          epicId: EpicId.make(row.epic_id),
+          squadronId: SquadronId.make(row.squadron_id),
           acceptedAt: failedAt,
           events: [
             {
@@ -282,7 +282,7 @@ const makeLayer = (daemon: boolean) =>
           ],
         });
         return {
-          epicId: EpicId.make(row.epic_id),
+          squadronId: SquadronId.make(row.squadron_id),
           messageId,
           state: alarmed ? ("alarmed" as const) : ("retry_scheduled" as const),
           attempt,
@@ -293,12 +293,12 @@ const makeLayer = (daemon: boolean) =>
         const now = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         const rows = yield* sql<DeliveryRow>`
           SELECT
-            epic_id,
+            squadron_id,
             message_id,
             sent_seq,
             sender_id,
             receiver_id,
-            receiver_epic_id,
+            receiver_squadron_id,
             exchange_id,
             exchange_role,
             correlation_id,
@@ -309,7 +309,7 @@ const makeLayer = (daemon: boolean) =>
           FROM j5_a2a_delivery
           WHERE status IN ('pending', 'retry_scheduled')
             AND (next_attempt_at IS NULL OR next_attempt_at <= ${now})
-          ORDER BY sent_seq, epic_id, message_id
+          ORDER BY sent_seq, squadron_id, message_id
           LIMIT 1
         `;
         const row = rows[0];
@@ -319,7 +319,7 @@ const makeLayer = (daemon: boolean) =>
         const milestone =
           exit._tag === "Success"
             ? ({
-                epicId: EpicId.make(row.epic_id),
+                squadronId: SquadronId.make(row.squadron_id),
                 messageId: LedgerMessageId.make(row.message_id),
                 state: "delivered",
                 attempt,
@@ -390,19 +390,19 @@ const makeLayer = (daemon: boolean) =>
         runOnce,
         drain,
         listAlarms: sql<{
-          readonly epic_id: string;
+          readonly squadron_id: string;
           readonly message_id: string;
           readonly attempts: number;
           readonly last_error: string;
         }>`
-          SELECT epic_id, message_id, attempts, last_error
+          SELECT squadron_id, message_id, attempts, last_error
           FROM j5_a2a_delivery
           WHERE status = 'alarmed'
-          ORDER BY updated_at, epic_id, message_id
+          ORDER BY updated_at, squadron_id, message_id
         `.pipe(
           Effect.map((rows) =>
             rows.map((row) => ({
-              epicId: EpicId.make(row.epic_id),
+              squadronId: SquadronId.make(row.squadron_id),
               messageId: LedgerMessageId.make(row.message_id),
               attempts: row.attempts,
               lastError: row.last_error,

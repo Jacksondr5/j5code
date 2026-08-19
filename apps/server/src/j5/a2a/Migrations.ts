@@ -3,12 +3,16 @@ import * as Migrator from "effect/unstable/sql/Migrator";
 
 import Migration0001 from "./migrations/001_EpicCommunicationLedger.ts";
 import Migration0002 from "./migrations/002_SendDeliverReply.ts";
+import Migration0003 from "./migrations/003_SquadronRename.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
+// Entries 1 and 2 are persisted migration history. Keep their file and manifest names unchanged;
+// applied migrations are skipped by id and never rerun.
 export const migrationEntries = [
   [1, "EpicCommunicationLedger", Migration0001],
   [2, "SendDeliverReply", Migration0002],
+  [3, "SquadronRename", Migration0003],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>

@@ -1,6 +1,6 @@
 import config from "./envelopes.v1.json" with { type: "json" };
 
-import type { EpicId, ExchangeId, ParticipantId } from "./contracts.ts";
+import type { SquadronId, ExchangeId, ParticipantId } from "./contracts.ts";
 
 export const A2A_ENVELOPE_VERSION = config.version;
 export const A2A_SEND_TOOL_DESCRIPTION = config.sendToolDescription;
@@ -22,13 +22,13 @@ const deliveryInstruction = (input: {
 
 export const formatPeerEnvelope = (input: {
   readonly senderId: ParticipantId;
-  readonly originEpicId: EpicId;
+  readonly originSquadronId: SquadronId;
   readonly exchangeId: ExchangeId | null;
   readonly message: string;
 }): string =>
   render(config.peerMessage, {
     senderId: input.senderId,
-    originEpicId: input.originEpicId,
+    originSquadronId: input.originSquadronId,
     message: input.message,
     exchangeInstruction: deliveryInstruction(input),
   });
