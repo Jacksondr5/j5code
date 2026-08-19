@@ -57,7 +57,8 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'j5_a2a_squadron_membership',
           'j5_a2a_exchange',
           'j5_a2a_delivery',
-          'j5_a2a_human_inbox_data'
+          'j5_a2a_human_inbox_data',
+          'j5_a2a_silence_detector_cursor'
         )
       ORDER BY name
     `;
@@ -97,6 +98,7 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       { name: "j5_a2a_delivery" },
       { name: "j5_a2a_exchange" },
       { name: "j5_a2a_human_inbox_data" },
+      { name: "j5_a2a_silence_detector_cursor" },
       { name: "j5_a2a_squadron" },
       { name: "j5_a2a_squadron_membership" },
     ]);
@@ -296,6 +298,10 @@ it.effect("renames existing Squadron data without changing ledger semantics", ()
       WHERE message_id = 'message:sent'
     `;
     assert.deepStrictEqual(delivery, [{ envelope_channel: "peer" }]);
+    const cursor = yield* sql<{ readonly after_sequence: number | null }>`
+      SELECT after_sequence FROM j5_a2a_silence_detector_cursor WHERE singleton = 1
+    `;
+    assert.deepStrictEqual(cursor, [{ after_sequence: null }]);
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
 

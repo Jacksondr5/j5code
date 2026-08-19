@@ -34,6 +34,7 @@ export const DeliveryEnvelopeChannel = Schema.Literals(["peer", "silence_notice"
 export type DeliveryEnvelopeChannel = typeof DeliveryEnvelopeChannel.Type;
 
 export const GLOBAL_HUMAN_PARTICIPANT_ID = ParticipantId.make("human:global");
+export const SILENCE_DETECTOR_PARTICIPANT_ID = ParticipantId.make("platform:silence-detector");
 
 export const AgentParticipant = Schema.Struct({
   kind: Schema.Literal("agent"),

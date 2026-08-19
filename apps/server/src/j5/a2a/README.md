@@ -13,3 +13,5 @@ For a cross-squadron send, the receiver ledger's idempotent `message.received` r
 Byte-equivalent rebuilds for the A2 exchange and delivery projections are deferred to the measured-projections milestone (M5). A2 keeps those tables derivable from the communication ledger but does not expose their rebuild operation.
 
 A3 persists an explicit delivery envelope channel. Existing delivery rows are backfilled as `peer`, which is the only path that existed before A3; current sends also write `peer` explicitly. Silence notices write `silence_notice`, reuse A2's versioned silence-notice formatter, and bypass peer/human wrapping in the shared transport.
+
+The silence detector checkpoints its global v2 event sequence in the J5 migration lane. A new installation first reconciles only open delivered exchanges against current thread projections, records the existing v2 high-water mark, and then tails from that durable cursor; retries replay at most the uncheckpointed tail instead of scanning the event store from genesis on every boot.

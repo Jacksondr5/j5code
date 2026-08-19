@@ -3,6 +3,7 @@ import {
   MessageId,
   EventId,
   type OrchestrationV2ProviderFailure,
+  type OrchestrationV2Run,
   type OrchestrationV2StoredEvent,
   type OrchestrationV2ThreadProjection,
   ProviderInstanceId,
@@ -10,12 +11,20 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
+import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { A2ADeliveryTransport, type A2ADeliveryTransportShape } from "./DeliveryTransport.ts";
@@ -26,6 +35,7 @@ import {
   A2ASilenceDetector,
   SilenceNoticePayload,
   STOPPED_NOTICE_INSTRUCTION,
+  layer as liveSilenceDetectorLayer,
   manualLayer as silenceDetectorLayer,
 } from "./SilenceDetector.ts";
 import {
@@ -34,6 +44,7 @@ import {
   SquadronId,
   GLOBAL_HUMAN_PARTICIPANT_ID,
   ParticipantId,
+  SILENCE_DETECTOR_PARTICIPANT_ID,
   type AgentParticipant,
   type ExchangeId,
   type LedgerMessageId,
@@ -55,6 +66,11 @@ const peer: AgentParticipant = {
   id: ParticipantId.make("agent:silence:peer"),
   threadId: ThreadId.make("thread:silence:peer"),
 };
+const newerPeer: AgentParticipant = {
+  kind: "agent",
+  id: ParticipantId.make("agent:silence:newer-peer"),
+  threadId: ThreadId.make("thread:silence:newer-peer"),
+};
 const failureDetail = {
   class: "provider_error" as const,
   message: "Provider exited with the measured failure detail.",
@@ -72,6 +88,7 @@ const makeTestLayer = () => {
   const threads = Layer.mock(ThreadManagementService)({
     getThreadProjection: () =>
       Effect.succeed({
+        runs: [],
         turnItems: [
           {
             runId: RunId.make("run:silence:test"),
@@ -95,6 +112,73 @@ const makeTestLayer = () => {
     Layer.provide(transport),
   );
   const detector = silenceDetectorLayer.pipe(
+    Layer.provide(ledger),
+    Layer.provide(database),
+    Layer.provide(threads),
+    Layer.provideMerge(worker),
+  );
+  return Layer.mergeAll(database, ledger, send, detector);
+};
+
+const makeDaemonTestLayer = (
+  storedEvents: (input?: {
+    readonly afterSequence?: number;
+  }) => Stream.Stream<OrchestrationV2StoredEvent>,
+  runs: ReadonlyArray<OrchestrationV2Run>,
+  initialHighWater: number,
+) => {
+  const database = SqlitePersistenceMemory.pipe(
+    Layer.tap((context) => {
+      const sql = Context.get(context, SqlClient.SqlClient);
+      return sql`
+        INSERT OR IGNORE INTO orchestration_v2_events (
+            sequence,
+            event_id,
+            command_id,
+            thread_id,
+            run_id,
+            node_id,
+            provider,
+            raw_event_id,
+            event_type,
+            occurred_at,
+            payload_json
+          ) VALUES (
+            ${initialHighWater},
+            'event:silence:cursor-high-water',
+            NULL,
+            'thread:silence:cursor-high-water',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            'thread.created',
+            ${iso(0)},
+            '{}'
+          )
+        `;
+    }),
+  );
+  const ledger = ledgerLayer.pipe(Layer.provide(database));
+  const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+  const threads = Layer.mock(ThreadManagementService)({
+    getThreadProjection: () =>
+      Effect.succeed({ runs, turnItems: [] } as unknown as OrchestrationV2ThreadProjection),
+    streamStoredEventsFrom: storedEvents,
+  });
+  const transport = Layer.succeed(
+    A2ADeliveryTransport,
+    A2ADeliveryTransport.of({
+      deliverAgent: () => Effect.void,
+      deliverHuman: () => Effect.void,
+    } satisfies A2ADeliveryTransportShape),
+  );
+  const worker = deliveryWorkerLayer.pipe(
+    Layer.provide(ledger),
+    Layer.provide(database),
+    Layer.provide(transport),
+  );
+  const detector = liveSilenceDetectorLayer.pipe(
     Layer.provide(ledger),
     Layer.provide(database),
     Layer.provide(threads),
@@ -133,6 +217,7 @@ const seed = Effect.fn("test.j5.a2a.silence.seed")(function* () {
   yield* join(waiter, "waiter");
   yield* join(subject, "subject");
   yield* join(peer, "peer");
+  yield* join(newerPeer, "newer-peer");
   yield* join({ kind: "human" }, "human");
 });
 
@@ -140,6 +225,7 @@ const openExchange = Effect.fn("test.j5.a2a.silence.openExchange")(function* (
   from: AgentParticipant,
   to: ParticipantId,
   suffix: string,
+  acceptedAtSecond = 0,
 ) {
   return yield* (yield* A2ASendService).send({
     commandId: CommCommandId.make(`command:silence:send:${suffix}`),
@@ -149,7 +235,7 @@ const openExchange = Effect.fn("test.j5.a2a.silence.openExchange")(function* (
     expectReply: true,
     intent: `Prove ${suffix}`,
     ...(to === GLOBAL_HUMAN_PARTICIPANT_ID ? { urgency: "blocking" as const } : {}),
-    acceptedAt: iso(0),
+    acceptedAt: iso(acceptedAtSecond),
   });
 });
 
@@ -161,7 +247,7 @@ const markDelivered = Effect.fn("test.j5.a2a.silence.markDelivered")(function* (
   second: number,
   channel: "agent" | "human" = "agent",
 ) {
-  yield* (yield* A2ALedger).append({
+  const result = yield* (yield* A2ALedger).append({
     commandId: CommCommandId.make(`command:silence:delivered:${messageId}`),
     squadronId,
     acceptedAt: iso(second),
@@ -175,6 +261,7 @@ const markDelivered = Effect.fn("test.j5.a2a.silence.markDelivered")(function* (
       createdAt: iso(second),
     },
   });
+  return result.event;
 });
 
 const markAlarmed = Effect.fn("test.j5.a2a.silence.markAlarmed")(function* (
@@ -257,26 +344,26 @@ const readNotices = Effect.fn("test.j5.a2a.silence.readNotices")(function* () {
 const seedInbound = Effect.fn("test.j5.a2a.silence.seedInbound")(function* (deliveredAt: number) {
   const exchange = yield* openExchange(waiter, subject.id, `inbound-${deliveredAt}`);
   assert.isNotNull(exchange.exchangeId);
-  yield* markDelivered(
+  const deliveryEvent = yield* markDelivered(
     exchange.messageId,
     exchange.exchangeId!,
     waiter.id,
     subject.id,
     deliveredAt,
   );
-  return exchange;
+  return { ...exchange, deliveryEvent };
 });
 
-it.effect("emits processed turn-ended-no-reply and leaves the exchange open", () =>
+it.effect("emits processed mid-turn silence and dedupes a later lifecycle sequence", () =>
   Effect.gen(function* () {
     yield* seed();
-    const exchange = yield* seedInbound(0);
+    const exchange = yield* seedInbound(2);
     const detector = yield* A2ASilenceDetector;
     yield* detector.handleStoredEvent(terminalEvent("completed"));
-    yield* detector.handleStoredEvent(terminalEvent("completed"));
+    yield* detector.handleStoredEvent(terminalEvent("completed", 101));
 
     const notices = yield* readNotices();
-    assert.lengthOf(notices, 1, "replaying the lifecycle event must not duplicate the notice");
+    assert.lengthOf(notices, 1, "a later lifecycle event must not duplicate the notice");
     assert.equal(notices[0]?.state, "turn-ended-no-reply");
     if (notices[0]?.state === "turn-ended-no-reply") {
       assert.equal(notices[0].processing, "processed");
@@ -290,9 +377,10 @@ it.effect("emits processed turn-ended-no-reply and leaves the exchange open", ()
       readonly envelope_channel: string;
       readonly message_id: string;
       readonly message_text: string;
+      readonly sender_id: string;
       readonly status: string;
     }>`
-      SELECT envelope_channel, message_id, message_text, status
+      SELECT envelope_channel, message_id, message_text, sender_id, status
       FROM j5_a2a_delivery
       WHERE envelope_channel = 'silence_notice'
     `;
@@ -301,6 +389,7 @@ it.effect("emits processed turn-ended-no-reply and leaves the exchange open", ()
     assert.equal(noticeDelivery.envelope_channel, "silence_notice");
     assert.include(noticeDelivery.message_text, "platform-authored delivery signal");
     assert.notInclude(noticeDelivery.message_text, "[Cross-agent message from");
+    assert.equal(noticeDelivery.sender_id, SILENCE_DETECTOR_PARTICIPANT_ID);
     assert.equal(noticeDelivery.status, "pending");
 
     const milestones = yield* (yield* A2ADeliveryWorker).drain;
@@ -318,15 +407,75 @@ it.effect("emits processed turn-ended-no-reply and leaves the exchange open", ()
 it.effect("emits never-processed when no turn started after the latest delivery", () =>
   Effect.gen(function* () {
     yield* seed();
-    yield* seedInbound(2);
-    yield* (yield* A2ASilenceDetector).handleStoredEvent(terminalEvent("completed"));
+    const inbound = yield* seedInbound(4);
+    yield* (yield* A2ASilenceDetector).handleDeliveryEvent(inbound.deliveryEvent);
     const notices = yield* readNotices();
     assert.equal(notices[0]?.state, "turn-ended-no-reply");
     if (notices[0]?.state === "turn-ended-no-reply") {
       assert.equal(notices[0].processing, "never-processed");
+      assert.isNull(notices[0].runId);
     }
   }).pipe(Effect.provide(makeTestLayer())),
 );
+
+it.effect("daemon retries its stored-event stream and advances the durable cursor", () => {
+  const stored = terminalEvent("completed", 130);
+  assert.equal(stored.event.type, "run.updated");
+  if (stored.event.type !== "run.updated") return Effect.die("expected run.updated fixture");
+  const run = stored.event.payload;
+  let streamCalls = 0;
+  const observedCursors: Array<number> = [];
+  const gateEffect = Effect.gen(function* () {
+    const gate = yield* Deferred.make<void>();
+    const firstFailureObserved = yield* Deferred.make<void>();
+    const daemonLayer = makeDaemonTestLayer(
+      (input) => {
+        streamCalls += 1;
+        observedCursors.push(input?.afterSequence ?? 0);
+        if (streamCalls === 1) {
+          return Stream.concat(
+            Stream.fromEffect(Deferred.succeed(firstFailureObserved, undefined)).pipe(Stream.drain),
+            Stream.die("simulated stored-event stream failure"),
+          );
+        }
+        if ((input?.afterSequence ?? 0) >= stored.sequence) return Stream.never;
+        return Stream.fromEffect(Deferred.await(gate).pipe(Effect.as(stored)));
+      },
+      [run],
+      75,
+    );
+
+    return yield* Effect.scoped(
+      Effect.gen(function* () {
+        yield* seed();
+        yield* seedInbound(0);
+        const committed = yield* (yield* A2ALedger).subscribeCommitted;
+        const noticeFiber = yield* committed.pipe(
+          Stream.filter((event) => event.kind === "silence.notice"),
+          Stream.runHead,
+          Effect.forkScoped,
+        );
+        yield* Deferred.await(firstFailureObserved);
+        yield* TestClock.adjust(Duration.millis(250));
+        yield* Deferred.succeed(gate, undefined);
+        const notice = yield* Fiber.join(noticeFiber);
+        assert.isTrue(Option.isSome(notice));
+
+        const sql = yield* SqlClient.SqlClient;
+        const cursor = yield* sql<{ readonly after_sequence: number | null }>`
+          SELECT after_sequence
+          FROM j5_a2a_silence_detector_cursor
+          WHERE singleton = 1
+        `;
+        assert.deepStrictEqual(cursor, [{ after_sequence: stored.sequence }]);
+        assert.isAtLeast(streamCalls, 2);
+        assert.equal(observedCursors[0], 75);
+        assert.notInclude(observedCursors, 0);
+      }).pipe(Effect.provide(daemonLayer)),
+    );
+  });
+  return gateEffect;
+});
 
 it.effect("attaches the persisted provider detail to an errored notice", () =>
   Effect.gen(function* () {
@@ -418,15 +567,16 @@ it.effect("stores the blocking peer id structurally", () =>
   Effect.gen(function* () {
     yield* seed();
     yield* seedInbound(0);
-    const outbound = yield* openExchange(subject, peer.id, "blocked-peer");
-    assert.isNotNull(outbound.exchangeId);
+    yield* openExchange(subject, peer.id, "older-blocked-peer");
+    const newestOutbound = yield* openExchange(subject, newerPeer.id, "newer-blocked-peer", 2);
+    assert.isNotNull(newestOutbound.exchangeId);
 
     yield* (yield* A2ASilenceDetector).handleStoredEvent(terminalEvent("completed"));
     const notices = yield* readNotices();
     assert.equal(notices[0]?.state, "blocked-on-peer");
     if (notices[0]?.state === "blocked-on-peer") {
-      assert.equal(notices[0].peerId, peer.id);
-      assert.equal(notices[0].peerExchangeId, outbound.exchangeId);
+      assert.equal(notices[0].peerId, newerPeer.id);
+      assert.equal(notices[0].peerExchangeId, newestOutbound.exchangeId);
     }
   }).pipe(Effect.provide(makeTestLayer())),
 );
@@ -437,6 +587,25 @@ it.effect("emits nothing for an idle agent that owes no reply", () =>
     const appended = yield* (yield* A2ASilenceDetector).handleStoredEvent(
       terminalEvent("completed"),
     );
+    assert.deepStrictEqual(appended, []);
+    assert.deepStrictEqual(yield* readNotices(), []);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("emits nothing when the human is the quiet recipient", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const outbound = yield* openExchange(subject, GLOBAL_HUMAN_PARTICIPANT_ID, "human-silence");
+    assert.isNotNull(outbound.exchangeId);
+    const delivered = yield* markDelivered(
+      outbound.messageId,
+      outbound.exchangeId!,
+      subject.id,
+      GLOBAL_HUMAN_PARTICIPANT_ID,
+      1,
+      "human",
+    );
+    const appended = yield* (yield* A2ASilenceDetector).handleDeliveryEvent(delivered);
     assert.deepStrictEqual(appended, []);
     assert.deepStrictEqual(yield* readNotices(), []);
   }).pipe(Effect.provide(makeTestLayer())),

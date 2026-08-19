@@ -3,10 +3,11 @@ import {
   type OrchestrationV2Run,
   type OrchestrationV2StoredEvent,
   RunId,
-  type ThreadId,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -15,17 +16,19 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
+import { deliveryMessageId } from "./DeliveryTransport.ts";
 import { formatSilenceNoticeEnvelope } from "./EnvelopeFormatter.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import {
   CommCommandId,
-  type CommEvent,
   CorrelationId,
   SquadronId,
   ExchangeId,
   GLOBAL_HUMAN_PARTICIPANT_ID,
   LedgerMessageId,
+  MessageDeliveredPayload,
   ParticipantId,
+  SILENCE_DETECTOR_PARTICIPANT_ID,
   type StoredCommEvent,
 } from "./contracts.ts";
 
@@ -34,7 +37,6 @@ export const STOPPED_NOTICE_INSTRUCTION =
 
 const noticeBase = {
   subjectId: ParticipantId,
-  runId: RunId,
   deliveryMessageId: LedgerMessageId,
   observedAt: Schema.String,
 } as const;
@@ -43,28 +45,33 @@ export const SilenceNoticePayload = Schema.Union([
   Schema.Struct({
     ...noticeBase,
     state: Schema.Literal("turn-ended-no-reply"),
+    runId: Schema.NullOr(RunId),
     processing: Schema.Literals(["processed", "never-processed"]),
   }),
   Schema.Struct({
     ...noticeBase,
     state: Schema.Literal("errored"),
+    runId: RunId,
     detail: OrchestrationV2ProviderFailure,
   }),
   Schema.Struct({
     ...noticeBase,
     state: Schema.Literal("stopped/cancelled"),
+    runId: RunId,
     lifecycleStatus: Schema.Literals(["interrupted", "cancelled", "rolled_back"]),
     instruction: Schema.Literal(STOPPED_NOTICE_INSTRUCTION),
   }),
   Schema.Struct({
     ...noticeBase,
     state: Schema.Literal("awaiting-human"),
+    runId: RunId,
     humanState: Schema.Literals(["human-knows", "human-doesnt-know"]),
     humanExchangeId: ExchangeId,
   }),
   Schema.Struct({
     ...noticeBase,
     state: Schema.Literal("blocked-on-peer"),
+    runId: RunId,
     peerId: ParticipantId,
     peerExchangeId: ExchangeId,
   }),
@@ -88,6 +95,13 @@ export interface A2ASilenceDetectorShape {
   readonly handleStoredEvent: (
     event: OrchestrationV2StoredEvent,
   ) => Effect.Effect<ReadonlyArray<StoredCommEvent>, A2ASilenceDetectorError>;
+  readonly handleDeliveryEvent: (
+    event: StoredCommEvent,
+  ) => Effect.Effect<ReadonlyArray<StoredCommEvent>, A2ASilenceDetectorError>;
+  readonly reconcileOpenExchanges: Effect.Effect<
+    ReadonlyArray<StoredCommEvent>,
+    A2ASilenceDetectorError
+  >;
 }
 
 export class A2ASilenceDetector extends Context.Service<
@@ -113,12 +127,23 @@ interface DeliveredMessageRow {
   readonly delivered_at: string;
 }
 
+interface OpenDeliveryRow extends ExchangeRow, DeliveredMessageRow {
+  readonly thread_id: string;
+}
+
 interface DeliveryStateRow {
   readonly status: "pending" | "retry_scheduled" | "delivered" | "alarmed";
 }
 
+interface CursorRow {
+  readonly after_sequence: number | null;
+}
+
 const detectorError = (operation: string) => (cause: unknown) =>
   new A2ASilenceDetectorError({ operation, cause });
+
+const decodeMessageDelivered = Schema.decodeUnknownEffect(MessageDeliveredPayload);
+const decodeSilenceNotice = Schema.decodeUnknownEffect(SilenceNoticePayload);
 
 const terminalRun = (stored: OrchestrationV2StoredEvent): OrchestrationV2Run | undefined => {
   const event = stored.event;
@@ -129,21 +154,21 @@ const terminalRun = (stored: OrchestrationV2StoredEvent): OrchestrationV2Run | u
 
 const stablePart = (value: string | number) => encodeURIComponent(String(value));
 
-const commandIdFor = (sequence: number, exchangeId: string) =>
-  CommCommandId.make(`command:j5:a2a:silence:${stablePart(sequence)}:${stablePart(exchangeId)}`);
+const commandIdFor = (source: string | number, exchangeId: string) =>
+  CommCommandId.make(`command:j5:a2a:silence:${stablePart(source)}:${stablePart(exchangeId)}`);
 
-const messageIdFor = (sequence: number, exchangeId: string) =>
-  LedgerMessageId.make(`message:j5:a2a:silence:${stablePart(sequence)}:${stablePart(exchangeId)}`);
+const messageIdFor = (source: string | number, exchangeId: string) =>
+  LedgerMessageId.make(`message:j5:a2a:silence:${stablePart(source)}:${stablePart(exchangeId)}`);
 
-const correlationIdFor = (sequence: number, exchangeId: string) =>
-  CorrelationId.make(
-    `correlation:j5:a2a:silence:${stablePart(sequence)}:${stablePart(exchangeId)}`,
-  );
+const correlationIdFor = (source: string | number, exchangeId: string) =>
+  CorrelationId.make(`correlation:j5:a2a:silence:${stablePart(source)}:${stablePart(exchangeId)}`);
 
 const noticeMessage = (payload: SilenceNoticePayload, exchangeId: ExchangeId): string => {
   switch (payload.state) {
     case "turn-ended-no-reply":
-      return `${payload.subjectId}'s turn ended without replying on ${exchangeId}. The latest delivered message was ${payload.processing}.`;
+      return payload.processing === "never-processed"
+        ? `${payload.subjectId} did not start a turn for the delivered message on ${exchangeId}.`
+        : `${payload.subjectId}'s turn ended without replying on ${exchangeId}. The latest delivered message was processed.`;
     case "errored":
       return `${payload.subjectId} errored without replying on ${exchangeId}: ${payload.detail.message}`;
     case "stopped/cancelled":
@@ -157,12 +182,23 @@ const noticeMessage = (payload: SilenceNoticePayload, exchangeId: ExchangeId): s
 
 const processingState = (
   deliveredAt: string,
-  startedAt: OrchestrationV2Run["startedAt"],
+  completedAt: OrchestrationV2Run["completedAt"],
 ): "processed" | "never-processed" =>
-  startedAt !== null &&
-  DateTime.toEpochMillis(DateTime.makeUnsafe(deliveredAt)) <= DateTime.toEpochMillis(startedAt)
+  completedAt !== null &&
+  DateTime.toEpochMillis(DateTime.makeUnsafe(deliveredAt)) <= DateTime.toEpochMillis(completedAt)
     ? "processed"
     : "never-processed";
+
+const runCoversDelivery = (
+  run: OrchestrationV2Run,
+  deliveredAt: string,
+  messageId: LedgerMessageId,
+): boolean => {
+  if (run.userMessageId === deliveryMessageId(messageId)) return true;
+  const delivered = DateTime.toEpochMillis(DateTime.makeUnsafe(deliveredAt));
+  const completed = run.completedAt === null ? null : DateTime.toEpochMillis(run.completedAt);
+  return completed === null || delivered <= completed;
+};
 
 const makeLayer = (daemon: boolean) =>
   Layer.effect(
@@ -201,7 +237,7 @@ const makeLayer = (daemon: boolean) =>
           SELECT squadron_id, exchange_id, sender_id, receiver_id, created_at
           FROM j5_a2a_exchange
           WHERE sender_id = ${base.subjectId} AND status = 'open'
-          ORDER BY created_at, squadron_id, exchange_id
+          ORDER BY created_at DESC, squadron_id, exchange_id
         `;
         for (const exchange of outbound) {
           const exchangeId = ExchangeId.make(exchange.exchange_id);
@@ -282,7 +318,7 @@ const makeLayer = (daemon: boolean) =>
               dependency ?? {
                 ...base,
                 state: "turn-ended-no-reply" as const,
-                processing: processingState(delivery.delivered_at, run.startedAt),
+                processing: processingState(delivery.delivered_at, run.completedAt),
               }
             );
           }
@@ -294,6 +330,188 @@ const makeLayer = (daemon: boolean) =>
             throw new Error(`Nonterminal run reached silence derivation: ${run.status}`);
         }
       });
+
+      const appendNotice = Effect.fn("j5.a2a.silence.appendNotice")(function* (
+        exchange: ExchangeRow,
+        subjectId: ParticipantId,
+        payload: SilenceNoticePayload,
+        source: string,
+      ) {
+        yield* decodeSilenceNotice(payload);
+        const prior = yield* sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count
+          FROM j5_a2a_comm_event
+          WHERE squadron_id = ${exchange.squadron_id}
+            AND kind = 'silence.notice'
+            AND exchange_id = ${exchange.exchange_id}
+            AND json_extract(payload, '$.deliveryMessageId') = ${payload.deliveryMessageId}
+        `;
+        if ((prior[0]?.count ?? 0) > 0) return [];
+
+        const exchangeId = ExchangeId.make(exchange.exchange_id);
+        const messageId = messageIdFor(source, exchange.exchange_id);
+        const correlationId = correlationIdFor(source, exchange.exchange_id);
+        const result = yield* ledger.appendEvents({
+          commandId: commandIdFor(source, exchange.exchange_id),
+          squadronId: SquadronId.make(exchange.squadron_id),
+          acceptedAt: payload.observedAt,
+          events: [
+            {
+              kind: "silence.notice",
+              sender: null,
+              receiver: ParticipantId.make(exchange.sender_id),
+              exchangeId,
+              correlationId,
+              payload,
+              createdAt: payload.observedAt,
+            },
+            {
+              kind: "message.sent",
+              sender: SILENCE_DETECTOR_PARTICIPANT_ID,
+              receiver: ParticipantId.make(exchange.sender_id),
+              exchangeId: null,
+              correlationId,
+              payload: {
+                messageId,
+                text: formatSilenceNoticeEnvelope({
+                  noticeType: payload.state,
+                  message: noticeMessage(payload, exchangeId),
+                }),
+                originSquadronId: SquadronId.make(exchange.squadron_id),
+                receiverSquadronId: SquadronId.make(exchange.squadron_id),
+                exchangeRole: "none",
+                envelopeChannel: "silence_notice",
+              },
+              createdAt: payload.observedAt,
+            },
+          ],
+        });
+        return result.committed
+          ? result.events.filter((event) => event.kind === "silence.notice")
+          : [];
+      });
+
+      const inspectOpenDelivery = Effect.fn("j5.a2a.silence.inspectOpenDelivery")(function* (
+        row: OpenDeliveryRow,
+        observedAt: string,
+        source: string,
+      ) {
+        const subjectId = ParticipantId.make(row.receiver_id);
+        const messageId = LedgerMessageId.make(row.message_id);
+        const threadId = ThreadId.make(row.thread_id);
+        const projection = yield* threads.getThreadProjection(threadId);
+        const run = projection.runs.findLast((candidate) =>
+          runCoversDelivery(candidate, row.delivered_at, messageId),
+        );
+        let payload: SilenceNoticePayload;
+        if (run === undefined) {
+          payload = {
+            subjectId,
+            runId: null,
+            deliveryMessageId: messageId,
+            observedAt,
+            state: "turn-ended-no-reply",
+            processing: "never-processed",
+          };
+        } else if (ThreadManagement.isTerminalRunStatus(run.status) && run.completedAt !== null) {
+          payload = yield* deriveNotice(run, threadId, subjectId, row, observedAt);
+        } else {
+          return [];
+        }
+        return yield* appendNotice(row, subjectId, payload, source);
+      });
+
+      const handleDeliveryEventRaw = Effect.fn("j5.a2a.silence.handleDeliveryEvent")(function* (
+        event: StoredCommEvent,
+      ) {
+        if (
+          event.kind !== "message.delivered" ||
+          event.receiver === null ||
+          event.receiver === GLOBAL_HUMAN_PARTICIPANT_ID
+        ) {
+          return [];
+        }
+        const payload = yield* decodeMessageDelivered(event.payload);
+        const rows = yield* sql<OpenDeliveryRow>`
+          SELECT
+            exchange.squadron_id,
+            exchange.exchange_id,
+            exchange.sender_id,
+            exchange.receiver_id,
+            exchange.created_at,
+            membership.thread_id,
+            delivery.message_id,
+            ${event.createdAt} AS delivered_at
+          FROM j5_a2a_delivery AS delivery
+          JOIN j5_a2a_exchange AS exchange
+            ON exchange.squadron_id = delivery.squadron_id
+           AND exchange.exchange_id = delivery.exchange_id
+          JOIN j5_a2a_squadron_membership AS membership
+            ON membership.participant_id = exchange.receiver_id
+          WHERE delivery.squadron_id = ${event.squadronId}
+            AND delivery.message_id = ${payload.messageId}
+            AND delivery.envelope_channel = 'peer'
+            AND exchange.status = 'open'
+          LIMIT 2
+        `;
+        if (rows.length !== 1) return [];
+        const appended = yield* inspectOpenDelivery(
+          rows[0]!,
+          event.createdAt,
+          `delivery:${event.squadronId}:${event.seq}`,
+        );
+        if (appended.length > 0) yield* deliveryWorker.notify;
+        return appended;
+      });
+
+      const reconcileOpenExchangesRaw = Effect.fn("j5.a2a.silence.reconcileOpenExchanges")(
+        function* () {
+          const rows = yield* sql<OpenDeliveryRow>`
+            SELECT
+              exchange.squadron_id,
+              exchange.exchange_id,
+              exchange.sender_id,
+              exchange.receiver_id,
+              exchange.created_at,
+              membership.thread_id,
+              json_extract(delivered.payload, '$.messageId') AS message_id,
+              delivered.created_at AS delivered_at
+            FROM j5_a2a_exchange AS exchange
+            JOIN j5_a2a_squadron_membership AS membership
+              ON membership.participant_id = exchange.receiver_id
+            JOIN j5_a2a_comm_event AS delivered
+              ON delivered.squadron_id = exchange.squadron_id
+             AND delivered.exchange_id = exchange.exchange_id
+             AND delivered.kind = 'message.delivered'
+            JOIN j5_a2a_delivery AS delivery
+              ON delivery.squadron_id = exchange.squadron_id
+             AND delivery.message_id = json_extract(delivered.payload, '$.messageId')
+             AND delivery.envelope_channel = 'peer'
+            WHERE exchange.status = 'open'
+              AND exchange.receiver_id <> ${GLOBAL_HUMAN_PARTICIPANT_ID}
+              AND delivered.seq = (
+                SELECT MAX(candidate.seq)
+                FROM j5_a2a_comm_event AS candidate
+                WHERE candidate.squadron_id = exchange.squadron_id
+                  AND candidate.exchange_id = exchange.exchange_id
+                  AND candidate.kind = 'message.delivered'
+              )
+            ORDER BY delivered.created_at, exchange.squadron_id, exchange.exchange_id
+          `;
+          const appended: Array<StoredCommEvent> = [];
+          for (const row of rows) {
+            appended.push(
+              ...(yield* inspectOpenDelivery(
+                row,
+                row.delivered_at,
+                `reconcile:${row.squadron_id}:${row.message_id}`,
+              )),
+            );
+          }
+          if (appended.length > 0) yield* deliveryWorker.notify;
+          return appended;
+        },
+      );
 
       const handleStoredEventRaw = Effect.fn("j5.a2a.silence.handleStoredEvent")(function* (
         stored: OrchestrationV2StoredEvent,
@@ -332,17 +550,6 @@ const makeLayer = (daemon: boolean) =>
           `;
           const delivery = delivered[0];
           if (delivery === undefined) continue;
-          const prior = yield* sql<{ readonly count: number }>`
-            SELECT COUNT(*) AS count
-            FROM j5_a2a_comm_event
-            WHERE squadron_id = ${exchange.squadron_id}
-              AND kind = 'silence.notice'
-              AND exchange_id = ${exchange.exchange_id}
-              AND json_extract(payload, '$.deliveryMessageId') = ${delivery.message_id}
-          `;
-          if ((prior[0]?.count ?? 0) > 0) continue;
-
-          const exchangeId = ExchangeId.make(exchange.exchange_id);
           const payload = yield* deriveNotice(
             run,
             stored.event.threadId,
@@ -350,47 +557,9 @@ const makeLayer = (daemon: boolean) =>
             delivery,
             DateTime.formatIso(stored.event.occurredAt),
           );
-          const messageId = messageIdFor(stored.sequence, exchange.exchange_id);
-          const correlationId = correlationIdFor(stored.sequence, exchange.exchange_id);
-          const events: ReadonlyArray<CommEvent> = [
-            {
-              kind: "silence.notice",
-              sender: null,
-              receiver: ParticipantId.make(exchange.sender_id),
-              exchangeId,
-              correlationId,
-              payload,
-              createdAt: payload.observedAt,
-            },
-            {
-              kind: "message.sent",
-              sender: subjectId,
-              receiver: ParticipantId.make(exchange.sender_id),
-              exchangeId: null,
-              correlationId,
-              payload: {
-                messageId,
-                text: formatSilenceNoticeEnvelope({
-                  noticeType: payload.state,
-                  message: noticeMessage(payload, exchangeId),
-                }),
-                originSquadronId: SquadronId.make(exchange.squadron_id),
-                receiverSquadronId: SquadronId.make(exchange.squadron_id),
-                exchangeRole: "none",
-                envelopeChannel: "silence_notice",
-              },
-              createdAt: payload.observedAt,
-            },
-          ];
-          const result = yield* ledger.appendEvents({
-            commandId: commandIdFor(stored.sequence, exchange.exchange_id),
-            squadronId: SquadronId.make(exchange.squadron_id),
-            acceptedAt: payload.observedAt,
-            events,
-          });
-          if (result.committed) {
-            appended.push(...result.events.filter((event) => event.kind === "silence.notice"));
-          }
+          appended.push(
+            ...(yield* appendNotice(exchange, subjectId, payload, `lifecycle:${stored.sequence}`)),
+          );
         }
         if (appended.length > 0) yield* deliveryWorker.notify;
         return appended;
@@ -399,17 +568,109 @@ const makeLayer = (daemon: boolean) =>
       const handleStoredEvent: A2ASilenceDetectorShape["handleStoredEvent"] = (event) =>
         handleStoredEventRaw(event).pipe(Effect.mapError(detectorError("handle lifecycle event")));
 
-      if (daemon) {
-        yield* threads.streamStoredEventsFrom({ afterSequence: 0 }).pipe(
-          Stream.runForEach(handleStoredEvent),
+      const handleDeliveryEvent: A2ASilenceDetectorShape["handleDeliveryEvent"] = (event) =>
+        handleDeliveryEventRaw(event).pipe(Effect.mapError(detectorError("handle delivery event")));
+
+      const reconcileOpenExchanges = reconcileOpenExchangesRaw().pipe(
+        Effect.mapError(detectorError("reconcile open exchanges")),
+      );
+
+      const readCursor = Effect.fn("j5.a2a.silence.readCursor")(function* () {
+        const rows = yield* sql<CursorRow>`
+          SELECT after_sequence
+          FROM j5_a2a_silence_detector_cursor
+          WHERE singleton = 1
+        `;
+        return rows[0]?.after_sequence ?? null;
+      });
+
+      const writeCursor = Effect.fn("j5.a2a.silence.writeCursor")(function* (sequence: number) {
+        const now = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+        yield* sql`
+          UPDATE j5_a2a_silence_detector_cursor
+          SET after_sequence = ${sequence}, updated_at = ${now}
+          WHERE singleton = 1
+            AND (after_sequence IS NULL OR after_sequence < ${sequence})
+        `;
+      });
+
+      const initializeCursor = Effect.fn("j5.a2a.silence.initializeCursor")(function* () {
+        const existing = yield* readCursor();
+        if (existing !== null) return existing;
+        const highWaterRows = yield* sql<{ readonly sequence: number }>`
+          SELECT COALESCE(MAX(sequence), 0) AS sequence
+          FROM orchestration_v2_events
+        `;
+        const highWater = highWaterRows[0]?.sequence ?? 0;
+        yield* reconcileOpenExchangesRaw();
+        yield* writeCursor(highWater);
+        return highWater;
+      });
+
+      const runLifecycleStream = Effect.gen(function* () {
+        const existing = yield* readCursor();
+        let checkpoint: number;
+        if (existing === null) {
+          checkpoint = yield* initializeCursor();
+        } else {
+          checkpoint = existing;
+          yield* reconcileOpenExchangesRaw();
+        }
+        yield* threads.streamStoredEventsFrom({ afterSequence: checkpoint }).pipe(
+          Stream.runForEach((event) =>
+            handleStoredEventRaw(event).pipe(
+              Effect.andThen(
+                Effect.gen(function* () {
+                  if (terminalRun(event) !== undefined || event.sequence - checkpoint >= 128) {
+                    yield* writeCursor(event.sequence);
+                    checkpoint = event.sequence;
+                  }
+                }),
+              ),
+            ),
+          ),
+        );
+      });
+
+      const runLifecycleDaemon = Effect.forever(
+        runLifecycleStream.pipe(
           Effect.catchCause((cause) =>
-            Effect.logError("J5 A2A silence detector stopped", { cause }),
+            Effect.logWarning("J5 A2A lifecycle subscription failed; resuming from cursor", {
+              cause,
+            }).pipe(Effect.andThen(Effect.sleep(Duration.millis(250)))),
+          ),
+        ),
+      );
+
+      if (daemon) {
+        const committed = yield* ledger.subscribeCommitted;
+        yield* committed.pipe(
+          Stream.runForEach((event) =>
+            handleDeliveryEvent(event).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("J5 A2A delivery silence check failed; reconciling open work", {
+                  cause,
+                }).pipe(
+                  Effect.andThen(reconcileOpenExchangesRaw()),
+                  Effect.catchCause((reconcileCause) =>
+                    Effect.logError("J5 A2A delivery silence reconciliation failed", {
+                      cause: reconcileCause,
+                    }),
+                  ),
+                ),
+              ),
+            ),
           ),
           Effect.forkScoped,
         );
+        yield* Effect.forkScoped(runLifecycleDaemon);
       }
 
-      return A2ASilenceDetector.of({ handleStoredEvent });
+      return A2ASilenceDetector.of({
+        handleStoredEvent,
+        handleDeliveryEvent,
+        reconcileOpenExchanges,
+      });
     }),
   );
 
