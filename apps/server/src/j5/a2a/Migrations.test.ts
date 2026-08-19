@@ -29,10 +29,13 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
     `;
 
     assert.equal(upstream[0]?.migration_id, upstreamMigrationManifest.at(-1)?.[0]);
-    assert.deepStrictEqual(j5, [{ migration_id: 1, name: "EpicCommunicationLedger" }]);
+    assert.deepStrictEqual(j5, [
+      { migration_id: 1, name: "EpicCommunicationLedger" },
+      { migration_id: 2, name: "SendDeliverReply" },
+    ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id]) => id),
-      [1],
+      [1, 2],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
@@ -49,7 +52,10 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'j5_a2a_epic',
           'j5_a2a_comm_event',
           'j5_a2a_comm_command_receipt',
-          'j5_a2a_epic_membership'
+          'j5_a2a_epic_membership',
+          'j5_a2a_exchange',
+          'j5_a2a_delivery',
+          'j5_a2a_human_inbox_data'
         )
       ORDER BY name
     `;
@@ -59,7 +65,13 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       WHERE type = 'index'
         AND name IN (
           'j5_a2a_comm_command_receipt_epic_seq_idx',
-          'j5_a2a_comm_event_received_correlation_idx'
+          'j5_a2a_comm_event_received_correlation_idx',
+          'j5_a2a_comm_event_command_idx',
+          'j5_a2a_exchange_open_pair_idx',
+          'j5_a2a_exchange_id_idx',
+          'j5_a2a_delivery_drain_idx',
+          'j5_a2a_delivery_message_sender_idx',
+          'j5_a2a_delivery_one_reply_idx'
         )
       ORDER BY name
     `;
@@ -80,14 +92,45 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
     assert.deepStrictEqual(tables, [
       { name: "j5_a2a_comm_command_receipt" },
       { name: "j5_a2a_comm_event" },
+      { name: "j5_a2a_delivery" },
       { name: "j5_a2a_epic" },
       { name: "j5_a2a_epic_membership" },
+      { name: "j5_a2a_exchange" },
+      { name: "j5_a2a_human_inbox_data" },
     ]);
-    assert.equal(indexes[0]?.name, "j5_a2a_comm_command_receipt_epic_seq_idx");
-    assert.include(indexes[0]?.sql ?? "", "ON j5_a2a_comm_command_receipt(epic_id, result_seq)");
-    assert.equal(indexes[1]?.name, "j5_a2a_comm_event_received_correlation_idx");
-    assert.include(indexes[1]?.sql ?? "", "ON j5_a2a_comm_event(epic_id, correlation_id)");
-    assert.include(indexes[1]?.sql ?? "", "WHERE kind = 'message.received'");
+    const indexesByName = new Map(indexes.map((index) => [index.name, index.sql]));
+    assert.include(
+      indexesByName.get("j5_a2a_comm_command_receipt_epic_seq_idx") ?? "",
+      "ON j5_a2a_comm_command_receipt(epic_id, result_seq)",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_comm_event_received_correlation_idx") ?? "",
+      "WHERE kind = 'message.received'",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_comm_event_command_idx") ?? "",
+      "ON j5_a2a_comm_event(command_id, epic_id, seq)",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_exchange_open_pair_idx") ?? "",
+      "WHERE status = 'open'",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_exchange_id_idx") ?? "",
+      "ON j5_a2a_exchange(exchange_id)",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_delivery_drain_idx") ?? "",
+      "ON j5_a2a_delivery(status, next_attempt_at, sent_seq)",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_delivery_message_sender_idx") ?? "",
+      "ON j5_a2a_delivery(message_id, sender_id)",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_delivery_one_reply_idx") ?? "",
+      "WHERE exchange_id IS NOT NULL AND exchange_role = 'reply'",
+    );
     assert.deepStrictEqual(unprefixed, []);
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );

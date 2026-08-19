@@ -12,6 +12,7 @@ import * as GitWorkflowService from "../../../git/GitWorkflowService.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../../../project/ProjectSetupScriptRunner.ts";
+import { SqlitePersistenceMemory } from "../../../persistence/Layers/Sqlite.ts";
 import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
 import { ScheduledTaskService } from "../../../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
@@ -66,6 +67,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
           }),
         ),
         Layer.provide(PreviewAutomationBroker.layer),
+        Layer.provide(SqlitePersistenceMemory),
         Layer.provide(StubServicesLive),
         Layer.build,
       );
@@ -78,6 +80,15 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(credential).toBeDefined();
 
       const httpClient = yield* HttpClient.HttpClient;
+      const unauthorizedResponse = yield* httpClient.post("/mcp", {
+        headers: { accept: "application/json, text/event-stream" },
+        body: HttpBody.text(
+          `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"unauthorized","version":"1.0.0"}}}`,
+          "application/json",
+        ),
+      });
+      expect(unauthorizedResponse.status).toBe(401);
+
       const auth = credential!.config.authorizationHeader;
       const initResponse = yield* httpClient.post("/mcp", {
         headers: {
@@ -114,6 +125,10 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       // than replacing them.
       expect(toolNames).toContain("preview_status");
       expect(toolNames).toContain("delegate_task");
+      // J5 uses the same authenticated transport and one shared registration
+      // that later J5 milestones extend inside the fork-owned toolkit.
+      expect(toolNames).toContain("send_message");
+      expect(toolNames).toContain("list_participants");
 
       // The handoff tool mutates thread state, reaches the network (origin
       // fetch), and runs project setup scripts, so its MCP hints must not

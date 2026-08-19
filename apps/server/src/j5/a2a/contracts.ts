@@ -23,6 +23,12 @@ export type ParticipantId = typeof ParticipantId.Type;
 export const CommCommandId = Identifier.pipe(Schema.brand("J5A2ACommCommandId"));
 export type CommCommandId = typeof CommCommandId.Type;
 
+export const LedgerMessageId = Identifier.pipe(Schema.brand("J5A2ALedgerMessageId"));
+export type LedgerMessageId = typeof LedgerMessageId.Type;
+
+export const Urgency = Schema.Literals(["blocking", "soon", "fyi"]);
+export type Urgency = typeof Urgency.Type;
+
 export const GLOBAL_HUMAN_PARTICIPANT_ID = ParticipantId.make("human:global");
 
 export const AgentParticipant = Schema.Struct({
@@ -155,6 +161,98 @@ export const CommCommandReceipt = Schema.Struct({
   resultSeq: PositiveInt,
 });
 export type CommCommandReceipt = typeof CommCommandReceipt.Type;
+
+export const AppendCommEventsCommand = Schema.Struct({
+  commandId: CommCommandId,
+  epicId: EpicId,
+  acceptedAt: Schema.String,
+  events: Schema.Array(CommEvent).pipe(Schema.check(Schema.isMinLength(1))),
+});
+export type AppendCommEventsCommand = typeof AppendCommEventsCommand.Type;
+
+export const ExchangeOpenedPayload = Schema.Struct({
+  intent: Schema.String.check(Schema.isNonEmpty()),
+  urgency: Schema.NullOr(Urgency),
+});
+export type ExchangeOpenedPayload = typeof ExchangeOpenedPayload.Type;
+
+export const MessageSentPayload = Schema.Struct({
+  messageId: LedgerMessageId,
+  text: Schema.String.check(Schema.isNonEmpty()),
+  originEpicId: EpicId,
+  receiverEpicId: EpicId,
+  exchangeRole: Schema.Literals(["none", "ask", "followup", "reply"]),
+});
+export type MessageSentPayload = typeof MessageSentPayload.Type;
+
+export const MessageDeliveredPayload = Schema.Struct({
+  messageId: LedgerMessageId,
+  attempt: PositiveInt,
+  channel: Schema.Literals(["agent", "human"]),
+});
+export type MessageDeliveredPayload = typeof MessageDeliveredPayload.Type;
+
+export const MessageDeliveryFailedPayload = Schema.Struct({
+  messageId: LedgerMessageId,
+  attempt: PositiveInt,
+  error: Schema.String.check(Schema.isNonEmpty()),
+  nextAttemptAt: Schema.NullOr(Schema.String),
+  alarmed: Schema.Boolean,
+});
+export type MessageDeliveryFailedPayload = typeof MessageDeliveryFailedPayload.Type;
+
+export const ExchangeClosedPayload = Schema.Struct({
+  replyMessageId: LedgerMessageId,
+});
+export type ExchangeClosedPayload = typeof ExchangeClosedPayload.Type;
+
+export const SendMessageInput = Schema.Struct({
+  commandId: CommCommandId,
+  senderThreadId: ThreadId,
+  to: ParticipantId,
+  message: Schema.String.check(Schema.isNonEmpty()),
+  expectReply: Schema.optional(Schema.Boolean),
+  exchangeId: Schema.optional(ExchangeId),
+  intent: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  urgency: Schema.optional(Urgency),
+  acceptedAt: Schema.String,
+});
+export type SendMessageInput = typeof SendMessageInput.Type;
+
+export const SendMessageResult = Schema.Struct({
+  messageId: LedgerMessageId,
+  exchangeId: Schema.NullOr(ExchangeId),
+  exchangeState: Schema.Literals(["none", "open", "closing", "closed"]),
+  joinedExistingExchange: Schema.Boolean,
+  durableAtSeq: PositiveInt,
+});
+export type SendMessageResult = typeof SendMessageResult.Type;
+
+export const ParticipantDirectoryRow = Schema.Struct({
+  epicId: EpicId,
+  participantId: ParticipantId,
+  participant: Participant,
+  canReceiveMessage: Schema.Boolean,
+  canOpenExchange: Schema.Boolean,
+  acceptsUrgency: Schema.Boolean,
+});
+export type ParticipantDirectoryRow = typeof ParticipantDirectoryRow.Type;
+
+export const DeliveryAlarm = Schema.Struct({
+  epicId: EpicId,
+  messageId: LedgerMessageId,
+  attempts: PositiveInt,
+  lastError: Schema.String,
+});
+export type DeliveryAlarm = typeof DeliveryAlarm.Type;
+
+export const DeliveryMilestone = Schema.Struct({
+  epicId: EpicId,
+  messageId: LedgerMessageId,
+  state: Schema.Literals(["delivered", "retry_scheduled", "alarmed"]),
+  attempt: PositiveInt,
+});
+export type DeliveryMilestone = typeof DeliveryMilestone.Type;
 
 export const LedgerCursor = Schema.Struct({
   afterSeq: NonNegativeInt,

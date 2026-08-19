@@ -35,6 +35,17 @@ Treat these upstream areas as off-limits except for those explicit appended case
 - existing provider adapters and shared runtime modules
 - vendored references under `.repos`
 
+### Sanctioned appended integration cases
+
+Against upstream pin `993407dd9e57f1edf2f5681d70140bfefeca93cc`, the complete A2A exception inventory is exactly these four cases. Line numbers identify this revision; the named symbol or test is the durable anchor after nearby upstream movement.
+
+1. A1's independent migration lane: `apps/server/src/persistence/Layers/Sqlite.ts:10` imports `runJ5A2AMigrations`, and `:42` runs it after upstream migrations. Introduced by `a064a87ac40ea2d2d936ba72008c95edeb8bbc2b` and merged in `521c50aa9bb6b4c7f55bc10a772822ec31129f2d`.
+2. The one shared authenticated J5 MCP/runtime seam: `apps/server/src/mcp/McpHttpServer.ts:31` imports `J5McpIntegrationLive`, and `:247-248` append its sole entry to `layer`. Registration and runtime composition stay in `apps/server/src/j5/a2a/mcp/registration.ts`; A6 extends the J5-owned toolkit without another protected-file registration.
+3. The internal delivery-dedup contract proof: `apps/server/src/orchestration-v2/runtimeLayer.test.ts:188-234`, test `replays an internal thread send without injecting a second message`.
+4. The authenticated shared-toolkit integration proof: `apps/server/src/mcp/toolkits/worktree/registration.test.ts:15,70,83-90,128-131`, within test `production mcp layer lists worktree tools over http`.
+
+These are per-instance Director/Jackson-authorized exceptions, not standing category permission. The earlier fork rebrand is separately complete at `0c0de1acefea00a34f9529bb97be32ff5056cfcc`; its rebase-critical boundary is recorded in `BRANDING.md:1-5,24-35`. The supporting fork setup plan (`artifacts/fork-setup-plan/index.md:8-12`) and its six T1-T6 ticket artifacts are internal project records and are not present in this repository.
+
 If a required change cannot fit this discipline, stop and review the exception before implementing it.
 
 ### Fork-owned migration lane

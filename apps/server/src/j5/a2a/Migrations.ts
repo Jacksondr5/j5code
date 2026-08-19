@@ -2,10 +2,14 @@ import * as Effect from "effect/Effect";
 import * as Migrator from "effect/unstable/sql/Migrator";
 
 import Migration0001 from "./migrations/001_EpicCommunicationLedger.ts";
+import Migration0002 from "./migrations/002_SendDeliverReply.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
-export const migrationEntries = [[1, "EpicCommunicationLedger", Migration0001]] as const;
+export const migrationEntries = [
+  [1, "EpicCommunicationLedger", Migration0001],
+  [2, "SendDeliverReply", Migration0002],
+] as const;
 
 const makeMigrationLoader = (throughId?: number) =>
   Migrator.fromRecord(
