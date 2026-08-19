@@ -180,15 +180,6 @@ const noticeMessage = (payload: SilenceNoticePayload, exchangeId: ExchangeId): s
   }
 };
 
-const processingState = (
-  deliveredAt: string,
-  completedAt: OrchestrationV2Run["completedAt"],
-): "processed" | "never-processed" =>
-  completedAt !== null &&
-  DateTime.toEpochMillis(DateTime.makeUnsafe(deliveredAt)) <= DateTime.toEpochMillis(completedAt)
-    ? "processed"
-    : "never-processed";
-
 const runCoversDelivery = (
   run: OrchestrationV2Run,
   deliveredAt: string,
@@ -318,7 +309,9 @@ const makeLayer = (daemon: boolean) =>
               dependency ?? {
                 ...base,
                 state: "turn-ended-no-reply" as const,
-                processing: processingState(delivery.delivered_at, run.completedAt),
+                // Lifecycle queries only select deliveries at or before this run ended.
+                // The delivery/reconciliation path exclusively owns never-processed.
+                processing: "processed" as const,
               }
             );
           }
@@ -333,7 +326,6 @@ const makeLayer = (daemon: boolean) =>
 
       const appendNotice = Effect.fn("j5.a2a.silence.appendNotice")(function* (
         exchange: ExchangeRow,
-        subjectId: ParticipantId,
         payload: SilenceNoticePayload,
         source: string,
       ) {
@@ -418,7 +410,7 @@ const makeLayer = (daemon: boolean) =>
         } else {
           return [];
         }
-        return yield* appendNotice(row, subjectId, payload, source);
+        return yield* appendNotice(row, payload, source);
       });
 
       const handleDeliveryEventRaw = Effect.fn("j5.a2a.silence.handleDeliveryEvent")(function* (
@@ -558,7 +550,7 @@ const makeLayer = (daemon: boolean) =>
             DateTime.formatIso(stored.event.occurredAt),
           );
           appended.push(
-            ...(yield* appendNotice(exchange, subjectId, payload, `lifecycle:${stored.sequence}`)),
+            ...(yield* appendNotice(exchange, payload, `lifecycle:${stored.sequence}`)),
           );
         }
         if (appended.length > 0) yield* deliveryWorker.notify;
@@ -607,15 +599,20 @@ const makeLayer = (daemon: boolean) =>
         return highWater;
       });
 
-      const runLifecycleStream = Effect.gen(function* () {
+      let lifecycleRetryDelayMs = 250;
+
+      const prepareLifecycleStream = Effect.gen(function* () {
         const existing = yield* readCursor();
-        let checkpoint: number;
         if (existing === null) {
-          checkpoint = yield* initializeCursor();
+          yield* initializeCursor();
         } else {
-          checkpoint = existing;
           yield* reconcileOpenExchangesRaw();
         }
+      });
+
+      const runLifecycleStream = Effect.gen(function* () {
+        const existing = yield* readCursor();
+        let checkpoint = existing ?? (yield* initializeCursor());
         yield* threads.streamStoredEventsFrom({ afterSequence: checkpoint }).pipe(
           Stream.runForEach((event) =>
             handleStoredEventRaw(event).pipe(
@@ -625,22 +622,37 @@ const makeLayer = (daemon: boolean) =>
                     yield* writeCursor(event.sequence);
                     checkpoint = event.sequence;
                   }
+                  lifecycleRetryDelayMs = 250;
                 }),
               ),
             ),
           ),
         );
+        return yield* Effect.die("J5 A2A lifecycle subscription ended");
       });
 
-      const runLifecycleDaemon = Effect.forever(
-        runLifecycleStream.pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("J5 A2A lifecycle subscription failed; resuming from cursor", {
-              cause,
-            }).pipe(Effect.andThen(Effect.sleep(Duration.millis(250)))),
-          ),
-        ),
-      );
+      const waitAfterLifecycleFailure = (cause: unknown) => {
+        const delayMs = lifecycleRetryDelayMs;
+        lifecycleRetryDelayMs = Math.min(delayMs * 2, 30_000);
+        return Effect.logWarning("J5 A2A lifecycle subscription failed; resuming from cursor", {
+          cause,
+          retryDelayMs: delayMs,
+        }).pipe(Effect.andThen(Effect.sleep(Duration.millis(delayMs))));
+      };
+
+      const runLifecycleDaemon = Effect.gen(function* () {
+        let prepared = false;
+        while (!prepared) {
+          prepared = yield* prepareLifecycleStream.pipe(
+            Effect.as(true),
+            Effect.catchCause((cause) => waitAfterLifecycleFailure(cause).pipe(Effect.as(false))),
+          );
+        }
+        lifecycleRetryDelayMs = 250;
+        return yield* Effect.forever(
+          runLifecycleStream.pipe(Effect.catchCause(waitAfterLifecycleFailure)),
+        );
+      });
 
       if (daemon) {
         const committed = yield* ledger.subscribeCommitted;

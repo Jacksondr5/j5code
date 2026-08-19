@@ -18,6 +18,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
@@ -476,6 +477,52 @@ it.effect("daemon retries its stored-event stream and advances the durable curso
   });
   return gateEffect;
 });
+
+it.effect("backs off exponentially across consecutive lifecycle stream failures", () =>
+  Effect.gen(function* () {
+    const failures = yield* Queue.unbounded<number>();
+    const fourthCall = yield* Deferred.make<void>();
+    let streamCalls = 0;
+    const daemonLayer = makeDaemonTestLayer(
+      () => {
+        streamCalls += 1;
+        if (streamCalls <= 3) {
+          return Stream.concat(
+            Stream.fromEffect(Queue.offer(failures, streamCalls)).pipe(Stream.drain),
+            Stream.die(`simulated lifecycle failure ${streamCalls}`),
+          );
+        }
+        return Stream.concat(
+          Stream.fromEffect(Deferred.succeed(fourthCall, undefined)).pipe(Stream.drain),
+          Stream.never,
+        );
+      },
+      [],
+      75,
+    );
+
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        assert.equal(yield* Queue.take(failures), 1);
+        yield* TestClock.adjust(Duration.millis(249));
+        assert.equal(streamCalls, 1);
+        yield* TestClock.adjust(Duration.millis(1));
+        assert.equal(yield* Queue.take(failures), 2);
+
+        yield* TestClock.adjust(Duration.millis(499));
+        assert.equal(streamCalls, 2);
+        yield* TestClock.adjust(Duration.millis(1));
+        assert.equal(yield* Queue.take(failures), 3);
+
+        yield* TestClock.adjust(Duration.millis(999));
+        assert.equal(streamCalls, 3);
+        yield* TestClock.adjust(Duration.millis(1));
+        yield* Deferred.await(fourthCall);
+        assert.equal(streamCalls, 4);
+      }).pipe(Effect.provide(daemonLayer)),
+    );
+  }),
+);
 
 it.effect("attaches the persisted provider detail to an errored notice", () =>
   Effect.gen(function* () {
