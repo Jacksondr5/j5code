@@ -8,21 +8,21 @@ import {
   formatPeerEnvelope,
   formatSilenceNoticeEnvelope,
 } from "./EnvelopeFormatter.ts";
-import { EpicId, ExchangeId, ParticipantId } from "./contracts.ts";
+import { SquadronId, ExchangeId, ParticipantId } from "./contracts.ts";
 
 it("renders the versioned peer envelope with exact reply semantics", () => {
   const rendered = formatPeerEnvelope({
     senderId: ParticipantId.make("agent:sender"),
-    originEpicId: EpicId.make("epic:origin"),
+    originSquadronId: SquadronId.make("squadron:origin"),
     exchangeId: ExchangeId.make("exchange:one"),
     message: "Please verify the worker.",
   });
 
-  assert.equal(A2A_ENVELOPE_VERSION, 5);
+  assert.equal(A2A_ENVELOPE_VERSION, 6);
   assert.include(rendered, "Cross-agent message");
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
   assert.include(rendered, "agent:sender");
-  assert.include(rendered, "epic:origin");
+  assert.include(rendered, "squadron:origin");
   assert.include(rendered, "Please verify the worker.");
   assert.include(rendered, 'send_message(to="agent:sender", exchange_id="exchange:one"');
   assert.include(rendered, "Reply once");
@@ -44,7 +44,7 @@ it("does not interpret caller text as an envelope template", () => {
   const message = "Preserve this literal token: {{exchangeInstruction}}";
   const rendered = formatPeerEnvelope({
     senderId: ParticipantId.make("agent:sender"),
-    originEpicId: EpicId.make("epic:origin"),
+    originSquadronId: SquadronId.make("squadron:origin"),
     exchangeId: ExchangeId.make("exchange:one"),
     message,
   });
@@ -66,10 +66,10 @@ it("tells agents that human-origin exchanges require an explicit tool reply", ()
   assert.include(A2A_SEND_TOOL_DESCRIPTION, "Durably send one message");
   assert.include(A2A_LIST_TOOL_DESCRIPTION, "List reachable message recipients");
   for (const description of [A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION]) {
-    assert.include(description, "native thread without a registered home epic");
+    assert.include(description, "native thread without a registered home squadron");
     assert.include(description, "wrapper-spawned agent");
     assert.include(description, "controlled test seeding");
-    assert.include(description, "home-epic registrar + A6 creation integrations follow-up");
+    assert.include(description, "home-squadron registrar + A6 creation integrations follow-up");
     assert.notMatch(description, /ask the user|product workflow|list_participants again/i);
   }
   assert.notMatch(

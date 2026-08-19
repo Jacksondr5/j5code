@@ -2,14 +2,14 @@ import { ThreadId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 const Identifier = Schema.String.check(Schema.isNonEmpty());
-const EpicName = Schema.String.check(
-  Schema.makeFilter((name) => name.trim().length > 0 || "Epic name must not be blank."),
+const SquadronName = Schema.String.check(
+  Schema.makeFilter((name) => name.trim().length > 0 || "Squadron name must not be blank."),
 );
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
-export const EpicId = Identifier.pipe(Schema.brand("J5A2AEpicId"));
-export type EpicId = typeof EpicId.Type;
+export const SquadronId = Identifier.pipe(Schema.brand("J5A2ASquadronId"));
+export type SquadronId = typeof SquadronId.Type;
 
 export const ExchangeId = Identifier.pipe(Schema.brand("J5A2AExchangeId"));
 export type ExchangeId = typeof ExchangeId.Type;
@@ -54,12 +54,12 @@ export type Participant = typeof Participant.Type;
 export const participantId = (participant: Participant): ParticipantId =>
   participant.kind === "human" ? GLOBAL_HUMAN_PARTICIPANT_ID : participant.id;
 
-export const Epic = Schema.Struct({
-  id: EpicId,
-  name: EpicName,
+export const Squadron = Schema.Struct({
+  id: SquadronId,
+  name: SquadronName,
   createdAt: Schema.String,
 });
-export type Epic = typeof Epic.Type;
+export type Squadron = typeof Squadron.Type;
 
 export const CommEventKind = Schema.Literals([
   "exchange.opened",
@@ -102,7 +102,7 @@ const MessageReceivedCommEvent = Schema.Struct({
   kind: Schema.Literal("message.received"),
   correlationId: CorrelationId,
   payload: Schema.Struct({
-    originEpicId: EpicId,
+    originSquadronId: SquadronId,
     message: Schema.Json,
   }),
 });
@@ -129,7 +129,7 @@ export type CommEvent = typeof CommEvent.Type;
 
 const storedFields = {
   seq: PositiveInt,
-  epicId: EpicId,
+  squadronId: SquadronId,
 } as const;
 
 export const StoredCommEvent = Schema.Union([
@@ -140,14 +140,14 @@ export const StoredCommEvent = Schema.Union([
 ]);
 export type StoredCommEvent = typeof StoredCommEvent.Type;
 
-export const CreateEpicCommand = Schema.Struct({
-  epic: Epic,
+export const CreateSquadronCommand = Schema.Struct({
+  squadron: Squadron,
 });
-export type CreateEpicCommand = typeof CreateEpicCommand.Type;
+export type CreateSquadronCommand = typeof CreateSquadronCommand.Type;
 
 export const AppendCommEventCommand = Schema.Struct({
   commandId: CommCommandId,
-  epicId: EpicId,
+  squadronId: SquadronId,
   acceptedAt: Schema.String,
   event: CommEvent,
 });
@@ -155,7 +155,7 @@ export type AppendCommEventCommand = typeof AppendCommEventCommand.Type;
 
 export const CommCommandReceipt = Schema.Struct({
   commandId: CommCommandId,
-  epicId: EpicId,
+  squadronId: SquadronId,
   commandType: Schema.Literal("comm.append"),
   acceptedAt: Schema.String,
   resultSeq: PositiveInt,
@@ -164,7 +164,7 @@ export type CommCommandReceipt = typeof CommCommandReceipt.Type;
 
 export const AppendCommEventsCommand = Schema.Struct({
   commandId: CommCommandId,
-  epicId: EpicId,
+  squadronId: SquadronId,
   acceptedAt: Schema.String,
   events: Schema.Array(CommEvent).pipe(Schema.check(Schema.isMinLength(1))),
 });
@@ -179,8 +179,8 @@ export type ExchangeOpenedPayload = typeof ExchangeOpenedPayload.Type;
 export const MessageSentPayload = Schema.Struct({
   messageId: LedgerMessageId,
   text: Schema.String.check(Schema.isNonEmpty()),
-  originEpicId: EpicId,
-  receiverEpicId: EpicId,
+  originSquadronId: SquadronId,
+  receiverSquadronId: SquadronId,
   exchangeRole: Schema.Literals(["none", "ask", "followup", "reply"]),
 });
 export type MessageSentPayload = typeof MessageSentPayload.Type;
@@ -229,7 +229,7 @@ export const SendMessageResult = Schema.Struct({
 export type SendMessageResult = typeof SendMessageResult.Type;
 
 export const ParticipantDirectoryRow = Schema.Struct({
-  epicId: EpicId,
+  squadronId: SquadronId,
   participantId: ParticipantId,
   participant: Participant,
   canReceiveMessage: Schema.Boolean,
@@ -239,7 +239,7 @@ export const ParticipantDirectoryRow = Schema.Struct({
 export type ParticipantDirectoryRow = typeof ParticipantDirectoryRow.Type;
 
 export const DeliveryAlarm = Schema.Struct({
-  epicId: EpicId,
+  squadronId: SquadronId,
   messageId: LedgerMessageId,
   attempts: PositiveInt,
   lastError: Schema.String,
@@ -247,7 +247,7 @@ export const DeliveryAlarm = Schema.Struct({
 export type DeliveryAlarm = typeof DeliveryAlarm.Type;
 
 export const DeliveryMilestone = Schema.Struct({
-  epicId: EpicId,
+  squadronId: SquadronId,
   messageId: LedgerMessageId,
   state: Schema.Literals(["delivered", "retry_scheduled", "alarmed"]),
   attempt: PositiveInt,
@@ -275,7 +275,7 @@ export const CommEventPage = Schema.Struct({
 export type CommEventPage = typeof CommEventPage.Type;
 
 export const Membership = Schema.Struct({
-  epicId: EpicId,
+  squadronId: SquadronId,
   participant: Participant,
   joinedSeq: PositiveInt,
   updatedSeq: PositiveInt,

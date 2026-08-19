@@ -13,14 +13,14 @@ import {
   CommCommandReceipt,
   type AppendCommEventCommand,
   type CommEventPage,
-  type CreateEpicCommand,
-  Epic,
+  type CreateSquadronCommand,
+  Squadron,
   ExchangeClosedPayload,
   ExchangeOpenedPayload,
   MessageDeliveredPayload,
   MessageDeliveryFailedPayload,
   MessageSentPayload,
-  type EpicId,
+  type SquadronId,
   type LedgerCursor,
   Membership,
   StoredCommEvent,
@@ -33,38 +33,38 @@ export class A2AStorageError extends Schema.TaggedErrorClass<A2AStorageError>()(
   cause: Schema.optional(Schema.Defect()),
 }) {}
 
-export class EpicNotFoundError extends Schema.TaggedErrorClass<EpicNotFoundError>()(
-  "EpicNotFoundError",
-  { epicId: Schema.String },
+export class SquadronNotFoundError extends Schema.TaggedErrorClass<SquadronNotFoundError>()(
+  "SquadronNotFoundError",
+  { squadronId: Schema.String },
 ) {}
 
 export class CommCommandConflictError extends Schema.TaggedErrorClass<CommCommandConflictError>()(
   "CommCommandConflictError",
   {
     commandId: Schema.String,
-    requestedEpicId: Schema.String,
-    existingEpicId: Schema.String,
+    requestedSquadronId: Schema.String,
+    existingSquadronId: Schema.String,
   },
 ) {}
 
 export class LedgerCursorError extends Schema.TaggedErrorClass<LedgerCursorError>()(
   "LedgerCursorError",
   {
-    epicId: Schema.String,
+    squadronId: Schema.String,
     afterSeq: Schema.Number,
     snapshotEnd: Schema.Number,
   },
 ) {}
 
 export class LedgerGapError extends Schema.TaggedErrorClass<LedgerGapError>()("LedgerGapError", {
-  epicId: Schema.String,
+  squadronId: Schema.String,
   expectedSeq: Schema.Number,
   actualSeq: Schema.NullOr(Schema.Number),
 }) {}
 
 export type A2ALedgerError =
   | A2AStorageError
-  | EpicNotFoundError
+  | SquadronNotFoundError
   | CommCommandConflictError
   | LedgerCursorError
   | LedgerGapError;
@@ -72,7 +72,7 @@ export type A2ALedgerError =
 const isA2ALedgerError = Schema.is(
   Schema.Union([
     A2AStorageError,
-    EpicNotFoundError,
+    SquadronNotFoundError,
     CommCommandConflictError,
     LedgerCursorError,
     LedgerGapError,
@@ -92,23 +92,25 @@ export interface AppendEventsResult {
 }
 
 export interface A2ALedgerShape {
-  readonly createEpic: (command: CreateEpicCommand) => Effect.Effect<Epic, A2ALedgerError>;
-  readonly listEpics: () => Effect.Effect<ReadonlyArray<Epic>, A2ALedgerError>;
-  readonly readEpic: (epicId: EpicId) => Effect.Effect<Epic, A2ALedgerError>;
+  readonly createSquadron: (
+    command: CreateSquadronCommand,
+  ) => Effect.Effect<Squadron, A2ALedgerError>;
+  readonly listSquadrons: () => Effect.Effect<ReadonlyArray<Squadron>, A2ALedgerError>;
+  readonly readSquadron: (squadronId: SquadronId) => Effect.Effect<Squadron, A2ALedgerError>;
   readonly append: (command: AppendCommEventCommand) => Effect.Effect<AppendResult, A2ALedgerError>;
   readonly appendEvents: (
     command: AppendCommEventsCommand,
   ) => Effect.Effect<AppendEventsResult, A2ALedgerError>;
   readonly readEvents: (input: {
-    readonly epicId: EpicId;
+    readonly squadronId: SquadronId;
     readonly cursor: LedgerCursor;
     readonly limit: number;
   }) => Effect.Effect<CommEventPage, A2ALedgerError>;
   readonly listMembership: (
-    epicId: EpicId,
+    squadronId: SquadronId,
   ) => Effect.Effect<ReadonlyArray<Membership>, A2ALedgerError>;
   readonly rebuildMembership: (
-    epicId: EpicId,
+    squadronId: SquadronId,
   ) => Effect.Effect<ReadonlyArray<Membership>, A2ALedgerError>;
   readonly subscribeCommitted: Effect.Effect<Stream.Stream<StoredCommEvent>, never, Scope.Scope>;
 }
@@ -117,7 +119,7 @@ export class A2ALedger extends Context.Service<A2ALedger, A2ALedgerShape>()(
   "t3/j5/a2a/LedgerService/A2ALedger",
 ) {}
 
-interface EpicRow {
+interface SquadronRow {
   readonly id: string;
   readonly name: string;
   readonly created_at: string;
@@ -125,7 +127,7 @@ interface EpicRow {
 
 interface EventRow {
   readonly seq: number;
-  readonly epic_id: string;
+  readonly squadron_id: string;
   readonly kind: string;
   readonly sender: string | null;
   readonly receiver: string | null;
@@ -137,20 +139,20 @@ interface EventRow {
 
 interface ReceiptRow {
   readonly command_id: string;
-  readonly epic_id: string;
+  readonly squadron_id: string;
   readonly command_type: string;
   readonly accepted_at: string;
   readonly result_seq: number;
 }
 
 interface MembershipRow {
-  readonly epic_id: string;
+  readonly squadron_id: string;
   readonly joined_seq: number;
   readonly updated_seq: number;
   readonly payload: string;
 }
 
-const decodeEpic = Schema.decodeUnknownEffect(Epic);
+const decodeSquadron = Schema.decodeUnknownEffect(Squadron);
 const decodeStoredEvent = Schema.decodeUnknownEffect(StoredCommEvent);
 const decodeReceipt = Schema.decodeUnknownEffect(CommCommandReceipt);
 const decodeMembership = Schema.decodeUnknownEffect(Membership);
@@ -167,13 +169,13 @@ const preserveDomainError =
   (cause: unknown): A2ALedgerError =>
     isA2ALedgerError(cause) ? cause : new A2AStorageError({ operation, cause });
 
-const epicFromRow = (row: EpicRow) =>
-  decodeEpic({ id: row.id, name: row.name, createdAt: row.created_at });
+const squadronFromRow = (row: SquadronRow) =>
+  decodeSquadron({ id: row.id, name: row.name, createdAt: row.created_at });
 
 const eventFromRow = Effect.fn("j5.a2a.eventFromRow")(function* (row: EventRow) {
   return yield* decodeStoredEvent({
     seq: row.seq,
-    epicId: row.epic_id,
+    squadronId: row.squadron_id,
     kind: row.kind,
     sender: row.sender,
     receiver: row.receiver,
@@ -187,7 +189,7 @@ const eventFromRow = Effect.fn("j5.a2a.eventFromRow")(function* (row: EventRow) 
 const receiptFromRow = (row: ReceiptRow) =>
   decodeReceipt({
     commandId: row.command_id,
-    epicId: row.epic_id,
+    squadronId: row.squadron_id,
     commandType: row.command_type,
     acceptedAt: row.accepted_at,
     resultSeq: row.result_seq,
@@ -195,7 +197,7 @@ const receiptFromRow = (row: ReceiptRow) =>
 
 const membershipFromRow = Effect.fn("j5.a2a.membershipFromRow")(function* (row: MembershipRow) {
   return yield* decodeMembership({
-    epicId: row.epic_id,
+    squadronId: row.squadron_id,
     participant: yield* decodeJson(row.payload),
     joinedSeq: row.joined_seq,
     updatedSeq: row.updated_seq,
@@ -209,12 +211,12 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
     const appendPermit = yield* Semaphore.make(1);
     const committed = yield* PubSub.unbounded<StoredCommEvent>();
 
-    const ensureEpic = Effect.fn("j5.a2a.ensureEpic")(function* (epicId: EpicId) {
+    const ensureSquadron = Effect.fn("j5.a2a.ensureSquadron")(function* (squadronId: SquadronId) {
       const rows = yield* sql<{ readonly id: string }>`
-        SELECT id FROM j5_a2a_epic WHERE id = ${epicId} LIMIT 1
+        SELECT id FROM j5_a2a_squadron WHERE id = ${squadronId} LIMIT 1
       `;
       if (rows[0] === undefined) {
-        return yield* new EpicNotFoundError({ epicId });
+        return yield* new SquadronNotFoundError({ squadronId });
       }
     });
 
@@ -224,16 +226,16 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
       const id = participantId(participant);
       if (event.kind === "participant.left") {
         yield* sql`
-          DELETE FROM j5_a2a_epic_membership
-          WHERE epic_id = ${event.epicId} AND participant_id = ${id}
+          DELETE FROM j5_a2a_squadron_membership
+          WHERE squadron_id = ${event.squadronId} AND participant_id = ${id}
         `;
         return;
       }
       const payload = yield* encodeJson(participant);
       const threadId = participant.kind === "agent" ? participant.threadId : null;
       yield* sql`
-        INSERT INTO j5_a2a_epic_membership (
-          epic_id,
+        INSERT INTO j5_a2a_squadron_membership (
+          squadron_id,
           participant_id,
           participant_kind,
           thread_id,
@@ -241,7 +243,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
           updated_seq,
           payload
         ) VALUES (
-          ${event.epicId},
+          ${event.squadronId},
           ${id},
           ${participant.kind},
           ${threadId},
@@ -249,11 +251,11 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
           ${event.seq},
           ${payload}
         )
-        ON CONFLICT(epic_id, participant_id)
+        ON CONFLICT(squadron_id, participant_id)
         DO UPDATE SET
           participant_kind = excluded.participant_kind,
           thread_id = excluded.thread_id,
-          joined_seq = j5_a2a_epic_membership.joined_seq,
+          joined_seq = j5_a2a_squadron_membership.joined_seq,
           updated_seq = excluded.updated_seq,
           payload = excluded.payload
       `;
@@ -271,7 +273,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
           }
           yield* sql`
             INSERT INTO j5_a2a_exchange (
-              epic_id,
+              squadron_id,
               exchange_id,
               sender_id,
               receiver_id,
@@ -283,7 +285,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
               created_at,
               updated_at
             ) VALUES (
-              ${event.epicId},
+              ${event.squadronId},
               ${event.exchangeId},
               ${event.sender},
               ${event.receiver},
@@ -309,7 +311,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
               status = 'closed',
               closed_seq = ${event.seq},
               updated_at = ${event.createdAt}
-            WHERE epic_id = ${event.epicId}
+            WHERE squadron_id = ${event.squadronId}
               AND exchange_id = ${event.exchangeId}
               AND status = 'open'
           `;
@@ -322,13 +324,13 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
           }
           yield* sql`
             INSERT INTO j5_a2a_delivery (
-              epic_id,
+              squadron_id,
               message_id,
               command_id,
               sent_seq,
               sender_id,
               receiver_id,
-              receiver_epic_id,
+              receiver_squadron_id,
               exchange_id,
               exchange_role,
               correlation_id,
@@ -341,13 +343,13 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
               created_at,
               updated_at
             ) VALUES (
-              ${event.epicId},
+              ${event.squadronId},
               ${payload.messageId},
               ${commandId},
               ${event.seq},
               ${event.sender},
               ${event.receiver},
-              ${payload.receiverEpicId},
+              ${payload.receiverSquadronId},
               ${event.exchangeId},
               ${payload.exchangeRole},
               ${event.correlationId},
@@ -374,7 +376,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
               next_attempt_at = NULL,
               delivered_seq = ${event.seq},
               updated_at = ${event.createdAt}
-            WHERE epic_id = ${event.epicId} AND message_id = ${payload.messageId}
+            WHERE squadron_id = ${event.squadronId} AND message_id = ${payload.messageId}
             RETURNING message_id
           `;
           if (rows[0] === undefined) {
@@ -392,7 +394,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
               last_error = ${payload.error},
               next_attempt_at = ${payload.nextAttemptAt},
               updated_at = ${event.createdAt}
-            WHERE epic_id = ${event.epicId} AND message_id = ${payload.messageId}
+            WHERE squadron_id = ${event.squadronId} AND message_id = ${payload.messageId}
             RETURNING message_id
           `;
           if (rows[0] === undefined) {
@@ -408,12 +410,14 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
       }
     });
 
-    const listMembershipEffect = Effect.fn("j5.a2a.listMembership")(function* (epicId: EpicId) {
-      yield* ensureEpic(epicId);
+    const listMembershipEffect = Effect.fn("j5.a2a.listMembership")(function* (
+      squadronId: SquadronId,
+    ) {
+      yield* ensureSquadron(squadronId);
       const rows = yield* sql<MembershipRow>`
-        SELECT epic_id, joined_seq, updated_seq, payload
-        FROM j5_a2a_epic_membership
-        WHERE epic_id = ${epicId}
+        SELECT squadron_id, joined_seq, updated_seq, payload
+        FROM j5_a2a_squadron_membership
+        WHERE squadron_id = ${squadronId}
         ORDER BY participant_id
       `;
       return yield* Effect.forEach(rows, membershipFromRow, { concurrency: 1 });
@@ -424,11 +428,11 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
     ) {
       const result = yield* sql.withTransaction(
         Effect.gen(function* () {
-          yield* ensureEpic(command.epicId);
+          yield* ensureSquadron(command.squadronId);
           const sequenceRows = yield* sql<{ readonly next_seq: number }>`
             SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq
             FROM j5_a2a_comm_event
-            WHERE epic_id = ${command.epicId}
+            WHERE squadron_id = ${command.squadronId}
           `;
           const firstSeq = sequenceRows[0]?.next_seq;
           if (firstSeq === undefined) {
@@ -438,13 +442,13 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
           const reserved = yield* sql<{ readonly command_id: string }>`
             INSERT INTO j5_a2a_comm_command_receipt (
               command_id,
-              epic_id,
+              squadron_id,
               command_type,
               accepted_at,
               result_seq
             ) VALUES (
               ${command.commandId},
-              ${command.epicId},
+              ${command.squadronId},
               'comm.append',
               ${command.acceptedAt},
               ${resultSeq}
@@ -455,7 +459,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
 
           if (reserved[0] === undefined) {
             const receiptRows = yield* sql<ReceiptRow>`
-              SELECT command_id, epic_id, command_type, accepted_at, result_seq
+              SELECT command_id, squadron_id, command_type, accepted_at, result_seq
               FROM j5_a2a_comm_command_receipt
               WHERE command_id = ${command.commandId}
               LIMIT 1
@@ -464,17 +468,17 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
             if (row === undefined) {
               return yield* new A2AStorageError({ operation: "read replayed batch receipt" });
             }
-            if (row.epic_id !== command.epicId) {
+            if (row.squadron_id !== command.squadronId) {
               return yield* new CommCommandConflictError({
                 commandId: command.commandId,
-                requestedEpicId: command.epicId,
-                existingEpicId: row.epic_id,
+                requestedSquadronId: command.squadronId,
+                existingSquadronId: row.squadron_id,
               });
             }
             const eventRows = yield* sql<EventRow>`
               SELECT
                 seq,
-                epic_id,
+                squadron_id,
                 kind,
                 sender,
                 receiver,
@@ -483,7 +487,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
                 payload,
                 created_at
               FROM j5_a2a_comm_event
-              WHERE epic_id = ${command.epicId} AND command_id = ${command.commandId}
+              WHERE squadron_id = ${command.squadronId} AND command_id = ${command.commandId}
               ORDER BY seq
             `;
             if (eventRows.length === 0) {
@@ -500,7 +504,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
           for (const [index, candidate] of command.events.entries()) {
             const pending = decideAppendCommEvent({
               commandId: command.commandId,
-              epicId: command.epicId,
+              squadronId: command.squadronId,
               acceptedAt: command.acceptedAt,
               event: candidate,
             })[0];
@@ -509,7 +513,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
             yield* sql`
               INSERT INTO j5_a2a_comm_event (
                 seq,
-                epic_id,
+                squadron_id,
                 kind,
                 sender,
                 receiver,
@@ -520,7 +524,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
                 command_id
               ) VALUES (
                 ${seq},
-                ${pending.epicId},
+                ${pending.squadronId},
                 ${pending.kind},
                 ${pending.sender},
                 ${pending.receiver},
@@ -539,7 +543,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
           return {
             receipt: yield* decodeReceipt({
               commandId: command.commandId,
-              epicId: command.epicId,
+              squadronId: command.squadronId,
               commandType: "comm.append",
               acceptedAt: command.acceptedAt,
               resultSeq,
@@ -558,44 +562,44 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
     });
 
     return A2ALedger.of({
-      createEpic: (command) =>
+      createSquadron: (command) =>
         Effect.gen(function* () {
           yield* sql`
-            INSERT INTO j5_a2a_epic (id, name, created_at)
-            VALUES (${command.epic.id}, ${command.epic.name}, ${command.epic.createdAt})
+            INSERT INTO j5_a2a_squadron (id, name, created_at)
+            VALUES (${command.squadron.id}, ${command.squadron.name}, ${command.squadron.createdAt})
             ON CONFLICT(id) DO NOTHING
           `;
-          return yield* epicFromRow(
-            (yield* sql<EpicRow>`
+          return yield* squadronFromRow(
+            (yield* sql<SquadronRow>`
               SELECT id, name, created_at
-              FROM j5_a2a_epic
-              WHERE id = ${command.epic.id}
+              FROM j5_a2a_squadron
+              WHERE id = ${command.squadron.id}
               LIMIT 1
             `)[0]!,
           );
-        }).pipe(Effect.mapError(preserveDomainError("create epic"))),
-      listEpics: () =>
+        }).pipe(Effect.mapError(preserveDomainError("create squadron"))),
+      listSquadrons: () =>
         Effect.gen(function* () {
-          const rows = yield* sql<EpicRow>`
-            SELECT id, name, created_at FROM j5_a2a_epic ORDER BY created_at, id
+          const rows = yield* sql<SquadronRow>`
+            SELECT id, name, created_at FROM j5_a2a_squadron ORDER BY created_at, id
           `;
-          return yield* Effect.forEach(rows, epicFromRow, { concurrency: 1 });
-        }).pipe(Effect.mapError(preserveDomainError("list epics"))),
-      readEpic: (epicId) =>
+          return yield* Effect.forEach(rows, squadronFromRow, { concurrency: 1 });
+        }).pipe(Effect.mapError(preserveDomainError("list squadrons"))),
+      readSquadron: (squadronId) =>
         Effect.gen(function* () {
-          const rows = yield* sql<EpicRow>`
-            SELECT id, name, created_at FROM j5_a2a_epic WHERE id = ${epicId} LIMIT 1
+          const rows = yield* sql<SquadronRow>`
+            SELECT id, name, created_at FROM j5_a2a_squadron WHERE id = ${squadronId} LIMIT 1
           `;
           const row = rows[0];
-          if (row === undefined) return yield* new EpicNotFoundError({ epicId });
-          return yield* epicFromRow(row);
-        }).pipe(Effect.mapError(preserveDomainError("read epic"))),
+          if (row === undefined) return yield* new SquadronNotFoundError({ squadronId });
+          return yield* squadronFromRow(row);
+        }).pipe(Effect.mapError(preserveDomainError("read squadron"))),
       append: (command) =>
         appendPermit
           .withPermit(
             appendEventsEffect({
               commandId: command.commandId,
-              epicId: command.epicId,
+              squadronId: command.squadronId,
               acceptedAt: command.acceptedAt,
               events: [command.event],
             }).pipe(
@@ -616,19 +620,19 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
         appendPermit
           .withPermit(appendEventsEffect(command))
           .pipe(Effect.mapError(preserveDomainError("append communication events"))),
-      readEvents: ({ epicId, cursor, limit }) =>
+      readEvents: ({ squadronId, cursor, limit }) =>
         Effect.gen(function* () {
-          yield* ensureEpic(epicId);
+          yield* ensureSquadron(squadronId);
           const highWaterRows = yield* sql<{ readonly high_water: number }>`
             SELECT COALESCE(MAX(seq), 0) AS high_water
             FROM j5_a2a_comm_event
-            WHERE epic_id = ${epicId}
+            WHERE squadron_id = ${squadronId}
           `;
           const highWater = highWaterRows[0]?.high_water ?? 0;
           const snapshotEnd = cursor.snapshotEnd ?? highWater;
           if (cursor.afterSeq > snapshotEnd || limit < 1 || !Number.isInteger(limit)) {
             return yield* new LedgerCursorError({
-              epicId,
+              squadronId,
               afterSeq: cursor.afterSeq,
               snapshotEnd,
             });
@@ -636,7 +640,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
           const rows = yield* sql<EventRow>`
             SELECT
               seq,
-              epic_id,
+              squadron_id,
               kind,
               sender,
               receiver,
@@ -645,7 +649,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
               payload,
               created_at
             FROM j5_a2a_comm_event
-            WHERE epic_id = ${epicId}
+            WHERE squadron_id = ${squadronId}
               AND seq > ${cursor.afterSeq}
               AND seq <= ${snapshotEnd}
             ORDER BY seq
@@ -656,7 +660,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
           for (const event of events) {
             if (event.seq !== expectedSeq) {
               return yield* new LedgerGapError({
-                epicId,
+                squadronId,
                 expectedSeq,
                 actualSeq: event.seq,
               });
@@ -664,7 +668,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
             expectedSeq += 1;
           }
           if (events.length === 0 && cursor.afterSeq < snapshotEnd) {
-            return yield* new LedgerGapError({ epicId, expectedSeq, actualSeq: null });
+            return yield* new LedgerGapError({ squadronId, expectedSeq, actualSeq: null });
           }
           const afterSeq = events.at(-1)?.seq ?? cursor.afterSeq;
           return {
@@ -673,21 +677,21 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
             complete: afterSeq === snapshotEnd,
           };
         }).pipe(Effect.mapError(preserveDomainError("read communication events"))),
-      listMembership: (epicId) =>
-        listMembershipEffect(epicId).pipe(
-          Effect.mapError(preserveDomainError("list epic membership")),
+      listMembership: (squadronId) =>
+        listMembershipEffect(squadronId).pipe(
+          Effect.mapError(preserveDomainError("list squadron membership")),
         ),
-      rebuildMembership: (epicId) =>
+      rebuildMembership: (squadronId) =>
         appendPermit
           .withPermit(
             sql.withTransaction(
               Effect.gen(function* () {
-                yield* ensureEpic(epicId);
-                yield* sql`DELETE FROM j5_a2a_epic_membership WHERE epic_id = ${epicId}`;
+                yield* ensureSquadron(squadronId);
+                yield* sql`DELETE FROM j5_a2a_squadron_membership WHERE squadron_id = ${squadronId}`;
                 const rows = yield* sql<EventRow>`
                   SELECT
                     seq,
-                    epic_id,
+                    squadron_id,
                     kind,
                     sender,
                     receiver,
@@ -696,18 +700,18 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
                     payload,
                     created_at
                   FROM j5_a2a_comm_event
-                  WHERE epic_id = ${epicId}
+                  WHERE squadron_id = ${squadronId}
                     AND kind IN ('participant.joined', 'participant.left')
                   ORDER BY seq
                 `;
                 for (const row of rows) {
                   yield* applyMembership(yield* eventFromRow(row));
                 }
-                return yield* listMembershipEffect(epicId);
+                return yield* listMembershipEffect(squadronId);
               }),
             ),
           )
-          .pipe(Effect.mapError(preserveDomainError("rebuild epic membership"))),
+          .pipe(Effect.mapError(preserveDomainError("rebuild squadron membership"))),
       subscribeCommitted: PubSub.subscribe(committed).pipe(
         Effect.map((subscription) => Stream.fromSubscription(subscription)),
       ),

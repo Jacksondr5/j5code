@@ -8,7 +8,7 @@ import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
-import { CommCommandId, EpicId, ParticipantId, type AgentParticipant } from "./contracts.ts";
+import { CommCommandId, SquadronId, ParticipantId, type AgentParticipant } from "./contracts.ts";
 
 const timestamp = "2026-08-16T12:00:00.000Z";
 
@@ -28,17 +28,17 @@ const receiver: AgentParticipant = {
   threadId: ThreadId.make("thread:receiver"),
 };
 
-const setupSameEpic = Effect.fn("test.j5.a2a.setupSameEpic")(function* () {
+const setupSameSquadron = Effect.fn("test.j5.a2a.setupSameSquadron")(function* () {
   yield* runJ5A2AMigrations();
   const ledgerService = yield* A2ALedger;
-  const epicId = EpicId.make("epic:exchange");
-  yield* ledgerService.createEpic({
-    epic: { id: epicId, name: "Exchange", createdAt: timestamp },
+  const squadronId = SquadronId.make("squadron:exchange");
+  yield* ledgerService.createSquadron({
+    squadron: { id: squadronId, name: "Exchange", createdAt: timestamp },
   });
   for (const [index, participant] of [sender, receiver].entries()) {
     yield* ledgerService.append({
       commandId: CommCommandId.make(`command:join:${index}`),
-      epicId,
+      squadronId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.joined",
@@ -51,12 +51,12 @@ const setupSameEpic = Effect.fn("test.j5.a2a.setupSameEpic")(function* () {
       },
     });
   }
-  return epicId;
+  return squadronId;
 });
 
 it.effect("opens once per sender-receiver pair, joins follow-ups, and one reply closes", () =>
   Effect.gen(function* () {
-    const epicId = yield* setupSameEpic();
+    const squadronId = yield* setupSameSquadron();
     const service = yield* A2ASendService;
     const sql = yield* SqlClient.SqlClient;
 
@@ -99,7 +99,7 @@ it.effect("opens once per sender-receiver pair, joins follow-ups, and one reply 
         acceptedAt: timestamp,
       }),
       reply,
-      "the same-epic reply command replays its original durable sequence",
+      "the same-squadron reply command replays its original durable sequence",
     );
     assert.deepStrictEqual(
       yield* service.send({
@@ -130,7 +130,7 @@ it.effect("opens once per sender-receiver pair, joins follow-ups, and one reply 
     const rows = yield* sql<{ readonly kind: string; readonly count: number }>`
       SELECT kind, COUNT(*) AS count
       FROM j5_a2a_comm_event
-      WHERE epic_id = ${epicId}
+      WHERE squadron_id = ${squadronId}
         AND kind IN ('exchange.opened', 'message.sent', 'exchange.closed')
       GROUP BY kind
       ORDER BY kind
@@ -157,12 +157,12 @@ it.effect("opens once per sender-receiver pair, joins follow-ups, and one reply 
 
 it.effect("validates intent and human-only urgency at exchange open", () =>
   Effect.gen(function* () {
-    const epicId = yield* setupSameEpic();
+    const squadronId = yield* setupSameSquadron();
     const ledgerService = yield* A2ALedger;
     const service = yield* A2ASendService;
     yield* ledgerService.append({
       commandId: CommCommandId.make("command:join:human"),
-      epicId,
+      squadronId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.joined",
@@ -230,7 +230,7 @@ it.effect("validates intent and human-only urgency at exchange open", () =>
 
 it.effect("rolls back the send receipt when its projection write fails", () =>
   Effect.gen(function* () {
-    yield* setupSameEpic();
+    yield* setupSameSquadron();
     const service = yield* A2ASendService;
     const sql = yield* SqlClient.SqlClient;
     const command = CommCommandId.make("command:receipt-rollback");
@@ -275,26 +275,29 @@ it.effect("rolls back the send receipt when its projection write fails", () =>
   }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("fails closed when a native thread has no provisioned epic membership", () =>
+it.effect("fails closed when a native thread has no provisioned squadron membership", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const service = yield* A2ASendService;
     const sql = yield* SqlClient.SqlClient;
-    const nativeThreadId = ThreadId.make("thread:native-without-home-epic");
+    const nativeThreadId = ThreadId.make("thread:native-without-home-squadron");
 
     const listError = yield* Effect.flip(service.listParticipants(nativeThreadId));
     assert.equal(listError._tag, "A2ASenderNotJoinedError");
     assert.include(listError.message, "native thread");
-    assert.include(listError.message, "no registered home epic");
+    assert.include(listError.message, "no registered home squadron");
     assert.include(listError.message, "wrapper-spawned agent");
     assert.include(listError.message, "controlled test seeding");
-    assert.include(listError.message, "home-epic registrar + A6 creation integrations follow-up");
+    assert.include(
+      listError.message,
+      "home-squadron registrar + A6 creation integrations follow-up",
+    );
     assert.include(listError.message, "Stop this messaging attempt");
     assert.notMatch(listError.message, /ask the user|product workflow|list_participants again/i);
 
     const sendError = yield* Effect.flip(
       service.send({
-        commandId: CommCommandId.make("command:native-without-home-epic"),
+        commandId: CommCommandId.make("command:native-without-home-squadron"),
         senderThreadId: nativeThreadId,
         to: receiver.id,
         message: "This must fail without provisioning.",
@@ -303,21 +306,21 @@ it.effect("fails closed when a native thread has no provisioned epic membership"
     );
     assert.equal(sendError._tag, "A2ASenderNotJoinedError");
 
-    const state = yield* sql<{ readonly epics: number; readonly events: number }>`
+    const state = yield* sql<{ readonly squadrons: number; readonly events: number }>`
       SELECT
-        (SELECT COUNT(*) FROM j5_a2a_epic) AS epics,
+        (SELECT COUNT(*) FROM j5_a2a_squadron) AS squadrons,
         (SELECT COUNT(*) FROM j5_a2a_comm_event) AS events
     `;
-    assert.deepStrictEqual(state, [{ epics: 0, events: 0 }]);
+    assert.deepStrictEqual(state, [{ squadrons: 0, events: 0 }]);
   }).pipe(Effect.provide(testLayer)),
 );
 
 it.effect("lists membership-derived participant capabilities", () =>
   Effect.gen(function* () {
-    const epicId = yield* setupSameEpic();
+    const squadronId = yield* setupSameSquadron();
     yield* (yield* A2ALedger).append({
       commandId: CommCommandId.make("command:list:join:human"),
-      epicId,
+      squadronId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.joined",
@@ -363,15 +366,15 @@ it.effect("lists membership-derived participant capabilities", () =>
 
 it.effect("marks ambiguous participant rows unavailable before send", () =>
   Effect.gen(function* () {
-    yield* setupSameEpic();
+    yield* setupSameSquadron();
     const ledgerService = yield* A2ALedger;
-    const duplicateEpicId = EpicId.make("epic:exchange:duplicate-receiver");
-    yield* ledgerService.createEpic({
-      epic: { id: duplicateEpicId, name: "Duplicate receiver", createdAt: timestamp },
+    const duplicateSquadronId = SquadronId.make("squadron:exchange:duplicate-receiver");
+    yield* ledgerService.createSquadron({
+      squadron: { id: duplicateSquadronId, name: "Duplicate receiver", createdAt: timestamp },
     });
     yield* ledgerService.appendEvents({
       commandId: CommCommandId.make("command:join:duplicate-receiver"),
-      epicId: duplicateEpicId,
+      squadronId: duplicateSquadronId,
       acceptedAt: timestamp,
       events: [
         {

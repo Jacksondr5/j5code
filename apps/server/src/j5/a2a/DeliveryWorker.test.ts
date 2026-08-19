@@ -34,7 +34,7 @@ import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
   CommCommandId,
-  EpicId,
+  SquadronId,
   GLOBAL_HUMAN_PARTICIPANT_ID,
   ParticipantId,
   type AgentParticipant,
@@ -72,13 +72,13 @@ const makeTestLayer = (
 };
 
 const join = Effect.fn("test.j5.a2a.delivery.join")(function* (
-  epicId: EpicId,
+  squadronId: SquadronId,
   participant: AgentParticipant,
   index: string,
 ) {
   yield* (yield* A2ALedger).append({
     commandId: CommCommandId.make(`command:delivery:join:${index}`),
-    epicId,
+    squadronId,
     acceptedAt: timestamp,
     event: {
       kind: "participant.joined",
@@ -92,34 +92,36 @@ const join = Effect.fn("test.j5.a2a.delivery.join")(function* (
   });
 });
 
-const seedSend = Effect.fn("test.j5.a2a.delivery.seedSend")(function* (crossEpic: boolean) {
+const seedSend = Effect.fn("test.j5.a2a.delivery.seedSend")(function* (crossSquadron: boolean) {
   yield* runJ5A2AMigrations();
   const ledgerService = yield* A2ALedger;
-  const senderEpicId = EpicId.make("epic:delivery:sender");
-  const receiverEpicId = crossEpic ? EpicId.make("epic:delivery:receiver") : senderEpicId;
-  yield* ledgerService.createEpic({
-    epic: { id: senderEpicId, name: "Delivery sender", createdAt: timestamp },
+  const senderSquadronId = SquadronId.make("squadron:delivery:sender");
+  const receiverSquadronId = crossSquadron
+    ? SquadronId.make("squadron:delivery:receiver")
+    : senderSquadronId;
+  yield* ledgerService.createSquadron({
+    squadron: { id: senderSquadronId, name: "Delivery sender", createdAt: timestamp },
   });
-  if (crossEpic) {
-    yield* ledgerService.createEpic({
-      epic: { id: receiverEpicId, name: "Delivery receiver", createdAt: timestamp },
+  if (crossSquadron) {
+    yield* ledgerService.createSquadron({
+      squadron: { id: receiverSquadronId, name: "Delivery receiver", createdAt: timestamp },
     });
   }
-  yield* join(senderEpicId, sender, "sender");
-  yield* join(receiverEpicId, receiver, "receiver");
+  yield* join(senderSquadronId, sender, "sender");
+  yield* join(receiverSquadronId, receiver, "receiver");
   const sent = yield* (yield* A2ASendService).send({
     commandId: CommCommandId.make(
-      crossEpic ? "command:delivery:cross-epic" : "command:delivery:same-epic",
+      crossSquadron ? "command:delivery:cross-squadron" : "command:delivery:same-squadron",
     ),
     senderThreadId: sender.threadId,
     to: receiver.id,
     message: "Delivery crash-window probe",
     acceptedAt: timestamp,
   });
-  return { senderEpicId, receiverEpicId, sent };
+  return { senderSquadronId, receiverSquadronId, sent };
 });
 
-const crashWindowScenario = (poisonIds: boolean, crossEpic: boolean) =>
+const crashWindowScenario = (poisonIds: boolean, crossSquadron: boolean) =>
   Effect.gen(function* () {
     const calls = yield* Ref.make(0);
     const injections = yield* Ref.make(0);
@@ -161,14 +163,14 @@ const crashWindowScenario = (poisonIds: boolean, crossEpic: boolean) =>
     });
 
     const result = yield* Effect.gen(function* () {
-      const { receiverEpicId, sent } = yield* seedSend(crossEpic);
+      const { receiverSquadronId, sent } = yield* seedSend(crossSquadron);
       const worker = yield* A2ADeliveryWorker;
       const sql = yield* SqlClient.SqlClient;
-      if (crossEpic) {
+      if (crossSquadron) {
         const before = yield* sql<{ readonly count: number }>`
           SELECT COUNT(*) AS count
           FROM j5_a2a_comm_event
-          WHERE epic_id = ${receiverEpicId} AND kind = 'message.received'
+          WHERE squadron_id = ${receiverSquadronId} AND kind = 'message.received'
         `;
         assert.equal(before[0]?.count, 0, "sender commit precedes receiver double-entry");
         const senderState = yield* sql<{ readonly status: string }>`
@@ -187,11 +189,11 @@ const crashWindowScenario = (poisonIds: boolean, crossEpic: boolean) =>
       assert.equal(replay?.state, "delivered");
       assert.equal(replay?.attempt, 2);
 
-      const received = crossEpic
+      const received = crossSquadron
         ? yield* sql<{ readonly count: number }>`
             SELECT COUNT(*) AS count
             FROM j5_a2a_comm_event
-            WHERE epic_id = ${receiverEpicId}
+            WHERE squadron_id = ${receiverSquadronId}
               AND kind = 'message.received'
               AND correlation_id IS NOT NULL
           `
@@ -262,7 +264,7 @@ it.effect("serializes manual runOnce calls against a concurrent drain", () =>
   }),
 );
 
-it.effect("cross-epic half-write recovery records exactly one receiver entry", () =>
+it.effect("cross-squadron half-write recovery records exactly one receiver entry", () =>
   Effect.gen(function* () {
     const result = yield* crashWindowScenario(false, true);
     assert.equal(result.injectionCount, 1);
@@ -271,7 +273,7 @@ it.effect("cross-epic half-write recovery records exactly one receiver entry", (
   }),
 );
 
-it.effect("closes a cross-epic exchange through the paired reply entry", () =>
+it.effect("closes a cross-squadron exchange through the paired reply entry", () =>
   Effect.gen(function* () {
     const injections = yield* Ref.make(0);
     const transport: A2ADeliveryTransportShape = {
@@ -284,24 +286,24 @@ it.effect("closes a cross-epic exchange through the paired reply entry", () =>
       const sendService = yield* A2ASendService;
       const worker = yield* A2ADeliveryWorker;
       const sql = yield* SqlClient.SqlClient;
-      const senderEpicId = EpicId.make("epic:exchange:sender");
-      const receiverEpicId = EpicId.make("epic:exchange:receiver");
-      yield* ledgerService.createEpic({
-        epic: { id: senderEpicId, name: "Exchange sender", createdAt: timestamp },
+      const senderSquadronId = SquadronId.make("squadron:exchange:sender");
+      const receiverSquadronId = SquadronId.make("squadron:exchange:receiver");
+      yield* ledgerService.createSquadron({
+        squadron: { id: senderSquadronId, name: "Exchange sender", createdAt: timestamp },
       });
-      yield* ledgerService.createEpic({
-        epic: { id: receiverEpicId, name: "Exchange receiver", createdAt: timestamp },
+      yield* ledgerService.createSquadron({
+        squadron: { id: receiverSquadronId, name: "Exchange receiver", createdAt: timestamp },
       });
-      yield* join(senderEpicId, sender, "exchange-sender");
-      yield* join(receiverEpicId, receiver, "exchange-receiver");
+      yield* join(senderSquadronId, sender, "exchange-sender");
+      yield* join(receiverSquadronId, receiver, "exchange-receiver");
 
       const opened = yield* sendService.send({
         commandId: CommCommandId.make("command:exchange:cross:open"),
         senderThreadId: sender.threadId,
         to: receiver.id,
-        message: "Please reply across epics.",
+        message: "Please reply across squadrons.",
         expectReply: true,
-        intent: "Prove cross-epic reply closure",
+        intent: "Prove cross-squadron reply closure",
         acceptedAt: timestamp,
       });
       assert.equal(opened.exchangeState, "open");
@@ -311,7 +313,7 @@ it.effect("closes a cross-epic exchange through the paired reply entry", () =>
         commandId: CommCommandId.make("command:exchange:cross:reply"),
         senderThreadId: receiver.threadId,
         to: sender.id,
-        message: "Cross-epic reply delivered.",
+        message: "Cross-squadron reply delivered.",
         exchangeId: opened.exchangeId!,
         acceptedAt: timestamp,
       } as const;
@@ -335,48 +337,48 @@ it.effect("closes a cross-epic exchange through the paired reply entry", () =>
         WHERE exchange_id = ${opened.exchangeId!}
       `;
       assert.deepStrictEqual(exchange, [{ status: "closed" }]);
-      const paired = yield* sql<{ readonly epic_id: string; readonly count: number }>`
-        SELECT epic_id, COUNT(*) AS count
+      const paired = yield* sql<{ readonly squadron_id: string; readonly count: number }>`
+        SELECT squadron_id, COUNT(*) AS count
         FROM j5_a2a_comm_event
         WHERE kind = 'message.received'
-          AND epic_id IN (${senderEpicId}, ${receiverEpicId})
-        GROUP BY epic_id
-        ORDER BY epic_id
+          AND squadron_id IN (${senderSquadronId}, ${receiverSquadronId})
+        GROUP BY squadron_id
+        ORDER BY squadron_id
       `;
       assert.deepStrictEqual(
         paired,
         [
-          { epic_id: receiverEpicId, count: 1 },
-          { epic_id: senderEpicId, count: 1 },
-        ].sort((left, right) => left.epic_id.localeCompare(right.epic_id)),
+          { squadron_id: receiverSquadronId, count: 1 },
+          { squadron_id: senderSquadronId, count: 1 },
+        ].sort((left, right) => left.squadron_id.localeCompare(right.squadron_id)),
       );
       const pairedPayloads = yield* sql<{
-        readonly epic_id: string;
+        readonly squadron_id: string;
         readonly payload: string;
       }>`
-        SELECT epic_id, payload
+        SELECT squadron_id, payload
         FROM j5_a2a_comm_event
         WHERE kind = 'message.received'
-          AND epic_id IN (${senderEpicId}, ${receiverEpicId})
-        ORDER BY epic_id
+          AND squadron_id IN (${senderSquadronId}, ${receiverSquadronId})
+        ORDER BY squadron_id
       `;
       assert.deepStrictEqual(
         pairedPayloads.map((row) => ({
-          epicId: row.epic_id,
+          squadronId: row.squadron_id,
           exchangeRole: (JSON.parse(row.payload) as { message: { exchangeRole: string } }).message
             .exchangeRole,
         })),
         [
-          { epicId: receiverEpicId, exchangeRole: "ask" },
-          { epicId: senderEpicId, exchangeRole: "reply" },
-        ].sort((left, right) => left.epicId.localeCompare(right.epicId)),
+          { squadronId: receiverSquadronId, exchangeRole: "ask" },
+          { squadronId: senderSquadronId, exchangeRole: "reply" },
+        ].sort((left, right) => left.squadronId.localeCompare(right.squadronId)),
       );
       assert.equal(yield* Ref.get(injections), 2);
     }).pipe(Effect.provide(makeTestLayer(transport)));
   }),
 );
 
-it.effect("startup reconciliation drains a persisted cross-epic half-write after restart", () =>
+it.effect("startup reconciliation drains a persisted cross-squadron half-write after restart", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -394,7 +396,7 @@ it.effect("startup reconciliation drains a persisted cross-epic half-write after
           const received = yield* sql<{ readonly count: number }>`
             SELECT COUNT(*) AS count
             FROM j5_a2a_comm_event
-            WHERE epic_id = ${seeded.receiverEpicId} AND kind = 'message.received'
+            WHERE squadron_id = ${seeded.receiverSquadronId} AND kind = 'message.received'
           `;
           assert.equal(received[0]?.count, 0);
           return seeded;
@@ -452,7 +454,7 @@ it.effect("startup reconciliation drains a persisted cross-epic half-write after
           const rows = yield* sql<{ readonly count: number }>`
             SELECT COUNT(*) AS count
             FROM j5_a2a_comm_event
-            WHERE epic_id = ${persisted.receiverEpicId}
+            WHERE squadron_id = ${persisted.receiverSquadronId}
               AND kind = 'message.received'
           `;
           assert.equal(rows[0]?.count, 1);
@@ -517,14 +519,14 @@ it.effect("delivers to the human through the idempotent inbox-data transport", (
     yield* Effect.gen(function* () {
       yield* runJ5A2AMigrations();
       const ledgerService = yield* A2ALedger;
-      const epicId = EpicId.make("epic:delivery:human");
-      yield* ledgerService.createEpic({
-        epic: { id: epicId, name: "Human delivery", createdAt: timestamp },
+      const squadronId = SquadronId.make("squadron:delivery:human");
+      yield* ledgerService.createSquadron({
+        squadron: { id: squadronId, name: "Human delivery", createdAt: timestamp },
       });
-      yield* join(epicId, sender, "human-sender");
+      yield* join(squadronId, sender, "human-sender");
       yield* ledgerService.append({
         commandId: CommCommandId.make("command:delivery:join:human"),
-        epicId,
+        squadronId,
         acceptedAt: timestamp,
         event: {
           kind: "participant.joined",
@@ -553,7 +555,7 @@ it.effect("delivers to the human through the idempotent inbox-data transport", (
       }>`
         SELECT message_id, payload
         FROM j5_a2a_human_inbox_data
-        WHERE origin_epic_id = ${epicId}
+        WHERE origin_squadron_id = ${squadronId}
       `;
       assert.deepStrictEqual(rows, [
         { message_id: sent.messageId, payload: "Human inbox payload" },

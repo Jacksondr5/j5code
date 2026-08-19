@@ -10,7 +10,7 @@ import {
   CommCommandId,
   type CommEvent,
   CorrelationId,
-  EpicId,
+  SquadronId,
   ExchangeId,
   GLOBAL_HUMAN_PARTICIPANT_ID,
   LedgerMessageId,
@@ -28,7 +28,7 @@ export class A2ASenderNotJoinedError extends Schema.TaggedErrorClass<A2ASenderNo
   { threadId: Schema.String },
 ) {
   override get message(): string {
-    return `Cross-agent messaging is unavailable for native thread ${this.threadId} because it has no registered home epic. Participation currently requires a wrapper-spawned agent that already has a home epic or controlled test seeding. Native user-created home provisioning is deferred to the home-epic registrar + A6 creation integrations follow-up. Stop this messaging attempt.`;
+    return `Cross-agent messaging is unavailable for native thread ${this.threadId} because it has no registered home squadron. Participation currently requires a wrapper-spawned agent that already has a home squadron or controlled test seeding. Native user-created home provisioning is deferred to the home-squadron registrar + A6 creation integrations follow-up. Stop this messaging attempt.`;
   }
 }
 
@@ -46,7 +46,7 @@ export class A2AAmbiguousParticipantError extends Schema.TaggedErrorClass<A2AAmb
   { participantId: Schema.String },
 ) {
   override get message(): string {
-    return `Participant ${this.participantId} is active in more than one epic and cannot be addressed unambiguously. Call list_participants and choose a participantId with canReceiveMessage=true, or ask the human to repair epic membership.`;
+    return `Participant ${this.participantId} is active in more than one squadron and cannot be addressed unambiguously. Call list_participants and choose a participantId with canReceiveMessage=true, or ask the human to repair squadron membership.`;
   }
 }
 
@@ -133,14 +133,14 @@ export type A2ASendError =
   | A2AExchangeParticipantMismatchError;
 
 interface MembershipRow {
-  readonly epic_id: string;
+  readonly squadron_id: string;
   readonly participant_id: string;
   readonly thread_id: string | null;
   readonly payload: string;
 }
 
 interface ExchangeRow {
-  readonly epic_id: string;
+  readonly squadron_id: string;
   readonly exchange_id: string;
   readonly sender_id: string;
   readonly receiver_id: string;
@@ -148,7 +148,7 @@ interface ExchangeRow {
 }
 
 interface ExistingMessageRow {
-  readonly epic_id: string;
+  readonly squadron_id: string;
   readonly sender_id: string;
   readonly receiver_id: string;
   readonly exchange_id: string | null;
@@ -187,9 +187,9 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
 
       const membershipRows = Effect.fn("j5.a2a.send.membershipRows")(function* () {
         return yield* sql<MembershipRow>`
-          SELECT epic_id, participant_id, thread_id, payload
-          FROM j5_a2a_epic_membership
-          ORDER BY epic_id, participant_id
+          SELECT squadron_id, participant_id, thread_id, payload
+          FROM j5_a2a_squadron_membership
+          ORDER BY squadron_id, participant_id
         `;
       });
 
@@ -202,22 +202,25 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
         }
         const row = matches[0]!;
         return {
-          epicId: EpicId.make(row.epic_id),
+          squadronId: SquadronId.make(row.squadron_id),
           participantId: row.participant_id as ParticipantId,
         };
       });
 
       const participantMembership = Effect.fn("j5.a2a.send.participantMembership")(function* (
         id: ParticipantId,
-        senderEpicId: EpicId,
+        senderSquadronId: SquadronId,
       ) {
         const matches = (yield* membershipRows()).filter((row) => row.participant_id === id);
         if (id === GLOBAL_HUMAN_PARTICIPANT_ID) {
-          const local = matches.find((row) => row.epic_id === senderEpicId);
+          const local = matches.find((row) => row.squadron_id === senderSquadronId);
           if (local === undefined) {
             return yield* new A2AParticipantNotFoundError({ participantId: id });
           }
-          return { epicId: senderEpicId, participant: yield* decodeParticipant(local.payload) };
+          return {
+            squadronId: senderSquadronId,
+            participant: yield* decodeParticipant(local.payload),
+          };
         }
         if (matches.length === 0) {
           return yield* new A2AParticipantNotFoundError({ participantId: id });
@@ -226,7 +229,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
           return yield* new A2AAmbiguousParticipantError({ participantId: id });
         }
         return {
-          epicId: EpicId.make(matches[0]!.epic_id),
+          squadronId: SquadronId.make(matches[0]!.squadron_id),
           participant: yield* decodeParticipant(matches[0]!.payload),
         };
       });
@@ -244,7 +247,8 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
           }
           const selected = rows.filter(
             (row) =>
-              row.participant_id !== GLOBAL_HUMAN_PARTICIPANT_ID || row.epic_id === sender.epicId,
+              row.participant_id !== GLOBAL_HUMAN_PARTICIPANT_ID ||
+              row.squadron_id === sender.squadronId,
           );
           return yield* Effect.forEach(
             selected,
@@ -255,7 +259,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
                   const addressable =
                     id === GLOBAL_HUMAN_PARTICIPANT_ID || membershipCounts.get(id) === 1;
                   return {
-                    epicId: EpicId.make(row.epic_id),
+                    squadronId: SquadronId.make(row.squadron_id),
                     participantId: id,
                     participant,
                     canReceiveMessage: addressable,
@@ -274,7 +278,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
       ) {
         const rows = yield* sql<ExistingMessageRow>`
           SELECT
-            epic_id,
+            squadron_id,
             sender_id,
             receiver_id,
             exchange_id,
@@ -291,14 +295,14 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
           row.exchange_id === null
             ? []
             : yield* sql<ExchangeRow>`
-                SELECT epic_id, exchange_id, sender_id, receiver_id, status
+                SELECT squadron_id, exchange_id, sender_id, receiver_id, status
                 FROM j5_a2a_exchange
                 WHERE exchange_id = ${row.exchange_id}
                 LIMIT 1
               `;
-        const isCrossEpicReply =
+        const isCrossSquadronReply =
           exchange[0] !== undefined &&
-          exchange[0].epic_id !== row.epic_id &&
+          exchange[0].squadron_id !== row.squadron_id &&
           exchange[0].receiver_id === row.sender_id &&
           exchange[0].sender_id === row.receiver_id;
         return {
@@ -309,7 +313,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
               ? ("none" as const)
               : row.exchange_role !== "reply"
                 ? ("open" as const)
-                : isCrossEpicReply
+                : isCrossSquadronReply
                   ? ("closing" as const)
                   : ("closed" as const),
           joinedExistingExchange: row.exchange_role === "followup",
@@ -324,7 +328,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
           const replay = yield* replayedSend(messageId, sender.participantId);
           if (replay !== null) return replay;
 
-          const receiver = yield* participantMembership(input.to, sender.epicId);
+          const receiver = yield* participantMembership(input.to, sender.squadronId);
           const receiverId = participantId(receiver.participant);
           let exchangeId: ExchangeId | null = null;
           let exchangeState: SendMessageResult["exchangeState"] = "none";
@@ -338,7 +342,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
               return yield* new A2AUrgencyRequiresExchangeError();
             }
             const rows = yield* sql<ExchangeRow>`
-              SELECT epic_id, exchange_id, sender_id, receiver_id, status
+              SELECT squadron_id, exchange_id, sender_id, receiver_id, status
               FROM j5_a2a_exchange
               WHERE exchange_id = ${input.exchangeId}
               LIMIT 2
@@ -370,8 +374,8 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
                 return yield* new A2AExchangeAlreadyAnsweredError({ exchangeId });
               }
               exchangeRole = "reply";
-              exchangeState = exchange.epic_id === sender.epicId ? "closed" : "closing";
-              if (exchange.epic_id === sender.epicId) {
+              exchangeState = exchange.squadron_id === sender.squadronId ? "closed" : "closing";
+              if (exchange.squadron_id === sender.squadronId) {
                 closeEvent = {
                   kind: "exchange.closed",
                   sender: sender.participantId,
@@ -388,9 +392,9 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
             }
           } else if (input.expectReply === true) {
             const existing = yield* sql<ExchangeRow>`
-              SELECT epic_id, exchange_id, sender_id, receiver_id, status
+              SELECT squadron_id, exchange_id, sender_id, receiver_id, status
               FROM j5_a2a_exchange
-              WHERE epic_id = ${sender.epicId}
+              WHERE squadron_id = ${sender.squadronId}
                 AND sender_id = ${sender.participantId}
                 AND receiver_id = ${receiverId}
                 AND status = 'open'
@@ -431,7 +435,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
           const correlationId = correlationIdFor(input.commandId);
           const result = yield* ledger.appendEvents({
             commandId: input.commandId,
-            epicId: sender.epicId,
+            squadronId: sender.squadronId,
             acceptedAt: input.acceptedAt,
             events: [
               ...(openEvent === undefined ? [] : [openEvent]),
@@ -444,8 +448,8 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
                 payload: {
                   messageId,
                   text: input.message,
-                  originEpicId: sender.epicId,
-                  receiverEpicId: receiver.epicId,
+                  originSquadronId: sender.squadronId,
+                  receiverSquadronId: receiver.squadronId,
                   exchangeRole,
                 },
                 createdAt: input.acceptedAt,

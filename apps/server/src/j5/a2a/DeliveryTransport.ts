@@ -8,7 +8,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { formatHumanEnvelope, formatPeerEnvelope } from "./EnvelopeFormatter.ts";
 import {
-  EpicId,
+  SquadronId,
   ExchangeId,
   GLOBAL_HUMAN_PARTICIPANT_ID,
   Participant,
@@ -37,8 +37,8 @@ export class A2ADeliveryTransportError extends Schema.TaggedErrorClass<A2ADelive
 ) {}
 
 export interface AgentDeliveryInput {
-  readonly originEpicId: EpicId;
-  readonly receiverEpicId: EpicId;
+  readonly originSquadronId: SquadronId;
+  readonly receiverSquadronId: SquadronId;
   readonly messageId: LedgerMessageId;
   readonly senderId: ParticipantId;
   readonly receiverId: ParticipantId;
@@ -98,8 +98,8 @@ export const live: Layer.Layer<
         Effect.gen(function* () {
           const rows = yield* sql<MembershipRow>`
             SELECT payload
-            FROM j5_a2a_epic_membership
-            WHERE epic_id = ${input.receiverEpicId}
+            FROM j5_a2a_squadron_membership
+            WHERE squadron_id = ${input.receiverSquadronId}
               AND participant_id = ${input.receiverId}
             LIMIT 1
           `;
@@ -132,7 +132,7 @@ export const live: Layer.Layer<
                 })
               : formatPeerEnvelope({
                   senderId: input.senderId,
-                  originEpicId: input.originEpicId,
+                  originSquadronId: input.originSquadronId,
                   exchangeId: input.exchangeId,
                   message: input.message,
                 });
@@ -155,21 +155,21 @@ export const live: Layer.Layer<
       deliverHuman: (input) =>
         sql`
             INSERT INTO j5_a2a_human_inbox_data (
-              origin_epic_id,
+              origin_squadron_id,
               message_id,
               exchange_id,
               sender_id,
               payload,
               created_at
             ) VALUES (
-              ${input.originEpicId},
+              ${input.originSquadronId},
               ${input.messageId},
               ${input.exchangeId},
               ${input.senderId},
               ${input.message},
               ${input.createdAt}
             )
-            ON CONFLICT(origin_epic_id, message_id) DO NOTHING
+            ON CONFLICT(origin_squadron_id, message_id) DO NOTHING
           `.pipe(
           Effect.asVoid,
           Effect.mapError(
