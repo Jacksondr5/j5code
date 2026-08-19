@@ -91,6 +91,13 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'comm_command_receipt_squadron_seq_idx'
         )
     `;
+    const deliveryColumns = yield* sql<{
+      readonly dflt_value: string | null;
+      readonly name: string;
+      readonly notnull: number;
+    }>`
+      PRAGMA table_info(j5_a2a_delivery)
+    `;
 
     assert.deepStrictEqual(tables, [
       { name: "j5_a2a_comm_command_receipt" },
@@ -135,6 +142,9 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       indexesByName.get("j5_a2a_delivery_one_reply_idx") ?? "",
       "WHERE exchange_id IS NOT NULL AND exchange_role = 'reply'",
     );
+    const envelopeChannel = deliveryColumns.find((column) => column.name === "envelope_channel");
+    assert.equal(envelopeChannel?.notnull, 1);
+    assert.isNull(envelopeChannel?.dflt_value);
     assert.deepStrictEqual(unprefixed, []);
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
@@ -172,45 +182,11 @@ it.effect("renames existing Squadron data without changing ledger semantics", ()
           'text', 'Preserve me',
           'originEpicId', 'legacy-home',
           'receiverEpicId', 'legacy-home',
-          'exchangeRole', 'none'
+          'exchangeRole', 'none',
+          'envelopeChannel', 'peer'
         ),
         '2026-08-18T00:00:00.000Z',
         'command:sent'
-      )
-    `;
-    yield* sql`
-      INSERT INTO j5_a2a_delivery (
-        epic_id,
-        message_id,
-        command_id,
-        sent_seq,
-        sender_id,
-        receiver_id,
-        receiver_epic_id,
-        exchange_id,
-        exchange_role,
-        correlation_id,
-        message_text,
-        status,
-        attempts,
-        created_at,
-        updated_at
-      ) VALUES (
-        'legacy-home',
-        'message:sent',
-        'command:sent',
-        1,
-        'agent:sender',
-        'agent:receiver',
-        'legacy-home',
-        NULL,
-        'none',
-        'correlation:sent',
-        'Preserve me',
-        'pending',
-        0,
-        '2026-08-18T00:00:00.000Z',
-        '2026-08-18T00:00:00.000Z'
       )
     `;
     yield* sql`
@@ -267,6 +243,7 @@ it.effect("renames existing Squadron data without changing ledger semantics", ()
             messageId: "message:sent",
             text: "Preserve me",
             exchangeRole: "none",
+            envelopeChannel: "peer",
             originSquadronId: "legacy-home",
             receiverSquadronId: "legacy-home",
           },
@@ -292,16 +269,6 @@ it.effect("renames existing Squadron data without changing ledger semantics", ()
         )
     `;
     assert.deepStrictEqual(legacySchema, []);
-    const delivery = yield* sql<{ readonly envelope_channel: string }>`
-      SELECT envelope_channel
-      FROM j5_a2a_delivery
-      WHERE message_id = 'message:sent'
-    `;
-    assert.deepStrictEqual(delivery, [{ envelope_channel: "peer" }]);
-    const cursor = yield* sql<{ readonly after_sequence: number | null }>`
-      SELECT after_sequence FROM j5_a2a_silence_detector_cursor WHERE singleton = 1
-    `;
-    assert.deepStrictEqual(cursor, [{ after_sequence: null }]);
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
 

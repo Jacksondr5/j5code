@@ -155,6 +155,7 @@ const makeLayer = (daemon: boolean) =>
                 originSquadronId,
                 receiverSquadronId,
                 exchangeRole: row.exchange_role,
+                envelopeChannel: row.envelope_channel,
               },
             },
             createdAt: receivedAt,
