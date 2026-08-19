@@ -19,7 +19,7 @@ const ledger = ledgerLayer.pipe(Layer.provide(database));
 const bootstrap = bootstrapLayer.pipe(Layer.provide(ledger), Layer.provide(database));
 const testLayer = Layer.mergeAll(database, ledger, bootstrap);
 
-it.effect("creates, reuses, and explicitly changes the caller's selected epic", () =>
+it.effect("upgrades the auto-created default epic and warns about open exchanges", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const service = yield* A2AEpicBootstrap;
@@ -43,20 +43,51 @@ it.effect("creates, reuses, and explicitly changes the caller's selected epic", 
     `;
     assert.equal(firstJoinEvents[0]?.count, 1, "idempotent rejoin does not append ledger junk");
 
-    const exchangeId = ExchangeId.make("exchange:bootstrap:open");
-    const peerId = ParticipantId.make("agent:bootstrap:peer");
+    const senderExchangeId = ExchangeId.make("exchange:bootstrap:open:a-sender");
+    const receiverExchangeId = ExchangeId.make("exchange:bootstrap:open:b-receiver");
+    const closedExchangeId = ExchangeId.make("exchange:bootstrap:closed");
+    const senderPeerId = ParticipantId.make("agent:bootstrap:sender-peer");
+    const receiverPeerId = ParticipantId.make("agent:bootstrap:receiver-peer");
+    const closedPeerId = ParticipantId.make("agent:bootstrap:closed-peer");
     yield* ledgerService.appendEvents({
-      commandId: CommCommandId.make("command:bootstrap:open-exchange"),
+      commandId: CommCommandId.make("command:bootstrap:open-exchanges"),
       epicId: created.epicId,
       acceptedAt: timestamp,
       events: [
         {
           kind: "exchange.opened",
           sender: created.participantId,
-          receiver: peerId,
-          exchangeId,
+          receiver: senderPeerId,
+          exchangeId: senderExchangeId,
           correlationId: null,
-          payload: { intent: "Keep this obligation visible across reassignment", urgency: null },
+          payload: { intent: "The default participant waits for its peer", urgency: null },
+          createdAt: timestamp,
+        },
+        {
+          kind: "exchange.opened",
+          sender: receiverPeerId,
+          receiver: created.participantId,
+          exchangeId: receiverExchangeId,
+          correlationId: null,
+          payload: { intent: "The default participant owes its peer", urgency: null },
+          createdAt: timestamp,
+        },
+        {
+          kind: "exchange.opened",
+          sender: created.participantId,
+          receiver: closedPeerId,
+          exchangeId: closedExchangeId,
+          correlationId: null,
+          payload: { intent: "This exchange is already closed", urgency: null },
+          createdAt: timestamp,
+        },
+        {
+          kind: "exchange.closed",
+          sender: closedPeerId,
+          receiver: created.participantId,
+          exchangeId: closedExchangeId,
+          correlationId: null,
+          payload: { replyMessageId: LedgerMessageId.make("message:bootstrap:closed") },
           createdAt: timestamp,
         },
       ],
@@ -70,14 +101,22 @@ it.effect("creates, reuses, and explicitly changes the caller's selected epic", 
     });
     assert.equal(selected.state, "created");
     assert.deepStrictEqual(selected.previousEpicIds, [created.epicId]);
-    assert.lengthOf(selected.openExchangeWarnings, 1);
-    assert.deepInclude(selected.openExchangeWarnings[0]!, {
-      epicId: created.epicId,
-      exchangeId,
-      peerId,
-    });
-    assert.include(selected.openExchangeWarnings[0]!.message, exchangeId);
-    assert.include(selected.openExchangeWarnings[0]!.message, peerId);
+    assert.deepStrictEqual(
+      selected.openExchangeWarnings.map(({ epicId, exchangeId, peerId }) => ({
+        epicId,
+        exchangeId,
+        peerId,
+      })),
+      [
+        { epicId: created.epicId, exchangeId: senderExchangeId, peerId: senderPeerId },
+        { epicId: created.epicId, exchangeId: receiverExchangeId, peerId: receiverPeerId },
+      ],
+    );
+    for (const warning of selected.openExchangeWarnings) {
+      assert.include(warning.message, warning.exchangeId);
+      assert.include(warning.message, warning.peerId);
+      assert.include(warning.message, "auto-created default epic");
+    }
     assert.deepStrictEqual(yield* ledgerService.listMembership(created.epicId), []);
     assert.equal(
       (yield* ledgerService.listMembership(selectedEpicId))[0]?.participant.kind,
@@ -102,30 +141,59 @@ it.effect("creates, reuses, and explicitly changes the caller's selected epic", 
       { kind: "participant.joined", count: 2 },
       { kind: "participant.left", count: 1 },
     ]);
+  }).pipe(Effect.provide(testLayer)),
+);
 
-    const selectedBack = yield* service.joinEpic({
+it.effect("rejects switching away from an explicit epic without writing ledger state", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const service = yield* A2AEpicBootstrap;
+    const ledgerService = yield* A2ALedger;
+    const sql = yield* SqlClient.SqlClient;
+    const currentEpicId = EpicId.make("epic:bootstrap:explicit-current");
+    const requestedEpicId = EpicId.make("epic:bootstrap:explicit-requested");
+
+    const joined = yield* service.joinEpic({
       senderThreadId: threadId,
-      epicId: created.epicId,
+      epicId: currentEpicId,
       acceptedAt: timestamp,
     });
-    assert.equal(selectedBack.state, "joined");
-    assert.deepStrictEqual(selectedBack.previousEpicIds, [selectedEpicId]);
-    assert.deepStrictEqual(selectedBack.openExchangeWarnings, []);
-    assert.equal((yield* ledgerService.listMembership(created.epicId)).length, 1);
-    assert.deepStrictEqual(yield* ledgerService.listMembership(selectedEpicId), []);
+    assert.equal(joined.state, "created");
+    assert.deepStrictEqual(joined.previousEpicIds, []);
 
-    const finalEventCounts = yield* sql<{ readonly kind: string; readonly count: number }>`
+    const rejoined = yield* service.joinEpic({
+      senderThreadId: threadId,
+      epicId: currentEpicId,
+      acceptedAt: timestamp,
+    });
+    assert.equal(rejoined.state, "selected");
+
+    const error = yield* Effect.flip(
+      service.joinEpic({
+        senderThreadId: threadId,
+        epicId: requestedEpicId,
+        acceptedAt: timestamp,
+      }),
+    );
+    assert.equal(error._tag, "A2AEpicReassignmentPendingError");
+    assert.include(error.message, currentEpicId);
+    assert.include(error.message, requestedEpicId);
+    assert.include(error.message, "reassignment awaits product definition");
+    assert.include(error.message, "join_epic");
+    assert.include(error.message, "list_participants");
+
+    assert.deepStrictEqual(
+      (yield* ledgerService.listEpics()).map((epic) => epic.id),
+      [currentEpicId],
+    );
+    assert.equal((yield* ledgerService.listMembership(currentEpicId)).length, 1);
+    const eventCounts = yield* sql<{ readonly kind: string; readonly count: number }>`
       SELECT kind, COUNT(*) AS count
       FROM j5_a2a_comm_event
-      WHERE receiver = ${created.participantId}
-        AND kind IN ('participant.joined', 'participant.left')
       GROUP BY kind
       ORDER BY kind
     `;
-    assert.deepStrictEqual(finalEventCounts, [
-      { kind: "participant.joined", count: 3 },
-      { kind: "participant.left", count: 2 },
-    ]);
+    assert.deepStrictEqual(eventCounts, [{ kind: "participant.joined", count: 1 }]);
   }).pipe(Effect.provide(testLayer)),
 );
 
@@ -184,11 +252,10 @@ it.effect("derives one command id for concurrent attempts to join the same epic"
   }),
 );
 
-it.effect("requires explicit selection when legacy membership is ambiguous", () =>
+it.effect("reports legacy multi-epic membership as blocked product work", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const ledgerService = yield* A2ALedger;
-    const sql = yield* SqlClient.SqlClient;
     const previousEpicIds = [
       EpicId.make("epic:bootstrap:ambiguous:a"),
       EpicId.make("epic:bootstrap:ambiguous:b"),
@@ -225,104 +292,26 @@ it.effect("requires explicit selection when legacy membership is ambiguous", () 
       (yield* A2AEpicBootstrap).joinEpic({ senderThreadId: threadId, acceptedAt: timestamp }),
     );
     assert.equal(error._tag, "A2AEpicSelectionRequiredError");
-    assert.include(error.message, "Retry join_epic with one explicit epic_id");
+    assert.include(error.message, previousEpicIds[0]!);
+    assert.include(error.message, previousEpicIds[1]!);
+    assert.include(error.message, "reassignment, which awaits product definition");
 
-    const senderExchangeId = ExchangeId.make("exchange:bootstrap:sender-direction");
-    const receiverExchangeId = ExchangeId.make("exchange:bootstrap:receiver-direction");
-    const closedExchangeId = ExchangeId.make("exchange:bootstrap:closed");
-    const senderPeerId = ParticipantId.make("agent:bootstrap:sender-peer");
-    const receiverPeerId = ParticipantId.make("agent:bootstrap:receiver-peer");
-    const closedPeerId = ParticipantId.make("agent:bootstrap:closed-peer");
-    yield* ledgerService.appendEvents({
-      commandId: CommCommandId.make("command:bootstrap:warning:sender"),
-      epicId: previousEpicIds[0]!,
-      acceptedAt: timestamp,
-      events: [
-        {
-          kind: "exchange.opened",
-          sender: participants[0]!.id,
-          receiver: senderPeerId,
-          exchangeId: senderExchangeId,
-          correlationId: null,
-          payload: { intent: "Sender waits for its peer", urgency: null },
-          createdAt: timestamp,
-        },
-      ],
-    });
-    yield* ledgerService.appendEvents({
-      commandId: CommCommandId.make("command:bootstrap:warning:receiver"),
-      epicId: previousEpicIds[1]!,
-      acceptedAt: timestamp,
-      events: [
-        {
-          kind: "exchange.opened",
-          sender: receiverPeerId,
-          receiver: participants[1]!.id,
-          exchangeId: receiverExchangeId,
-          correlationId: null,
-          payload: { intent: "Mover owes its peer", urgency: null },
-          createdAt: timestamp,
-        },
-        {
-          kind: "exchange.opened",
-          sender: participants[1]!.id,
-          receiver: closedPeerId,
-          exchangeId: closedExchangeId,
-          correlationId: null,
-          payload: { intent: "Already closed", urgency: null },
-          createdAt: timestamp,
-        },
-        {
-          kind: "exchange.closed",
-          sender: closedPeerId,
-          receiver: participants[1]!.id,
-          exchangeId: closedExchangeId,
-          correlationId: null,
-          payload: { replyMessageId: LedgerMessageId.make("message:bootstrap:closed") },
-          createdAt: timestamp,
-        },
-      ],
-    });
-
-    const selected = yield* (yield* A2AEpicBootstrap).joinEpic({
-      senderThreadId: threadId,
-      epicId: EpicId.make("epic:bootstrap:ambiguity-resolved"),
-      acceptedAt: timestamp,
-    });
-    assert.deepStrictEqual(selected.previousEpicIds, previousEpicIds);
-    assert.deepStrictEqual(
-      selected.openExchangeWarnings.map(({ epicId, exchangeId, peerId }) => ({
-        epicId,
-        exchangeId,
-        peerId,
-      })),
-      [
-        { epicId: previousEpicIds[0], exchangeId: senderExchangeId, peerId: senderPeerId },
-        { epicId: previousEpicIds[1], exchangeId: receiverExchangeId, peerId: receiverPeerId },
-      ],
+    const explicitError = yield* Effect.flip(
+      (yield* A2AEpicBootstrap).joinEpic({
+        senderThreadId: threadId,
+        epicId: previousEpicIds[0]!,
+        acceptedAt: timestamp,
+      }),
     );
-    const leftEvents = yield* sql<{
-      readonly epic_id: string;
-      readonly receiver: string;
-      readonly payload: string;
-    }>`
-      SELECT epic_id, receiver, payload
-      FROM j5_a2a_comm_event
-      WHERE kind = 'participant.left'
-        AND epic_id IN (${previousEpicIds[0]!}, ${previousEpicIds[1]!})
-      ORDER BY epic_id
-    `;
+    assert.equal(explicitError._tag, "A2AEpicReassignmentPendingError");
+    assert.include(explicitError.message, previousEpicIds[0]!);
+    assert.include(explicitError.message, previousEpicIds[1]!);
+    assert.include(explicitError.message, "join_epic cannot choose among these legacy memberships");
     assert.deepStrictEqual(
-      leftEvents.map((row) => ({
-        epicId: row.epic_id,
-        receiver: row.receiver,
-        participantId: (JSON.parse(row.payload) as { participant: { id: string } }).participant.id,
-      })),
-      previousEpicIds.map((epicId, index) => ({
-        epicId,
-        receiver: participants[index]!.id,
-        participantId: participants[index]!.id,
-      })),
+      yield* Effect.forEach(previousEpicIds, (epicId) => ledgerService.listMembership(epicId)),
+      participants.map((participant, index) => [
+        { epicId: previousEpicIds[index]!, participant, joinedSeq: 1, updatedSeq: 1 },
+      ]),
     );
   }).pipe(Effect.provide(testLayer)),
 );

@@ -28,7 +28,7 @@ export class A2ASenderNotJoinedError extends Schema.TaggedErrorClass<A2ASenderNo
   { threadId: Schema.String },
 ) {
   override get message(): string {
-    return `Thread ${this.threadId} is not an active A2A participant. Join it to an epic, then call list_participants again.`;
+    return `Thread ${this.threadId} is not an active cross-agent messaging participant. Join it to an epic, then call list_participants again.`;
   }
 }
 

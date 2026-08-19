@@ -23,11 +23,32 @@ export class A2AEpicSelectionRequiredError extends Schema.TaggedErrorClass<A2AEp
   { epicIds: Schema.Array(Schema.String) },
 ) {
   override get message(): string {
-    return `This thread belongs to multiple epics (${this.epicIds.join(", ")}). Retry join_epic with one explicit epic_id to select it.`;
+    return `This thread already belongs to multiple epics (${this.epicIds.join(", ")}). Selecting one would require cross-epic reassignment, which awaits product definition. Ask the human to resolve this membership after that workflow ships.`;
   }
 }
 
-export type A2AEpicBootstrapError = A2ALedgerError | A2AEpicSelectionRequiredError | SqlError;
+export class A2AEpicReassignmentPendingError extends Schema.TaggedErrorClass<A2AEpicReassignmentPendingError>()(
+  "A2AEpicReassignmentPendingError",
+  {
+    currentEpicIds: Schema.Array(Schema.String),
+    blockingEpicIds: Schema.Array(Schema.String),
+    requestedEpicId: Schema.String,
+  },
+) {
+  override get message(): string {
+    const nextCommand =
+      this.currentEpicIds.length === 1
+        ? `Continue with the current membership by calling join_epic(epic_id="${this.currentEpicIds[0]}") and then list_participants.`
+        : "join_epic cannot choose among these legacy memberships; ask the human to resolve them after the epic-management workflow ships.";
+    return `This thread belongs to ${this.currentEpicIds.join(", ")}; membership in ${this.blockingEpicIds.join(", ")} blocks joining ${this.requestedEpicId}. Cross-epic reassignment awaits product definition; only an explicit upgrade from an auto-created per-thread default epic is supported today. ${nextCommand}`;
+  }
+}
+
+export type A2AEpicBootstrapError =
+  | A2ALedgerError
+  | A2AEpicSelectionRequiredError
+  | A2AEpicReassignmentPendingError
+  | SqlError;
 
 export interface A2AEpicBootstrapShape {
   readonly joinEpic: (input: JoinEpicInput) => Effect.Effect<JoinEpicResult, A2AEpicBootstrapError>;
@@ -40,6 +61,9 @@ export class A2AEpicBootstrap extends Context.Service<A2AEpicBootstrap, A2AEpicB
 const stablePart = (value: string) => encodeURIComponent(value);
 
 const defaultEpicId = (threadId: ThreadId) => EpicId.make(`epic:j5:a2a:${stablePart(threadId)}`);
+
+const isAutoCreatedDefaultMembership = (membership: Membership, threadId: ThreadId) =>
+  membership.epicId === defaultEpicId(threadId);
 
 const defaultParticipantId = (threadId: ThreadId) =>
   ParticipantId.make(`agent:j5:a2a:${stablePart(threadId)}`);
@@ -104,6 +128,17 @@ export const layer: A2AEpicBootstrapLayer = Layer.effect(
 
         const targetEpicId = input.epicId ?? defaultEpicId(input.senderThreadId);
         const targetMembership = existing.find((membership) => membership.epicId === targetEpicId);
+        const previous = existing.filter((membership) => membership.epicId !== targetEpicId);
+        const blockingMemberships = previous.filter(
+          (membership) => !isAutoCreatedDefaultMembership(membership, input.senderThreadId),
+        );
+        if (blockingMemberships.length > 0) {
+          return yield* new A2AEpicReassignmentPendingError({
+            currentEpicIds: existing.map((membership) => membership.epicId),
+            blockingEpicIds: blockingMemberships.map((membership) => membership.epicId),
+            requestedEpicId: targetEpicId,
+          });
+        }
         const participantId =
           targetMembership?.participant.id ??
           existing[0]?.participant.id ??
@@ -115,13 +150,15 @@ export const layer: A2AEpicBootstrapLayer = Layer.effect(
           yield* ledger.createEpic({
             epic: {
               id: targetEpicId,
-              name: `J5 epic ${targetEpicId}`,
+              name:
+                input.epicId === undefined
+                  ? `Auto-created cross-agent messaging epic for ${input.senderThreadId}`
+                  : `Cross-agent messaging epic ${targetEpicId}`,
               createdAt: input.acceptedAt,
             },
           });
         }
 
-        const previous = existing.filter((membership) => membership.epicId !== targetEpicId);
         const previousParticipantByEpic = new Map(
           previous.map((membership) => [membership.epicId, membership.participant.id] as const),
         );

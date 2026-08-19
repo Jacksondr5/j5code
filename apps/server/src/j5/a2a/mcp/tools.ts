@@ -62,7 +62,7 @@ export const J5SendMessageTool = Tool.make("send_message", {
   failureMode: "return",
   dependencies,
 })
-  .annotate(Tool.Title, "Send a J5 A2A message")
+  .annotate(Tool.Title, "Send a cross-agent message")
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, true)
   .annotate(Tool.Idempotent, false)
@@ -75,7 +75,7 @@ export const J5ListParticipantsTool = Tool.make("list_participants", {
   failureMode: "return",
   dependencies,
 })
-  .annotate(Tool.Title, "List J5 A2A participants")
+  .annotate(Tool.Title, "List cross-agent messaging participants")
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true)
@@ -89,7 +89,7 @@ export const J5JoinEpicTool = Tool.make("join_epic", {
   failureMode: "return",
   dependencies,
 })
-  .annotate(Tool.Title, "Join a J5 epic")
+  .annotate(Tool.Title, "Join a cross-agent messaging epic")
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, true)
   .annotate(Tool.Idempotent, true)
