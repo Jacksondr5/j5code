@@ -284,9 +284,13 @@ it.effect("fails closed when a native thread has no provisioned epic membership"
 
     const listError = yield* Effect.flip(service.listParticipants(nativeThreadId));
     assert.equal(listError._tag, "A2ASenderNotJoinedError");
-    assert.include(listError.message, "no provisioned epic membership");
-    assert.include(listError.message, "Ask the user to create an epic");
-    assert.include(listError.message, "list_participants");
+    assert.include(listError.message, "native thread");
+    assert.include(listError.message, "no registered home epic");
+    assert.include(listError.message, "wrapper-spawned agent");
+    assert.include(listError.message, "controlled test seeding");
+    assert.include(listError.message, "home-epic registrar + A6 creation integrations follow-up");
+    assert.include(listError.message, "Stop this messaging attempt");
+    assert.notMatch(listError.message, /ask the user|product workflow|list_participants again/i);
 
     const sendError = yield* Effect.flip(
       service.send({

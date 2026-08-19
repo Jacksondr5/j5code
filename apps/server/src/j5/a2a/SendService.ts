@@ -28,7 +28,7 @@ export class A2ASenderNotJoinedError extends Schema.TaggedErrorClass<A2ASenderNo
   { threadId: Schema.String },
 ) {
   override get message(): string {
-    return `Thread ${this.threadId} has no provisioned epic membership and cannot use cross-agent messaging. Ask the user to create an epic and register this agent through the product workflow, then call list_participants again.`;
+    return `Cross-agent messaging is unavailable for native thread ${this.threadId} because it has no registered home epic. Participation currently requires a wrapper-spawned agent that already has a home epic or controlled test seeding. Native user-created home provisioning is deferred to the home-epic registrar + A6 creation integrations follow-up. Stop this messaging attempt.`;
   }
 }
 
