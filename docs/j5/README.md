@@ -43,3 +43,8 @@ source system (`kind`: spec = durable context, ticket/story = work items with
 Cross-references between documents use relative paths and survive within this
 tree. References to `interviews/` point at the public
 `Jacksondr5/pr-group` repository.
+
+## Not part of the mirror
+
+Hand-written fork docs coexist in this directory (currently `macos-packaging.md`).
+Mirror refreshes must exclude them — they are owned in-repo, not in the workspace.

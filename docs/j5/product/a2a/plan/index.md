@@ -1,6 +1,6 @@
 ---
-kind: spec
 title: "A2A v1 — builder-facing plan"
+kind: spec
 ---
 
 # A2A v1 plan
@@ -54,7 +54,7 @@ Our reply-obligation object (D9 — never called "thread"; a T3 thread is a conv
 The ledger row is the primary act; delivery is an attempt recorded against it:
 
 1. Send command validates participants, appends `message.sent` (+ `exchange.opened` if applicable) in one transaction. The tool returns once the row is durable.
-2. The delivery worker drains undelivered rows: agent recipients get injection via v2's thread-send; the human gets an inbox row. **Exactly-once injection comes from upstream's own dedup, not from our receipt**: the worker derives v2's `clientRequestId` deterministically from the ledger message id, so a post-crash re-drain replays as the same command and v2 dedupes it. Our `message.delivered` receipt records the outcome but cannot be the guarantee — it does not survive the crash window between successful injection and recording. Success appends `message.delivered`; failure appends `message.delivery_failed` and retries with backoff.
+2. The delivery worker drains undelivered rows: agent recipients get injection via v2's thread-send with explicit **`steer_active`** dispatch; the human gets an inbox row. Prompt envelopes must interject into an active turn so the recipient genuinely sees delivery before silence classification, and blocked-on-peer chains resolve promptly. **Exactly-once injection comes from upstream's own dedup, not from our receipt**: the worker derives v2's `clientRequestId` deterministically from the ledger message id, so a post-crash re-drain replays as the same command and v2 dedupes it. Our `message.delivered` receipt records the outcome but cannot be the guarantee — it does not survive the crash window between successful injection and recording. Success appends `message.delivered`; failure appends `message.delivery_failed` and retries with backoff. Per-message queueing is plausible future work (for example, an FYI urgency), but is deliberately not part of M2.
 3. Rows failing past the retry threshold surface as an alarm state in projections — an undelivered message is a **visible gap, never a silent loss**. This applies equally to one-shots (no exchange, but same delivery guarantees) — "was it delivered" and "was it answered" are independent guarantees.
 4. Startup reconciliation: on host restart, the worker re-drains anything sent-but-not-delivered. No RAM-only state anywhere.
 

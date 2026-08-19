@@ -1,6 +1,6 @@
 ---
-kind: review
 title: "A6 core review — verdict at d65acfdca (changes requested)"
+kind: review
 ---
 
 # A6 core review — verdict
@@ -10,8 +10,6 @@ title: "A6 core review — verdict at d65acfdca (changes requested)"
 **Round 1 reviewed SHA:** `d65acfdca92c221982b932c65944976ccda78a3f` (measured clean; `git status` empty, HEAD confirmed before and after review).
 **Scope (both rounds):** J5 placement/provenance/reparent/cascade core only. A2's shared MCP bootstrap was **not** reviewed in either round and is not folded into either verdict — see §Untested integration boundary.
 **Round 1 verdict:** changes requested — 3 medium, 3 low, no high.
-
----
 
 # Round 2 — re-review at `e041f576` (clean)
 
@@ -41,8 +39,6 @@ The cascade harness builds its projection stub as a partial object cast `as Orch
 
 Also noted without action: `PlacementReparentedEvent.authMethod` accepts all three `ServerAuthSessionMethod` values while the DB CHECK permits only `browser-session-cookie`. The schema is deliberately wider than the constraint; the constraint is the enforcement point.
 
----
-
 # Round 1 detail (historical)
 
 ## Actionable checklist (round 1)
@@ -53,8 +49,6 @@ Also noted without action: `PlacementReparentedEvent.authMethod` accepts all thr
 4. **F4** (low) — cascade-vs-fork consequence isn't documented where the ticket requires.
 5. **F5** (low) — `index.ts` barrel omits both new services.
 6. **F6** (low) — two cycle detectors, neither corrupt-graph branch tested.
-
----
 
 ## What I verified, and how
 
@@ -71,8 +65,6 @@ Positives recorded so the next reader doesn't re-derive them.
 **Cycle check** is a new J5 algorithm (`assertAcyclic`, `PlacementService.ts:492-524`) — walks to root from the requested parent, names the offending path in the error, and the test asserts no state changed on refusal. Correct, and correctly *not* borrowed from v2, which has none.
 
 **Baseline:** 11 tests pass across the three touched files; `tsgo --noEmit` on `apps/server` is clean.
-
----
 
 ## F1 — MEDIUM — reparent authenticates the caller but never identifies it
 
@@ -112,8 +104,6 @@ The ticket requires cascade semantics "documented in the command contracts". Tod
 ## F6 — LOW — two cycle detectors, neither corrupt-graph branch tested
 
 `assertAcyclic` carries a visited set *and* a membership bound, both raising `PlacementGraphCorruptError`; `listSubtree` then implements a second, independent detector (`visiting`/`visited`/`path`, `PlacementService.ts:908-927`) raising the same error. Neither corrupt-graph branch has a test, and the state they defend against is the one `assertAcyclic` exists to prevent. In a 940-line service this is the kind of defensive machinery worth one pass of subtraction — keep the traversal guard that terminates the walk, drop the redundant one, or test the branch that stays. Related nit: `provenanceFromRow` (`:224-245`) relies on non-null assertions that are only safe because of the migration CHECKs; a comment tying the two together would stop a future reader from "fixing" the constraint.
-
----
 
 ## Untested integration boundary (not a core defect)
 

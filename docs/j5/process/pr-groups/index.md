@@ -1,6 +1,6 @@
 ---
-kind: spec
 title: "PR Groups on j5code — setup and operating rules"
+kind: spec
 ---
 
 # PR Groups on j5code
@@ -9,7 +9,7 @@ PR Groups are Jackson's build-management practice for agent-run PRs: **Builder +
 
 **Source of truth for the methodology is `~/.pr-group/` — every group agent reads `00-roles.md` at bring-up.** This artifact does not duplicate the playbooks; it covers the install and the j5code deltas.
 
-> **SHAKEDOWN FIRST (Jackson, 2026-08-16): exactly one PR group runs to start**, and its retro gates any further staffing. Details in [Shakedown gate](#shakedown-gate--exactly-one-group-first) below.
+<user_quoted_section>SHAKEDOWN FIRST (Jackson, 2026-08-16): exactly one PR group runs to start, and its retro gates any further staffing. Details in Shakedown gate below.</user_quoted_section>
 
 ## The system, in one diagram
 
@@ -60,7 +60,7 @@ The nine hard rules of `00-roles.md` apply unchanged. j5code specifics:
 3. **PR titles are conventional commits** (`feat: …`, `fix(web): …`), one concern per PR. If the description says "also", split it.
 4. **CI gate = the J5 workflows** (`.github/workflows/j5-*.yml`). Gate 2 of `prg gates` measures the rollup at head; a red upstream-inherited workflow is diagnosed by the Sitter before routing, never forwarded raw.
 5. **One group per ticket.** The group is spawned before the PR exists, all three seats bound to the Builder's worktree, and registered at spawn (`prg group register`). No backport flow exists on j5code (no `release/**` branches) — `06-backport.md` is dormant here.
-6. **No CodeRabbit on j5code today.** Gate 6 (bot dispositions) will pass vacuously; the Reviewer's internal verdict and gate 1 (Jackson's approval) carry the review weight. If a review bot is added later, the `04-rounds.md` triage flow applies as written.
+6. **CodeRabbit is active on j5code.** Gate 6 requires an evidence-backed disposition of every CodeRabbit thread on the exact PR head, using the `04-rounds.md` triage flow. The independent Reviewer's verdict and the readiness correction for GitHub approval remain required; neither substitutes for bot triage.
 7. **Attribution line on every GitHub post** (hard rule 7): posts go out under `Jacksondr5`, opening byte-identical with `Posted by an AI agent on Jackson's behalf`.
 8. **Jackson merges. Always.** READY goes up only after `prg gates` shows 1–6 green and the judgment gates (negative control included) are asserted with evidence. **Readiness correction (Jackson, 2026-08-16, during the A1 shakedown): a separate human GitHub *approval* is NOT required for these builds — disposed CodeRabbit comments + green applicable checks are sufficient external-review evidence (a known gate-1 mismatch to read accordingly). The group's independent Reviewer verdict and judgment-gate evidence are still required. Jackson still performs every merge.**
 9. **Upstream-pin discipline:** groups never advance the pin in `FORK.md` as a side effect. Rebases onto a new upstream base are their own deliberate, reviewed change — out of scope for any feature group.

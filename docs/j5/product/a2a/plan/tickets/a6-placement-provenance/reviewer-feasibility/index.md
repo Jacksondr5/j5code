@@ -1,6 +1,6 @@
 ---
-kind: review
 title: "A6 reviewer verdict — feasibility seams, independently measured"
+kind: review
 ---
 
 # A6 reviewer verdict — feasibility seams
@@ -58,8 +58,6 @@ Held for the stationary handoff review:
 ## Simplification pushed to the Builder
 
 **One** mutable J5 placement row keyed by threadId, where NULL means "follow provenance". That is the smallest model that makes all three of D10's relationships independently true. A design that writes an explicit placement row for every spawn duplicates what is already derivable and creates a second write path to keep consistent — it would come back as a finding.
-
----
 
 # Addendum — Director ruling (2026-08-16)
 

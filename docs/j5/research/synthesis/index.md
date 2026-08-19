@@ -11,7 +11,7 @@ kind: spec
 
 **T3 Code observes and controls agents; Traycer orchestrates them. Neither does both. Our app is the composition — plus the one capability neither has: a fleet that truly spans machines.**
 
-- T3 Code (100k+ users): one-thread-one-agent *control surface* over five harnesses (Codex, Claude, Cursor, Grok, OpenCode), with a first-class **fleet observability panel** for whatever the provider spawns — but it never spawns or coordinates agents itself, and has **no cross-environment state sync** (a client connects to one environment at a time; this was a deliberate complexity-budget decision).
+- T3 Code (100k+ users): one-thread-one-agent *control surface* over five harnesses (Codex, Claude, Cursor, Grok, OpenCode), with a first-class **fleet observability panel** for whatever the provider spawns — but it never spawns or coordinates agents itself, and has **no cross-environment state sync**. *(Correction 2026-08-19: the parenthetical this sentence originally carried — "a client connects to one environment at a time" — is stale. Current code connects the client to ALL saved environments concurrently and aggregates threads/attention across them; only server-side state remains per-environment. Verified in `../remote-hosting/`.)*
 - Traycer: **fleet orchestration** — peer A2A messaging, epics, hierarchy, artifacts, roles — but agent identity only *replicates* across hosts; message delivery still rejects non-local receivers (`RECEIVER_NOT_LOCAL`), even after they shipped an encrypted remote transport and didn't route A2A over it.
 
 ## Foundation decision

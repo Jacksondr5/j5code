@@ -116,7 +116,7 @@ Three layers of defense:
 
 ## Open questions to close with Jackson
 
-> **Superseded (2026-08-16):** decision tracking for these four questions (now D1–D4) plus the newer design decisions (D5–D7) moved to `../a2a/` — the A2A design session's decision register. The list below is kept for the original rationale only.
+<user_quoted_section>Superseded (2026-08-16): decision tracking for these four questions (now D1–D4) plus the newer design decisions (D5–D7) moved to ../a2a/ — the A2A design session's decision register. The list below is kept for the original rationale only.</user_quoted_section>
 
 1. **Do hierarchical delegations live in the same log?** T3 v2 gives us `delegate_task` (parent→child, durable result) for free. My recommendation: **yes, one unified log** — a delegation *is* a wait, and a graph that omits it lies about who's blocked on whom. Peer threads and delegations become two edge kinds in one graph.
 2. **Do ordinary human↔agent chat turns become edges?** Recommendation: **no** — only explicit thread events. Every chat turn as an edge floods the graph into noise. An agent blocked on an in-chat question still surfaces via the `awaiting-input` notice path.

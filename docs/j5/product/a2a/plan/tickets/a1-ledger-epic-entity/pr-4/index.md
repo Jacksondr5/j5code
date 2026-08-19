@@ -1,13 +1,13 @@
 ---
-kind: story
 title: "A1 PR #4 sitter log"
+kind: story
 status: 2
 ---
 
 # A1 PR #4 sitter log
 
-PR: [Jacksondr5/j5code#4](https://github.com/Jacksondr5/j5code/pull/4)  
-Head: `a064a87ac40ea2d2d936ba72008c95edeb8bbc2b`  
+PR: [Jacksondr5/j5code#4](https://github.com/Jacksondr5/j5code/pull/4)
+Head: `a064a87ac40ea2d2d936ba72008c95edeb8bbc2b`
 Base: `j5/main`
 
 ## PR log

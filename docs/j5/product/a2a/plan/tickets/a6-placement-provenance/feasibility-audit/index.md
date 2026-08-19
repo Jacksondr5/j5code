@@ -1,6 +1,6 @@
 ---
-kind: spec
 title: "A6 feasibility audit — placement integration boundary"
+kind: spec
 ---
 
 # A6 feasibility audit — placement integration boundary
@@ -67,7 +67,7 @@ The MCP anchor has one additional exact-shape check: `McpHttpServer.ts` may cont
 
 A6 is **pre-PR/integration-cleared only**, not PR-ready. Its branch currently contains A2 history and has no open PR. A2 must complete its live proof, PR lifecycle, and merge first. Only then may A6 rebase its A6-only delta onto the fresh `j5/main`, repeat exact-head independent review and the FORK gate, and open a one-concern A6 PR. A2's unperformed live provider proof is A2's boundary and is not evidence of A6 readiness.
 
-The rebase is semantic, not a standalone cherry-pick: the integration range modifies A1/A2-owned J5 files (handlers, toolkit, runtime, bootstrap, and ledger) and contains no new-file commits. After it, rerun the discriminating G1 ordering/no-side-effect, G2 historic-versus-never-joined, and G3 handler-branch controls; remeasure migration sequencing and the four-anchor gate against the new base; then obtain a fresh independent review. 
+The rebase is semantic, not a standalone cherry-pick: the integration range modifies A1/A2-owned J5 files (handlers, toolkit, runtime, bootstrap, and ledger) and contains no new-file commits. After it, rerun the discriminating G1 ordering/no-side-effect, G2 historic-versus-never-joined, and G3 handler-branch controls; remeasure migration sequencing and the four-anchor gate against the new base; then obtain a fresh independent review.
 
 ## Open findings
 

@@ -1,15 +1,13 @@
 ---
-kind: spec
 title: "PR Pane v1 — product brief (draft for Jackson's review)"
+kind: spec
 ---
 
 # PR Pane v1 brief
 
-**Status: DRAFT — awaiting Jackson's review. Not posted anywhere.** Once approved, the section between the markers below is pasted verbatim as a GitHub issue on `Jacksondr5/j5code`. It is written self-contained for human engineers who cannot see this epic's artifacts; everything they need is inlined. The wireframe block at the bottom is for review here only — replace with a screenshot or omit in the issue.
+**Status: APPROVED by Jackson and POSTED 2026-08-17 → [https://github.com/Jacksondr5/j5code/issues/6](https://github.com/Jacksondr5/j5code/issues/6)** (issues were disabled on the repo; enabled with Jackson's authorization to post). The issue body below is the published text of record; revisions happen on the GitHub issue from here, with this artifact as the design-rationale companion. Written self-contained for human engineers who cannot see this epic's artifacts.
 
 Rulings baked in (Jackson, 2026-08-17): association auto-first, agent-driven explicit attach deferred (raises broader agent↔DB design questions); nudge v1 = message-an-associated-agent only; GitHub-only with forge abstraction kept; universe = agent-associated PRs only; pr-review.jackson.codes ignored; readiness gates do not ship (future generic successor: named status checks).
-
----
 
 ## ISSUE BODY START
 
@@ -84,8 +82,6 @@ A "Message agent" action on each PR row: opens the normal agent-message composer
 Negative controls required: for each "never" above (never guess, never write to GitHub, never reorder under cursor), demonstrate the check can fail — e.g., feed the UI a null mergeability and show it would catch a green rendering.
 
 ## ISSUE BODY END
-
----
 
 ## Wireframe (review aid only — not part of the issue)
 

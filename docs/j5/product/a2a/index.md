@@ -1,6 +1,6 @@
 ---
-kind: spec
 title: "A2A design session — grounding and decision register"
+kind: spec
 ---
 
 # A2A design session (backlog item 2)

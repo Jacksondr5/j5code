@@ -1,6 +1,6 @@
 ---
-kind: spec
 title: "A1 decision — J5 migrations run in their own lane, not upstream's registry"
+kind: spec
 ---
 
 # J5 migrations run in their own lane
@@ -11,7 +11,7 @@ Relevant beyond A1: **A7 (upstream rebase) inherits the consequence**, and A2–
 
 ## The decision
 
-| | |
+|  |  |
 | --- | --- |
 | **Chosen** | A J5-owned migrator with its own tracking table and its own id space starting at 1 |
 | **Rejected** | Appending `[50, "J5A2ALedger", …]` to upstream's `migrationEntries` |

@@ -1,6 +1,6 @@
 ---
-kind: spec
 title: "A2 gate — how upstream dedup actually works at pin 521c50aa9"
+kind: spec
 ---
 
 # Upstream exactly-once mechanics (reviewer-verified)
@@ -72,16 +72,16 @@ This forces a retry-design choice that must be made explicitly:
 ## A1 carry-forwards that land on A2
 
 - **The `A2ALedger` layer is not provided at runtime.** Outside `src/j5/a2a/`, the only reference to J5
-  A2A code is `persistence/Layers/Sqlite.ts:10`, which runs migrations. A1 shipped tables without a
-  runtime service. A2 owns the wiring.
+A2A code is `persistence/Layers/Sqlite.ts:10`, which runs migrations. A1 shipped tables without a
+runtime service. A2 owns the wiring.
 - **Receipt rollback needs a committed regression.** `LedgerService.ts:267-283` reserves the receipt row
-  before inserting the event, inside one transaction. A2's `message.received` path can fail that insert
-  on the unique index (`migrations/001_EpicCommunicationLedger.ts:41-45`). If the receipt ever survived a
-  failed event insert, a replayed `commandId` would return a receipt pointing at a nonexistent event.
-  A1 only probed this with a throwaway.
+before inserting the event, inside one transaction. A2's `message.received` path can fail that insert
+on the unique index (`migrations/001_EpicCommunicationLedger.ts:41-45`). If the receipt ever survived a
+failed event insert, a replayed `commandId` would return a receipt pointing at a nonexistent event.
+A1 only probed this with a throwaway.
 - **`readEvents` gap contract.** `LedgerService.ts:451` raises `LedgerGapError` when a page returns empty
-  while `afterSeq < snapshotEnd`. A drain loop that filters by kind in SQL while reusing this cursor
-  contract will trip it.
+while `afterSeq < snapshotEnd`. A drain loop that filters by kind in SQL while reusing this cursor
+contract will trip it.
 
 ## The authorized MCP registration case (Director ruling, 2026-08-16)
 
@@ -109,16 +109,15 @@ further protected-file registration edits. That makes the aggregate shape a cont
 
 Two boundaries that are *not* covered by the ruling:
 
-- **Capabilities.** `McpInvocationContext.ts:10` is `ALL_MCP_CAPABILITIES = ["preview","orchestration",
-  "worktree"]`. Adding an `"a2a"` capability edits a third protected file — a Sitter-routed DECISION.
-  Note `requireMcpCapability` (line 27) is hardcoded to `"preview"`; the orchestrator and worktree
-  toolkits authorize by thread scoping (`loadScopedThread`) instead, which is the in-bounds pattern.
+- **Capabilities.** `McpInvocationContext.ts:10` is `ALL_MCP_CAPABILITIES = ["preview","orchestration", "worktree"]`. Adding an `"a2a"` capability edits a third protected file — a Sitter-routed DECISION.
+Note `requireMcpCapability` (line 27) is hardcoded to `"preview"`; the orchestrator and worktree
+toolkits authorize by thread scoping (`loadScopedThread`) instead, which is the in-bounds pattern.
 - **The delivery worker does not belong in the MCP registration.** It needs startup reconciliation and a
-  background drain, so it belongs in the runtime: one appended `Layer.provideMerge` alongside
-  `RuntimeCoreDependenciesBaseLive` (`server.ts:346`), where `SqlClient` (via `PersistenceLayerLive`,
-  354) and `ThreadManagement` (via `OrchestrationApplicationLayerLive`, 341) are both visible. Hiding a
-  background worker inside the MCP toolkit layer to avoid the `server.ts` line would tie its lifecycle to
-  the MCP transport — gaming the constraint rather than honoring it.
+background drain, so it belongs in the runtime: one appended `Layer.provideMerge` alongside
+`RuntimeCoreDependenciesBaseLive` (`server.ts:346`), where `SqlClient` (via `PersistenceLayerLive`,
+  354. and `ThreadManagement` (via `OrchestrationApplicationLayerLive`, 341) are both visible. Hiding a
+background worker inside the MCP toolkit layer to avoid the `server.ts` line would tie its lifecycle to
+the MCP transport — gaming the constraint rather than honoring it.
 
 **Sender identity is a security boundary.** `McpInvocationScope` (`McpInvocationContext.ts:13`) carries
 `threadId`, `environmentId`, `providerSessionId`, `providerInstanceId`. The J5 `send_message` tool must

@@ -1,11 +1,11 @@
 ---
-kind: review
 title: "A6 integration review — verdict at d44fad9ad (changes requested)"
+kind: review
 ---
 
 # A6 integration review — verdict
 
-> **Current verdict (fix round): CLEAN to open the PR at `87151a0a2137e4cff2d4f156d28ad789e2e37d54`.** G1, G2, G3, G5 resolved; G4's implementation is fixed but its test cannot fail, carried as one LOW. See §Fix round at the end. The round-1 detail below is the record of what was asked.
+<user_quoted_section>Current verdict (fix round): CLEAN to open the PR at 87151a0a2137e4cff2d4f156d28ad789e2e37d54. G1, G2, G3, G5 resolved; G4's implementation is fixed but its test cannot fail, carried as one LOW. See §Fix round at the end. The round-1 detail below is the record of what was asked.</user_quoted_section>
 
 **Reviewed SHA:** `d44fad9ad278d24ddf8c017d388934fe277e66ea` (working tree clean, HEAD confirmed).
 **Diff under review:** `3152dc494..d44fad9ad` (A6 integration) plus the composed head's protected-file delta and cherry-pick mapping.
@@ -19,8 +19,6 @@ title: "A6 integration review — verdict at d44fad9ad (changes requested)"
 3. **G3 MEDIUM** — one integration test; the caller-membership error branches and the enriched `placementParentId` are never exercised.
 4. **G4 LOW** — the J5 runtime builds a second `ThreadLifecycleService` instead of the shared one.
 5. **G5 LOW** — `clientRequestId` is loosened relative to upstream's constraint, letting upstream's dedup key and J5's placement command id disagree.
-
----
 
 ## Gates that pass, and how they were measured
 
@@ -48,8 +46,6 @@ Every anchor re-measured at this head rather than taken from the decision record
 **Reachability: proven at handler level.** The integration test drives all six tools through the real `J5Toolkit.handle` with a real `McpInvocationContext`, so toolkit composition and handler identity resolution are genuinely exercised.
 
 **Baseline:** 45 tests pass across 11 files; `tsgo --noEmit` exits 0 with zero diagnostics.
-
----
 
 ## G1 — HIGH — cascade tools accept any epic from any caller
 
@@ -85,10 +81,6 @@ Every anchor re-measured at this head rather than taken from the decision record
 ## G5 — LOW — `clientRequestId` is loosened against upstream's constraint
 
 `J5SpawnAgentInput` overrides the spread field with `Schema.String.check(Schema.isNonEmpty())`, while upstream's `OrchestratorMcpClientRequestId` is `TrimmedNonEmptyString` capped at 256 (`orchestratorMcp.ts:44-46`). Concrete divergence: for `" k"` versus `"k"`, upstream trims and treats them as the same dedup key — returning the same child — while J5 embeds the raw value in `placementCommandId`, producing two different command ids. The second call then attempts a fresh placement write for a child that already has one and fails with `PlacementAlreadyExistsError`. Obscure, but it is exactly the retry path the required `clientRequestId` exists to make safe. Reusing upstream's schema for the field removes it.
-
----
-
----
 
 # Fix round — re-review at `87151a0a` (clean to open)
 
