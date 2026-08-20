@@ -21,7 +21,7 @@ import {
   type SendMessageResult,
   participantId,
 } from "./contracts.ts";
-import { type A2AHomeLookupError, resolveThreadHome } from "./HomeRegistrar.ts";
+import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 
 export class A2ASenderNotJoinedError extends Schema.TaggedErrorClass<A2ASenderNotJoinedError>()(
@@ -148,7 +148,6 @@ export class A2AExchangeAlreadyAnsweredError extends Schema.TaggedErrorClass<A2A
 
 export type A2ASendError =
   | A2ALedgerError
-  | A2AHomeLookupError
   | Schema.SchemaError
   | SqlError
   | A2ASenderNotJoinedError
@@ -245,7 +244,11 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
             participantId: resolution.home.participantId,
           });
         }
-        if (resolution.retired || matches.length !== 1) {
+        if (
+          resolution.retired ||
+          resolution.activeMemberships.length !== 1 ||
+          matches.length !== 1
+        ) {
           return yield* new A2AHomeMembershipStateError({
             threadId,
             expectedSquadronId: resolution.home.squadronId,

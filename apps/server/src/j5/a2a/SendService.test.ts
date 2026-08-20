@@ -353,6 +353,63 @@ it.effect("fails loudly when active membership diverges from the immutable home"
   }).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("fails closed when an extra active membership accompanies the correct home", () =>
+  Effect.gen(function* () {
+    const homeSquadronId = yield* setupSameSquadron();
+    const service = yield* A2ASendService;
+    const ledgerService = yield* A2ALedger;
+    const sql = yield* SqlClient.SqlClient;
+    const extraSquadronId = SquadronId.make("squadron:additive-projection-corruption");
+    yield* ledgerService.createSquadron({
+      squadron: {
+        id: extraSquadronId,
+        name: "Additive projection corruption",
+        createdAt: timestamp,
+      },
+    });
+    yield* sql`
+      INSERT INTO j5_a2a_squadron_membership (
+        squadron_id,
+        participant_id,
+        participant_kind,
+        thread_id,
+        joined_seq,
+        updated_seq,
+        payload
+      )
+      SELECT
+        ${extraSquadronId},
+        participant_id,
+        participant_kind,
+        thread_id,
+        joined_seq,
+        updated_seq,
+        payload
+      FROM j5_a2a_squadron_membership
+      WHERE squadron_id = ${homeSquadronId}
+        AND participant_id = ${sender.id}
+    `;
+
+    const error = yield* Effect.flip(
+      service.send({
+        commandId: CommCommandId.make("command:additive-projection-corruption"),
+        senderThreadId: sender.threadId,
+        to: receiver.id,
+        message: "This sender has a conflicting extra active membership.",
+        acceptedAt: timestamp,
+      }),
+    );
+
+    assert.equal(error._tag, "A2AHomeMembershipStateError");
+    if (error._tag === "A2AHomeMembershipStateError") {
+      assert.deepStrictEqual([...error.activeHomes].sort(), [
+        `${extraSquadronId}:${sender.id}`,
+        `${homeSquadronId}:${sender.id}`,
+      ]);
+    }
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("reports a legitimately retired sender without prescribing projection repair", () =>
   Effect.gen(function* () {
     const squadronId = yield* setupSameSquadron();
@@ -503,6 +560,12 @@ it.effect("ignores left events that do not identify a later retirement of the ex
     const wrongThreadPayload = yield* encodeAgentParticipantPayload({
       participant: wrongThreadParticipant,
     });
+    const sequenceRows = yield* sql<{ readonly next_seq: number }>`
+      SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq
+      FROM j5_a2a_comm_event
+      WHERE squadron_id = ${homeSquadronId}
+    `;
+    const decoySeq = sequenceRows[0]!.next_seq;
     yield* sql`
       INSERT INTO j5_a2a_comm_event (
         seq,
@@ -516,7 +579,7 @@ it.effect("ignores left events that do not identify a later retirement of the ex
         created_at,
         command_id
       ) VALUES (
-        5,
+        ${decoySeq},
         ${homeSquadronId},
         'participant.left',
         ${wrongThreadParticipant.id},
@@ -538,7 +601,7 @@ it.effect("ignores left events that do not identify a later retirement of the ex
     });
 
     assert.equal(result.exchangeState, "none");
-    assert.equal(result.durableAtSeq, 6);
+    assert.equal(result.durableAtSeq, decoySeq + 1);
   }).pipe(Effect.provide(testLayer)),
 );
 

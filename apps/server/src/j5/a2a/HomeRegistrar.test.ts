@@ -105,6 +105,32 @@ it.effect("replays the exact creation key without appending a second join", () =
   }).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("returns the same durable home when a fresh command id repeats its creation", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const service = yield* A2AHomeRegistrar;
+    const squadronId = SquadronId.make("squadron:registrar:fresh-command-replay");
+    const threadId = ThreadId.make("thread:registrar:fresh-command-replay");
+    yield* createSquadron(squadronId);
+
+    const initial = yield* service.registerAtCreation({
+      squadronId,
+      threadId,
+      createdAt,
+      commandId: CommCommandId.make("command:registrar:fresh-command-replay:initial"),
+    });
+    const replay = yield* service.registerAtCreation({
+      squadronId,
+      threadId,
+      createdAt,
+      commandId: CommCommandId.make("command:registrar:fresh-command-replay:retry"),
+    });
+
+    assert.deepStrictEqual(replay, initial);
+    assert.equal(yield* countJoined(threadId), 1);
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("rejects changed creation inputs when the command id replays", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();

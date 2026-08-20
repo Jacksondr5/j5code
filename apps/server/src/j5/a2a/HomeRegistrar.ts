@@ -60,7 +60,7 @@ export type A2AHomeLookupError = SqlError | A2AHomeNotFoundError;
 
 export type A2AHomeRegistrationError =
   | A2ALedgerError
-  | A2AHomeLookupError
+  | SqlError
   | A2AHomeConflictError
   | A2AHomeCommandConflictError;
 
@@ -169,14 +169,12 @@ export const layer: Layer.Layer<A2AHomeRegistrar, never, A2ALedger | SqlClient.S
           const existing = yield* getHomeForThread(input.threadId).pipe(
             Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)),
           );
-          if (existing !== null) {
-            if (existing.squadronId !== input.squadronId) {
-              return yield* new A2AHomeConflictError({
-                threadId: input.threadId,
-                existingSquadronId: existing.squadronId,
-                requestedSquadronId: input.squadronId,
-              });
-            }
+          if (existing !== null && existing.squadronId !== input.squadronId) {
+            return yield* new A2AHomeConflictError({
+              threadId: input.threadId,
+              existingSquadronId: existing.squadronId,
+              requestedSquadronId: input.squadronId,
+            });
           }
 
           yield* ledger.readSquadron(input.squadronId);
