@@ -2,13 +2,14 @@ import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
-import { CommCommandId, SquadronId, ParticipantId, type AgentParticipant } from "./contracts.ts";
+import { AgentParticipant, CommCommandId, SquadronId, ParticipantId } from "./contracts.ts";
 
 const timestamp = "2026-08-16T12:00:00.000Z";
 
@@ -16,6 +17,9 @@ const database = NodeSqliteClient.layerMemory();
 const ledger = ledgerLayer.pipe(Layer.provide(database));
 const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
 const testLayer = Layer.mergeAll(database, ledger, send);
+const encodeAgentParticipantPayload = Schema.encodeEffect(
+  Schema.fromJsonString(Schema.Struct({ participant: AgentParticipant })),
+);
 
 const sender: AgentParticipant = {
   kind: "agent",
@@ -399,6 +403,142 @@ it.effect("reports a legitimately retired sender without prescribing projection 
         updatedSeq: 2,
       },
     ]);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("ignores left events that do not identify a later retirement of the exact home", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const service = yield* A2ASendService;
+    const ledgerService = yield* A2ALedger;
+    const sql = yield* SqlClient.SqlClient;
+    const homeSquadronId = SquadronId.make("squadron:retirement-decoys:home");
+    const foreignSquadronId = SquadronId.make("squadron:retirement-decoys:foreign");
+    yield* ledgerService.createSquadron({
+      squadron: { id: homeSquadronId, name: "Retirement decoy home", createdAt: timestamp },
+    });
+    yield* ledgerService.createSquadron({
+      squadron: {
+        id: foreignSquadronId,
+        name: "Retirement decoy foreign",
+        createdAt: timestamp,
+      },
+    });
+    const appendAgentEvent = (
+      squadronId: SquadronId,
+      commandId: string,
+      kind: "participant.joined" | "participant.left",
+      participant: AgentParticipant,
+    ) =>
+      ledgerService.append({
+        commandId: CommCommandId.make(commandId),
+        squadronId,
+        acceptedAt: timestamp,
+        event: {
+          kind,
+          sender: kind === "participant.left" ? participant.id : null,
+          receiver: kind === "participant.joined" ? participant.id : null,
+          exchangeId: null,
+          correlationId: null,
+          payload: { participant },
+          createdAt: timestamp,
+        },
+      });
+
+    yield* appendAgentEvent(
+      homeSquadronId,
+      "command:retirement-decoys:pre-join-left",
+      "participant.left",
+      sender,
+    );
+    yield* appendAgentEvent(
+      homeSquadronId,
+      "command:retirement-decoys:sender-join",
+      "participant.joined",
+      sender,
+    );
+    yield* appendAgentEvent(
+      homeSquadronId,
+      "command:retirement-decoys:receiver-join",
+      "participant.joined",
+      receiver,
+    );
+    for (const index of [1, 2]) {
+      yield* ledgerService.append({
+        commandId: CommCommandId.make(`command:retirement-decoys:foreign-padding:${index}`),
+        squadronId: foreignSquadronId,
+        acceptedAt: timestamp,
+        event: {
+          kind: "participant.joined",
+          sender: null,
+          receiver: null,
+          exchangeId: null,
+          correlationId: null,
+          payload: { participant: { kind: "human" } },
+          createdAt: timestamp,
+        },
+      });
+    }
+    yield* appendAgentEvent(
+      foreignSquadronId,
+      "command:retirement-decoys:foreign-left",
+      "participant.left",
+      sender,
+    );
+    yield* appendAgentEvent(
+      homeSquadronId,
+      "command:retirement-decoys:wrong-participant-left",
+      "participant.left",
+      {
+        kind: "agent",
+        id: ParticipantId.make("agent:retirement-decoy"),
+        threadId: sender.threadId,
+      },
+    );
+    const wrongThreadParticipant: AgentParticipant = {
+      kind: "agent",
+      id: sender.id,
+      threadId: ThreadId.make("thread:retirement-decoy"),
+    };
+    const wrongThreadPayload = yield* encodeAgentParticipantPayload({
+      participant: wrongThreadParticipant,
+    });
+    yield* sql`
+      INSERT INTO j5_a2a_comm_event (
+        seq,
+        squadron_id,
+        kind,
+        sender,
+        receiver,
+        exchange_id,
+        correlation_id,
+        payload,
+        created_at,
+        command_id
+      ) VALUES (
+        5,
+        ${homeSquadronId},
+        'participant.left',
+        ${wrongThreadParticipant.id},
+        NULL,
+        NULL,
+        NULL,
+        ${wrongThreadPayload},
+        ${timestamp},
+        'command:retirement-decoys:wrong-thread-left'
+      )
+    `;
+
+    const result = yield* service.send({
+      commandId: CommCommandId.make("command:retirement-decoys:send"),
+      senderThreadId: sender.threadId,
+      to: receiver.id,
+      message: "These unrelated left events must not retire the live sender.",
+      acceptedAt: timestamp,
+    });
+
+    assert.equal(result.exchangeState, "none");
+    assert.equal(result.durableAtSeq, 6);
   }).pipe(Effect.provide(testLayer)),
 );
 
