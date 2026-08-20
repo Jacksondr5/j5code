@@ -349,6 +349,59 @@ it.effect("fails loudly when active membership diverges from the immutable home"
   }).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("reports a legitimately retired sender without prescribing projection repair", () =>
+  Effect.gen(function* () {
+    const squadronId = yield* setupSameSquadron();
+    const service = yield* A2ASendService;
+    const ledgerService = yield* A2ALedger;
+    yield* ledgerService.append({
+      commandId: CommCommandId.make("command:sender:retired"),
+      squadronId,
+      acceptedAt: timestamp,
+      event: {
+        kind: "participant.left",
+        sender: sender.id,
+        receiver: null,
+        exchangeId: null,
+        correlationId: null,
+        payload: { participant: sender },
+        createdAt: timestamp,
+      },
+    });
+
+    const error = yield* Effect.flip(
+      service.send({
+        commandId: CommCommandId.make("command:sender:retired:send"),
+        senderThreadId: sender.threadId,
+        to: receiver.id,
+        message: "This retired sender must not send.",
+        acceptedAt: timestamp,
+      }),
+    );
+
+    assert.equal(error._tag, "A2ASenderRetiredError");
+    if (error._tag === "A2ASenderRetiredError") {
+      assert.equal(error.threadId, sender.threadId);
+      assert.equal(error.squadronId, squadronId);
+      assert.equal(error.participantId, sender.id);
+      assert.include(error.message, "retired from immutable home");
+      assert.include(error.message, "participant.left");
+      assert.include(error.message, "cannot send cross-agent messages");
+      assert.include(error.message, "Do not repair the projection");
+      assert.include(error.message, "stop this messaging attempt");
+      assert.notInclude(error.message, "no registered home squadron");
+    }
+    assert.deepStrictEqual(yield* ledgerService.listMembership(squadronId), [
+      {
+        squadronId,
+        participant: receiver,
+        joinedSeq: 2,
+        updatedSeq: 2,
+      },
+    ]);
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("lists membership-derived participant capabilities", () =>
   Effect.gen(function* () {
     const squadronId = yield* setupSameSquadron();

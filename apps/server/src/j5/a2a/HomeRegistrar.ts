@@ -82,11 +82,13 @@ interface HistoricalHomeRow {
   readonly home_participant_id: string;
   readonly active_squadron_id: string | null;
   readonly active_participant_id: string | null;
+  readonly is_retired: number;
 }
 
 interface ThreadHomeResolution {
   readonly home: RegisteredThreadHome;
   readonly activeMemberships: ReadonlyArray<RegisteredThreadHome>;
+  readonly retired: boolean;
 }
 
 const stablePart = (value: string) => encodeURIComponent(value);
@@ -103,7 +105,18 @@ export const resolveThreadHome = Effect.fn("j5.a2a.resolveThreadHome")(function*
       event.squadron_id AS home_squadron_id,
       json_extract(event.payload, '$.participant.id') AS home_participant_id,
       membership.squadron_id AS active_squadron_id,
-      membership.participant_id AS active_participant_id
+      membership.participant_id AS active_participant_id,
+      EXISTS (
+        SELECT 1
+        FROM j5_a2a_comm_event AS retirement
+        WHERE retirement.squadron_id = event.squadron_id
+          AND retirement.seq > event.seq
+          AND retirement.kind = 'participant.left'
+          AND json_extract(retirement.payload, '$.participant.kind') = 'agent'
+          AND json_extract(retirement.payload, '$.participant.id') =
+            json_extract(event.payload, '$.participant.id')
+          AND json_extract(retirement.payload, '$.participant.threadId') = ${threadId}
+      ) AS is_retired
     FROM j5_a2a_comm_event AS event
     LEFT JOIN j5_a2a_squadron_membership AS membership
       ON membership.thread_id = ${threadId}
@@ -137,6 +150,7 @@ export const resolveThreadHome = Effect.fn("j5.a2a.resolveThreadHome")(function*
       participantId: ParticipantId.make(first.home_participant_id),
     },
     activeMemberships,
+    retired: first.is_retired === 1,
   };
 });
 

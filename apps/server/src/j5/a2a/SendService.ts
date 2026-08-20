@@ -48,6 +48,19 @@ export class A2AHomeMembershipStateError extends Schema.TaggedErrorClass<A2AHome
   }
 }
 
+export class A2ASenderRetiredError extends Schema.TaggedErrorClass<A2ASenderRetiredError>()(
+  "A2ASenderRetiredError",
+  {
+    threadId: Schema.String,
+    squadronId: Schema.String,
+    participantId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Thread ${this.threadId} was retired from immutable home ${this.squadronId}:${this.participantId} by participant.left and cannot send cross-agent messages. Do not repair the projection or register another home; stop this messaging attempt.`;
+  }
+}
+
 export class A2AParticipantNotFoundError extends Schema.TaggedErrorClass<A2AParticipantNotFoundError>()(
   "A2AParticipantNotFoundError",
   { participantId: Schema.String },
@@ -139,6 +152,7 @@ export type A2ASendError =
   | Schema.SchemaError
   | SqlError
   | A2ASenderNotJoinedError
+  | A2ASenderRetiredError
   | A2AHomeMembershipStateError
   | A2AParticipantNotFoundError
   | A2AAmbiguousParticipantError
@@ -224,7 +238,14 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
             membership.squadronId === resolution.home.squadronId &&
             membership.participantId === resolution.home.participantId,
         );
-        if (matches.length !== 1) {
+        if (resolution.retired && resolution.activeMemberships.length === 0) {
+          return yield* new A2ASenderRetiredError({
+            threadId,
+            squadronId: resolution.home.squadronId,
+            participantId: resolution.home.participantId,
+          });
+        }
+        if (resolution.retired || matches.length !== 1) {
           return yield* new A2AHomeMembershipStateError({
             threadId,
             expectedSquadronId: resolution.home.squadronId,
