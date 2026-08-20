@@ -33,6 +33,21 @@ export class A2ASenderNotJoinedError extends Schema.TaggedErrorClass<A2ASenderNo
   }
 }
 
+export class A2AHomeMembershipStateError extends Schema.TaggedErrorClass<A2AHomeMembershipStateError>()(
+  "A2AHomeMembershipStateError",
+  {
+    threadId: Schema.String,
+    expectedSquadronId: Schema.String,
+    expectedParticipantId: Schema.String,
+    activeHomes: Schema.Array(Schema.String),
+  },
+) {
+  override get message(): string {
+    const active = this.activeHomes.length === 0 ? "none" : this.activeHomes.join(", ");
+    return `Thread ${this.threadId} has immutable home ${this.expectedSquadronId}:${this.expectedParticipantId}, but its active membership projection is ${active}. Repair the projection before retrying; do not register a new home.`;
+  }
+}
+
 export class A2AParticipantNotFoundError extends Schema.TaggedErrorClass<A2AParticipantNotFoundError>()(
   "A2AParticipantNotFoundError",
   { participantId: Schema.String },
@@ -124,6 +139,7 @@ export type A2ASendError =
   | Schema.SchemaError
   | SqlError
   | A2ASenderNotJoinedError
+  | A2AHomeMembershipStateError
   | A2AParticipantNotFoundError
   | A2AAmbiguousParticipantError
   | A2AIntentRequiredError
@@ -198,21 +214,27 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
       const senderMembership = Effect.fn("j5.a2a.send.senderMembership")(function* (
         threadId: ThreadId,
       ) {
-        const home = yield* resolveThreadHome(sql, threadId).pipe(
+        const resolution = yield* resolveThreadHome(sql, threadId).pipe(
           Effect.catchTag("A2AHomeNotFoundError", () =>
             Effect.fail(new A2ASenderNotJoinedError({ threadId })),
           ),
         );
-        const matches = (yield* membershipRows()).filter(
-          (row) =>
-            row.squadron_id === home.squadronId &&
-            row.participant_id === home.participantId &&
-            row.thread_id === threadId,
+        const matches = resolution.activeMemberships.filter(
+          (membership) =>
+            membership.squadronId === resolution.home.squadronId &&
+            membership.participantId === resolution.home.participantId,
         );
         if (matches.length !== 1) {
-          return yield* new A2ASenderNotJoinedError({ threadId });
+          return yield* new A2AHomeMembershipStateError({
+            threadId,
+            expectedSquadronId: resolution.home.squadronId,
+            expectedParticipantId: resolution.home.participantId,
+            activeHomes: resolution.activeMemberships.map(
+              (membership) => `${membership.squadronId}:${membership.participantId}`,
+            ),
+          });
         }
-        return home;
+        return resolution.home;
       });
 
       const participantMembership = Effect.fn("j5.a2a.send.participantMembership")(function* (

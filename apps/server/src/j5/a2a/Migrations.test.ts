@@ -155,6 +155,10 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
     );
     assert.include(
       indexesByName.get("j5_a2a_comm_event_agent_home_thread_idx") ?? "",
+      "CREATE UNIQUE INDEX j5_a2a_comm_event_agent_home_thread_idx",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_comm_event_agent_home_thread_idx") ?? "",
       "WHERE kind = 'participant.joined'",
     );
     const envelopeChannel = deliveryColumns.find((column) => column.name === "envelope_channel");

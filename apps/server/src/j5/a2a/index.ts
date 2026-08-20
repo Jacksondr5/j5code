@@ -1,7 +1,6 @@
 export * from "./contracts.ts";
 export * from "./decider.ts";
 export {
-  A2AAmbiguousHomeError,
   A2AHomeCommandConflictError,
   A2AHomeConflictError,
   A2AHomeNotFoundError,

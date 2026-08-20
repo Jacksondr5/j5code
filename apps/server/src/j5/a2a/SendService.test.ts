@@ -313,6 +313,42 @@ it.effect("fails closed when a native thread has no provisioned squadron members
   }).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("fails loudly when active membership diverges from the immutable home", () =>
+  Effect.gen(function* () {
+    const homeSquadronId = yield* setupSameSquadron();
+    const service = yield* A2ASendService;
+    const ledgerService = yield* A2ALedger;
+    const sql = yield* SqlClient.SqlClient;
+    const corruptedSquadronId = SquadronId.make("squadron:corrupted-projection");
+    yield* ledgerService.createSquadron({
+      squadron: {
+        id: corruptedSquadronId,
+        name: "Corrupted projection",
+        createdAt: timestamp,
+      },
+    });
+    yield* sql`
+      UPDATE j5_a2a_squadron_membership
+      SET squadron_id = ${corruptedSquadronId}
+      WHERE squadron_id = ${homeSquadronId}
+        AND participant_id = ${sender.id}
+    `;
+
+    const error = yield* Effect.flip(service.listParticipants(sender.threadId));
+
+    assert.equal(error._tag, "A2AHomeMembershipStateError");
+    if (error._tag === "A2AHomeMembershipStateError") {
+      assert.equal(error.expectedSquadronId, homeSquadronId);
+      assert.equal(error.expectedParticipantId, sender.id);
+      assert.deepStrictEqual(error.activeHomes, [`${corruptedSquadronId}:${sender.id}`]);
+      assert.include(error.message, "immutable home");
+      assert.include(error.message, "Repair the projection");
+      assert.include(error.message, "do not register a new home");
+      assert.notInclude(error.message, "no registered home squadron");
+    }
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("lists membership-derived participant capabilities", () =>
   Effect.gen(function* () {
     const squadronId = yield* setupSameSquadron();

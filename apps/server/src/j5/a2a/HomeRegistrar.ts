@@ -43,18 +43,6 @@ export class A2AHomeConflictError extends Schema.TaggedErrorClass<A2AHomeConflic
   }
 }
 
-export class A2AAmbiguousHomeError extends Schema.TaggedErrorClass<A2AAmbiguousHomeError>()(
-  "A2AAmbiguousHomeError",
-  {
-    threadId: Schema.String,
-    homes: Schema.Array(Schema.String),
-  },
-) {
-  override get message(): string {
-    return `Thread ${this.threadId} has conflicting historical homes (${this.homes.join(", ")}). The immutable-home invariant is already broken; repair the stored history before retrying.`;
-  }
-}
-
 export class A2AHomeCommandConflictError extends Schema.TaggedErrorClass<A2AHomeCommandConflictError>()(
   "A2AHomeCommandConflictError",
   {
@@ -68,7 +56,7 @@ export class A2AHomeCommandConflictError extends Schema.TaggedErrorClass<A2AHome
   }
 }
 
-export type A2AHomeLookupError = SqlError | A2AHomeNotFoundError | A2AAmbiguousHomeError;
+export type A2AHomeLookupError = SqlError | A2AHomeNotFoundError;
 
 export type A2AHomeRegistrationError =
   | A2ALedgerError
@@ -90,8 +78,15 @@ export class A2AHomeRegistrar extends Context.Service<A2AHomeRegistrar, A2AHomeR
 ) {}
 
 interface HistoricalHomeRow {
-  readonly squadron_id: string;
-  readonly participant_id: string;
+  readonly home_squadron_id: string;
+  readonly home_participant_id: string;
+  readonly active_squadron_id: string | null;
+  readonly active_participant_id: string | null;
+}
+
+interface ThreadHomeResolution {
+  readonly home: RegisteredThreadHome;
+  readonly activeMemberships: ReadonlyArray<RegisteredThreadHome>;
 }
 
 const stablePart = (value: string) => encodeURIComponent(value);
@@ -102,36 +97,47 @@ export const participantIdForThread = (threadId: ThreadId) =>
 export const resolveThreadHome = Effect.fn("j5.a2a.resolveThreadHome")(function* (
   sql: SqlClient.SqlClient,
   threadId: ThreadId,
-) {
+): Effect.fn.Return<ThreadHomeResolution, A2AHomeLookupError> {
   const rows = yield* sql<HistoricalHomeRow>`
     SELECT
-      squadron_id,
-      json_extract(payload, '$.participant.id') AS participant_id
-    FROM j5_a2a_comm_event
-    WHERE kind = 'participant.joined'
-      AND json_extract(payload, '$.participant.kind') = 'agent'
-      AND json_extract(payload, '$.participant.threadId') = ${threadId}
-    ORDER BY squadron_id, seq
+      event.squadron_id AS home_squadron_id,
+      json_extract(event.payload, '$.participant.id') AS home_participant_id,
+      membership.squadron_id AS active_squadron_id,
+      membership.participant_id AS active_participant_id
+    FROM j5_a2a_comm_event AS event
+    LEFT JOIN j5_a2a_squadron_membership AS membership
+      ON membership.thread_id = ${threadId}
+    WHERE event.kind = 'participant.joined'
+      AND json_extract(event.payload, '$.participant.kind') = 'agent'
+      AND json_extract(event.payload, '$.participant.threadId') = ${threadId}
+    ORDER BY membership.squadron_id, membership.participant_id
   `;
-  const homes = Array.from(
+  const first = rows[0];
+  if (first === undefined) return yield* new A2AHomeNotFoundError({ threadId });
+  const activeMemberships = Array.from(
     new Map(
-      rows.map((row) => [
-        `${row.squadron_id}\u0000${row.participant_id}`,
-        {
-          squadronId: row.squadron_id as SquadronId,
-          participantId: ParticipantId.make(row.participant_id),
-        },
-      ]),
+      rows.flatMap((row) =>
+        row.active_squadron_id === null || row.active_participant_id === null
+          ? []
+          : [
+              [
+                `${row.active_squadron_id}\u0000${row.active_participant_id}`,
+                {
+                  squadronId: row.active_squadron_id as SquadronId,
+                  participantId: ParticipantId.make(row.active_participant_id),
+                },
+              ] as const,
+            ],
+      ),
     ).values(),
   );
-  if (homes.length === 0) return yield* new A2AHomeNotFoundError({ threadId });
-  if (homes.length > 1) {
-    return yield* new A2AAmbiguousHomeError({
-      threadId,
-      homes: homes.map((home) => `${home.squadronId}:${home.participantId}`),
-    });
-  }
-  return homes[0]!;
+  return {
+    home: {
+      squadronId: first.home_squadron_id as SquadronId,
+      participantId: ParticipantId.make(first.home_participant_id),
+    },
+    activeMemberships,
+  };
 });
 
 export const layer: Layer.Layer<A2AHomeRegistrar, never, A2ALedger | SqlClient.SqlClient> =
@@ -142,7 +148,7 @@ export const layer: Layer.Layer<A2AHomeRegistrar, never, A2ALedger | SqlClient.S
       const sql = yield* SqlClient.SqlClient;
 
       const getHomeForThread: A2AHomeRegistrarShape["getHomeForThread"] = (threadId) =>
-        resolveThreadHome(sql, threadId);
+        resolveThreadHome(sql, threadId).pipe(Effect.map((resolution) => resolution.home));
 
       const registerAtCreation: A2AHomeRegistrarShape["registerAtCreation"] = (input) =>
         Effect.gen(function* () {
