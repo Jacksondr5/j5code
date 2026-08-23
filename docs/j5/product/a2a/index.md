@@ -3,11 +3,11 @@ title: "A2A design session — grounding and decision register"
 kind: spec
 ---
 
-> **Terminology note (post-E6):** the grouping concept was renamed **epic → squadron** on 2026-08-17 (definition: `product/epic/`); the code rename landed in PR #8. "Epic" below is preserved as dated historical record — read it as "squadron." Filesystem paths are literal.
+> **Terminology note (post-E6):** the grouping concept was renamed **epic → squadron** on 2026-08-17 (definition: `../features/squadron.md`); the code rename landed in PR #8. "Epic" below is preserved as dated historical record — read it as "squadron." Filesystem paths are literal.
 
 # A2A design session (backlog item 2)
 
-Working artifact for the tech-plan session started 2026-08-16. This is the single home for the open decisions (it supersedes the open-questions list in `../communication-graph/`); the builder-facing plan artifact gets written once the register below is settled. Companion context: `../communication-graph/` (the product definition), `../../research/t3code/orchestration-v2/` (the base), `../../research/traycer/agent-to-agent/` (the steal list), `../../research/jackson-prior-art/fleet-interviews-synthesis/` (P1–P13 and the classification lens).
+Working artifact for the tech-plan session started 2026-08-16. This is the single home for the open decisions (it supersedes the open-questions list in `../communication-graph.md`); the builder-facing plan artifact gets written once the register below is settled. Companion context: `../communication-graph.md` (the product definition), `../../research/t3code/orchestration-v2.md` (the base), `../../research/traycer/agent-to-agent.md` (the steal list), `../../research/jackson-prior-art/fleet-interviews-synthesis.md` (P1–P13 and the classification lens).
 
 ## Grounding: the four-layer model
 
@@ -39,4 +39,4 @@ Settled by prior decisions (decision log / synthesis): human as first-class node
 
 ## Register status: fully settled 2026-08-16
 
-All ten decisions closed. Silent-inference review done with Jackson: cross-epic double-entry accepted with the remote-dev collision risk explicitly carried; one-shot delivery resiliency confirmed identical to exchanges (log-first is a pipeline property — "was it delivered" and "was it answered" are independent guarantees); fork Phase-2 status confirmed by the Director (base `j5/main` @ `e7597dac8`, additive build cleared, one certain rebase at upstream #2829 merge). **The builder-facing plan is at `plan/`** — written along the five D7 milestone seams; sent to the Director for review before staffing.
+All ten decisions closed. Silent-inference review done with Jackson: cross-epic double-entry accepted with the remote-dev collision risk explicitly carried; one-shot delivery resiliency confirmed identical to exchanges (log-first is a pipeline property — "was it delivered" and "was it answered" are independent guarantees); fork Phase-2 status confirmed by the Director (base `j5/main` @ `e7597dac8`, additive build cleared, one certain rebase at upstream #2829 merge). **The builder-facing plan is at `plan.md`** — written along the five D7 milestone seams; sent to the Director for review before staffing.

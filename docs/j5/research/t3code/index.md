@@ -34,13 +34,13 @@ T3 Code calls itself an **"agent harness control surface."** It is not an editor
 
 ## Deep dives
 
-| Artifact                                                | Covers                                                                         |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| [Feature inventory](./feature-inventory/)               | Every user-facing feature, how each works                                      |
-| [Architecture map](./architecture/)                     | Process model, stack, monorepo, persistence, wire protocol, orchestration loop |
-| [Multi-agent & providers](./multi-agent-and-providers/) | The Agents fleet panel, subagent fold, the five drivers, ACP                   |
-| [Remote & multi-machine](./remote/)                     | Five access methods, relay, auth model, SSH, failure handling                  |
-| [Performance & quality](./performance-and-quality/)     | Rendering, read path, deterministic async, testing, CI, code health grade      |
+| Artifact                                                  | Covers                                                                         |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| [Feature inventory](./feature-inventory.md)               | Every user-facing feature, how each works                                      |
+| [Architecture map](./architecture.md)                     | Process model, stack, monorepo, persistence, wire protocol, orchestration loop |
+| [Multi-agent & providers](./multi-agent-and-providers.md) | The Agents fleet panel, subagent fold, the five drivers, ACP                   |
+| [Remote & multi-machine](./remote.md)                     | Five access methods, relay, auth model, SSH, failure handling                  |
+| [Performance & quality](./performance-and-quality.md)     | Rendering, read path, deterministic async, testing, CI, code health grade      |
 
 ## What changed since March — the four stale claims
 

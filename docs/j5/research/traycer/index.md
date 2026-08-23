@@ -22,11 +22,11 @@ So for the A2A deep dive, what we can read is the **wire contract, the message f
 
 ## Deep dives (sub-artifacts)
 
-| Artifact                                               | Covers                                                                                                                                                   |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`agent-to-agent/`](./agent-to-agent/index.md)         | The peer-messaging system end to end: MCP surface, broker model, `expectReply` threads, lifecycle notices, create/configure/fork/stop, hierarchy storage |
-| [`organization-model/`](./organization-model/index.md) | Epics as containers, the artifact model, multi-workspace binding, worktree lifecycle, persistence                                                        |
-| [`performance/`](./performance/index.md)               | Root-cause analysis of freezes, thread-jumping, large-thread degradation                                                                                 |
+| Artifact                                         | Covers                                                                                                                                                   |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`agent-to-agent/`](./agent-to-agent.md)         | The peer-messaging system end to end: MCP surface, broker model, `expectReply` threads, lifecycle notices, create/configure/fork/stop, hierarchy storage |
+| [`organization-model/`](./organization-model.md) | Epics as containers, the artifact model, multi-workspace binding, worktree lifecycle, persistence                                                        |
+| [`performance/`](./performance.md)               | Root-cause analysis of freezes, thread-jumping, large-thread degradation                                                                                 |
 
 ## 1. Feature inventory
 
@@ -163,7 +163,7 @@ Released schema shapes are **frozen in code and never edited**. `agent.gui.listH
 
 **279 RPC methods** at `ad605aa9` (was ~130 at `e372e303` — the surface **more than doubled in three weeks**) across: `agent.*`, `chat.subscribe`, `epic.*`, `terminal.*`, `worktree.*`, `workspace.*`, `git.*`, `comments.*`, `providers.*`, `host.*`, `notifications.*`, `snapshots.*`, `resources.*`, `speech.*`, `editor.*`, `migration.*`.
 
-That growth rate is itself a finding: a per-call manifest handshake that iterates the full catalog (see [performance](./performance/index.md) root cause #2) gets more expensive every week. The design does not degrade gracefully with surface growth.
+That growth rate is itself a finding: a per-call manifest handshake that iterates the full catalog (see [performance](./performance.md) root cause #2) gets more expensive every week. The design does not degrade gracefully with surface growth.
 
 ### How it drives harnesses
 
@@ -176,9 +176,9 @@ Two fundamentally different paths, and the split is the right one:
 
 See the sub-artifacts linked above. Headline conclusions:
 
-- **A2A** ([`agent-to-agent/`](./agent-to-agent/index.md)) is the best-designed feature in the product and the thing most worth stealing. The insight that elevates it above "agents can message each other": **a reply-expected thread is a first-class object with a lifecycle, and the system actively tells the sender when the counterparty went silent and why** — with seven distinct reasons distinguishing "still thinking" from "died" from "blocked on a human".
-- **Organization** ([`organization-model/`](./organization-model/index.md)) is coherent, with one load-bearing rule — _tabs are bound to a host for life; cross-host continuation is clone-not-migrate_ — that eliminates an entire class of bugs.
-- **Performance** ([`performance/`](./performance/index.md)) — every renderer resource bound is **explicitly waived while agents are working**, which is exactly Jackson's workload. That, plus a per-RPC WebSocket dial with a now-**279**-method manifest handshake, plus a monolithic per-Epic Y.Doc that clients must fully materialize, explains the reported symptoms.
+- **A2A** ([`agent-to-agent/`](./agent-to-agent.md)) is the best-designed feature in the product and the thing most worth stealing. The insight that elevates it above "agents can message each other": **a reply-expected thread is a first-class object with a lifecycle, and the system actively tells the sender when the counterparty went silent and why** — with seven distinct reasons distinguishing "still thinking" from "died" from "blocked on a human".
+- **Organization** ([`organization-model/`](./organization-model.md)) is coherent, with one load-bearing rule — _tabs are bound to a host for life; cross-host continuation is clone-not-migrate_ — that eliminates an entire class of bugs.
+- **Performance** ([`performance/`](./performance.md)) — every renderer resource bound is **explicitly waived while agents are working**, which is exactly Jackson's workload. That, plus a per-RPC WebSocket dial with a now-**279**-method manifest handshake, plus a monolithic per-Epic Y.Doc that clients must fully materialize, explains the reported symptoms.
   **Delta verdict: 2 of 5 root causes fixed, 1 fixed only for remote hosts, 1 mid-migration, 1 untouched.** Crucially, Traycer's own production RCA (commit #966 — a renderer at **4.86 GB after 21 hours**) independently confirmed three of my five findings using a heap profiler, and reached the same top-level conclusion: _"React fibers were flat, so the UI itself was innocent."_ The rules our anti-constitution draws from root causes #1, #2 and #3 remain fully load-bearing.
 
 ## 6. Quality assessment

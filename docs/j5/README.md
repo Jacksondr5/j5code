@@ -12,33 +12,47 @@ describes the codebase and decisions _as of when it was written_ — check dates
 before treating details as current. Documents carry YAML frontmatter from the
 source system (`kind`: spec = durable context, ticket/story = work items with
 `status` 0/1/2 = todo/in-progress/done); it is preserved for fidelity.
+Note: this tree was reorganized 2026-08-23 (single-doc folders flattened to
+`topic.md`, feature docs grouped under `features/`), so its layout no longer
+matches the workspace's folder structure — content, not paths, is what mirrors.
 
 ## Reading order for newcomers
 
-1. `product/fleet-vision/` — why this exists: the operating model and thesis.
-2. `research/synthesis/` — what we learned from T3 Code and Traycer, and the
+1. `product/problems.md` — what hurts and what's wanted: the problem statement
+   and goals, in Jackson's voice.
+2. `product/fleet-vision.md` — why this exists: the operating model and thesis.
+3. `product/principles.md` — the beliefs, lenses, and principles: the machine
+   that turns the problems and goals into product.
+4. `research/synthesis.md` — what we learned from T3 Code and Traycer, and the
    engineering principles adopted from each.
-3. `research/jackson-prior-art/fleet-interviews-synthesis/` — field lessons
+5. `research/jackson-prior-art/fleet-interviews-synthesis.md` — field lessons
    from a real production agent fleet, and the platform/non-platform boundary
    that governs scope decisions.
-4. `product/decision-log/` — every settled product decision, one row each.
-5. `product/a2a/` — the A2A (agent-to-agent communication) design: decision
-   register, grounding model, and `plan/` with the milestone plan and tickets.
-6. `product/dashboard/pr-pane/` — the PR pane brief (first human-engineer
-   workstream).
+6. `product/decision-log.md` — every settled product decision, one row each.
+7. `product/a2a/` — the A2A (agent-to-agent communication) design: decision
+   register, grounding model, and `plan.md` with the milestone plan.
+8. `product/features/` — the feature definitions of record (Squadrons, Memos, the PR
+   pane; Roles, Crews, and Playbooks to come).
 
 ## Contents
 
-- `backlog/` — the prioritized roadmap.
-- `product/` — product designs and decisions (A2A, communication graph,
-  dashboard, decision log, fleet vision).
+- `backlog.md` — the prioritized roadmap.
+- `product/features/` — feature definitions of record: `squadron.md`, `memos.md`,
+  `pr-pane.md` (more as they're designed).
+- `product/` — product designs and decisions: problems & goals, the
+  beliefs/lenses/principles machine, decision log, fleet vision, glossary,
+  the A2A design + plan, communication graph, cross-device position, and the
+  2026-08-21 design-review register that defined Crews/Manifests/Captains.
 - `research/` — the studies behind the decisions: T3 Code deep dives (the
   upstream this repo forks), Traycer's A2A/organization model, and the
   prior-art fleet studies. A quarantined, superseded early T3 snapshot was
   deliberately not mirrored.
-- `fork-setup-plan/` — how this fork was established (base pin, rebrand,
-  CI, load-test baseline).
 - `process/` — working-process notes for the agent teams building here.
+- `worklog/` — build-time records, kept out of the evergreen docs: the A2A
+  implementation tickets with their reviews and retros (`a2a-tickets/`), how
+  this fork was established (`fork-setup-plan/` — base pin, rebrand, CI,
+  load-test baseline), and PR triage reviews. Historical by nature; read the
+  product docs for current truth.
 
 Cross-references between documents use relative paths and survive within this
 tree. References to `interviews/` point at the public

@@ -1,4 +1,0 @@
----
-title: "Dashboard"
-kind: spec
----
