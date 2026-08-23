@@ -9,7 +9,7 @@ Settled with Jackson 2026-08-17, closing the gap the Director surfaced: the term
 
 ## Definition
 
-A **grouping, not a boundary** — the way sets of agents, artifacts, PRs, human-targeted messages, and their communication ledger are organized around **a large amount of work or a long-running initiative**. It is a filter over shared infrastructure, not an isolation wall: messaging crosses it (D8 double-entry), the human node is global, the fleet dashboard aggregates across it, and the filesystem is readable regardless.
+A **grouping, not a boundary** — the way sets of agents, artifacts, PRs, human-targeted messages, and their communication ledger are organized around **a large amount of work or a long-running initiative**. It is a filter over shared infrastructure, not an isolation wall: messaging crosses it (D8 double-entry), human nodes are global (person-scoped `human:<id>`, never singleton — R9/R29), the fleet dashboard aggregates across it, and the filesystem is readable regardless.
 
 | Question                    | Ruling                                                                                                                                                                                                                                                         |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

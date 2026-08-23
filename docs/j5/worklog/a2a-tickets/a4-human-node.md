@@ -6,6 +6,8 @@ status: 0
 
 # A4 — Human node
 
+> **Amended 2026-08-23 (pre-staffing):** multi-human sweep applied per R9/R29 — human nodes are person-scoped (`human:<id>`) and never singleton; all inbox semantics below read per person.
+
 **Governing artifacts:** `../../product/a2a/plan.md` (§Human node), `../../product/a2a/plan.md` (grounding: human as first-class node; D2). Base: `j5/main` @ `e7597dac8`.
 
 ## Goal
@@ -14,7 +16,7 @@ Jackson is a first-class participant: agents ask him through the graph, he answe
 
 ## Scope
 
-- **Inbox projection — cross-ledger by construction**: one global human node + per-squadron ledgers means the inbox aggregates open human-addressed exchanges across EVERY squadron ledger on the host. Do not scope it per-squadron and call it done (plan calls this out explicitly). Ranked by urgency (`blocking|soon|fyi`) then age.
+- **Inbox projection — cross-ledger by construction**: global person-scoped human nodes (`human:<id>`, never singleton — R9/R29) + per-squadron ledgers mean the inbox aggregates a person's open exchanges across EVERY squadron ledger on the host. Do not scope it per-squadron and call it done (plan calls this out explicitly). Ranked by urgency (`blocking|soon|fyi`) then age.
 - **Answer path**: the human's typed answer IS the `exchange.closed` event — captured verbatim, durable, linkable by id, delivered to the asker via the A2 pipeline. No manual "mark answered" step, no relay, no paraphrase.
 - **Human→agent sends** use the human-origin envelope (states plainly that the human is not watching that chat and sees only what returns on this exchange).
 - **Surface scope**: a _minimal functional surface_ sufficient to prove the loop end to end (a plain inbox list + answer box in the app, or dev-grade equivalent). The polished attention pane is item 4's — do not gold-plate.

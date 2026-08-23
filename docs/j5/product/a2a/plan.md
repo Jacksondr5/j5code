@@ -43,7 +43,7 @@ T3 has **no squadron object** (nearest native concepts: project/environment), an
 
 `comm_event` table, per-squadron monotonic sequence, append-only: `seq`, `squadron_id`, `kind`, `sender`, `receiver`, `exchange_id?`, `correlation_id?` (cross-squadron), `payload`, `created_at`. Event kinds: `exchange.opened`, `message.sent`, `message.delivered`, `message.delivery_failed`, `exchange.closed` (the reply), `silence.notice`, `participant.joined/left`. Rows are never edited; corrections are new rows.
 
-Participants: anything with its own thread — main agents, child agents (agent-created real threads), and **one global human node** (not per-squadron; cross-squadron exchanges reach the same user). Provider-native `ExecutionNode` subagents are not participants and never appear (D1).
+Participants: anything with its own thread — main agents, child agents (agent-created real threads), and **human nodes** — global (not per-squadron), person-scoped (`human:<id>`, R9), never singleton (multi-human invariant, R29); cross-squadron exchanges reach the same person. Provider-native `ExecutionNode` subagents are not participants and never appear (D1).
 
 ### Exchanges (M2)
 
@@ -80,7 +80,7 @@ Notices inform the waiter; they never auto-close exchanges. No PTY/quiet watchdo
 
 ### Human node (M4)
 
-The inbox is necessarily a **cross-ledger projection**: one global human node + per-squadron ledgers means it aggregates open human-addressed exchanges across _every_ squadron ledger on the host — a builder must not scope it per-squadron and call it done. Inbox projection = open exchanges addressed to the human, ranked by urgency then age. The human's answer (typed in the app) **is** the closing reply event: captured verbatim, durable, linkable by id — and delivered to the asker through the normal pipeline. Loop closure is therefore _structural_: no manual "ask answered" step, no relay, no qualifier-shedding. Human→agent sends through the graph use the human-origin envelope; human silence emits no notices (unanswered-count and age are dashboard metrics, item 4).
+The inbox is necessarily a **cross-ledger projection**: global person-scoped human nodes + per-squadron ledgers mean it aggregates open exchanges addressed to a person across _every_ squadron ledger on the host — a builder must not scope it per-squadron and call it done. Inbox projection = open exchanges addressed to a person, ranked by urgency then age. The addressed person's answer (typed in the app) **is** the closing reply event: captured verbatim, durable, linkable by id — and delivered to the asker through the normal pipeline. Loop closure is therefore _structural_: no manual "ask answered" step, no relay, no qualifier-shedding. Human→agent sends through the graph use the human-origin envelope; human silence emits no notices (unanswered-count and age are dashboard metrics, item 4).
 
 ### Graph projection + read API (M5)
 
