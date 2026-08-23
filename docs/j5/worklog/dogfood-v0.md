@@ -35,4 +35,4 @@ status: 1
 
 ## Explicitly NOT v0
 
-Roles/Crews design session (item 3 — informed by phase 4's retro), Memos, Playbooks, Shared Squadrons, item-4 panes, Director migration, multi-dev ticket sharing.
+Roles/Crews implementation (item 3 — design session completed 2026-08-23 ahead of the retro; feature docs are the build-ready contract, rulings at [roles-crews-session-2026-08-23.md](roles-crews-session-2026-08-23.md); staffing is a separate call), Memos, Playbooks, Shared Squadrons, item-4 panes, Director migration, multi-dev ticket sharing.
