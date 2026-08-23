@@ -51,7 +51,7 @@ A feature can have parts that are mechanical and parts that are judgment. What c
 
 ## 3. Use cases
 
-J5 Code has multiple use cases, defined in [TBD](path-tbd). These are concrete use cases that the product is aiming to serve. Run your features through them to see how they serve those use cases.
+J5 Code has multiple use cases, defined in [use-cases.md](use-cases.md). These are concrete use cases that the product is aiming to serve. Run your features through them to see how they serve those use cases.
 
 ---
 

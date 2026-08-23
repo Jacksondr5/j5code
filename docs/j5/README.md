@@ -23,26 +23,29 @@ matches the workspace's folder structure — content, not paths, is what mirrors
 2. `product/fleet-vision.md` — why this exists: the operating model and thesis.
 3. `product/principles.md` — the beliefs, lenses, and principles: the machine
    that turns the problems and goals into product.
-4. `research/synthesis.md` — what we learned from T3 Code and Traycer, and the
+4. `product/use-cases.md` — the concrete fleets every feature is tested
+   against.
+5. `research/synthesis.md` — what we learned from T3 Code and Traycer, and the
    engineering principles adopted from each.
-5. `research/jackson-prior-art/fleet-interviews-synthesis.md` — field lessons
+6. `research/jackson-prior-art/fleet-interviews-synthesis.md` — field lessons
    from a real production agent fleet, and the platform/non-platform boundary
    that governs scope decisions.
-6. `product/decision-log.md` — every settled product decision, one row each.
-7. `product/a2a/` — the A2A (agent-to-agent communication) design: decision
+7. `product/decision-log.md` — every settled product decision, one row each.
+8. `product/a2a/` — the A2A (agent-to-agent communication) design: decision
    register, grounding model, and `plan.md` with the milestone plan.
-8. `product/features/` — the feature definitions of record (Squadrons, Memos, the PR
-   pane; Roles, Crews, and Playbooks to come).
+9. `product/features/` — the feature definitions of record: Squadrons, Crews,
+   Roles, Playbooks, Memos, Shared Squadrons, and the PR pane.
 
 ## Contents
 
 - `backlog.md` — the prioritized roadmap.
-- `product/features/` — feature definitions of record: `squadron.md`, `memos.md`,
-  `pr-pane.md` (more as they're designed).
+- `product/features/` — feature definitions of record: `squadron.md`,
+  `crews.md`, `roles.md`, `playbooks.md`, `memos.md`, `shared-squadrons.md`,
+  `pr-pane.md`.
 - `product/` — product designs and decisions: problems & goals, the
-  beliefs/lenses/principles machine, decision log, fleet vision, glossary,
-  the A2A design + plan, communication graph, cross-device position, and the
-  2026-08-21 design-review register that defined Crews/Manifests/Captains.
+  beliefs/lenses/principles machine, use cases, decision log, fleet vision,
+  glossary, the A2A design + plan, communication graph, cross-device position,
+  and the 2026-08-21 design-review register that defined Crews/Roles/Captains.
 - `research/` — the studies behind the decisions: T3 Code deep dives (the
   upstream this repo forks), Traycer's A2A/organization model, and the
   prior-art fleet studies. A quarantined, superseded early T3 snapshot was
