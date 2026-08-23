@@ -5,7 +5,7 @@ kind: spec
 
 # Crews
 
-Feature definition of record. The problems and goals it serves ([problems doc](../problems.md)): complex work needs groups of agents with defined Roles working with high independence from the user — and Foreground agents need somewhere to delegate context-heavy work so they can stay responsive touchpoints. Rulings baked in: R12–R20 and R21–R22 in [the register](../design-review-2026-08-21.md).
+Feature definition of record. The problems and goals it serves ([problems doc](../problems.md)): complex work needs groups of agents with defined Roles working with high independence from the user — and Foreground agents need somewhere to delegate context-heavy work so they can stay responsive touchpoints. Rulings baked in: R12–R20 and R21–R22 in [the register](../design-review-2026-08-21.md), plus the item-3 product session ([worklog record](../../worklog/roles-crews-session-2026-08-23.md)).
 
 ## The Crew
 
@@ -14,6 +14,8 @@ A **Crew** is a group of agents spawned as a unit from a user-authored, git-vers
 - **Membership is fixed at spawn.** Counterpart references ("escalate CI failures to your Builder") resolve at spawn, so every member knows how to work with the others without the human wiring them together.
 - **A Crew lives entirely inside one Squadron** and renders as one node in the org tree, with its members beneath it — cascade operations treat it as a unit.
 - Crews work their task with high independence, until a defined stopping point or completion. They can always reach any other agent in the Squadron directly — but their communication with the user is rarely direct chat: they are Background agents, reaching the human through the inbox or their Captain, and recording deferred items as [Memos](memos.md).
+
+**Definition integrity is checked where it's structured**: a Crew that references a Role that doesn't exist (missing file, renamed) is a visible defect in the library before anyone spawns it. Prose counterpart mentions are never parsed or validated — that's a judgment task, and guessing at it is worse than not checking ([never-guess](../principles.md) applies to validators too).
 
 ## Command: Captains
 
@@ -32,10 +34,19 @@ Crews archive **only as a unit** — members are never individually archived or 
 - **Archive never destroys work** (R15): no worktrees, branches, or checkpoints deleted by default; workspace cleanup is a separate explicit act.
 - **Archive is loud** (R1/R2): open Exchanges terminate with notices to every waiter, who can reopen against the successor with `regarding`.
 
+## Archive and respawn are judgment moments — the platform composes nothing
+
+Settled in the item-3 session, from the poisoned-Crew scenario:
+
+- **Archiving a Crew with open Exchanges warns loudly**: the archive action surfaces the count and the list (who is waiting, on what) and requires explicit confirmation. The expectation — carried in guidance at the moment of action, not enforced — is that a Captain in this situation **checks with the human**: they make a plan together (what happens to the open decision, who tells the waiters, what the successor needs) and implement it.
+- **The successor Crew gets a fresh brief, written by the respawner**: where things stand, the state of the durable artifacts, what to do next. The platform does **not** compose it — no auto-forwarded original brief, no generated state summary, no transferred conversation history, no inherited obligations, no auto-reopened asks. Every one of those is a judgment call, and this is an extreme judgment task.
+- What the platform does provide is **the record to consult while writing**: the archived Crew's brief, ledger, and artifacts remain readable forever (R11), and the surviving worktree/branch/PR are visible facts.
+
 ## Platform and content
 
-The platform ships the machinery — define, spawn, render, archive. The Playbook a Crew executes and the Roles it contains are always the user's content: the PR Group is one Crew definition someone wrote, never the product's opinion.
+The platform ships the machinery — define, spawn, render, warn, archive. The Playbook a Crew executes and the Roles it contains are always the user's content: the PR Group is one Crew definition someone wrote, never the product's opinion.
 
-## Open — owned by the item-3 design session
+## Deferred (with reasons)
 
-The Crew definition schema (how Roles compose into seats, the wiring format, its Playbook reference); the spawn tool surface; how briefs travel at spawn.
+- **Crew-spawn human UI**: owned by the implementing dev. One requirement recorded: it must be differentiated from solo Role spawn — a Crew is _launched_ as a unit with a brief, not started as a chat.
+- **Technical design** (definition schema, wiring format, tool schemas, brief delivery mechanics): owned by the implementing dev, within these product rulings.
