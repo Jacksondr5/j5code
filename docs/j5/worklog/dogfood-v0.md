@@ -27,6 +27,10 @@ status: 1
 - **Crews move at phase 4; the Director moves last** — Traycer remains the command deck until the phase-4 retro says J5 Code can hold it. Migrating the Director is explicitly OUT of v0 scope and is decided by that retro.
 - Sharing tickets/designs with other human devs: later, Jackson's call — not part of v0.
 
+## Phase-3 prerequisite (discovered 2026-08-24)
+
+**Squadron-creation + agent-creation UX.** Phase 3 requires Jackson to create a Squadron and create agents under it in-app, but no in-flight work builds that surface — the registrar (#10) deliberately takes an explicit _existing_ Squadron and E4 makes creation user-only. T3's project flow is not reusable: it assumes a 1:1 open-folder→agents shape, while Squadrons↔folders is many-to-many (many Squadrons per folder; a Squadron may target multiple folders/repos). Design session with the product lead first (front-end before back-end, Jackson's call); a minimal dev-grade creation surface must exist before phase 3. Phases 0–2 are unaffected and do not pause.
+
 ## Opportunistic / standing (any phase)
 
 - **A5** (graph read API) staffs whenever lane capacity allows — approved, amended, no dependencies beyond A2.
