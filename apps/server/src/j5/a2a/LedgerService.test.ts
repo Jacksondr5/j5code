@@ -325,10 +325,10 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
       {
         kind: "participant.joined",
         sender: null,
-        receiver: secondAgent.id,
+        receiver: null,
         exchangeId: null,
         correlationId: null,
-        payload: { participant: secondAgent },
+        payload: { participant: { kind: "human" } },
         createdAt: timestamp,
       },
       {
@@ -350,13 +350,13 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
         squadronId,
         participant: secondAgent,
         joinedSeq: 3,
-        updatedSeq: 4,
+        updatedSeq: 3,
       },
       {
         squadronId,
         participant: { kind: "human" as const },
         joinedSeq: 2,
-        updatedSeq: 2,
+        updatedSeq: 4,
       },
     ];
     const before = yield* ledger.listMembership(squadronId);

@@ -21,6 +21,7 @@ import {
   type SendMessageResult,
   participantId,
 } from "./contracts.ts";
+import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 
 export class A2ASenderNotJoinedError extends Schema.TaggedErrorClass<A2ASenderNotJoinedError>()(
@@ -28,7 +29,35 @@ export class A2ASenderNotJoinedError extends Schema.TaggedErrorClass<A2ASenderNo
   { threadId: Schema.String },
 ) {
   override get message(): string {
-    return `Cross-agent messaging is unavailable for native thread ${this.threadId} because it has no registered home squadron. Participation currently requires a wrapper-spawned agent that already has a home squadron or controlled test seeding. Native user-created home provisioning is deferred to the home-squadron registrar + A6 creation integrations follow-up. Stop this messaging attempt.`;
+    return `Cross-agent messaging is unavailable for native thread ${this.threadId} because it has no registered home squadron. No native user-created-thread hook consumes the internal registrar at this head. The sanctioned future production path is the A6 creation wrapper; controlled tests may seed membership directly. Stop this messaging attempt.`;
+  }
+}
+
+export class A2AHomeMembershipStateError extends Schema.TaggedErrorClass<A2AHomeMembershipStateError>()(
+  "A2AHomeMembershipStateError",
+  {
+    threadId: Schema.String,
+    expectedSquadronId: Schema.String,
+    expectedParticipantId: Schema.String,
+    activeHomes: Schema.Array(Schema.String),
+  },
+) {
+  override get message(): string {
+    const active = this.activeHomes.length === 0 ? "none" : this.activeHomes.join(", ");
+    return `Thread ${this.threadId} has immutable home ${this.expectedSquadronId}:${this.expectedParticipantId}, but its active membership projection is ${active}. Repair the projection before retrying; do not register a new home.`;
+  }
+}
+
+export class A2ASenderRetiredError extends Schema.TaggedErrorClass<A2ASenderRetiredError>()(
+  "A2ASenderRetiredError",
+  {
+    threadId: Schema.String,
+    squadronId: Schema.String,
+    participantId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Thread ${this.threadId} was retired from immutable home ${this.squadronId}:${this.participantId} by participant.left and cannot send cross-agent messages. Do not repair the projection or register another home; stop this messaging attempt.`;
   }
 }
 
@@ -122,6 +151,8 @@ export type A2ASendError =
   | Schema.SchemaError
   | SqlError
   | A2ASenderNotJoinedError
+  | A2ASenderRetiredError
+  | A2AHomeMembershipStateError
   | A2AParticipantNotFoundError
   | A2AAmbiguousParticipantError
   | A2AIntentRequiredError
@@ -196,15 +227,38 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
       const senderMembership = Effect.fn("j5.a2a.send.senderMembership")(function* (
         threadId: ThreadId,
       ) {
-        const matches = (yield* membershipRows()).filter((row) => row.thread_id === threadId);
-        if (matches.length !== 1) {
-          return yield* new A2ASenderNotJoinedError({ threadId });
+        const resolution = yield* resolveThreadHome(sql, threadId).pipe(
+          Effect.catchTag("A2AHomeNotFoundError", () =>
+            Effect.fail(new A2ASenderNotJoinedError({ threadId })),
+          ),
+        );
+        const matches = resolution.activeMemberships.filter(
+          (membership) =>
+            membership.squadronId === resolution.home.squadronId &&
+            membership.participantId === resolution.home.participantId,
+        );
+        if (resolution.retired && resolution.activeMemberships.length === 0) {
+          return yield* new A2ASenderRetiredError({
+            threadId,
+            squadronId: resolution.home.squadronId,
+            participantId: resolution.home.participantId,
+          });
         }
-        const row = matches[0]!;
-        return {
-          squadronId: SquadronId.make(row.squadron_id),
-          participantId: row.participant_id as ParticipantId,
-        };
+        if (
+          resolution.retired ||
+          resolution.activeMemberships.length !== 1 ||
+          matches.length !== 1
+        ) {
+          return yield* new A2AHomeMembershipStateError({
+            threadId,
+            expectedSquadronId: resolution.home.squadronId,
+            expectedParticipantId: resolution.home.participantId,
+            activeHomes: resolution.activeMemberships.map(
+              (membership) => `${membership.squadronId}:${membership.participantId}`,
+            ),
+          });
+        }
+        return resolution.home;
       });
 
       const participantMembership = Effect.fn("j5.a2a.send.participantMembership")(function* (

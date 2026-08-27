@@ -9,6 +9,7 @@ import {
   runMigrations,
 } from "../../persistence/Migrations.ts";
 import { J5_A2A_MIGRATIONS_TABLE, migrationEntries, runJ5A2AMigrations } from "./Migrations.ts";
+import Migration0005 from "./migrations/005_ImmutableThreadHome.ts";
 
 it.effect("tracks J5 A2A migrations independently from upstream migrations", () =>
   Effect.gen(function* () {
@@ -34,10 +35,11 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 2, name: "SendDeliverReply" },
       { migration_id: 3, name: "SquadronRename" },
       { migration_id: 4, name: "SilenceNoticeChannel" },
+      { migration_id: 5, name: "ImmutableThreadHome" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id]) => id),
-      [1, 2, 3, 4],
+      [1, 2, 3, 4, 5],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
@@ -79,7 +81,8 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'j5_a2a_exchange_id_idx',
           'j5_a2a_delivery_drain_idx',
           'j5_a2a_delivery_message_sender_idx',
-          'j5_a2a_delivery_one_reply_idx'
+          'j5_a2a_delivery_one_reply_idx',
+          'j5_a2a_comm_event_agent_home_thread_idx'
         )
       ORDER BY name
     `;
@@ -147,6 +150,22 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       indexesByName.get("j5_a2a_delivery_one_reply_idx") ?? "",
       "WHERE exchange_id IS NOT NULL AND exchange_role = 'reply'",
     );
+    assert.include(
+      indexesByName.get("j5_a2a_comm_event_agent_home_thread_idx") ?? "",
+      "json_extract(payload, '$.participant.threadId')",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_comm_event_agent_home_thread_idx") ?? "",
+      "CREATE UNIQUE INDEX j5_a2a_comm_event_agent_home_thread_idx",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_comm_event_agent_home_thread_idx") ?? "",
+      "WHERE kind = 'participant.joined'",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_comm_event_agent_home_thread_idx") ?? "",
+      "json_extract(payload, '$.participant.kind') = 'agent'",
+    );
     const envelopeChannel = deliveryColumns.find((column) => column.name === "envelope_channel");
     assert.equal(envelopeChannel?.notnull, 1);
     assert.isNull(envelopeChannel?.dflt_value);
@@ -155,6 +174,120 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
     `;
     assert.deepStrictEqual(cursor, [{ after_sequence: null }]);
     assert.deepStrictEqual(unprefixed, []);
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect("reports conflicting thread ids before creating the immutable-home index", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 4 });
+    yield* sql`
+      INSERT INTO j5_a2a_squadron (id, name, created_at) VALUES
+        ('squadron:migration-conflict:first', 'First conflict source', '2026-08-19T00:00:00.000Z'),
+        ('squadron:migration-conflict:second', 'Second conflict source', '2026-08-19T00:00:00.000Z')
+    `;
+    yield* sql`
+      INSERT INTO j5_a2a_comm_event (
+        seq,
+        squadron_id,
+        kind,
+        sender,
+        receiver,
+        exchange_id,
+        correlation_id,
+        payload,
+        created_at,
+        command_id
+      ) VALUES
+        (
+          1,
+          'squadron:migration-conflict:first',
+          'participant.joined',
+          NULL,
+          'agent:migration-conflict:a:first',
+          NULL,
+          NULL,
+          json_object(
+            'participant',
+            json_object(
+              'kind', 'agent',
+              'id', 'agent:migration-conflict:a:first',
+              'threadId', 'thread:migration-conflict:a'
+            )
+          ),
+          '2026-08-19T00:00:00.000Z',
+          'command:migration-conflict:a:first'
+        ),
+        (
+          2,
+          'squadron:migration-conflict:first',
+          'participant.joined',
+          NULL,
+          'agent:migration-conflict:b:first',
+          NULL,
+          NULL,
+          json_object(
+            'participant',
+            json_object(
+              'kind', 'agent',
+              'id', 'agent:migration-conflict:b:first',
+              'threadId', 'thread:migration-conflict:b'
+            )
+          ),
+          '2026-08-19T00:00:00.000Z',
+          'command:migration-conflict:b:first'
+        ),
+        (
+          1,
+          'squadron:migration-conflict:second',
+          'participant.joined',
+          NULL,
+          'agent:migration-conflict:a:second',
+          NULL,
+          NULL,
+          json_object(
+            'participant',
+            json_object(
+              'kind', 'agent',
+              'id', 'agent:migration-conflict:a:second',
+              'threadId', 'thread:migration-conflict:a'
+            )
+          ),
+          '2026-08-19T00:00:00.000Z',
+          'command:migration-conflict:a:second'
+        ),
+        (
+          2,
+          'squadron:migration-conflict:second',
+          'participant.joined',
+          NULL,
+          'agent:migration-conflict:b:second',
+          NULL,
+          NULL,
+          json_object(
+            'participant',
+            json_object(
+              'kind', 'agent',
+              'id', 'agent:migration-conflict:b:second',
+              'threadId', 'thread:migration-conflict:b'
+            )
+          ),
+          '2026-08-19T00:00:00.000Z',
+          'command:migration-conflict:b:second'
+        )
+    `;
+
+    const error = yield* Effect.flip(Migration0005);
+
+    assert.include(String(error), "thread:migration-conflict:a (2 joins)");
+    assert.include(String(error), "thread:migration-conflict:b (2 joins)");
+    assert.include(String(error), "Repair duplicate participant.joined history");
+    const indexes = yield* sql<{ readonly count: number }>`
+      SELECT COUNT(*) AS count
+      FROM sqlite_master
+      WHERE type = 'index' AND name = 'j5_a2a_comm_event_agent_home_thread_idx'
+    `;
+    assert.deepStrictEqual(indexes, [{ count: 0 }]);
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
 

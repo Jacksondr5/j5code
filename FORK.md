@@ -19,6 +19,7 @@ cd j5code
 git remote add upstream https://github.com/pingdotgg/t3code.git
 git fetch --all --prune
 git switch j5/main
+# j5/main is the canonical fork branch; do not use fork-local main; upstream refs live under the upstream remote.
 ```
 
 ## Add, don't modify
