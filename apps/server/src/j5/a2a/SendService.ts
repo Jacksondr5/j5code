@@ -12,11 +12,11 @@ import {
   CorrelationId,
   SquadronId,
   ExchangeId,
-  GLOBAL_HUMAN_PARTICIPANT_ID,
+  isHumanParticipantId,
   LedgerMessageId,
   Participant,
   type ParticipantDirectoryRow,
-  type ParticipantId,
+  ParticipantId,
   type SendMessageInput,
   type SendMessageResult,
   participantId,
@@ -266,7 +266,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
         senderSquadronId: SquadronId,
       ) {
         const matches = (yield* membershipRows()).filter((row) => row.participant_id === id);
-        if (id === GLOBAL_HUMAN_PARTICIPANT_ID) {
+        if (isHumanParticipantId(id)) {
           const local = matches.find((row) => row.squadron_id === senderSquadronId);
           if (local === undefined) {
             return yield* new A2AParticipantNotFoundError({ participantId: id });
@@ -301,7 +301,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
           }
           const selected = rows.filter(
             (row) =>
-              row.participant_id !== GLOBAL_HUMAN_PARTICIPANT_ID ||
+              !isHumanParticipantId(ParticipantId.make(row.participant_id)) ||
               row.squadron_id === sender.squadronId,
           );
           return yield* Effect.forEach(
@@ -310,8 +310,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
               decodeParticipant(row.payload).pipe(
                 Effect.map((participant) => {
                   const id = participantId(participant);
-                  const addressable =
-                    id === GLOBAL_HUMAN_PARTICIPANT_ID || membershipCounts.get(id) === 1;
+                  const addressable = isHumanParticipantId(id) || membershipCounts.get(id) === 1;
                   return {
                     squadronId: SquadronId.make(row.squadron_id),
                     participantId: id,

@@ -31,6 +31,10 @@ const receiver: AgentParticipant = {
   id: ParticipantId.make("agent:receiver"),
   threadId: ThreadId.make("thread:receiver"),
 };
+const person = {
+  kind: "human" as const,
+  id: ParticipantId.make("human:send-person"),
+};
 
 const setupSameSquadron = Effect.fn("test.j5.a2a.setupSameSquadron")(function* () {
   yield* runJ5A2AMigrations();
@@ -171,10 +175,10 @@ it.effect("validates intent and human-only urgency at exchange open", () =>
       event: {
         kind: "participant.joined",
         sender: null,
-        receiver: ParticipantId.make("human:global"),
+        receiver: person.id,
         exchangeId: null,
         correlationId: null,
-        payload: { participant: { kind: "human" } },
+        payload: { participant: person },
         createdAt: timestamp,
       },
     });
@@ -195,7 +199,7 @@ it.effect("validates intent and human-only urgency at exchange open", () =>
       service.send({
         commandId: CommCommandId.make("command:missing-urgency"),
         senderThreadId: sender.threadId,
-        to: ParticipantId.make("human:global"),
+        to: person.id,
         message: "Human question",
         expectReply: true,
         intent: "Obtain a human ruling",
@@ -222,7 +226,7 @@ it.effect("validates intent and human-only urgency at exchange open", () =>
       service.send({
         commandId: CommCommandId.make("command:one-shot-urgency"),
         senderThreadId: sender.threadId,
-        to: ParticipantId.make("human:global"),
+        to: person.id,
         message: "One-shot human message",
         urgency: "fyi",
         acceptedAt: timestamp,
@@ -531,7 +535,12 @@ it.effect("ignores left events that do not identify a later retirement of the ex
           receiver: null,
           exchangeId: null,
           correlationId: null,
-          payload: { participant: { kind: "human" } },
+          payload: {
+            participant: {
+              kind: "human",
+              id: ParticipantId.make(`human:retirement-padding:${index}`),
+            },
+          },
           createdAt: timestamp,
         },
       });
@@ -615,10 +624,10 @@ it.effect("lists membership-derived participant capabilities", () =>
       event: {
         kind: "participant.joined",
         sender: null,
-        receiver: ParticipantId.make("human:global"),
+        receiver: person.id,
         exchangeId: null,
         correlationId: null,
-        payload: { participant: { kind: "human" } },
+        payload: { participant: person },
         createdAt: timestamp,
       },
     });
@@ -644,7 +653,7 @@ it.effect("lists membership-derived participant capabilities", () =>
           acceptsUrgency: false,
         },
         {
-          id: ParticipantId.make("human:global"),
+          id: person.id,
           canReceiveMessage: true,
           canOpenExchange: true,
           acceptsUrgency: true,

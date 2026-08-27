@@ -11,7 +11,7 @@ import {
   type DeliveryEnvelopeChannel,
   SquadronId,
   ExchangeId,
-  GLOBAL_HUMAN_PARTICIPANT_ID,
+  isHumanParticipantId,
   Participant,
   ParticipantId,
   type LedgerMessageId,
@@ -83,6 +83,15 @@ interface MembershipRow {
   readonly payload: string;
 }
 
+interface HumanExchangeRow {
+  readonly sender_id: string;
+  readonly receiver_id: string;
+  readonly intent: string;
+  readonly urgency: "blocking" | "soon" | "fyi" | null;
+  readonly opened_seq: number;
+  readonly created_at: string;
+}
+
 const decodeParticipant = Schema.decodeUnknownEffect(Schema.fromJsonString(Participant));
 
 const assertNever = (channel: never): never => {
@@ -92,7 +101,7 @@ const assertNever = (channel: never): never => {
 export const formatAgentDeliveryEnvelope = (input: AgentDeliveryInput): string => {
   switch (input.envelopeChannel) {
     case "peer":
-      return input.senderId === GLOBAL_HUMAN_PARTICIPANT_ID
+      return isHumanParticipantId(input.senderId)
         ? formatHumanEnvelope({
             senderId: input.senderId,
             exchangeId: input.exchangeId,
@@ -163,7 +172,7 @@ export const live: Layer.Layer<
             createdBy:
               input.envelopeChannel === "silence_notice"
                 ? "system"
-                : input.senderId === GLOBAL_HUMAN_PARTICIPANT_ID
+                : isHumanParticipantId(input.senderId)
                   ? "user"
                   : "agent",
             creationSource: "mcp",
@@ -174,12 +183,14 @@ export const live: Layer.Layer<
           ),
         ),
       deliverHuman: (input) =>
-        sql`
+        Effect.gen(function* () {
+          yield* sql`
             INSERT INTO j5_a2a_human_inbox_data (
               origin_squadron_id,
               message_id,
               exchange_id,
               sender_id,
+              receiver_id,
               payload,
               created_at
             ) VALUES (
@@ -187,11 +198,73 @@ export const live: Layer.Layer<
               ${input.messageId},
               ${input.exchangeId},
               ${input.senderId},
+              ${input.receiverId},
               ${input.message},
               ${input.createdAt}
             )
             ON CONFLICT(origin_squadron_id, message_id) DO NOTHING
-          `.pipe(
+          `;
+          if (input.exchangeId === null) return;
+          const exchanges = yield* sql<HumanExchangeRow>`
+            SELECT sender_id, receiver_id, intent, urgency, opened_seq, created_at
+            FROM j5_a2a_exchange
+            WHERE squadron_id = ${input.originSquadronId}
+              AND exchange_id = ${input.exchangeId}
+              AND status = 'open'
+              AND receiver_id = ${input.receiverId}
+            LIMIT 1
+          `;
+          const exchange = exchanges[0];
+          if (exchange === undefined || exchange.urgency === null) {
+            return yield* new A2ADeliveryTargetError({
+              participantId: input.receiverId,
+              state: "person-addressed exchange disappeared before inbox projection",
+            });
+          }
+          yield* sql`
+            INSERT INTO j5_a2a_human_inbox (
+              person_id,
+              squadron_id,
+              exchange_id,
+              sender_id,
+              intent,
+              urgency,
+              latest_message_id,
+              latest_message,
+              opened_seq,
+              opened_at,
+              status,
+              terminal_seq,
+              terminal_at,
+              terminal_disposition,
+              terminal_cause,
+              terminal_facts,
+              terminal_notice_message_id
+            ) VALUES (
+              ${input.receiverId},
+              ${input.originSquadronId},
+              ${input.exchangeId},
+              ${exchange.sender_id},
+              ${exchange.intent},
+              ${exchange.urgency},
+              ${input.messageId},
+              ${input.message},
+              ${exchange.opened_seq},
+              ${exchange.created_at},
+              'open',
+              NULL,
+              NULL,
+              NULL,
+              NULL,
+              NULL,
+              NULL
+            )
+            ON CONFLICT(person_id, squadron_id, exchange_id) DO UPDATE SET
+              latest_message_id = excluded.latest_message_id,
+              latest_message = excluded.latest_message
+            WHERE j5_a2a_human_inbox.status = 'open'
+          `;
+        }).pipe(
           Effect.asVoid,
           Effect.mapError(
             (cause) => new A2ADeliveryTransportError({ operation: "deliver human", cause }),

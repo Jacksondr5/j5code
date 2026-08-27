@@ -6,6 +6,7 @@ import { layer as homeRegistrarLayer } from "./HomeRegistrar.ts";
 import { layer as ledgerLayer } from "./LedgerService.ts";
 import { layer as sendServiceLayer } from "./SendService.ts";
 import { layer as silenceDetectorLayer } from "./SilenceDetector.ts";
+import { layer as humanInboxLayer } from "./HumanInboxService.ts";
 
 export const makeJ5A2ARuntimeLayer = (
   options: {
@@ -27,6 +28,7 @@ export const makeJ5A2ARuntimeLayer = (
     sendServiceLayer,
     deliveryWorkerProvided,
     silenceDetectorProvided,
+    humanInboxLayer,
   ).pipe(Layer.provideMerge(ledgerProvided));
 };
 

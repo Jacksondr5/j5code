@@ -315,6 +315,22 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
               AND exchange_id = ${event.exchangeId}
               AND status = 'open'
           `;
+          // Human inbox history is an A4-owned ledger projection. Lifecycle
+          // producers append terminal facts and never mutate this table.
+          yield* sql`
+            UPDATE j5_a2a_human_inbox
+            SET
+              status = 'answered',
+              terminal_seq = ${event.seq},
+              terminal_at = ${event.createdAt},
+              terminal_disposition = 'answered',
+              terminal_cause = NULL,
+              terminal_facts = NULL,
+              terminal_notice_message_id = NULL
+            WHERE squadron_id = ${event.squadronId}
+              AND exchange_id = ${event.exchangeId}
+              AND status = 'open'
+          `;
           return;
         }
         case "message.sent": {

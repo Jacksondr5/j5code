@@ -32,13 +32,7 @@ import {
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
-import {
-  CommCommandId,
-  SquadronId,
-  GLOBAL_HUMAN_PARTICIPANT_ID,
-  ParticipantId,
-  type AgentParticipant,
-} from "./contracts.ts";
+import { CommCommandId, SquadronId, ParticipantId, type AgentParticipant } from "./contracts.ts";
 
 const timestamp = "2026-08-16T12:00:00.000Z";
 const sender: AgentParticipant = {
@@ -50,6 +44,10 @@ const receiver: AgentParticipant = {
   kind: "agent",
   id: ParticipantId.make("agent:delivery-receiver"),
   threadId: ThreadId.make("thread:delivery-receiver"),
+};
+const person = {
+  kind: "human" as const,
+  id: ParticipantId.make("human:delivery-person"),
 };
 
 const makeTestLayer = (
@@ -544,18 +542,21 @@ it.effect("delivers to the human through the idempotent inbox-data transport", (
         event: {
           kind: "participant.joined",
           sender: null,
-          receiver: GLOBAL_HUMAN_PARTICIPANT_ID,
+          receiver: person.id,
           exchangeId: null,
           correlationId: null,
-          payload: { participant: { kind: "human" } },
+          payload: { participant: person },
           createdAt: timestamp,
         },
       });
       const sent = yield* (yield* A2ASendService).send({
         commandId: CommCommandId.make("command:delivery:human"),
         senderThreadId: sender.threadId,
-        to: GLOBAL_HUMAN_PARTICIPANT_ID,
+        to: person.id,
         message: "Human inbox payload",
+        expectReply: true,
+        intent: "Obtain a human answer",
+        urgency: "soon",
         acceptedAt: timestamp,
       });
       const delivery = yield* (yield* A2ADeliveryWorker).runOnce;
@@ -565,13 +566,35 @@ it.effect("delivers to the human through the idempotent inbox-data transport", (
       const rows = yield* sql<{
         readonly message_id: string;
         readonly payload: string;
+        readonly receiver_id: string;
       }>`
-        SELECT message_id, payload
+        SELECT message_id, payload, receiver_id
         FROM j5_a2a_human_inbox_data
         WHERE origin_squadron_id = ${squadronId}
       `;
       assert.deepStrictEqual(rows, [
-        { message_id: sent.messageId, payload: "Human inbox payload" },
+        {
+          message_id: sent.messageId,
+          payload: "Human inbox payload",
+          receiver_id: person.id,
+        },
+      ]);
+      const inbox = yield* sql<{
+        readonly person_id: string;
+        readonly exchange_id: string;
+        readonly status: string;
+        readonly urgency: string;
+      }>`
+        SELECT person_id, exchange_id, status, urgency
+        FROM j5_a2a_human_inbox
+      `;
+      assert.deepStrictEqual(inbox, [
+        {
+          person_id: person.id,
+          exchange_id: sent.exchangeId!,
+          status: "open",
+          urgency: "soon",
+        },
       ]);
       assert.isNull(yield* (yield* A2ADeliveryWorker).runOnce);
     }).pipe(Effect.provide(layer));

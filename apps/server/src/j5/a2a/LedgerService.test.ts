@@ -294,6 +294,10 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
       id: ParticipantId.make("agent:second"),
       threadId: ThreadId.make("thread:second"),
     };
+    const person = {
+      kind: "human" as const,
+      id: ParticipantId.make("human:ledger-person"),
+    };
     const membershipEvents: ReadonlyArray<CommEvent> = [
       {
         kind: "participant.joined",
@@ -307,10 +311,10 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
       {
         kind: "participant.joined",
         sender: null,
-        receiver: null,
+        receiver: person.id,
         exchangeId: null,
         correlationId: null,
-        payload: { participant: { kind: "human" } },
+        payload: { participant: person },
         createdAt: timestamp,
       },
       {
@@ -328,7 +332,7 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
         receiver: null,
         exchangeId: null,
         correlationId: null,
-        payload: { participant: { kind: "human" } },
+        payload: { participant: person },
         createdAt: timestamp,
       },
       {
@@ -354,7 +358,7 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
       },
       {
         squadronId,
-        participant: { kind: "human" as const },
+        participant: person,
         joinedSeq: 2,
         updatedSeq: 4,
       },

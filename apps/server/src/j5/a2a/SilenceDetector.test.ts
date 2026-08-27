@@ -43,10 +43,10 @@ import {
   CommCommandId,
   CorrelationId,
   SquadronId,
-  GLOBAL_HUMAN_PARTICIPANT_ID,
   ParticipantId,
   SILENCE_DETECTOR_PARTICIPANT_ID,
   type AgentParticipant,
+  type HumanParticipant,
   type ExchangeId,
   type LedgerMessageId,
 } from "./contracts.ts";
@@ -71,6 +71,10 @@ const newerPeer: AgentParticipant = {
   kind: "agent",
   id: ParticipantId.make("agent:silence:newer-peer"),
   threadId: ThreadId.make("thread:silence:newer-peer"),
+};
+const person: HumanParticipant = {
+  kind: "human",
+  id: ParticipantId.make("human:silence-person"),
 };
 const failureDetail = {
   class: "provider_error" as const,
@@ -189,10 +193,10 @@ const makeDaemonTestLayer = (
 };
 
 const join = Effect.fn("test.j5.a2a.silence.join")(function* (
-  participant: AgentParticipant | { readonly kind: "human" },
+  participant: AgentParticipant | HumanParticipant,
   suffix: string,
 ) {
-  const participantId = participant.kind === "human" ? GLOBAL_HUMAN_PARTICIPANT_ID : participant.id;
+  const participantId = participant.id;
   yield* (yield* A2ALedger).append({
     commandId: CommCommandId.make(`command:silence:join:${suffix}`),
     squadronId,
@@ -219,7 +223,7 @@ const seed = Effect.fn("test.j5.a2a.silence.seed")(function* () {
   yield* join(subject, "subject");
   yield* join(peer, "peer");
   yield* join(newerPeer, "newer-peer");
-  yield* join({ kind: "human" }, "human");
+  yield* join(person, "human");
 });
 
 const openExchange = Effect.fn("test.j5.a2a.silence.openExchange")(function* (
@@ -235,7 +239,7 @@ const openExchange = Effect.fn("test.j5.a2a.silence.openExchange")(function* (
     message: `Silence detector request ${suffix}`,
     expectReply: true,
     intent: `Prove ${suffix}`,
-    ...(to === GLOBAL_HUMAN_PARTICIPANT_ID ? { urgency: "blocking" as const } : {}),
+    ...(to === person.id ? { urgency: "blocking" as const } : {}),
     acceptedAt: iso(acceptedAtSecond),
   });
 });
@@ -618,22 +622,22 @@ it.effect("emits awaiting-human with human-knows when the inbox row exists", () 
   Effect.gen(function* () {
     yield* seed();
     yield* seedInbound(0);
-    const outbound = yield* openExchange(subject, GLOBAL_HUMAN_PARTICIPANT_ID, "human-knows");
+    const outbound = yield* openExchange(subject, person.id, "human-knows");
     assert.isNotNull(outbound.exchangeId);
     const sql = yield* SqlClient.SqlClient;
     yield* sql`
       INSERT INTO j5_a2a_human_inbox_data (
-        origin_squadron_id, message_id, exchange_id, sender_id, payload, created_at
+        origin_squadron_id, message_id, exchange_id, sender_id, receiver_id, payload, created_at
       ) VALUES (
         ${squadronId}, ${outbound.messageId}, ${outbound.exchangeId}, ${subject.id},
-        'Human request', ${iso(1)}
+        ${person.id}, 'Human request', ${iso(1)}
       )
     `;
     yield* markDelivered(
       outbound.messageId,
       outbound.exchangeId!,
       subject.id,
-      GLOBAL_HUMAN_PARTICIPANT_ID,
+      person.id,
       1,
       "human",
     );
@@ -652,14 +656,9 @@ it.effect("emits awaiting-human with human-doesnt-know after terminal inbox fail
   Effect.gen(function* () {
     yield* seed();
     yield* seedInbound(0);
-    const outbound = yield* openExchange(subject, GLOBAL_HUMAN_PARTICIPANT_ID, "human-alarmed");
+    const outbound = yield* openExchange(subject, person.id, "human-alarmed");
     assert.isNotNull(outbound.exchangeId);
-    yield* markAlarmed(
-      outbound.messageId,
-      outbound.exchangeId!,
-      subject.id,
-      GLOBAL_HUMAN_PARTICIPANT_ID,
-    );
+    yield* markAlarmed(outbound.messageId, outbound.exchangeId!, subject.id, person.id);
 
     yield* (yield* A2ASilenceDetector).handleStoredEvent(terminalEvent("completed"));
     const notices = yield* readNotices();
@@ -702,13 +701,13 @@ it.effect("emits nothing for an idle agent that owes no reply", () =>
 it.effect("emits nothing when the human is the quiet recipient", () =>
   Effect.gen(function* () {
     yield* seed();
-    const outbound = yield* openExchange(subject, GLOBAL_HUMAN_PARTICIPANT_ID, "human-silence");
+    const outbound = yield* openExchange(subject, person.id, "human-silence");
     assert.isNotNull(outbound.exchangeId);
     const delivered = yield* markDelivered(
       outbound.messageId,
       outbound.exchangeId!,
       subject.id,
-      GLOBAL_HUMAN_PARTICIPANT_ID,
+      person.id,
       1,
       "human",
     );

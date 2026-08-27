@@ -60,7 +60,6 @@ import {
   CommCommandId,
   SquadronId,
   ExchangeId,
-  GLOBAL_HUMAN_PARTICIPANT_ID,
   LedgerMessageId,
   ParticipantId,
 } from "./contracts.ts";
@@ -460,12 +459,13 @@ it.effect("attributes human-origin delivery to the user actor", () =>
       const transport = yield* A2ADeliveryTransport;
       const target = yield* seedTarget("human-origin");
       const humanMessageId = LedgerMessageId.make("message:j5-a2a-delivery-human-origin");
+      const personId = ParticipantId.make("human:transport-person");
       const message = "Human-authored request delivered through A2A.";
 
       yield* transport.deliverAgent({
         ...target.delivery,
         messageId: humanMessageId,
-        senderId: GLOBAL_HUMAN_PARTICIPANT_ID,
+        senderId: personId,
         message,
       });
 
@@ -476,7 +476,7 @@ it.effect("attributes human-origin delivery to the user actor", () =>
       assert.equal(
         delivered?.text,
         formatHumanEnvelope({
-          senderId: GLOBAL_HUMAN_PARTICIPANT_ID,
+          senderId: personId,
           exchangeId: target.exchangeId,
           message,
         }),
