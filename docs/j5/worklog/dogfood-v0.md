@@ -37,6 +37,10 @@ status: 1
 - **A7** (upstream rebase) fires whenever pingdotgg#2829 merges and briefly preempts everything (expected: days).
 - 4a (PR pane, issue #6) continues with the human engineers independently.
 
+## Queued post-v0 (ratified, waiting on the milestone)
+
+- **Naming audit (Jackson, 2026-08-28):** examine the naming of everything against the settled glossary (Squadron et al.) — headline case: the `j5/a2a` module / `j5_a2a_*` table namespace has grown into the whole fleet-coordination substrate (Squadrons, membership, placement/provenance, messaging), so "a2a" now under-describes it. Rename cost grows with every milestone; run the audit immediately post-dogfood.
+
 ## Explicitly NOT v0
 
 Roles/Crews implementation (item 3 — design session completed 2026-08-23 ahead of the retro; feature docs are the build-ready contract, rulings at [roles-crews-session-2026-08-23.md](roles-crews-session-2026-08-23.md); staffing is a separate call), Memos, Playbooks, Shared Squadrons, item-4 panes, Director migration, multi-dev ticket sharing.
