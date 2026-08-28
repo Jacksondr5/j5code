@@ -73,18 +73,20 @@ export const runPlacementCascade = <A, E>(input: {
   readonly participantId: ParticipantId;
   readonly operation: (participant: AgentParticipantPlacementView) => Effect.Effect<A, E>;
 }): Effect.Effect<ReadonlyArray<A>, PlacementError | E> =>
-  input.placement.listSubtree({ squadronId: input.squadronId, participantId: input.participantId }).pipe(
-    Effect.flatMap((participants) =>
-      Effect.forEach(
-        participants.filter(
-          (participant): participant is AgentParticipantPlacementView =>
-            participant.participant.kind === "agent" && participant.threadId !== null,
+  input.placement
+    .listSubtree({ squadronId: input.squadronId, participantId: input.participantId })
+    .pipe(
+      Effect.flatMap((participants) =>
+        Effect.forEach(
+          participants.filter(
+            (participant): participant is AgentParticipantPlacementView =>
+              participant.participant.kind === "agent" && participant.threadId !== null,
+          ),
+          input.operation,
+          { concurrency: 1 },
         ),
-        input.operation,
-        { concurrency: 1 },
       ),
-    ),
-  );
+    );
 
 export interface PlacementCascadeServiceShape {
   readonly stop: (
