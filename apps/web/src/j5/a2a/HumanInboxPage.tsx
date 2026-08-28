@@ -16,6 +16,20 @@ interface HumanInboxAnswerAttempt {
   readonly clientRequestId: string;
 }
 
+type HumanInboxAnswers = Readonly<Record<string, string>>;
+
+export function captureHumanInboxAnswer(
+  event: { readonly currentTarget: { readonly value: string } },
+  exchangeId: string,
+  setAnswers: (update: (current: HumanInboxAnswers) => HumanInboxAnswers) => void,
+) {
+  const value = event.currentTarget.value;
+  setAnswers((current) => ({
+    ...current,
+    [exchangeId]: value,
+  }));
+}
+
 export async function submitHumanInboxAnswer(input: {
   readonly item: HumanInboxItem;
   readonly message: string;
@@ -69,7 +83,7 @@ export async function submitHumanInboxAnswer(input: {
 export function HumanInboxPage() {
   const [personId, setPersonId] = useState("");
   const [items, setItems] = useState<ReadonlyArray<HumanInboxItem>>([]);
-  const [answers, setAnswers] = useState<Readonly<Record<string, string>>>({});
+  const [answers, setAnswers] = useState<HumanInboxAnswers>({});
   const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -179,10 +193,7 @@ export function HumanInboxPage() {
                     <Textarea
                       aria-label={`Answer ${item.intent}`}
                       onChange={(event) =>
-                        setAnswers((current) => ({
-                          ...current,
-                          [item.exchangeId]: event.currentTarget.value,
-                        }))
+                        captureHumanInboxAnswer(event, item.exchangeId, setAnswers)
                       }
                       placeholder="Type the answer exactly as it should be delivered"
                       value={answers[item.exchangeId] ?? ""}

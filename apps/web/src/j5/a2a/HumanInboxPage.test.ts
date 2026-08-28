@@ -1,7 +1,30 @@
 import { assert, it, vi } from "@effect/vitest";
 
-import { submitHumanInboxAnswer } from "./HumanInboxPage";
+import { captureHumanInboxAnswer, submitHumanInboxAnswer } from "./HumanInboxPage";
 import type { HumanInboxItem } from "./humanInboxClient";
+
+it("captures typed answer text before the state updater runs", () => {
+  const event: { currentTarget: { value: string } | null } = {
+    currentTarget: { value: "Verbatim answer" },
+  };
+  let update:
+    | ((current: Readonly<Record<string, string>>) => Readonly<Record<string, string>>)
+    | undefined;
+
+  captureHumanInboxAnswer(
+    event as { readonly currentTarget: { readonly value: string } },
+    "exchange:deferred-update",
+    (next) => {
+      update = next;
+    },
+  );
+  event.currentTarget = null;
+
+  assert.deepStrictEqual(update?.({ existing: "Kept" }), {
+    existing: "Kept",
+    "exchange:deferred-update": "Verbatim answer",
+  });
+});
 
 it("clears pending state when answer attempt id generation fails", async () => {
   const item = {
