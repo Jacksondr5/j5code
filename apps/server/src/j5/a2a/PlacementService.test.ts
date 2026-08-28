@@ -25,11 +25,7 @@ import {
 } from "./PlacementService.ts";
 import { runPlacementCascade } from "./PlacementCascadeService.ts";
 import { CommCommandId, SquadronId, ParticipantId, type Participant } from "./contracts.ts";
-import {
-  PlacementCommandId,
-  type ParticipantProvenance,
-  type PlacementSelection,
-} from "./placementContracts.ts";
+import { PlacementCommandId, type ParticipantProvenance } from "./placementContracts.ts";
 
 const timestamp = "2026-08-16T16:00:00.000Z";
 const squadronId = SquadronId.make("squadron:placement");
@@ -106,7 +102,6 @@ const record = (input: {
   readonly index: number;
   readonly participant: Extract<Participant, { kind: "agent" }>;
   readonly provenance: ParticipantProvenance;
-  readonly placement?: PlacementSelection;
 }) =>
   Effect.gen(function* () {
     const placements = yield* ParticipantPlacementService;
@@ -116,49 +111,29 @@ const record = (input: {
       participantId: input.participant.id,
       actor: "platform",
       provenance: input.provenance,
-      placement: input.placement ?? { type: "default" },
       createdAt: timestamp,
     });
   });
 
-it.effect("keeps sibling placement distinct from immutable spawned-by provenance", () =>
+it.effect("places wrapper-created children under their current caller", () =>
   Effect.gen(function* () {
-    const coordinator = agent("coordinator");
     const spawner = agent("spawner");
-    const sibling = agent("sibling");
-    const explicit = agent("explicit");
-    const root = agent("root");
-    yield* prepare([coordinator, spawner, sibling, explicit, root]);
+    const child = agent("wrapper-child");
+    yield* prepare([spawner, child]);
 
     yield* record({
       index: 1,
-      participant: coordinator,
+      participant: spawner,
       provenance: { kind: "unknown", source: "native_or_unobserved" },
     });
-    yield* record({ index: 2, participant: spawner, provenance: spawnedBy(coordinator) });
-    const siblingResult = yield* record({
-      index: 3,
-      participant: sibling,
+    const childResult = yield* record({
+      index: 2,
+      participant: child,
       provenance: spawnedBy(spawner),
-      placement: { type: "sibling" },
-    });
-    const explicitResult = yield* record({
-      index: 4,
-      participant: explicit,
-      provenance: spawnedBy(spawner),
-      placement: { type: "other_parent", parentParticipantId: coordinator.id },
-    });
-    const rootResult = yield* record({
-      index: 5,
-      participant: root,
-      provenance: spawnedBy(spawner),
-      placement: { type: "root" },
     });
 
-    assert.deepStrictEqual(siblingResult.placement.provenance, spawnedBy(spawner));
-    assert.equal(siblingResult.placement.placementParentId, coordinator.id);
-    assert.equal(explicitResult.placement.placementParentId, coordinator.id);
-    assert.equal(rootResult.placement.placementParentId, null);
+    assert.deepStrictEqual(childResult.placement.provenance, spawnedBy(spawner));
+    assert.equal(childResult.placement.placementParentId, spawner.id);
   }).pipe(Effect.provide(TestLayer)),
 );
 
@@ -236,6 +211,19 @@ it.effect(
           ?.placementParentId,
         group.id,
       );
+      const forkReparent = yield* placements.reparent(humanCaller, {
+        commandId: PlacementCommandId.make("reparent:fork-to-root"),
+        squadronId,
+        participantId: nestedFork.id,
+        placementParentId: null,
+        createdAt: timestamp,
+      });
+      assert.equal(forkReparent.placement.placementParentId, null);
+      assert.deepStrictEqual(forkReparent.placement.provenance, {
+        kind: "forked-from",
+        sourceParticipantId: source.id,
+        source: "upstream_lineage",
+      });
     }).pipe(Effect.provide(TestLayer)),
 );
 
@@ -266,7 +254,7 @@ it.effect(
     }).pipe(Effect.provide(TestLayer)),
 );
 
-it.effect("retains departed provenance but refuses a participant id that never joined", () =>
+it.effect("roots departed lineage backfill while refusing a participant id that never joined", () =>
   Effect.gen(function* () {
     const departedParent = agent("departed-parent");
     const child = agent("departed-child");
@@ -296,18 +284,28 @@ it.effect("retains departed provenance but refuses a participant id that never j
     const departedResult = yield* record({
       index: 2,
       participant: child,
-      provenance: spawnedBy(departedParent),
-      placement: { type: "root" },
+      provenance: {
+        kind: "spawned-by",
+        spawnedByParticipantId: departedParent.id,
+        source: "upstream_lineage",
+      },
     });
-    assert.deepStrictEqual(departedResult.placement.provenance, spawnedBy(departedParent));
+    assert.deepStrictEqual(departedResult.placement.provenance, {
+      kind: "spawned-by",
+      spawnedByParticipantId: departedParent.id,
+      source: "upstream_lineage",
+    });
     assert.equal(departedResult.placement.placementParentId, null);
 
     const fabricatedError = yield* Effect.flip(
       record({
         index: 3,
         participant: fabricatedTarget,
-        provenance: spawnedBy(fabricatedSource),
-        placement: { type: "root" },
+        provenance: {
+          kind: "spawned-by",
+          spawnedByParticipantId: fabricatedSource.id,
+          source: "upstream_lineage",
+        },
       }),
     );
     assert.isTrue(isParticipantNotFound(fabricatedError));
@@ -339,7 +337,6 @@ it.effect("replays placement creation without changing immutable provenance", ()
       participantId: child.id,
       actor: "agent" as const,
       provenance: spawnedBy(parent),
-      placement: { type: "default" as const },
       createdAt: timestamp,
     };
 
@@ -424,7 +421,8 @@ it.effect(
       assert.isTrue(isCycle(cycleError));
       assert.include(cycleError.message, "Placement cycle state");
       assert.equal(
-        (yield* placements.readPlacement({ squadronId, participantId: first.id }))?.placementParentId,
+        (yield* placements.readPlacement({ squadronId, participantId: first.id }))
+          ?.placementParentId,
         null,
       );
     }).pipe(Effect.provide(TestLayer)),
@@ -504,16 +502,28 @@ it.effect("walks cascade targets by mutable placement rather than provenance", (
       index: 3,
       participant: movedToSecond,
       provenance: spawnedBy(firstRoot),
-      placement: { type: "other_parent", parentParticipantId: secondRoot.id },
     });
     yield* record({ index: 4, participant: childOfMoved, provenance: spawnedBy(movedToSecond) });
     yield* record({
       index: 5,
       participant: movedToFirst,
       provenance: spawnedBy(secondRoot),
-      placement: { type: "other_parent", parentParticipantId: firstRoot.id },
     });
     const placements = yield* ParticipantPlacementService;
+    yield* placements.reparent(humanCaller, {
+      commandId: PlacementCommandId.make("reparent:moved-to-second"),
+      squadronId,
+      participantId: movedToSecond.id,
+      placementParentId: secondRoot.id,
+      createdAt: timestamp,
+    });
+    yield* placements.reparent(humanCaller, {
+      commandId: PlacementCommandId.make("reparent:moved-to-first"),
+      squadronId,
+      participantId: movedToFirst.id,
+      placementParentId: firstRoot.id,
+      createdAt: timestamp,
+    });
 
     const firstCascade = yield* runPlacementCascade({
       placement: placements,
@@ -555,7 +565,10 @@ it.effect(
         createdAt: timestamp,
       });
       const childBefore = yield* placements.readPlacement({ squadronId, participantId: child.id });
-      const parentBefore = yield* placements.readPlacement({ squadronId, participantId: parent.id });
+      const parentBefore = yield* placements.readPlacement({
+        squadronId,
+        participantId: parent.id,
+      });
       assert.isNotNull(childBefore);
       assert.isNotNull(parentBefore);
       const before = [childBefore!, parentBefore!];

@@ -23,6 +23,12 @@ import {
 import { J5ToolkitHandlersLive } from "./handlers.ts";
 import { J5Toolkit, type J5SendMessageInput } from "./tools.ts";
 
+interface PlacementCascadeArgs {
+  readonly client_request_id: string;
+  readonly squadron_id: SquadronId;
+  readonly participant_id: ParticipantId;
+}
+
 const invocation = {
   environmentId: EnvironmentId.make("environment:j5:mcp-handler"),
   threadId: ThreadId.make("thread:j5:mcp-handler"),
@@ -187,12 +193,27 @@ it.effect("enriches participants and authorizes cascades before placement dispat
 
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
-      const call = (
-        name: "list_participants" | "stop_agent" | "archive_agent",
-        args: Record<string, unknown>,
-      ) =>
+      const callList = () =>
         toolkit
-          .handle(name, args)
+          .handle("list_participants", {})
+          .pipe(
+            Stream.unwrap,
+            Stream.run(Sink.last()),
+            Effect.flatMap(Effect.fromOption),
+            Effect.provideService(McpInvocationContext, invocation),
+          );
+      const callStop = (args: PlacementCascadeArgs) =>
+        toolkit
+          .handle("stop_agent", args)
+          .pipe(
+            Stream.unwrap,
+            Stream.run(Sink.last()),
+            Effect.flatMap(Effect.fromOption),
+            Effect.provideService(McpInvocationContext, invocation),
+          );
+      const callArchive = (args: PlacementCascadeArgs) =>
+        toolkit
+          .handle("archive_agent", args)
           .pipe(
             Stream.unwrap,
             Stream.run(Sink.last()),
@@ -200,7 +221,7 @@ it.effect("enriches participants and authorizes cascades before placement dispat
             Effect.provideService(McpInvocationContext, invocation),
           );
 
-      const listed = yield* call("list_participants", {});
+      const listed = yield* callList();
       const listedRows = (
         listed.result as unknown as {
           readonly participants: ReadonlyArray<{
@@ -214,12 +235,12 @@ it.effect("enriches participants and authorizes cascades before placement dispat
       assert.deepStrictEqual(listedRows[1]?.provenance, { kind: "not-applicable" });
       assert.equal(listedRows[1]?.placementParentId, null);
 
-      yield* call("stop_agent", {
+      yield* callStop({
         client_request_id: "cascade-stop-1",
         squadron_id: squadronId,
         participant_id: childParticipantId,
       });
-      yield* call("archive_agent", {
+      yield* callArchive({
         client_request_id: "cascade-archive-1",
         squadron_id: squadronId,
         participant_id: childParticipantId,
@@ -243,7 +264,7 @@ it.effect("enriches participants and authorizes cascades before placement dispat
         ],
       );
 
-      const crossSquadron = yield* call("stop_agent", {
+      const crossSquadron = yield* callStop({
         client_request_id: "cross-squadron-stop",
         squadron_id: otherSquadronId,
         participant_id: childParticipantId,
@@ -256,20 +277,20 @@ it.effect("enriches participants and authorizes cascades before placement dispat
       assert.lengthOf(yield* Ref.get(cascadeCommands), 2);
 
       yield* Ref.set(directoryRows, []);
-      const missing = yield* call("archive_agent", {
+      const missing = yield* callArchive({
         client_request_id: "missing-caller",
         squadron_id: squadronId,
         participant_id: childParticipantId,
       });
       assert.isTrue(missing.isFailure);
-      assert.include((missing.result as unknown as { message: string }).message, "missing for thread");
+      assert.include(
+        (missing.result as unknown as { message: string }).message,
+        "missing for thread",
+      );
       assert.lengthOf(yield* Ref.get(cascadeCommands), 2);
 
-      yield* Ref.set(directoryRows, [
-        callerRow,
-        { ...callerRow, squadronId: otherSquadronId },
-      ]);
-      const ambiguous = yield* call("stop_agent", {
+      yield* Ref.set(directoryRows, [callerRow, { ...callerRow, squadronId: otherSquadronId }]);
+      const ambiguous = yield* callStop({
         client_request_id: "ambiguous-caller",
         squadron_id: squadronId,
         participant_id: childParticipantId,

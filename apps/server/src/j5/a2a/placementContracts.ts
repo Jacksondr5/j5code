@@ -49,18 +49,6 @@ export const ParticipantProvenanceView = Schema.Union([
 ]);
 export type ParticipantProvenanceView = typeof ParticipantProvenanceView.Type;
 
-export const PlacementSelection = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("default") }),
-  Schema.Struct({ type: Schema.Literal("spawner") }),
-  Schema.Struct({ type: Schema.Literal("sibling") }),
-  Schema.Struct({ type: Schema.Literal("root") }),
-  Schema.Struct({
-    type: Schema.Literal("other_parent"),
-    parentParticipantId: ParticipantId,
-  }),
-]);
-export type PlacementSelection = typeof PlacementSelection.Type;
-
 export const ParticipantPlacement = Schema.Struct({
   squadronId: SquadronId,
   participantId: ParticipantId,
@@ -111,7 +99,6 @@ export const RecordParticipantPlacementInput = Schema.Struct({
   participantId: ParticipantId,
   actor: PlacementActor,
   provenance: ParticipantProvenance,
-  placement: PlacementSelection,
   createdAt: Schema.String,
 });
 export type RecordParticipantPlacementInput = typeof RecordParticipantPlacementInput.Type;

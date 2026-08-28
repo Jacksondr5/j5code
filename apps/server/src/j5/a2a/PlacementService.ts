@@ -70,19 +70,6 @@ export class PlacementAlreadyExistsError extends Schema.TaggedErrorClass<Placeme
   }
 }
 
-export class PlacementReferenceUnavailableError extends Schema.TaggedErrorClass<PlacementReferenceUnavailableError>()(
-  "PlacementReferenceUnavailableError",
-  {
-    participantId: ParticipantId,
-    provenanceKind: Schema.Literals(["forked-from", "unknown"]),
-    requestedPlacement: Schema.Literals(["spawner", "sibling"]),
-  },
-) {
-  override get message(): string {
-    return `Placement reference state is unavailable for ${this.participantId}: provenance is ${this.provenanceKind}, so ${this.requestedPlacement} placement cannot be resolved. Choose root or an explicit other parent.`;
-  }
-}
-
 export class PlacementHumanRequiredError extends Schema.TaggedErrorClass<PlacementHumanRequiredError>()(
   "PlacementHumanRequiredError",
   {
@@ -150,7 +137,6 @@ export type PlacementError =
   | PlacementParticipantNotFoundError
   | PlacementParentNotFoundError
   | PlacementAlreadyExistsError
-  | PlacementReferenceUnavailableError
   | PlacementHumanRequiredError
   | PlacementCycleError
   | PlacementGraphCorruptError
@@ -162,7 +148,6 @@ const PlacementErrorSchema = Schema.Union([
   PlacementParticipantNotFoundError,
   PlacementParentNotFoundError,
   PlacementAlreadyExistsError,
-  PlacementReferenceUnavailableError,
   PlacementHumanRequiredError,
   PlacementCycleError,
   PlacementGraphCorruptError,
@@ -335,7 +320,6 @@ const creationFingerprint = (input: RecordParticipantPlacementInput): string =>
     participantId: input.participantId,
     actor: input.actor,
     provenance: input.provenance,
-    placement: input.placement,
     createdAt: input.createdAt,
   });
 
@@ -355,7 +339,9 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
       const sql = yield* SqlClient.SqlClient;
       const mutationPermit = yield* Semaphore.make(1);
 
-      const ensureSquadron = Effect.fn("j5.a2a.placement.ensureSquadron")(function* (squadronId: SquadronId) {
+      const ensureSquadron = Effect.fn("j5.a2a.placement.ensureSquadron")(function* (
+        squadronId: SquadronId,
+      ) {
         const rows = yield* sql<{ readonly id: string }>`
           SELECT id FROM j5_a2a_squadron WHERE id = ${squadronId} LIMIT 1
         `;
@@ -407,6 +393,19 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
         if (rows[0] === undefined) {
           return yield* new PlacementParentNotFoundError({ squadronId, parentParticipantId });
         }
+      });
+
+      const isCurrentParticipant = Effect.fn("j5.a2a.placement.isCurrentParticipant")(function* (
+        squadronId: SquadronId,
+        participantId: ParticipantId,
+      ) {
+        const rows = yield* sql<{ readonly participant_id: string }>`
+            SELECT participant_id
+            FROM j5_a2a_squadron_membership
+            WHERE squadron_id = ${squadronId} AND participant_id = ${participantId}
+            LIMIT 1
+          `;
+        return rows[0] !== undefined;
       });
 
       const selectPlacement = Effect.fn("j5.a2a.placement.selectPlacement")(function* (
@@ -484,7 +483,9 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
         };
       });
 
-      const allocateSeq = Effect.fn("j5.a2a.placement.allocateSeq")(function* (squadronId: SquadronId) {
+      const allocateSeq = Effect.fn("j5.a2a.placement.allocateSeq")(function* (
+        squadronId: SquadronId,
+      ) {
         const rows = yield* sql<{ readonly next_seq: number }>`
           SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq
           FROM j5_a2a_placement_event
@@ -497,50 +498,29 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
         return seq;
       });
 
-      const resolveCreationParent = Effect.fn("j5.a2a.placement.resolveCreationParent")(function* (
-        input: RecordParticipantPlacementInput,
-      ) {
-        const siblingOf = (sourceParticipantId: ParticipantId) =>
-          selectPlacement(input.squadronId, sourceParticipantId).pipe(
-            Effect.map((source) => source?.placementParentId ?? null),
-          );
-        switch (input.placement.type) {
-          case "default":
-            switch (input.provenance.kind) {
-              case "spawned-by":
-                return input.provenance.spawnedByParticipantId;
-              case "forked-from":
-                return yield* siblingOf(input.provenance.sourceParticipantId);
-              case "unknown":
-                return null;
+      const resolveProvenanceDefaultParent = Effect.fn(
+        "j5.a2a.placement.resolveProvenanceDefaultParent",
+      )(function* (input: RecordParticipantPlacementInput) {
+        switch (input.provenance.kind) {
+          case "spawned-by":
+            if (input.provenance.source === "j5_wrapper") {
+              return input.provenance.spawnedByParticipantId;
             }
-          case "root":
-            return null;
-          case "other_parent":
-            return input.placement.parentParticipantId;
-          case "spawner":
-            if (input.provenance.kind !== "spawned-by") {
-              return yield* new PlacementReferenceUnavailableError({
-                participantId: input.participantId,
-                provenanceKind: input.provenance.kind,
-                requestedPlacement: "spawner",
-              });
-            }
-            return input.provenance.spawnedByParticipantId;
-          case "sibling": {
-            if (input.provenance.kind === "unknown") {
-              return yield* new PlacementReferenceUnavailableError({
-                participantId: input.participantId,
-                provenanceKind: input.provenance.kind,
-                requestedPlacement: "sibling",
-              });
-            }
-            return yield* siblingOf(
-              input.provenance.kind === "spawned-by"
-                ? input.provenance.spawnedByParticipantId
-                : input.provenance.sourceParticipantId,
+            return (yield* isCurrentParticipant(
+              input.squadronId,
+              input.provenance.spawnedByParticipantId,
+            ))
+              ? input.provenance.spawnedByParticipantId
+              : null;
+          case "forked-from": {
+            const source = yield* selectPlacement(
+              input.squadronId,
+              input.provenance.sourceParticipantId,
             );
+            return source?.placementParentId ?? null;
           }
+          case "unknown":
+            return null;
         }
       });
 
@@ -610,7 +590,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             path: [input.participantId],
           });
         }
-        const placementParentId = yield* resolveCreationParent(input);
+        const placementParentId = yield* resolveProvenanceDefaultParent(input);
         yield* ensureParent(input.squadronId, placementParentId);
         yield* assertAcyclic({
           squadronId: input.squadronId,
@@ -846,7 +826,9 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
         );
       });
 
-      const listEventsEffect = Effect.fn("j5.a2a.placement.listEvents")(function* (squadronId: SquadronId) {
+      const listEventsEffect = Effect.fn("j5.a2a.placement.listEvents")(function* (
+        squadronId: SquadronId,
+      ) {
         yield* ensureSquadron(squadronId);
         const rows = yield* sql<EventRow>`
           SELECT
