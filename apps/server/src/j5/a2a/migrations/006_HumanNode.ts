@@ -28,31 +28,101 @@ export default Effect.gen(function* () {
   `;
 
   yield* sql`
-    CREATE TABLE j5_a2a_squadron_membership_person_scoped (
+    CREATE TABLE j5_a2a_human_person (
+      person_id TEXT PRIMARY KEY CHECK (
+        person_id LIKE 'human:%'
+        AND person_id <> 'human:global'
+        AND length(substr(person_id, length('human:') + 1)) > 0
+      ),
+      is_local_operator INTEGER NOT NULL CHECK (is_local_operator IN (0, 1)),
+      created_at TEXT NOT NULL
+    )
+  `;
+  yield* sql`
+    CREATE UNIQUE INDEX j5_a2a_human_person_local_operator_idx
+    ON j5_a2a_human_person(is_local_operator)
+    WHERE is_local_operator = 1
+  `;
+  yield* sql`
+    WITH historical_people AS (
+      SELECT
+        CASE WHEN membership.participant_id = 'human:global'
+          THEN ${LEGACY_PERSON_ID}
+          ELSE membership.participant_id
+        END AS person_id,
+        squadron.created_at,
+        CASE WHEN membership.participant_id = 'human:global' THEN 1 ELSE 0 END AS is_local_operator
+      FROM j5_a2a_squadron_membership AS membership
+      JOIN j5_a2a_squadron AS squadron ON squadron.id = membership.squadron_id
+      WHERE membership.participant_kind = 'human'
+
+      UNION ALL
+      SELECT sender, created_at, CASE WHEN sender = ${LEGACY_PERSON_ID} THEN 1 ELSE 0 END
+      FROM j5_a2a_comm_event
+      WHERE sender LIKE 'human:%'
+
+      UNION ALL
+      SELECT receiver, created_at, CASE WHEN receiver = ${LEGACY_PERSON_ID} THEN 1 ELSE 0 END
+      FROM j5_a2a_comm_event
+      WHERE receiver LIKE 'human:%'
+
+      UNION ALL
+      SELECT
+        CASE WHEN sender_id = 'human:global' THEN ${LEGACY_PERSON_ID} ELSE sender_id END,
+        created_at,
+        CASE WHEN sender_id = 'human:global' THEN 1 ELSE 0 END
+      FROM j5_a2a_exchange
+      WHERE sender_id LIKE 'human:%'
+
+      UNION ALL
+      SELECT
+        CASE WHEN receiver_id = 'human:global' THEN ${LEGACY_PERSON_ID} ELSE receiver_id END,
+        created_at,
+        CASE WHEN receiver_id = 'human:global' THEN 1 ELSE 0 END
+      FROM j5_a2a_exchange
+      WHERE receiver_id LIKE 'human:%'
+
+      UNION ALL
+      SELECT
+        CASE WHEN sender_id = 'human:global' THEN ${LEGACY_PERSON_ID} ELSE sender_id END,
+        created_at,
+        CASE WHEN sender_id = 'human:global' THEN 1 ELSE 0 END
+      FROM j5_a2a_delivery
+      WHERE sender_id LIKE 'human:%'
+
+      UNION ALL
+      SELECT
+        CASE WHEN receiver_id = 'human:global' THEN ${LEGACY_PERSON_ID} ELSE receiver_id END,
+        created_at,
+        CASE WHEN receiver_id = 'human:global' THEN 1 ELSE 0 END
+      FROM j5_a2a_delivery
+      WHERE receiver_id LIKE 'human:%'
+    )
+    INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+    SELECT person_id, MAX(is_local_operator), MIN(created_at)
+    FROM historical_people
+    WHERE person_id <> 'human:global'
+    GROUP BY person_id
+  `;
+
+  // Person addressability is host-global registry state. Historical human
+  // membership events remain ledger facts but never project Squadron membership.
+  yield* sql`
+    CREATE TABLE j5_a2a_squadron_membership_agent_only (
       squadron_id TEXT NOT NULL,
       participant_id TEXT NOT NULL,
-      participant_kind TEXT NOT NULL CHECK (participant_kind IN ('agent', 'human')),
-      thread_id TEXT,
+      participant_kind TEXT NOT NULL CHECK (participant_kind = 'agent'),
+      thread_id TEXT NOT NULL,
       joined_seq INTEGER NOT NULL,
       updated_seq INTEGER NOT NULL,
       payload TEXT NOT NULL,
       PRIMARY KEY (squadron_id, participant_id),
       FOREIGN KEY (squadron_id) REFERENCES j5_a2a_squadron(id) ON DELETE CASCADE,
-      CHECK (
-        (
-          participant_kind = 'human'
-          AND participant_id LIKE 'human:%'
-          AND participant_id <> 'human:global'
-          AND length(substr(participant_id, length('human:') + 1)) > 0
-          AND thread_id IS NULL
-        )
-        OR
-        (participant_kind = 'agent' AND thread_id IS NOT NULL)
-      )
+      CHECK (participant_id NOT LIKE 'human:%')
     )
   `;
   yield* sql`
-    INSERT INTO j5_a2a_squadron_membership_person_scoped (
+    INSERT INTO j5_a2a_squadron_membership_agent_only (
       squadron_id,
       participant_id,
       participant_kind,
@@ -63,21 +133,18 @@ export default Effect.gen(function* () {
     )
     SELECT
       squadron_id,
-      CASE WHEN participant_id = 'human:global' THEN ${LEGACY_PERSON_ID} ELSE participant_id END,
+      participant_id,
       participant_kind,
       thread_id,
       joined_seq,
       updated_seq,
-      CASE
-        WHEN participant_kind = 'human'
-        THEN json_set(payload, '$.id', ${LEGACY_PERSON_ID})
-        ELSE payload
-      END
+      payload
     FROM j5_a2a_squadron_membership
+    WHERE participant_kind = 'agent'
   `;
   yield* sql`DROP TABLE j5_a2a_squadron_membership`;
   yield* sql`
-    ALTER TABLE j5_a2a_squadron_membership_person_scoped
+    ALTER TABLE j5_a2a_squadron_membership_agent_only
     RENAME TO j5_a2a_squadron_membership
   `;
 

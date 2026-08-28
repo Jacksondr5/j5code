@@ -13,12 +13,13 @@ import {
   SquadronId,
   ExchangeId,
   type HumanInboxItem,
-  isHumanParticipantId,
+  isDurableHumanParticipantId,
   LedgerMessageId,
   ParticipantId,
   type SendMessageResult,
 } from "./contracts.ts";
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
+import { isRegisteredHumanPerson } from "./HumanPersonRegistry.ts";
 import {
   A2AExchangeAlreadyAnsweredError,
   A2AExchangeNotOpenError,
@@ -74,7 +75,7 @@ const correlationIdFor = (commandId: CommCommandId) =>
   CorrelationId.make(`correlation:j5:a2a:${encodeURIComponent(commandId)}`);
 
 const assertPersonId = (personId: ParticipantId) =>
-  isHumanParticipantId(personId)
+  isDurableHumanParticipantId(personId)
     ? Effect.void
     : Effect.fail(new A2AHumanPersonIdError({ personId }));
 
@@ -101,6 +102,9 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
       const list: A2AHumanInboxShape["list"] = (personId) =>
         Effect.gen(function* () {
           yield* assertPersonId(personId);
+          if (!(yield* isRegisteredHumanPerson(sql, personId))) {
+            return yield* new A2AParticipantNotFoundError({ participantId: personId });
+          }
           const rows = yield* sql<InboxRow>`
             SELECT
               exchange.receiver_id AS person_id,
@@ -149,6 +153,9 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
       const answer: A2AHumanInboxShape["answer"] = (input) =>
         Effect.gen(function* () {
           yield* assertPersonId(input.personId);
+          if (!(yield* isRegisteredHumanPerson(sql, input.personId))) {
+            return yield* new A2AParticipantNotFoundError({ participantId: input.personId });
+          }
           const messageId = messageIdFor(input.commandId);
           const replay = yield* sql<ExistingReplyRow>`
             SELECT squadron_id, sent_seq
@@ -182,16 +189,6 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
           }
           if (exchange.status !== "open") {
             return yield* new A2AExchangeNotOpenError({ exchangeId: input.exchangeId });
-          }
-          const membership = yield* sql<{ readonly count: number }>`
-            SELECT COUNT(*) AS count
-            FROM j5_a2a_squadron_membership
-            WHERE squadron_id = ${exchange.squadron_id}
-              AND participant_id = ${input.personId}
-              AND participant_kind = 'human'
-          `;
-          if ((membership[0]?.count ?? 0) !== 1) {
-            return yield* new A2AParticipantNotFoundError({ participantId: input.personId });
           }
           const acceptedReplies = yield* sql<{ readonly count: number }>`
             SELECT COUNT(*) AS count

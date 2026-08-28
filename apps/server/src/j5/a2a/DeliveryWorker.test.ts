@@ -29,6 +29,7 @@ import {
   live as deliveryTransportLive,
   type A2ADeliveryTransportShape,
 } from "./DeliveryTransport.ts";
+import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
@@ -535,20 +536,11 @@ it.effect("delivers to the human through the idempotent inbox-data transport", (
         squadron: { id: squadronId, name: "Human delivery", createdAt: timestamp },
       });
       yield* join(squadronId, sender, "human-sender");
-      yield* ledgerService.append({
-        commandId: CommCommandId.make("command:delivery:join:human"),
-        squadronId,
-        acceptedAt: timestamp,
-        event: {
-          kind: "participant.joined",
-          sender: null,
-          receiver: person.id,
-          exchangeId: null,
-          correlationId: null,
-          payload: { participant: person },
-          createdAt: timestamp,
-        },
-      });
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`
+        INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+        VALUES (${person.id}, 1, ${timestamp})
+      `;
       const sent = yield* (yield* A2ASendService).send({
         commandId: CommCommandId.make("command:delivery:human"),
         senderThreadId: sender.threadId,
@@ -562,7 +554,6 @@ it.effect("delivers to the human through the idempotent inbox-data transport", (
       const delivery = yield* (yield* A2ADeliveryWorker).runOnce;
       assert.equal(delivery?.state, "delivered");
 
-      const sql = yield* SqlClient.SqlClient;
       const rows = yield* sql<{
         readonly message_id: string;
         readonly payload: string;
@@ -597,6 +588,90 @@ it.effect("delivers to the human through the idempotent inbox-data transport", (
         },
       ]);
       assert.isNull(yield* (yield* A2ADeliveryWorker).runOnce);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("treats a follow-up delivered after the human answered as a successful no-op", () =>
+  Effect.gen(function* () {
+    const database = NodeSqliteClient.layerMemory();
+    const ledger = ledgerLayer.pipe(Layer.provide(database));
+    const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+    const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+    const transport = deliveryTransportLive.pipe(
+      Layer.provide(database),
+      Layer.provide(Layer.mock(ThreadManagementService)({})),
+    );
+    const worker = deliveryWorkerLayerWithHooks(false).pipe(
+      Layer.provide(ledger),
+      Layer.provide(database),
+      Layer.provide(transport),
+      Layer.provide(
+        Layer.succeed(
+          A2ADeliveryHooks,
+          A2ADeliveryHooks.of({ afterTransportSuccess: () => Effect.void }),
+        ),
+      ),
+    );
+    const layer = Layer.mergeAll(database, ledger, send, inbox, transport, worker);
+
+    yield* Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      const ledgerService = yield* A2ALedger;
+      const sendService = yield* A2ASendService;
+      const deliveryWorker = yield* A2ADeliveryWorker;
+      const sql = yield* SqlClient.SqlClient;
+      const squadronId = SquadronId.make("squadron:delivery:human-followup-race");
+      yield* ledgerService.createSquadron({
+        squadron: { id: squadronId, name: "Human follow-up race", createdAt: timestamp },
+      });
+      yield* join(squadronId, sender, "human-followup-race-sender");
+      yield* sql`
+        INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+        VALUES (${person.id}, 1, ${timestamp})
+      `;
+      const opened = yield* sendService.send({
+        commandId: CommCommandId.make("command:delivery:human-followup-race:open"),
+        senderThreadId: sender.threadId,
+        to: person.id,
+        message: "Initial question",
+        expectReply: true,
+        intent: "Reproduce answer racing a follow-up",
+        urgency: "blocking",
+        acceptedAt: timestamp,
+      });
+      assert.equal((yield* deliveryWorker.runOnce)?.state, "delivered");
+
+      const followup = yield* sendService.send({
+        commandId: CommCommandId.make("command:delivery:human-followup-race:followup"),
+        senderThreadId: sender.threadId,
+        to: person.id,
+        message: "Pending follow-up",
+        exchangeId: opened.exchangeId!,
+        acceptedAt: "2026-08-16T12:00:01.000Z",
+      });
+      yield* (yield* A2AHumanInbox).answer({
+        commandId: CommCommandId.make("command:delivery:human-followup-race:answer"),
+        personId: person.id,
+        exchangeId: opened.exchangeId!,
+        message: "Answered before follow-up transport",
+        acceptedAt: "2026-08-16T12:00:02.000Z",
+      });
+
+      const milestone = yield* deliveryWorker.runOnce;
+      assert.equal(milestone?.messageId, followup.messageId);
+      assert.equal(milestone?.state, "delivered");
+      const rows = yield* sql<{
+        readonly attempts: number;
+        readonly last_error: string | null;
+        readonly status: string;
+      }>`
+        SELECT status, attempts, last_error
+        FROM j5_a2a_delivery
+        WHERE message_id = ${followup.messageId}
+      `;
+      assert.deepStrictEqual(rows, [{ status: "delivered", attempts: 1, last_error: null }]);
+      assert.deepStrictEqual(yield* deliveryWorker.listAlarms, []);
     }).pipe(Effect.provide(layer));
   }),
 );

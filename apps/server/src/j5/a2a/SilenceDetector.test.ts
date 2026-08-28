@@ -193,7 +193,7 @@ const makeDaemonTestLayer = (
 };
 
 const join = Effect.fn("test.j5.a2a.silence.join")(function* (
-  participant: AgentParticipant | HumanParticipant,
+  participant: AgentParticipant,
   suffix: string,
 ) {
   const participantId = participant.id;
@@ -216,6 +216,11 @@ const join = Effect.fn("test.j5.a2a.silence.join")(function* (
 const seed = Effect.fn("test.j5.a2a.silence.seed")(function* () {
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`
+    INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+    VALUES (${person.id}, 1, ${iso(0)})
+  `;
   yield* ledger.createSquadron({
     squadron: { id: squadronId, name: "Silence detector", createdAt: iso(0) },
   });
@@ -223,7 +228,6 @@ const seed = Effect.fn("test.j5.a2a.silence.seed")(function* () {
   yield* join(subject, "subject");
   yield* join(peer, "peer");
   yield* join(newerPeer, "newer-peer");
-  yield* join(person, "human");
 });
 
 const openExchange = Effect.fn("test.j5.a2a.silence.openExchange")(function* (

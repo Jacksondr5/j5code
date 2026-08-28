@@ -1,4 +1,3 @@
-import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
@@ -52,19 +51,14 @@ export const answerHumanExchange = (input: {
   readonly personId: string;
   readonly exchangeId: string;
   readonly message: string;
+  readonly clientRequestId: string;
 }) =>
   runtime.runPromise(
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient;
-      const crypto = yield* Crypto.Crypto;
       const request = yield* HttpClientRequest.post(
         resolvePrimaryEnvironmentHttpUrl("/api/j5/a2a/inbox/answer"),
-      ).pipe(
-        HttpClientRequest.bodyJson({
-          ...input,
-          clientRequestId: yield* crypto.randomUUIDv4,
-        }),
-      );
+      ).pipe(HttpClientRequest.bodyJson(input));
       const response = yield* client.execute(request);
       const success = yield* HttpClientResponse.filterStatusOk(response);
       return yield* HttpClientResponse.schemaBodyJson(AnswerResponse)(success);

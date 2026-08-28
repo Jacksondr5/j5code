@@ -86,6 +86,7 @@ interface MembershipRow {
 interface HumanExchangeRow {
   readonly sender_id: string;
   readonly receiver_id: string;
+  readonly status: "open" | "closed";
   readonly intent: string;
   readonly urgency: "blocking" | "soon" | "fyi" | null;
   readonly opened_seq: number;
@@ -206,11 +207,10 @@ export const live: Layer.Layer<
           `;
           if (input.exchangeId === null) return;
           const exchanges = yield* sql<HumanExchangeRow>`
-            SELECT sender_id, receiver_id, intent, urgency, opened_seq, created_at
+            SELECT sender_id, receiver_id, status, intent, urgency, opened_seq, created_at
             FROM j5_a2a_exchange
             WHERE squadron_id = ${input.originSquadronId}
               AND exchange_id = ${input.exchangeId}
-              AND status = 'open'
               AND receiver_id = ${input.receiverId}
             LIMIT 1
           `;
@@ -221,6 +221,10 @@ export const live: Layer.Layer<
               state: "person-addressed exchange disappeared before inbox projection",
             });
           }
+          // A follow-up may still be pending when the person answers. The raw
+          // message is durable above, but a discharged obligation has no active
+          // inbox row to update and is a successful no-op for projection.
+          if (exchange.status === "closed") return;
           yield* sql`
             INSERT INTO j5_a2a_human_inbox (
               person_id,

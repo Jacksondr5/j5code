@@ -35,7 +35,10 @@ export type DeliveryEnvelopeChannel = typeof DeliveryEnvelopeChannel.Type;
 export const SILENCE_DETECTOR_PARTICIPANT_ID = ParticipantId.make("platform:silence-detector");
 
 export const isHumanParticipantId = (id: ParticipantId): boolean =>
-  id.startsWith("human:") && id !== "human:global" && id.length > "human:".length;
+  id.startsWith("human:") && id.length > "human:".length;
+
+export const isDurableHumanParticipantId = (id: ParticipantId): boolean =>
+  isHumanParticipantId(id) && id !== "human:global";
 
 export const AgentParticipant = Schema.Struct({
   kind: Schema.Literal("agent"),
@@ -48,7 +51,7 @@ export const HumanParticipant = Schema.Struct({
   kind: Schema.Literal("human"),
   id: ParticipantId.pipe(
     Schema.check(
-      Schema.makeFilter(isHumanParticipantId, {
+      Schema.makeFilter(isDurableHumanParticipantId, {
         message: "A human participant id must use the durable human:<person-id> namespace.",
       }),
     ),

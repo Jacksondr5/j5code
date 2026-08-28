@@ -6,10 +6,11 @@ import * as Ref from "effect/Ref";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import {
   A2ADeliveryTransport,
-  type A2ADeliveryTransportShape,
+  live as deliveryTransportLive,
   type AgentDeliveryInput,
 } from "./DeliveryTransport.ts";
 import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts";
@@ -38,13 +39,20 @@ const makeTestLayer = (deliveries: Ref.Ref<ReadonlyArray<AgentDeliveryInput>>) =
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));
-  const transport = Layer.succeed(
-    A2ADeliveryTransport,
-    A2ADeliveryTransport.of({
-      deliverAgent: (input) => Ref.update(deliveries, (current) => [...current, input]),
-      deliverHuman: () => Effect.void,
-    } satisfies A2ADeliveryTransportShape),
+  const liveTransport = deliveryTransportLive.pipe(
+    Layer.provide(database),
+    Layer.provide(Layer.mock(ThreadManagementService)({})),
   );
+  const transport = Layer.effect(
+    A2ADeliveryTransport,
+    Effect.gen(function* () {
+      const production = yield* A2ADeliveryTransport;
+      return A2ADeliveryTransport.of({
+        deliverAgent: (input) => Ref.update(deliveries, (current) => [...current, input]),
+        deliverHuman: production.deliverHuman,
+      });
+    }),
+  ).pipe(Layer.provide(liveTransport));
   const worker = deliveryWorkerLayer.pipe(
     Layer.provide(ledger),
     Layer.provide(database),
@@ -65,6 +73,12 @@ it.effect(
         const inbox = yield* A2AHumanInbox;
         const worker = yield* A2ADeliveryWorker;
         const sql = yield* SqlClient.SqlClient;
+        yield* sql`
+          INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+          VALUES
+            (${firstPerson.id}, 1, '2026-08-23T00:00:00.000Z'),
+            (${secondPerson.id}, 0, '2026-08-23T00:00:00.000Z')
+        `;
 
         const open = Effect.fn("test.j5.a2a.humanInbox.open")(function* (input: {
           readonly suffix: string;
@@ -90,15 +104,17 @@ it.effect(
             commandId: CommCommandId.make(`command:human-inbox:join:${input.suffix}`),
             squadronId,
             acceptedAt: input.openedAt,
-            events: [agent, input.person].map((participant) => ({
-              kind: "participant.joined" as const,
-              sender: null,
-              receiver: participant.id,
-              exchangeId: null,
-              correlationId: null,
-              payload: { participant },
-              createdAt: input.openedAt,
-            })),
+            events: [
+              {
+                kind: "participant.joined",
+                sender: null,
+                receiver: agent.id,
+                exchangeId: null,
+                correlationId: null,
+                payload: { participant: agent },
+                createdAt: input.openedAt,
+              },
+            ],
           });
           const sent = yield* send.send({
             commandId: CommCommandId.make(`command:human-inbox:ask:${input.suffix}`),
@@ -110,40 +126,7 @@ it.effect(
             urgency: input.urgency,
             acceptedAt: input.openedAt,
           });
-          yield* sql`
-            INSERT INTO j5_a2a_human_inbox (
-              person_id,
-              squadron_id,
-              exchange_id,
-              sender_id,
-              intent,
-              urgency,
-              latest_message_id,
-              latest_message,
-              opened_seq,
-              opened_at,
-              status
-            )
-            SELECT
-              exchange.receiver_id,
-              exchange.squadron_id,
-              exchange.exchange_id,
-              exchange.sender_id,
-              exchange.intent,
-              exchange.urgency,
-              delivery.message_id,
-              delivery.message_text,
-              exchange.opened_seq,
-              exchange.created_at,
-              'open'
-            FROM j5_a2a_exchange AS exchange
-            JOIN j5_a2a_delivery AS delivery
-              ON delivery.squadron_id = exchange.squadron_id
-             AND delivery.exchange_id = exchange.exchange_id
-             AND delivery.exchange_role = 'ask'
-            WHERE exchange.squadron_id = ${squadronId}
-              AND exchange.exchange_id = ${sent.exchangeId}
-          `;
+          yield* worker.drain;
           return { agent, squadronId, exchangeId: sent.exchangeId! };
         });
 
@@ -182,6 +165,13 @@ it.effect(
           urgency: "blocking",
           openedAt: "2026-08-23T13:00:00.000Z",
         });
+
+        const humanMemberships = yield* sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count
+          FROM j5_a2a_squadron_membership
+          WHERE participant_kind = 'human' OR participant_id LIKE 'human:%'
+        `;
+        assert.deepStrictEqual(humanMemberships, [{ count: 0 }]);
 
         const firstInbox = yield* inbox.list(firstPerson.id);
         assert.deepStrictEqual(

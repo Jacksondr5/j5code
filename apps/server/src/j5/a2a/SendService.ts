@@ -22,6 +22,7 @@ import {
   participantId,
 } from "./contracts.ts";
 import { resolveThreadHome } from "./HomeRegistrar.ts";
+import { isRegisteredHumanPerson, listRegisteredHumanPersonIds } from "./HumanPersonRegistry.ts";
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 
 export class A2ASenderNotJoinedError extends Schema.TaggedErrorClass<A2ASenderNotJoinedError>()(
@@ -265,17 +266,16 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
         id: ParticipantId,
         senderSquadronId: SquadronId,
       ) {
-        const matches = (yield* membershipRows()).filter((row) => row.participant_id === id);
         if (isHumanParticipantId(id)) {
-          const local = matches.find((row) => row.squadron_id === senderSquadronId);
-          if (local === undefined) {
+          if (!(yield* isRegisteredHumanPerson(sql, id))) {
             return yield* new A2AParticipantNotFoundError({ participantId: id });
           }
           return {
             squadronId: senderSquadronId,
-            participant: yield* decodeParticipant(local.payload),
+            participant: { kind: "human" as const, id },
           };
         }
+        const matches = (yield* membershipRows()).filter((row) => row.participant_id === id);
         if (matches.length === 0) {
           return yield* new A2AParticipantNotFoundError({ participantId: id });
         }
@@ -292,6 +292,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
         Effect.gen(function* () {
           const sender = yield* senderMembership(senderThreadId);
           const rows = yield* membershipRows();
+          const people = yield* listRegisteredHumanPersonIds(sql);
           const membershipCounts = new Map<string, number>();
           for (const row of rows) {
             membershipCounts.set(
@@ -299,30 +300,39 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
               (membershipCounts.get(row.participant_id) ?? 0) + 1,
             );
           }
-          const selected = rows.filter(
-            (row) =>
-              !isHumanParticipantId(ParticipantId.make(row.participant_id)) ||
-              row.squadron_id === sender.squadronId,
-          );
-          return yield* Effect.forEach(
-            selected,
+          const agents = yield* Effect.forEach(
+            rows,
             (row) =>
               decodeParticipant(row.payload).pipe(
                 Effect.map((participant) => {
                   const id = participantId(participant);
-                  const addressable = isHumanParticipantId(id) || membershipCounts.get(id) === 1;
+                  const addressable = membershipCounts.get(id) === 1;
                   return {
                     squadronId: SquadronId.make(row.squadron_id),
                     participantId: id,
                     participant,
                     canReceiveMessage: addressable,
                     canOpenExchange: addressable,
-                    acceptsUrgency: participant.kind === "human",
+                    acceptsUrgency: false,
                   };
                 }),
               ),
             { concurrency: 1 },
           );
+          return [
+            ...agents,
+            ...people.map(
+              (personId) =>
+                ({
+                  squadronId: sender.squadronId,
+                  participantId: personId,
+                  participant: { kind: "human", id: personId },
+                  canReceiveMessage: true,
+                  canOpenExchange: true,
+                  acceptsUrgency: true,
+                }) satisfies ParticipantDirectoryRow,
+            ),
+          ];
         });
 
       const replayedSend = Effect.fn("j5.a2a.send.replayedSend")(function* (

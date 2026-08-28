@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
@@ -22,6 +22,9 @@ export function HumanInboxPage() {
   const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const answerAttempts = useRef(
+    new Map<string, { readonly message: string; readonly clientRequestId: string }>(),
+  );
 
   const refresh = useCallback(async () => {
     if (
@@ -54,12 +57,20 @@ export function HumanInboxPage() {
     if (message.length === 0) return;
     setPendingExchangeId(item.exchangeId);
     setError(null);
+    const previousAttempt = answerAttempts.current.get(item.exchangeId);
+    const attempt =
+      previousAttempt?.message === message
+        ? previousAttempt
+        : { message, clientRequestId: window.crypto.randomUUID() };
+    answerAttempts.current.set(item.exchangeId, attempt);
     try {
       await answerHumanExchange({
         personId,
         exchangeId: item.exchangeId,
         message,
+        clientRequestId: attempt.clientRequestId,
       });
+      answerAttempts.current.delete(item.exchangeId);
       setAnswers((current) => {
         const next = { ...current };
         delete next[item.exchangeId];

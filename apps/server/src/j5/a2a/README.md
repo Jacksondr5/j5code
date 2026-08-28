@@ -8,6 +8,10 @@ Production includes a non-agent-invocable home registrar for sanctioned creation
 
 No native user-created-thread hook consumes the registrar yet. Such threads remain explicit nonparticipants: `send_message` and `list_participants` fail closed when the caller has no home. The sanctioned consumers are the future A6 creation wrapper and controlled test seeding; neither a default squadron nor a production seeding helper exists here. A6 separately owns wrapper placement/provenance and final real-provider proof, so this registrar does not claim either integration.
 
+Human-inbox routes currently authenticate the environment scope, not the named person. The caller supplies the `human:<person-id>` used for reads and attributed answers; person-bound authentication remains deferred to X4's peer registry. Until that identity seam lands, an `orchestration:read` session can read any known person's inbox and an `orchestration:operate` session can answer as any known person.
+
+The first J5 runtime start mints one opaque, durable `human:<person-id>` local-operator record in the host registry. A person is host-global addressability state: minting creates no Squadron, default, home, or membership event. The participant union remains broad enough to read historical human membership facts, while the live Squadron membership projection is agent-only; participant directories synthesize registered people alongside member agents.
+
 For a cross-squadron send, the receiver ledger's idempotent `message.received` records durable acceptance of the sender's act before transport is attempted. It does not claim successful thread injection: delivery success, retries, and the terminal alarm remain in the sender squadron's delivery projection.
 
 Byte-equivalent rebuilds for the A2 exchange and delivery projections are deferred to the measured-projections milestone (M5). A2 keeps those tables derivable from the communication ledger but does not expose their rebuild operation.

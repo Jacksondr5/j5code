@@ -11,9 +11,17 @@ import {
 import { J5_A2A_MIGRATIONS_TABLE, migrationEntries, runJ5A2AMigrations } from "./Migrations.ts";
 import Migration0005 from "./migrations/005_ImmutableThreadHome.ts";
 
+const enableAndAssertForeignKeys = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`PRAGMA foreign_keys = ON`;
+  const rows = yield* sql<{ readonly foreign_keys: number }>`PRAGMA foreign_keys`;
+  assert.deepStrictEqual(rows, [{ foreign_keys: 1 }]);
+});
+
 it.effect("tracks J5 A2A migrations independently from upstream migrations", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    yield* enableAndAssertForeignKeys;
     yield* runMigrations();
     yield* runJ5A2AMigrations();
 
@@ -48,6 +56,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
 it.effect("creates the exact namespaced ledger schema and receiver correlation constraint", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    yield* enableAndAssertForeignKeys;
     yield* runJ5A2AMigrations({ toMigrationInclusive: 3 });
     const deliveriesBeforeA3 = yield* sql<{ readonly count: number }>`
       SELECT COUNT(*) AS count FROM j5_a2a_delivery
@@ -65,6 +74,7 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'j5_a2a_squadron_membership',
           'j5_a2a_exchange',
           'j5_a2a_delivery',
+          'j5_a2a_human_person',
           'j5_a2a_human_inbox',
           'j5_a2a_human_inbox_data',
           'j5_a2a_silence_detector_cursor'
@@ -84,7 +94,8 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'j5_a2a_delivery_drain_idx',
           'j5_a2a_delivery_message_sender_idx',
           'j5_a2a_delivery_one_reply_idx',
-          'j5_a2a_comm_event_agent_home_thread_idx'
+          'j5_a2a_comm_event_agent_home_thread_idx',
+          'j5_a2a_human_person_local_operator_idx'
         )
       ORDER BY name
     `;
@@ -108,6 +119,11 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
     }>`
       PRAGMA table_info(j5_a2a_delivery)
     `;
+    const membershipSchema = yield* sql<{ readonly sql: string }>`
+      SELECT sql
+      FROM sqlite_master
+      WHERE type = 'table' AND name = 'j5_a2a_squadron_membership'
+    `;
 
     assert.deepStrictEqual(tables, [
       { name: "j5_a2a_comm_command_receipt" },
@@ -116,6 +132,7 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       { name: "j5_a2a_exchange" },
       { name: "j5_a2a_human_inbox" },
       { name: "j5_a2a_human_inbox_data" },
+      { name: "j5_a2a_human_person" },
       { name: "j5_a2a_silence_detector_cursor" },
       { name: "j5_a2a_squadron" },
       { name: "j5_a2a_squadron_membership" },
@@ -169,6 +186,12 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       indexesByName.get("j5_a2a_comm_event_agent_home_thread_idx") ?? "",
       "json_extract(payload, '$.participant.kind') = 'agent'",
     );
+    assert.include(
+      indexesByName.get("j5_a2a_human_person_local_operator_idx") ?? "",
+      "WHERE is_local_operator = 1",
+    );
+    assert.include(membershipSchema[0]?.sql ?? "", "participant_kind = 'agent'");
+    assert.include(membershipSchema[0]?.sql ?? "", "participant_id NOT LIKE 'human:%'");
     const envelopeChannel = deliveryColumns.find((column) => column.name === "envelope_channel");
     assert.equal(envelopeChannel?.notnull, 1);
     assert.isNull(envelopeChannel?.dflt_value);
@@ -177,12 +200,43 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
     `;
     assert.deepStrictEqual(cursor, [{ after_sequence: null }]);
     assert.deepStrictEqual(unprefixed, []);
+    yield* sql`
+      INSERT INTO j5_a2a_squadron (id, name, created_at)
+      VALUES ('squadron:forbid-human-membership', 'Agent-only membership', '2026-08-20T00:00:00.000Z')
+    `;
+    const forbiddenMembership = yield* Effect.flip(sql`
+      INSERT INTO j5_a2a_squadron_membership (
+        squadron_id,
+        participant_id,
+        participant_kind,
+        thread_id,
+        joined_seq,
+        updated_seq,
+        payload
+      ) VALUES (
+        'squadron:forbid-human-membership',
+        'human:forbidden-membership',
+        'human',
+        'thread:forbidden-human-membership',
+        1,
+        1,
+        json_object('kind', 'human', 'id', 'human:forbidden-membership')
+      )
+    `);
+    assert.equal(forbiddenMembership._tag, "SqlError");
+    const forbiddenRows = yield* sql<{ readonly count: number }>`
+      SELECT COUNT(*) AS count
+      FROM j5_a2a_squadron_membership
+      WHERE participant_id = 'human:forbidden-membership'
+    `;
+    assert.deepStrictEqual(forbiddenRows, [{ count: 0 }]);
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
 
 it.effect("reports conflicting thread ids before creating the immutable-home index", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    yield* enableAndAssertForeignKeys;
     yield* runJ5A2AMigrations({ toMigrationInclusive: 4 });
     yield* sql`
       INSERT INTO j5_a2a_squadron (id, name, created_at) VALUES
@@ -299,6 +353,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
+      yield* enableAndAssertForeignKeys;
       yield* runJ5A2AMigrations({ toMigrationInclusive: 5 });
       yield* sql`
       INSERT INTO j5_a2a_squadron (id, name, created_at)
@@ -483,23 +538,20 @@ it.effect(
 
       yield* runJ5A2AMigrations();
 
-      const memberships = yield* sql<{
-        readonly participant_id: string;
-        readonly payload: string;
-      }>`
-      SELECT participant_id, payload
+      const memberships = yield* sql<{ readonly participant_id: string }>`
+      SELECT participant_id
       FROM j5_a2a_squadron_membership
       WHERE squadron_id = 'squadron:legacy-human'
     `;
-      assert.deepStrictEqual(
-        memberships.map((row) => ({ ...row, payload: JSON.parse(row.payload) })),
-        [
-          {
-            participant_id: "human:legacy-person",
-            payload: { kind: "human", id: "human:legacy-person" },
-          },
-        ],
-      );
+      assert.deepStrictEqual(memberships, []);
+      const people = yield* sql<{
+        readonly person_id: string;
+        readonly is_local_operator: number;
+      }>`
+        SELECT person_id, is_local_operator
+        FROM j5_a2a_human_person
+      `;
+      assert.deepStrictEqual(people, [{ person_id: "human:legacy-person", is_local_operator: 1 }]);
       const events = yield* sql<{ readonly receiver: string; readonly payload: string }>`
       SELECT receiver, payload
       FROM j5_a2a_comm_event
@@ -562,6 +614,7 @@ it.effect(
         UNION ALL SELECT sender_id FROM j5_a2a_human_inbox_data
         UNION ALL SELECT receiver_id FROM j5_a2a_human_inbox_data
         UNION ALL SELECT person_id FROM j5_a2a_human_inbox
+        UNION ALL SELECT person_id FROM j5_a2a_human_person
       )
       WHERE value = 'human:global'
     `;
@@ -572,6 +625,7 @@ it.effect(
 it.effect("renames existing Squadron data without changing ledger semantics", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    yield* enableAndAssertForeignKeys;
     yield* runJ5A2AMigrations({ toMigrationInclusive: 2 });
     yield* sql`
       INSERT INTO j5_a2a_epic (id, name, created_at)
@@ -695,6 +749,7 @@ it.effect("renames existing Squadron data without changing ledger semantics", ()
 it.effect("runs the J5 migration lane during normal SQLite setup", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    yield* enableAndAssertForeignKeys;
     const rows = yield* sql<{ readonly name: string }>`
       SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'j5_a2a_comm_event'
     `;

@@ -19,10 +19,8 @@ import {
   failEnvironmentInternal,
   failEnvironmentScopeRequired,
 } from "../../auth/http.ts";
-import { A2ADeliveryWorker, manualLayer as manualDeliveryWorkerLayer } from "./DeliveryWorker.ts";
-import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
-import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts";
-import { layer as ledgerLayer } from "./LedgerService.ts";
+import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
+import { A2AHumanInbox } from "./HumanInboxService.ts";
 import { CommCommandId, ExchangeId, ParticipantId } from "./contracts.ts";
 
 const INBOX_PATH = "/api/j5/a2a/inbox";
@@ -74,13 +72,6 @@ const operationFailure = (error: unknown) => {
           : 500;
   return HttpServerResponse.jsonUnsafe({ error: tag, message }, { status });
 };
-
-const providedHumanInboxLayer = humanInboxLayer.pipe(Layer.provideMerge(ledgerLayer));
-const providedManualDeliveryLayer = manualDeliveryWorkerLayer.pipe(
-  Layer.provideMerge(deliveryTransportLayer),
-  Layer.provideMerge(ledgerLayer),
-);
-const routeServices = Layer.mergeAll(providedHumanInboxLayer, providedManualDeliveryLayer);
 
 /** Authenticated raw routes keep A4 out of upstream wire contracts. */
 export const humanInboxHttpRouteLayer = Layer.unwrap(
@@ -139,7 +130,7 @@ export const humanInboxHttpRouteLayer = Layer.unwrap(
               message: decoded.success.message,
               acceptedAt,
             })
-            .pipe(Effect.tap(() => worker.drain)),
+            .pipe(Effect.tap(() => worker.notify)),
         );
         return Result.isSuccess(result)
           ? HttpServerResponse.jsonUnsafe({ result: result.success })
@@ -154,4 +145,4 @@ export const humanInboxHttpRouteLayer = Layer.unwrap(
     );
     return Layer.mergeAll(listRoute, answerRoute);
   }),
-).pipe(Layer.provide(routeServices));
+);
