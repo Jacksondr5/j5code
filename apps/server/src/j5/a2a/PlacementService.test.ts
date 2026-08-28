@@ -19,20 +19,32 @@ import {
   PlacementCycleError,
   PlacementGraphCorruptError,
   PlacementHumanRequiredError,
+  PlacementHumanTargetError,
   PlacementParentNotFoundError,
   PlacementParticipantNotFoundError,
   ParticipantPlacementService,
   layer as placementLayer,
 } from "./PlacementService.ts";
 import { runPlacementCascade } from "./PlacementCascadeService.ts";
-import { CommCommandId, SquadronId, ParticipantId, type Participant } from "./contracts.ts";
-import { PlacementCommandId, type ParticipantProvenance } from "./placementContracts.ts";
+import {
+  CommCommandId,
+  GLOBAL_HUMAN_PARTICIPANT_ID,
+  SquadronId,
+  ParticipantId,
+  type Participant,
+} from "./contracts.ts";
+import {
+  PlacementCommandId,
+  PlacementReparentedEvent,
+  type ParticipantProvenance,
+} from "./placementContracts.ts";
 
 const timestamp = "2026-08-16T16:00:00.000Z";
 const squadronId = SquadronId.make("squadron:placement");
 const isCycle = Schema.is(PlacementCycleError);
 const isGraphCorrupt = Schema.is(PlacementGraphCorruptError);
 const isHumanRequired = Schema.is(PlacementHumanRequiredError);
+const isHumanTarget = Schema.is(PlacementHumanTargetError);
 const isParentNotFound = Schema.is(PlacementParentNotFoundError);
 const isParticipantNotFound = Schema.is(PlacementParticipantNotFoundError);
 const humanPrincipal = {
@@ -51,6 +63,27 @@ const bearerCaller = {
     method: "bearer-access-token" as const,
   },
 } as const;
+
+it("accepts only browser-session-cookie authentication on reparent events", () => {
+  const isReparentedEvent = Schema.is(PlacementReparentedEvent);
+  const event = {
+    seq: 1,
+    commandId: PlacementCommandId.make("reparent:auth-contract"),
+    squadronId,
+    participantId: ParticipantId.make("agent:auth-contract"),
+    kind: "participant.reparented",
+    actor: "human",
+    actorSessionId: AuthSessionId.make("session:auth-contract"),
+    actorSubject: "human:auth-contract",
+    provenance: null,
+    previousParentId: null,
+    placementParentId: null,
+    createdAt: timestamp,
+  } as const;
+
+  assert.isTrue(isReparentedEvent({ ...event, authMethod: "browser-session-cookie" }));
+  assert.isFalse(isReparentedEvent({ ...event, authMethod: "bearer-access-token" }));
+});
 
 const TestLayer = Layer.merge(ledgerLayer, placementLayer).pipe(
   Layer.provideMerge(NodeSqliteClient.layerMemory()),
@@ -365,7 +398,15 @@ it.effect("replays placement creation without changing immutable provenance", ()
     };
 
     const first = yield* placements.recordCreation(input);
-    const replay = yield* placements.recordCreation(input);
+    const replayProvenance: ParticipantProvenance = {
+      source: "j5_wrapper",
+      spawnedByParticipantId: parent.id,
+      kind: "spawned-by",
+    };
+    const replay = yield* placements.recordCreation({
+      ...input,
+      provenance: replayProvenance,
+    });
 
     assert.isTrue(first.committed);
     assert.isFalse(replay.committed);
@@ -450,6 +491,58 @@ it.effect(
         null,
       );
     }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect("refuses human placement mutation while preserving human-as-parent semantics", () =>
+  Effect.gen(function* () {
+    const human = { kind: "human" as const };
+    const child = agent("human-parent-child");
+    yield* prepare([human, child]);
+    const placements = yield* ParticipantPlacementService;
+
+    const creationError = yield* Effect.flip(
+      placements.recordCreation({
+        commandId: PlacementCommandId.make("placement:human-target-refused"),
+        squadronId,
+        participantId: GLOBAL_HUMAN_PARTICIPANT_ID,
+        actor: "platform",
+        provenance: { kind: "unknown", source: "native_or_unobserved" },
+        createdAt: timestamp,
+      }),
+    );
+    assert.isTrue(isHumanTarget(creationError));
+    assert.include(creationError.message, "immutable-human");
+    assert.include(creationError.message, "record-creation");
+
+    const childCreation = yield* record({
+      index: 1,
+      participant: child,
+      provenance: { kind: "unknown", source: "native_or_unobserved" },
+    });
+    assert.equal(childCreation.placement.placementParentId, null);
+
+    const reparentError = yield* Effect.flip(
+      placements.reparent(humanCaller, {
+        commandId: PlacementCommandId.make("reparent:human-target-refused"),
+        squadronId,
+        participantId: GLOBAL_HUMAN_PARTICIPANT_ID,
+        placementParentId: null,
+        createdAt: timestamp,
+      }),
+    );
+    assert.isTrue(isHumanTarget(reparentError));
+    assert.include(reparentError.message, "reparent");
+
+    const underHuman = yield* placements.reparent(humanCaller, {
+      commandId: PlacementCommandId.make("reparent:human-child-return"),
+      squadronId,
+      participantId: child.id,
+      placementParentId: GLOBAL_HUMAN_PARTICIPANT_ID,
+      createdAt: timestamp,
+    });
+    assert.equal(underHuman.placement.placementParentId, GLOBAL_HUMAN_PARTICIPANT_ID);
+    assert.lengthOf(yield* placements.listEvents(squadronId), 2);
+  }).pipe(Effect.provide(TestLayer)),
 );
 
 it.effect("detects corrupt stored cycles in mutation and subtree traversal", () =>

@@ -1,4 +1,4 @@
-import { AuthSessionId, ServerAuthSessionMethod, ThreadId } from "@t3tools/contracts";
+import { AuthSessionId, ThreadId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 import { SquadronId, Participant, ParticipantId } from "./contracts.ts";
@@ -82,7 +82,7 @@ export const PlacementReparentedEvent = Schema.Struct({
   actor: Schema.Literal("human"),
   actorSessionId: AuthSessionId,
   actorSubject: Schema.String.check(Schema.isNonEmpty()),
-  authMethod: ServerAuthSessionMethod,
+  authMethod: Schema.Literal("browser-session-cookie"),
   provenance: Schema.Null,
   previousParentId: Schema.NullOr(ParticipantId),
   placementParentId: Schema.NullOr(ParticipantId),

@@ -192,6 +192,72 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
 
+it.effect("requires a non-null, non-blank reparent actor subject", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations();
+    yield* sql`
+      INSERT INTO j5_a2a_squadron (id, name, created_at)
+      VALUES ('squadron:placement-actor-check', 'Placement actor check', '2026-08-28T00:00:00.000Z')
+    `;
+
+    const insertReparent = (seq: number, commandId: string, actorSubject: string | null) => sql`
+      INSERT INTO j5_a2a_placement_event (
+        seq,
+        command_id,
+        request_fingerprint,
+        squadron_id,
+        participant_id,
+        kind,
+        actor,
+        actor_session_id,
+        actor_subject,
+        auth_method,
+        provenance_kind,
+        provenance_participant_id,
+        provenance_source,
+        previous_parent_id,
+        placement_parent_id,
+        created_at
+      ) VALUES (
+        ${seq},
+        ${commandId},
+        'fingerprint:placement-actor-check',
+        'squadron:placement-actor-check',
+        'agent:placement-actor-check',
+        'participant.reparented',
+        'human',
+        'session:placement-actor-check',
+        ${actorSubject},
+        'browser-session-cookie',
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        '2026-08-28T00:00:00.000Z'
+      )
+    `;
+
+    yield* Effect.flip(insertReparent(1, "command:placement-actor-null", null));
+    yield* Effect.flip(insertReparent(2, "command:placement-actor-empty", ""));
+    yield* insertReparent(3, "command:placement-actor-valid", "human:placement-owner");
+
+    const rows = yield* sql<{ readonly actor_subject: string; readonly command_id: string }>`
+      SELECT command_id, actor_subject
+      FROM j5_a2a_placement_event
+      WHERE squadron_id = 'squadron:placement-actor-check'
+      ORDER BY seq
+    `;
+    assert.deepStrictEqual(rows, [
+      {
+        command_id: "command:placement-actor-valid",
+        actor_subject: "human:placement-owner",
+      },
+    ]);
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
 it.effect("reports conflicting thread ids before creating the immutable-home index", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;

@@ -42,6 +42,7 @@ export default Effect.gen(function* () {
         (kind = 'participant.reparented'
           AND actor = 'human'
           AND actor_session_id IS NOT NULL
+          AND actor_subject IS NOT NULL
           AND length(trim(actor_subject)) > 0
           AND auth_method = 'browser-session-cookie'
           AND provenance_kind IS NULL

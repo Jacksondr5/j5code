@@ -159,6 +159,7 @@ interface MembershipRow {
 }
 
 const decodeSquadron = Schema.decodeUnknownEffect(Squadron);
+const decodeParticipantId = Schema.decodeUnknownEffect(ParticipantId);
 const decodeStoredEvent = Schema.decodeUnknownEffect(StoredCommEvent);
 const decodeReceipt = Schema.decodeUnknownEffect(CommCommandReceipt);
 const decodeMembership = Schema.decodeUnknownEffect(Membership);
@@ -443,7 +444,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
           AND json_extract(payload, '$.participant.threadId') = ${input.threadId}
         ORDER BY participant_id
       `;
-        return rows.length === 1 ? ParticipantId.make(rows[0]!.participant_id) : null;
+        return rows.length === 1 ? yield* decodeParticipantId(rows[0]!.participant_id) : null;
       },
     );
 

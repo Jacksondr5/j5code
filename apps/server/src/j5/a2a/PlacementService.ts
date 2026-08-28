@@ -12,6 +12,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import type { McpInvocationScope } from "../../mcp/McpInvocationContext.ts";
 import {
+  GLOBAL_HUMAN_PARTICIPANT_ID,
   SquadronId,
   Participant,
   ParticipantId,
@@ -90,6 +91,19 @@ export class PlacementHumanRequiredError extends Schema.TaggedErrorClass<Placeme
   }
 }
 
+export class PlacementHumanTargetError extends Schema.TaggedErrorClass<PlacementHumanTargetError>()(
+  "PlacementHumanTargetError",
+  {
+    operation: Schema.Literals(["record-creation", "reparent"]),
+    squadronId: SquadronId,
+    participantId: ParticipantId,
+  },
+) {
+  override get message(): string {
+    return `Placement participant state is immutable-human for ${this.participantId} in squadron ${this.squadronId}; ${this.operation} only accepts agent participants. The human may still be selected as an agent's placement parent.`;
+  }
+}
+
 /**
  * V1 treats an authenticated browser-session cookie as the human command
  * boundary. MCP callers and bearer/DPoP environment sessions are refused;
@@ -138,6 +152,7 @@ export type PlacementError =
   | PlacementParentNotFoundError
   | PlacementAlreadyExistsError
   | PlacementHumanRequiredError
+  | PlacementHumanTargetError
   | PlacementCycleError
   | PlacementGraphCorruptError
   | PlacementCommandConflictError;
@@ -149,6 +164,7 @@ const PlacementErrorSchema = Schema.Union([
   PlacementParentNotFoundError,
   PlacementAlreadyExistsError,
   PlacementHumanRequiredError,
+  PlacementHumanTargetError,
   PlacementCycleError,
   PlacementGraphCorruptError,
   PlacementCommandConflictError,
@@ -198,11 +214,7 @@ interface EventRow {
   readonly actor: "human" | "agent" | "platform";
   readonly actor_session_id: string | null;
   readonly actor_subject: string | null;
-  readonly auth_method:
-    | "browser-session-cookie"
-    | "bearer-access-token"
-    | "dpop-access-token"
-    | null;
+  readonly auth_method: "browser-session-cookie" | null;
   readonly provenance_kind: "spawned-by" | "forked-from" | "unknown" | null;
   readonly provenance_participant_id: string | null;
   readonly provenance_source: "upstream_lineage" | "j5_wrapper" | null;
@@ -313,15 +325,34 @@ const preserveDomainError =
   (cause: unknown): PlacementError =>
     isPlacementError(cause) ? cause : new PlacementStorageError({ operation, cause });
 
-const creationFingerprint = (input: RecordParticipantPlacementInput): string =>
-  JSON.stringify({
+const creationFingerprint = (input: RecordParticipantPlacementInput): string => {
+  const provenanceFields =
+    input.provenance.kind === "unknown"
+      ? {
+          provenanceKind: "unknown" as const,
+          provenanceParticipantId: null,
+          provenanceSource: "native_or_unobserved" as const,
+        }
+      : input.provenance.kind === "spawned-by"
+        ? {
+            provenanceKind: "spawned-by" as const,
+            provenanceParticipantId: input.provenance.spawnedByParticipantId,
+            provenanceSource: input.provenance.source,
+          }
+        : {
+            provenanceKind: "forked-from" as const,
+            provenanceParticipantId: input.provenance.sourceParticipantId,
+            provenanceSource: input.provenance.source,
+          };
+  return JSON.stringify({
     type: "record_creation",
     squadronId: input.squadronId,
     participantId: input.participantId,
     actor: input.actor,
-    provenance: input.provenance,
+    ...provenanceFields,
     createdAt: input.createdAt,
   });
+};
 
 const reparentFingerprint = (input: ReparentParticipantInput): string =>
   JSON.stringify({
@@ -561,6 +592,13 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
       const recordCreationEffect = Effect.fn("j5.a2a.placement.recordCreation")(function* (
         input: RecordParticipantPlacementInput,
       ) {
+        if (input.participantId === GLOBAL_HUMAN_PARTICIPANT_ID) {
+          return yield* new PlacementHumanTargetError({
+            operation: "record-creation",
+            squadronId: input.squadronId,
+            participantId: input.participantId,
+          });
+        }
         const fingerprint = creationFingerprint(input);
         const replayed = yield* replay(input.commandId, fingerprint);
         if (replayed !== null) return replayed;
@@ -686,7 +724,11 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
 
       const reparentEffect = Effect.fn("j5.a2a.placement.reparent")(function* (
         input: ReparentParticipantInput,
-        principal: EnvironmentSessionPrincipalShape,
+        principal: {
+          readonly sessionId: EnvironmentSessionPrincipalShape["sessionId"];
+          readonly subject: EnvironmentSessionPrincipalShape["subject"];
+          readonly method: "browser-session-cookie";
+        },
       ) {
         const fingerprint = reparentFingerprint(input);
         const replayed = yield* replay(input.commandId, fingerprint);
@@ -936,6 +978,15 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             .withPermit(sql.withTransaction(recordCreationEffect(input)))
             .pipe(Effect.mapError(preserveDomainError("record participant placement"))),
         reparent: (caller, input) => {
+          if (input.participantId === GLOBAL_HUMAN_PARTICIPANT_ID) {
+            return Effect.fail(
+              new PlacementHumanTargetError({
+                operation: "reparent",
+                squadronId: input.squadronId,
+                participantId: input.participantId,
+              }),
+            );
+          }
           if (caller.kind === "mcp") {
             return Effect.fail(
               new PlacementHumanRequiredError({
@@ -961,7 +1012,15 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             );
           }
           return mutationPermit
-            .withPermit(sql.withTransaction(reparentEffect(input, caller.principal)))
+            .withPermit(
+              sql.withTransaction(
+                reparentEffect(input, {
+                  sessionId: caller.principal.sessionId,
+                  subject: caller.principal.subject,
+                  method: "browser-session-cookie",
+                }),
+              ),
+            )
             .pipe(Effect.mapError(preserveDomainError("reparent participant")));
         },
         readPlacement: ({ squadronId, participantId }) =>
