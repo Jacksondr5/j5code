@@ -35,23 +35,32 @@ export async function submitHumanInboxAnswer(input: {
   input.setPendingExchangeId(input.item.exchangeId);
   input.setError(null);
   try {
-    const previousAttempt = input.attempts.get(input.item.exchangeId);
-    const attempt =
-      previousAttempt?.message === input.message
-        ? previousAttempt
-        : { message: input.message, clientRequestId: input.randomUUID() };
-    input.attempts.set(input.item.exchangeId, attempt);
-    await input.send({
-      personId: input.item.personId,
-      exchangeId: input.item.exchangeId,
-      message: input.message,
-      clientRequestId: attempt.clientRequestId,
-    });
+    try {
+      const previousAttempt = input.attempts.get(input.item.exchangeId);
+      const attempt =
+        previousAttempt?.message === input.message
+          ? previousAttempt
+          : { message: input.message, clientRequestId: input.randomUUID() };
+      input.attempts.set(input.item.exchangeId, attempt);
+      await input.send({
+        personId: input.item.personId,
+        exchangeId: input.item.exchangeId,
+        message: input.message,
+        clientRequestId: attempt.clientRequestId,
+      });
+    } catch (cause) {
+      input.setError(cause instanceof Error ? cause.message : "Could not deliver the answer.");
+      return;
+    }
     input.attempts.delete(input.item.exchangeId);
     input.onAccepted();
-    await input.refresh(input.item.personId);
-  } catch (cause) {
-    input.setError(cause instanceof Error ? cause.message : "Could not deliver the answer.");
+    try {
+      await input.refresh(input.item.personId);
+    } catch {
+      input.setError(
+        "Answer delivered, but the inbox could not be refreshed. The list may be stale.",
+      );
+    }
   } finally {
     input.setPendingExchangeId(null);
   }

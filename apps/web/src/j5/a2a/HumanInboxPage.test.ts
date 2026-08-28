@@ -41,3 +41,47 @@ it("clears pending state when answer attempt id generation fails", async () => {
   assert.equal(refresh.mock.calls.length, 0);
   assert.equal(onAccepted.mock.calls.length, 0);
 });
+
+it("reports a stale inbox without treating a delivered answer as failed", async () => {
+  const item = {
+    personId: "human:local-operator",
+    squadronId: "squadron:refresh-test",
+    squadronName: "Refresh test",
+    exchangeId: "exchange:refresh-test",
+    senderId: "agent:refresh-test",
+    intent: "Distinguish delivery from refresh",
+    urgency: "blocking",
+    message: "Question",
+    openedAt: "2026-08-27T00:00:00.000Z",
+  } satisfies HumanInboxItem;
+  const attempts = new Map<string, { message: string; clientRequestId: string }>();
+  const pending: Array<string | null> = [];
+  const errors: Array<string | null> = [];
+  const send = vi.fn(async () => undefined);
+  const refresh = vi.fn(async () => {
+    throw new Error("Network unavailable.");
+  });
+  const onAccepted = vi.fn();
+
+  await submitHumanInboxAnswer({
+    item,
+    message: "Delivered answer",
+    attempts,
+    randomUUID: () => "request:refresh-test",
+    send,
+    refresh,
+    onAccepted,
+    setPendingExchangeId: (exchangeId) => pending.push(exchangeId),
+    setError: (message) => errors.push(message),
+  });
+
+  assert.deepStrictEqual(pending, [item.exchangeId, null]);
+  assert.deepStrictEqual(errors, [
+    null,
+    "Answer delivered, but the inbox could not be refreshed. The list may be stale.",
+  ]);
+  assert.equal(send.mock.calls.length, 1);
+  assert.equal(refresh.mock.calls.length, 1);
+  assert.equal(onAccepted.mock.calls.length, 1);
+  assert.equal(attempts.has(item.exchangeId), false);
+});
