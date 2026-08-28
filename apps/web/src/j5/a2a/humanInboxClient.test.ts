@@ -2,7 +2,7 @@ import { assert, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
-import { listHumanInboxEffect } from "./humanInboxClient";
+import { HumanInboxHttpError, listHumanInboxEffect } from "./humanInboxClient";
 
 vi.stubGlobal("window", {
   location: new URL("http://environment.test/"),
@@ -41,4 +41,28 @@ it.effect(
       assert.equal(urls[0]?.searchParams.has("personId"), false);
       assert.equal(urls[1]?.searchParams.get("personId"), explicitPersonId);
     }),
+);
+
+it.effect("surfaces the server's human inbox error message", () =>
+  Effect.gen(function* () {
+    const client = HttpClient.make((request) =>
+      Effect.succeed(
+        HttpClientResponse.fromWeb(
+          request,
+          Response.json(
+            { error: "A2AExchangeAlreadyAnsweredError", message: "This exchange was answered." },
+            { status: 409 },
+          ),
+        ),
+      ),
+    );
+
+    const error = yield* Effect.flip(
+      listHumanInboxEffect().pipe(Effect.provideService(HttpClient.HttpClient, client)),
+    );
+
+    assert.instanceOf(error, HumanInboxHttpError);
+    assert.equal(error.status, 409);
+    assert.equal(error.message, "This exchange was answered.");
+  }),
 );

@@ -129,7 +129,7 @@ export const humanInboxHttpRouteLayer = Layer.unwrap(
           inbox
             .answer({
               commandId: CommCommandId.make(
-                `command:j5:a2a:human:${encodeURIComponent(decoded.success.clientRequestId)}`,
+                `command:j5:a2a:human:${encodeURIComponent(decoded.success.personId)}:${encodeURIComponent(decoded.success.exchangeId)}:${encodeURIComponent(decoded.success.clientRequestId)}`,
               ),
               personId: decoded.success.personId,
               exchangeId: decoded.success.exchangeId,

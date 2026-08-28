@@ -13,13 +13,14 @@ import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { humanInboxHttpRouteLayer } from "./HumanInboxHttp.ts";
 import { A2AHumanInbox } from "./HumanInboxService.ts";
 import { A2AParticipantNotFoundError } from "./SendService.ts";
-import { ParticipantId } from "./contracts.ts";
+import { ExchangeId, LedgerMessageId, ParticipantId } from "./contracts.ts";
 
 it("returns the resolved person above an empty inbox and preserves explicit selection", async () => {
   const localPersonId = ParticipantId.make("human:local-operator");
   const explicitPersonId = ParticipantId.make("human:second-person");
   const missingPersonId = ParticipantId.make("human:missing-person");
   const requested: Array<string | undefined> = [];
+  const answerCommandIds: Array<string> = [];
   const inbox = Layer.mock(A2AHumanInbox)({
     resolvePersonId: (personId) => {
       requested.push(personId);
@@ -29,6 +30,16 @@ it("returns the resolved person above an empty inbox and preserves explicit sele
       return Effect.succeed(personId ?? localPersonId);
     },
     list: () => Effect.succeed([]),
+    answer: (input) => {
+      answerCommandIds.push(input.commandId);
+      return Effect.succeed({
+        messageId: LedgerMessageId.make(`message:test:${input.exchangeId}`),
+        exchangeId: input.exchangeId,
+        exchangeState: "closed",
+        joinedExistingExchange: false,
+        durableAtSeq: 1,
+      });
+    },
   });
   const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
     authenticateHttpRequest: () =>
@@ -41,7 +52,7 @@ it("returns the resolved person above an empty inbox and preserves explicit sele
   });
   const routes = humanInboxHttpRouteLayer.pipe(
     Layer.provide(inbox),
-    Layer.provide(Layer.mock(A2ADeliveryWorker)({})),
+    Layer.provide(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
     Layer.provideMerge(auth),
     Layer.provide(HttpServer.layerServices),
   );
@@ -67,6 +78,29 @@ it("returns the resolved person above an empty inbox and preserves explicit sele
     assert.deepStrictEqual(await explicit.json(), { personId: explicitPersonId, items: [] });
     assert.equal(missing.status, 404);
     assert.deepStrictEqual(requested, [undefined, explicitPersonId, missingPersonId]);
+
+    const firstExchangeId = ExchangeId.make("exchange:same-client:first");
+    const secondExchangeId = ExchangeId.make("exchange:same-client:second");
+    const clientRequestId = "reused-client-request";
+    const answer = (exchangeId: ExchangeId) =>
+      handler(
+        new Request("http://environment.test/api/j5/a2a/inbox/answer", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            personId: localPersonId,
+            exchangeId,
+            message: `Answer for ${exchangeId}`,
+            clientRequestId,
+          }),
+        }),
+      );
+    assert.equal((await answer(firstExchangeId)).status, 200);
+    assert.equal((await answer(secondExchangeId)).status, 200);
+    assert.deepStrictEqual(answerCommandIds, [
+      `command:j5:a2a:human:${encodeURIComponent(localPersonId)}:${encodeURIComponent(firstExchangeId)}:${encodeURIComponent(clientRequestId)}`,
+      `command:j5:a2a:human:${encodeURIComponent(localPersonId)}:${encodeURIComponent(secondExchangeId)}:${encodeURIComponent(clientRequestId)}`,
+    ]);
   } finally {
     await dispose();
   }

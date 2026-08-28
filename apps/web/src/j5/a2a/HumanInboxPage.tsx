@@ -11,6 +11,52 @@ import { SidebarInset } from "../../components/ui/sidebar";
 import { Textarea } from "../../components/ui/textarea";
 import { answerHumanExchange, listHumanInbox, type HumanInboxItem } from "./humanInboxClient";
 
+interface HumanInboxAnswerAttempt {
+  readonly message: string;
+  readonly clientRequestId: string;
+}
+
+export async function submitHumanInboxAnswer(input: {
+  readonly item: HumanInboxItem;
+  readonly message: string;
+  readonly attempts: Map<string, HumanInboxAnswerAttempt>;
+  readonly randomUUID: () => string;
+  readonly send: (request: {
+    readonly personId: string;
+    readonly exchangeId: string;
+    readonly message: string;
+    readonly clientRequestId: string;
+  }) => Promise<unknown>;
+  readonly refresh: (personId: string) => Promise<void>;
+  readonly onAccepted: () => void;
+  readonly setPendingExchangeId: (exchangeId: string | null) => void;
+  readonly setError: (message: string | null) => void;
+}) {
+  input.setPendingExchangeId(input.item.exchangeId);
+  input.setError(null);
+  try {
+    const previousAttempt = input.attempts.get(input.item.exchangeId);
+    const attempt =
+      previousAttempt?.message === input.message
+        ? previousAttempt
+        : { message: input.message, clientRequestId: input.randomUUID() };
+    input.attempts.set(input.item.exchangeId, attempt);
+    await input.send({
+      personId: input.item.personId,
+      exchangeId: input.item.exchangeId,
+      message: input.message,
+      clientRequestId: attempt.clientRequestId,
+    });
+    input.attempts.delete(input.item.exchangeId);
+    input.onAccepted();
+    await input.refresh(input.item.personId);
+  } catch (cause) {
+    input.setError(cause instanceof Error ? cause.message : "Could not deliver the answer.");
+  } finally {
+    input.setPendingExchangeId(null);
+  }
+}
+
 export function HumanInboxPage() {
   const [personId, setPersonId] = useState("");
   const [items, setItems] = useState<ReadonlyArray<HumanInboxItem>>([]);
@@ -18,9 +64,7 @@ export function HumanInboxPage() {
   const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const answerAttempts = useRef(
-    new Map<string, { readonly message: string; readonly clientRequestId: string }>(),
-  );
+  const answerAttempts = useRef(new Map<string, HumanInboxAnswerAttempt>());
 
   const refresh = useCallback(async (requestedPersonId?: string) => {
     if (
@@ -53,33 +97,22 @@ export function HumanInboxPage() {
   const answer = async (item: HumanInboxItem) => {
     const message = answers[item.exchangeId] ?? "";
     if (message.length === 0) return;
-    setPendingExchangeId(item.exchangeId);
-    setError(null);
-    const previousAttempt = answerAttempts.current.get(item.exchangeId);
-    const attempt =
-      previousAttempt?.message === message
-        ? previousAttempt
-        : { message, clientRequestId: window.crypto.randomUUID() };
-    answerAttempts.current.set(item.exchangeId, attempt);
-    try {
-      await answerHumanExchange({
-        personId: item.personId,
-        exchangeId: item.exchangeId,
-        message,
-        clientRequestId: attempt.clientRequestId,
-      });
-      answerAttempts.current.delete(item.exchangeId);
-      setAnswers((current) => {
-        const next = { ...current };
-        delete next[item.exchangeId];
-        return next;
-      });
-      await refresh(item.personId);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not deliver the answer.");
-    } finally {
-      setPendingExchangeId(null);
-    }
+    await submitHumanInboxAnswer({
+      item,
+      message,
+      attempts: answerAttempts.current,
+      randomUUID: () => window.crypto.randomUUID(),
+      send: answerHumanExchange,
+      refresh,
+      onAccepted: () =>
+        setAnswers((current) => {
+          const next = { ...current };
+          delete next[item.exchangeId];
+          return next;
+        }),
+      setPendingExchangeId,
+      setError,
+    });
   };
 
   return (
