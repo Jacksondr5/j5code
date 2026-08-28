@@ -8,6 +8,13 @@ The proof seeds only one Codex parent in disposable state. The production wrappe
 Claude child, register its immutable home, record spawned-by provenance and placement, and then make
 the child addressable through `list_participants` and `send_message`.
 
+The first authorized attempt failed before `spawn_agent` because the old proof harness sent a
+multi-statement seed file through a helper that prepared and executed only its first statement. That
+was a harness-only failure: the Squadron insert survived, while the parent home and placement were
+never written, so the wrapper correctly refused an unregistered sender. It neither proves nor
+disproves wrapper behavior. The forensic report remains in internal project records; this runbook
+replaces only that broken seed step with the reviewed J5 transaction below.
+
 ## Safety boundary
 
 - Run from a clean detached worktree at one reviewed commit.
@@ -134,7 +141,9 @@ stop_server
 ## 3. Controlled seed of the one parent
 
 This is the only non-production step. It creates one Squadron and one registered root placement for
-the existing Codex parent in the disposable database. The Claude child must not be seeded.
+the existing Codex parent in the disposable database. The J5 utility binds every supplied value and
+commits the Squadron, immutable-home event and receipt, membership projection, placement event, and
+root placement projection in one transaction. The Claude child must not be seeded.
 
 ```bash
 NONCE="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -144,69 +153,39 @@ PARENT_PARTICIPANT_ID="agent:j5:a2a:$(
     'process.stdout.write(encodeURIComponent(process.argv[1]))' "$PARENT_THREAD_ID"
 )"
 CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-SEED_SQL="$PROOF_BASE/parent-seed.sql"
-
-case "$SQUADRON_ID$PARENT_THREAD_ID$PARENT_PARTICIPANT_ID$CREATED_AT" in
-  *"'"*) echo "Generated proof identifiers must not contain a SQL quote." >&2; exit 1 ;;
-esac
-
-cat >"$SEED_SQL" <<SQL
-INSERT INTO j5_a2a_squadron (id, name, created_at)
-VALUES ('$SQUADRON_ID', 'A6 live proof', '$CREATED_AT');
-
-INSERT INTO j5_a2a_comm_event (
-  seq, squadron_id, kind, sender, receiver, exchange_id, correlation_id, payload, created_at
-) VALUES (
-  1, '$SQUADRON_ID', 'participant.joined', NULL, '$PARENT_PARTICIPANT_ID', NULL, NULL,
-  json_object('participant', json_object(
-    'kind', 'agent', 'id', '$PARENT_PARTICIPANT_ID', 'threadId', '$PARENT_THREAD_ID'
-  )), '$CREATED_AT'
-);
-
-INSERT INTO j5_a2a_comm_command_receipt (
-  command_id, squadron_id, command_type, accepted_at, result_seq
-) VALUES (
-  'command:j5:a2a:live-proof:parent-home:$NONCE', '$SQUADRON_ID', 'comm.append',
-  '$CREATED_AT', 1
-);
-
-INSERT INTO j5_a2a_squadron_membership (
-  squadron_id, participant_id, participant_kind, thread_id, joined_seq, updated_seq, payload
-) VALUES (
-  '$SQUADRON_ID', '$PARENT_PARTICIPANT_ID', 'agent', '$PARENT_THREAD_ID', 1, 1,
-  json_object('kind', 'agent', 'id', '$PARENT_PARTICIPANT_ID', 'threadId', '$PARENT_THREAD_ID')
-);
-
-INSERT INTO j5_a2a_placement_event (
-  seq, command_id, request_fingerprint, squadron_id, participant_id, kind, actor,
-  actor_session_id, actor_subject, auth_method, provenance_kind, provenance_participant_id,
-  provenance_source, previous_parent_id, placement_parent_id, created_at
-) VALUES (
-  1, 'command:j5:a2a:live-proof:parent-placement:$NONCE',
-  'controlled-live-proof-parent-seed-v1', '$SQUADRON_ID', '$PARENT_PARTICIPANT_ID',
-  'participant.placement_created', 'platform', NULL, NULL, NULL, 'unknown', NULL, NULL,
-  NULL, NULL, '$CREATED_AT'
-);
-
-INSERT INTO j5_a2a_participant_placement (
-  squadron_id, participant_id, provenance_kind, provenance_participant_id,
-  provenance_source, placement_parent_id, created_event_seq, updated_event_seq
-) VALUES (
-  '$SQUADRON_ID', '$PARENT_PARTICIPANT_ID', 'unknown', NULL, NULL, NULL, 1, 1
-);
-SQL
+HOME_COMMAND_ID="command:j5:a2a:live-proof:parent-home:$NONCE"
+PLACEMENT_COMMAND_ID="command:j5:a2a:live-proof:parent-placement:$NONCE"
+PLACEMENT_FINGERPRINT="controlled-live-proof-parent-seed-v1:$NONCE"
+SEED_RESULT="$PROOF_BASE/parent-seed-result.json"
 
 (
   cd "$PROOF_SOURCE"
-  fnm exec --using="$NODE_VERSION" node apps/server/scripts/t3-sqlite-state.ts exec \
-    --base-dir "$PROOF_BASE" --file "$SEED_SQL"
-)
-rm -f "$SEED_SQL"
+  fnm exec --using="$NODE_VERSION" node \
+    apps/server/src/j5/a2a/scripts/seed-controlled-parent.ts \
+    --base-dir "$PROOF_BASE" \
+    --squadron-id "$SQUADRON_ID" \
+    --squadron-name "A6 live proof" \
+    --participant-id "$PARENT_PARTICIPANT_ID" \
+    --thread-id "$PARENT_THREAD_ID" \
+    --created-at "$CREATED_AT" \
+    --home-command-id "$HOME_COMMAND_ID" \
+    --placement-command-id "$PLACEMENT_COMMAND_ID" \
+    --placement-request-fingerprint "$PLACEMENT_FINGERPRINT"
+) >"$SEED_RESULT"
+
+SEED_BACKUP="$(
+  fnm exec --using="$NODE_VERSION" node -e \
+    'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).backup)' \
+    "$SEED_RESULT"
+)"
+test -f "$SEED_BACKUP"
 start_server
 ```
 
-The state helper creates a timestamped SQLite backup before the seed transaction. Keep that backup
-with the evidence until review is complete.
+The seed utility creates a mode-`0600` timestamped SQLite backup before the transaction. Keep that
+backup and `parent-seed-result.json` with the evidence until review is complete. A failed utility
+invocation is a failed harness setup and must not be retried by starting providers; inspect the
+isolated database read-only and return to code review.
 
 ## 4. Drive the real wrapper and ask/reply flow
 
