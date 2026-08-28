@@ -79,6 +79,12 @@ it.effect(
             (${firstPerson.id}, 1, '2026-08-23T00:00:00.000Z'),
             (${secondPerson.id}, 0, '2026-08-23T00:00:00.000Z')
         `;
+        assert.equal(yield* inbox.resolvePersonId(), firstPerson.id);
+        assert.equal(yield* inbox.resolvePersonId(secondPerson.id), secondPerson.id);
+        const unregistered = yield* Effect.flip(
+          inbox.resolvePersonId(ParticipantId.make("human:missing-person")),
+        );
+        assert.equal(unregistered._tag, "A2AParticipantNotFoundError");
 
         const open = Effect.fn("test.j5.a2a.humanInbox.open")(function* (input: {
           readonly suffix: string;

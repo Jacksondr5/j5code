@@ -11,12 +11,8 @@ import { SidebarInset } from "../../components/ui/sidebar";
 import { Textarea } from "../../components/ui/textarea";
 import { answerHumanExchange, listHumanInbox, type HumanInboxItem } from "./humanInboxClient";
 
-const PERSON_ID_STORAGE_KEY = "j5.a2a.humanInbox.personId";
-
 export function HumanInboxPage() {
-  const [personId, setPersonId] = useState(() =>
-    typeof window === "undefined" ? "" : (window.localStorage.getItem(PERSON_ID_STORAGE_KEY) ?? ""),
-  );
+  const [personId, setPersonId] = useState("");
   const [items, setItems] = useState<ReadonlyArray<HumanInboxItem>>([]);
   const [answers, setAnswers] = useState<Readonly<Record<string, string>>>({});
   const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);
@@ -26,11 +22,12 @@ export function HumanInboxPage() {
     new Map<string, { readonly message: string; readonly clientRequestId: string }>(),
   );
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (requestedPersonId?: string) => {
     if (
-      !personId.startsWith("human:") ||
-      personId === "human:global" ||
-      personId.length <= "human:".length
+      requestedPersonId !== undefined &&
+      (!requestedPersonId.startsWith("human:") ||
+        requestedPersonId === "human:global" ||
+        requestedPersonId.length <= "human:".length)
     ) {
       setError("Enter a person id in the form human:<person-id>.");
       setItems([]);
@@ -39,18 +36,19 @@ export function HumanInboxPage() {
     setLoading(true);
     setError(null);
     try {
-      window.localStorage.setItem(PERSON_ID_STORAGE_KEY, personId);
-      setItems(await listHumanInbox(personId));
+      const response = await listHumanInbox(requestedPersonId);
+      setPersonId(response.personId);
+      setItems(response.items);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load this person's inbox.");
     } finally {
       setLoading(false);
     }
-  }, [personId]);
+  }, []);
 
   useEffect(() => {
-    if (personId.length > 0) void refresh();
-  }, []);
+    void refresh();
+  }, [refresh]);
 
   const answer = async (item: HumanInboxItem) => {
     const message = answers[item.exchangeId] ?? "";
@@ -65,7 +63,7 @@ export function HumanInboxPage() {
     answerAttempts.current.set(item.exchangeId, attempt);
     try {
       await answerHumanExchange({
-        personId,
+        personId: item.personId,
         exchangeId: item.exchangeId,
         message,
         clientRequestId: attempt.clientRequestId,
@@ -76,7 +74,7 @@ export function HumanInboxPage() {
         delete next[item.exchangeId];
         return next;
       });
-      await refresh();
+      await refresh(item.personId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not deliver the answer.");
     } finally {
@@ -104,7 +102,7 @@ export function HumanInboxPage() {
               className="flex items-end gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
-                void refresh();
+                void refresh(personId);
               }}
             >
               <label className="flex flex-1 flex-col gap-1 text-sm">

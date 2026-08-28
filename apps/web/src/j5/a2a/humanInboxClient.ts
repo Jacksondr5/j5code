@@ -21,7 +21,11 @@ const HumanInboxItem = Schema.Struct({
 });
 export type HumanInboxItem = typeof HumanInboxItem.Type;
 
-const InboxResponse = Schema.Struct({ items: Schema.Array(HumanInboxItem) });
+const InboxResponse = Schema.Struct({
+  personId: Schema.String,
+  items: Schema.Array(HumanInboxItem),
+});
+export type HumanInboxResponse = typeof InboxResponse.Type;
 
 const AnswerResponse = Schema.Struct({
   result: Schema.Struct({
@@ -35,17 +39,19 @@ const AnswerResponse = Schema.Struct({
 
 const runtime = ManagedRuntime.make(Layer.merge(primaryEnvironmentHttpLayer, browserCryptoLayer));
 
-export const listHumanInbox = (personId: string): Promise<ReadonlyArray<HumanInboxItem>> =>
-  runtime.runPromise(
-    Effect.gen(function* () {
-      const client = yield* HttpClient.HttpClient;
-      const url = new URL(resolvePrimaryEnvironmentHttpUrl("/api/j5/a2a/inbox"));
-      url.searchParams.set("personId", personId);
-      const response = yield* client.get(url.toString());
-      const success = yield* HttpClientResponse.filterStatusOk(response);
-      return (yield* HttpClientResponse.schemaBodyJson(InboxResponse)(success)).items;
-    }),
-  );
+export const listHumanInboxEffect = Effect.fn("j5.a2a.humanInboxClient.list")(function* (
+  personId?: string,
+) {
+  const client = yield* HttpClient.HttpClient;
+  const url = new URL(resolvePrimaryEnvironmentHttpUrl("/api/j5/a2a/inbox"));
+  if (personId !== undefined) url.searchParams.set("personId", personId);
+  const response = yield* client.get(url.toString());
+  const success = yield* HttpClientResponse.filterStatusOk(response);
+  return yield* HttpClientResponse.schemaBodyJson(InboxResponse)(success);
+});
+
+export const listHumanInbox = (personId?: string): Promise<HumanInboxResponse> =>
+  runtime.runPromise(listHumanInboxEffect(personId));
 
 export const answerHumanExchange = (input: {
   readonly personId: string;

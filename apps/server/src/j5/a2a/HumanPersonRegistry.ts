@@ -3,12 +3,22 @@ import * as NodeCrypto from "node:crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { ParticipantId } from "./contracts.ts";
 
 interface HumanPersonRow {
   readonly person_id: string;
+}
+
+export class A2ALocalOperatorNotFoundError extends Schema.TaggedErrorClass<A2ALocalOperatorNotFoundError>()(
+  "A2ALocalOperatorNotFoundError",
+  {},
+) {
+  override get message(): string {
+    return "The host-local human operator registry entry is missing.";
+  }
 }
 
 export const listRegisteredHumanPersonIds = Effect.fn(
@@ -33,6 +43,20 @@ export const isRegisteredHumanPerson = Effect.fn(
   return (rows[0]?.count ?? 0) === 1;
 });
 
+export const getLocalOperatorHumanPersonId = Effect.fn(
+  "j5.a2a.humanPersonRegistry.getLocalOperatorHumanPersonId",
+)(function* (sql: SqlClient.SqlClient) {
+  const rows = yield* sql<HumanPersonRow>`
+    SELECT person_id
+    FROM j5_a2a_human_person
+    WHERE is_local_operator = 1
+    LIMIT 2
+  `;
+  const row = rows.length === 1 ? rows[0] : undefined;
+  if (row === undefined) return yield* new A2ALocalOperatorNotFoundError();
+  return ParticipantId.make(row.person_id);
+});
+
 export const ensureLocalOperatorHumanPerson = Effect.fn(
   "j5.a2a.humanPersonRegistry.ensureLocalOperatorHumanPerson",
 )(function* (sql: SqlClient.SqlClient) {
@@ -53,13 +77,7 @@ export const ensureLocalOperatorHumanPerson = Effect.fn(
         VALUES (${personId}, 1, ${createdAt})
         ON CONFLICT DO NOTHING
       `;
-      const inserted = yield* sql<HumanPersonRow>`
-        SELECT person_id
-        FROM j5_a2a_human_person
-        WHERE is_local_operator = 1
-        LIMIT 1
-      `;
-      return ParticipantId.make(inserted[0]!.person_id);
+      return yield* getLocalOperatorHumanPersonId(sql);
     }),
   );
 });

@@ -87,13 +87,19 @@ export const humanInboxHttpRouteLayer = Layer.unwrap(
         const request = yield* HttpServerRequest.HttpServerRequest;
         const url = HttpServerRequest.toURL(request);
         if (Option.isNone(url)) return requestFailure("The request URL is invalid.");
-        const personId = url.value.searchParams.get("personId");
-        if (personId === null || personId.length === 0) {
-          return requestFailure("personId=human:<person-id> is required.");
-        }
-        const result = yield* Effect.result(inbox.list(ParticipantId.make(personId)));
+        const requestedPersonId = url.value.searchParams.get("personId");
+        const result = yield* Effect.result(
+          Effect.gen(function* () {
+            const personId = yield* inbox.resolvePersonId(
+              requestedPersonId === null || requestedPersonId.length === 0
+                ? undefined
+                : ParticipantId.make(requestedPersonId),
+            );
+            return { personId, items: yield* inbox.list(personId) };
+          }),
+        );
         return Result.isSuccess(result)
-          ? HttpServerResponse.jsonUnsafe({ items: result.success })
+          ? HttpServerResponse.jsonUnsafe(result.success)
           : operationFailure(result.failure);
       }).pipe(
         Effect.catchTags({

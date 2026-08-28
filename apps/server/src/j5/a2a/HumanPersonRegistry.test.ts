@@ -4,6 +4,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
 import {
+  getLocalOperatorHumanPersonId,
   ensureLocalOperatorHumanPerson,
   listRegisteredHumanPersonIds,
 } from "./HumanPersonRegistry.ts";
@@ -13,9 +14,12 @@ it.effect("mints one opaque local operator once without Squadron state", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const sql = yield* SqlClient.SqlClient;
+    const missing = yield* Effect.flip(getLocalOperatorHumanPersonId(sql));
+    assert.equal(missing._tag, "A2ALocalOperatorNotFoundError");
     const first = yield* ensureLocalOperatorHumanPerson(sql);
     const restarted = yield* ensureLocalOperatorHumanPerson(sql);
     assert.equal(restarted, first);
+    assert.equal(yield* getLocalOperatorHumanPersonId(sql), first);
     assert.match(first, /^human:[0-9a-f]{8}-[0-9a-f-]{27}$/);
 
     const people = yield* listRegisteredHumanPersonIds(sql);

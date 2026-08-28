@@ -19,7 +19,11 @@ import {
   type SendMessageResult,
 } from "./contracts.ts";
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
-import { isRegisteredHumanPerson } from "./HumanPersonRegistry.ts";
+import {
+  type A2ALocalOperatorNotFoundError,
+  getLocalOperatorHumanPersonId,
+  isRegisteredHumanPerson,
+} from "./HumanPersonRegistry.ts";
 import {
   A2AExchangeAlreadyAnsweredError,
   A2AExchangeNotOpenError,
@@ -38,6 +42,7 @@ export class A2AHumanPersonIdError extends Schema.TaggedErrorClass<A2AHumanPerso
 export type A2AHumanInboxError =
   | A2ALedgerError
   | SqlError
+  | A2ALocalOperatorNotFoundError
   | A2AHumanPersonIdError
   | A2AParticipantNotFoundError
   | A2AExchangeNotOpenError
@@ -80,6 +85,9 @@ const assertPersonId = (personId: ParticipantId) =>
     : Effect.fail(new A2AHumanPersonIdError({ personId }));
 
 export interface A2AHumanInboxShape {
+  readonly resolvePersonId: (
+    personId?: ParticipantId,
+  ) => Effect.Effect<ParticipantId, A2AHumanInboxError>;
   readonly list: (
     personId: ParticipantId,
   ) => Effect.Effect<ReadonlyArray<HumanInboxItem>, A2AHumanInboxError>;
@@ -99,12 +107,19 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
       const ledger = yield* A2ALedger;
       const sql = yield* SqlClient.SqlClient;
 
-      const list: A2AHumanInboxShape["list"] = (personId) =>
+      const resolvePersonId: A2AHumanInboxShape["resolvePersonId"] = (personId) =>
         Effect.gen(function* () {
+          if (personId === undefined) return yield* getLocalOperatorHumanPersonId(sql);
           yield* assertPersonId(personId);
           if (!(yield* isRegisteredHumanPerson(sql, personId))) {
             return yield* new A2AParticipantNotFoundError({ participantId: personId });
           }
+          return personId;
+        });
+
+      const list: A2AHumanInboxShape["list"] = (personId) =>
+        Effect.gen(function* () {
+          yield* resolvePersonId(personId);
           const rows = yield* sql<InboxRow>`
             SELECT
               exchange.receiver_id AS person_id,
@@ -248,6 +263,6 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
           } satisfies SendMessageResult;
         });
 
-      return A2AHumanInbox.of({ list, answer });
+      return A2AHumanInbox.of({ resolvePersonId, list, answer });
     }),
   );
