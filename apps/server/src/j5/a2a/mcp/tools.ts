@@ -1,11 +1,19 @@
 import { Tool, Toolkit } from "effect/unstable/ai";
 import * as Schema from "effect/Schema";
 
-import { ThreadId } from "@t3tools/contracts";
+import {
+  OrchestratorMcpDelegateTaskInput,
+  OrchestratorMcpDelegateTaskResult,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as McpInvocationContext from "../../../mcp/McpInvocationContext.ts";
+import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
+import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { A2A_LIST_TOOL_DESCRIPTION, A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
+import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
+import { A2ALedger } from "../LedgerService.ts";
 import { PlacementCascadeRow, PlacementCascadeService } from "../PlacementCascadeService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
@@ -17,7 +25,7 @@ import {
   SquadronId,
   Urgency,
 } from "../contracts.ts";
-import { ParticipantProvenanceView } from "../placementContracts.ts";
+import { ParticipantPlacement, ParticipantProvenanceView } from "../placementContracts.ts";
 
 export const J5McpFailure = Schema.Struct({
   code: Schema.String,
@@ -47,6 +55,17 @@ export const J5ListParticipantsResult = Schema.Struct({
   participants: Schema.Array(J5ParticipantDirectoryRow),
 });
 
+export const J5SpawnAgentInput = Schema.Struct({
+  ...OrchestratorMcpDelegateTaskInput.fields,
+  clientRequestId: Schema.required(OrchestratorMcpDelegateTaskInput.fields.clientRequestId),
+});
+export type J5SpawnAgentInput = typeof J5SpawnAgentInput.Type;
+
+export const J5SpawnAgentResult = Schema.Struct({
+  delegation: OrchestratorMcpDelegateTaskResult,
+  placement: ParticipantPlacement,
+});
+
 export const J5PlacementCascadeInput = Schema.Struct({
   client_request_id: Schema.String.check(Schema.isNonEmpty()),
   squadron_id: SquadronId,
@@ -68,6 +87,14 @@ const placementDependencies = [
   ...dependencies,
   ParticipantPlacementService,
   PlacementCascadeService,
+];
+
+const spawnDependencies = [
+  ...placementDependencies,
+  A2ALedger,
+  A2AHomeRegistrar,
+  OrchestratorMcpService,
+  ThreadManagementService,
 ];
 
 export const J5SendMessageTool = Tool.make("send_message", {
@@ -96,6 +123,21 @@ export const J5ListParticipantsTool = Tool.make("list_participants", {
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true)
   .annotate(Tool.OpenWorld, false);
+
+export const J5SpawnAgentTool = Tool.make("spawn_agent", {
+  description:
+    "Delegate one child agent into the caller's existing home Squadron. The wrapper passes the delegation request to upstream unchanged, then idempotently registers the child in that same Squadron and records immutable spawned-by provenance with placement directly under the caller. There is no placement or Squadron selection parameter. clientRequestId is required and must be reused for retries.",
+  parameters: J5SpawnAgentInput,
+  success: J5SpawnAgentResult,
+  failure: J5McpFailure,
+  failureMode: "return",
+  dependencies: spawnDependencies,
+})
+  .annotate(Tool.Title, "Spawn an agent in the current Squadron")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, true)
+  .annotate(Tool.Idempotent, true)
+  .annotate(Tool.OpenWorld, true);
 
 export const J5StopAgentTool = Tool.make("stop_agent", {
   description:
@@ -129,6 +171,7 @@ export const J5ArchiveAgentTool = Tool.make("archive_agent", {
 export const J5Toolkit = Toolkit.make(
   J5SendMessageTool,
   J5ListParticipantsTool,
+  J5SpawnAgentTool,
   J5StopAgentTool,
   J5ArchiveAgentTool,
 );

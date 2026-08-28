@@ -7,16 +7,22 @@ import {
   McpInvocationContext,
   type McpInvocationScope,
 } from "../../../mcp/McpInvocationContext.ts";
+import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
+import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
+import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
+import { A2ALedger } from "../LedgerService.ts";
 import { PlacementCascadeService } from "../PlacementCascadeService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import {
   CommCommandId,
   type ParticipantDirectoryRow,
+  type ParticipantId,
   type SquadronId,
 } from "../contracts.ts";
 import { PlacementCommandId } from "../placementContracts.ts";
+import { provenanceFromThreadLineage } from "../placementProvenance.ts";
 import { J5Toolkit, type J5McpFailure } from "./tools.ts";
 
 class J5PlacementMcpStateError extends Data.TaggedError("J5PlacementMcpStateError")<{
@@ -46,6 +52,19 @@ const placementCommandId = (input: {
   PlacementCommandId.make(
     `command:j5:a2a:placement:mcp:${stablePart(input.providerSessionId)}:${stablePart(input.requestKey)}:${input.operation}`,
   );
+
+const placementBackfillCommandId = (input: {
+  readonly squadronId: SquadronId;
+  readonly participantId: ParticipantId;
+}) =>
+  PlacementCommandId.make(
+    `command:j5:a2a:placement:lineage:${stablePart(input.squadronId)}:${stablePart(input.participantId)}`,
+  );
+
+const spawnCommandId = (input: {
+  readonly taskId: string;
+  readonly operation: "home" | "placement";
+}) => `command:j5:a2a:spawn:${stablePart(input.taskId)}:${input.operation}`;
 
 export const commandIdForRequest = (input: {
   readonly providerSessionId: string;
@@ -97,6 +116,44 @@ const requireCallerInSquadron = Effect.fn("j5.a2a.mcp.requireCallerInSquadron")(
   return caller;
 });
 
+const ensureCallerPlacement = Effect.fn("j5.a2a.mcp.ensureCallerPlacement")(function* (
+  scope: McpInvocationScope,
+  caller: AgentDirectoryRow,
+) {
+  const placements = yield* ParticipantPlacementService;
+  const existing = yield* placements.readPlacement({
+    squadronId: caller.squadronId,
+    participantId: caller.participantId,
+  });
+  if (existing !== null) return existing;
+
+  const projection = yield* (yield* ThreadManagementService).getThreadProjection(scope.threadId);
+  const parentThreadId = projection.thread.lineage.parentThreadId;
+  const parentParticipantId =
+    parentThreadId === null
+      ? null
+      : yield* (yield* A2ALedger).findHistoricalAgentParticipantId({
+          squadronId: caller.squadronId,
+          threadId: parentThreadId,
+        });
+  const provenance = provenanceFromThreadLineage({
+    lineage: projection.thread.lineage,
+    parentParticipantId,
+  });
+  const result = yield* placements.recordCreation({
+    commandId: placementBackfillCommandId({
+      squadronId: caller.squadronId,
+      participantId: caller.participantId,
+    }),
+    squadronId: caller.squadronId,
+    participantId: caller.participantId,
+    actor: "platform",
+    provenance,
+    createdAt: String(projection.thread.createdAt),
+  });
+  return result.placement;
+});
+
 const handlers = {
   send_message: (input) =>
     Effect.gen(function* () {
@@ -135,9 +192,7 @@ const handlers = {
         { concurrency: 1 },
       )).flat();
       const placementByParticipant = new Map(
-        placementRows.map(
-          (row) => [`${row.squadronId}\u0000${row.participantId}`, row] as const,
-        ),
+        placementRows.map((row) => [`${row.squadronId}\u0000${row.participantId}`, row] as const),
       );
       return {
         participants: directory.map((row) => {
@@ -156,6 +211,45 @@ const handlers = {
           };
         }),
       };
+    }).pipe(Effect.mapError(failure)),
+  spawn_agent: (input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
+      const caller = yield* resolveCallerMembership(scope);
+      const ledger = yield* A2ALedger;
+      // Fail before upstream delegation if the caller's immutable home no
+      // longer names an existing Squadron.
+      yield* ledger.readSquadron(caller.squadronId);
+      yield* ensureCallerPlacement(scope, caller);
+
+      const delegation = yield* (yield* OrchestratorMcpService).delegateTask(scope, input);
+      const childProjection = yield* (yield* ThreadManagementService).getThreadProjection(
+        delegation.childThreadId,
+      );
+      const createdAt = String(childProjection.thread.createdAt);
+      const home = yield* (yield* A2AHomeRegistrar).registerAtCreation({
+        commandId: CommCommandId.make(
+          spawnCommandId({ taskId: delegation.taskId, operation: "home" }),
+        ),
+        squadronId: caller.squadronId,
+        threadId: delegation.childThreadId,
+        createdAt,
+      });
+      const placement = yield* (yield* ParticipantPlacementService).recordCreation({
+        commandId: PlacementCommandId.make(
+          spawnCommandId({ taskId: delegation.taskId, operation: "placement" }),
+        ),
+        squadronId: home.squadronId,
+        participantId: home.participantId,
+        actor: "agent",
+        provenance: {
+          kind: "spawned-by",
+          spawnedByParticipantId: caller.participantId,
+          source: "j5_wrapper",
+        },
+        createdAt,
+      });
+      return { delegation, placement: placement.placement };
     }).pipe(Effect.mapError(failure)),
   stop_agent: (input) =>
     Effect.gen(function* () {

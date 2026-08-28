@@ -1,6 +1,12 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  NodeId,
+  ProviderInstanceId,
+  ThreadId,
+  type OrchestratorMcpDelegateTaskInput,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
@@ -8,7 +14,11 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
+import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
+import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
+import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
+import { A2ALedger, SquadronNotFoundError } from "../LedgerService.ts";
 import { PlacementCascadeService } from "../PlacementCascadeService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
@@ -20,8 +30,9 @@ import {
   type ParticipantDirectoryRow,
   type SendMessageInput,
 } from "../contracts.ts";
+import type { RecordParticipantPlacementInput } from "../placementContracts.ts";
 import { J5ToolkitHandlersLive } from "./handlers.ts";
-import { J5Toolkit, type J5SendMessageInput } from "./tools.ts";
+import { J5Toolkit, type J5SendMessageInput, type J5SpawnAgentInput } from "./tools.ts";
 
 interface PlacementCascadeArgs {
   readonly client_request_id: string;
@@ -44,6 +55,7 @@ it.effect("derives send idempotency and sender identity from authenticated scope
       "archive_agent",
       "list_participants",
       "send_message",
+      "spawn_agent",
       "stop_agent",
     ]);
     const sends = yield* Ref.make<ReadonlyArray<SendMessageInput>>([]);
@@ -68,6 +80,10 @@ it.effect("derives send idempotency and sender identity from authenticated scope
       sendService,
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(PlacementCascadeService)({}),
+      Layer.mock(A2ALedger)({}),
+      Layer.mock(A2AHomeRegistrar)({}),
+      Layer.mock(OrchestratorMcpService)({}),
+      Layer.mock(ThreadManagementService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       NodeServices.layer,
     );
@@ -95,6 +111,270 @@ it.effect("derives send idempotency and sender identity from authenticated scope
       assert.lengthOf(captured, 2);
       assert.equal(captured[0]?.commandId, captured[1]?.commandId);
       assert.equal(captured[0]?.senderThreadId, invocation.threadId);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("registers and places a fixed-spawner child after unchanged upstream delegation", () =>
+  Effect.gen(function* () {
+    const squadronId = SquadronId.make("squadron:j5:mcp-spawn");
+    const callerParticipantId = ParticipantId.make("agent:j5:mcp-spawn-caller");
+    const childParticipantId = ParticipantId.make("agent:j5:mcp-spawn-child");
+    const childThreadId = ThreadId.make("thread:j5:mcp-spawn-child");
+    const departedParentParticipantId = ParticipantId.make("agent:j5:mcp-spawn-departed");
+    const departedParentThreadId = ThreadId.make("thread:j5:mcp-spawn-departed");
+    const taskId = NodeId.make("node:j5:mcp-spawn-task");
+    const createdAt = "2026-08-27T20:00:00.000Z";
+    const steps = yield* Ref.make<ReadonlyArray<string>>([]);
+    const delegatedInputs = yield* Ref.make<ReadonlyArray<OrchestratorMcpDelegateTaskInput>>([]);
+    const homeInputs = yield* Ref.make<
+      ReadonlyArray<{
+        readonly commandId: string;
+        readonly squadronId: SquadronId;
+        readonly threadId: ThreadId;
+      }>
+    >([]);
+    const placementInputs = yield* Ref.make<ReadonlyArray<RecordParticipantPlacementInput>>([]);
+    const callerPlaced = yield* Ref.make(false);
+    const childPlaced = yield* Ref.make(false);
+    const missingSquadron = yield* Ref.make(false);
+    const callerRow = {
+      squadronId,
+      participantId: callerParticipantId,
+      participant: {
+        kind: "agent" as const,
+        id: callerParticipantId,
+        threadId: invocation.threadId,
+      },
+      canReceiveMessage: true,
+      canOpenExchange: true,
+      acceptsUrgency: false,
+    } satisfies ParticipantDirectoryRow;
+    const delegation = {
+      taskId,
+      childThreadId,
+      childRunId: null,
+      childNodeId: NodeId.make("node:j5:mcp-spawn-child"),
+      status: "waiting" as const,
+      providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "claude-fable-5",
+      summary: null,
+      resultContextTransferId: null,
+      waitTimedOut: false,
+    };
+    const placementResult = (
+      input: RecordParticipantPlacementInput,
+      placementParentId: ParticipantId | null,
+      seq: number,
+      committed: boolean,
+    ) => ({
+      event: {
+        seq,
+        commandId: input.commandId,
+        squadronId: input.squadronId,
+        participantId: input.participantId,
+        kind: "participant.placement_created" as const,
+        actor: input.actor,
+        provenance: input.provenance,
+        previousParentId: null,
+        placementParentId,
+        createdAt: input.createdAt,
+      },
+      placement: {
+        squadronId: input.squadronId,
+        participantId: input.participantId,
+        provenance: input.provenance,
+        placementParentId,
+        createdEventSeq: seq,
+        updatedEventSeq: seq,
+      },
+      committed,
+    });
+
+    const sendService = Layer.succeed(
+      A2ASendService,
+      A2ASendService.of({
+        send: () => Effect.die("send_message is outside this spawn-handler test"),
+        listParticipants: () => Effect.succeed([callerRow]),
+      }),
+    );
+    const ledger = Layer.mock(A2ALedger)({
+      readSquadron: (requestedSquadronId) =>
+        Ref.update(steps, (items) => [...items, "squadron-preflight"]).pipe(
+          Effect.andThen(Ref.get(missingSquadron)),
+          Effect.flatMap((missing) =>
+            missing
+              ? Effect.fail(new SquadronNotFoundError({ squadronId: requestedSquadronId }))
+              : Effect.succeed({
+                  id: requestedSquadronId,
+                  name: "Spawn wrapper test",
+                  createdAt,
+                }),
+          ),
+        ),
+      findHistoricalAgentParticipantId: () =>
+        Ref.update(steps, (items) => [...items, "historical-parent"]).pipe(
+          Effect.as(departedParentParticipantId),
+        ),
+    });
+    const placements = Layer.mock(ParticipantPlacementService)({
+      readPlacement: () =>
+        Ref.update(steps, (items) => [...items, "caller-placement-read"]).pipe(
+          Effect.andThen(Ref.get(callerPlaced)),
+          Effect.map((exists) =>
+            exists
+              ? {
+                  squadronId,
+                  participantId: callerParticipantId,
+                  provenance: {
+                    kind: "unknown" as const,
+                    source: "native_or_unobserved" as const,
+                  },
+                  placementParentId: null,
+                  createdEventSeq: 1,
+                  updatedEventSeq: 1,
+                }
+              : null,
+          ),
+        ),
+      recordCreation: (input) =>
+        Effect.gen(function* () {
+          yield* Ref.update(placementInputs, (items) => [...items, input]);
+          if (input.participantId === callerParticipantId) {
+            yield* Ref.update(steps, (items) => [...items, "caller-placement-record"]);
+            const replay = yield* Ref.get(callerPlaced);
+            yield* Ref.set(callerPlaced, true);
+            return placementResult(input, null, 1, !replay);
+          }
+          yield* Ref.update(steps, (items) => [...items, "child-placement-record"]);
+          const replay = yield* Ref.get(childPlaced);
+          yield* Ref.set(childPlaced, true);
+          return placementResult(input, callerParticipantId, 2, !replay);
+        }),
+    });
+    const threads = Layer.mock(ThreadManagementService)({
+      getThreadProjection: (threadId) =>
+        Ref.update(steps, (items) => [
+          ...items,
+          threadId === invocation.threadId ? "caller-projection" : "child-projection",
+        ]).pipe(
+          Effect.as({
+            thread: {
+              createdAt,
+              lineage:
+                threadId === invocation.threadId
+                  ? {
+                      parentThreadId: departedParentThreadId,
+                      relationshipToParent: "subagent",
+                    }
+                  : {
+                      parentThreadId: invocation.threadId,
+                      relationshipToParent: "subagent",
+                    },
+            },
+          } as never),
+        ),
+    });
+    const orchestrator = Layer.mock(OrchestratorMcpService)({
+      delegateTask: (_scope, input) =>
+        Effect.gen(function* () {
+          yield* Ref.update(steps, (items) => [...items, "delegate"]);
+          yield* Ref.update(delegatedInputs, (items) => [...items, input]);
+          return delegation;
+        }),
+    });
+    const registrar = Layer.mock(A2AHomeRegistrar)({
+      registerAtCreation: (input) =>
+        Effect.gen(function* () {
+          yield* Ref.update(steps, (items) => [...items, "register-home"]);
+          yield* Ref.update(homeInputs, (items) => [...items, input]);
+          return { squadronId, participantId: childParticipantId };
+        }),
+    });
+    const dependencies = Layer.mergeAll(
+      sendService,
+      ledger,
+      placements,
+      threads,
+      orchestrator,
+      registrar,
+      Layer.mock(PlacementCascadeService)({}),
+      Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      NodeServices.layer,
+    );
+    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+
+    yield* Effect.gen(function* () {
+      const toolkit = yield* J5Toolkit;
+      const callSpawn = (args: J5SpawnAgentInput) =>
+        toolkit
+          .handle("spawn_agent", args)
+          .pipe(
+            Stream.unwrap,
+            Stream.run(Sink.last()),
+            Effect.flatMap(Effect.fromOption),
+            Effect.provideService(McpInvocationContext, invocation),
+          );
+      const args = {
+        task: "Run the isolated receiver proof",
+        target: { providerInstanceId: ProviderInstanceId.make("claudeAgent") },
+        mode: "async" as const,
+        clientRequestId: "spawn-wrapper-replay-1",
+      } satisfies J5SpawnAgentInput;
+
+      const first = yield* callSpawn(args);
+      const replay = yield* callSpawn(args);
+      assert.isFalse(first.isFailure);
+      assert.isFalse(replay.isFailure);
+      assert.deepStrictEqual(yield* Ref.get(delegatedInputs), [args, args]);
+      assert.deepStrictEqual(yield* Ref.get(steps), [
+        "squadron-preflight",
+        "caller-placement-read",
+        "caller-projection",
+        "historical-parent",
+        "caller-placement-record",
+        "delegate",
+        "child-projection",
+        "register-home",
+        "child-placement-record",
+        "squadron-preflight",
+        "caller-placement-read",
+        "delegate",
+        "child-projection",
+        "register-home",
+        "child-placement-record",
+      ]);
+      const registrations = yield* Ref.get(homeInputs);
+      assert.lengthOf(registrations, 2);
+      assert.equal(registrations[0]?.squadronId, squadronId);
+      assert.equal(registrations[0]?.threadId, childThreadId);
+      assert.equal(registrations[0]?.commandId, registrations[1]?.commandId);
+      const recorded = yield* Ref.get(placementInputs);
+      assert.deepStrictEqual(recorded[0]?.provenance, {
+        kind: "spawned-by",
+        spawnedByParticipantId: departedParentParticipantId,
+        source: "upstream_lineage",
+      });
+      const childRecords = recorded.filter((input) => input.participantId === childParticipantId);
+      assert.lengthOf(childRecords, 2);
+      assert.equal(childRecords[0]?.commandId, childRecords[1]?.commandId);
+      assert.deepStrictEqual(childRecords[0]?.provenance, {
+        kind: "spawned-by",
+        spawnedByParticipantId: callerParticipantId,
+        source: "j5_wrapper",
+      });
+
+      yield* Ref.set(missingSquadron, true);
+      yield* Ref.set(steps, []);
+      const delegatedBeforeFailure = (yield* Ref.get(delegatedInputs)).length;
+      const missing = yield* callSpawn({ ...args, clientRequestId: "missing-squadron" });
+      assert.isTrue(missing.isFailure);
+      assert.equal(
+        (missing.result as unknown as { readonly code: string }).code,
+        "SquadronNotFoundError",
+      );
+      assert.deepStrictEqual(yield* Ref.get(steps), ["squadron-preflight"]);
+      assert.lengthOf(yield* Ref.get(delegatedInputs), delegatedBeforeFailure);
     }).pipe(Effect.provide(layer));
   }),
 );
@@ -186,6 +466,10 @@ it.effect("enriches participants and authorizes cascades before placement dispat
       sendService,
       placementService,
       cascades,
+      Layer.mock(A2ALedger)({}),
+      Layer.mock(A2AHomeRegistrar)({}),
+      Layer.mock(OrchestratorMcpService)({}),
+      Layer.mock(ThreadManagementService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       NodeServices.layer,
     );

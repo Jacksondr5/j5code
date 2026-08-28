@@ -19,6 +19,7 @@ import {
   PlacementCycleError,
   PlacementGraphCorruptError,
   PlacementHumanRequiredError,
+  PlacementParentNotFoundError,
   PlacementParticipantNotFoundError,
   ParticipantPlacementService,
   layer as placementLayer,
@@ -32,6 +33,7 @@ const squadronId = SquadronId.make("squadron:placement");
 const isCycle = Schema.is(PlacementCycleError);
 const isGraphCorrupt = Schema.is(PlacementGraphCorruptError);
 const isHumanRequired = Schema.is(PlacementHumanRequiredError);
+const isParentNotFound = Schema.is(PlacementParentNotFoundError);
 const isParticipantNotFound = Schema.is(PlacementParticipantNotFoundError);
 const humanPrincipal = {
   sessionId: AuthSessionId.make("session:placement-human"),
@@ -258,9 +260,10 @@ it.effect("roots departed lineage backfill while refusing a participant id that 
   Effect.gen(function* () {
     const departedParent = agent("departed-parent");
     const child = agent("departed-child");
+    const wrapperChild = agent("departed-wrapper-child");
     const fabricatedTarget = agent("fabricated-target");
     const fabricatedSource = agent("never-joined-source");
-    yield* prepare([departedParent, child, fabricatedTarget]);
+    yield* prepare([departedParent, child, wrapperChild, fabricatedTarget]);
     yield* record({
       index: 1,
       participant: departedParent,
@@ -297,9 +300,30 @@ it.effect("roots departed lineage backfill while refusing a participant id that 
     });
     assert.equal(departedResult.placement.placementParentId, null);
 
-    const fabricatedError = yield* Effect.flip(
+    const wrapperError = yield* Effect.flip(
       record({
         index: 3,
+        participant: wrapperChild,
+        provenance: {
+          kind: "spawned-by",
+          spawnedByParticipantId: departedParent.id,
+          source: "j5_wrapper",
+        },
+      }),
+    );
+    assert.isTrue(isParentNotFound(wrapperError));
+    assert.include(wrapperError.message, departedParent.id);
+    assert.equal(
+      yield* (yield* ParticipantPlacementService).readPlacement({
+        squadronId,
+        participantId: wrapperChild.id,
+      }),
+      null,
+    );
+
+    const fabricatedError = yield* Effect.flip(
+      record({
+        index: 4,
         participant: fabricatedTarget,
         provenance: {
           kind: "spawned-by",
