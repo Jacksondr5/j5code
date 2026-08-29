@@ -14,14 +14,14 @@ record: [`product/a2a/substrate.md`](../product/a2a/substrate.md).
    briefing, echoed by the evaluator) that upstream's `cascadeTerminalizeRunOwnedSubagents` reaps
    delegated children by lineage when the spawner's run dies. Verified false: it emits only
    `subagent.updated`/`node.updated`/`turn-item.updated` projection events terminalizing the
-   *parent's tracking rows*; the only child-stopping paths are explicit `cancelTask` / per-thread
+   _parent's tracking rows_; the only child-stopping paths are explicit `cancelTask` / per-thread
    interrupt (which J5's placement cascade dispatches). Delegated children survive their spawner.
    The dual-authority concern reduced from destructive to presentational.
 
 2. **There was never a delivery bug.** The A6 live proof's "failed" attempt — a delivered
    `expect_reply` ask with no reply, read at the time as "delivery does not wake an idle child" —
    was re-examined against the retained databases (`/tmp/j5-a6-live.mWKKbF`,
-   `/tmp/j5-a6-final2-live.UuQmUp`, read-only copies). In *both* attempts the ask was **steered
+   `/tmp/j5-a6-final2-live.UuQmUp`, read-only copies). In _both_ attempts the ask was **steered
    into the child's active run** (delivery message rows bound to child run ordinal 1, mid-run
    timestamps; no `queued` or `waiting` run in either database). The failed child's own final
    message acknowledges the envelope and declines to reply — as its briefing instructed. The PASS
