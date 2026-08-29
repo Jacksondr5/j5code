@@ -16,6 +16,6 @@ The single home for phase-3/MVP scope cuts (Jackson's rule, 2026-08-25: override
 ## Standing guards (not overrides — v0 must keep these)
 
 - **Squadron-first creation**: name the work, then attach the folder. Reusing the project-creation flow wholesale (open-folder-then-it's-a-Squadron) rebuilds T3's 1:1 shape with a rename — the exact thing the design exists to not be. The composer heading stays Squadron-named; the first-run gate stays "create your first Squadron."
-- SC3 is fully in force: Squadron-grouped sidebar, context-inherited composer chip (changeable until send, immutable after, feeding the Registrar), no auto-Default Squadron.
+- SC3 is fully in force **as amended 2026-08-29 (SB3)**: Squadron **scope dropdown** in the sidebar (not grouping — superseded by the sidebar/roster rulings), context-inherited composer chip (changeable until send, immutable after, feeding the Registrar), no auto-Default Squadron.
 
 Session trail: the MVP discussion (2026-08-25) amending the squadron-creation session (2026-08-24); challenge points and their acceptance recorded in the Product lead's session log.
