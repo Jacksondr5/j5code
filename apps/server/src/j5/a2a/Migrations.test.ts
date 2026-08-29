@@ -48,6 +48,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 6, name: "HumanNode" },
       { migration_id: 7, name: "ParticipantPlacement" },
       { migration_id: 8, name: "LifecycleClosure" },
+      { migration_id: 9, name: "SquadronProjectReferences" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -60,6 +61,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [6, "HumanNode"],
         [7, "ParticipantPlacement"],
         [8, "LifecycleClosure"],
+        [9, "SquadronProjectReferences"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
@@ -92,7 +94,8 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'j5_a2a_silence_detector_cursor',
           'j5_a2a_placement_event',
           'j5_a2a_participant_placement',
-          'j5_a2a_lifecycle_cursor'
+          'j5_a2a_lifecycle_cursor',
+          'j5_a2a_squadron_project_reference'
         )
       ORDER BY name
     `;
@@ -112,7 +115,8 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'j5_a2a_comm_event_agent_home_thread_idx',
           'j5_a2a_human_person_local_operator_idx',
           'j5_a2a_placement_event_participant_idx',
-          'j5_a2a_participant_placement_parent_idx'
+          'j5_a2a_participant_placement_parent_idx',
+          'j5_a2a_squadron_project_reference_project_idx'
         )
       ORDER BY name
     `;
@@ -156,6 +160,7 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       { name: "j5_a2a_silence_detector_cursor" },
       { name: "j5_a2a_squadron" },
       { name: "j5_a2a_squadron_membership" },
+      { name: "j5_a2a_squadron_project_reference" },
     ]);
     const indexesByName = new Map(indexes.map((index) => [index.name, index.sql]));
     assert.include(
@@ -219,6 +224,10 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
     assert.include(
       indexesByName.get("j5_a2a_placement_event_participant_idx") ?? "",
       "ON j5_a2a_placement_event(squadron_id, participant_id, seq)",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_squadron_project_reference_project_idx") ?? "",
+      "ON j5_a2a_squadron_project_reference(project_id, squadron_id)",
     );
     const envelopeChannel = deliveryColumns.find((column) => column.name === "envelope_channel");
     assert.equal(envelopeChannel?.notnull, 1);
