@@ -26,6 +26,8 @@ A **grouping, not a boundary** — the way sets of agents, artifacts, PRs, human
 - Exclusive-join's worst property — _silently_ leaving other epics — is moot under no-movement, but the principle it violated stands recorded: membership changes, were they ever to exist, must be loud and evented.
 - D3/D8 unchanged: per-epic ledger as storage/replication unit; cross-epic exchanges via double-entry.
 
+> **Dogfood v0 note:** the v0 build ships an overridden subset of the creation UX below (exactly-one folder per Squadron, project-reference implementation). Overrides live in one place only: [`../dogfood-v0.md`](../dogfood-v0.md). This document remains the end-state truth.
+
 ## Creation UX — Squadrons and the agents under them (settled 2026-08-24)
 
 From the creation-UX session ([worklog record](../../worklog/squadron-creation-session-2026-08-24.md)); mockups reviewed and approved by Jackson. The governing inversion: T3's shape is folder-as-container (open a folder, get a project, base agents on it — a 1:1 shape). J5's shape is **work-as-container**: the Squadron is created first and _targets_ folders, many-to-many — many Squadrons can target one repo; one Squadron can target many folders (on one environment — cross-machine targeting is item-5, out of scope).
