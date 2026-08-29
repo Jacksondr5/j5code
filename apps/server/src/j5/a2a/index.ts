@@ -17,12 +17,26 @@ export type {
 } from "./HomeRegistrar.ts";
 export * from "./LedgerService.ts";
 export * from "./Migrations.ts";
+export * from "./placementContracts.ts";
+export * from "./placementProvenance.ts";
 export {
   A2AHumanInbox,
   A2AHumanPersonIdError,
   type A2AHumanInboxError,
   type A2AHumanInboxShape,
 } from "./HumanInboxService.ts";
+export {
+  ParticipantPlacementService,
+  type ParticipantPlacementServiceShape,
+  type PlacementError,
+  type PlacementReparentCaller,
+} from "./PlacementService.ts";
+export {
+  PlacementCascadeService,
+  type PlacementCascadeServiceShape,
+  type PlacementCascadeInput,
+  type PlacementCascadeRow,
+} from "./PlacementCascadeService.ts";
 export {
   A2ASilenceDetector,
   A2ASilenceDetectorError,

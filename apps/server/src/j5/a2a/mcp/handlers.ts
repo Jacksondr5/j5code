@@ -1,12 +1,34 @@
 import * as Crypto from "effect/Crypto";
+import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
-import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
+import {
+  McpInvocationContext,
+  type McpInvocationScope,
+} from "../../../mcp/McpInvocationContext.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
+import { PlacementCascadeService } from "../PlacementCascadeService.ts";
+import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
-import { CommCommandId } from "../contracts.ts";
+import {
+  CommCommandId,
+  type ParticipantDirectoryRow,
+  type ParticipantId,
+  type SquadronId,
+} from "../contracts.ts";
+import { PlacementCommandId } from "../placementContracts.ts";
+import { provenanceFromThreadLineage } from "../placementProvenance.ts";
 import { J5Toolkit, type J5McpFailure } from "./tools.ts";
+
+class J5PlacementMcpStateError extends Data.TaggedError("J5PlacementMcpStateError")<{
+  readonly state: string;
+  readonly nextCommand: string;
+}> {
+  override get message(): string {
+    return `J5 caller membership state is ${this.state}. ${this.nextCommand}`;
+  }
+}
 
 const failure = (error: unknown): J5McpFailure => ({
   code:
@@ -18,6 +40,15 @@ const failure = (error: unknown): J5McpFailure => ({
 
 const stablePart = (value: string) => encodeURIComponent(value);
 
+const placementCommandId = (input: {
+  readonly providerSessionId: string;
+  readonly requestKey: string;
+  readonly operation: string;
+}) =>
+  PlacementCommandId.make(
+    `command:j5:a2a:placement:mcp:${stablePart(input.providerSessionId)}:${stablePart(input.requestKey)}:${input.operation}`,
+  );
+
 export const commandIdForRequest = (input: {
   readonly providerSessionId: string;
   readonly requestKey: string;
@@ -25,6 +56,48 @@ export const commandIdForRequest = (input: {
   CommCommandId.make(
     `command:j5:a2a:mcp:${stablePart(input.providerSessionId)}:${stablePart(input.requestKey)}`,
   );
+
+type AgentDirectoryRow = ParticipantDirectoryRow & {
+  readonly participant: Extract<ParticipantDirectoryRow["participant"], { readonly kind: "agent" }>;
+};
+
+const resolveCallerMembership = Effect.fn("j5.a2a.mcp.resolveCallerMembership")(function* (
+  scope: McpInvocationScope,
+) {
+  const directory = yield* (yield* A2ASendService).listParticipants(scope.threadId);
+  const memberships = directory.filter(
+    (row): row is AgentDirectoryRow =>
+      row.participant.kind === "agent" && row.participant.threadId === scope.threadId,
+  );
+  if (memberships.length === 0) {
+    return yield* new J5PlacementMcpStateError({
+      state: `missing for thread ${scope.threadId}`,
+      nextCommand: "Call list_participants to inspect current Squadron membership before retrying.",
+    });
+  }
+  if (memberships.length !== 1) {
+    return yield* new J5PlacementMcpStateError({
+      state: `ambiguous across current Squadrons ${memberships.map((row) => row.squadronId).join(", ")}`,
+      nextCommand: "Call list_participants to inspect current Squadron membership before retrying.",
+    });
+  }
+  return memberships[0]!;
+});
+
+const requireCallerInSquadron = Effect.fn("j5.a2a.mcp.requireCallerInSquadron")(function* (
+  scope: McpInvocationScope,
+  targetSquadronId: SquadronId,
+  command: "stop_agent" | "archive_agent",
+) {
+  const caller = yield* resolveCallerMembership(scope);
+  if (caller.squadronId !== targetSquadronId) {
+    return yield* new J5PlacementMcpStateError({
+      state: `current Squadron is ${caller.squadronId}, but ${command} targeted ${targetSquadronId}`,
+      nextCommand: `Retry ${command} with squadron_id=${caller.squadronId}.`,
+    });
+  }
+  return caller;
+});
 
 const handlers = {
   send_message: (input) =>
@@ -55,8 +128,68 @@ const handlers = {
   list_participants: () =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
-      const service = yield* A2ASendService;
-      return { participants: yield* service.listParticipants(scope.threadId) };
+      const directory = yield* (yield* A2ASendService).listParticipants(scope.threadId);
+      const placements = yield* ParticipantPlacementService;
+      const squadronIds = [...new Set(directory.map((row) => row.squadronId))];
+      const placementRows = (yield* Effect.forEach(
+        squadronIds,
+        (squadronId) => placements.listParticipants(squadronId),
+        { concurrency: 1 },
+      )).flat();
+      const placementByParticipant = new Map(
+        placementRows.map((row) => [`${row.squadronId}\u0000${row.participantId}`, row] as const),
+      );
+      return {
+        participants: directory.map((row) => {
+          const placement = placementByParticipant.get(
+            `${row.squadronId}\u0000${row.participantId}`,
+          );
+          return {
+            ...row,
+            threadId: row.participant.kind === "agent" ? row.participant.threadId : null,
+            provenance:
+              placement?.provenance ??
+              (row.participant.kind === "human"
+                ? ({ kind: "not-applicable" } as const)
+                : ({ kind: "unrecorded" } as const)),
+            placementParentId: placement?.placementParentId ?? null,
+          };
+        }),
+      };
+    }).pipe(Effect.mapError(failure)),
+  stop_agent: (input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
+      yield* requireCallerInSquadron(scope, input.squadron_id, "stop_agent");
+      const cascades = yield* PlacementCascadeService;
+      return {
+        results: yield* cascades.stop({
+          commandId: placementCommandId({
+            providerSessionId: scope.providerSessionId,
+            requestKey: input.client_request_id,
+            operation: "stop",
+          }),
+          squadronId: input.squadron_id,
+          participantId: input.participant_id,
+        }),
+      };
+    }).pipe(Effect.mapError(failure)),
+  archive_agent: (input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
+      yield* requireCallerInSquadron(scope, input.squadron_id, "archive_agent");
+      const cascades = yield* PlacementCascadeService;
+      return {
+        results: yield* cascades.archive({
+          commandId: placementCommandId({
+            providerSessionId: scope.providerSessionId,
+            requestKey: input.client_request_id,
+            operation: "archive",
+          }),
+          squadronId: input.squadron_id,
+          participantId: input.participant_id,
+        }),
+      };
     }).pipe(Effect.mapError(failure)),
 } satisfies Parameters<typeof J5Toolkit.toLayer>[0];
 
