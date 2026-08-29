@@ -71,9 +71,10 @@ the scope dropdown filters, it never walls (E1).
 
 ## Deferred (with reasons)
 
-- **Inbox UI/UX** — its own design session; only the two-lane principle
-  (obligation queue vs measured alerts, shared UI never shared data
-  model — R5) is settled.
+- **Inbox UI/UX** — designed same day; definition of record at
+  [`inbox.md`](inbox.md) (IB1–IB7). The two-lane principle (obligation
+  queue vs measured alerts — R5) stands; the alerts lane itself is
+  post-v0.
 - **Multi-environment scope treatment** — v0 consciously assumes one
   environment; the X2 merge question is recorded.
 - **Human-contact-spectrum representation** — the sidebar/roster split is
