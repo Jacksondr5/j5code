@@ -48,5 +48,6 @@ The platform ships the machinery — define, spawn, render, warn, archive. The P
 
 ## Deferred (with reasons)
 
+- **May Crew members spawn solo Peer Agents?** Deliberately open (Jackson, 2026-08-24) — worth deciding when Crews are being built and a real Crew's behavior is observable, difficult to discern before. Fixed context for whoever closes it: R20 (members cannot spawn Crews) is untouched either way; members' _Subagent_ use is unregulable by construction (glossary, ST4); provenance + placement mean a member-spawned Peer Agent would be visible and contained under the member — the prior-art hazard was invisibility, which no longer exists. Both positions are one-line rulings away.
 - **Crew-spawn human UI**: owned by the implementing dev. One requirement recorded: it must be differentiated from solo Role spawn — a Crew is _launched_ as a unit with a brief, not started as a chat.
 - **Technical design** (definition schema, wiring format, tool schemas, brief delivery mechanics): owned by the implementing dev, within these product rulings.

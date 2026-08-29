@@ -25,5 +25,5 @@ Per surface: user sees full conversation vs summary; user can talk to it directl
 
 ## Open
 
-- The original question, now precisely posed: **may Crew members spawn solo Peer Agents?** (Members using Subagents is unregulable and unremarkable — ST4.) R20 (members cannot spawn Crews) is untouched. Awaiting Jackson's ruling.
+- The original question, now precisely posed: **may Crew members spawn solo Peer Agents?** (Members using Subagents is unregulable and unremarkable — ST4.) R20 (members cannot spawn Crews) is untouched. Ruled 2026-08-24: deliberately left OPEN until Crews are being built and real behavior is observable - recorded in features/crews.md Deferred.
 - D1's prose description ("provider-native subagents visible only via a rough log") understates current upstream visibility (shadow threads mirror tool activity; Codex-native children are resumable). The ledger exclusion stands; the description deserves the footnote when the A2A register is next touched.
