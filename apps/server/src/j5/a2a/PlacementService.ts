@@ -105,7 +105,7 @@ export class PlacementGraphCorruptError extends Schema.TaggedErrorClass<Placemen
   { squadronId: SquadronId, path: Schema.Array(ParticipantId) },
 ) {
   override get message(): string {
-    return `Placement graph state is already cyclic or exceeds its membership bound in squadron ${this.squadronId}: ${this.path.join(" -> ")}. Repair the placement projection before retrying.`;
+    return `Placement graph state is already cyclic or exceeds its placement bound in squadron ${this.squadronId}: ${this.path.join(" -> ")}. Repair the placement projection before retrying.`;
   }
 }
 

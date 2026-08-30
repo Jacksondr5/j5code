@@ -515,6 +515,7 @@ it.effect("detects corrupt stored cycles in creation and subtree traversal", () 
     );
     assert.isTrue(isGraphCorrupt(mutationError));
     assert.include(mutationError.message, "Placement graph state");
+    assert.include(mutationError.message, "placement bound");
     assert.equal(yield* placements.readPlacement({ squadronId, participantId: child.id }), null);
 
     const traversalError = yield* Effect.flip(
