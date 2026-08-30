@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  formatSquadronFolder,
   PRIMARY_ENVIRONMENT_CREATION_REASON,
   resolveSquadronCreationState,
 } from "./SquadronCreate.logic";
+
+describe("formatSquadronFolder", () => {
+  it("keeps the selected folder human-readable instead of exposing its durable project id", () => {
+    expect(
+      formatSquadronFolder({ title: "J5 Code", workspaceRoot: "/Users/jackson/repos/j5code" }),
+    ).toBe("J5 Code — /Users/jackson/repos/j5code");
+  });
+});
 
 describe("resolveSquadronCreationState", () => {
   it("requires an explicit name and existing folder instead of inventing either", () => {

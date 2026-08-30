@@ -1,18 +1,11 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 
-import { openCommandPalette } from "../../commandPaletteBus";
+import { openCommandPalette, type CommandPaletteProjectSelection } from "../../commandPaletteBus";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
-import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from "../../components/ui/select";
-import { useProjects } from "../../state/entities";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import {
+  formatSquadronFolder,
   PRIMARY_ENVIRONMENT_CREATION_REASON,
   resolveSquadronCreationState,
 } from "./SquadronCreate.logic";
@@ -22,20 +15,17 @@ import { setAmbientSquadronId } from "./SquadronDraftState";
 
 /** Shared first-run and subsequent-create form: the caller supplies no default selection. */
 export function SquadronCreateForm({ onCreated }: { readonly onCreated?: () => void }) {
-  const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const [name, setName] = useState("");
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const [selectedProject, setSelectedProject] = useState<CommandPaletteProjectSelection | null>(
+    null,
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const selectedProject = useMemo(
-    () => projects.find((project) => project.id === projectId) ?? null,
-    [projectId, projects],
-  );
   const creationState = resolveSquadronCreationState({
     name,
     hasSelectedProject: selectedProject !== null,
-    isPrimaryProject: selectedProject?.environmentId === primaryEnvironmentId,
+    isPrimaryProject: selectedProject?.projectRef.environmentId === primaryEnvironmentId,
   });
   const create = useCallback(async () => {
     if (creationState.kind !== "ready" || selectedProject === null) {
@@ -49,7 +39,10 @@ export function SquadronCreateForm({ onCreated }: { readonly onCreated?: () => v
     setSubmitting(true);
     setError(null);
     try {
-      const created = await createSquadron({ name, projectId: selectedProject.id });
+      const created = await createSquadron({
+        name,
+        projectId: selectedProject.projectRef.projectId,
+      });
       await refreshSquadronDirectory({ force: true });
       setAmbientSquadronId(created.squadron.id);
       onCreated?.();
@@ -59,17 +52,6 @@ export function SquadronCreateForm({ onCreated }: { readonly onCreated?: () => v
       setSubmitting(false);
     }
   }, [creationState, name, onCreated, selectedProject]);
-
-  if (projects.length === 0) {
-    return (
-      <div className="mt-5 flex flex-col items-center gap-2">
-        <p className="text-sm text-muted-foreground">Add a folder before creating its Squadron.</p>
-        <Button size="sm" type="button" onClick={() => openCommandPalette({ open: "add-project" })}>
-          Add folder
-        </Button>
-      </div>
-    );
-  }
 
   return (
     <form
@@ -85,18 +67,28 @@ export function SquadronCreateForm({ onCreated }: { readonly onCreated?: () => v
       </label>
       <label className="flex flex-col gap-1.5 text-sm font-medium text-foreground">
         Folder
-        <Select value={projectId} onValueChange={setProjectId}>
-          <SelectTrigger aria-label="Choose one existing folder">
-            <SelectValue placeholder="Choose one folder" />
-          </SelectTrigger>
-          <SelectPopup>
-            {projects.map((project) => (
-              <SelectItem key={`${project.environmentId}:${project.id}`} value={project.id}>
-                {project.title}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
+        <div className="flex flex-col gap-2">
+          <Button
+            aria-label="Choose folder with the project picker"
+            size="sm"
+            type="button"
+            variant="outline"
+            onClick={() =>
+              openCommandPalette({ open: "add-project", onProjectSelected: setSelectedProject })
+            }
+          >
+            {selectedProject === null ? "Choose folder" : "Change folder"}
+          </Button>
+          {selectedProject === null ? (
+            <p className="text-sm font-normal text-muted-foreground">
+              Choose one folder with the project picker.
+            </p>
+          ) : (
+            <p className="text-sm font-normal text-muted-foreground">
+              {formatSquadronFolder(selectedProject)}
+            </p>
+          )}
+        </div>
       </label>
       {creationState.kind === "non-primary-project" ? (
         <p className="text-sm text-destructive">{PRIMARY_ENVIRONMENT_CREATION_REASON}</p>

@@ -87,7 +87,11 @@ import {
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
-import { onOpenCommandPalette } from "../commandPaletteBus";
+import {
+  onOpenCommandPalette,
+  returnCommandPaletteProjectSelection,
+  type CommandPaletteProjectSelection,
+} from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
@@ -392,7 +396,13 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     mode: "command",
     openIntent: null,
   });
-  const setOpen = useCallback((open: boolean) => dispatch({ _tag: "SetOpen", open }), []);
+  const [onProjectSelected, setOnProjectSelected] = useState<
+    ((selection: CommandPaletteProjectSelection) => void) | undefined
+  >(undefined);
+  const setOpen = useCallback((open: boolean) => {
+    if (!open) setOnProjectSelected(undefined);
+    dispatch({ _tag: "SetOpen", open });
+  }, []);
   const toggleMode = useCallback(
     (mode: SearchOverlayMode) => dispatch({ _tag: "ToggleMode", mode }),
     [],
@@ -469,6 +479,9 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       onOpenCommandPalette((detail) => {
+        setOnProjectSelected(() =>
+          detail.open === "add-project" ? detail.onProjectSelected : undefined,
+        );
         if (detail.open === "new-thread-in") {
           openNewThreadIn();
         } else if (detail.open === "add-project") {
@@ -501,6 +514,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           setOpen={setOpen}
           openOverlayMode={toggleMode}
           clearOpenIntent={clearOpenIntent}
+          onProjectSelected={onProjectSelected}
         />
       </CommandDialog>
     </ComposerHandleContext>
@@ -514,6 +528,7 @@ function CommandPaletteDialog(props: {
   readonly setOpen: (open: boolean) => void;
   readonly openOverlayMode: (mode: SearchOverlayMode) => void;
   readonly clearOpenIntent: () => void;
+  readonly onProjectSelected: ((selection: CommandPaletteProjectSelection) => void) | undefined;
 }) {
   const composerHandleRef = useComposerHandleContext();
 
@@ -552,6 +567,7 @@ function CommandPaletteDialog(props: {
           setOpen={props.setOpen}
           openOverlayMode={props.openOverlayMode}
           clearOpenIntent={props.clearOpenIntent}
+          onProjectSelected={props.onProjectSelected}
         />
       )}
     </CommandDialogPopup>
@@ -563,9 +579,10 @@ function OpenCommandPaletteDialog(props: {
   readonly setOpen: (open: boolean) => void;
   readonly openOverlayMode: (mode: SearchOverlayMode) => void;
   readonly clearOpenIntent: () => void;
+  readonly onProjectSelected: ((selection: CommandPaletteProjectSelection) => void) | undefined;
 }) {
   const navigate = useNavigate();
-  const { clearOpenIntent, openIntent, openOverlayMode, setOpen } = props;
+  const { clearOpenIntent, onProjectSelected, openIntent, openOverlayMode, setOpen } = props;
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const isActionsOnly = deferredQuery.startsWith(">");
@@ -1677,6 +1694,16 @@ function OpenCommandPaletteDialog(props: {
         cwd,
       );
       if (existing) {
+        if (
+          returnCommandPaletteProjectSelection(onProjectSelected, {
+            projectRef: scopeProjectRef(existing.environmentId, existing.id),
+            title: existing.title,
+            workspaceRoot: existing.workspaceRoot,
+          })
+        ) {
+          setOpen(false);
+          return;
+        }
         const latestThread = getLatestThreadForProject(
           threads.filter((thread) => thread.environmentId === existing.environmentId),
           existing.id,
@@ -1741,6 +1768,17 @@ function OpenCommandPaletteDialog(props: {
         return;
       }
 
+      if (
+        returnCommandPaletteProjectSelection(onProjectSelected, {
+          projectRef: scopeProjectRef(input.environmentId, projectId),
+          title: inferProjectTitleFromPath(cwd),
+          workspaceRoot: cwd,
+        })
+      ) {
+        setOpen(false);
+        return;
+      }
+
       const navigationResult = await settlePromise(() =>
         handleNewThread(scopeProjectRef(input.environmentId, projectId)),
       );
@@ -1766,6 +1804,7 @@ function OpenCommandPaletteDialog(props: {
       projects,
       providers,
       setOpen,
+      onProjectSelected,
       clientSettings.sidebarThreadSortOrder,
       threads,
     ],
