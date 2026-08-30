@@ -120,7 +120,7 @@ export interface DevDeliverySeedReceipt {
   };
   readonly notSeeded: {
     readonly ta2HumanAnswer: {
-      readonly status: "requires-post-rebase-merged-human-inbox";
+      readonly status: "deferred-not-implemented-this-runner";
       readonly reason: "TA2 must use the merged #11 HumanInbox production flow; this runner does not fabricate a thread row.";
     };
     readonly ta4Trailing: {
@@ -679,7 +679,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         },
         notSeeded: {
           ta2HumanAnswer: {
-            status: "requires-post-rebase-merged-human-inbox",
+            status: "deferred-not-implemented-this-runner",
             reason:
               "TA2 must use the merged #11 HumanInbox production flow; this runner does not fabricate a thread row.",
           },

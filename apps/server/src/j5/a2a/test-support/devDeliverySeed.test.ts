@@ -62,10 +62,7 @@ it.effect("requires an explicit isolated base and emits a provider-safe receipt"
       assert.equal(receipt.noProviderWork.activeRunCount, 0);
       assert.equal(receipt.noProviderWork.cancelledProviderStartEffectCount, 5);
       assert.equal(receipt.noProviderWork.nextClaimableAt, null);
-      assert.equal(
-        receipt.notSeeded.ta2HumanAnswer.status,
-        "requires-post-rebase-merged-human-inbox",
-      );
+      assert.equal(receipt.notSeeded.ta2HumanAnswer.status, "deferred-not-implemented-this-runner");
       assert.equal(receipt.notSeeded.ta4Trailing.status, "held");
       const lock = new DatabaseSync(receipt.dbPath);
       lock.exec("BEGIN IMMEDIATE");
