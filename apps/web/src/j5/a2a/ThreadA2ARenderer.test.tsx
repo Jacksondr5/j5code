@@ -65,7 +65,7 @@ const silenceRaw = [
 ].join("\n");
 
 describe("ThreadA2ADeliveryRenderer", () => {
-  it("renders a peer block with an exchange chip and byte-preserved raw envelope", () => {
+  it("renders the peer exchange badge inline beside the sender without protocol metadata", () => {
     const source = message({ text: peerRaw });
     const parsed = presentThreadA2ADelivery({
       message: source,
@@ -88,8 +88,11 @@ describe("ThreadA2ADeliveryRenderer", () => {
       rawEnvelope: peerRaw,
     });
     expect(markup).toContain('data-j5-a2a-renderer="peer"');
-    expect(markup).toContain("expects your reply");
-    expect(markup).toContain("Show raw envelope");
+    expect(markup).toMatch(
+      /<span class="font-medium">Alice<\/span><span[^>]*>Expects reply<\/span>/,
+    );
+    expect(markup).not.toContain("squadron:alpha");
+    expect(markup).not.toContain("Show raw envelope");
     expect(parsed?.rawEnvelope).toBe(peerRaw);
   });
 
@@ -148,7 +151,7 @@ describe("ThreadA2ADeliveryRenderer", () => {
     ).toEqual({ kind: "raw", rawEnvelope: raw });
   });
 
-  it("renders a silence notice as a muted, expandable platform line", () => {
+  it("renders a silence notice as a muted platform line without a raw expander", () => {
     const source = message({ id: deliveryId("silence"), createdBy: "system", text: silenceRaw });
     const markup = renderToStaticMarkup(
       <ThreadA2ADeliveryRenderer message={source} timestampLabel={TIMESTAMP_LABEL} />,
@@ -158,7 +161,7 @@ describe("ThreadA2ADeliveryRenderer", () => {
     expect(markup).toContain("agent:counterpart");
     expect(markup).toContain("turn ended without replying");
     expect(markup).toContain(TIMESTAMP_LABEL);
-    expect(markup).toContain("Show raw envelope");
+    expect(markup).not.toContain("Show raw envelope");
     expect(presentThreadA2ADelivery({ message: source })).toMatchObject({
       kind: "silence",
       summary: "agent:counterpart's turn ended without replying",
@@ -168,6 +171,20 @@ describe("ThreadA2ADeliveryRenderer", () => {
     expect(summary).toBeDefined();
     expect(summary).not.toContain("turn-ended-no-reply");
     expect(summary).not.toContain(CREATED_AT);
+  });
+
+  it.each([
+    ["peer", message({ text: peerRaw })],
+    ["human", message({ id: deliveryId("human-parsed"), createdBy: "user", text: humanRaw })],
+    [
+      "silence",
+      message({ id: deliveryId("silence-parsed"), createdBy: "system", text: silenceRaw }),
+    ],
+  ] as const)("keeps parsed %s cards free of raw-envelope expanders", (_kind, source) => {
+    const markup = renderToStaticMarkup(<ThreadA2ADeliveryRenderer message={source} />);
+
+    expect(presentThreadA2ADelivery({ message: source })?.kind).not.toBe("raw");
+    expect(markup).not.toContain("Show raw envelope");
   });
 
   it.each([
@@ -290,6 +307,7 @@ describe("ThreadA2ADeliveryRenderer", () => {
     expect(presentation).toEqual({ kind: "raw", rawEnvelope: raw });
     expect(markup).toContain('data-j5-a2a-renderer="raw"');
     expect(markup).toContain(raw);
+    expect(markup).toContain("Show raw envelope");
     expect(markup).toMatch(/<details[^>]*\bopen(?:=|\s|>)/);
   });
 

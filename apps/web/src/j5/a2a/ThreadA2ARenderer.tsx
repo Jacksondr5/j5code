@@ -263,13 +263,11 @@ export function renderThreadA2ADelivery(props: ThreadA2ADeliveryCompositionInput
       >
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
           <span className="font-medium">{presentation.senderLabel}</span>
-          <span className="text-muted-foreground">{presentation.squadronId}</span>
           <span className="rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-            {presentation.exchange === "expects-reply" ? "expects your reply" : "plain"}
+            {presentation.exchange === "expects-reply" ? "Expects reply" : "plain"}
           </span>
         </div>
         <p className="mt-2 whitespace-pre-wrap break-words text-sm">{presentation.body}</p>
-        <RawEnvelopeExpander rawEnvelope={presentation.rawEnvelope} />
       </section>
     );
   }
@@ -295,7 +293,6 @@ export function renderThreadA2ADelivery(props: ThreadA2ADeliveryCompositionInput
           ⚠ {presentation.summary}
           {props.timestampLabel ? ` · ${props.timestampLabel}` : null}
         </span>
-        <RawEnvelopeExpander rawEnvelope={presentation.rawEnvelope} />
       </section>
     );
   }
