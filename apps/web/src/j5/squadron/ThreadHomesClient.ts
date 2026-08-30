@@ -63,11 +63,14 @@ const listThreadHomes = (threadIds: ReadonlyArray<ThreadId>) =>
   runtime.runPromise(listThreadHomesEffect(threadIds));
 
 interface ThreadHomesStore {
-  readonly homesByThreadId: Map<string, ThreadHome>;
+  /**
+   * The React external-store snapshot. Replacing, rather than mutating, this
+   * map keeps the value React observes identical to the data Sidebar renders.
+   */
+  homesByThreadId: ReadonlyMap<string, ThreadHome>;
   readonly listeners: Set<() => void>;
   readonly pendingThreadIds: Set<ThreadId>;
   reading: boolean;
-  version: number;
 }
 
 const threadHomesStoreKey = "__t3J5ThreadHomesStore";
@@ -82,7 +85,6 @@ const threadHomesStore = (() => {
     listeners: new Set(),
     pendingThreadIds: new Set(),
     reading: false,
-    version: 0,
   };
   target[threadHomesStoreKey] = created;
   return created;
@@ -92,9 +94,8 @@ const subscribe = (listener: () => void) => {
   threadHomesStore.listeners.add(listener);
   return () => threadHomesStore.listeners.delete(listener);
 };
-const getVersion = () => threadHomesStore.version;
+const getSnapshot = () => threadHomesStore.homesByThreadId;
 const notify = () => {
-  threadHomesStore.version += 1;
   threadHomesStore.listeners.forEach((listener) => listener());
 };
 
@@ -105,7 +106,10 @@ const readPendingThreadHomes = () => {
   threadHomesStore.pendingThreadIds.clear();
   void listThreadHomes(threadIds)
     .then((entries) => {
-      mergeThreadHomeEntries(threadHomesStore.homesByThreadId, entries);
+      threadHomesStore.homesByThreadId = replaceThreadHomeEntries(
+        threadHomesStore.homesByThreadId,
+        entries,
+      );
     })
     // Under a selected scope, an unreadable home remains excluded rather than
     // being guessed from a project. The next changed sidebar set retries it.
@@ -125,6 +129,12 @@ export const mergeThreadHomeEntries = (
   for (const entry of entries) homes.set(entry.threadId, entry.home);
   return homes;
 };
+
+/** Replaces the rendered cache snapshot so receipt updates cannot retain a stale projection. */
+export const replaceThreadHomeEntries = (
+  homes: ReadonlyMap<string, ThreadHome>,
+  entries: ReadonlyArray<ThreadHomeEntry>,
+) => mergeThreadHomeEntries(new Map(homes), entries);
 
 export const shouldRequestThreadHome = (home: ThreadHome | undefined, force: boolean) =>
   force || home === undefined;
@@ -159,7 +169,7 @@ export function useThreadHomes(
     () => (key === "" ? [] : key.split("\0").map((threadId) => ThreadId.make(threadId))),
     [key],
   );
-  const currentVersion = useSyncExternalStore(subscribe, getVersion, getVersion);
+  const homesSnapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   useEffect(() => {
     requestThreadHomes(requestedThreadIds, shouldForceThreadHomesForScope(selectedSquadronId));
   }, [requestedThreadIds, selectedSquadronId, scopeSelectionGeneration]);
@@ -167,10 +177,10 @@ export function useThreadHomes(
     () =>
       new Map(
         requestedThreadIds.flatMap((threadId) => {
-          const home = threadHomesStore.homesByThreadId.get(threadId);
+          const home = homesSnapshot.get(threadId);
           return home === undefined ? [] : [[threadId, home] as const];
         }),
       ),
-    [currentVersion, requestedThreadIds],
+    [homesSnapshot, requestedThreadIds],
   );
 }

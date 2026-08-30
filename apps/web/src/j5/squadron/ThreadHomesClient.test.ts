@@ -6,6 +6,7 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import {
   listThreadHomesEffect,
   mergeThreadHomeEntries,
+  replaceThreadHomeEntries,
   shouldForceThreadHomesForScope,
   shouldRequestThreadHome,
   type ThreadHome,
@@ -113,4 +114,25 @@ it("replaces a missing or stale home in the exact cache map read by Squadron fil
     squadron: { id: "squadron:alpha", name: "Alpha" },
   });
   expect(filterThreadsForSquadronScope(threads, alphaScope, homes)).toEqual([threads[0]]);
+});
+
+it("publishes a new rendered snapshot when a receipt replaces an initial unknown home", () => {
+  const threads = [{ id: "thread:alpha" }];
+  const alphaScope = { id: "squadron:alpha", name: "Alpha", projectIds: ["project:shared"] };
+  const initialSnapshot = new Map<string, ThreadHome>([["thread:alpha", { kind: "unknown" }]]);
+
+  expect(filterThreadsForSquadronScope(threads, alphaScope, initialSnapshot)).toEqual([]);
+
+  const receiptSnapshot = replaceThreadHomeEntries(initialSnapshot, [
+    {
+      threadId: ThreadId.make("thread:alpha"),
+      home: { kind: "known", squadron: { id: "squadron:alpha", name: "Alpha" } },
+    },
+  ]);
+
+  // React observes this reference as its external-store snapshot. A new
+  // reference is therefore as important as the known-home contents.
+  expect(receiptSnapshot).not.toBe(initialSnapshot);
+  expect(initialSnapshot.get("thread:alpha")).toEqual({ kind: "unknown" });
+  expect(filterThreadsForSquadronScope(threads, alphaScope, receiptSnapshot)).toEqual(threads);
 });
