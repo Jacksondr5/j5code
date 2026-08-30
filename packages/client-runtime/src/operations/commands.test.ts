@@ -265,6 +265,7 @@ describe("V2 environment commands", () => {
       yield* startThreadTurn({
         commandId: CommandId.make("launch-existing-worktree"),
         threadId: v2ThreadId,
+        squadronId: "squadron:explicit-home",
         message: {
           messageId: MessageId.make("message-existing-worktree"),
           role: "user",
@@ -290,6 +291,7 @@ describe("V2 environment commands", () => {
 
       expect(launches[0]).toMatchObject({
         threadId: v2ThreadId,
+        squadronId: "squadron:explicit-home",
         title: "Continue here",
         generateTitle: true,
         workspaceStrategy: {

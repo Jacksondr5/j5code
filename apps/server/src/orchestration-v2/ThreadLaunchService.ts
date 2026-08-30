@@ -14,16 +14,19 @@ import {
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import { buildTemporaryWorktreeBranchName, isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
+import { SquadronThreadCreationService } from "../j5/a2a/SquadronThreadCreationService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
@@ -92,6 +95,7 @@ export class ThreadLaunchError extends Schema.TaggedErrorClass<ThreadLaunchError
       "dispatch-message",
       "release-run",
       "fail-run",
+      "register-squadron",
     ]),
     commandId: CommandId,
     projectId: ProjectId,
@@ -100,6 +104,9 @@ export class ThreadLaunchError extends Schema.TaggedErrorClass<ThreadLaunchError
   },
 ) {
   override get message(): string {
+    if (this.operation === "register-squadron" && this.threadId !== undefined) {
+      return `Thread ${this.threadId} was created but could not be assigned its required Squadron home. Replay the same creation command to retry registration; the durable thread was not deleted.`;
+    }
     return `Thread launch ${this.commandId} failed during ${this.operation}.`;
   }
 }
@@ -134,6 +141,7 @@ export const make = Effect.gen(function* () {
   const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
   const ids = yield* IdAllocator.IdAllocatorV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
+  const squadronCreation = yield* SquadronThreadCreationService;
   const preparationScope = yield* Scope.make("sequential");
   const scheduledLaunches = yield* Ref.make<ReadonlySet<CommandId>>(new Set());
   yield* Effect.addFinalizer(() => Scope.close(preparationScope, Exit.void));
@@ -533,6 +541,23 @@ export const make = Effect.gen(function* () {
         const projection = yield* threads
           .getThreadProjection(threadId)
           .pipe(Effect.mapError(mapError(input, "create-thread", threadId)));
+        const squadronCreationInput = {
+          ...(input.squadronId === undefined ? {} : { squadronId: input.squadronId }),
+          commandId: input.commandId,
+          threadId,
+          projectId: input.projectId,
+          createdAt: DateTime.formatIso(projection.thread.createdAt),
+        };
+        const registration = yield* Effect.result(
+          squadronCreation.registerAtDurableLaunch(squadronCreationInput),
+        );
+        if (Result.isFailure(registration)) {
+          return yield* failPreparedRun(input, threadId, runId, registration.failure).pipe(
+            Effect.andThen(() =>
+              Effect.fail(mapError(input, "register-squadron", threadId)(registration.failure)),
+            ),
+          );
+        }
         const runIsPreparing =
           runId !== null &&
           projection.runs.some((run) => run.id === runId && run.status === "preparing");

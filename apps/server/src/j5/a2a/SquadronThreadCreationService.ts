@@ -1,17 +1,15 @@
-import * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import * as ThreadLaunch from "../../orchestration-v2/ThreadLaunchService.ts";
+import { CommandId, ProjectId, ThreadId } from "@t3tools/contracts";
 import {
   A2AHomeRegistrar,
   type A2AHomeRegistrationError,
   type RegisteredThreadHome,
 } from "./HomeRegistrar.ts";
-import { CommCommandId, type SquadronId } from "./contracts.ts";
+import { CommCommandId, SquadronId } from "./contracts.ts";
 import {
   SquadronProjectReferences,
   type SquadronProjectReferenceError,
@@ -22,14 +20,14 @@ export interface SquadronThreadCreationInput {
    * The edge contract makes this optional for backwards compatibility. The J5
    * boundary makes it mandatory: creation without an explicit Squadron fails.
    */
-  readonly squadronId?: SquadronId;
-  readonly launch: ThreadLaunch.ThreadLaunchInput;
+  readonly squadronId?: string;
+  readonly commandId: CommandId;
+  readonly threadId: ThreadId;
+  readonly projectId: ProjectId;
+  readonly createdAt: string;
 }
 
-export interface SquadronThreadCreationResult {
-  readonly launch: ThreadLaunch.ThreadLaunchResult;
-  readonly home: RegisteredThreadHome;
-}
+export type SquadronThreadCreationResult = RegisteredThreadHome;
 
 export class SquadronThreadCreationMissingSquadronError extends Schema.TaggedErrorClass<SquadronThreadCreationMissingSquadronError>()(
   "SquadronThreadCreationMissingSquadronError",
@@ -58,18 +56,18 @@ export type SquadronThreadCreationError =
   | SquadronThreadCreationProjectReferenceError
   | A2AHomeRegistrationError
   | SquadronProjectReferenceError
-  | ThreadLaunch.ThreadLaunchError;
+  | Schema.SchemaError;
 
 export interface SquadronThreadCreationServiceShape {
-  readonly create: (
+  readonly registerAtDurableLaunch: (
     input: SquadronThreadCreationInput,
   ) => Effect.Effect<SquadronThreadCreationResult, SquadronThreadCreationError>;
 }
 
 /**
- * Sanctioned J5 creation choreography. It deliberately wraps the canonical
- * launch service instead of reconstructing thread creation from lower-level
- * commands, then registers the immutable home in the same SQL transaction.
+ * Sanctioned J5 creation engine. ThreadLaunch calls this only after durable
+ * thread creation; an attach failure leaves that named thread intact so a
+ * replay can register its immutable home with the exact same command id.
  */
 export class SquadronThreadCreationService extends Context.Service<
   SquadronThreadCreationService,
@@ -82,56 +80,42 @@ export const registrationCommandIdForCreation = (commandId: string) =>
 export const layer: Layer.Layer<
   SquadronThreadCreationService,
   never,
-  | SqlClient.SqlClient
-  | ThreadLaunch.ThreadLaunchService
-  | A2AHomeRegistrar
-  | SquadronProjectReferences
+  A2AHomeRegistrar | SquadronProjectReferences
 > = Layer.effect(
   SquadronThreadCreationService,
   Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const launcher = yield* ThreadLaunch.ThreadLaunchService;
     const registrar = yield* A2AHomeRegistrar;
     const projectReferences = yield* SquadronProjectReferences;
 
-    const create: SquadronThreadCreationServiceShape["create"] = (input) =>
+    const registerAtDurableLaunch: SquadronThreadCreationServiceShape["registerAtDurableLaunch"] = (
+      input,
+    ) =>
       Effect.gen(function* () {
-        const squadronId = input.squadronId;
-        if (squadronId === undefined) {
+        if (input.squadronId === undefined) {
           return yield* new SquadronThreadCreationMissingSquadronError({
-            commandId: input.launch.commandId,
+            commandId: input.commandId,
           });
         }
+        const squadronId = yield* Schema.decodeUnknownEffect(SquadronId)(input.squadronId);
 
         const references = yield* projectReferences.listForSquadron(squadronId);
         const referencedProjectIds = references.map((reference) => reference.projectId);
-        if (
-          referencedProjectIds.length !== 1 ||
-          referencedProjectIds[0] !== input.launch.projectId
-        ) {
+        if (referencedProjectIds.length !== 1 || referencedProjectIds[0] !== input.projectId) {
           return yield* new SquadronThreadCreationProjectReferenceError({
             squadronId,
-            projectId: input.launch.projectId,
+            projectId: input.projectId,
             referencedProjectIds,
           });
         }
 
-        return yield* sql.withTransaction(
-          Effect.gen(function* () {
-            const launch = yield* launcher.launch(input.launch);
-            const home = yield* registrar.registerAtCreation({
-              squadronId,
-              threadId: launch.threadId,
-              // The launch projection persists this instant. Replays therefore
-              // reproduce the registrar's command and event inputs exactly.
-              createdAt: DateTime.formatIso(launch.projection.thread.createdAt),
-              commandId: registrationCommandIdForCreation(input.launch.commandId),
-            });
-            return { launch, home };
-          }),
-        );
+        return yield* registrar.registerAtCreation({
+          squadronId,
+          threadId: input.threadId,
+          createdAt: input.createdAt,
+          commandId: registrationCommandIdForCreation(input.commandId),
+        });
       });
 
-    return SquadronThreadCreationService.of({ create });
+    return SquadronThreadCreationService.of({ registerAtDurableLaunch });
   }),
 );

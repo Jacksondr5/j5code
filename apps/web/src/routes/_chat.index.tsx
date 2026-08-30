@@ -10,6 +10,8 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/
 import { SidebarInset } from "../components/ui/sidebar";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { SquadronFirstRunGate } from "../j5/squadron/FirstRunGate";
+import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
+import { resolveSquadronFirstRunGateState } from "../j5/squadron/FirstRunGate.logic";
 import {
   useAllEnvironmentShellsBootstrapped,
   useProjects,
@@ -29,8 +31,18 @@ function ChatIndexRouteView() {
     return <HostedStaticOnboardingState />;
   }
 
+  return <SquadronFirstRunGateLive />;
+}
+
+function SquadronFirstRunGateLive() {
+  const { status, squadrons } = useSquadronDirectory();
+  const state = resolveSquadronFirstRunGateState({
+    authenticatedRouteAvailable: status !== "error",
+    squadronCount: status === "loading" ? null : squadrons.length,
+  });
+
   return (
-    <SquadronFirstRunGate state="unavailable">
+    <SquadronFirstRunGate state={state}>
       <IndexDraftLanding />
     </SquadronFirstRunGate>
   );

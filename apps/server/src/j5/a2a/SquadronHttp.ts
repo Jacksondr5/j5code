@@ -1,7 +1,6 @@
 import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
-  OrchestrationV2ThreadLaunchInput,
   ProjectId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -22,20 +21,15 @@ import {
   failEnvironmentInternal,
   failEnvironmentScopeRequired,
 } from "../../auth/http.ts";
-import { SquadronThreadCreationService } from "./SquadronThreadCreationService.ts";
 import { SquadronManagementService } from "./SquadronManagementService.ts";
-import { SquadronId } from "./contracts.ts";
 
 const SQUADRONS_PATH = "/api/j5/squadrons";
-const THREADS_PATH = "/api/j5/squadrons/threads";
 
 const CreateSquadronRequest = Schema.Struct({
   name: Schema.String,
   projectId: ProjectId,
 });
 const decodeCreateSquadronRequest = Schema.decodeUnknownEffect(CreateSquadronRequest);
-const decodeThreadLaunchRequest = Schema.decodeUnknownEffect(OrchestrationV2ThreadLaunchInput);
-const decodeSquadronId = Schema.decodeUnknownEffect(SquadronId);
 
 const authenticate = (
   scope: typeof AuthOrchestrationReadScope | typeof AuthOrchestrationOperateScope,
@@ -83,7 +77,6 @@ const operationFailure = (error: unknown) => {
 export const squadronHttpRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const management = yield* SquadronManagementService;
-    const creation = yield* SquadronThreadCreationService;
     const listRoute = HttpRouter.add(
       "GET",
       SQUADRONS_PATH,
@@ -127,70 +120,6 @@ export const squadronHttpRouteLayer = Layer.unwrap(
         }),
       ),
     );
-    const createThreadRoute = HttpRouter.add(
-      "POST",
-      THREADS_PATH,
-      Effect.gen(function* () {
-        yield* annotateEnvironmentRequest("j5.squadron.createThread");
-        yield* authenticate(AuthOrchestrationOperateScope);
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        const body = yield* Effect.result(request.json);
-        if (Result.isFailure(body)) return requestFailure("The request body must be JSON.");
-        const decoded = yield* Effect.result(decodeThreadLaunchRequest(body.success));
-        if (Result.isFailure(decoded)) return requestFailure("A valid thread launch is required.");
-        let squadronId: SquadronId | undefined;
-        if (decoded.success.squadronId !== undefined) {
-          const decodedSquadronId = yield* Effect.result(
-            decodeSquadronId(decoded.success.squadronId),
-          );
-          if (Result.isFailure(decodedSquadronId)) {
-            return requestFailure("The supplied Squadron id is invalid.");
-          }
-          squadronId = decodedSquadronId.success;
-        }
-        const launch = {
-          commandId: decoded.success.commandId,
-          ...(decoded.success.threadId === undefined ? {} : { threadId: decoded.success.threadId }),
-          ...(decoded.success.reuseExistingThread === undefined
-            ? {}
-            : { reuseExistingThread: decoded.success.reuseExistingThread }),
-          projectId: decoded.success.projectId,
-          title: decoded.success.title,
-          ...(decoded.success.generateTitle === undefined
-            ? {}
-            : { generateTitle: decoded.success.generateTitle }),
-          modelSelection: decoded.success.modelSelection,
-          runtimeMode: decoded.success.runtimeMode,
-          interactionMode: decoded.success.interactionMode,
-          workspaceStrategy: decoded.success.workspaceStrategy,
-          ...(decoded.success.initialMessage === undefined
-            ? {}
-            : {
-                initialMessage: {
-                  ...(decoded.success.initialMessage.messageId === undefined
-                    ? {}
-                    : { messageId: decoded.success.initialMessage.messageId }),
-                  text: decoded.success.initialMessage.text,
-                  attachments: decoded.success.initialMessage.attachments,
-                },
-              }),
-          createdBy: "user" as const,
-          creationSource: decoded.success.creationSource ?? "web",
-        };
-        const result = yield* Effect.result(
-          creation.create(squadronId === undefined ? { launch } : { squadronId, launch }),
-        );
-        return Result.isSuccess(result)
-          ? HttpServerResponse.jsonUnsafe(result.success, { status: 201 })
-          : operationFailure(result.failure);
-      }).pipe(
-        Effect.catchTags({
-          EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
-          EnvironmentInternalError: HttpServerRespondable.toResponse,
-          EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
-        }),
-      ),
-    );
-    return Layer.mergeAll(listRoute, createRoute, createThreadRoute);
+    return Layer.mergeAll(listRoute, createRoute);
   }),
 );

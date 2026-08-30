@@ -141,6 +141,8 @@ interface StartThreadBootstrap {
 }
 
 export interface StartThreadTurnInput extends ThreadCommandInput {
+  /** Explicit J5 home carried only by first-message launch callers. */
+  readonly squadronId?: string;
   readonly message: {
     readonly messageId: MessageId;
     readonly role: "user";
@@ -572,6 +574,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
     return yield* request(ORCHESTRATION_V2_WS_METHODS.launchThread, {
       commandId,
       creationSource: input.creationSource ?? "web",
+      ...(input.squadronId === undefined ? {} : { squadronId: input.squadronId }),
       threadId: input.threadId,
       ...(bootstrap === undefined ? { reuseExistingThread: true } : {}),
       projectId: thread.projectId,

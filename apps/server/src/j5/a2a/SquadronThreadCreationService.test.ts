@@ -1,12 +1,9 @@
 import { assert, it } from "@effect/vitest";
 import { CommandId, ProjectId, ThreadId } from "@t3tools/contracts";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
-import { A2AHomeConflictError, A2AHomeRegistrar } from "./HomeRegistrar.ts";
+import { A2AHomeRegistrar } from "./HomeRegistrar.ts";
 import {
   SquadronThreadCreationMissingSquadronError,
   SquadronThreadCreationProjectReferenceError,
@@ -14,31 +11,25 @@ import {
   layer as squadronThreadCreationServiceLayer,
 } from "./SquadronThreadCreationService.ts";
 import { SquadronProjectReferences } from "./SquadronProjectReferences.ts";
-import * as ThreadLaunch from "../../orchestration-v2/ThreadLaunchService.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
 
 const squadronId = SquadronId.make("squadron:creation");
 const projectId = ProjectId.make("project:creation");
 const otherProjectId = ProjectId.make("project:other");
 const threadId = ThreadId.make("thread:creation");
-const createdAt = DateTime.makeUnsafe("2026-08-29T20:00:00.000Z");
+const commandId = CommandId.make("command:creation");
+const createdAt = "2026-08-29T20:00:00.000Z";
 
-const launchInput = {
-  commandId: CommandId.make("command:creation"),
-  projectId,
-} as ThreadLaunch.ThreadLaunchInput;
-
-const launchResult = {
+const input = {
+  squadronId,
+  commandId,
   threadId,
-  projection: { thread: { createdAt } },
-  resumed: false,
-} as ThreadLaunch.ThreadLaunchResult;
-
-const database = NodeSqliteClient.layerMemory();
+  projectId,
+  createdAt,
+};
 
 const makeLayer = (input: {
   readonly references: ReadonlyArray<ProjectId>;
-  readonly launch?: ThreadLaunch.ThreadLaunchService["Service"]["launch"];
   readonly register?: A2AHomeRegistrar["Service"]["registerAtCreation"];
 }) => {
   const references = Layer.mock(SquadronProjectReferences)({
@@ -48,12 +39,9 @@ const makeLayer = (input: {
           squadronId,
           projectId: candidateProjectId,
           ordinal,
-          createdAt: "2026-08-29T20:00:00.000Z",
+          createdAt,
         })),
       ),
-  });
-  const launcher = Layer.mock(ThreadLaunch.ThreadLaunchService)({
-    launch: input.launch ?? (() => Effect.succeed(launchResult)),
   });
   const registrar = Layer.mock(A2AHomeRegistrar)({
     registerAtCreation:
@@ -66,96 +54,66 @@ const makeLayer = (input: {
   });
   return squadronThreadCreationServiceLayer.pipe(
     Layer.provideMerge(references),
-    Layer.provideMerge(launcher),
     Layer.provideMerge(registrar),
-    Layer.provideMerge(database),
   );
 };
 
-it.effect("refuses a thread creation without an explicit Squadron before launch", () =>
+it.effect("refuses a durable thread launch without an explicit Squadron", () =>
   Effect.gen(function* () {
     const service = yield* SquadronThreadCreationService;
-    const error = yield* service.create({ launch: launchInput }).pipe(Effect.flip);
+    const { squadronId: _squadronId, ...withoutSquadron } = input;
+    const error = yield* service.registerAtDurableLaunch(withoutSquadron).pipe(Effect.flip);
     assert.instanceOf(error, SquadronThreadCreationMissingSquadronError);
   }).pipe(Effect.provide(makeLayer({ references: [projectId] }))),
 );
 
-it.effect("refuses unreferenced and ambiguous project selections without inferring a project", () =>
+it.effect("refuses unreferenced and ambiguous project selections without inference", () =>
   Effect.gen(function* () {
     const service = yield* SquadronThreadCreationService;
-    const error = yield* service.create({ squadronId, launch: launchInput }).pipe(Effect.flip);
+    const error = yield* service
+      .registerAtDurableLaunch({ ...input, projectId: otherProjectId })
+      .pipe(Effect.flip);
     assert.instanceOf(error, SquadronThreadCreationProjectReferenceError);
-    assert.deepStrictEqual(error.referencedProjectIds, [otherProjectId, projectId]);
-  }).pipe(Effect.provide(makeLayer({ references: [otherProjectId, projectId] }))),
+    assert.deepStrictEqual(error.referencedProjectIds, [projectId]);
+  }).pipe(Effect.provide(makeLayer({ references: [projectId] }))),
 );
 
-it.effect("uses canonical launch then rolls it back when home registration fails", () => {
-  let probeSql: SqlClient.SqlClient | undefined;
-  return Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    probeSql = sql;
-    yield* sql`CREATE TABLE creation_probe (value TEXT NOT NULL)`;
-    const service = yield* SquadronThreadCreationService;
-    const error = yield* service.create({ squadronId, launch: launchInput }).pipe(Effect.flip);
-    assert.instanceOf(error, A2AHomeConflictError);
-    assert.deepStrictEqual(
-      yield* sql<{ readonly value: string }>`SELECT value FROM creation_probe`,
-      [],
-    );
-  }).pipe(
-    Effect.provide(
-      makeLayer({
-        references: [projectId],
-        launch: () => {
-          if (probeSql === undefined) return Effect.die("test database was not initialized");
-          return probeSql`INSERT INTO creation_probe (value) VALUES ('launched')`.pipe(
-            Effect.mapError(
-              (cause) =>
-                new ThreadLaunch.ThreadLaunchError({
-                  operation: "create-thread",
-                  commandId: launchInput.commandId,
-                  projectId,
-                  cause,
-                }),
-            ),
-            Effect.as(launchResult),
-          );
+it.effect(
+  "replays the exact durable registration inputs without launching or preparing again",
+  () => {
+    const registrations: Array<Parameters<A2AHomeRegistrar["Service"]["registerAtCreation"]>[0]> =
+      [];
+    return Effect.gen(function* () {
+      const service = yield* SquadronThreadCreationService;
+      yield* service.registerAtDurableLaunch(input);
+      yield* service.registerAtDurableLaunch(input);
+      assert.deepStrictEqual(registrations, [
+        {
+          squadronId,
+          threadId,
+          createdAt,
+          commandId: "command:j5:a2a:thread-creation:command%3Acreation",
         },
-        register: () =>
-          Effect.fail(
-            new A2AHomeConflictError({
-              threadId,
-              existingSquadronId: SquadronId.make("squadron:existing"),
-              requestedSquadronId: squadronId,
-            }),
-          ),
-      }),
-    ),
-  );
-});
-
-it.effect("derives stable registration inputs from the durable launch projection", () => {
-  const registrations: Array<unknown> = [];
-  return Effect.gen(function* () {
-    const service = yield* SquadronThreadCreationService;
-    yield* service.create({ squadronId, launch: launchInput });
-    yield* service.create({ squadronId, launch: launchInput });
-    assert.equal(registrations.length, 2);
-    assert.deepStrictEqual(registrations[0], registrations[1]);
-  }).pipe(
-    Effect.provide(
-      makeLayer({
-        references: [projectId],
-        register: (registration) =>
-          Effect.sync(() => {
-            // Capture the registrar inputs without changing the test's service graph.
+        {
+          squadronId,
+          threadId,
+          createdAt,
+          commandId: "command:j5:a2a:thread-creation:command%3Acreation",
+        },
+      ]);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          references: [projectId],
+          register: (registration) => {
             registrations.push(registration);
-            return {
+            return Effect.succeed({
               squadronId,
               participantId: ParticipantId.make(`agent:${threadId}`),
-            };
-          }),
-      }),
-    ),
-  );
-});
+            });
+          },
+        }),
+      ),
+    );
+  },
+);

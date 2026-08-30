@@ -142,6 +142,7 @@ import {
   sortThreadsForSidebar,
 } from "./Sidebar.logic";
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
+import { SquadronScopeDropdown } from "../j5/squadron/SquadronScopeDropdown";
 import {
   ThreadWorktreeIndicator,
   nextThreadChangeRequestSnapshot,
@@ -3433,6 +3434,9 @@ export default function Sidebar() {
                   </TooltipPopup>
                 </Tooltip>
               </div>
+            </div>
+            <div className="flex items-center gap-1">
+              <SquadronScopeDropdown />
             </div>
             {projectGroups.length > 0 ? (
               <div className="flex items-center gap-1">

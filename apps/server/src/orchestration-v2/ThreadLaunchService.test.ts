@@ -28,6 +28,10 @@ import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.t
 import { makeProviderRegistryLayer } from "../provider/testUtils/providerRegistryMock.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import {
+  SquadronThreadCreationMissingSquadronError,
+  SquadronThreadCreationService,
+} from "../j5/a2a/SquadronThreadCreationService.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
@@ -74,6 +78,7 @@ interface HarnessOptions {
   readonly generateBranchName?: TextGeneration.TextGeneration["Service"]["generateBranchName"];
   readonly serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
   readonly providers?: ReadonlyArray<ServerProvider>;
+  readonly registerAtDurableLaunch?: SquadronThreadCreationService["Service"]["registerAtDurableLaunch"];
 }
 
 function makeHarness(options: HarnessOptions = {}) {
@@ -135,7 +140,23 @@ function makeHarness(options: HarnessOptions = {}) {
     makeProviderRegistryLayer(options.providers),
   );
   const launch = ThreadLaunch.layer.pipe(
-    Layer.provide(Layer.mergeAll(externalServices, threadManagement, receipts, IdAllocator.layer)),
+    Layer.provide(
+      Layer.mergeAll(
+        externalServices,
+        threadManagement,
+        receipts,
+        IdAllocator.layer,
+        Layer.mock(SquadronThreadCreationService)({
+          registerAtDurableLaunch:
+            options.registerAtDurableLaunch ??
+            (() =>
+              Effect.succeed({
+                squadronId: "squadron:launch-test" as never,
+                participantId: "agent:launch-test" as never,
+              })),
+        }),
+      ),
+    ),
   );
   const projectedProjects = Layer.mock(ProjectionProjectRepository)({
     getById: ({ projectId: requestedProjectId }) =>
@@ -173,9 +194,13 @@ function launchInput(input: {
   readonly thread: string;
   readonly message?: string;
   readonly workspace?: ThreadLaunch.ThreadLaunchWorkspaceStrategy;
+  readonly squadronId?: string | null;
 }) {
   return {
     commandId: CommandId.make(input.command),
+    ...(input.squadronId === null
+      ? {}
+      : { squadronId: input.squadronId ?? "squadron:launch-test" }),
     threadId: ThreadId.make(input.thread),
     projectId,
     title: "New thread",
@@ -211,6 +236,76 @@ function waitUntil<E, R>(predicate: () => Effect.Effect<boolean, E, R>): Effect.
     assert.fail("Condition was not reached before timeout.");
   });
 }
+
+it.effect("keeps a durable named thread when the required Squadron registration is absent", () => {
+  let setupCalls = 0;
+  const harness = makeHarness({
+    runSetup: () =>
+      Effect.sync(() => {
+        setupCalls += 1;
+        return { status: "no-script" as const };
+      }),
+    registerAtDurableLaunch: (input) =>
+      input.squadronId === undefined
+        ? Effect.fail(
+            new SquadronThreadCreationMissingSquadronError({ commandId: input.commandId }),
+          )
+        : Effect.die("test expected no Squadron"),
+  });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const launch = launchInput({
+      command: "command:launch:missing-squadron",
+      thread: "thread:launch:missing-squadron",
+      message: "Must not prepare",
+      workspace: { type: "worktree", baseRef: "main" },
+      squadronId: null,
+    });
+
+    const error = yield* launches.launch(launch).pipe(Effect.flip);
+    assert.instanceOf(error, ThreadLaunch.ThreadLaunchError);
+    assert.equal(error.operation, "register-squadron");
+    assert.equal(error.threadId, launch.threadId);
+    assert.match(error.message, /durable thread was not deleted/i);
+
+    const durable = yield* threads.getThreadProjection(launch.threadId);
+    assert.equal(durable.thread.id, launch.threadId);
+    assert.equal(durable.runs[0]?.status, "failed");
+    assert.equal(setupCalls, 0);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("replays the identical registration command after durable thread creation", () => {
+  const registrations: Array<{
+    readonly squadronId?: string;
+    readonly threadId: ThreadId;
+    readonly commandId: CommandId;
+    readonly createdAt: string;
+  }> = [];
+  const harness = makeHarness({
+    registerAtDurableLaunch: (input) => {
+      registrations.push(input);
+      return Effect.succeed({
+        squadronId: "squadron:launch-test" as never,
+        participantId: "agent:launch-test" as never,
+      });
+    },
+  });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const launch = launchInput({
+      command: "command:launch:registration-replay",
+      thread: "thread:launch:registration-replay",
+    });
+    yield* launches.launch(launch);
+    yield* launches.launch(launch);
+
+    assert.lengthOf(registrations, 2);
+    assert.deepStrictEqual(registrations[1], registrations[0]);
+    assert.equal(registrations[0]?.threadId, launch.threadId);
+  }).pipe(Effect.provide(harness.layer));
+});
 
 it.effect("returns a visible preparing message while provisioning is still blocked", () =>
   Effect.gen(function* () {

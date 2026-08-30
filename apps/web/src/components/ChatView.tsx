@@ -246,6 +246,14 @@ import {
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
+import { SquadronDraftChip } from "../j5/squadron/SquadronDraftChip";
+import {
+  freezeDraftSquadronAtFirstSend,
+  selectDraftSquadron,
+  useSquadronAmbientScope,
+  useSquadronDraftScope,
+} from "../j5/squadron/SquadronDraftState";
+import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline, type MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
@@ -1797,6 +1805,13 @@ function ChatViewContent(props: ChatViewProps) {
     [activeThread?.environmentId, activeThread?.projectId],
   );
   const activeProject = useProject(activeProjectRef);
+  const { squadrons } = useSquadronDirectory();
+  const ambientSquadronId = useSquadronAmbientScope();
+  const draftSquadron = useSquadronDraftScope(routeThreadKey);
+  const effectiveSquadronId = draftSquadron.squadronId ?? ambientSquadronId;
+  const effectiveSquadronName =
+    squadrons.find(({ squadron }) => squadron.id === effectiveSquadronId)?.squadron.name ?? null;
+  const isFirstMessageForActiveThread = !isServerThread || activeMessageCount === 0;
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   }, [activeProjectRef, handleNewThread]);
@@ -5176,7 +5191,7 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
     const threadIdForSend = activeThread.id;
-    const isFirstMessage = !isServerThread || activeMessageCount === 0;
+    const isFirstMessage = isFirstMessageForActiveThread;
     const baseBranchForWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
         ? activeThreadBranch
@@ -5189,6 +5204,30 @@ function ChatViewContent(props: ChatViewProps) {
     if (shouldCreateWorktree && !activeThreadBranch) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return;
+    }
+
+    let squadronIdForLaunch: string | undefined;
+    if (isFirstMessage) {
+      if (effectiveSquadronId === null) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Choose a Squadron before sending",
+            description: "A new agent needs an explicit existing Squadron home.",
+          }),
+        );
+        return;
+      }
+      // Ambient scope is user-selected context, not an invented default. Persist
+      // it to this draft at the one-way send boundary before the RPC starts.
+      if (draftSquadron.squadronId === null) {
+        selectDraftSquadron(routeThreadKey, effectiveSquadronId);
+      }
+      const frozenSquadronId = freezeDraftSquadronAtFirstSend(routeThreadKey);
+      if (frozenSquadronId === null) {
+        return;
+      }
+      squadronIdForLaunch = frozenSquadronId;
     }
 
     sendInFlightRef.current = true;
@@ -5383,6 +5422,7 @@ function ChatViewContent(props: ChatViewProps) {
         environmentId,
         input: {
           threadId: threadIdForSend,
+          ...(squadronIdForLaunch === undefined ? {} : { squadronId: squadronIdForLaunch }),
           message: {
             messageId: messageIdForSend,
             role: "user",
@@ -6509,8 +6549,8 @@ function ChatViewContent(props: ChatViewProps) {
                         }
                       >
                         <DraftHeroHeadline
-                          activeProjectRef={activeProjectRef}
                           activeProjectTitle={activeProject?.title ?? null}
+                          squadronName={effectiveSquadronName}
                         />
                       </div>
                       <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
@@ -6542,6 +6582,14 @@ function ChatViewContent(props: ChatViewProps) {
                     >
                       <div className="chat-composer-glass-host relative z-10 w-full rounded-[22px]">
                         <div className="relative z-10">
+                          {isFirstMessageForActiveThread ? (
+                            <div className="flex px-3 pt-2">
+                              <SquadronDraftChip
+                                ambientSquadronId={ambientSquadronId}
+                                draftKey={routeThreadKey}
+                              />
+                            </div>
+                          ) : null}
                           <ChatComposer
                             composerRef={composerRef}
                             composerDraftTarget={composerDraftTarget}

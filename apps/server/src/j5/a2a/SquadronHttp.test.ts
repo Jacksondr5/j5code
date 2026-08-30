@@ -10,10 +10,6 @@ import * as Layer from "effect/Layer";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
-import {
-  SquadronThreadCreationMissingSquadronError,
-  SquadronThreadCreationService,
-} from "./SquadronThreadCreationService.ts";
 import { SquadronManagementService } from "./SquadronManagementService.ts";
 import { squadronHttpRouteLayer } from "./SquadronHttp.ts";
 import { SquadronId } from "./contracts.ts";
@@ -21,19 +17,8 @@ import { SquadronId } from "./contracts.ts";
 const projectId = ProjectId.make("project:squadron-http");
 const squadronId = SquadronId.make("squadron:squadron-http");
 
-const launchRequest = {
-  commandId: "command:squadron-http",
-  projectId,
-  title: "A new thread",
-  modelSelection: { instanceId: "codex", model: "test-model" },
-  runtimeMode: "full-access",
-  interactionMode: "default",
-  workspaceStrategy: { type: "root" },
-};
-
-it("lists and creates explicit Squadron project references, then refuses a launch without a Squadron", async () => {
+it("lists and creates explicit Squadron project references", async () => {
   const createInputs: Array<{ readonly name: string; readonly projectId: ProjectId }> = [];
-  const launchInputs: Array<{ readonly squadronId: SquadronId | undefined }> = [];
   const management = Layer.mock(SquadronManagementService)({
     list: () =>
       Effect.succeed([
@@ -50,16 +35,6 @@ it("lists and creates explicit Squadron project references, then refuses a launc
       });
     },
   });
-  const creation = Layer.mock(SquadronThreadCreationService)({
-    create: (input) => {
-      launchInputs.push({ squadronId: input.squadronId });
-      return Effect.fail(
-        new SquadronThreadCreationMissingSquadronError({
-          commandId: "command:squadron-http",
-        }),
-      );
-    },
-  });
   const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
     authenticateHttpRequest: () =>
       Effect.succeed({
@@ -71,7 +46,6 @@ it("lists and creates explicit Squadron project references, then refuses a launc
   });
   const routes = squadronHttpRouteLayer.pipe(
     Layer.provide(management),
-    Layer.provide(creation),
     Layer.provideMerge(auth),
     Layer.provide(HttpServer.layerServices),
   );
@@ -98,20 +72,6 @@ it("lists and creates explicit Squadron project references, then refuses a launc
     );
     assert.equal(created.status, 201);
     assert.deepStrictEqual(createInputs, [{ name: "Operations", projectId }]);
-
-    const refused = await handler(
-      new Request("http://environment.test/api/j5/squadrons/threads", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(launchRequest),
-      }),
-    );
-    assert.equal(refused.status, 400);
-    assert.deepStrictEqual(await refused.json(), {
-      error: "SquadronThreadCreationMissingSquadronError",
-      message: "Creation command command:squadron-http requires an explicit existing Squadron.",
-    });
-    assert.deepStrictEqual(launchInputs, [{ squadronId: undefined }]);
   } finally {
     await dispose();
   }
