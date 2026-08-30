@@ -7,11 +7,10 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
-import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
-import { PlacementCascadeService } from "./PlacementCascadeService.ts";
+import { ParticipantPlacementService } from "./PlacementService.ts";
 import { A2ASilenceDetector } from "./SilenceDetector.ts";
 import { makeJ5A2ARuntimeLayer } from "./runtimeLayer.ts";
 
@@ -35,7 +34,6 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
       const threadManagement = Layer.mock(ThreadManagementService)({
         streamStoredEventsFrom: () => Stream.never,
       });
-      const threadLifecycle = Layer.mock(ThreadLifecycleService)({});
       const runtime = makeJ5A2ARuntimeLayer({ ledger: countedLedger });
       const httpConsumer = Layer.effectDiscard(A2ALedger.pipe(Effect.asVoid));
       const mcpConsumer = Layer.effectDiscard(A2ASilenceDetector.pipe(Effect.asVoid));
@@ -43,12 +41,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
         Layer.mergeAll(
           nested === "http" ? httpConsumer.pipe(Layer.provide(runtime)) : httpConsumer,
           nested === "mcp" ? mcpConsumer.pipe(Layer.provide(runtime)) : mcpConsumer,
-        ).pipe(
-          Layer.provide(runtime),
-          Layer.provide(threadLifecycle),
-          Layer.provide(threadManagement),
-          Layer.provide(database),
-        ),
+        ).pipe(Layer.provide(runtime), Layer.provide(threadManagement), Layer.provide(database)),
       );
       return ledgerBuilds;
     }),
@@ -68,7 +61,6 @@ it.effect("shares one runtime across the combined HTTP and MCP-style route graph
       }).pipe(Effect.provide(database));
 
       let ledgerBuilds = 0;
-      let threadLifecycleBuilds = 0;
       let threadManagementBuilds = 0;
       const countedLedger = ledgerLayer.pipe(
         Layer.tap(() => Effect.sync(() => (ledgerBuilds += 1))),
@@ -76,25 +68,27 @@ it.effect("shares one runtime across the combined HTTP and MCP-style route graph
       const countedThreadManagement = Layer.mock(ThreadManagementService)({
         streamStoredEventsFrom: () => Stream.never,
       }).pipe(Layer.tap(() => Effect.sync(() => (threadManagementBuilds += 1))));
-      const countedThreadLifecycle = Layer.mock(ThreadLifecycleService)({}).pipe(
-        Layer.tap(() => Effect.sync(() => (threadLifecycleBuilds += 1))),
-      );
       const ledgerConsumer = Layer.effectDiscard(A2ALedger.pipe(Effect.asVoid));
       const secondThreadConsumer = Layer.effectDiscard(ThreadManagementService.pipe(Effect.asVoid));
-      const cascadeConsumer = Layer.effectDiscard(PlacementCascadeService.pipe(Effect.asVoid));
+      const placementConsumer = Layer.effectDiscard(
+        ParticipantPlacementService.pipe(Effect.asVoid),
+      );
       const silenceConsumer = Layer.effectDiscard(A2ASilenceDetector.pipe(Effect.asVoid));
       const runtime = makeJ5A2ARuntimeLayer({ ledger: countedLedger });
       yield* Layer.build(
-        Layer.mergeAll(ledgerConsumer, secondThreadConsumer, cascadeConsumer, silenceConsumer).pipe(
+        Layer.mergeAll(
+          ledgerConsumer,
+          secondThreadConsumer,
+          placementConsumer,
+          silenceConsumer,
+        ).pipe(
           Layer.provideMerge(runtime),
-          Layer.provide(countedThreadLifecycle),
           Layer.provide(countedThreadManagement),
           Layer.provide(database),
         ),
       );
 
       assert.equal(ledgerBuilds, 1);
-      assert.equal(threadLifecycleBuilds, 1);
       assert.equal(threadManagementBuilds, 1);
       const sql = Context.get(databaseContext, SqlClient.SqlClient);
       const people = yield* sql<{

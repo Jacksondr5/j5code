@@ -103,15 +103,6 @@ export const RecordParticipantPlacementInput = Schema.Struct({
 });
 export type RecordParticipantPlacementInput = typeof RecordParticipantPlacementInput.Type;
 
-export const ReparentParticipantInput = Schema.Struct({
-  commandId: PlacementCommandId,
-  squadronId: SquadronId,
-  participantId: ParticipantId,
-  placementParentId: Schema.NullOr(ParticipantId),
-  createdAt: Schema.String,
-});
-export type ReparentParticipantInput = typeof ReparentParticipantInput.Type;
-
 export const ParticipantPlacementView = Schema.Struct({
   squadronId: SquadronId,
   participant: Participant,

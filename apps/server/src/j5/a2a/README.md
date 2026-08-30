@@ -6,11 +6,7 @@
 
 Production includes a non-agent-invocable home registrar for sanctioned creation paths. `registerAtCreation` accepts only an explicit existing squadron, records one immutable `participant.joined`, replays the same creation without another event, and rejects a different requested home. `getHomeForThread` reads historical join events so later lifecycle retirement cannot erase or reassign a thread's home. The registrar never creates, selects, moves, or leaves squadrons, and it is not an agent tool.
 
-Placement and provenance are an agent-only organization overlay. Creation records immutable typed provenance (`spawned-by`, `forked-from`, or `unknown`) and derives the initial placement from that fact; only an authenticated human browser session may later reparent an agent. Humans and person ids are never placement-tree nodes.
-
-`PlacementCascadeService` is retained as the future Crew lifecycle engine: it walks the mutable placement tree leaves-first and dispatches the existing per-thread stop/archive primitives. It is deliberately unexposed until Crews provide the owning command surface. No MCP tool or handler currently consumes it, and its focused tests invoke the service directly rather than proving a shipped cascade command.
-
-Legacy registered agents may remain visibly `unrecorded`. The internal `repairLegacyParticipantPlacement` operation can idempotently derive their original lineage provenance on explicit invocation, but no MCP read or lifecycle command triggers it. Registration is the species guard: provider-native or otherwise unregistered threads are never absorbed into J5 placement.
+Placement and provenance are an agent-only organization overlay. Creation records immutable typed provenance (`spawned-by`, `forked-from`, or `unknown`) and derives the initial placement from that fact. Humans and person ids are never placement-tree nodes. This extraction ships no reparent or cascade command surface; the retained R21 human-only reparent law and Crew lifecycle recovery contracts live in the A6 ticket record.
 
 No native user-created-thread hook consumes the registrar. Such threads remain explicit nonparticipants: `send_message` and `list_participants` fail closed when the caller has no home. There is no default Squadron, agent-created home, move action, or production seeding helper.
 

@@ -5,7 +5,6 @@ import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import { layer as homeRegistrarLayer } from "./HomeRegistrar.ts";
 import { humanPersonRegistryLayer } from "./HumanPersonRegistry.ts";
 import { layer as ledgerLayer } from "./LedgerService.ts";
-import { layer as placementCascadeLayer } from "./PlacementCascadeService.ts";
 import { layer as participantPlacementLayer } from "./PlacementService.ts";
 import { layer as sendServiceLayer } from "./SendService.ts";
 import { layer as silenceDetectorLayer } from "./SilenceDetector.ts";
@@ -25,14 +24,6 @@ export const makeJ5A2ARuntimeLayer = (
   const silenceDetectorProvided = silenceDetectorLayer.pipe(
     Layer.provideMerge(deliveryWorkerProvided),
   );
-  // Retain the unexposed cascade engine in the production graph for the future
-  // Crew command consumer. It requires the one shared upstream lifecycle
-  // service; no fallback constructs a second instance, and no current MCP tool
-  // or handler reaches this service.
-  const placementCascadeProvided = placementCascadeLayer.pipe(
-    Layer.provideMerge(participantPlacementLayer),
-  );
-
   return Layer.mergeAll(
     humanPersonRegistryLayer,
     homeRegistrarLayer,
@@ -40,9 +31,9 @@ export const makeJ5A2ARuntimeLayer = (
     deliveryWorkerProvided,
     silenceDetectorProvided,
     humanInboxLayer,
-    placementCascadeProvided,
+    participantPlacementLayer,
   ).pipe(Layer.provideMerge(ledgerProvided));
 };
 
-/** Production J5 A2A services; SQL and V2 thread/lifecycle services stay shared dependencies. */
+/** Production J5 A2A services; SQL and V2 thread management stay shared dependencies. */
 export const J5A2ARuntimeLayer = makeJ5A2ARuntimeLayer();

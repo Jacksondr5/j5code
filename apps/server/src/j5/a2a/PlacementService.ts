@@ -1,8 +1,3 @@
-import {
-  ServerAuthSessionMethod,
-  ThreadId,
-  type EnvironmentSessionPrincipalShape,
-} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -10,9 +5,6 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import type { McpInvocationScope } from "../../mcp/McpInvocationContext.ts";
-import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { A2ALedger } from "./LedgerService.ts";
 import {
   SquadronId,
   Participant,
@@ -27,9 +19,7 @@ import {
   PlacementEvent,
   type PlacementMutationResult,
   type RecordParticipantPlacementInput,
-  type ReparentParticipantInput,
 } from "./placementContracts.ts";
-import { provenanceFromThreadLineage } from "./placementProvenance.ts";
 
 export class PlacementStorageError extends Schema.TaggedErrorClass<PlacementStorageError>()(
   "PlacementStorageError",
@@ -80,34 +70,14 @@ export class PlacementAlreadyExistsError extends Schema.TaggedErrorClass<Placeme
   { squadronId: SquadronId, participantId: ParticipantId },
 ) {
   override get message(): string {
-    return `Placement state already exists for ${this.participantId} in squadron ${this.squadronId}; provenance is immutable. Use the human reparent command to change only display placement.`;
-  }
-}
-
-export class PlacementHumanRequiredError extends Schema.TaggedErrorClass<PlacementHumanRequiredError>()(
-  "PlacementHumanRequiredError",
-  {
-    callerKind: Schema.Literals(["mcp-agent", "environment-session"]),
-    participantId: ParticipantId,
-    authMethod: Schema.NullOr(ServerAuthSessionMethod),
-    subject: Schema.NullOr(Schema.String),
-    providerSessionId: Schema.NullOr(Schema.String),
-    threadId: Schema.NullOr(ThreadId),
-  },
-) {
-  override get message(): string {
-    const identity =
-      this.callerKind === "mcp-agent"
-        ? `MCP agent session ${this.providerSessionId} on thread ${this.threadId}`
-        : `environment session ${this.subject} authenticated with ${this.authMethod}`;
-    return `Placement actor state is ${this.callerKind} for ${this.participantId}: ${identity} cannot reparent. Retry from a human browser session.`;
+    return `Placement state already exists for ${this.participantId} in squadron ${this.squadronId}; creation cannot rewrite immutable provenance.`;
   }
 }
 
 export class PlacementHumanTargetError extends Schema.TaggedErrorClass<PlacementHumanTargetError>()(
   "PlacementHumanTargetError",
   {
-    operation: Schema.Literals(["record-creation", "reparent"]),
+    operation: Schema.Literal("record-creation"),
     squadronId: SquadronId,
     participantId: ParticipantId,
   },
@@ -116,29 +86,6 @@ export class PlacementHumanTargetError extends Schema.TaggedErrorClass<Placement
     return `Placement participant state is immutable-human for ${this.participantId} in squadron ${this.squadronId}; ${this.operation} only accepts agent participants.`;
   }
 }
-
-export class PlacementLegacyRepairTargetError extends Schema.TaggedErrorClass<PlacementLegacyRepairTargetError>()(
-  "PlacementLegacyRepairTargetError",
-  {
-    squadronId: SquadronId,
-    participantId: ParticipantId,
-    state: Schema.Literals(["ineligible-non-agent", "unregistered"]),
-  },
-) {
-  override get message(): string {
-    return `Legacy placement repair target state is ${this.state} for ${this.participantId} in squadron ${this.squadronId}. Repair accepts only an explicitly registered agent participant.`;
-  }
-}
-
-/**
- * V1 treats an authenticated browser-session cookie as the human command
- * boundary. MCP callers and bearer/DPoP environment sessions are refused;
- * successful events retain the session id, subject, and auth method measured
- * at that boundary.
- */
-export type PlacementReparentCaller =
-  | { readonly kind: "environment"; readonly principal: EnvironmentSessionPrincipalShape }
-  | { readonly kind: "mcp"; readonly scope: McpInvocationScope };
 
 export class PlacementCycleError extends Schema.TaggedErrorClass<PlacementCycleError>()(
   "PlacementCycleError",
@@ -149,7 +96,7 @@ export class PlacementCycleError extends Schema.TaggedErrorClass<PlacementCycleE
   },
 ) {
   override get message(): string {
-    return `Placement cycle state: reparenting ${this.participantId} under ${this.requestedParentId} would make it its own ancestor through ${this.path.join(" -> ")}. Choose root or a participant outside that subtree.`;
+    return `Placement cycle state: placing ${this.participantId} under ${this.requestedParentId} would make it its own ancestor through ${this.path.join(" -> ")}. Choose root or a participant outside that subtree.`;
   }
 }
 
@@ -178,9 +125,7 @@ export type PlacementError =
   | PlacementParentNotFoundError
   | PlacementParentIneligibleError
   | PlacementAlreadyExistsError
-  | PlacementHumanRequiredError
   | PlacementHumanTargetError
-  | PlacementLegacyRepairTargetError
   | PlacementCycleError
   | PlacementGraphCorruptError
   | PlacementCommandConflictError;
@@ -192,9 +137,7 @@ const PlacementErrorSchema = Schema.Union([
   PlacementParentNotFoundError,
   PlacementParentIneligibleError,
   PlacementAlreadyExistsError,
-  PlacementHumanRequiredError,
   PlacementHumanTargetError,
-  PlacementLegacyRepairTargetError,
   PlacementCycleError,
   PlacementGraphCorruptError,
   PlacementCommandConflictError,
@@ -202,123 +145,33 @@ const PlacementErrorSchema = Schema.Union([
 const isPlacementError = Schema.is(PlacementErrorSchema);
 
 export interface ParticipantPlacementServiceShape {
+  /** Imminent A2 spawn/verb slice records placement at agent creation. */
   readonly recordCreation: (
     input: RecordParticipantPlacementInput,
   ) => Effect.Effect<PlacementMutationResult, PlacementError>;
-  readonly reparent: (
-    caller: PlacementReparentCaller,
-    input: ReparentParticipantInput,
-  ) => Effect.Effect<PlacementMutationResult, PlacementError>;
+  /** Imminent A2 spawn/verb slice reads the newly recorded placement. */
   readonly readPlacement: (input: {
     readonly squadronId: SquadronId;
     readonly participantId: ParticipantId;
   }) => Effect.Effect<ParticipantPlacement | null, PlacementError>;
+  /** Live `list_participants` enrichment read surface. */
   readonly listParticipants: (
     squadronId: SquadronId,
   ) => Effect.Effect<ReadonlyArray<ParticipantPlacementView>, PlacementError>;
-  /** Placement descendants in leaves-first order, including the requested root. */
+  /**
+   * Placement descendants in leaves-first order, including the requested root.
+   * The in-flight A9 AR2 pre-archive provider is the named consumer.
+   */
   readonly listSubtree: (input: {
     readonly squadronId: SquadronId;
     readonly participantId: ParticipantId;
   }) => Effect.Effect<ReadonlyArray<ParticipantPlacementView>, PlacementError>;
-  readonly listEvents: (
-    squadronId: SquadronId,
-  ) => Effect.Effect<ReadonlyArray<PlacementEvent>, PlacementError>;
-  readonly rebuildProjection: (
-    squadronId: SquadronId,
-  ) => Effect.Effect<ReadonlyArray<ParticipantPlacement>, PlacementError>;
 }
 
 export class ParticipantPlacementService extends Context.Service<
   ParticipantPlacementService,
   ParticipantPlacementServiceShape
 >()("t3/j5/a2a/PlacementService/ParticipantPlacementService") {}
-
-export interface RepairLegacyParticipantPlacementInput {
-  readonly squadronId: SquadronId;
-  readonly participantId: ParticipantId;
-}
-
-export interface RepairLegacyParticipantPlacementResult {
-  readonly placement: ParticipantPlacement;
-  readonly repaired: boolean;
-}
-
-const legacyRepairCommandId = (input: RepairLegacyParticipantPlacementInput) =>
-  PlacementCommandId.make(
-    `command:j5:a2a:placement:legacy-repair:${encodeURIComponent(input.squadronId)}:${encodeURIComponent(input.participantId)}`,
-  );
-
-/**
- * Explicit, internal-only repair for already-registered legacy agents. Reads,
- * listing, and lifecycle commands never invoke this operation automatically.
- */
-export const repairLegacyParticipantPlacement = Effect.fn(
-  "j5.a2a.placement.repairLegacyParticipantPlacement",
-)(function* (input: RepairLegacyParticipantPlacementInput) {
-  if (isHumanParticipantId(input.participantId)) {
-    return yield* new PlacementLegacyRepairTargetError({
-      squadronId: input.squadronId,
-      participantId: input.participantId,
-      state: "ineligible-non-agent",
-    });
-  }
-
-  const ledger = yield* A2ALedger;
-  const membership = (yield* ledger.listMembership(input.squadronId)).find(
-    (candidate) => participantIdOf(candidate.participant) === input.participantId,
-  );
-  if (membership === undefined) {
-    return yield* new PlacementLegacyRepairTargetError({
-      squadronId: input.squadronId,
-      participantId: input.participantId,
-      state: "unregistered",
-    });
-  }
-  if (membership.participant.kind !== "agent") {
-    return yield* new PlacementLegacyRepairTargetError({
-      squadronId: input.squadronId,
-      participantId: input.participantId,
-      state: "ineligible-non-agent",
-    });
-  }
-
-  const placements = yield* ParticipantPlacementService;
-  const existing = yield* placements.readPlacement(input);
-  if (existing !== null) {
-    return {
-      placement: existing,
-      repaired: false,
-    } satisfies RepairLegacyParticipantPlacementResult;
-  }
-
-  const projection = yield* (yield* ThreadManagementService).getThreadProjection(
-    membership.participant.threadId,
-  );
-  const parentThreadId = projection.thread.lineage.parentThreadId;
-  const parentParticipantId =
-    parentThreadId === null
-      ? null
-      : yield* ledger.findHistoricalAgentParticipantId({
-          squadronId: input.squadronId,
-          threadId: parentThreadId,
-        });
-  const result = yield* placements.recordCreation({
-    commandId: legacyRepairCommandId(input),
-    squadronId: input.squadronId,
-    participantId: input.participantId,
-    actor: "platform",
-    provenance: provenanceFromThreadLineage({
-      lineage: projection.thread.lineage,
-      parentParticipantId,
-    }),
-    createdAt: String(projection.thread.createdAt),
-  });
-  return {
-    placement: result.placement,
-    repaired: result.committed,
-  } satisfies RepairLegacyParticipantPlacementResult;
-});
 
 interface EventRow {
   readonly seq: number;
@@ -469,15 +322,6 @@ const creationFingerprint = (input: RecordParticipantPlacementInput): string => 
     createdAt: input.createdAt,
   });
 };
-
-const reparentFingerprint = (input: ReparentParticipantInput): string =>
-  JSON.stringify({
-    type: "reparent",
-    squadronId: input.squadronId,
-    participantId: input.participantId,
-    placementParentId: input.placementParentId,
-    createdAt: input.createdAt,
-  });
 
 export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.SqlClient> =
   Layer.effect(
@@ -844,100 +688,6 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
         return { event, placement, committed: true as const };
       });
 
-      const reparentEffect = Effect.fn("j5.a2a.placement.reparent")(function* (
-        input: ReparentParticipantInput,
-        principal: {
-          readonly sessionId: EnvironmentSessionPrincipalShape["sessionId"];
-          readonly subject: EnvironmentSessionPrincipalShape["subject"];
-          readonly method: "browser-session-cookie";
-        },
-      ) {
-        const fingerprint = reparentFingerprint(input);
-        const replayed = yield* replay(input.commandId, fingerprint);
-        if (replayed !== null) return replayed;
-        yield* ensureSquadron(input.squadronId);
-        yield* ensureParticipant(input.squadronId, input.participantId);
-        yield* ensureParent(input.squadronId, input.placementParentId);
-        const current = yield* selectPlacement(input.squadronId, input.participantId);
-        if (current === null) {
-          return yield* new PlacementParticipantNotFoundError({
-            squadronId: input.squadronId,
-            participantId: input.participantId,
-          });
-        }
-        yield* assertAcyclic({
-          squadronId: input.squadronId,
-          participantId: input.participantId,
-          requestedParentId: input.placementParentId,
-        });
-        const seq = yield* allocateSeq(input.squadronId);
-        yield* sql`
-          INSERT INTO j5_a2a_placement_event (
-            seq,
-            command_id,
-            request_fingerprint,
-            squadron_id,
-            participant_id,
-            kind,
-            actor,
-            actor_session_id,
-            actor_subject,
-            auth_method,
-            provenance_kind,
-            provenance_participant_id,
-            provenance_source,
-            previous_parent_id,
-            placement_parent_id,
-            created_at
-          ) VALUES (
-            ${seq},
-            ${input.commandId},
-            ${fingerprint},
-            ${input.squadronId},
-            ${input.participantId},
-            'participant.reparented',
-            'human',
-            ${principal.sessionId},
-            ${principal.subject},
-            ${principal.method},
-            NULL,
-            NULL,
-            NULL,
-            ${current.placementParentId},
-            ${input.placementParentId},
-            ${input.createdAt}
-          )
-        `;
-        yield* sql`
-          UPDATE j5_a2a_participant_placement
-          SET placement_parent_id = ${input.placementParentId}, updated_event_seq = ${seq}
-          WHERE squadron_id = ${input.squadronId} AND participant_id = ${input.participantId}
-        `;
-        const event = yield* eventFromRow({
-          seq,
-          command_id: input.commandId,
-          request_fingerprint: fingerprint,
-          squadron_id: input.squadronId,
-          participant_id: input.participantId,
-          kind: "participant.reparented",
-          actor: "human",
-          actor_session_id: principal.sessionId,
-          actor_subject: principal.subject,
-          auth_method: principal.method,
-          provenance_kind: null,
-          provenance_participant_id: null,
-          provenance_source: null,
-          previous_parent_id: current.placementParentId,
-          placement_parent_id: input.placementParentId,
-          created_at: input.createdAt,
-        });
-        const placement = yield* selectPlacement(input.squadronId, input.participantId);
-        if (placement === null) {
-          return yield* new PlacementStorageError({ operation: "read reparented placement" });
-        }
-        return { event, placement, committed: true as const };
-      });
-
       const listParticipantsEffect = Effect.fn("j5.a2a.placement.listParticipants")(function* (
         squadronId: SquadronId,
       ) {
@@ -990,161 +740,11 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
         );
       });
 
-      const listEventsEffect = Effect.fn("j5.a2a.placement.listEvents")(function* (
-        squadronId: SquadronId,
-      ) {
-        yield* ensureSquadron(squadronId);
-        const rows = yield* sql<EventRow>`
-          SELECT
-            seq,
-            command_id,
-            request_fingerprint,
-            squadron_id,
-            participant_id,
-            kind,
-            actor,
-            actor_session_id,
-            actor_subject,
-            auth_method,
-            provenance_kind,
-            provenance_participant_id,
-            provenance_source,
-            previous_parent_id,
-            placement_parent_id,
-            created_at
-          FROM j5_a2a_placement_event
-          WHERE squadron_id = ${squadronId}
-          ORDER BY seq
-        `;
-        return yield* Effect.forEach(rows, eventFromRow, { concurrency: 1 });
-      });
-
-      const rebuildProjectionEffect = Effect.fn("j5.a2a.placement.rebuildProjection")(function* (
-        squadronId: SquadronId,
-      ) {
-        yield* ensureSquadron(squadronId);
-        const rows = yield* sql<EventRow>`
-            SELECT
-              seq,
-              command_id,
-              request_fingerprint,
-              squadron_id,
-              participant_id,
-              kind,
-              actor,
-              actor_session_id,
-              actor_subject,
-              auth_method,
-              provenance_kind,
-              provenance_participant_id,
-              provenance_source,
-              previous_parent_id,
-              placement_parent_id,
-              created_at
-            FROM j5_a2a_placement_event
-            WHERE squadron_id = ${squadronId}
-            ORDER BY seq
-          `;
-        yield* sql`DELETE FROM j5_a2a_participant_placement WHERE squadron_id = ${squadronId}`;
-        for (const row of rows) {
-          if (row.kind === "participant.placement_created") {
-            yield* sql`
-                INSERT INTO j5_a2a_participant_placement (
-                  squadron_id,
-                  participant_id,
-                  provenance_kind,
-                  provenance_participant_id,
-                  provenance_source,
-                  placement_parent_id,
-                  created_event_seq,
-                  updated_event_seq
-                ) VALUES (
-                  ${row.squadron_id},
-                  ${row.participant_id},
-                  ${row.provenance_kind},
-                  ${row.provenance_participant_id},
-                  ${row.provenance_source},
-                  ${row.placement_parent_id},
-                  ${row.seq},
-                  ${row.seq}
-                )
-              `;
-          } else {
-            yield* sql`
-                UPDATE j5_a2a_participant_placement
-                SET placement_parent_id = ${row.placement_parent_id}, updated_event_seq = ${row.seq}
-                WHERE squadron_id = ${row.squadron_id} AND participant_id = ${row.participant_id}
-              `;
-          }
-        }
-        const placements = yield* sql<PlacementRow>`
-            SELECT
-              squadron_id,
-              participant_id,
-              provenance_kind,
-              provenance_participant_id,
-              provenance_source,
-              placement_parent_id,
-              created_event_seq,
-              updated_event_seq
-            FROM j5_a2a_participant_placement
-            WHERE squadron_id = ${squadronId}
-            ORDER BY participant_id
-          `;
-        return yield* Effect.forEach(placements, placementFromRow, { concurrency: 1 });
-      });
-
       return ParticipantPlacementService.of({
         recordCreation: (input) =>
           mutationPermit
             .withPermit(sql.withTransaction(recordCreationEffect(input)))
             .pipe(Effect.mapError(preserveDomainError("record participant placement"))),
-        reparent: (caller, input) => {
-          if (isHumanParticipantId(input.participantId)) {
-            return Effect.fail(
-              new PlacementHumanTargetError({
-                operation: "reparent",
-                squadronId: input.squadronId,
-                participantId: input.participantId,
-              }),
-            );
-          }
-          if (caller.kind === "mcp") {
-            return Effect.fail(
-              new PlacementHumanRequiredError({
-                callerKind: "mcp-agent",
-                participantId: input.participantId,
-                authMethod: null,
-                subject: null,
-                providerSessionId: caller.scope.providerSessionId,
-                threadId: caller.scope.threadId,
-              }),
-            );
-          }
-          if (caller.principal.method !== "browser-session-cookie") {
-            return Effect.fail(
-              new PlacementHumanRequiredError({
-                callerKind: "environment-session",
-                participantId: input.participantId,
-                authMethod: caller.principal.method,
-                subject: caller.principal.subject,
-                providerSessionId: null,
-                threadId: null,
-              }),
-            );
-          }
-          return mutationPermit
-            .withPermit(
-              sql.withTransaction(
-                reparentEffect(input, {
-                  sessionId: caller.principal.sessionId,
-                  subject: caller.principal.subject,
-                  method: "browser-session-cookie",
-                }),
-              ),
-            )
-            .pipe(Effect.mapError(preserveDomainError("reparent participant")));
-        },
         readPlacement: ({ squadronId, participantId }) =>
           Effect.gen(function* () {
             yield* ensureSquadron(squadronId);
@@ -1191,14 +791,6 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             yield* visit(participantId);
             return ordered;
           }).pipe(Effect.mapError(preserveDomainError("list placement subtree"))),
-        listEvents: (squadronId) =>
-          listEventsEffect(squadronId).pipe(
-            Effect.mapError(preserveDomainError("list placement events")),
-          ),
-        rebuildProjection: (squadronId) =>
-          mutationPermit
-            .withPermit(sql.withTransaction(rebuildProjectionEffect(squadronId)))
-            .pipe(Effect.mapError(preserveDomainError("rebuild placement projection"))),
       });
     }),
   );
