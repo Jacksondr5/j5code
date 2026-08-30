@@ -629,7 +629,6 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
     }).pipe(Effect.provide(layer));
   }),
 );
-
 it.effect("keeps participant listing placement-read-only", () =>
   Effect.gen(function* () {
     const squadronId = SquadronId.make("squadron:j5:mcp-placement-handler");
@@ -675,6 +674,7 @@ it.effect("keeps participant listing placement-read-only", () =>
       A2ASendService,
       A2ASendService.of({
         send: () => Effect.die("send_message is outside this placement-handler test"),
+        clearOwnAsk: () => Effect.die("clear_own_ask is outside this placement-handler test"),
         listParticipants: () => Effect.succeed([callerRow, forkedRow, humanRow]),
       }),
     );
@@ -847,6 +847,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
       A2ASendService,
       A2ASendService.of({
         send: () => Effect.die("unused"),
+        clearOwnAsk: () => Effect.die("unused"),
         listParticipants: () => Effect.succeed(rows),
       }),
     );
@@ -982,6 +983,7 @@ it.effect("returns null display names when the ambient shell snapshot fails", ()
       A2ASendService,
       A2ASendService.of({
         send: () => Effect.die("unused"),
+        clearOwnAsk: () => Effect.die("unused"),
         listParticipants: () => Effect.succeed(rows),
       }),
     );

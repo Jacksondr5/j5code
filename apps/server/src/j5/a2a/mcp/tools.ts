@@ -52,6 +52,12 @@ export const J5SendMessageInput = Schema.Struct({
 });
 export type J5SendMessageInput = typeof J5SendMessageInput.Type;
 
+export const J5ClearOwnAskInput = Schema.Struct({
+  exchange_id: ExchangeId,
+  client_request_id: Schema.String.check(Schema.isNonEmpty()),
+});
+export type J5ClearOwnAskInput = typeof J5ClearOwnAskInput.Type;
+
 const J5AgentParticipant = Schema.Struct({
   kind: AgentParticipant.fields.kind,
   id: AgentParticipant.fields.id,

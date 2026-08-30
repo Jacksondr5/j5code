@@ -32,7 +32,6 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
   assert.notInclude(rendered, "{{");
 });
 
-
 it("renders reply closures without another reply instruction for either channel", () => {
   const peerMessage = "Peer reply bytes\n  stay exact.  ";
   const humanMessage = "  Human reply bytes\nremain exact. ";
