@@ -55,9 +55,12 @@ creation-surface registration lands — is a small code change in `envelopes.v1.
 | `intent`            | string            | with `expect_reply`              | One-line summary carried in projections                |
 | `urgency`           | Urgency           | opening an Exchange to the human | Inbox priority                                         |
 
-Result: `SendMessageResult` (message id, exchange state). Errors name the sender's membership state
-(`A2ASenderNotJoinedError` family) or recipient addressability, each with the next command. Events:
-message + exchange ledger events; delivery receipts follow asynchronously.
+Result: `SendMessageResult` (message id, exchange state). Errors (each naming the actual state and
+the next command): sender membership (`A2ASenderNotJoinedError` family); recipient not addressable
+(with the `list_participants` next-command); `expect_reply` without `intent` (an ask must carry its
+one-line intent); an `exchange_id` that is unknown, already closed, or not an exchange the caller
+participates in (naming the exchange's actual state); opening an exchange to the human without
+`urgency`. Events: message + exchange ledger events; delivery receipts follow asynchronously.
 
 ## `list_participants` — built (`j5/main`); contract revision: `display_name`
 
@@ -124,8 +127,9 @@ nothing. Requires your current squadron_id. Reuse client_request_id to retry saf
 | `squadron_id`       | SquadronId        | yes (must be the caller's Squadron) |
 | `participant_id`    | ParticipantId     | yes (the one agent to stop)         |
 
-Result: the outcome for that participant (`interrupt_requested`, `already_idle`, …). Errors name
-the caller's actual Squadron and the corrected retry.
+Result: exactly one of `interrupt_requested` (a running turn is being interrupted) or
+`already_idle` (no running turn; no side effect). Anything else is an error, not an outcome —
+errors name the caller's actual Squadron and the corrected retry.
 
 **Amendment (Jackson, 2026-08-29):** the A6 build cascaded over the placement subtree; that blast
 radius makes the tool less useful, so `stop_agent` and `archive_agent` are single-target. The
@@ -156,9 +160,12 @@ will be interrupted) — the toolsmith rule doing the human dialog's job — plu
 `confirmation_token`. The token is issued with the fact list and is bound to it: it proves the
 caller saw the consequences, so the confirmation cannot be short-circuited by a preemptive flag on
 the first call (Jackson, 2026-08-29). If the target's state changed since the refusal, the stale
-token is rejected and a fresh refusal lists the current facts. Errors: not-caller's-Squadron,
-unknown participant, stale token — each naming state and next command. Events: archive + the
-obligation-closure events for each ended exchange (loud in the ledger, not just the dialog).
+token is rejected and a fresh refusal lists the current facts. Result: exactly one of `archived`
+or `already_archived` (no side effect); a consequential target yields the refusal above — an error
+carrying the fact list and `confirmation_token` — never a partial outcome. Errors:
+not-caller's-Squadron, unknown participant, consequential-without-token (the refusal), stale token
+— each naming state and next command. Events: archive + the obligation-closure events for each
+ended exchange (loud in the ledger, not just the dialog).
 
 ## `clear_own_ask` — ruled, unbuilt (inbox IB1b; substrate.md "needed-but-unbuilt")
 
