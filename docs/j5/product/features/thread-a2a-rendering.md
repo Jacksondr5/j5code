@@ -38,9 +38,11 @@ workspace (`product/thread-a2a/`).
    Inbox"** for the local operator. No display names exist yet; the label
    derives from the person id (multi-human invariant, R29), so named
    humans render properly when names arrive.
-3. **Silence notice** (TA3): one muted line — "⚠ Platform notice ·
-   ⟨counterpart⟩'s turn ended without replying · ⟨age⟩" — expandable to
-   the full delivered text.
+3. **Silence notice** (TA3, expander clause amended 2026-08-31 with
+   TA1): one muted line — "⚠ Platform notice · ⟨counterpart⟩'s turn
+   ended without replying · ⟨age⟩". Parsed notices carry no expander —
+   the expander removal applies to parsed blocks everywhere; unparseable
+   notice text falls back to raw rendering, as everywhere.
 4. **Outbound send** (TA4): a compact directional line — "→ ⟨receiver⟩ ·
    expects reply" — carrying live exchange state (_open · 2h_ /
    _✓ answered_) once the client can read it (A5); send-time static chips
