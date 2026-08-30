@@ -74,10 +74,11 @@ it.effect("preserves an authenticated thread-home read failure", () =>
   }),
 );
 
-it("re-reads the selected scope and replaces a stale unknown with its durable Registrar home", () => {
+it("replaces a missing or stale home in the exact cache map read by Squadron filtering", () => {
   const threads = [{ id: "thread:alpha" }, { id: "thread:native" }];
   const alphaScope = { id: "squadron:alpha", name: "Alpha", projectIds: ["project:shared"] };
   const homes = new Map<string, ThreadHome>();
+  expect(filterThreadsForSquadronScope(threads, alphaScope, homes)).toEqual([]);
   mergeThreadHomeEntries(homes, [
     { threadId: ThreadId.make("thread:alpha"), home: { kind: "unknown" } },
     { threadId: ThreadId.make("thread:native"), home: { kind: "unknown" } },
@@ -99,6 +100,8 @@ it("re-reads the selected scope and replaces a stale unknown with its durable Re
   ).toBe(true);
   expect(filterThreadsForSquadronScope(threads, alphaScope, homes)).toEqual([]);
 
+  // The receipt must overwrite the same map instance consumed by the Sidebar
+  // predicate, not a separate HMR-era module cache.
   mergeThreadHomeEntries(homes, [
     {
       threadId: ThreadId.make("thread:alpha"),

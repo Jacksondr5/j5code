@@ -62,36 +62,56 @@ export const listThreadHomesEffect = Effect.fn("j5.threadHomesClient.list")(func
 const listThreadHomes = (threadIds: ReadonlyArray<ThreadId>) =>
   runtime.runPromise(listThreadHomesEffect(threadIds));
 
-const homesByThreadId = new Map<string, ThreadHome>();
-const listeners = new Set<() => void>();
-const pendingThreadIds = new Set<ThreadId>();
-let reading = false;
-let version = 0;
+interface ThreadHomesStore {
+  readonly homesByThreadId: Map<string, ThreadHome>;
+  readonly listeners: Set<() => void>;
+  readonly pendingThreadIds: Set<ThreadId>;
+  reading: boolean;
+  version: number;
+}
+
+const threadHomesStoreKey = "__t3J5ThreadHomesStore";
+
+const threadHomesStore = (() => {
+  const target = globalThis as typeof globalThis & {
+    __t3J5ThreadHomesStore?: ThreadHomesStore;
+  };
+  if (target[threadHomesStoreKey] !== undefined) return target[threadHomesStoreKey];
+  const created: ThreadHomesStore = {
+    homesByThreadId: new Map(),
+    listeners: new Set(),
+    pendingThreadIds: new Set(),
+    reading: false,
+    version: 0,
+  };
+  target[threadHomesStoreKey] = created;
+  return created;
+})();
 
 const subscribe = (listener: () => void) => {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+  threadHomesStore.listeners.add(listener);
+  return () => threadHomesStore.listeners.delete(listener);
 };
-const getVersion = () => version;
+const getVersion = () => threadHomesStore.version;
 const notify = () => {
-  version += 1;
-  listeners.forEach((listener) => listener());
+  threadHomesStore.version += 1;
+  threadHomesStore.listeners.forEach((listener) => listener());
 };
 
 const readPendingThreadHomes = () => {
-  if (reading || pendingThreadIds.size === 0) return;
-  reading = true;
-  const threadIds = Array.from(pendingThreadIds);
-  pendingThreadIds.clear();
+  if (threadHomesStore.reading || threadHomesStore.pendingThreadIds.size === 0) return;
+  threadHomesStore.reading = true;
+  const threadIds = Array.from(threadHomesStore.pendingThreadIds);
+  threadHomesStore.pendingThreadIds.clear();
   void listThreadHomes(threadIds)
     .then((entries) => {
-      mergeThreadHomeEntries(homesByThreadId, entries);
+      mergeThreadHomeEntries(threadHomesStore.homesByThreadId, entries);
     })
     // Under a selected scope, an unreadable home remains excluded rather than
     // being guessed from a project. The next changed sidebar set retries it.
     .catch(() => undefined)
     .finally(() => {
-      reading = false;
+      threadHomesStore.reading = false;
       notify();
       readPendingThreadHomes();
     });
@@ -115,8 +135,8 @@ export const shouldForceThreadHomesForScope = (selectedSquadronId: string | null
 
 const requestThreadHomes = (threadIds: ReadonlyArray<ThreadId>, force = false) => {
   for (const threadId of threadIds) {
-    if (shouldRequestThreadHome(homesByThreadId.get(threadId), force))
-      pendingThreadIds.add(threadId);
+    if (shouldRequestThreadHome(threadHomesStore.homesByThreadId.get(threadId), force))
+      threadHomesStore.pendingThreadIds.add(threadId);
   }
   readPendingThreadHomes();
 };
@@ -147,7 +167,7 @@ export function useThreadHomes(
     () =>
       new Map(
         requestedThreadIds.flatMap((threadId) => {
-          const home = homesByThreadId.get(threadId);
+          const home = threadHomesStore.homesByThreadId.get(threadId);
           return home === undefined ? [] : [[threadId, home] as const];
         }),
       ),
