@@ -46,6 +46,7 @@ import {
   promoteQueuedRun,
   reorderQueuedRun,
   revertThreadCheckpoint,
+  SquadronLaunchRequiresBootstrapError,
   settleThread,
   startThreadTurn,
   unsettleThread,
@@ -254,6 +255,40 @@ describe("V2 environment commands", () => {
         sourcePlanRef: { threadId: "thread-plan", planId: "plan-1" },
         dispatchMode: { type: "start_immediately" },
       });
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("loudly refuses an explicit Squadron retry without a durable launch bootstrap", () =>
+    Effect.gen(function* () {
+      const commands: OrchestrationV2Command[] = [];
+      const launches: OrchestrationV2ThreadLaunchInput[] = [];
+      const supervisor = yield* makeSupervisor({ commands, projects: [], launches });
+
+      const error = yield* startThreadTurn({
+        commandId: CommandId.make("retry-empty-thread-with-home"),
+        threadId: v2ThreadId,
+        squadronId: "squadron:explicit-home",
+        message: {
+          messageId: MessageId.make("message-retry-empty-thread"),
+          role: "user",
+          text: "Retry the first message",
+          attachments: [],
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+      }).pipe(
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.flip,
+      );
+
+      expect(error).toBeInstanceOf(SquadronLaunchRequiresBootstrapError);
+      expect(error).toMatchObject({
+        _tag: "SquadronLaunchRequiresBootstrapError",
+        threadId: v2ThreadId,
+      });
+      expect(error.message).toContain("Start a new thread");
+      expect(commands).toEqual([]);
+      expect(launches).toEqual([]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );
 

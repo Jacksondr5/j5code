@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
+import { RotateCcwIcon } from "lucide-react";
 
+import { Button } from "../../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../../components/ui/empty";
 import { SidebarInset } from "../../components/ui/sidebar";
 import type { SquadronFirstRunGateState } from "./FirstRunGate.logic";
@@ -7,9 +9,11 @@ import { SquadronCreateForm } from "./SquadronCreateForm";
 
 export function SquadronFirstRunGate({
   children,
+  onRetry,
   state,
 }: {
   readonly children: ReactNode;
+  readonly onRetry?: () => void;
   readonly state: SquadronFirstRunGateState;
 }) {
   if (state === "ready") return children;
@@ -41,6 +45,14 @@ export function SquadronFirstRunGate({
             {content.description}
           </EmptyDescription>
           {state === "requires_creation" ? <SquadronCreateForm /> : null}
+          {state === "unavailable" && onRetry !== undefined ? (
+            <div className="mt-5 flex justify-center">
+              <Button size="sm" onClick={onRetry}>
+                <RotateCcwIcon className="size-4" />
+                Try again
+              </Button>
+            </div>
+          ) : null}
         </EmptyHeader>
       </Empty>
     </SidebarInset>

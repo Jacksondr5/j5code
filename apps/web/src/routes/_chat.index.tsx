@@ -35,14 +35,19 @@ function ChatIndexRouteView() {
 }
 
 function SquadronFirstRunGateLive() {
-  const { status, squadrons } = useSquadronDirectory();
+  const { status, squadrons, refresh } = useSquadronDirectory();
   const state = resolveSquadronFirstRunGateState({
     authenticatedRouteAvailable: status !== "error",
     squadronCount: status === "loading" ? null : squadrons.length,
   });
 
   return (
-    <SquadronFirstRunGate state={state}>
+    <SquadronFirstRunGate
+      state={state}
+      onRetry={() => {
+        void refresh({ force: true });
+      }}
+    >
       <IndexDraftLanding />
     </SquadronFirstRunGate>
   );
