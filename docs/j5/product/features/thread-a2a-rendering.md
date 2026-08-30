@@ -6,7 +6,9 @@ kind: spec
 # A2A in the thread view
 
 Feature definition of record, settled 2026-08-29 with Jackson
-([session rulings TA1–TA5](../../worklog/thread-a2a-session-2026-08-29.md)).
+([session rulings TA1–TA5](../../worklog/thread-a2a-session-2026-08-29.md));
+TA1 amended 2026-08-31, ratified by Jackson directly while live-testing
+B3's build (PR #16) — no session, amendments folded in below.
 The problem: in phase-3 dogfood the human lives inside agents' threads,
 and today every A2A delivery renders as a wall of envelope text — raw
 participant ids, per-message protocol boilerplate, silence notices
@@ -17,14 +19,21 @@ workspace (`product/thread-a2a/`).
 
 ## The four treatments
 
-1. **Incoming peer message** (TA1): a distinct block — sender display
-   name + Squadron, exchange chip (_expects your reply_ / _closed your
-   exchange_ / plain), time, message body. Envelope boilerplate lives
-   behind a **"show raw envelope"** expander. The expander is not
-   decoration: the renderer is a parser over versioned envelope text, and
-   raw text is its mandatory fallback for unrecognized versions
-   ([never-guess](../principles.md)) — the expander exposes that same
-   content on demand, answering "what exactly was this agent told?"
+1. **Incoming peer message** (TA1, as amended 2026-08-31): a distinct
+   block — sender display name (**clickable — navigates to the sender's
+   thread**; ruled into the B1/B6 scope), the exchange badge beside the
+   name (**"Expects reply"** — viewer-neutral copy — / _closed your
+   exchange_ / plain), time, message body. No second sub-line: the
+   squadron id row is removed. **Parsed blocks carry no raw-envelope
+   expander** — live use showed it duplicative, reading as debug UI. The
+   renderer remains a parser over versioned envelope text, and raw text
+   remains its **mandatory fallback** for unrecognized versions
+   ([never-guess](../principles.md)) — that negative control is
+   untouched; what changed is only that successfully parsed blocks no
+   longer re-expose the envelope. _(As originally settled 2026-08-29:
+   sender + Squadron sub-line, "expects your reply" copy, and a
+   "show raw envelope" expander on every block — all three amended in
+   Jackson's live test of the first real build.)_
 2. **Human inbox reply** (TA2): rendered as the person — **"You · via
    Inbox"** for the local operator. No display names exist yet; the label
    derives from the person id (multi-human invariant, R29), so named
@@ -36,6 +45,13 @@ workspace (`product/thread-a2a/`).
    expects reply" — carrying live exchange state (_open · 2h_ /
    _✓ answered_) once the client can read it (A5); send-time static chips
    until then.
+
+> **Dogfood v0 note:** TA2's "You" label is overridden in v0 — the merged
+> auth principal carries no person binding, so v0 renders neutral
+> `Via Inbox · <person>` (DV4). Overrides live in one place only:
+> [`../dogfood-v0.md`](../dogfood-v0.md). This document remains the
+> end-state truth; the "You" upgrade returns with the auth-subject→person
+> binding session.
 
 Everything else — conversation, tool calls, work logs — keeps upstream
 rendering untouched (TA5).
