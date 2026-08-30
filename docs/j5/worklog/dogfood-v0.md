@@ -45,6 +45,8 @@ status: 1
 
 - **Claude read-only/dontAsk tool allowlist vs J5 verbs (recorded 2026-08-31):** the provider-side allowlist predates J5 and omits `list_participants`, now a primary steered verb — whether J5 verbs join it is a deliberate product/protected-seam session, not a drive-by on any PR.
 
+- **Orphan policy (re-affirmed at #21 merge, 2026-08-31):** archiving a participant leaves its placed children working but parked under the retired node — no auto-re-parenting (platform composes nothing, per the Roles/Crews ruling; re-parent is human-only per R21, and even that mechanism awaits its rebuild in the placement-display/Fleet-page lane, recovery-recorded from #18). The substrate session's orphan-policy design pass decides what the platform SURFACES about orphans; runs before or with the Fleet page work. Jackson wants follow-up ensured.
+
 ## Explicitly NOT v0
 
 Roles/Crews implementation (item 3 — design session completed 2026-08-23 ahead of the retro; feature docs are the build-ready contract, rulings at [roles-crews-session-2026-08-23.md](roles-crews-session-2026-08-23.md); staffing is a separate call), Memos, Playbooks, Shared Squadrons, item-4 panes, Director migration, multi-dev ticket sharing.
