@@ -280,7 +280,7 @@ it.effect("cross-squadron half-write recovery records exactly one receiver entry
   }),
 );
 
-it.effect("closes a cross-squadron exchange through the paired reply entry", () =>
+it.effect("refuses a cross-squadron reply before delivery or closure", () =>
   Effect.gen(function* () {
     const injections = yield* Ref.make(0);
     const transport: A2ADeliveryTransportShape = {
@@ -324,76 +324,50 @@ it.effect("closes a cross-squadron exchange through the paired reply entry", () 
         exchangeId: opened.exchangeId!,
         acceptedAt: timestamp,
       } as const;
-      const reply = yield* sendService.send(replyInput);
-      assert.equal(reply.exchangeState, "closing");
+      const error = yield* Effect.flip(sendService.send(replyInput));
+      assert.equal(error._tag, "A2ACrossSquadronReplyInvariantError");
+      if (error._tag === "A2ACrossSquadronReplyInvariantError") {
+        assert.equal(error.exchangeId, opened.exchangeId);
+        assert.equal(error.exchangeSquadronId, senderSquadronId);
+        assert.equal(error.senderSquadronId, receiverSquadronId);
+        assert.include(error.message, "nothing was sent");
+      }
 
-      const duplicateReply = yield* Effect.flip(
-        sendService.send({
-          ...replyInput,
-          commandId: CommCommandId.make("command:exchange:cross:duplicate-reply"),
-        }),
-      );
-      assert.equal(duplicateReply._tag, "A2AExchangeAlreadyAnsweredError");
-      assert.equal((yield* worker.runOnce)?.state, "delivered");
-
-      const replay = yield* sendService.send(replyInput);
-      assert.deepStrictEqual(replay, reply, "command replay preserves its pre-delivery result");
       const exchange = yield* sql<{ readonly status: string }>`
         SELECT status
         FROM j5_a2a_exchange
         WHERE exchange_id = ${opened.exchangeId!}
       `;
-      assert.deepStrictEqual(exchange, [{ status: "closed" }]);
-      const paired = yield* sql<{ readonly squadron_id: string; readonly count: number }>`
-        SELECT squadron_id, COUNT(*) AS count
-        FROM j5_a2a_comm_event
-        WHERE kind = 'message.received'
-          AND squadron_id IN (${senderSquadronId}, ${receiverSquadronId})
-        GROUP BY squadron_id
-        ORDER BY squadron_id
-      `;
-      assert.deepStrictEqual(
-        paired,
-        [
-          { squadron_id: receiverSquadronId, count: 1 },
-          { squadron_id: senderSquadronId, count: 1 },
-        ].sort((left, right) => left.squadron_id.localeCompare(right.squadron_id)),
-      );
-      const pairedPayloads = yield* sql<{
-        readonly squadron_id: string;
-        readonly payload: string;
+      assert.deepStrictEqual(exchange, [{ status: "open" }]);
+      const sideEffects = yield* sql<{
+        readonly reply_deliveries: number;
+        readonly closures: number;
+        readonly reply_receipts: number;
       }>`
-        SELECT squadron_id, payload
-        FROM j5_a2a_comm_event
-        WHERE kind = 'message.received'
-          AND squadron_id IN (${senderSquadronId}, ${receiverSquadronId})
-        ORDER BY squadron_id
+        SELECT
+          (
+            SELECT COUNT(*)
+            FROM j5_a2a_delivery
+            WHERE exchange_id = ${opened.exchangeId!}
+              AND exchange_role = 'reply'
+          ) AS reply_deliveries,
+          (
+            SELECT COUNT(*)
+            FROM j5_a2a_comm_event
+            WHERE exchange_id = ${opened.exchangeId!}
+              AND kind = 'exchange.closed'
+          ) AS closures,
+          (
+            SELECT COUNT(*)
+            FROM j5_a2a_comm_event
+            WHERE squadron_id = ${senderSquadronId}
+              AND kind = 'message.received'
+          ) AS reply_receipts
       `;
-      assert.deepStrictEqual(
-        pairedPayloads.map((row) => {
-          const payload = JSON.parse(row.payload) as {
-            message: { envelopeChannel: string; exchangeRole: string };
-          };
-          return {
-            squadronId: row.squadron_id,
-            message: {
-              envelopeChannel: payload.message.envelopeChannel,
-              exchangeRole: payload.message.exchangeRole,
-            },
-          };
-        }),
-        [
-          {
-            squadronId: receiverSquadronId,
-            message: { envelopeChannel: "peer", exchangeRole: "ask" },
-          },
-          {
-            squadronId: senderSquadronId,
-            message: { envelopeChannel: "peer", exchangeRole: "reply" },
-          },
-        ].sort((left, right) => left.squadronId.localeCompare(right.squadronId)),
-      );
-      assert.equal(yield* Ref.get(injections), 2);
+      assert.deepStrictEqual(sideEffects, [
+        { reply_deliveries: 0, closures: 0, reply_receipts: 0 },
+      ]);
+      assert.equal(yield* Ref.get(injections), 1);
     }).pipe(Effect.provide(makeTestLayer(transport)));
   }),
 );
