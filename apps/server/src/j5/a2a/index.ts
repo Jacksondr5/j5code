@@ -18,6 +18,12 @@ export type {
 export * from "./LedgerService.ts";
 export * from "./Migrations.ts";
 export {
+  A2AHumanInbox,
+  A2AHumanPersonIdError,
+  type A2AHumanInboxError,
+  type A2AHumanInboxShape,
+} from "./HumanInboxService.ts";
+export {
   A2ASilenceDetector,
   A2ASilenceDetectorError,
   SilenceNoticePayload,

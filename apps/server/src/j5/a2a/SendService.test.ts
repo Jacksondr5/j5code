@@ -31,6 +31,18 @@ const receiver: AgentParticipant = {
   id: ParticipantId.make("agent:receiver"),
   threadId: ThreadId.make("thread:receiver"),
 };
+const person = {
+  kind: "human" as const,
+  id: ParticipantId.make("human:send-person"),
+};
+
+const registerPerson = Effect.fn("test.j5.a2a.registerPerson")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`
+    INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+    VALUES (${person.id}, 1, ${timestamp})
+  `;
+});
 
 const setupSameSquadron = Effect.fn("test.j5.a2a.setupSameSquadron")(function* () {
   yield* runJ5A2AMigrations();
@@ -161,23 +173,9 @@ it.effect("opens once per sender-receiver pair, joins follow-ups, and one reply 
 
 it.effect("validates intent and human-only urgency at exchange open", () =>
   Effect.gen(function* () {
-    const squadronId = yield* setupSameSquadron();
-    const ledgerService = yield* A2ALedger;
+    yield* setupSameSquadron();
     const service = yield* A2ASendService;
-    yield* ledgerService.append({
-      commandId: CommCommandId.make("command:join:human"),
-      squadronId,
-      acceptedAt: timestamp,
-      event: {
-        kind: "participant.joined",
-        sender: null,
-        receiver: ParticipantId.make("human:global"),
-        exchangeId: null,
-        correlationId: null,
-        payload: { participant: { kind: "human" } },
-        createdAt: timestamp,
-      },
-    });
+    yield* registerPerson();
 
     const missingIntent = yield* Effect.flip(
       service.send({
@@ -195,7 +193,7 @@ it.effect("validates intent and human-only urgency at exchange open", () =>
       service.send({
         commandId: CommCommandId.make("command:missing-urgency"),
         senderThreadId: sender.threadId,
-        to: ParticipantId.make("human:global"),
+        to: person.id,
         message: "Human question",
         expectReply: true,
         intent: "Obtain a human ruling",
@@ -222,7 +220,7 @@ it.effect("validates intent and human-only urgency at exchange open", () =>
       service.send({
         commandId: CommCommandId.make("command:one-shot-urgency"),
         senderThreadId: sender.threadId,
-        to: ParticipantId.make("human:global"),
+        to: person.id,
         message: "One-shot human message",
         urgency: "fyi",
         acceptedAt: timestamp,
@@ -521,20 +519,16 @@ it.effect("ignores left events that do not identify a later retirement of the ex
       receiver,
     );
     for (const index of [1, 2]) {
-      yield* ledgerService.append({
-        commandId: CommCommandId.make(`command:retirement-decoys:foreign-padding:${index}`),
-        squadronId: foreignSquadronId,
-        acceptedAt: timestamp,
-        event: {
-          kind: "participant.joined",
-          sender: null,
-          receiver: null,
-          exchangeId: null,
-          correlationId: null,
-          payload: { participant: { kind: "human" } },
-          createdAt: timestamp,
+      yield* appendAgentEvent(
+        foreignSquadronId,
+        `command:retirement-decoys:foreign-padding:${index}`,
+        "participant.joined",
+        {
+          kind: "agent",
+          id: ParticipantId.make(`agent:retirement-padding:${index}`),
+          threadId: ThreadId.make(`thread:retirement-padding:${index}`),
         },
-      });
+      );
     }
     yield* appendAgentEvent(
       foreignSquadronId,
@@ -605,23 +599,16 @@ it.effect("ignores left events that do not identify a later retirement of the ex
   }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("lists membership-derived participant capabilities", () =>
+it.effect("lists member agents and registry-derived person capabilities", () =>
   Effect.gen(function* () {
-    const squadronId = yield* setupSameSquadron();
-    yield* (yield* A2ALedger).append({
-      commandId: CommCommandId.make("command:list:join:human"),
-      squadronId,
-      acceptedAt: timestamp,
-      event: {
-        kind: "participant.joined",
-        sender: null,
-        receiver: ParticipantId.make("human:global"),
-        exchangeId: null,
-        correlationId: null,
-        payload: { participant: { kind: "human" } },
-        createdAt: timestamp,
-      },
-    });
+    yield* setupSameSquadron();
+    yield* registerPerson();
+    const secondPersonId = ParticipantId.make("human:send-person-two");
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+      VALUES (${secondPersonId}, 0, ${timestamp})
+    `;
     const rows = yield* (yield* A2ASendService).listParticipants(sender.threadId);
     assert.deepStrictEqual(
       rows.map((row) => ({
@@ -644,7 +631,13 @@ it.effect("lists membership-derived participant capabilities", () =>
           acceptsUrgency: false,
         },
         {
-          id: ParticipantId.make("human:global"),
+          id: person.id,
+          canReceiveMessage: true,
+          canOpenExchange: true,
+          acceptsUrgency: true,
+        },
+        {
+          id: secondPersonId,
           canReceiveMessage: true,
           canOpenExchange: true,
           acceptsUrgency: true,

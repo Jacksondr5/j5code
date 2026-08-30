@@ -294,6 +294,10 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
       id: ParticipantId.make("agent:second"),
       threadId: ThreadId.make("thread:second"),
     };
+    const person = {
+      kind: "human" as const,
+      id: ParticipantId.make("human:ledger-person"),
+    };
     const membershipEvents: ReadonlyArray<CommEvent> = [
       {
         kind: "participant.joined",
@@ -307,28 +311,10 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
       {
         kind: "participant.joined",
         sender: null,
-        receiver: null,
-        exchangeId: null,
-        correlationId: null,
-        payload: { participant: { kind: "human" } },
-        createdAt: timestamp,
-      },
-      {
-        kind: "participant.joined",
-        sender: null,
         receiver: secondAgent.id,
         exchangeId: null,
         correlationId: null,
         payload: { participant: secondAgent },
-        createdAt: timestamp,
-      },
-      {
-        kind: "participant.joined",
-        sender: null,
-        receiver: null,
-        exchangeId: null,
-        correlationId: null,
-        payload: { participant: { kind: "human" } },
         createdAt: timestamp,
       },
       {
@@ -344,19 +330,40 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
     for (const [index, event] of membershipEvents.entries()) {
       yield* ledger.append(appendCommand(squadronId, index + 1, event));
     }
+    // Upgraded databases retain readable human membership history, but rebuilds
+    // never project it into the now agent-only membership table.
+    yield* sql`
+      INSERT INTO j5_a2a_comm_event (
+        seq,
+        squadron_id,
+        kind,
+        sender,
+        receiver,
+        exchange_id,
+        correlation_id,
+        payload,
+        created_at,
+        command_id
+      ) VALUES (
+        4,
+        ${squadronId},
+        'participant.joined',
+        NULL,
+        ${person.id},
+        NULL,
+        NULL,
+        json_object('participant', json_object('kind', 'human', 'id', ${person.id})),
+        ${timestamp},
+        'command:historical-human-membership'
+      )
+    `;
 
     const expected = [
       {
         squadronId,
         participant: secondAgent,
-        joinedSeq: 3,
-        updatedSeq: 3,
-      },
-      {
-        squadronId,
-        participant: { kind: "human" as const },
         joinedSeq: 2,
-        updatedSeq: 4,
+        updatedSeq: 2,
       },
     ];
     const before = yield* ledger.listMembership(squadronId);
@@ -371,6 +378,27 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
     assert.deepStrictEqual(rebuilt, expected);
     const encode = Schema.encodeEffect(Schema.fromJsonString(Schema.Json));
     assert.equal(yield* encode(rebuilt), yield* encode(before));
+    const history = yield* ledger.readEvents({
+      squadronId,
+      cursor: { afterSeq: 3 },
+      limit: 1,
+    });
+    assert.deepStrictEqual(history.events[0]?.payload, { participant: person });
+
+    const forbidden = yield* Effect.flip(
+      ledger.append(
+        appendCommand(squadronId, 5, {
+          kind: "participant.joined",
+          sender: null,
+          receiver: person.id,
+          exchangeId: null,
+          correlationId: null,
+          payload: { participant: person },
+          createdAt: timestamp,
+        }),
+      ),
+    );
+    assert.equal(forbidden._tag, "A2AStorageError");
   }).pipe(Effect.provide(memoryLedgerLayer())),
 );
 

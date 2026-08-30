@@ -75,6 +75,8 @@ import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import { humanInboxHttpRouteLayer } from "./j5/a2a/HumanInboxHttp.ts";
+import { J5A2ARuntimeLayer } from "./j5/a2a/runtimeLayer.ts";
 import {
   connectHttpApiLayer,
   pendingServiceUpdateExists,
@@ -436,11 +438,13 @@ export const makeRoutesLayer = Layer.mergeAll(
     assetRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
+    humanInboxHttpRouteLayer,
   ),
   // The MCP session registry is provided globally (shared with V2 provider
   // sessions) rather than inline here.
   McpHttpServer.layer,
 ).pipe(
+  Layer.provide(J5A2ARuntimeLayer),
   // Both transports consume the same service instance, so caches single-flight across clients
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.
   Layer.provide(PullRequestServiceLive),

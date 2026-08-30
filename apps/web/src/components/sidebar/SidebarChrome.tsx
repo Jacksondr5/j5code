@@ -124,9 +124,11 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     select: (location) =>
       location.pathname === "/usage"
         ? "usage"
-        : location.pathname === "/pull-requests"
-          ? "pull-requests"
-          : null,
+        : location.pathname === "/inbox"
+          ? "inbox"
+          : location.pathname === "/pull-requests"
+            ? "pull-requests"
+            : null,
   });
   const { environments } = useEnvironments();
   // The page reads every connected server, so one of them offering pull requests is enough for
@@ -155,6 +157,11 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     void navigate({ to: "/usage" });
   }, [isMobile, navigate, setOpenMobile]);
 
+  const handleInboxClick = useCallback(() => {
+    closeMobileSidebar();
+    void navigate({ to: "/inbox" });
+  }, [closeMobileSidebar, navigate]);
+
   const handleBackClick = useCallback(() => {
     closeMobileSidebar();
     void navigate({ to: "/" });
@@ -174,6 +181,11 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
           </SidebarMenuItem>
         ) : (
           <>
+            <SidebarMenuItem className="shrink-0">
+              <SidebarMenuButton aria-label="Inbox" onClick={handleInboxClick}>
+                <span>Inbox</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             <SidebarMenuItem className="shrink-0">
               <Tooltip>
                 <TooltipTrigger

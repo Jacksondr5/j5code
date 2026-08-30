@@ -21,7 +21,7 @@ import {
   CorrelationId,
   SquadronId,
   ExchangeId,
-  GLOBAL_HUMAN_PARTICIPANT_ID,
+  isHumanParticipantId,
   LedgerMessageId,
   ParticipantId,
   type DeliveryAlarm,
@@ -203,7 +203,7 @@ const makeLayer = (daemon: boolean) =>
         const receiverId = ParticipantId.make(row.receiver_id);
         const exchangeId = row.exchange_id === null ? null : ExchangeId.make(row.exchange_id);
         yield* appendReceiverEntry(row);
-        if (receiverId === GLOBAL_HUMAN_PARTICIPANT_ID) {
+        if (isHumanParticipantId(receiverId)) {
           yield* transport.deliverHuman({
             originSquadronId,
             receiverSquadronId,
@@ -243,7 +243,7 @@ const makeLayer = (daemon: boolean) =>
               payload: {
                 messageId,
                 attempt,
-                channel: receiverId === GLOBAL_HUMAN_PARTICIPANT_ID ? "human" : "agent",
+                channel: isHumanParticipantId(receiverId) ? "human" : "agent",
               },
               createdAt: deliveredAt,
             },

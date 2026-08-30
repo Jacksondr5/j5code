@@ -39,6 +39,7 @@ export const formatHumanEnvelope = (input: {
   readonly message: string;
 }): string =>
   render(config.humanMessage, {
+    senderId: input.senderId,
     message: input.message,
     exchangeInstruction: deliveryInstruction(input),
   });

@@ -223,6 +223,9 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
     const applyMembership = Effect.fn("j5.a2a.applyMembership")(function* (event: StoredCommEvent) {
       if (event.kind !== "participant.joined" && event.kind !== "participant.left") return;
       const participant = event.payload.participant;
+      // Historical human membership events remain readable ledger facts. New
+      // person addressability is host registry state, never Squadron membership.
+      if (participant.kind === "human") return;
       const id = participantId(participant);
       if (event.kind === "participant.left") {
         yield* sql`
@@ -311,6 +314,22 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
               status = 'closed',
               closed_seq = ${event.seq},
               updated_at = ${event.createdAt}
+            WHERE squadron_id = ${event.squadronId}
+              AND exchange_id = ${event.exchangeId}
+              AND status = 'open'
+          `;
+          // Human inbox history is an A4-owned ledger projection. Lifecycle
+          // producers append terminal facts and never mutate this table.
+          yield* sql`
+            UPDATE j5_a2a_human_inbox
+            SET
+              status = 'answered',
+              terminal_seq = ${event.seq},
+              terminal_at = ${event.createdAt},
+              terminal_disposition = 'answered',
+              terminal_cause = NULL,
+              terminal_facts = NULL,
+              terminal_notice_message_id = NULL
             WHERE squadron_id = ${event.squadronId}
               AND exchange_id = ${event.exchangeId}
               AND status = 'open'
@@ -504,6 +523,14 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
 
           const events: Array<StoredCommEvent> = [];
           for (const [index, candidate] of command.events.entries()) {
+            if (
+              (candidate.kind === "participant.joined" || candidate.kind === "participant.left") &&
+              candidate.payload.participant.kind === "human"
+            ) {
+              return yield* new A2AStorageError({
+                operation: "append host-global human as Squadron membership",
+              });
+            }
             const pending = decideAppendCommEvent({
               commandId: command.commandId,
               squadronId: command.squadronId,

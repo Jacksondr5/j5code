@@ -6,6 +6,7 @@ import Migration0002 from "./migrations/002_SendDeliverReply.ts";
 import Migration0003 from "./migrations/003_SquadronRename.ts";
 import Migration0004 from "./migrations/004_SilenceNoticeChannel.ts";
 import Migration0005 from "./migrations/005_ImmutableThreadHome.ts";
+import Migration0006 from "./migrations/006_HumanNode.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
@@ -17,6 +18,7 @@ export const migrationEntries = [
   [3, "SquadronRename", Migration0003],
   [4, "SilenceNoticeChannel", Migration0004],
   [5, "ImmutableThreadHome", Migration0005],
+  [6, "HumanNode", Migration0006],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>

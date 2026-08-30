@@ -32,8 +32,13 @@ export type Urgency = typeof Urgency.Type;
 export const DeliveryEnvelopeChannel = Schema.Literals(["peer", "silence_notice"]);
 export type DeliveryEnvelopeChannel = typeof DeliveryEnvelopeChannel.Type;
 
-export const GLOBAL_HUMAN_PARTICIPANT_ID = ParticipantId.make("human:global");
 export const SILENCE_DETECTOR_PARTICIPANT_ID = ParticipantId.make("platform:silence-detector");
+
+export const isHumanParticipantId = (id: ParticipantId): boolean =>
+  id.startsWith("human:") && id.length > "human:".length;
+
+export const isDurableHumanParticipantId = (id: ParticipantId): boolean =>
+  isHumanParticipantId(id) && id !== "human:global";
 
 export const AgentParticipant = Schema.Struct({
   kind: Schema.Literal("agent"),
@@ -42,21 +47,22 @@ export const AgentParticipant = Schema.Struct({
 });
 export type AgentParticipant = typeof AgentParticipant.Type;
 
-/**
- * There is exactly one human participant for the host. Provider-native
- * ExecutionNodes cannot satisfy this closed participant union because they do
- * not own an addressable T3 thread.
- */
 export const HumanParticipant = Schema.Struct({
   kind: Schema.Literal("human"),
+  id: ParticipantId.pipe(
+    Schema.check(
+      Schema.makeFilter(isDurableHumanParticipantId, {
+        message: "A human participant id must use the durable human:<person-id> namespace.",
+      }),
+    ),
+  ),
 });
 export type HumanParticipant = typeof HumanParticipant.Type;
 
 export const Participant = Schema.Union([AgentParticipant, HumanParticipant]);
 export type Participant = typeof Participant.Type;
 
-export const participantId = (participant: Participant): ParticipantId =>
-  participant.kind === "human" ? GLOBAL_HUMAN_PARTICIPANT_ID : participant.id;
+export const participantId = (participant: Participant): ParticipantId => participant.id;
 
 export const Squadron = Schema.Struct({
   id: SquadronId,
@@ -286,3 +292,25 @@ export const Membership = Schema.Struct({
   updatedSeq: PositiveInt,
 });
 export type Membership = typeof Membership.Type;
+
+export const HumanInboxItem = Schema.Struct({
+  personId: ParticipantId,
+  squadronId: SquadronId,
+  squadronName: SquadronName,
+  exchangeId: ExchangeId,
+  senderId: ParticipantId,
+  intent: Schema.String,
+  urgency: Urgency,
+  message: Schema.String,
+  openedAt: Schema.String,
+});
+export type HumanInboxItem = typeof HumanInboxItem.Type;
+
+export const AnswerHumanExchangeInput = Schema.Struct({
+  commandId: CommCommandId,
+  personId: ParticipantId,
+  exchangeId: ExchangeId,
+  message: Schema.String.check(Schema.isNonEmpty()),
+  acceptedAt: Schema.String,
+});
+export type AnswerHumanExchangeInput = typeof AnswerHumanExchangeInput.Type;

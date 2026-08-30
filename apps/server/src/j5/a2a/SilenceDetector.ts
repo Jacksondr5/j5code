@@ -24,7 +24,7 @@ import {
   CorrelationId,
   SquadronId,
   ExchangeId,
-  GLOBAL_HUMAN_PARTICIPANT_ID,
+  isHumanParticipantId,
   LedgerMessageId,
   MessageDeliveredPayload,
   ParticipantId,
@@ -241,7 +241,7 @@ const makeLayer = (daemon: boolean) =>
         `;
         for (const exchange of outbound) {
           const exchangeId = ExchangeId.make(exchange.exchange_id);
-          if (exchange.receiver_id !== GLOBAL_HUMAN_PARTICIPANT_ID) {
+          if (!isHumanParticipantId(ParticipantId.make(exchange.receiver_id))) {
             return {
               ...base,
               state: "blocked-on-peer" as const,
@@ -438,7 +438,7 @@ const makeLayer = (daemon: boolean) =>
         if (
           event.kind !== "message.delivered" ||
           event.receiver === null ||
-          event.receiver === GLOBAL_HUMAN_PARTICIPANT_ID
+          isHumanParticipantId(event.receiver)
         ) {
           return [];
         }
@@ -495,7 +495,7 @@ const makeLayer = (daemon: boolean) =>
              AND delivery.message_id = json_extract(delivered.payload, '$.messageId')
              AND delivery.envelope_channel = 'peer'
             WHERE exchange.status = 'open'
-              AND exchange.receiver_id <> ${GLOBAL_HUMAN_PARTICIPANT_ID}
+              AND exchange.receiver_id NOT LIKE 'human:%'
               AND delivered.seq = (
                 SELECT MAX(candidate.seq)
                 FROM j5_a2a_comm_event AS candidate
