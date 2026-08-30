@@ -113,6 +113,51 @@ it.effect("places wrapper-created children under their current caller", () =>
   }).pipe(Effect.provide(TestLayer)),
 );
 
+it.effect("places through retained departed ancestors using the placement-row safety bound", () =>
+  Effect.gen(function* () {
+    const root = agent("departed-chain-root");
+    const first = agent("departed-chain-first");
+    const second = agent("departed-chain-second");
+    const spawner = agent("departed-chain-spawner");
+    const child = agent("departed-chain-child");
+    yield* prepare([root, first, second, spawner, child]);
+    yield* record({
+      index: 101,
+      participant: root,
+      provenance: { kind: "unknown", source: "native_or_unobserved" },
+    });
+    yield* record({ index: 102, participant: first, provenance: spawnedBy(root) });
+    yield* record({ index: 103, participant: second, provenance: spawnedBy(first) });
+    yield* record({ index: 104, participant: spawner, provenance: spawnedBy(second) });
+
+    const ledger = yield* A2ALedger;
+    for (const participant of [root, first, second]) {
+      yield* ledger.append({
+        commandId: CommCommandId.make(`membership:${participant.id}:left`),
+        squadronId,
+        acceptedAt: timestamp,
+        event: {
+          kind: "participant.left",
+          sender: participant.id,
+          receiver: null,
+          exchangeId: null,
+          correlationId: null,
+          payload: { participant },
+          createdAt: timestamp,
+        },
+      });
+    }
+
+    const result = yield* record({
+      index: 105,
+      participant: child,
+      provenance: spawnedBy(spawner),
+    });
+    assert.deepStrictEqual(result.placement.provenance, spawnedBy(spawner));
+    assert.equal(result.placement.placementParentId, spawner.id);
+  }).pipe(Effect.provide(TestLayer)),
+);
+
 it.effect(
   "types fork provenance without coercing it to spawned-by and defaults forks to source siblings",
   () =>
@@ -361,11 +406,12 @@ it.effect("refuses both human participant id shapes as immutable placement targe
   }).pipe(Effect.provide(TestLayer)),
 );
 
-it.effect("detects corrupt stored cycles in subtree traversal", () =>
+it.effect("detects corrupt stored cycles in creation and subtree traversal", () =>
   Effect.gen(function* () {
     const first = agent("corrupt-first");
     const second = agent("corrupt-second");
-    yield* prepare([first, second]);
+    const child = agent("corrupt-child");
+    yield* prepare([first, second, child]);
     yield* record({
       index: 1,
       participant: first,
@@ -386,6 +432,13 @@ it.effect("detects corrupt stored cycles in subtree traversal", () =>
       WHERE squadron_id = ${squadronId} AND participant_id IN (${first.id}, ${second.id})
     `;
     const placements = yield* ParticipantPlacementService;
+
+    const mutationError = yield* Effect.flip(
+      record({ index: 3, participant: child, provenance: spawnedBy(first) }),
+    );
+    assert.isTrue(isGraphCorrupt(mutationError));
+    assert.include(mutationError.message, "Placement graph state");
+    assert.equal(yield* placements.readPlacement({ squadronId, participantId: child.id }), null);
 
     const traversalError = yield* Effect.flip(
       placements.listSubtree({ squadronId, participantId: first.id }),

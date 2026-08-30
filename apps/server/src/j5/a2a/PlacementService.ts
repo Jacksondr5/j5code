@@ -534,9 +534,9 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
       }) {
         if (input.requestedParentId === null) return;
         const countRows = yield* sql<{ readonly count: number }>`
-          SELECT COUNT(*) AS count FROM j5_a2a_squadron_membership WHERE squadron_id = ${input.squadronId}
+          SELECT COUNT(*) AS count FROM j5_a2a_participant_placement WHERE squadron_id = ${input.squadronId}
         `;
-        const membershipBound = (countRows[0]?.count ?? 0) + 1;
+        const placementBound = (countRows[0]?.count ?? 0) + 1;
         const visited = new Set<ParticipantId>();
         const path: Array<ParticipantId> = [];
         let current: ParticipantId | null = input.requestedParentId;
@@ -549,7 +549,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
               path,
             });
           }
-          if (visited.has(current) || path.length > membershipBound) {
+          if (visited.has(current) || path.length > placementBound) {
             return yield* new PlacementGraphCorruptError({ squadronId: input.squadronId, path });
           }
           visited.add(current);
