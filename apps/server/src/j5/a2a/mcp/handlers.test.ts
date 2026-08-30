@@ -501,7 +501,7 @@ it.effect("refuses ambiguous historical archive identities without invoking the 
   }),
 );
 
-it.effect("derives send idempotency and sender identity from authenticated scope", () =>
+it.effect("namespaces mutating-tool idempotency and sender identity from authenticated scope", () =>
   Effect.gen(function* () {
     assert.deepStrictEqual(Object.keys(J5Toolkit.tools).sort(), [
       "archive_agent",
@@ -586,7 +586,7 @@ it.effect("derives send idempotency and sender identity from authenticated scope
       const sendArguments = {
         to: participantId,
         message: "Idempotent MCP send",
-        client_request_id: "logical-send-1",
+        client_request_id: "shared-logical-request-1",
       };
       yield* call(sendArguments);
       yield* call(sendArguments);
@@ -618,11 +618,12 @@ it.effect("derives send idempotency and sender identity from authenticated scope
       assert.equal(captured[0]?.commandId, captured[1]?.commandId);
       assert.equal(captured[0]?.senderThreadId, invocation.threadId);
       const exchangeId = ExchangeId.make("exchange:j5:mcp-handler:clear");
-      yield* callClear(exchangeId, "logical-clear-1");
-      yield* callClear(exchangeId, "logical-clear-1");
+      yield* callClear(exchangeId, "shared-logical-request-1");
+      yield* callClear(exchangeId, "shared-logical-request-1");
       const capturedClears = yield* Ref.get(clears);
       assert.lengthOf(capturedClears, 2);
       assert.equal(capturedClears[0]?.commandId, capturedClears[1]?.commandId);
+      assert.notEqual(captured[0]?.commandId, capturedClears[0]?.commandId);
       assert.equal(capturedClears[0]?.senderThreadId, invocation.threadId);
       assert.equal(capturedClears[0]?.exchangeId, exchangeId);
     }).pipe(Effect.provide(layer));

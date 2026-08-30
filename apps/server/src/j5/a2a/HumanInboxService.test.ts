@@ -227,6 +227,36 @@ it.effect(
           }),
         );
         assert.equal(mismatchedClear._tag, "A2AClearOwnAskSenderMismatchError");
+        const collidingCommandId = CommCommandId.make(
+          "command:human-inbox:clear:colliding-receipt",
+        );
+        yield* send.send({
+          commandId: collidingCommandId,
+          senderThreadId: senderCleared.agent.threadId,
+          to: firstPerson.id,
+          message: "An unrelated send reserved this command id.",
+          acceptedAt: "2026-08-23T13:41:30.000Z",
+        });
+        const collidingClear = yield* Effect.flip(
+          send.clearOwnAsk({
+            commandId: collidingCommandId,
+            senderThreadId: senderCleared.agent.threadId,
+            exchangeId: senderCleared.exchangeId,
+            acceptedAt: "2026-08-23T13:41:31.000Z",
+          }),
+        );
+        assert.equal(collidingClear._tag, "A2AClearOwnAskCommandConflictError");
+        assert.include(
+          (yield* inbox.list(firstPerson.id)).map((item) => item.intent),
+          "Resolved in the agent thread",
+        );
+        const collidingEvents = yield* sql<{ readonly kind: string }>`
+          SELECT kind
+          FROM j5_a2a_comm_event
+          WHERE command_id = ${collidingCommandId}
+          ORDER BY seq
+        `;
+        assert.deepStrictEqual(collidingEvents, [{ kind: "message.sent" }]);
         const clearCommand = {
           commandId: CommCommandId.make("command:human-inbox:clear:sender-cleared"),
           senderThreadId: senderCleared.agent.threadId,

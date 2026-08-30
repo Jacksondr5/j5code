@@ -163,12 +163,17 @@ const spawnPlacementCommandId = (input: {
   PlacementCommandId.make(lifecycleId({ kind: "command", operation: "spawn-placement", ...input }));
 
 export const commandIdForRequest = (input: {
+  readonly toolName: "send_message" | "clear_own_ask";
   readonly providerSessionId: string;
   readonly requestKey: string;
-}) =>
-  CommCommandId.make(
-    `command:j5:a2a:mcp:${stablePart(input.providerSessionId)}:${stablePart(input.requestKey)}`,
+}) => {
+  // send_message already shipped with the unqualified form, so it remains the legacy namespace
+  // to preserve retries across upgrades. Every later mutating tool gets an explicit namespace.
+  const toolNamespace = input.toolName === "send_message" ? "" : `:${stablePart(input.toolName)}`;
+  return CommCommandId.make(
+    `command:j5:a2a:mcp:${stablePart(input.providerSessionId)}${toolNamespace}:${stablePart(input.requestKey)}`,
   );
+};
 
 type AgentDirectoryRow = ParticipantDirectoryRow & {
   readonly participant: Extract<ParticipantDirectoryRow["participant"], { readonly kind: "agent" }>;
@@ -419,6 +424,7 @@ const handlers = {
       const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
       const result = yield* service.send({
         commandId: commandIdForRequest({
+          toolName: "send_message",
           providerSessionId: scope.providerSessionId,
           requestKey,
         }),
@@ -441,6 +447,7 @@ const handlers = {
       const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
       return yield* service.clearOwnAsk({
         commandId: commandIdForRequest({
+          toolName: "clear_own_ask",
           providerSessionId: scope.providerSessionId,
           requestKey: input.client_request_id,
         }),

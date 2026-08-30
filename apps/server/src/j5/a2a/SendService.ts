@@ -205,6 +205,15 @@ export class A2AClearOwnAskUnknownExchangeError extends Schema.TaggedErrorClass<
   }
 }
 
+export class A2AClearOwnAskCommandConflictError extends Schema.TaggedErrorClass<A2AClearOwnAskCommandConflictError>()(
+  "A2AClearOwnAskCommandConflictError",
+  { commandId: Schema.String, exchangeId: Schema.String },
+) {
+  override get message(): string {
+    return `Command ${this.commandId} was already used for a different ledger mutation, so clear_own_ask did not close exchange ${this.exchangeId}. Check that the exchange is still open, then retry clear_own_ask with a new client_request_id.`;
+  }
+}
+
 export type A2ASendError =
   | A2ALedgerError
   | Schema.SchemaError
@@ -225,7 +234,8 @@ export type A2ASendError =
   | A2AExchangeParticipantMismatchError
   | A2AClearOwnAskSenderMismatchError
   | A2AClearOwnAskAlreadyClosedError
-  | A2AClearOwnAskUnknownExchangeError;
+  | A2AClearOwnAskUnknownExchangeError
+  | A2AClearOwnAskCommandConflictError;
 
 interface MembershipRow {
   readonly squadron_id: string;
@@ -701,7 +711,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
             });
           }
 
-          yield* ledger.append({
+          const result = yield* ledger.append({
             commandId: input.commandId,
             squadronId: SquadronId.make(exchange.squadron_id),
             acceptedAt: input.acceptedAt,
@@ -715,11 +725,27 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
               createdAt: input.acceptedAt,
             },
           });
-          return {
+          const eventMatchesClear =
+            result.event.kind === "exchange.closed" &&
+            result.event.exchangeId === input.exchangeId &&
+            result.event.sender === sender.participantId &&
+            typeof result.event.payload === "object" &&
+            result.event.payload !== null &&
+            "closureKind" in result.event.payload &&
+            result.event.payload.closureKind === "sender-cleared";
+          const clearResult = {
             exchangeId: input.exchangeId,
-            closureKind: "sender-cleared",
-            closedAt: input.acceptedAt,
+            closureKind: "sender-cleared" as const,
+            closedAt: result.event.createdAt,
           } satisfies ClearOwnAskResult;
+          if (!result.committed && eventMatchesClear) return clearResult;
+          if (!result.committed || !eventMatchesClear) {
+            return yield* new A2AClearOwnAskCommandConflictError({
+              commandId: input.commandId,
+              exchangeId: input.exchangeId,
+            });
+          }
+          return clearResult;
         });
 
       return A2ASendService.of({ send, clearOwnAsk, listParticipants });
