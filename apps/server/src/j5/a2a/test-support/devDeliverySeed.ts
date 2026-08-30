@@ -22,9 +22,9 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { homedir } from "node:os";
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 import * as CheckpointStore from "../../../checkpointing/CheckpointStore.ts";
 import { ServerConfig } from "../../../config.ts";
@@ -162,33 +162,36 @@ export const parseDevDeliverySeedArgs = (args: ReadonlyArray<string>) => {
 };
 
 const isInside = (candidate: string, parent: string) => {
-  const path = relative(parent, candidate);
-  return path === "" || (!path.startsWith("..") && !isAbsolute(path));
+  const path = NodePath.relative(parent, candidate);
+  return path === "" || (!path.startsWith("..") && !NodePath.isAbsolute(path));
 };
 
 /** Require an existing, absolute disposable T3 home; resolves symlinks before rejecting live state. */
 export const validateIsolatedBaseDir = (baseDir: string) => {
-  if (!isAbsolute(baseDir)) {
+  if (!NodePath.isAbsolute(baseDir)) {
     throw new DevDeliverySeedArgumentError("--base-dir must be an absolute path.");
   }
-  const requested = resolve(baseDir);
-  const configuredSharedT3Home = resolve(homedir(), ".t3");
-  const sharedT3Home = existsSync(configuredSharedT3Home)
-    ? realpathSync(configuredSharedT3Home)
+  const requested = NodePath.resolve(baseDir);
+  const configuredSharedT3Home = NodePath.resolve(NodeOS.homedir(), ".t3");
+  const sharedT3Home = NodeFS.existsSync(configuredSharedT3Home)
+    ? NodeFS.realpathSync(configuredSharedT3Home)
     : configuredSharedT3Home;
   let existingParent = requested;
-  while (!existsSync(existingParent)) {
-    const parent = dirname(existingParent);
+  while (!NodeFS.existsSync(existingParent)) {
+    const parent = NodePath.dirname(existingParent);
     if (parent === existingParent) break;
     existingParent = parent;
   }
-  if (isInside(requested, sharedT3Home) || isInside(realpathSync(existingParent), sharedT3Home)) {
+  if (
+    isInside(requested, sharedT3Home) ||
+    isInside(NodeFS.realpathSync(existingParent), sharedT3Home)
+  ) {
     throw new DevDeliverySeedArgumentError(
       "--base-dir must not be ~/.t3 or anything below it, including ~/.t3/userdata.",
     );
   }
-  mkdirSync(requested, { recursive: true });
-  const resolvedBaseDir = realpathSync(requested);
+  NodeFS.mkdirSync(requested, { recursive: true });
+  const resolvedBaseDir = NodeFS.realpathSync(requested);
   if (isInside(resolvedBaseDir, sharedT3Home)) {
     throw new DevDeliverySeedArgumentError(
       "--base-dir must not be ~/.t3 or anything below it, including ~/.t3/userdata.",
@@ -197,7 +200,7 @@ export const validateIsolatedBaseDir = (baseDir: string) => {
   return resolvedBaseDir;
 };
 
-const databasePathFor = (baseDir: string) => resolve(baseDir, "userdata", "state.sqlite");
+const databasePathFor = (baseDir: string) => NodePath.resolve(baseDir, "userdata", "state.sqlite");
 
 const seededId = (runId: string, suffix: string) => `${runId}:${suffix}`;
 

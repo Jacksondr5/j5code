@@ -2,10 +2,10 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Cause from "effect/Cause";
 import * as Logger from "effect/Logger";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import * as NodeSqlite from "node:sqlite";
 
 import {
   DevDeliverySeedArgumentError,
@@ -28,16 +28,18 @@ it.effect("requires an explicit isolated base and emits a provider-safe receipt"
     assert.instanceOf(missingBaseDirError, DevDeliverySeedArgumentError);
     const sharedStateError = (() => {
       try {
-        validateIsolatedBaseDir(resolve(homedir(), ".t3", "userdata"));
+        validateIsolatedBaseDir(NodePath.resolve(NodeOS.homedir(), ".t3", "userdata"));
       } catch (error) {
         return error;
       }
       return undefined;
     })();
     assert.instanceOf(sharedStateError, DevDeliverySeedArgumentError);
-    const baseDir = mkdtempSync(join(tmpdir(), "j5-a2a-dev-delivery-seed-test-"));
+    const baseDir = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "j5-a2a-dev-delivery-seed-test-"),
+    );
     try {
-      assert.equal(validateIsolatedBaseDir(baseDir), realpathSync(baseDir));
+      assert.equal(validateIsolatedBaseDir(baseDir), NodeFS.realpathSync(baseDir));
       yield* verifyDevDeliverySeedRollback(baseDir).pipe(
         Effect.provide(Logger.layer([], { mergeWithExisting: false })),
       );
@@ -73,7 +75,7 @@ it.effect("requires an explicit isolated base and emits a provider-safe receipt"
       assert.equal(receipt.noProviderWork.cancelledProviderStartEffectCount, 6);
       assert.equal(receipt.noProviderWork.nextClaimableAt, null);
       assert.equal(receipt.notSeeded.ta4Trailing.status, "held");
-      const lock = new DatabaseSync(receipt.dbPath);
+      const lock = new NodeSqlite.DatabaseSync(receipt.dbPath);
       lock.exec("BEGIN IMMEDIATE");
       try {
         const locked = yield* Effect.exit(
@@ -93,7 +95,7 @@ it.effect("requires an explicit isolated base and emits a provider-safe receipt"
         lock.close();
       }
     } finally {
-      rmSync(baseDir, { recursive: true, force: true });
+      NodeFS.rmSync(baseDir, { recursive: true, force: true });
     }
   }),
 );
