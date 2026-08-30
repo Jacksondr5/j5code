@@ -44,6 +44,7 @@ import {
   resolveFileDiffPath,
 } from "../../lib/diffRendering";
 import ChatMarkdown from "../ChatMarkdown";
+import { renderThreadA2ADelivery } from "../../j5/a2a/ThreadA2ARenderer";
 import {
   BotIcon,
   CheckIcon,
@@ -1035,6 +1036,15 @@ type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["grouped
 type TimelineRow = MessagesTimelineRow;
 
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
+  const ctx = use(TimelineRowCtx);
+  const a2aDelivery =
+    row.kind === "message" && row.message.role === "user"
+      ? renderThreadA2ADelivery({
+          message: row.message,
+          timestampLabel: formatDayAwareTimestamp(row.message.createdAt, ctx.timestampFormat),
+        })
+      : null;
+
   return (
     <div
       className={cn(
@@ -1060,7 +1070,10 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "work" ? <WorkGroupSection groupedEntries={row.groupedEntries} /> : null}
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
       {row.kind === "attempt-fold" ? <AttemptFoldTimelineRow row={row} /> : null}
-      {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
+      {a2aDelivery}
+      {row.kind === "message" && row.message.role === "user" && a2aDelivery === null ? (
+        <UserTimelineRow row={row} />
+      ) : null}
       {row.kind === "message" && row.message.role === "assistant" ? (
         <AssistantTimelineRow row={row} />
       ) : null}
