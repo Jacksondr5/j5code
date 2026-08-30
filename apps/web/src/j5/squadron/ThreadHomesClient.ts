@@ -132,6 +132,7 @@ export const refreshThreadHomes = (threadIds: ReadonlyArray<ThreadId>) =>
 export function useThreadHomes(
   threadIds: ReadonlyArray<ThreadId>,
   selectedSquadronId: string | null = null,
+  scopeSelectionGeneration = 0,
 ) {
   const key = Array.from(new Set(threadIds)).join("\0");
   const requestedThreadIds = useMemo(
@@ -141,7 +142,7 @@ export function useThreadHomes(
   const currentVersion = useSyncExternalStore(subscribe, getVersion, getVersion);
   useEffect(() => {
     requestThreadHomes(requestedThreadIds, shouldForceThreadHomesForScope(selectedSquadronId));
-  }, [requestedThreadIds, selectedSquadronId]);
+  }, [requestedThreadIds, selectedSquadronId, scopeSelectionGeneration]);
   return useMemo(
     () =>
       new Map(

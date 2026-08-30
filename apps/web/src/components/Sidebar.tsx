@@ -139,7 +139,10 @@ import {
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import { SquadronScopeDropdown } from "../j5/squadron/SquadronScopeDropdown";
 import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
-import { useSquadronAmbientScope } from "../j5/squadron/SquadronDraftState";
+import {
+  useSquadronAmbientScope,
+  useSquadronAmbientScopeSelectionGeneration,
+} from "../j5/squadron/SquadronDraftState";
 import {
   filterThreadsForSquadronScope,
   resolveSquadronScope,
@@ -1885,6 +1888,7 @@ export default function Sidebar() {
 
   const { squadrons } = useSquadronDirectory();
   const squadronScopeId = useSquadronAmbientScope();
+  const squadronScopeSelectionGeneration = useSquadronAmbientScopeSelectionGeneration();
   const squadronScope = resolveSquadronScope(
     squadrons.map(({ squadron, projectIds }) => ({
       id: squadron.id,
@@ -1896,6 +1900,7 @@ export default function Sidebar() {
   const threadHomes = useThreadHomes(
     threads.map((thread) => thread.id),
     squadronScopeId,
+    squadronScopeSelectionGeneration,
   );
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content

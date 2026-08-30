@@ -8,10 +8,15 @@ import {
 
 type Snapshot = {
   readonly ambientSquadronId: string | null;
+  readonly ambientScopeSelectionGeneration: number;
   readonly draftStates: Readonly<Record<string, SquadronDraftState<null>>>;
 };
 
-let snapshot: Snapshot = { ambientSquadronId: null, draftStates: {} };
+let snapshot: Snapshot = {
+  ambientSquadronId: null,
+  ambientScopeSelectionGeneration: 0,
+  draftStates: {},
+};
 const listeners = new Set<() => void>();
 const emptyDraftStates = new Map<string, SquadronDraftState<null>>();
 const notify = () => listeners.forEach((listener) => listener());
@@ -36,7 +41,11 @@ const draftStateFor = (draftKey: string) => {
 };
 
 export const setAmbientSquadronId = (squadronId: string | null) => {
-  snapshot = { ...snapshot, ambientSquadronId: squadronId };
+  snapshot = {
+    ...snapshot,
+    ambientSquadronId: squadronId,
+    ambientScopeSelectionGeneration: snapshot.ambientScopeSelectionGeneration + 1,
+  };
   notify();
 };
 
@@ -61,6 +70,15 @@ export function useSquadronAmbientScope() {
     subscribe,
     () => snapshot.ambientSquadronId,
     () => null,
+  );
+}
+
+/** Changes on every scope selection, including an explicit reselect of the current scope. */
+export function useSquadronAmbientScopeSelectionGeneration() {
+  return useSyncExternalStore(
+    subscribe,
+    () => snapshot.ambientScopeSelectionGeneration,
+    () => 0,
   );
 }
 
