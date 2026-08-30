@@ -65,6 +65,14 @@ one-line intent); an `exchange_id` that is unknown, already closed, or not an ex
 participates in (naming the exchange's actual state); opening an exchange to the human without
 `urgency`. Events: message + exchange ledger events; delivery receipts follow asynchronously.
 
+**Contract revision (ruled 2026-08-31, self-messaging):** `to` equal to the caller's own
+participant id is rejected fail-closed — self-send is never legitimate (a self-Exchange is
+degenerate: the caller would owe itself a reply and the silence detector would type its own
+silence against it; the real self-shaped needs have dedicated verbs). Per the toolsmith rule, the
+error names the caller's own participant id and the next commands: `list_participants` to find the
+intended recipient, a Memo for notes-to-self, `schedule_task` for future-self triggers. Origin:
+live test — an agent asked to message "the other agent" messaged itself.
+
 ## `list_participants` — built (`j5/main`); contract revision: `display_name`
 
 **Description (contract):** "Your address book: every participant you can message — agents and the
@@ -77,6 +85,11 @@ role, resolve them here first; consult it again after any spawn or archive chang
 product agent" must resolve a human-recognizable name to a `participant_id`. Every row gains
 **`display_name`** (the agent's thread title now; the Role name when Roles land). Small code
 ticket.
+
+**Contract revision (ruled 2026-08-31, self-messaging):** the caller's own row is marked
+**`self`** — the address book must answer "which one am I" before it can answer "who else is
+there" (adopts the prior art's `[self]` marker; same live-test origin as `send_message`'s
+self-send rejection). The description gains a clause telling the caller its own row is marked.
 
 No inputs. Result rows: `display_name`, `squadron_id`, `participant_id`, participant kind (thread
 id for agents), `can_receive_message`, `can_open_exchange`, `accepts_urgency`, plus `provenance`
@@ -111,6 +124,12 @@ placement + provenance atomically, then starts the first turn with the brief. Er
 caller-membership state (missing/ambiguous, with the `list_participants` next-command), home
 integrity, creation failure — each naming state and next command. Events: `participant.joined`,
 home registration, `participant.placement_created`.
+
+**Contract revision (ruled 2026-08-31, self-messaging):** the spawned agent's first-turn context
+states its own `participant_id` and Squadron as platform-provided facts — the same class as the
+envelope's sender identity, composed by the platform because they are measured, not judgment. A
+fresh spawn is never id-blind about itself (live-test origin: an id-blind agent messaged itself).
+The spawner's brief remains untouched — this rides beside it, never inside it.
 
 > **Spawning guide (settled 2026-08-30) — [`features/spawning-guide.md`](../features/spawning-guide.md).**
 > SP4 closed this contract's held slot: the description's single sentence of brief steering above
