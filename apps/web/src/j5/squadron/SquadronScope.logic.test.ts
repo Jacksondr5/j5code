@@ -18,16 +18,49 @@ describe("Squadron scope logic", () => {
     expect(resolveSquadronScope(choices, "squadron:missing")).toBeNull();
   });
 
-  it("filters the sidebar list from the selected Squadron's explicit folder references", () => {
+  it("keeps same-folder Squadrons distinct through Registrar homes, never a project proxy", () => {
+    const threads = [
+      { id: "thread:alpha", projectId: "project:shared" },
+      { id: "thread:bravo", projectId: "project:shared" },
+      { id: "thread:native", projectId: "project:shared" },
+    ];
+    const homes = new Map([
+      ["thread:alpha", { kind: "known" as const, squadron: { id: "squadron:alpha" } }],
+      ["thread:bravo", { kind: "known" as const, squadron: { id: "squadron:bravo" } }],
+      ["thread:native", { kind: "unknown" as const }],
+    ]);
+
     expect(
       filterThreadsForSquadronScope(
-        [
-          { id: "thread:one", projectId: "project:alpha" },
-          { id: "thread:two", projectId: "project:bravo" },
-        ],
-        { id: "squadron:alpha", name: "Alpha", projectIds: ["project:alpha"] },
+        threads,
+        { id: "squadron:alpha", name: "Alpha", projectIds: ["project:shared"] },
+        homes,
       ),
-    ).toEqual([{ id: "thread:one", projectId: "project:alpha" }]);
+    ).toEqual([threads[0]]);
+    expect(
+      filterThreadsForSquadronScope(
+        threads,
+        { id: "squadron:bravo", name: "Bravo", projectIds: ["project:shared"] },
+        homes,
+      ),
+    ).toEqual([threads[1]]);
+  });
+
+  it("excludes native/unknown homes while a Squadron is selected and restores them zoomed out", () => {
+    const threads = [{ id: "thread:known" }, { id: "thread:native" }];
+    const homes = new Map([
+      ["thread:known", { kind: "known" as const, squadron: { id: "squadron:alpha" } }],
+      ["thread:native", { kind: "unknown" as const }],
+    ]);
+
+    expect(
+      filterThreadsForSquadronScope(
+        threads,
+        { id: "squadron:alpha", name: "Alpha", projectIds: [] },
+        homes,
+      ),
+    ).toEqual([threads[0]]);
+    expect(filterThreadsForSquadronScope(threads, null, homes)).toEqual(threads);
   });
 
   it("changes only the pre-send Squadron selection and preserves typed draft content", () => {

@@ -46,3 +46,19 @@ FORK exception numbers are allocated by landing order. During an isolated SQ1 ca
 ## Acceptance
 
 End-to-end in the dev app: fresh state → first-run gate forces Squadron creation (name + one folder; name-only correctly refused per DV2) → **second Squadron created over the SAME folder — both fully work (DV1 guard b, the headline check)** → both appear in the Squadron scope dropdown and scoping filters the thread list → selecting a Squadron scope and composing shows the heading + chip; chip changeable until send, immutable after → the created agent's thread is registered to the chip's exact Squadron (assert the Registrar-recorded home matches, and that membership was Registrar-assigned, not project-derived). Schema check: the folder relation round-trips a second folder at the storage layer (list-ready, DV1 guard c) even though the UI caps at one. Negative controls: no code path auto-creates a Squadron; a send with no Squadron context is impossible by construction (the composer always carries one). Baseline suite green.
+
+## Cross-lane M2 transfer record
+
+B6's surgically transplanted batch **threadId → Registrar-home** component was
+reviewed in this SQ1 worktree at
+`12c5f2cb7f8f3cda935dff79a5efc52e1fe14a84`. The dedicated B6 rereview artifact
+`product/a2a/dogfood/sq1-thread-homes-transplant-rereview` is CLEAN: it verifies
+the set-based/chunked immutable joined-history query and aggregate 401/403/200
+controls. This transfer was re-keyed by measurement rather than by an invented
+participant-id mapping.
+
+The SQ1 consumer must retain the Director's visibility law: a selected
+Squadron shows only tagged-known Registrar homes matching that Squadron;
+unknown/native homes are excluded there and remain reachable in the unscoped
+zoom-out state. No folder proxy is permitted. B6 owns the transferred component
+review; SQ1 owns the client/Sidebar integration and the DV1 same-folder proof.

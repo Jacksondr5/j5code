@@ -144,6 +144,7 @@ import {
   filterThreadsForSquadronScope,
   resolveSquadronScope,
 } from "../j5/squadron/SquadronScope.logic";
+import { useThreadHomes } from "../j5/squadron/ThreadHomesClient";
 import {
   ThreadWorktreeIndicator,
   nextThreadChangeRequestSnapshot,
@@ -571,7 +572,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   projectDisplayNameByKey: ReadonlyMap<string, string>;
   projectCwdByKey: ReadonlyMap<string, string>;
   projectFaviconPathByKey: ReadonlyMap<string, string | null | undefined>;
-  scopedProjectIds: ReadonlySet<string> | null;
+  showDrafts: boolean;
   routeDraftId: string | null;
   onNavigateToDraft: (draftId: DraftId) => void;
 }) {
@@ -604,14 +605,12 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   }
   const drafts = useMemo(() => {
     const rows: SidebarDraftRowData[] = [];
+    if (!props.showDrafts) return rows;
     // Every non-promoted session with content gets a row, mapped or not:
     // new-thread surfaces mint fresh drafts and leave invested ones behind
     // unmapped, so the mapping only knows about the latest per project.
     for (const [draftKey, session] of Object.entries(draftThreadsByThreadKey)) {
       if (session.promotedTo != null) {
-        continue;
-      }
-      if (props.scopedProjectIds !== null && !props.scopedProjectIds.has(session.projectId)) {
         continue;
       }
       if (draftKey === props.routeDraftId) {
@@ -636,7 +635,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
     draftsByThreadKey,
     frozenActive,
     props.routeDraftId,
-    props.scopedProjectIds,
+    props.showDrafts,
   ]);
   const handleDiscard = useCallback(
     (draftId: DraftId) => {
@@ -1894,7 +1893,7 @@ export default function Sidebar() {
     })),
     squadronScopeId,
   );
-  const scopedProjectIds = squadronScope === null ? null : new Set(squadronScope.projectIds);
+  const threadHomes = useThreadHomes(threads.map((thread) => thread.id));
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content
   // subscription. Selecting a number keeps typing in a draft composer from
@@ -1903,15 +1902,13 @@ export default function Sidebar() {
   // an open never-left draft, which only softens the empty state.
   const routeDraftIdForRows = routeTarget?.kind === "draft" ? routeTarget.draftId : null;
   const visibleDraftSessionCount = useComposerDraftStore((store) => {
+    if (squadronScope !== null) return 0;
     let count = 0;
     for (const [draftKey, session] of Object.entries(store.draftThreadsByThreadKey)) {
       if (session.promotedTo != null) {
         continue;
       }
       if (!composerDraftHasUserContent(store.draftsByThreadKey[draftKey])) {
-        continue;
-      }
-      if (scopedProjectIds !== null && !scopedProjectIds.has(session.projectId)) {
         continue;
       }
       count += 1;
@@ -1949,6 +1946,7 @@ export default function Sidebar() {
     const visible = filterThreadsForSquadronScope(
       filterSidebarV2VisibleThreads(threads, null),
       squadronScope,
+      threadHomes,
     );
     const pinned: EnvironmentThreadShell[] = [];
     const active: EnvironmentThreadShell[] = [];
@@ -2031,6 +2029,7 @@ export default function Sidebar() {
     squadronScope,
     serverConfigs,
     snoozeWakeTick,
+    threadHomes,
     threads,
   ]);
 
@@ -3583,7 +3582,7 @@ export default function Sidebar() {
                       projectDisplayNameByKey={projectDisplayNameByKey}
                       projectCwdByKey={projectCwdByKey}
                       projectFaviconPathByKey={projectFaviconPathByKey}
-                      scopedProjectIds={scopedProjectIds}
+                      showDrafts={squadronScope === null}
                       routeDraftId={routeDraftIdForRows}
                       onNavigateToDraft={navigateToDraft}
                     />,

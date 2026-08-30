@@ -16,14 +16,21 @@ export const resolveSquadronScope = (
   selectedId: string | null,
 ) => choices.find((choice) => choice.id === selectedId) ?? null;
 
-/** Sidebar scoping is a view filter over the selected Squadron's explicit folder references. */
-export const filterThreadsForSquadronScope = <T extends { readonly projectId: string }>(
+/** Selected scope admits only that Squadron's immutable, known Registrar homes. */
+export const filterThreadsForSquadronScope = <T extends { readonly id: string }>(
   threads: ReadonlyArray<T>,
   scope: SquadronChoice | null,
+  homesByThreadId: ReadonlyMap<
+    string,
+    | { readonly kind: "known"; readonly squadron: { readonly id: string } }
+    | { readonly kind: "unknown" }
+  >,
 ) => {
   if (scope === null) return [...threads];
-  const projectIds = new Set(scope.projectIds);
-  return threads.filter((thread) => projectIds.has(thread.projectId));
+  return threads.filter((thread) => {
+    const home = homesByThreadId.get(thread.id);
+    return home?.kind === "known" && home.squadron.id === scope.id;
+  });
 };
 
 /** Changing the pre-send chip is scoped state only; the typed draft stays intact. */
