@@ -10,6 +10,7 @@ import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as GitWorkflowService from "../../../git/GitWorkflowService.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
+import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../../../project/ProjectSetupScriptRunner.ts";
 import { SqlitePersistenceMemory } from "../../../persistence/Layers/Sqlite.ts";
@@ -23,6 +24,7 @@ import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 
 const StubServicesLive = Layer.mergeAll(
   Layer.mock(ThreadManagementService)({}),
+  Layer.mock(OrchestratorV2)({}),
   Layer.mock(ProviderRegistry)({}),
   Layer.mock(ScheduledTaskService)({}),
   Layer.mock(ProjectService.ProjectService)({}),
@@ -124,7 +126,22 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       // The worktree registration merges alongside the other toolkits rather
       // than replacing them.
       expect(toolNames).toContain("preview_status");
-      expect(toolNames).toContain("delegate_task");
+      expect(toolNames).toContain("orchestrator_capabilities");
+      expect(toolNames).toContain("schedule_task");
+      expect(toolNames).toContain("t3_thread_list");
+      expect(toolNames).toContain("t3_thread_read");
+      expect(toolNames).toContain("t3_thread_wait");
+      for (const excluded of [
+        "delegate_task",
+        "task_status",
+        "task_cancel",
+        "create_threads",
+        "t3_thread_start",
+        "t3_thread_send",
+        "t3_thread_interrupt",
+      ]) {
+        expect(toolNames).not.toContain(excluded);
+      }
       // J5 uses the same authenticated transport and one shared registration
       // that later J5 milestones extend inside the fork-owned toolkit.
       expect(toolNames).toContain("send_message");

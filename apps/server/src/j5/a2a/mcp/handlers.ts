@@ -1,12 +1,15 @@
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
+import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { CommCommandId } from "../contracts.ts";
+import type { ParticipantProvenanceView } from "../placementContracts.ts";
 import { J5Toolkit, type J5McpFailure } from "./tools.ts";
 
 const failure = (error: unknown): J5McpFailure => ({
@@ -18,6 +21,25 @@ const failure = (error: unknown): J5McpFailure => ({
 });
 
 const stablePart = (value: string) => encodeURIComponent(value);
+
+const projectProvenance = (provenance: ParticipantProvenanceView) => {
+  switch (provenance.kind) {
+    case "spawned-by":
+      return {
+        kind: provenance.kind,
+        spawned_by_participant_id: provenance.spawnedByParticipantId,
+        source: provenance.source,
+      } as const;
+    case "forked-from":
+      return {
+        kind: provenance.kind,
+        source_participant_id: provenance.sourceParticipantId,
+        source: provenance.source,
+      } as const;
+    default:
+      return provenance;
+  }
+};
 
 export const commandIdForRequest = (input: {
   readonly providerSessionId: string;
@@ -56,7 +78,9 @@ const handlers = {
   list_participants: () =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
-      const directory = yield* (yield* A2ASendService).listParticipants(scope.threadId);
+      const service = yield* A2ASendService;
+      const orchestrator = yield* OrchestratorV2;
+      const directory = yield* service.listParticipants(scope.threadId);
       const placements = yield* ParticipantPlacementService;
       const squadronIds = [...new Set(directory.map((row) => row.squadronId))];
       const placementRows = (yield* Effect.forEach(
@@ -67,20 +91,45 @@ const handlers = {
       const placementByParticipant = new Map(
         placementRows.map((row) => [`${row.squadronId}\u0000${row.participantId}`, row] as const),
       );
+      const snapshot = yield* Effect.option(orchestrator.getShellSnapshot());
+      const titleByThreadId = new Map(
+        Option.match(snapshot, {
+          onNone: () => [],
+          onSome: ({ archivedThreads, threads }) =>
+            [...threads, ...archivedThreads].map((thread) => [thread.id, thread.title] as const),
+        }),
+      );
       return {
         participants: directory.map((row) => {
           const placement = placementByParticipant.get(
             `${row.squadronId}\u0000${row.participantId}`,
           );
           return {
-            ...row,
-            threadId: row.participant.kind === "agent" ? row.participant.threadId : null,
-            provenance:
+            squadron_id: row.squadronId,
+            participant_id: row.participantId,
+            participant:
+              row.participant.kind === "agent"
+                ? {
+                    kind: row.participant.kind,
+                    id: row.participant.id,
+                    thread_id: row.participant.threadId,
+                  }
+                : row.participant,
+            can_receive_message: row.canReceiveMessage,
+            can_open_exchange: row.canOpenExchange,
+            accepts_urgency: row.acceptsUrgency,
+            thread_id: row.participant.kind === "agent" ? row.participant.threadId : null,
+            provenance: projectProvenance(
               placement?.provenance ??
-              (row.participant.kind === "human"
-                ? ({ kind: "not-applicable" } as const)
-                : ({ kind: "unrecorded" } as const)),
-            placementParentId: placement?.placementParentId ?? null,
+                (row.participant.kind === "human"
+                  ? ({ kind: "not-applicable" } as const)
+                  : ({ kind: "unrecorded" } as const)),
+            ),
+            placement_parent_id: placement?.placementParentId ?? null,
+            display_name:
+              row.participant.kind === "agent"
+                ? (titleByThreadId.get(row.participant.threadId) ?? null)
+                : null,
           };
         }),
       };

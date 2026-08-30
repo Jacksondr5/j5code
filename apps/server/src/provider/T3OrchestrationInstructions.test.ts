@@ -7,11 +7,25 @@ import {
 } from "./T3OrchestrationInstructions.ts";
 
 describe("T3 orchestration provider instructions", () => {
-  it("distinguishes delegated subagents from ordinary top-level threads", () => {
-    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "use `delegate_task`");
-    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "ordinary top-level T3 conversations");
-    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Never use them merely");
-    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "different provider");
+  it("steers only to current provider-native Subagents and addressable Peer Agents", () => {
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "provider-native Subagent");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "your provider's native Subagent mechanism");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "cannot create a new Peer Agent yet");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Use `list_participants`");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "expect_reply=true");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "open an Exchange");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "continue with other work");
+    for (const excluded of [
+      "spawn_agent",
+      "delegate_task",
+      "task_status",
+      "task_cancel",
+      "create_threads",
+      "t3_thread_start",
+      "In your brief, tell the new agent",
+    ]) {
+      assert.notInclude(T3_CODE_ORCHESTRATION_INSTRUCTIONS, excluded);
+    }
   });
 
   it("documents structured schedules instead of JSON strings", () => {

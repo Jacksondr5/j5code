@@ -4,18 +4,25 @@ import * as Schema from "effect/Schema";
 import { ThreadId } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as McpInvocationContext from "../../../mcp/McpInvocationContext.ts";
+import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { A2A_LIST_TOOL_DESCRIPTION, A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import {
+  AgentParticipant,
   ExchangeId,
-  ParticipantDirectoryRow,
+  HumanParticipant,
   ParticipantId,
   SendMessageResult,
+  SquadronId,
   Urgency,
 } from "../contracts.ts";
-import { ParticipantProvenanceView } from "../placementContracts.ts";
+import {
+  ForkedFromParticipantProvenance,
+  SpawnedByParticipantProvenance,
+  UnknownParticipantProvenance,
+} from "../placementContracts.ts";
 
 export const J5McpFailure = Schema.Struct({
   code: Schema.String,
@@ -34,12 +41,44 @@ export const J5SendMessageInput = Schema.Struct({
 });
 export type J5SendMessageInput = typeof J5SendMessageInput.Type;
 
-export const J5ParticipantDirectoryRow = Schema.Struct({
-  ...ParticipantDirectoryRow.fields,
-  threadId: Schema.NullOr(ThreadId),
-  provenance: ParticipantProvenanceView,
-  placementParentId: Schema.NullOr(ParticipantId),
+const J5AgentParticipant = Schema.Struct({
+  kind: AgentParticipant.fields.kind,
+  id: AgentParticipant.fields.id,
+  thread_id: AgentParticipant.fields.threadId,
 });
+
+const J5Participant = Schema.Union([J5AgentParticipant, HumanParticipant]);
+
+export const J5ParticipantProvenanceView = Schema.Union([
+  Schema.Struct({
+    kind: SpawnedByParticipantProvenance.fields.kind,
+    spawned_by_participant_id: SpawnedByParticipantProvenance.fields.spawnedByParticipantId,
+    source: SpawnedByParticipantProvenance.fields.source,
+  }),
+  Schema.Struct({
+    kind: ForkedFromParticipantProvenance.fields.kind,
+    source_participant_id: ForkedFromParticipantProvenance.fields.sourceParticipantId,
+    source: ForkedFromParticipantProvenance.fields.source,
+  }),
+  UnknownParticipantProvenance,
+  Schema.Struct({ kind: Schema.Literal("unrecorded") }),
+  Schema.Struct({ kind: Schema.Literal("not-applicable") }),
+]);
+export type J5ParticipantProvenanceView = typeof J5ParticipantProvenanceView.Type;
+
+export const J5ParticipantDirectoryRow = Schema.Struct({
+  squadron_id: SquadronId,
+  participant_id: ParticipantId,
+  participant: J5Participant,
+  can_receive_message: Schema.Boolean,
+  can_open_exchange: Schema.Boolean,
+  accepts_urgency: Schema.Boolean,
+  thread_id: Schema.NullOr(ThreadId),
+  provenance: J5ParticipantProvenanceView,
+  placement_parent_id: Schema.NullOr(ParticipantId),
+  display_name: Schema.NullOr(Schema.String),
+});
+export type J5ParticipantDirectoryRow = typeof J5ParticipantDirectoryRow.Type;
 
 export const J5ListParticipantsResult = Schema.Struct({
   participants: Schema.Array(J5ParticipantDirectoryRow),
@@ -50,6 +89,7 @@ const dependencies = [
   A2ASendService,
   A2ADeliveryWorker,
   Crypto.Crypto,
+  OrchestratorV2,
 ];
 
 const placementDependencies = [...dependencies, ParticipantPlacementService];
