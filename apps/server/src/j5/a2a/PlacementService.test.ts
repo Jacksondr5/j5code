@@ -9,8 +9,10 @@ import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import {
+  PlacementCycleError,
   PlacementGraphCorruptError,
   PlacementHumanTargetError,
+  PlacementParentIneligibleError,
   PlacementParentNotFoundError,
   PlacementParticipantNotFoundError,
   ParticipantPlacementService,
@@ -22,8 +24,10 @@ import { PlacementCommandId, type ParticipantProvenance } from "./placementContr
 const timestamp = "2026-08-16T16:00:00.000Z";
 const squadronId = SquadronId.make("squadron:placement");
 const legacyGlobalHumanId = ParticipantId.make("human:global");
+const isCycle = Schema.is(PlacementCycleError);
 const isGraphCorrupt = Schema.is(PlacementGraphCorruptError);
 const isHumanTarget = Schema.is(PlacementHumanTargetError);
+const isParentIneligible = Schema.is(PlacementParentIneligibleError);
 const isParentNotFound = Schema.is(PlacementParentNotFoundError);
 const isParticipantNotFound = Schema.is(PlacementParticipantNotFoundError);
 const TestLayer = Layer.merge(ledgerLayer, placementLayer).pipe(
@@ -379,6 +383,24 @@ it.effect("replays placement creation without changing immutable provenance", ()
   }).pipe(Effect.provide(TestLayer)),
 );
 
+it.effect("refuses self-provenance as a placement cycle without writing placement", () =>
+  Effect.gen(function* () {
+    const participant = agent("self-provenance");
+    yield* prepare([participant]);
+    const placements = yield* ParticipantPlacementService;
+
+    const error = yield* Effect.flip(
+      record({ index: 1, participant, provenance: spawnedBy(participant) }),
+    );
+    assert.isTrue(isCycle(error));
+    assert.include(error.message, participant.id);
+    assert.equal(
+      yield* placements.readPlacement({ squadronId, participantId: participant.id }),
+      null,
+    );
+  }).pipe(Effect.provide(TestLayer)),
+);
+
 it.effect("refuses both human participant id shapes as immutable placement targets", () =>
   Effect.gen(function* () {
     const durablePersonId = ParticipantId.make("human:placement-person");
@@ -402,6 +424,61 @@ it.effect("refuses both human participant id shapes as immutable placement targe
       assert.isTrue(isHumanTarget(creationError));
       assert.include(creationError.message, "immutable-human");
       assert.include(creationError.message, "record-creation");
+    }
+  }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect("refuses both retained human id shapes as j5_spawn provenance parents", () =>
+  Effect.gen(function* () {
+    const child = agent("human-provenance-parent-child");
+    const durablePersonId = ParticipantId.make("human:placement-parent-person");
+    yield* prepare([child]);
+    const placements = yield* ParticipantPlacementService;
+    const sql = yield* SqlClient.SqlClient;
+
+    for (const [index, personId] of [
+      [1, legacyGlobalHumanId],
+      [2, durablePersonId],
+    ] as const) {
+      yield* sql`
+        INSERT INTO j5_a2a_comm_event (
+          seq,
+          squadron_id,
+          kind,
+          sender,
+          receiver,
+          exchange_id,
+          correlation_id,
+          payload,
+          created_at
+        ) VALUES (
+          ${100 + index},
+          ${squadronId},
+          'participant.joined',
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          json_object('participant', json_object('kind', 'human', 'id', ${personId})),
+          ${timestamp}
+        )
+      `;
+
+      const error = yield* Effect.flip(
+        record({
+          index: 10 + index,
+          participant: child,
+          provenance: {
+            kind: "spawned-by",
+            spawnedByParticipantId: personId,
+            source: "j5_spawn",
+          },
+        }),
+      );
+      assert.isTrue(isParentIneligible(error));
+      assert.include(error.message, "ineligible-non-agent");
+      assert.include(error.message, personId);
+      assert.equal(yield* placements.readPlacement({ squadronId, participantId: child.id }), null);
     }
   }).pipe(Effect.provide(TestLayer)),
 );
