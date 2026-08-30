@@ -29,10 +29,15 @@ export type LedgerMessageId = typeof LedgerMessageId.Type;
 export const Urgency = Schema.Literals(["blocking", "soon", "fyi"]);
 export type Urgency = typeof Urgency.Type;
 
-export const DeliveryEnvelopeChannel = Schema.Literals(["peer", "silence_notice"]);
+export const DeliveryEnvelopeChannel = Schema.Literals([
+  "peer",
+  "silence_notice",
+  "lifecycle_notice",
+]);
 export type DeliveryEnvelopeChannel = typeof DeliveryEnvelopeChannel.Type;
 
 export const SILENCE_DETECTOR_PARTICIPANT_ID = ParticipantId.make("platform:silence-detector");
+export const LIFECYCLE_PARTICIPANT_ID = ParticipantId.make("platform:lifecycle");
 
 export const isHumanParticipantId = (id: ParticipantId): boolean =>
   id.startsWith("human:") && id.length > "human:".length;
@@ -78,6 +83,7 @@ export const CommEventKind = Schema.Literals([
   "message.delivered",
   "message.delivery_failed",
   "exchange.closed",
+  "exchange.dropped",
   "silence.notice",
   "participant.joined",
   "participant.left",
@@ -90,6 +96,7 @@ const NonMembershipEventKind = Schema.Literals([
   "message.delivered",
   "message.delivery_failed",
   "exchange.closed",
+  "exchange.dropped",
   "silence.notice",
 ]);
 
@@ -191,7 +198,7 @@ export const MessageSentPayload = Schema.Struct({
   text: Schema.String.check(Schema.isNonEmpty()),
   originSquadronId: SquadronId,
   receiverSquadronId: SquadronId,
-  exchangeRole: Schema.Literals(["none", "ask", "followup", "reply"]),
+  exchangeRole: Schema.Literals(["none", "ask", "followup", "reply", "terminal_notice"]),
   envelopeChannel: DeliveryEnvelopeChannel,
 });
 export type MessageSentPayload = typeof MessageSentPayload.Type;
@@ -216,6 +223,25 @@ export const ExchangeClosedPayload = Schema.Struct({
   replyMessageId: LedgerMessageId,
 });
 export type ExchangeClosedPayload = typeof ExchangeClosedPayload.Type;
+
+export const ExchangeDropDisposition = Schema.Literals(["receiver-retired", "sender-retired"]);
+export type ExchangeDropDisposition = typeof ExchangeDropDisposition.Type;
+
+export const ExchangeDroppedPayload = Schema.Struct({
+  disposition: ExchangeDropDisposition,
+  cause: Schema.Struct({
+    kind: Schema.Literal("participant-archived"),
+    participantId: ParticipantId,
+    squadronId: SquadronId,
+  }),
+  facts: Schema.Struct({
+    replyRequired: Schema.Literal(false),
+    retryAllowed: Schema.Literal(false),
+    replacementRequired: Schema.Literal(false),
+  }),
+  noticeMessageId: LedgerMessageId,
+});
+export type ExchangeDroppedPayload = typeof ExchangeDroppedPayload.Type;
 
 export const SendMessageInput = Schema.Struct({
   commandId: CommCommandId,
@@ -314,3 +340,15 @@ export const AnswerHumanExchangeInput = Schema.Struct({
   acceptedAt: Schema.String,
 });
 export type AnswerHumanExchangeInput = typeof AnswerHumanExchangeInput.Type;
+
+export const ArchiveParticipantInput = Schema.Struct({
+  participantId: ParticipantId,
+  archivedAt: Schema.String,
+});
+export type ArchiveParticipantInput = typeof ArchiveParticipantInput.Type;
+
+export const LifecycleArchiveResult = Schema.Struct({
+  archived: Schema.Boolean,
+  droppedExchangeIds: Schema.Array(ExchangeId),
+});
+export type LifecycleArchiveResult = typeof LifecycleArchiveResult.Type;

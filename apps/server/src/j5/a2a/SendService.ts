@@ -80,6 +80,18 @@ export class A2AAmbiguousParticipantError extends Schema.TaggedErrorClass<A2AAmb
   }
 }
 
+export class A2AParticipantArchivedError extends Schema.TaggedErrorClass<A2AParticipantArchivedError>()(
+  "A2AParticipantArchivedError",
+  {
+    participantId: Schema.String,
+    squadronId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Participant ${this.participantId} is A2A-retired from immutable home ${this.squadronId} by participant.left and cannot receive new messages. Upstream thread unarchive does not revive A2A participation; choose an active participant or wait for a ratified re-entry policy.`;
+  }
+}
+
 export class A2AIntentRequiredError extends Schema.TaggedErrorClass<A2AIntentRequiredError>()(
   "A2AIntentRequiredError",
   {},
@@ -156,6 +168,7 @@ export type A2ASendError =
   | A2AHomeMembershipStateError
   | A2AParticipantNotFoundError
   | A2AAmbiguousParticipantError
+  | A2AParticipantArchivedError
   | A2AIntentRequiredError
   | A2AUrgencyRequiredError
   | A2AUrgencyNotAcceptedError
@@ -167,8 +180,11 @@ export type A2ASendError =
 interface MembershipRow {
   readonly squadron_id: string;
   readonly participant_id: string;
-  readonly thread_id: string | null;
   readonly payload: string;
+}
+
+interface RetiredParticipantRow {
+  readonly squadron_id: string;
 }
 
 interface ExchangeRow {
@@ -176,7 +192,7 @@ interface ExchangeRow {
   readonly exchange_id: string;
   readonly sender_id: string;
   readonly receiver_id: string;
-  readonly status: "open" | "closed";
+  readonly status: "open" | "closed" | "dropped";
 }
 
 interface ExistingMessageRow {
@@ -184,7 +200,7 @@ interface ExistingMessageRow {
   readonly sender_id: string;
   readonly receiver_id: string;
   readonly exchange_id: string | null;
-  readonly exchange_role: "none" | "ask" | "followup" | "reply";
+  readonly exchange_role: "none" | "ask" | "followup" | "reply" | "terminal_notice";
   readonly sent_seq: number;
 }
 
@@ -219,9 +235,34 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
 
       const membershipRows = Effect.fn("j5.a2a.send.membershipRows")(function* () {
         return yield* sql<MembershipRow>`
-          SELECT squadron_id, participant_id, thread_id, payload
+          SELECT squadron_id, participant_id, payload
           FROM j5_a2a_squadron_membership
           ORDER BY squadron_id, participant_id
+        `;
+      });
+
+      const retiredParticipantRows = Effect.fn("j5.a2a.send.retiredParticipantRows")(function* (
+        id: ParticipantId,
+      ) {
+        return yield* sql<RetiredParticipantRow>`
+          SELECT joined.squadron_id
+          FROM j5_a2a_comm_event AS joined
+          WHERE joined.kind = 'participant.joined'
+            AND json_extract(joined.payload, '$.participant.kind') = 'agent'
+            AND json_extract(joined.payload, '$.participant.id') = ${id}
+            AND EXISTS (
+              SELECT 1
+              FROM j5_a2a_comm_event AS retirement
+              WHERE retirement.squadron_id = joined.squadron_id
+                AND retirement.seq > joined.seq
+                AND retirement.kind = 'participant.left'
+                AND json_extract(retirement.payload, '$.participant.kind') = 'agent'
+                AND json_extract(retirement.payload, '$.participant.id') = ${id}
+                AND json_extract(retirement.payload, '$.participant.threadId') =
+                  json_extract(joined.payload, '$.participant.threadId')
+            )
+          ORDER BY joined.seq
+          LIMIT 2
         `;
       });
 
@@ -277,7 +318,17 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
         }
         const matches = (yield* membershipRows()).filter((row) => row.participant_id === id);
         if (matches.length === 0) {
-          return yield* new A2AParticipantNotFoundError({ participantId: id });
+          const retired = yield* retiredParticipantRows(id);
+          if (retired[0] === undefined) {
+            return yield* new A2AParticipantNotFoundError({ participantId: id });
+          }
+          if (retired.length > 1) {
+            return yield* new A2AAmbiguousParticipantError({ participantId: id });
+          }
+          return yield* new A2AParticipantArchivedError({
+            participantId: id,
+            squadronId: retired[0].squadron_id,
+          });
         }
         if (matches.length > 1) {
           return yield* new A2AAmbiguousParticipantError({ participantId: id });

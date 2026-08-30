@@ -18,6 +18,7 @@ When an agent that owes a reply goes quiet, the waiter learns _why_ — from pla
 - The five v1 states exactly as the plan's table: `turn-ended-no-reply` (with processed vs never-processed timestamp sub-split), `errored` (raw detail attached), `stopped/cancelled` (carries do-not-retry/do-not-replace instruction text), `awaiting-human` (human-knows vs human-doesn't-know via inbox delivery state), `blocked-on-peer` (**peer id stored structurally in the payload** — future cycle detection must need no ledger migration).
 - Notices append to the ledger (`silence.notice`) and deliver to the waiter through the A2 pipeline using the silence-notice envelope channel (clearly marked system signal, never styled as a peer message).
 - Notices inform; they NEVER auto-close exchanges.
+- **A9 lifecycle cross-reference:** before committing a notice batch, A3 conditionally appends only if the Exchange is still open, with that guard inside the ledger's permit-protected transaction. A9 Dropped first means no silence row; A3 first means its true historical notice remains alongside the later lifecycle fact.
 
 ## Out of scope
 

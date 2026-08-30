@@ -17,7 +17,9 @@ import {
   type CreateSquadronCommand,
   Squadron,
   ExchangeClosedPayload,
+  ExchangeDroppedPayload,
   ExchangeOpenedPayload,
+  type ExchangeId,
   MessageDeliveredPayload,
   MessageDeliveryFailedPayload,
   MessageSentPayload,
@@ -103,6 +105,10 @@ export interface A2ALedgerShape {
   readonly appendEvents: (
     command: AppendCommEventsCommand,
   ) => Effect.Effect<AppendEventsResult, A2ALedgerError>;
+  readonly appendEventsIfExchangeOpen: (
+    command: AppendCommEventsCommand,
+    exchangeId: ExchangeId,
+  ) => Effect.Effect<AppendEventsResult | null, A2ALedgerError>;
   readonly readEvents: (input: {
     readonly squadronId: SquadronId;
     readonly cursor: LedgerCursor;
@@ -165,6 +171,7 @@ const decodeReceipt = Schema.decodeUnknownEffect(CommCommandReceipt);
 const decodeMembership = Schema.decodeUnknownEffect(Membership);
 const decodeExchangeOpened = Schema.decodeUnknownEffect(ExchangeOpenedPayload);
 const decodeExchangeClosed = Schema.decodeUnknownEffect(ExchangeClosedPayload);
+const decodeExchangeDropped = Schema.decodeUnknownEffect(ExchangeDroppedPayload);
 const decodeMessageSent = Schema.decodeUnknownEffect(MessageSentPayload);
 const decodeMessageDelivered = Schema.decodeUnknownEffect(MessageDeliveredPayload);
 const decodeMessageDeliveryFailed = Schema.decodeUnknownEffect(MessageDeliveryFailedPayload);
@@ -177,7 +184,11 @@ const preserveDomainError =
     isA2ALedgerError(cause) ? cause : new A2AStorageError({ operation, cause });
 
 const squadronFromRow = (row: SquadronRow) =>
-  decodeSquadron({ id: row.id, name: row.name, createdAt: row.created_at });
+  decodeSquadron({
+    id: row.id,
+    name: row.name,
+    createdAt: row.created_at,
+  });
 
 const eventFromRow = Effect.fn("j5.a2a.eventFromRow")(function* (row: EventRow) {
   return yield* decodeStoredEvent({
@@ -343,6 +354,45 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
           `;
           return;
         }
+        case "exchange.dropped": {
+          const dropped = yield* decodeExchangeDropped(event.payload);
+          if (event.exchangeId === null) {
+            return yield* new A2AStorageError({ operation: "project dropped exchange" });
+          }
+          const rows = yield* sql<{ readonly exchange_id: string }>`
+            UPDATE j5_a2a_exchange
+            SET
+              status = 'dropped',
+              closed_seq = ${event.seq},
+              updated_at = ${event.createdAt}
+            WHERE squadron_id = ${event.squadronId}
+              AND exchange_id = ${event.exchangeId}
+              AND status = 'open'
+            RETURNING exchange_id
+          `;
+          if (rows[0] === undefined) {
+            return yield* new A2AStorageError({ operation: "project dropped exchange" });
+          }
+          const terminalCause = yield* encodeJson(dropped.cause);
+          const terminalFacts = yield* encodeJson(dropped.facts);
+          // A4 owns this retained projection; the ledger applies its terminal
+          // state from the ordinary exchange.dropped fact in the same commit.
+          yield* sql`
+            UPDATE j5_a2a_human_inbox
+            SET
+              status = 'dropped',
+              terminal_seq = ${event.seq},
+              terminal_at = ${event.createdAt},
+              terminal_disposition = ${dropped.disposition},
+              terminal_cause = ${terminalCause},
+              terminal_facts = ${terminalFacts},
+              terminal_notice_message_id = ${dropped.noticeMessageId}
+            WHERE squadron_id = ${event.squadronId}
+              AND exchange_id = ${event.exchangeId}
+              AND status = 'open'
+          `;
+          return;
+        }
         case "message.sent": {
           const payload = yield* decodeMessageSent(event.payload);
           if (event.sender === null || event.receiver === null || event.correlationId === null) {
@@ -467,23 +517,21 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
       },
     );
 
-    const appendEventsEffect = Effect.fn("j5.a2a.appendEvents")(function* (
+    const appendEventsInTransaction = Effect.fn("j5.a2a.appendEventsInTransaction")(function* (
       command: AppendCommEventsCommand,
     ) {
-      const result = yield* sql.withTransaction(
-        Effect.gen(function* () {
-          yield* ensureSquadron(command.squadronId);
-          const sequenceRows = yield* sql<{ readonly next_seq: number }>`
+      yield* ensureSquadron(command.squadronId);
+      const sequenceRows = yield* sql<{ readonly next_seq: number }>`
             SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq
             FROM j5_a2a_comm_event
             WHERE squadron_id = ${command.squadronId}
           `;
-          const firstSeq = sequenceRows[0]?.next_seq;
-          if (firstSeq === undefined) {
-            return yield* new A2AStorageError({ operation: "allocate communication sequences" });
-          }
-          const resultSeq = firstSeq + command.events.length - 1;
-          const reserved = yield* sql<{ readonly command_id: string }>`
+      const firstSeq = sequenceRows[0]?.next_seq;
+      if (firstSeq === undefined) {
+        return yield* new A2AStorageError({ operation: "allocate communication sequences" });
+      }
+      const resultSeq = firstSeq + command.events.length - 1;
+      const reserved = yield* sql<{ readonly command_id: string }>`
             INSERT INTO j5_a2a_comm_command_receipt (
               command_id,
               squadron_id,
@@ -501,25 +549,25 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
             RETURNING command_id
           `;
 
-          if (reserved[0] === undefined) {
-            const receiptRows = yield* sql<ReceiptRow>`
+      if (reserved[0] === undefined) {
+        const receiptRows = yield* sql<ReceiptRow>`
               SELECT command_id, squadron_id, command_type, accepted_at, result_seq
               FROM j5_a2a_comm_command_receipt
               WHERE command_id = ${command.commandId}
               LIMIT 1
             `;
-            const row = receiptRows[0];
-            if (row === undefined) {
-              return yield* new A2AStorageError({ operation: "read replayed batch receipt" });
-            }
-            if (row.squadron_id !== command.squadronId) {
-              return yield* new CommCommandConflictError({
-                commandId: command.commandId,
-                requestedSquadronId: command.squadronId,
-                existingSquadronId: row.squadron_id,
-              });
-            }
-            const eventRows = yield* sql<EventRow>`
+        const row = receiptRows[0];
+        if (row === undefined) {
+          return yield* new A2AStorageError({ operation: "read replayed batch receipt" });
+        }
+        if (row.squadron_id !== command.squadronId) {
+          return yield* new CommCommandConflictError({
+            commandId: command.commandId,
+            requestedSquadronId: command.squadronId,
+            existingSquadronId: row.squadron_id,
+          });
+        }
+        const eventRows = yield* sql<EventRow>`
               SELECT
                 seq,
                 squadron_id,
@@ -534,35 +582,35 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
               WHERE squadron_id = ${command.squadronId} AND command_id = ${command.commandId}
               ORDER BY seq
             `;
-            if (eventRows.length === 0) {
-              return yield* new A2AStorageError({ operation: "read replayed batch events" });
-            }
-            return {
-              receipt: yield* receiptFromRow(row),
-              events: yield* Effect.forEach(eventRows, eventFromRow, { concurrency: 1 }),
-              committed: false as const,
-            };
-          }
+        if (eventRows.length === 0) {
+          return yield* new A2AStorageError({ operation: "read replayed batch events" });
+        }
+        return {
+          receipt: yield* receiptFromRow(row),
+          events: yield* Effect.forEach(eventRows, eventFromRow, { concurrency: 1 }),
+          committed: false as const,
+        };
+      }
 
-          const events: Array<StoredCommEvent> = [];
-          for (const [index, candidate] of command.events.entries()) {
-            if (
-              (candidate.kind === "participant.joined" || candidate.kind === "participant.left") &&
-              candidate.payload.participant.kind === "human"
-            ) {
-              return yield* new A2AStorageError({
-                operation: "append host-global human as Squadron membership",
-              });
-            }
-            const pending = decideAppendCommEvent({
-              commandId: command.commandId,
-              squadronId: command.squadronId,
-              acceptedAt: command.acceptedAt,
-              event: candidate,
-            })[0];
-            const seq = firstSeq + index;
-            const payload = yield* encodeJson(pending.payload);
-            yield* sql`
+      const events: Array<StoredCommEvent> = [];
+      for (const [index, candidate] of command.events.entries()) {
+        if (
+          (candidate.kind === "participant.joined" || candidate.kind === "participant.left") &&
+          candidate.payload.participant.kind === "human"
+        ) {
+          return yield* new A2AStorageError({
+            operation: "append host-global human as Squadron membership",
+          });
+        }
+        const pending = decideAppendCommEvent({
+          commandId: command.commandId,
+          squadronId: command.squadronId,
+          acceptedAt: command.acceptedAt,
+          event: candidate,
+        })[0];
+        const seq = firstSeq + index;
+        const payload = yield* encodeJson(pending.payload);
+        yield* sql`
               INSERT INTO j5_a2a_comm_event (
                 seq,
                 squadron_id,
@@ -587,24 +635,27 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
                 ${command.commandId}
               )
             `;
-            const event = yield* decodeStoredEvent({ seq, ...pending });
-            yield* applyMembership(event);
-            yield* applyA2Projection(event, command.commandId);
-            events.push(event);
-          }
-          return {
-            receipt: yield* decodeReceipt({
-              commandId: command.commandId,
-              squadronId: command.squadronId,
-              commandType: "comm.append",
-              acceptedAt: command.acceptedAt,
-              resultSeq,
-            }),
-            events,
-            committed: true as const,
-          };
+        const event = yield* decodeStoredEvent({ seq, ...pending });
+        yield* applyMembership(event);
+        yield* applyA2Projection(event, command.commandId);
+        events.push(event);
+      }
+      return {
+        receipt: yield* decodeReceipt({
+          commandId: command.commandId,
+          squadronId: command.squadronId,
+          commandType: "comm.append",
+          acceptedAt: command.acceptedAt,
+          resultSeq,
         }),
-      );
+        events,
+        committed: true as const,
+      };
+    });
+
+    const publishCommitted = Effect.fn("j5.a2a.publishCommitted")(function* (
+      result: AppendEventsResult,
+    ) {
       if (result.committed) {
         for (const event of result.events) {
           yield* PubSub.publish(committed, event);
@@ -613,12 +664,44 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
       return result;
     });
 
+    const appendEventsEffect = Effect.fn("j5.a2a.appendEvents")(function* (
+      command: AppendCommEventsCommand,
+    ) {
+      return yield* sql
+        .withTransaction(appendEventsInTransaction(command))
+        .pipe(Effect.flatMap(publishCommitted));
+    });
+
+    const appendEventsIfExchangeOpenEffect = Effect.fn("j5.a2a.appendEventsIfExchangeOpen")(
+      function* (command: AppendCommEventsCommand, exchangeId: ExchangeId) {
+        const result = yield* sql.withTransaction(
+          Effect.gen(function* () {
+            const open = yield* sql<{ readonly exchange_id: string }>`
+            SELECT exchange_id
+            FROM j5_a2a_exchange
+            WHERE squadron_id = ${command.squadronId}
+              AND exchange_id = ${exchangeId}
+              AND status = 'open'
+            LIMIT 1
+          `;
+            if (open[0] === undefined) return null;
+            return yield* appendEventsInTransaction(command);
+          }),
+        );
+        return result === null ? null : yield* publishCommitted(result);
+      },
+    );
+
     return A2ALedger.of({
       createSquadron: (command) =>
         Effect.gen(function* () {
           yield* sql`
             INSERT INTO j5_a2a_squadron (id, name, created_at)
-            VALUES (${command.squadron.id}, ${command.squadron.name}, ${command.squadron.createdAt})
+            VALUES (
+              ${command.squadron.id},
+              ${command.squadron.name},
+              ${command.squadron.createdAt}
+            )
             ON CONFLICT(id) DO NOTHING
           `;
           return yield* squadronFromRow(
@@ -633,14 +716,19 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
       listSquadrons: () =>
         Effect.gen(function* () {
           const rows = yield* sql<SquadronRow>`
-            SELECT id, name, created_at FROM j5_a2a_squadron ORDER BY created_at, id
+            SELECT id, name, created_at
+            FROM j5_a2a_squadron
+            ORDER BY created_at, id
           `;
           return yield* Effect.forEach(rows, squadronFromRow, { concurrency: 1 });
         }).pipe(Effect.mapError(preserveDomainError("list squadrons"))),
       readSquadron: (squadronId) =>
         Effect.gen(function* () {
           const rows = yield* sql<SquadronRow>`
-            SELECT id, name, created_at FROM j5_a2a_squadron WHERE id = ${squadronId} LIMIT 1
+            SELECT id, name, created_at
+            FROM j5_a2a_squadron
+            WHERE id = ${squadronId}
+            LIMIT 1
           `;
           const row = rows[0];
           if (row === undefined) return yield* new SquadronNotFoundError({ squadronId });
@@ -672,6 +760,10 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
         appendPermit
           .withPermit(appendEventsEffect(command))
           .pipe(Effect.mapError(preserveDomainError("append communication events"))),
+      appendEventsIfExchangeOpen: (command, exchangeId) =>
+        appendPermit
+          .withPermit(appendEventsIfExchangeOpenEffect(command, exchangeId))
+          .pipe(Effect.mapError(preserveDomainError("append communication events if open"))),
       readEvents: ({ squadronId, cursor, limit }) =>
         Effect.gen(function* () {
           yield* ensureSquadron(squadronId);

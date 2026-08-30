@@ -86,7 +86,7 @@ interface MembershipRow {
 interface HumanExchangeRow {
   readonly sender_id: string;
   readonly receiver_id: string;
-  readonly status: "open" | "closed";
+  readonly status: "open" | "closed" | "dropped";
   readonly intent: string;
   readonly urgency: "blocking" | "soon" | "fyi" | null;
   readonly opened_seq: number;
@@ -115,6 +115,7 @@ export const formatAgentDeliveryEnvelope = (input: AgentDeliveryInput): string =
             message: input.message,
           });
     case "silence_notice":
+    case "lifecycle_notice":
       return input.message;
     default:
       return assertNever(input.envelopeChannel);
@@ -171,7 +172,8 @@ export const live: Layer.Layer<
             attachments: [],
             mode,
             createdBy:
-              input.envelopeChannel === "silence_notice"
+              input.envelopeChannel === "silence_notice" ||
+              input.envelopeChannel === "lifecycle_notice"
                 ? "system"
                 : isHumanParticipantId(input.senderId)
                   ? "user"
@@ -184,8 +186,10 @@ export const live: Layer.Layer<
           ),
         ),
       deliverHuman: (input) =>
-        Effect.gen(function* () {
-          yield* sql`
+        input.envelopeChannel === "lifecycle_notice"
+          ? Effect.void
+          : Effect.gen(function* () {
+              yield* sql`
             INSERT INTO j5_a2a_human_inbox_data (
               origin_squadron_id,
               message_id,
@@ -205,8 +209,8 @@ export const live: Layer.Layer<
             )
             ON CONFLICT(origin_squadron_id, message_id) DO NOTHING
           `;
-          if (input.exchangeId === null) return;
-          const exchanges = yield* sql<HumanExchangeRow>`
+              if (input.exchangeId === null) return;
+              const exchanges = yield* sql<HumanExchangeRow>`
             SELECT sender_id, receiver_id, status, intent, urgency, opened_seq, created_at
             FROM j5_a2a_exchange
             WHERE squadron_id = ${input.originSquadronId}
@@ -214,18 +218,19 @@ export const live: Layer.Layer<
               AND receiver_id = ${input.receiverId}
             LIMIT 1
           `;
-          const exchange = exchanges[0];
-          if (exchange === undefined || exchange.urgency === null) {
-            return yield* new A2ADeliveryTargetError({
-              participantId: input.receiverId,
-              state: "person-addressed exchange disappeared before inbox projection",
-            });
-          }
-          // A follow-up may still be pending when the person answers. The raw
-          // message is durable above, but a discharged obligation has no active
-          // inbox row to update and is a successful no-op for projection.
-          if (exchange.status === "closed") return;
-          yield* sql`
+              const exchange = exchanges[0];
+              if (exchange === undefined || exchange.urgency === null) {
+                return yield* new A2ADeliveryTargetError({
+                  participantId: input.receiverId,
+                  state: "person-addressed exchange disappeared before inbox projection",
+                });
+              }
+              // A follow-up may still be pending when the person answers or
+              // lifecycle closure drops the exchange. The raw peer message is
+              // durable above, but a discharged obligation has no active inbox
+              // row to update and is a successful projection no-op.
+              if (exchange.status !== "open") return;
+              yield* sql`
             INSERT INTO j5_a2a_human_inbox (
               person_id,
               squadron_id,
@@ -268,12 +273,12 @@ export const live: Layer.Layer<
               latest_message = excluded.latest_message
             WHERE j5_a2a_human_inbox.status = 'open'
           `;
-        }).pipe(
-          Effect.asVoid,
-          Effect.mapError(
-            (cause) => new A2ADeliveryTransportError({ operation: "deliver human", cause }),
-          ),
-        ),
+            }).pipe(
+              Effect.asVoid,
+              Effect.mapError(
+                (cause) => new A2ADeliveryTransportError({ operation: "deliver human", cause }),
+              ),
+            ),
     });
   }),
 );

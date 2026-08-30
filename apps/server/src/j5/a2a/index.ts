@@ -1,4 +1,19 @@
 export * from "./contracts.ts";
+export {
+  A2AArchiveFacts,
+  A2AArchiveFactsError,
+  A2AArchivePlacementFactsProviderError,
+  A2AArchivePlacementFactsProvider,
+  layer as archiveFactsLayer,
+  placementFactsUnavailableLayer,
+} from "./ArchiveFactsService.ts";
+export type {
+  A2AArchiveFactsShape,
+  A2AArchivePlacementFactsProviderShape,
+  ArchivePlacementSubtree,
+  OpenExchangeArchiveFact,
+  ThreadPreArchiveFacts,
+} from "./ArchiveFactsService.ts";
 export * from "./decider.ts";
 export {
   A2AHomeCommandConflictError,
@@ -16,6 +31,16 @@ export type {
   RegisterAtCreationInput,
 } from "./HomeRegistrar.ts";
 export * from "./LedgerService.ts";
+export {
+  A2ALifecycleCounterpartyStateError,
+  A2ALifecycleBridgeError,
+  A2ALifecycleHumanArchiveNotAllowedError,
+  A2ALifecycleParticipantHomeStateError,
+  A2ALifecycleParticipantNotFoundError,
+  A2ALifecycleService,
+  formatLifecycleNotice,
+} from "./LifecycleService.ts";
+export type { A2ALifecycleError, A2ALifecycleServiceShape } from "./LifecycleService.ts";
 export * from "./Migrations.ts";
 export * from "./placementContracts.ts";
 export * from "./placementProvenance.ts";

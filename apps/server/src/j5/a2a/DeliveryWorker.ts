@@ -39,8 +39,8 @@ interface DeliveryRow {
   readonly receiver_id: string;
   readonly receiver_squadron_id: string;
   readonly exchange_id: string | null;
-  readonly exchange_role: "none" | "ask" | "followup" | "reply";
-  readonly envelope_channel: "peer" | "silence_notice";
+  readonly exchange_role: "none" | "ask" | "followup" | "reply" | "terminal_notice";
+  readonly envelope_channel: "peer" | "silence_notice" | "lifecycle_notice";
   readonly correlation_id: string;
   readonly message_text: string;
   readonly status: "pending" | "retry_scheduled" | "delivered" | "alarmed";
@@ -161,7 +161,7 @@ const makeLayer = (daemon: boolean) =>
             createdAt: receivedAt,
           },
         ];
-        if (exchangeId !== null) {
+        if (exchangeId !== null && row.exchange_role === "reply") {
           const exchanges = yield* sql<OpenExchangeRow>`
             SELECT squadron_id, exchange_id, sender_id, receiver_id
             FROM j5_a2a_exchange

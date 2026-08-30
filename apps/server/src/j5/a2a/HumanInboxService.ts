@@ -65,7 +65,7 @@ interface ExchangeRow {
   readonly exchange_id: string;
   readonly sender_id: string;
   readonly receiver_id: string;
-  readonly status: "open" | "closed";
+  readonly status: "open" | "closed" | "dropped";
 }
 
 interface ExistingReplyRow {

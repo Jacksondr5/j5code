@@ -33,7 +33,15 @@ import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts"
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
-import { CommCommandId, SquadronId, ParticipantId, type AgentParticipant } from "./contracts.ts";
+import {
+  CommCommandId,
+  CorrelationId,
+  LedgerMessageId,
+  LIFECYCLE_PARTICIPANT_ID,
+  SquadronId,
+  ParticipantId,
+  type AgentParticipant,
+} from "./contracts.ts";
 
 const timestamp = "2026-08-16T12:00:00.000Z";
 const sender: AgentParticipant = {
@@ -672,6 +680,151 @@ it.effect("treats a follow-up delivered after the human answered as a successful
       `;
       assert.deepStrictEqual(rows, [{ status: "delivered", attempts: 1, last_error: null }]);
       assert.deepStrictEqual(yield* deliveryWorker.listAlarms, []);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("receipts a human lifecycle notice without creating a second actionable inbox row", () =>
+  Effect.gen(function* () {
+    const database = NodeSqliteClient.layerMemory();
+    const ledger = ledgerLayer.pipe(Layer.provide(database));
+    const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+    const transport = deliveryTransportLive.pipe(
+      Layer.provide(database),
+      Layer.provide(Layer.mock(ThreadManagementService)({})),
+    );
+    const worker = deliveryWorkerLayerWithHooks(false).pipe(
+      Layer.provide(ledger),
+      Layer.provide(database),
+      Layer.provide(transport),
+      Layer.provide(
+        Layer.succeed(
+          A2ADeliveryHooks,
+          A2ADeliveryHooks.of({ afterTransportSuccess: () => Effect.void }),
+        ),
+      ),
+    );
+    const layer = Layer.mergeAll(database, ledger, send, transport, worker);
+
+    yield* Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      const ledgerService = yield* A2ALedger;
+      const sendService = yield* A2ASendService;
+      const deliveryWorker = yield* A2ADeliveryWorker;
+      const sql = yield* SqlClient.SqlClient;
+      const squadronId = SquadronId.make("squadron:delivery:human-lifecycle");
+      const noticeMessageId = LedgerMessageId.make("message:delivery:human-lifecycle");
+      const correlationId = CorrelationId.make("correlation:delivery:human-lifecycle");
+      yield* ledgerService.createSquadron({
+        squadron: { id: squadronId, name: "Human lifecycle delivery", createdAt: timestamp },
+      });
+      yield* join(squadronId, sender, "human-lifecycle-sender");
+      yield* sql`
+        INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+        VALUES (${person.id}, 1, ${timestamp})
+      `;
+      const opened = yield* sendService.send({
+        commandId: CommCommandId.make("command:delivery:human-lifecycle:open"),
+        senderThreadId: sender.threadId,
+        to: person.id,
+        message: "This person-addressed obligation will be dropped loudly.",
+        expectReply: true,
+        intent: "Prove lifecycle notices stay non-actionable",
+        urgency: "soon",
+        acceptedAt: timestamp,
+      });
+      assert.equal((yield* deliveryWorker.runOnce)?.state, "delivered");
+      yield* ledgerService.appendEvents({
+        commandId: CommCommandId.make("command:delivery:human-lifecycle:drop"),
+        squadronId,
+        acceptedAt: timestamp,
+        events: [
+          {
+            kind: "exchange.dropped",
+            sender: sender.id,
+            receiver: person.id,
+            exchangeId: opened.exchangeId!,
+            correlationId,
+            payload: {
+              disposition: "sender-retired",
+              cause: {
+                kind: "participant-archived",
+                participantId: sender.id,
+                squadronId,
+              },
+              facts: {
+                replyRequired: false,
+                retryAllowed: false,
+                replacementRequired: false,
+              },
+              noticeMessageId,
+            },
+            createdAt: timestamp,
+          },
+          {
+            kind: "message.sent",
+            sender: LIFECYCLE_PARTICIPANT_ID,
+            receiver: person.id,
+            exchangeId: opened.exchangeId!,
+            correlationId,
+            payload: {
+              messageId: noticeMessageId,
+              text: "The exchange was dropped because its agent sender retired from A2A.",
+              originSquadronId: squadronId,
+              receiverSquadronId: squadronId,
+              exchangeRole: "terminal_notice",
+              envelopeChannel: "lifecycle_notice",
+            },
+            createdAt: timestamp,
+          },
+        ],
+      });
+
+      const delivery = yield* deliveryWorker.runOnce;
+      assert.equal(delivery?.state, "delivered");
+      const rawRows = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count
+        FROM j5_a2a_human_inbox_data
+        WHERE origin_squadron_id = ${squadronId}
+      `;
+      const inboxRows = yield* sql<{
+        readonly cause_participant_id: string;
+        readonly replacement_required: number;
+        readonly reply_required: number;
+        readonly retry_allowed: number;
+        readonly status: string;
+        readonly terminal_disposition: string | null;
+        readonly terminal_notice_message_id: string | null;
+      }>`
+        SELECT
+          status,
+          terminal_disposition,
+          terminal_notice_message_id,
+          json_extract(terminal_cause, '$.participantId') AS cause_participant_id,
+          json_extract(terminal_facts, '$.replyRequired') AS reply_required,
+          json_extract(terminal_facts, '$.retryAllowed') AS retry_allowed,
+          json_extract(terminal_facts, '$.replacementRequired') AS replacement_required
+        FROM j5_a2a_human_inbox
+        WHERE person_id = ${person.id} AND exchange_id = ${opened.exchangeId!}
+      `;
+      const receipt = yield* sql<{ readonly status: string }>`
+        SELECT status
+        FROM j5_a2a_delivery
+        WHERE message_id = ${noticeMessageId}
+      `;
+      assert.deepStrictEqual(rawRows, [{ count: 1 }]);
+      assert.deepStrictEqual(inboxRows, [
+        {
+          cause_participant_id: sender.id,
+          replacement_required: 0,
+          reply_required: 0,
+          retry_allowed: 0,
+          status: "dropped",
+          terminal_disposition: "sender-retired",
+          terminal_notice_message_id: noticeMessageId,
+        },
+      ]);
+      assert.deepStrictEqual(receipt, [{ status: "delivered" }]);
     }).pipe(Effect.provide(layer));
   }),
 );

@@ -359,45 +359,49 @@ const makeLayer = (daemon: boolean) =>
           exchange.exchange_id,
           payload.deliveryMessageId,
         );
-        const result = yield* ledger.appendEvents({
-          commandId: commandIdFor(
-            exchange.squadron_id,
-            exchange.exchange_id,
-            payload.deliveryMessageId,
-          ),
-          squadronId: SquadronId.make(exchange.squadron_id),
-          acceptedAt: payload.observedAt,
-          events: [
-            {
-              kind: "silence.notice",
-              sender: null,
-              receiver: ParticipantId.make(exchange.sender_id),
-              exchangeId,
-              correlationId,
-              payload,
-              createdAt: payload.observedAt,
-            },
-            {
-              kind: "message.sent",
-              sender: SILENCE_DETECTOR_PARTICIPANT_ID,
-              receiver: ParticipantId.make(exchange.sender_id),
-              exchangeId: null,
-              correlationId,
-              payload: {
-                messageId,
-                text: formatSilenceNoticeEnvelope({
-                  noticeType: payload.state,
-                  message: noticeMessage(payload, exchangeId),
-                }),
-                originSquadronId: SquadronId.make(exchange.squadron_id),
-                receiverSquadronId: SquadronId.make(exchange.squadron_id),
-                exchangeRole: "none",
-                envelopeChannel: "silence_notice",
+        const result = yield* ledger.appendEventsIfExchangeOpen(
+          {
+            commandId: commandIdFor(
+              exchange.squadron_id,
+              exchange.exchange_id,
+              payload.deliveryMessageId,
+            ),
+            squadronId: SquadronId.make(exchange.squadron_id),
+            acceptedAt: payload.observedAt,
+            events: [
+              {
+                kind: "silence.notice",
+                sender: null,
+                receiver: ParticipantId.make(exchange.sender_id),
+                exchangeId,
+                correlationId,
+                payload,
+                createdAt: payload.observedAt,
               },
-              createdAt: payload.observedAt,
-            },
-          ],
-        });
+              {
+                kind: "message.sent",
+                sender: SILENCE_DETECTOR_PARTICIPANT_ID,
+                receiver: ParticipantId.make(exchange.sender_id),
+                exchangeId: null,
+                correlationId,
+                payload: {
+                  messageId,
+                  text: formatSilenceNoticeEnvelope({
+                    noticeType: payload.state,
+                    message: noticeMessage(payload, exchangeId),
+                  }),
+                  originSquadronId: SquadronId.make(exchange.squadron_id),
+                  receiverSquadronId: SquadronId.make(exchange.squadron_id),
+                  exchangeRole: "none",
+                  envelopeChannel: "silence_notice",
+                },
+                createdAt: payload.observedAt,
+              },
+            ],
+          },
+          exchangeId,
+        );
+        if (result === null) return [];
         return result.committed
           ? result.events.filter((event) => event.kind === "silence.notice")
           : [];

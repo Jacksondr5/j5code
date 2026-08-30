@@ -1,11 +1,16 @@
 import * as Layer from "effect/Layer";
 
+import {
+  layer as archiveFactsLayer,
+  placementFactsUnavailableLayer,
+} from "./ArchiveFactsService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import { layer as homeRegistrarLayer } from "./HomeRegistrar.ts";
 import { humanPersonRegistryLayer } from "./HumanPersonRegistry.ts";
 import { layer as ledgerLayer } from "./LedgerService.ts";
 import { layer as participantPlacementLayer } from "./PlacementService.ts";
+import { layer as lifecycleServiceLayer } from "./LifecycleService.ts";
 import { layer as sendServiceLayer } from "./SendService.ts";
 import { layer as silenceDetectorLayer } from "./SilenceDetector.ts";
 import { layer as humanInboxLayer } from "./HumanInboxService.ts";
@@ -24,6 +29,12 @@ export const makeJ5A2ARuntimeLayer = (
   const silenceDetectorProvided = silenceDetectorLayer.pipe(
     Layer.provideMerge(deliveryWorkerProvided),
   );
+  const lifecycleServiceProvided = lifecycleServiceLayer.pipe(
+    Layer.provideMerge(deliveryWorkerProvided),
+  );
+  const archiveFactsProvided = archiveFactsLayer.pipe(
+    Layer.provide(placementFactsUnavailableLayer),
+  );
   return Layer.mergeAll(
     humanPersonRegistryLayer,
     homeRegistrarLayer,
@@ -32,6 +43,8 @@ export const makeJ5A2ARuntimeLayer = (
     silenceDetectorProvided,
     humanInboxLayer,
     participantPlacementLayer,
+    lifecycleServiceProvided,
+    archiveFactsProvided,
   ).pipe(Layer.provideMerge(ledgerProvided));
 };
 
