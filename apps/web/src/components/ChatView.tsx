@@ -254,8 +254,8 @@ import {
   useSquadronDraftScope,
 } from "../j5/squadron/SquadronDraftState";
 import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
-import { refreshThreadHomes } from "../j5/squadron/ThreadHomesClient";
-import { shouldShowSquadronDraftChip } from "../j5/squadron/SquadronScope.logic";
+import { refreshThreadHomes, useThreadHomes } from "../j5/squadron/ThreadHomesClient";
+import { resolveSquadronDraftChipState } from "../j5/squadron/SquadronScope.logic";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline, type MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
@@ -1547,6 +1547,7 @@ function ChatViewContent(props: ChatViewProps) {
     [draftThread, fallbackDraftProject?.defaultModelSelection, threadId],
   );
   const isServerThread = serverThread !== null;
+  const activeThreadHomes = useThreadHomes(serverThread === null ? [] : [serverThread.id]);
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const serverLatestRun = useMemo(
     () => (serverProjection === null ? null : deriveLatestThreadRun(serverProjection)),
@@ -1812,9 +1813,13 @@ function ChatViewContent(props: ChatViewProps) {
   const effectiveSquadronName =
     squadrons.find(({ squadron }) => squadron.id === effectiveSquadronId)?.squadron.name ?? null;
   const isFirstMessageForActiveThread = !isServerThread || activeMessageCount === 0;
-  const showSquadronDraftChip = shouldShowSquadronDraftChip({
+  const activeThreadHome =
+    serverThread === null ? undefined : activeThreadHomes.get(serverThread.id);
+  const durableSquadronHome = activeThreadHome?.kind === "known" ? activeThreadHome.squadron : null;
+  const squadronDraftChip = resolveSquadronDraftChipState({
+    durableHome: durableSquadronHome,
+    draft: draftSquadron,
     isFirstMessage: isFirstMessageForActiveThread,
-    frozenAtFirstSend: draftSquadron.frozenAtFirstSend,
   });
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
@@ -6564,11 +6569,13 @@ function ChatViewContent(props: ChatViewProps) {
                     >
                       <div className="chat-composer-glass-host relative z-10 w-full rounded-[22px]">
                         <div className="relative z-10">
-                          {showSquadronDraftChip ? (
+                          {squadronDraftChip.visible ? (
                             <div className="flex px-3 pt-2">
                               <SquadronDraftChip
                                 ambientSquadronId={ambientSquadronId}
                                 draftKey={routeThreadKey}
+                                durableHome={durableSquadronHome}
+                                frozen={squadronDraftChip.frozen}
                               />
                             </div>
                           ) : null}

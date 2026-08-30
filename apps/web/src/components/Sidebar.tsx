@@ -1893,7 +1893,10 @@ export default function Sidebar() {
     })),
     squadronScopeId,
   );
-  const threadHomes = useThreadHomes(threads.map((thread) => thread.id));
+  const threadHomes = useThreadHomes(
+    threads.map((thread) => thread.id),
+    squadronScopeId,
+  );
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content
   // subscription. Selecting a number keeps typing in a draft composer from

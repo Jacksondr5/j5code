@@ -109,6 +109,10 @@ export const mergeThreadHomeEntries = (
 export const shouldRequestThreadHome = (home: ThreadHome | undefined, force: boolean) =>
   force || home === undefined;
 
+/** A named scope must re-read its visible rows; zoom-out does not force a read. */
+export const shouldForceThreadHomesForScope = (selectedSquadronId: string | null) =>
+  selectedSquadronId !== null;
+
 const requestThreadHomes = (threadIds: ReadonlyArray<ThreadId>, force = false) => {
   for (const threadId of threadIds) {
     if (shouldRequestThreadHome(homesByThreadId.get(threadId), force))
@@ -125,7 +129,10 @@ export const refreshThreadHomes = (threadIds: ReadonlyArray<ThreadId>) =>
   requestThreadHomes(threadIds, true);
 
 /** Immutable Registrar-home cache for Sidebar rows; never derives a home from project metadata. */
-export function useThreadHomes(threadIds: ReadonlyArray<ThreadId>) {
+export function useThreadHomes(
+  threadIds: ReadonlyArray<ThreadId>,
+  selectedSquadronId: string | null = null,
+) {
   const key = Array.from(new Set(threadIds)).join("\0");
   const requestedThreadIds = useMemo(
     () => (key === "" ? [] : key.split("\0").map((threadId) => ThreadId.make(threadId))),
@@ -133,8 +140,8 @@ export function useThreadHomes(threadIds: ReadonlyArray<ThreadId>) {
   );
   const currentVersion = useSyncExternalStore(subscribe, getVersion, getVersion);
   useEffect(() => {
-    requestThreadHomes(requestedThreadIds);
-  }, [requestedThreadIds]);
+    requestThreadHomes(requestedThreadIds, shouldForceThreadHomesForScope(selectedSquadronId));
+  }, [requestedThreadIds, selectedSquadronId]);
   return useMemo(
     () =>
       new Map(

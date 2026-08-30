@@ -48,3 +48,27 @@ export const shouldShowSquadronDraftChip = (input: {
   readonly isFirstMessage: boolean;
   readonly frozenAtFirstSend: boolean;
 }) => input.isFirstMessage || input.frozenAtFirstSend;
+
+export interface DurableSquadronHome {
+  readonly id: string;
+  readonly name: string;
+}
+
+/** A Registrar home is the durable, immutable source for an existing thread. */
+export const resolveSquadronDraftChipState = (input: {
+  readonly durableHome: DurableSquadronHome | null;
+  readonly draft: Pick<SquadronDraftState, "frozenAtFirstSend" | "squadronId">;
+  readonly isFirstMessage: boolean;
+}) => {
+  if (input.durableHome !== null) {
+    return { visible: true, frozen: true, squadronId: input.durableHome.id } as const;
+  }
+  return {
+    visible: shouldShowSquadronDraftChip({
+      isFirstMessage: input.isFirstMessage,
+      frozenAtFirstSend: input.draft.frozenAtFirstSend,
+    }),
+    frozen: input.draft.frozenAtFirstSend,
+    squadronId: input.draft.squadronId,
+  } as const;
+};

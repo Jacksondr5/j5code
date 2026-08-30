@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   filterThreadsForSquadronScope,
   freezeSquadronForFirstSend,
+  resolveSquadronDraftChipState,
   resolveSquadronScope,
   selectSquadronForDraft,
   shouldShowSquadronDraftChip,
@@ -93,5 +94,32 @@ describe("Squadron scope logic", () => {
     expect(shouldShowSquadronDraftChip({ isFirstMessage: false, frozenAtFirstSend: false })).toBe(
       false,
     );
+  });
+
+  it("uses a durable known Registrar home for a fresh thread chip", () => {
+    expect(
+      resolveSquadronDraftChipState({
+        durableHome: { id: "squadron:alpha", name: "Alpha" },
+        draft: { squadronId: null, frozenAtFirstSend: false },
+        isFirstMessage: false,
+      }),
+    ).toEqual({ visible: true, frozen: true, squadronId: "squadron:alpha" });
+  });
+
+  it("keeps unknown/native existing threads chip-free and preserves pre-send draft behavior", () => {
+    expect(
+      resolveSquadronDraftChipState({
+        durableHome: null,
+        draft: { squadronId: null, frozenAtFirstSend: false },
+        isFirstMessage: false,
+      }),
+    ).toEqual({ visible: false, frozen: false, squadronId: null });
+    expect(
+      resolveSquadronDraftChipState({
+        durableHome: null,
+        draft: { squadronId: "squadron:bravo", frozenAtFirstSend: false },
+        isFirstMessage: true,
+      }),
+    ).toEqual({ visible: true, frozen: false, squadronId: "squadron:bravo" });
   });
 });

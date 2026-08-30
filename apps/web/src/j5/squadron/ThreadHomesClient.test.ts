@@ -6,10 +6,12 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import {
   listThreadHomesEffect,
   mergeThreadHomeEntries,
+  shouldForceThreadHomesForScope,
   shouldRequestThreadHome,
   type ThreadHome,
   ThreadHomesHttpError,
 } from "./ThreadHomesClient";
+import { filterThreadsForSquadronScope } from "./SquadronScope.logic";
 
 vi.stubGlobal("window", { location: new URL("http://environment.test/") });
 
@@ -72,14 +74,30 @@ it.effect("preserves an authenticated thread-home read failure", () =>
   }),
 );
 
-it("replaces a transient unknown with the durable Registrar home after interactive launch", () => {
+it("re-reads the selected scope and replaces a stale unknown with its durable Registrar home", () => {
+  const threads = [{ id: "thread:alpha" }, { id: "thread:native" }];
+  const alphaScope = { id: "squadron:alpha", name: "Alpha", projectIds: ["project:shared"] };
   const homes = new Map<string, ThreadHome>();
   mergeThreadHomeEntries(homes, [
     { threadId: ThreadId.make("thread:alpha"), home: { kind: "unknown" } },
+    { threadId: ThreadId.make("thread:native"), home: { kind: "unknown" } },
   ]);
 
   expect(shouldRequestThreadHome(homes.get("thread:alpha"), false)).toBe(false);
-  expect(shouldRequestThreadHome(homes.get("thread:alpha"), true)).toBe(true);
+  expect(shouldForceThreadHomesForScope(null)).toBe(false);
+  expect(shouldForceThreadHomesForScope(alphaScope.id)).toBe(true);
+  // A failed or not-yet-completed prior read is likewise retried under an
+  // explicit scope; no missing home is inferred from the current project.
+  expect(shouldRequestThreadHome(undefined, shouldForceThreadHomesForScope(alphaScope.id))).toBe(
+    true,
+  );
+  expect(
+    shouldRequestThreadHome(
+      homes.get("thread:alpha"),
+      shouldForceThreadHomesForScope(alphaScope.id),
+    ),
+  ).toBe(true);
+  expect(filterThreadsForSquadronScope(threads, alphaScope, homes)).toEqual([]);
 
   mergeThreadHomeEntries(homes, [
     {
@@ -91,4 +109,5 @@ it("replaces a transient unknown with the durable Registrar home after interacti
     kind: "known",
     squadron: { id: "squadron:alpha", name: "Alpha" },
   });
+  expect(filterThreadsForSquadronScope(threads, alphaScope, homes)).toEqual([threads[0]]);
 });
