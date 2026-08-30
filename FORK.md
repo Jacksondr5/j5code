@@ -33,12 +33,13 @@ Treat these upstream areas as off-limits except for those explicit appended case
 - `apps/server` core orchestration and persistence
 - `packages/contracts`
 - `packages/client-runtime`
+- `apps/web` existing application components and render paths
 - existing provider adapters and shared runtime modules
 - vendored references under `.repos`
 
 ### Sanctioned appended integration cases
 
-Against upstream pin `993407dd9e57f1edf2f5681d70140bfefeca93cc`, the complete A2A exception inventory is exactly these six cases. Line numbers identify this revision; the named symbol or test is the durable anchor after nearby upstream movement.
+Against upstream pin `993407dd9e57f1edf2f5681d70140bfefeca93cc`, the complete A2A exception inventory is exactly these seven cases. Line numbers identify this revision; the named symbol or test is the durable anchor after nearby upstream movement.
 
 1. A1's independent Squadron communication-ledger migration lane: `apps/server/src/persistence/Layers/Sqlite.ts:10` imports `runJ5A2AMigrations`, and `:42` runs it after upstream migrations. Introduced by `a064a87ac40ea2d2d936ba72008c95edeb8bbc2b` and merged in `521c50aa9bb6b4c7f55bc10a772822ec31129f2d`.
 2. The one shared authenticated J5 MCP registration seam: `apps/server/src/mcp/McpHttpServer.ts:31` imports `J5McpIntegrationLive`, and `:247-248` append its sole entry to `layer`. Registration stays in `apps/server/src/j5/a2a/mcp/registration.ts`; the combined HTTP/MCP runtime is provided once at case 5's server graph. A6 extends the J5-owned toolkit without another protected-file registration or runtime provider.
@@ -46,6 +47,7 @@ Against upstream pin `993407dd9e57f1edf2f5681d70140bfefeca93cc`, the complete A2
 4. The authenticated shared-toolkit integration proof: `apps/server/src/mcp/toolkits/worktree/registration.test.ts:15,70,83-90,128-131`, within test `production mcp layer lists worktree tools over http`.
 5. A4's authenticated raw human-inbox route and shared-runtime composition: `apps/server/src/server.ts`, where `makeRoutesLayer` imports and appends `humanInboxHttpRouteLayer` after `websocketRpcRouteLayer`, imports `J5A2ARuntimeLayer`, and provides that runtime exactly once around the combined HTTP and MCP route graph. The J5-owned human-inbox route and MCP registration require that shared runtime and never provide nested copies. The route implementation remains in `apps/server/src/j5/a2a/HumanInboxHttp.ts`; `apps/server/src/http.ts` and shared wire contracts remain untouched.
 6. A4's visible human-inbox navigation append: `apps/web/src/components/sidebar/SidebarChrome.tsx`, where `SidebarChromeFooter` recognizes `/inbox` and appends its footer navigation button. The route and page remain under J5-owned files.
+7. B3's thread A2A rendering seam: `apps/web/src/components/chat/MessagesTimeline.tsx:47` imports J5-owned `renderThreadA2ADelivery`; `TimelineRowContent` at `:1038-1046,:1073-1076` calls it only for `row.kind === "message" && row.message.role === "user"`, passes the complete `ChatMessage` plus one `formatDayAwareTimestamp` label from `TimelineRowCtx`, and renders the generic `UserTimelineRow` only when `a2aDelivery === null`. Classification, envelope parsing, raw fallback, and focused proof remain in `apps/web/src/j5/a2a/ThreadA2ARenderer.tsx` and `.test.tsx`; TA4 stays absent.
 
 `apps/web/src/routeTree.gen.ts` is generated output, not a hand-authored exception. When a J5-owned route file changes, regenerate it with the normal web build and review only the generated route registration delta; never edit the generated tree directly.
 
