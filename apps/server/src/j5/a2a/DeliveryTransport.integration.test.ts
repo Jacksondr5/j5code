@@ -21,6 +21,7 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { ServerConfig } from "../../config.ts";
@@ -43,6 +44,10 @@ import {
   ThreadManagementService,
   type ThreadManagementSendMode,
 } from "../../orchestration-v2/ThreadManagementService.ts";
+import {
+  ThreadLifecycleService,
+  layer as threadLifecycleServiceLayer,
+} from "../../orchestration-v2/ThreadLifecycleService.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import type { ProviderInstance } from "../../provider/ProviderDriver.ts";
 import { ProviderInstanceRegistry } from "../../provider/Services/ProviderInstanceRegistry.ts";
@@ -54,14 +59,18 @@ import {
   deliveryMessageId,
   live as deliveryTransportLayer,
 } from "./DeliveryTransport.ts";
+import { manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { formatHumanEnvelope, formatPeerEnvelope } from "./EnvelopeFormatter.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { A2ALifecycleService, manualLayer as lifecycleServiceLayer } from "./LifecycleService.ts";
+import { A2ASenderRetiredError, A2ASendService, layer as sendServiceLayer } from "./SendService.ts";
 import {
   CommCommandId,
   SquadronId,
   ExchangeId,
   LedgerMessageId,
   ParticipantId,
+  type AgentParticipant,
 } from "./contracts.ts";
 
 const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
@@ -243,6 +252,15 @@ const makeTestLayer = (harness: DeliveryHarness) => {
   return Layer.merge(ledgerLayer, recordedDeliveryTransport).pipe(
     Layer.provideMerge(orchestrationTestLayer),
   );
+};
+
+const makeLifecycleTestLayer = (harness: DeliveryHarness) => {
+  const base = makeTestLayer(harness);
+  const send = sendServiceLayer.pipe(Layer.provide(base));
+  const worker = deliveryWorkerLayer.pipe(Layer.provide(base));
+  const lifecycle = lifecycleServiceLayer.pipe(Layer.provide(worker), Layer.provide(base));
+  const threadLifecycle = threadLifecycleServiceLayer.pipe(Layer.provide(base));
+  return Layer.mergeAll(base, send, worker, lifecycle, threadLifecycle);
 };
 
 const makeHarness = Effect.gen(function* () {
@@ -488,5 +506,160 @@ it.effect("attributes human-origin delivery to the user actor", () =>
         [{ messageId: upstreamMessageId, mode: "queue", createdBy: "user" }],
       );
     }).pipe(Effect.provide(makeTestLayer(harness)));
+  }),
+);
+
+it.effect("routes real archive and delete commands through lifecycle closure exactly once", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const orchestrator = yield* OrchestratorV2;
+      const threads = yield* ThreadManagementService;
+      const threadLifecycle = yield* ThreadLifecycleService;
+      const ledger = yield* A2ALedger;
+      const send = yield* A2ASendService;
+      const lifecycle = yield* A2ALifecycleService;
+      const sql = yield* SqlClient.SqlClient;
+      const squadronId = SquadronId.make("squadron:j5-a2a-lifecycle-command-path");
+      const sender: AgentParticipant = {
+        kind: "agent",
+        id: ParticipantId.make("agent:j5-a2a-lifecycle-command-path-sender"),
+        threadId: ThreadId.make("thread:j5-a2a-lifecycle-command-path-sender"),
+      };
+      const receiver: AgentParticipant = {
+        kind: "agent",
+        id: ParticipantId.make("agent:j5-a2a-lifecycle-command-path-receiver"),
+        threadId: ThreadId.make("thread:j5-a2a-lifecycle-command-path-receiver"),
+      };
+      const createdAt = "2026-08-29T14:00:00.000Z";
+
+      for (const [index, participant] of [sender, receiver].entries()) {
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`command:j5-a2a-lifecycle-command-path-create:${index}`),
+          threadId: participant.threadId,
+          projectId: ProjectId.make(`project:j5-a2a-lifecycle-command-path:${index}`),
+          title: `J5 A2A lifecycle command path ${index}`,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+        });
+      }
+      yield* ledger.createSquadron({
+        squadron: { id: squadronId, name: "Lifecycle command path", createdAt },
+      });
+      for (const [index, participant] of [sender, receiver].entries()) {
+        yield* ledger.append({
+          commandId: CommCommandId.make(`command:j5-a2a-lifecycle-command-path-join:${index}`),
+          squadronId,
+          acceptedAt: createdAt,
+          event: {
+            kind: "participant.joined",
+            sender: null,
+            receiver: participant.id,
+            exchangeId: null,
+            correlationId: null,
+            payload: { participant },
+            createdAt,
+          },
+        });
+      }
+      const opened = yield* send.send({
+        commandId: CommCommandId.make("command:j5-a2a-lifecycle-command-path-open"),
+        senderThreadId: sender.threadId,
+        to: receiver.id,
+        message: "Archive the reply-owing participant through the real lifecycle command.",
+        expectReply: true,
+        intent: "Prove the production archive bridge",
+        acceptedAt: createdAt,
+      });
+
+      const storedLifecycleEvents = yield* threads.streamStoredEventsFrom().pipe(
+        Stream.filter(
+          (stored) =>
+            stored.event.threadId === receiver.threadId &&
+            (stored.event.type === "thread.archived" || stored.event.type === "thread.deleted"),
+        ),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* threadLifecycle.archive({
+        commandId: CommandId.make("command:j5-a2a-lifecycle-command-path-archive"),
+        threadId: receiver.threadId,
+      });
+      yield* threadLifecycle.unarchive({
+        commandId: CommandId.make("command:j5-a2a-lifecycle-command-path-unarchive"),
+        threadId: receiver.threadId,
+      });
+      yield* threadLifecycle.delete({
+        commandId: CommandId.make("command:j5-a2a-lifecycle-command-path-delete"),
+        threadId: receiver.threadId,
+      });
+      const stored = yield* Fiber.join(storedLifecycleEvents);
+      assert.deepStrictEqual(
+        Array.from(stored, (event) => event.event.type),
+        ["thread.archived", "thread.deleted"],
+      );
+      for (const event of stored) yield* lifecycle.handleStoredEvent(event);
+
+      const state = yield* sql<{
+        readonly status: string;
+        readonly dropped_events: number;
+        readonly terminal_notices: number;
+        readonly participant_left_events: number;
+      }>`
+        SELECT
+          exchange.status,
+          (
+            SELECT COUNT(*)
+            FROM j5_a2a_comm_event
+            WHERE kind = 'exchange.dropped' AND exchange_id = ${opened.exchangeId}
+          ) AS dropped_events,
+          (
+            SELECT COUNT(*)
+            FROM j5_a2a_delivery
+            WHERE exchange_role = 'terminal_notice' AND exchange_id = ${opened.exchangeId}
+          ) AS terminal_notices,
+          (
+            SELECT COUNT(*)
+            FROM j5_a2a_comm_event
+            WHERE kind = 'participant.left' AND receiver = ${receiver.id}
+          ) AS participant_left_events
+        FROM j5_a2a_exchange AS exchange
+        WHERE exchange.exchange_id = ${opened.exchangeId}
+      `;
+      assert.deepStrictEqual(state, [
+        {
+          status: "dropped",
+          dropped_events: 1,
+          terminal_notices: 1,
+          participant_left_events: 1,
+        },
+      ]);
+      assert.deepStrictEqual(yield* ledger.listMembership(squadronId), [
+        {
+          squadronId,
+          participant: sender,
+          joinedSeq: 1,
+          updatedSeq: 1,
+        },
+      ]);
+      const retiredSend = yield* Effect.flip(
+        send.send({
+          commandId: CommCommandId.make("command:j5-a2a-lifecycle-command-path-retired-send"),
+          senderThreadId: receiver.threadId,
+          to: sender.id,
+          message: "Upstream unarchive must not revive A2A participation.",
+          acceptedAt: createdAt,
+        }),
+      );
+      assert.instanceOf(retiredSend, A2ASenderRetiredError);
+      assert.include(retiredSend.message, "participant.left");
+    }).pipe(Effect.provide(makeLifecycleTestLayer(harness)));
   }),
 );

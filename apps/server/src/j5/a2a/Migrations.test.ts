@@ -10,6 +10,7 @@ import {
 } from "../../persistence/Migrations.ts";
 import { J5_A2A_MIGRATIONS_TABLE, migrationEntries, runJ5A2AMigrations } from "./Migrations.ts";
 import Migration0005 from "./migrations/005_ImmutableThreadHome.ts";
+import Migration0008 from "./migrations/008_LifecycleClosure.ts";
 
 const enableAndAssertForeignKeys = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -46,6 +47,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 5, name: "ImmutableThreadHome" },
       { migration_id: 6, name: "HumanNode" },
       { migration_id: 7, name: "ParticipantPlacement" },
+      { migration_id: 8, name: "LifecycleClosure" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -57,6 +59,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [5, "ImmutableThreadHome"],
         [6, "HumanNode"],
         [7, "ParticipantPlacement"],
+        [8, "LifecycleClosure"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
@@ -88,7 +91,8 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'j5_a2a_human_inbox_data',
           'j5_a2a_silence_detector_cursor',
           'j5_a2a_placement_event',
-          'j5_a2a_participant_placement'
+          'j5_a2a_participant_placement',
+          'j5_a2a_lifecycle_cursor'
         )
       ORDER BY name
     `;
@@ -146,6 +150,7 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       { name: "j5_a2a_human_inbox" },
       { name: "j5_a2a_human_inbox_data" },
       { name: "j5_a2a_human_person" },
+      { name: "j5_a2a_lifecycle_cursor" },
       { name: "j5_a2a_participant_placement" },
       { name: "j5_a2a_placement_event" },
       { name: "j5_a2a_silence_detector_cursor" },
@@ -222,6 +227,13 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       SELECT after_sequence FROM j5_a2a_silence_detector_cursor WHERE singleton = 1
     `;
     assert.deepStrictEqual(cursor, [{ after_sequence: null }]);
+    const lifecycleCursor = yield* sql<{
+      readonly after_sequence: number;
+      readonly updated_at: string | null;
+    }>`
+      SELECT after_sequence, updated_at FROM j5_a2a_lifecycle_cursor WHERE singleton = 1
+    `;
+    assert.deepStrictEqual(lifecycleCursor, [{ after_sequence: 0, updated_at: null }]);
     assert.deepStrictEqual(unprefixed, []);
     yield* sql`
       INSERT INTO j5_a2a_squadron (id, name, created_at)
@@ -319,6 +331,259 @@ it.effect("requires a non-null, non-blank reparent actor subject", () =>
         actor_subject: "human:placement-owner",
       },
     ]);
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect("adds lifecycle terminal state without mutating the A4 human inbox projection", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 7 });
+    yield* sql`
+      INSERT INTO j5_a2a_squadron (id, name, created_at)
+      VALUES ('squadron:lifecycle-migration', 'Lifecycle migration', '2026-08-23T00:00:00.000Z')
+    `;
+    yield* sql`
+      INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+      VALUES ('human:person-lifecycle-migration', 1, '2026-08-23T00:00:00.000Z')
+    `;
+    yield* sql`
+      INSERT INTO j5_a2a_exchange (
+        squadron_id, exchange_id, sender_id, receiver_id, status, intent, urgency,
+        opened_seq, closed_seq, created_at, updated_at
+      ) VALUES
+        (
+          'squadron:lifecycle-migration', 'exchange:lifecycle:open',
+          'agent:lifecycle-migration', 'human:person-lifecycle-migration', 'open',
+          'Preserve open inbox state', 'soon', 1, NULL,
+          '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z'
+        ),
+        (
+          'squadron:lifecycle-migration', 'exchange:lifecycle:answered',
+          'agent:lifecycle-migration', 'human:person-lifecycle-migration', 'closed',
+          'Preserve answered inbox state', 'blocking', 2, 5,
+          '2026-08-23T00:00:01.000Z', '2026-08-23T00:00:05.000Z'
+        ),
+        (
+          'squadron:lifecycle-migration', 'exchange:lifecycle:dropped',
+          'agent:lifecycle-migration', 'human:person-lifecycle-migration', 'closed',
+          'Preserve dropped inbox state', 'fyi', 3, 6,
+          '2026-08-23T00:00:02.000Z', '2026-08-23T00:00:06.000Z'
+        )
+    `;
+    yield* sql`
+      INSERT INTO j5_a2a_human_inbox_data (
+        origin_squadron_id, message_id, exchange_id, sender_id, receiver_id, payload, created_at
+      ) VALUES (
+        'squadron:lifecycle-migration', 'message:raw-inbox', 'exchange:lifecycle:open',
+        'agent:lifecycle-migration', 'human:person-lifecycle-migration',
+        '{"opaque":"raw-inbox"}', '2026-08-23T00:00:00.000Z'
+      )
+    `;
+    yield* sql`
+      INSERT INTO j5_a2a_delivery (
+        squadron_id, message_id, command_id, sent_seq, sender_id, receiver_id,
+        receiver_squadron_id, exchange_id, exchange_role, correlation_id,
+        message_text, status, attempts, last_error, next_attempt_at, delivered_seq,
+        created_at, updated_at, envelope_channel
+      ) VALUES (
+        'squadron:lifecycle-migration', 'message:lifecycle-migration',
+        'command:lifecycle-migration', 4, 'agent:lifecycle-migration',
+        'human:person-lifecycle-migration', 'squadron:lifecycle-migration',
+        'exchange:lifecycle:open', 'ask', 'correlation:lifecycle-migration',
+        'Preserve this delivery', 'pending', 0, NULL, NULL, NULL,
+        '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z', 'peer'
+      )
+    `;
+    yield* sql`
+      INSERT INTO j5_a2a_human_inbox (
+        person_id, squadron_id, exchange_id, sender_id, intent, urgency,
+        latest_message_id, latest_message, opened_seq, opened_at, status,
+        terminal_seq, terminal_at, terminal_disposition, terminal_cause,
+        terminal_facts, terminal_notice_message_id
+      ) VALUES
+        (
+          'human:person-lifecycle-migration', 'squadron:lifecycle-migration',
+          'exchange:lifecycle:open', 'agent:lifecycle-migration', 'Open intent', 'soon',
+          'message:open', 'Open message', 1, '2026-08-23T00:00:00.000Z', 'open',
+          NULL, NULL, NULL, NULL, NULL, NULL
+        ),
+        (
+          'human:person-lifecycle-migration', 'squadron:lifecycle-migration',
+          'exchange:lifecycle:answered', 'agent:lifecycle-migration', 'Answered intent',
+          'blocking', 'message:answered', 'Answered message', 2,
+          '2026-08-23T00:00:01.000Z', 'answered', 5, '2026-08-23T00:00:05.000Z',
+          'reply-received', '{"kind":"reply"}', '{"replyRequired":false}', NULL
+        ),
+        (
+          'human:person-lifecycle-migration', 'squadron:lifecycle-migration',
+          'exchange:lifecycle:dropped', 'agent:lifecycle-migration', 'Dropped intent', 'fyi',
+          'message:dropped', 'Dropped message', 3, '2026-08-23T00:00:02.000Z',
+          'dropped', 6, '2026-08-23T00:00:06.000Z', 'sender-retired',
+          '{"kind":"participant-archived"}',
+          '{"replyRequired":false,"retryAllowed":false,"replacementRequired":false}',
+          'message:terminal-notice'
+        )
+    `;
+    const inboxSqlBefore = yield* sql<{ readonly sql: string }>`
+      SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'j5_a2a_human_inbox'
+    `;
+    const inboxRowsBefore = yield* sql<Readonly<Record<string, unknown>>>`
+      SELECT * FROM j5_a2a_human_inbox ORDER BY exchange_id
+    `;
+    const rawInboxRowsBefore = yield* sql<Readonly<Record<string, unknown>>>`
+      SELECT * FROM j5_a2a_human_inbox_data ORDER BY message_id
+    `;
+
+    yield* sql.withTransaction(Migration0008);
+
+    const inboxSqlAfter = yield* sql<{ readonly sql: string }>`
+      SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'j5_a2a_human_inbox'
+    `;
+    const inboxRowsAfter = yield* sql<Readonly<Record<string, unknown>>>`
+      SELECT * FROM j5_a2a_human_inbox ORDER BY exchange_id
+    `;
+    const rawInboxRowsAfter = yield* sql<Readonly<Record<string, unknown>>>`
+      SELECT * FROM j5_a2a_human_inbox_data ORDER BY message_id
+    `;
+    const foreignKeyViolations = yield* sql<Readonly<Record<string, unknown>>>`
+      PRAGMA foreign_key_check
+    `;
+    const exchangeColumns = yield* sql<{ readonly name: string; readonly pk: number }>`
+      PRAGMA table_info(j5_a2a_exchange)
+    `;
+    const exchangeForeignKeys = yield* sql<{
+      readonly table: string;
+      readonly from: string;
+      readonly to: string;
+      readonly on_delete: string;
+    }>`PRAGMA foreign_key_list(j5_a2a_exchange)`;
+    const inboxForeignKeys = yield* sql<{
+      readonly table: string;
+      readonly from: string;
+      readonly to: string;
+      readonly on_delete: string;
+    }>`PRAGMA foreign_key_list(j5_a2a_human_inbox)`;
+    const squadronColumns = yield* sql<{ readonly name: string }>`
+      PRAGMA table_info(j5_a2a_squadron)
+    `;
+    const exchangeSchema = yield* sql<{ readonly sql: string }>`
+      SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'j5_a2a_exchange'
+    `;
+    const openPairIndex = yield* sql<{ readonly sql: string }>`
+      SELECT sql FROM sqlite_master
+      WHERE type = 'index' AND name = 'j5_a2a_exchange_open_pair_idx'
+    `;
+    const deliverySchema = yield* sql<{ readonly sql: string }>`
+      SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'j5_a2a_delivery'
+    `;
+    const eventSchema = yield* sql<{ readonly sql: string }>`
+      SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'j5_a2a_comm_event'
+    `;
+    const preservedDelivery = yield* sql<{
+      readonly message_id: string;
+      readonly exchange_role: string;
+      readonly envelope_channel: string;
+    }>`
+      SELECT message_id, exchange_role, envelope_channel
+      FROM j5_a2a_delivery
+      WHERE message_id = 'message:lifecycle-migration'
+    `;
+
+    assert.deepStrictEqual(inboxSqlAfter, inboxSqlBefore);
+    assert.include(
+      inboxSqlAfter[0]?.sql ?? "",
+      "REFERENCES j5_a2a_exchange(squadron_id, exchange_id) ON DELETE CASCADE",
+    );
+    assert.deepStrictEqual(inboxRowsAfter, inboxRowsBefore);
+    assert.deepStrictEqual(rawInboxRowsAfter, rawInboxRowsBefore);
+    assert.deepStrictEqual(foreignKeyViolations, []);
+    assert.deepStrictEqual(
+      exchangeColumns.filter((column) => column.pk > 0).map(({ name, pk }) => ({ name, pk })),
+      [
+        { name: "squadron_id", pk: 1 },
+        { name: "exchange_id", pk: 2 },
+      ],
+    );
+    assert.isTrue(
+      exchangeForeignKeys.some(
+        (foreignKey) =>
+          foreignKey.table === "j5_a2a_squadron" &&
+          foreignKey.from === "squadron_id" &&
+          foreignKey.to === "id" &&
+          foreignKey.on_delete === "CASCADE",
+      ),
+    );
+    assert.isTrue(
+      inboxForeignKeys.some(
+        (foreignKey) =>
+          foreignKey.table === "j5_a2a_exchange" &&
+          foreignKey.from === "squadron_id" &&
+          foreignKey.to === "squadron_id" &&
+          foreignKey.on_delete === "CASCADE",
+      ),
+    );
+    assert.isTrue(
+      inboxForeignKeys.some(
+        (foreignKey) =>
+          foreignKey.table === "j5_a2a_exchange" &&
+          foreignKey.from === "exchange_id" &&
+          foreignKey.to === "exchange_id" &&
+          foreignKey.on_delete === "CASCADE",
+      ),
+    );
+    assert.notInclude(
+      squadronColumns.map((column) => column.name),
+      "archived_at",
+    );
+    assert.match(
+      exchangeSchema[0]?.sql ?? "",
+      /status TEXT NOT NULL CHECK \(status IN \('open', 'closed', 'dropped'\)\)/,
+    );
+    assert.match(
+      openPairIndex[0]?.sql ?? "",
+      /CREATE UNIQUE INDEX j5_a2a_exchange_open_pair_idx[\s\S]*WHERE status = 'open'/,
+    );
+    assert.include(deliverySchema[0]?.sql ?? "", "'terminal_notice'");
+    assert.include(deliverySchema[0]?.sql ?? "", "'lifecycle_notice'");
+    assert.include(eventSchema[0]?.sql ?? "", "'exchange.dropped'");
+    assert.notInclude(eventSchema[0]?.sql ?? "", "'squadron.archived'");
+    assert.deepStrictEqual(preservedDelivery, [
+      {
+        message_id: "message:lifecycle-migration",
+        exchange_role: "ask",
+        envelope_channel: "peer",
+      },
+    ]);
+
+    yield* sql`
+      UPDATE j5_a2a_exchange
+      SET status = 'dropped', closed_seq = 7, updated_at = '2026-08-23T00:01:00.000Z'
+      WHERE squadron_id = 'squadron:lifecycle-migration'
+        AND exchange_id = 'exchange:lifecycle:dropped'
+    `;
+    const invalidStatusError = yield* Effect.flip(sql`
+      UPDATE j5_a2a_exchange
+      SET status = 'invalid-terminal-state'
+      WHERE squadron_id = 'squadron:lifecycle-migration'
+        AND exchange_id = 'exchange:lifecycle:open'
+    `);
+    assert.equal(invalidStatusError._tag, "SqlError");
+    yield* sql`
+      INSERT INTO j5_a2a_delivery (
+        squadron_id, message_id, command_id, sent_seq, sender_id, receiver_id,
+        receiver_squadron_id, exchange_id, exchange_role, correlation_id,
+        message_text, status, attempts, last_error, next_attempt_at, delivered_seq,
+        created_at, updated_at, envelope_channel
+      ) VALUES (
+        'squadron:lifecycle-migration', 'message:lifecycle-notice-migration',
+        'command:lifecycle-notice-migration', 8, 'platform:lifecycle',
+        'human:person-lifecycle-migration', 'squadron:lifecycle-migration',
+        'exchange:lifecycle:dropped', 'terminal_notice',
+        'correlation:lifecycle-notice-migration', 'Exchange dropped', 'pending', 0,
+        NULL, NULL, NULL, '2026-08-23T00:01:00.000Z',
+        '2026-08-23T00:01:00.000Z', 'lifecycle_notice'
+      )
+    `;
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
 

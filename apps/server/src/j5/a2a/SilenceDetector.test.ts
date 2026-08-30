@@ -42,13 +42,13 @@ import {
 import {
   CommCommandId,
   CorrelationId,
+  ExchangeId,
+  LedgerMessageId,
   SquadronId,
   ParticipantId,
   SILENCE_DETECTOR_PARTICIPANT_ID,
   type AgentParticipant,
   type HumanParticipant,
-  type ExchangeId,
-  type LedgerMessageId,
 } from "./contracts.ts";
 
 const squadronId = SquadronId.make("squadron:silence-test");
@@ -301,6 +301,87 @@ const markAlarmed = Effect.fn("test.j5.a2a.silence.markAlarmed")(function* (
   });
 });
 
+const silenceAppendCommand = (
+  exchangeId: ExchangeId,
+  deliveryMessageId: LedgerMessageId,
+  suffix: string,
+) => {
+  const observedAt = iso(6);
+  const correlationId = CorrelationId.make(`correlation:silence:serialization:${suffix}`);
+  return {
+    commandId: CommCommandId.make(`command:silence:serialization:${suffix}`),
+    squadronId,
+    acceptedAt: observedAt,
+    events: [
+      {
+        kind: "silence.notice" as const,
+        sender: null,
+        receiver: waiter.id,
+        exchangeId,
+        correlationId,
+        payload: {
+          subjectId: subject.id,
+          deliveryMessageId,
+          observedAt,
+          state: "turn-ended-no-reply" as const,
+          runId: null,
+          processing: "never-processed" as const,
+        },
+        createdAt: observedAt,
+      },
+      {
+        kind: "message.sent" as const,
+        sender: SILENCE_DETECTOR_PARTICIPANT_ID,
+        receiver: waiter.id,
+        exchangeId: null,
+        correlationId,
+        payload: {
+          messageId: LedgerMessageId.make(`message:silence:serialization:${suffix}`),
+          text: "Serialization seam silence notice",
+          originSquadronId: squadronId,
+          receiverSquadronId: squadronId,
+          exchangeRole: "none" as const,
+          envelopeChannel: "silence_notice" as const,
+        },
+        createdAt: observedAt,
+      },
+    ],
+  };
+};
+
+const dropExchange = Effect.fn("test.j5.a2a.silence.dropExchange")(function* (
+  exchangeId: ExchangeId,
+  suffix: string,
+) {
+  yield* (yield* A2ALedger).append({
+    commandId: CommCommandId.make(`command:silence:serialization:drop:${suffix}`),
+    squadronId,
+    acceptedAt: iso(5),
+    event: {
+      kind: "exchange.dropped",
+      sender: waiter.id,
+      receiver: subject.id,
+      exchangeId,
+      correlationId: CorrelationId.make(`correlation:silence:serialization:drop:${suffix}`),
+      payload: {
+        disposition: "receiver-retired",
+        cause: {
+          kind: "participant-archived",
+          participantId: subject.id,
+          squadronId,
+        },
+        facts: {
+          replyRequired: false,
+          retryAllowed: false,
+          replacementRequired: false,
+        },
+        noticeMessageId: LedgerMessageId.make(`message:silence:serialization:drop:${suffix}`),
+      },
+      createdAt: iso(5),
+    },
+  });
+});
+
 const terminalEvent = (
   status: "completed" | "failed" | "interrupted" | "cancelled" | "rolled_back",
   sequence = 100,
@@ -470,6 +551,68 @@ it.effect("emits processed mid-turn silence and dedupes a later lifecycle sequen
       SELECT status FROM j5_a2a_delivery WHERE message_id = ${noticeDelivery.message_id}
     `;
     assert.deepStrictEqual(delivered, [{ status: "delivered" }]);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("no-ops when A9 drops after the A3 read but before its serialized append", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const inbound = yield* seedInbound(2);
+    assert.isNotNull(inbound.exchangeId);
+    const exchangeId = inbound.exchangeId!;
+    const sql = yield* SqlClient.SqlClient;
+    const observed = yield* sql<{ readonly status: string }>`
+      SELECT status FROM j5_a2a_exchange WHERE exchange_id = ${exchangeId}
+    `;
+    assert.deepStrictEqual(observed, [{ status: "open" }]);
+
+    yield* dropExchange(exchangeId, "drop-before-append");
+    const attempted = yield* (yield* A2ALedger).appendEventsIfExchangeOpen(
+      silenceAppendCommand(exchangeId, inbound.messageId, "drop-before-append"),
+      exchangeId,
+    );
+    assert.isNull(attempted);
+
+    const rows = yield* sql<{
+      readonly dropped: number;
+      readonly silence: number;
+      readonly silence_deliveries: number;
+    }>`
+      SELECT
+        (SELECT COUNT(*) FROM j5_a2a_comm_event WHERE kind = 'exchange.dropped' AND exchange_id = ${exchangeId}) AS dropped,
+        (SELECT COUNT(*) FROM j5_a2a_comm_event WHERE kind = 'silence.notice' AND exchange_id = ${exchangeId}) AS silence,
+        (SELECT COUNT(*) FROM j5_a2a_delivery WHERE envelope_channel = 'silence_notice' AND command_id = 'command:silence:serialization:drop-before-append') AS silence_deliveries
+    `;
+    assert.deepStrictEqual(rows, [{ dropped: 1, silence: 0, silence_deliveries: 0 }]);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("keeps both historical facts when A3 appends before A9 drops", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const inbound = yield* seedInbound(2);
+    assert.isNotNull(inbound.exchangeId);
+    const exchangeId = inbound.exchangeId!;
+    const ledger = yield* A2ALedger;
+    const appended = yield* ledger.appendEventsIfExchangeOpen(
+      silenceAppendCommand(exchangeId, inbound.messageId, "append-before-drop"),
+      exchangeId,
+    );
+    assert.isNotNull(appended);
+    assert.isTrue(appended!.committed);
+
+    yield* dropExchange(exchangeId, "append-before-drop");
+    const rows = yield* (yield* SqlClient.SqlClient)<{
+      readonly dropped: number;
+      readonly silence: number;
+      readonly silence_deliveries: number;
+    }>`
+      SELECT
+        (SELECT COUNT(*) FROM j5_a2a_comm_event WHERE kind = 'exchange.dropped' AND exchange_id = ${exchangeId}) AS dropped,
+        (SELECT COUNT(*) FROM j5_a2a_comm_event WHERE kind = 'silence.notice' AND exchange_id = ${exchangeId}) AS silence,
+        (SELECT COUNT(*) FROM j5_a2a_delivery WHERE envelope_channel = 'silence_notice' AND command_id = 'command:silence:serialization:append-before-drop') AS silence_deliveries
+    `;
+    assert.deepStrictEqual(rows, [{ dropped: 1, silence: 1, silence_deliveries: 1 }]);
   }).pipe(Effect.provide(makeTestLayer())),
 );
 

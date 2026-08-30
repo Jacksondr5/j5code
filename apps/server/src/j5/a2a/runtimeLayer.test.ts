@@ -9,6 +9,8 @@ import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
+import { A2ALifecycleService } from "./LifecycleService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { ParticipantPlacementService } from "./PlacementService.ts";
 import { A2ASilenceDetector } from "./SilenceDetector.ts";
@@ -74,6 +76,8 @@ it.effect("shares one runtime across the combined HTTP and MCP-style route graph
         ParticipantPlacementService.pipe(Effect.asVoid),
       );
       const silenceConsumer = Layer.effectDiscard(A2ASilenceDetector.pipe(Effect.asVoid));
+      const lifecycleConsumer = Layer.effectDiscard(A2ALifecycleService.pipe(Effect.asVoid));
+      const archiveFactsConsumer = Layer.effectDiscard(A2AArchiveFacts.pipe(Effect.asVoid));
       const runtime = makeJ5A2ARuntimeLayer({ ledger: countedLedger });
       yield* Layer.build(
         Layer.mergeAll(
@@ -81,6 +85,8 @@ it.effect("shares one runtime across the combined HTTP and MCP-style route graph
           secondThreadConsumer,
           placementConsumer,
           silenceConsumer,
+          lifecycleConsumer,
+          archiveFactsConsumer,
         ).pipe(
           Layer.provideMerge(runtime),
           Layer.provide(countedThreadManagement),

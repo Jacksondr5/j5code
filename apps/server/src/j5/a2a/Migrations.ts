@@ -8,10 +8,11 @@ import Migration0004 from "./migrations/004_SilenceNoticeChannel.ts";
 import Migration0005 from "./migrations/005_ImmutableThreadHome.ts";
 import Migration0006 from "./migrations/006_HumanNode.ts";
 import Migration0007 from "./migrations/007_ParticipantPlacement.ts";
+import Migration0008 from "./migrations/008_LifecycleClosure.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
-// Entries 1 through 6 are persisted migration history. Keep their file and manifest names unchanged;
+// Entries 1 through 8 are persisted migration history. Keep their file and manifest names unchanged;
 // applied migrations are skipped by id and never rerun.
 export const migrationEntries = [
   [1, "EpicCommunicationLedger", Migration0001],
@@ -21,6 +22,7 @@ export const migrationEntries = [
   [5, "ImmutableThreadHome", Migration0005],
   [6, "HumanNode", Migration0006],
   [7, "ParticipantPlacement", Migration0007],
+  [8, "LifecycleClosure", Migration0008],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>
