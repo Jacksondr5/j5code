@@ -39,6 +39,10 @@ This ticket touches upstream UI surfaces (sidebar structure, composer, first-run
 
 Registrar merged (#10). A4 merged or in-flight coordination on the sidebar seam. Staff when lane capacity allows — phases 1–2 (A4/A9, then A10+A8) keep priority; SQ1 must merge before phase 3 begins.
 
+## Integration carry rule
+
+FORK exception numbers are allocated by landing order. During an isolated SQ1 carry, retain the SQ1 cases even if another lane's case is absent from the worktree. On a later PR/rebase conflict, resolve mechanically by union: retain every already-landed lane and the SQ1 cases, renumbering only by landing order; never drop another lane's case.
+
 ## Acceptance
 
 End-to-end in the dev app: fresh state → first-run gate forces Squadron creation (name + one folder; name-only correctly refused per DV2) → **second Squadron created over the SAME folder — both fully work (DV1 guard b, the headline check)** → both appear in the Squadron scope dropdown and scoping filters the thread list → selecting a Squadron scope and composing shows the heading + chip; chip changeable until send, immutable after → the created agent's thread is registered to the chip's exact Squadron (assert the Registrar-recorded home matches, and that membership was Registrar-assigned, not project-derived). Schema check: the folder relation round-trips a second folder at the storage layer (list-ready, DV1 guard c) even though the UI caps at one. Negative controls: no code path auto-creates a Squadron; a send with no Squadron context is impossible by construction (the composer always carries one). Baseline suite green.

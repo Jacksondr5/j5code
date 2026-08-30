@@ -2322,6 +2322,7 @@ export type OrchestrationV2ThreadLaunchWorkspaceStrategy =
 export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   commandId: CommandId,
   creationSource: Schema.optional(OrchestrationV2CreationSource),
+  squadronId: Schema.optional(Schema.String),
   threadId: Schema.optional(ThreadId),
   reuseExistingThread: Schema.optional(Schema.Boolean),
   projectId: ProjectId,
