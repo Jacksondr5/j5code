@@ -16,9 +16,12 @@ positive instruction over negation.
 
 - **Naming**: snake_case verbs, snake_case parameters. (`spawn_agent`'s frozen A6 build used
   `clientRequestId` from the delegate passthrough; the rebuilt contract below corrects it.)
-- **Idempotency**: every mutating verb takes required `client_request_id`; the server derives a
-  stable command id from (provider session, request key), so retrying the same logical call replays
-  the original result instead of double-acting.
+- **Idempotency**: every mutating verb accepts optional `client_request_id` — upstream's own
+  pattern. Supplied, the server derives a stable command id from (provider session, request key),
+  so retrying the same logical call replays the original result instead of double-acting. Omitted,
+  the server mints a random key and each call is a fresh command — supply and reuse the id whenever
+  you might retry. (The frozen A6 verbs required it; they relax to optional in the rebuild,
+  2026-08-29.)
 - **Errors** (the toolsmith rule, `plan.md`): failures return `{ code, message }` where the message
   names the _actual state_ and the _next command_ — callers must never have to discover state by
   failing twice.
@@ -87,7 +90,7 @@ description's pitch. Read-only; no events.
 thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and
 records you as its immutable spawner; it is addressable the moment this returns. Choose provider,
 model, and reasoning for the work in the brief — see orchestrator_capabilities for what's
-available. client_request_id is required; reuse it to retry the same spawn safely."
+available. Reuse client_request_id to retry the same spawn safely."
 
 | Input               | Type                                 | Required | Meaning                                           |
 | ------------------- | ------------------------------------ | -------- | ------------------------------------------------- |
@@ -97,7 +100,7 @@ available. client_request_id is required; reuse it to retry the same spawn safel
 |                     |                                      |          | 2026-08-29: inheriting is wrong more than right)  |
 | `model`             | id from `orchestrator_capabilities`  | yes      | Chosen per task                                   |
 | `reasoning`         | option from capabilities descriptors | yes      | Chosen per task                                   |
-| `client_request_id` | string, non-empty                    | yes      | Idempotency key                                   |
+| `client_request_id` | string, non-empty                    | no       | Supply and reuse to make retries safe             |
 
 Result: `participant_id`, `thread_id`, `squadron_id`, `placement` (parent = caller, provenance
 `spawned-by`, source `j5_wrapper`). Semantics: creates an ordinary **root-lineage** thread via the
@@ -121,11 +124,11 @@ home registration, `participant.placement_created`.
 remains, stays readable, and can be messaged again later — stopping halts work, it retires
 nothing. Requires your current squadron_id. Reuse client_request_id to retry safely."
 
-| Input               | Type              | Required                            |
-| ------------------- | ----------------- | ----------------------------------- |
-| `client_request_id` | string, non-empty | yes                                 |
-| `squadron_id`       | SquadronId        | yes (must be the caller's Squadron) |
-| `participant_id`    | ParticipantId     | yes (the one agent to stop)         |
+| Input               | Type              | Required                               |
+| ------------------- | ----------------- | -------------------------------------- |
+| `client_request_id` | string, non-empty | no (supply and reuse for safe retries) |
+| `squadron_id`       | SquadronId        | yes (must be the caller's Squadron)    |
+| `participant_id`    | ParticipantId     | yes (the one agent to stop)            |
 
 Result: exactly one of `interrupt_requested` (a running turn is being interrupted) or
 `already_idle` (no running turn; no side effect). Anything else is an error, not an outcome —
@@ -146,12 +149,12 @@ confirmation_token; call again with that token to proceed. The archived agent le
 roster; its ledger and conversation stay readable forever. Requires your current squadron_id.
 Reuse client_request_id to retry safely."
 
-| Input                | Type              | Required                            |
-| -------------------- | ----------------- | ----------------------------------- |
-| `client_request_id`  | string, non-empty | yes                                 |
-| `squadron_id`        | SquadronId        | yes (must be the caller's Squadron) |
-| `participant_id`     | ParticipantId     | yes (the one agent to archive)      |
-| `confirmation_token` | string            | only when confirming a refusal      |
+| Input                | Type              | Required                               |
+| -------------------- | ----------------- | -------------------------------------- |
+| `client_request_id`  | string, non-empty | no (supply and reuse for safe retries) |
+| `squadron_id`        | SquadronId        | yes (must be the caller's Squadron)    |
+| `participant_id`     | ParticipantId     | yes (the one agent to archive)         |
+| `confirmation_token` | string            | only when confirming a refusal         |
 
 Semantics — the agent-facing form of the archive-flow rulings (AR1–AR4): the **quiet clean path**
 archives immediately when nothing would be cut short; the **loud path** is a refusal whose error
