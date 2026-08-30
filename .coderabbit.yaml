@@ -1,0 +1,10 @@
+# J5-owned CodeRabbit configuration (add-only file).
+# Automatic reviews are DISABLED: with many concurrent PRs iterating exact heads,
+# auto + incremental reviews exhausted the rate allowance on heads that were known
+# to still change, starving finished PRs of their substantive review.
+# Process (PR-group law): the group's Sitter comments `@coderabbitai review` at the
+# reviewer-clean READY head, and again when a re-review is needed. A rate-limited
+# or absent run is "never reviewed", not "no findings" (vacuous != satisfied).
+reviews:
+  auto_review:
+    enabled: false
