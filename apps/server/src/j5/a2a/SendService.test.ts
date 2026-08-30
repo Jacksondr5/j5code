@@ -171,6 +171,58 @@ it.effect("opens once per sender-receiver pair, joins follow-ups, and one reply 
   }).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("refuses a second reply when an accepted reply exists on an open exchange", () =>
+  Effect.gen(function* () {
+    yield* setupSameSquadron();
+    const service = yield* A2ASendService;
+    const sql = yield* SqlClient.SqlClient;
+    const opened = yield* service.send({
+      commandId: CommCommandId.make("command:already-answered:open"),
+      senderThreadId: sender.threadId,
+      to: receiver.id,
+      message: "Can you answer once?",
+      expectReply: true,
+      intent: "Exercise the one-reply guard",
+      acceptedAt: timestamp,
+    });
+    yield* service.send({
+      commandId: CommCommandId.make("command:already-answered:first-reply"),
+      senderThreadId: receiver.threadId,
+      to: sender.id,
+      message: "This is the accepted reply.",
+      exchangeId: opened.exchangeId!,
+      acceptedAt: timestamp,
+    });
+
+    // Reconstruct the defensive state: the reply is durable while the exchange projection is open.
+    yield* sql`
+      UPDATE j5_a2a_exchange
+      SET status = 'open', closed_seq = NULL
+      WHERE exchange_id = ${opened.exchangeId!}
+    `;
+
+    const error = yield* Effect.flip(
+      service.send({
+        commandId: CommCommandId.make("command:already-answered:second-reply"),
+        senderThreadId: receiver.threadId,
+        to: sender.id,
+        message: "This duplicate must be refused.",
+        exchangeId: opened.exchangeId!,
+        acceptedAt: timestamp,
+      }),
+    );
+    assert.equal(error._tag, "A2AExchangeAlreadyAnsweredError");
+
+    const replies = yield* sql<{ readonly count: number }>`
+      SELECT COUNT(*) AS count
+      FROM j5_a2a_delivery
+      WHERE exchange_id = ${opened.exchangeId!}
+        AND exchange_role = 'reply'
+    `;
+    assert.deepStrictEqual(replies, [{ count: 1 }]);
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("refuses a reply whose exchange cannot record a same-squadron closure fact", () =>
   Effect.gen(function* () {
     yield* setupSameSquadron();
