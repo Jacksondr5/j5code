@@ -17,14 +17,17 @@ import {
   ThreadId,
   type ModelSelection,
 } from "@t3tools/contracts";
+import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
 
 import * as CheckpointStore from "../../../checkpointing/CheckpointStore.ts";
 import { ServerConfig } from "../../../config.ts";
@@ -141,66 +144,93 @@ export interface DevDeliverySeedReceipt {
   };
 }
 
-export class DevDeliverySeedArgumentError extends Error {}
+export class DevDeliverySeedArgumentError extends Schema.TaggedErrorClass<DevDeliverySeedArgumentError>()(
+  "DevDeliverySeedArgumentError",
+  { message: Schema.String },
+) {}
 
-export class DevDeliverySeedServerOffError extends Error {
-  constructor(cause: unknown) {
-    super(
-      "The disposable A2A seed runner could not acquire its rollback write preflight. Stop the target T3 server, confirm no process holds this isolated database, then retry.",
-      { cause },
-    );
+export class DevDeliverySeedServerOffError extends Schema.TaggedErrorClass<DevDeliverySeedServerOffError>()(
+  "DevDeliverySeedServerOffError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "The disposable A2A seed runner could not acquire its rollback write preflight. Stop the target T3 server, confirm no process holds this isolated database, then retry.";
   }
 }
 
-class DevDeliverySeedPreflightRollback extends Error {}
+class DevDeliverySeedPreflightRollback extends Schema.TaggedErrorClass<DevDeliverySeedPreflightRollback>()(
+  "DevDeliverySeedPreflightRollback",
+  {},
+) {}
+
+class DevDeliverySeedScenarioError extends Schema.TaggedErrorClass<DevDeliverySeedScenarioError>()(
+  "DevDeliverySeedScenarioError",
+  { name: Schema.String, cause: Schema.Defect() },
+) {}
+
+class DevDeliverySeedControlledRollbackError extends Schema.TaggedErrorClass<DevDeliverySeedControlledRollbackError>()(
+  "DevDeliverySeedControlledRollbackError",
+  {},
+) {}
+
+const isDevDeliverySeedPreflightRollback = Schema.is(DevDeliverySeedPreflightRollback);
+const isDevDeliverySeedServerOffError = Schema.is(DevDeliverySeedServerOffError);
 
 export const parseDevDeliverySeedArgs = (args: ReadonlyArray<string>) => {
   if (args.length !== 2 || args[0] !== "--base-dir") {
-    throw new DevDeliverySeedArgumentError("Usage: --base-dir <absolute isolated T3 home>");
+    throw new DevDeliverySeedArgumentError({
+      message: "Usage: --base-dir <absolute isolated T3 home>",
+    });
   }
   return { baseDir: args[1]! };
 };
 
-const isInside = (candidate: string, parent: string) => {
-  const path = NodePath.relative(parent, candidate);
-  return path === "" || (!path.startsWith("..") && !NodePath.isAbsolute(path));
+const isInside = (path: Path.Path, candidate: string, parent: string) => {
+  const relative = path.relative(parent, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 };
 
 /** Require an existing, absolute disposable T3 home; resolves symlinks before rejecting live state. */
-export const validateIsolatedBaseDir = (baseDir: string) => {
-  if (!NodePath.isAbsolute(baseDir)) {
-    throw new DevDeliverySeedArgumentError("--base-dir must be an absolute path.");
-  }
-  const requested = NodePath.resolve(baseDir);
-  const configuredSharedT3Home = NodePath.resolve(NodeOS.homedir(), ".t3");
-  const sharedT3Home = NodeFS.existsSync(configuredSharedT3Home)
-    ? NodeFS.realpathSync(configuredSharedT3Home)
-    : configuredSharedT3Home;
-  let existingParent = requested;
-  while (!NodeFS.existsSync(existingParent)) {
-    const parent = NodePath.dirname(existingParent);
-    if (parent === existingParent) break;
-    existingParent = parent;
-  }
-  if (
-    isInside(requested, sharedT3Home) ||
-    isInside(NodeFS.realpathSync(existingParent), sharedT3Home)
-  ) {
-    throw new DevDeliverySeedArgumentError(
-      "--base-dir must not be ~/.t3 or anything below it, including ~/.t3/userdata.",
-    );
-  }
-  NodeFS.mkdirSync(requested, { recursive: true });
-  const resolvedBaseDir = NodeFS.realpathSync(requested);
-  if (isInside(resolvedBaseDir, sharedT3Home)) {
-    throw new DevDeliverySeedArgumentError(
-      "--base-dir must not be ~/.t3 or anything below it, including ~/.t3/userdata.",
-    );
-  }
-  return resolvedBaseDir;
-};
+export const validateIsolatedBaseDir = (baseDir: string) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    if (!path.isAbsolute(baseDir)) {
+      return yield* new DevDeliverySeedArgumentError({
+        message: "--base-dir must be an absolute path.",
+      });
+    }
+    const requested = path.resolve(baseDir);
+    const configuredSharedT3Home = path.resolve(NodeOS.homedir(), ".t3");
+    const sharedT3Home = (yield* fileSystem.exists(configuredSharedT3Home))
+      ? yield* fileSystem.realPath(configuredSharedT3Home)
+      : configuredSharedT3Home;
+    let existingParent = requested;
+    while (!(yield* fileSystem.exists(existingParent))) {
+      const parent = path.dirname(existingParent);
+      if (parent === existingParent) break;
+      existingParent = parent;
+    }
+    if (
+      isInside(path, requested, sharedT3Home) ||
+      isInside(path, yield* fileSystem.realPath(existingParent), sharedT3Home)
+    ) {
+      return yield* new DevDeliverySeedArgumentError({
+        message: "--base-dir must not be ~/.t3 or anything below it, including ~/.t3/userdata.",
+      });
+    }
+    yield* fileSystem.makeDirectory(requested, { recursive: true });
+    const resolvedBaseDir = yield* fileSystem.realPath(requested);
+    if (isInside(path, resolvedBaseDir, sharedT3Home)) {
+      return yield* new DevDeliverySeedArgumentError({
+        message: "--base-dir must not be ~/.t3 or anything below it, including ~/.t3/userdata.",
+      });
+    }
+    return resolvedBaseDir;
+  });
 
-const databasePathFor = (baseDir: string) => NodePath.resolve(baseDir, "userdata", "state.sqlite");
+const databasePathFor = (path: Path.Path, baseDir: string) =>
+  path.resolve(baseDir, "userdata", "state.sqlite");
 
 const seededId = (runId: string, suffix: string) => `${runId}:${suffix}`;
 
@@ -219,10 +249,8 @@ const unavailableAdapter: ProviderAdapterV2Shape = {
     Effect.die("The disposable A2A seed runner must never open a provider session."),
 };
 
-const makeRuntimeLayer = (baseDir: string) => {
-  const database = makeSqlitePersistenceLive(databasePathFor(baseDir)).pipe(
-    Layer.provide(NodeServices.layer),
-  );
+const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
+  const database = makeSqlitePersistenceLive(databasePath).pipe(Layer.provide(NodeServices.layer));
   const config = ServerConfig.layerTest(process.cwd(), baseDir);
   const vcs = VcsDriverRegistry.layer.pipe(
     Layer.provide(VcsProcess.layer),
@@ -338,11 +366,7 @@ const atomicScenario = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>) =
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
     sql
       .withTransaction(effect)
-      .pipe(
-        Effect.mapError(
-          (cause) => new Error(`Disposable seed scenario ${name} rolled back.`, { cause }),
-        ),
-      ),
+      .pipe(Effect.mapError((cause) => new DevDeliverySeedScenarioError({ name, cause }))),
   );
 
 /**
@@ -370,9 +394,9 @@ const assertTargetServerStopped = (input: {
       )
       .pipe(
         Effect.catch((cause) =>
-          cause instanceof DevDeliverySeedPreflightRollback
+          isDevDeliverySeedPreflightRollback(cause)
             ? Effect.void
-            : Effect.fail(new DevDeliverySeedServerOffError(cause)),
+            : Effect.fail(new DevDeliverySeedServerOffError({ cause })),
         ),
       );
   });
@@ -421,16 +445,18 @@ const joinScenarioAgents = (input: {
 
 export const runDevDeliverySeed = (requestedBaseDir: string) =>
   Effect.gen(function* () {
-    const baseDir = validateIsolatedBaseDir(requestedBaseDir);
-    const runId = `j5-a2a-seed-${crypto.randomUUID()}`;
-    const now = new Date().toISOString();
+    const baseDir = yield* validateIsolatedBaseDir(requestedBaseDir);
+    const path = yield* Path.Path;
+    const crypto = yield* Crypto.Crypto;
+    const runId = `j5-a2a-seed-${yield* crypto.randomUUIDv4}`;
+    const now = DateTime.formatIso(yield* DateTime.now);
     const projectId = ProjectId.make(`project:${runId}`);
     const senderThreadId = ThreadId.make(`thread:${runId}:sender`);
     const receiverThreadId = ThreadId.make(`thread:${runId}:receiver`);
     const senderId = ParticipantId.make(`agent:${runId}:sender`);
     const receiverId = ParticipantId.make(`agent:${runId}:receiver`);
     const squadronId = SquadronId.make(`squadron:${runId}`);
-    const runtime = makeRuntimeLayer(baseDir);
+    const runtime = makeRuntimeLayer(databasePathFor(path, baseDir), baseDir);
 
     const seed = Effect.gen(function* () {
       const threads = yield* ThreadManagementService;
@@ -756,7 +782,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         version: 1,
         runId,
         baseDir,
-        dbPath: databasePathFor(baseDir),
+        dbPath: databasePathFor(path, baseDir),
         project: { id: projectId },
         threads: {
           sender: { threadId: senderThreadId, participantId: senderId },
@@ -791,23 +817,25 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
     }).pipe(Effect.provide(runtime));
     return yield* seed.pipe(
       Effect.catch((cause) =>
-        cause instanceof DevDeliverySeedServerOffError || !isDatabaseContention(cause)
+        isDevDeliverySeedServerOffError(cause) || !isDatabaseContention(cause)
           ? Effect.fail(cause)
-          : Effect.fail(new DevDeliverySeedServerOffError(cause)),
+          : Effect.fail(new DevDeliverySeedServerOffError({ cause })),
       ),
     );
-  });
+  }).pipe(Effect.provide(NodeServices.layer));
 
 /** Test-only proof that nested production writes roll back as one durable scenario. */
 export const verifyDevDeliverySeedRollback = (requestedBaseDir: string) =>
   Effect.gen(function* () {
-    const baseDir = validateIsolatedBaseDir(requestedBaseDir);
-    const runId = `j5-a2a-rollback-${crypto.randomUUID()}`;
+    const baseDir = yield* validateIsolatedBaseDir(requestedBaseDir);
+    const path = yield* Path.Path;
+    const crypto = yield* Crypto.Crypto;
+    const runId = `j5-a2a-rollback-${yield* crypto.randomUUIDv4}`;
     const squadronId = SquadronId.make(`squadron:${runId}`);
     const senderId = ParticipantId.make(`agent:${runId}:sender`);
     const senderThreadId = ThreadId.make(`thread:${runId}:sender`);
-    const createdAt = new Date().toISOString();
-    const runtime = makeRuntimeLayer(baseDir);
+    const createdAt = DateTime.formatIso(yield* DateTime.now);
+    const runtime = makeRuntimeLayer(databasePathFor(path, baseDir), baseDir);
     return yield* Effect.gen(function* () {
       const ledger = yield* A2ALedger;
       const failedScenario = yield* Effect.exit(
@@ -835,7 +863,7 @@ export const verifyDevDeliverySeedRollback = (requestedBaseDir: string) =>
                 },
               ],
             });
-            return yield* Effect.fail(new Error("Controlled failure after durable ledger writes."));
+            return yield* new DevDeliverySeedControlledRollbackError();
           }),
         ),
       );
@@ -847,4 +875,4 @@ export const verifyDevDeliverySeedRollback = (requestedBaseDir: string) =>
         return yield* Effect.die("Controlled rollback left durable A2A state behind.");
       }
     }).pipe(Effect.provide(runtime));
-  });
+  }).pipe(Effect.provide(NodeServices.layer));

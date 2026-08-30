@@ -1,10 +1,11 @@
 import { assert, it } from "@effect/vitest";
-import * as Effect from "effect/Effect";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Logger from "effect/Logger";
-import * as NodeFS from "node:fs";
+import * as Schema from "effect/Schema";
 import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
 
 import {
@@ -14,6 +15,8 @@ import {
   validateIsolatedBaseDir,
   verifyDevDeliverySeedRollback,
 } from "./devDeliverySeed.ts";
+
+const isDevDeliverySeedArgumentError = Schema.is(DevDeliverySeedArgumentError);
 
 it.effect("requires an explicit isolated base and emits a provider-safe receipt", () =>
   Effect.gen(function* () {
@@ -25,21 +28,18 @@ it.effect("requires an explicit isolated base and emits a provider-safe receipt"
       }
       return undefined;
     })();
-    assert.instanceOf(missingBaseDirError, DevDeliverySeedArgumentError);
-    const sharedStateError = (() => {
-      try {
-        validateIsolatedBaseDir(NodePath.resolve(NodeOS.homedir(), ".t3", "userdata"));
-      } catch (error) {
-        return error;
-      }
-      return undefined;
-    })();
-    assert.instanceOf(sharedStateError, DevDeliverySeedArgumentError);
-    const baseDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "j5-a2a-dev-delivery-seed-test-"),
+    assert.isTrue(isDevDeliverySeedArgumentError(missingBaseDirError));
+    const fileSystem = yield* FileSystem.FileSystem;
+    const sharedStateError = yield* Effect.flip(
+      validateIsolatedBaseDir(`${NodeOS.homedir()}/.t3/userdata`),
     );
+    assert.isTrue(isDevDeliverySeedArgumentError(sharedStateError));
+    const baseDir = yield* fileSystem.makeTempDirectory({
+      directory: NodeOS.tmpdir(),
+      prefix: "j5-a2a-dev-delivery-seed-test-",
+    });
     try {
-      assert.equal(validateIsolatedBaseDir(baseDir), NodeFS.realpathSync(baseDir));
+      assert.equal(yield* validateIsolatedBaseDir(baseDir), yield* fileSystem.realPath(baseDir));
       yield* verifyDevDeliverySeedRollback(baseDir).pipe(
         Effect.provide(Logger.layer([], { mergeWithExisting: false })),
       );
@@ -95,7 +95,7 @@ it.effect("requires an explicit isolated base and emits a provider-safe receipt"
         lock.close();
       }
     } finally {
-      NodeFS.rmSync(baseDir, { recursive: true, force: true });
+      yield* fileSystem.remove(baseDir, { recursive: true, force: true }).pipe(Effect.ignore);
     }
-  }),
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
