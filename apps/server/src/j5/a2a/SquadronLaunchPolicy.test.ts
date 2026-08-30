@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { DV5_NATIVE_COHORTS, resolveSquadronLaunchPolicy } from "./SquadronLaunchPolicy.ts";
+import {
+  DV5_NATIVE_COHORTS,
+  DV5_SCHEDULED_NEW_THREAD_POLICY,
+  resolveSquadronLaunchPolicy,
+} from "./SquadronLaunchPolicy.ts";
 
 describe("resolveSquadronLaunchPolicy", () => {
   it("requires an explicit Squadron for interactive user-origin creation", () => {
@@ -16,7 +20,6 @@ describe("resolveSquadronLaunchPolicy", () => {
 
   it.each([
     ["mobile", "user", true, "mobile-future-squadron"],
-    ["server", "system", true, "scheduled-future-context"],
     ["server", "system", false, "system-bootstrap-native"],
   ] as const)(
     "keeps %s/%s in the named native cohort",
@@ -35,6 +38,24 @@ describe("resolveSquadronLaunchPolicy", () => {
       });
     },
   );
+
+  it("names scheduled new-thread execution as unsupported instead of guessing scheduler provenance", () => {
+    expect(DV5_SCHEDULED_NEW_THREAD_POLICY).toMatchObject({
+      kind: "unsupported-refused",
+      returnCondition: "Return with future scheduling context selection.",
+    });
+  });
+
+  it("requires a Squadron when a system/server launch has an initial message", () => {
+    expect(
+      resolveSquadronLaunchPolicy({
+        createdBy: "system",
+        creationSource: "server",
+        hasInitialMessage: true,
+        sourcePlanHasRegisteredHome: null,
+      }),
+    ).toEqual({ kind: "require-squadron" });
+  });
 
   it("keeps a plan child of a legacy no-home parent native without choosing a Squadron", () => {
     expect(

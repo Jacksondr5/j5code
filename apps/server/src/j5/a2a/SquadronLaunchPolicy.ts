@@ -7,7 +7,6 @@ import type { OrchestrationV2Actor, OrchestrationV2CreationSource } from "@t3too
  */
 export const DV5_NATIVE_COHORTS = {
   "mobile-future-squadron": "Return with the future mobile-Squadron creation surface.",
-  "scheduled-future-context": "Return with future scheduling context selection.",
   "system-bootstrap-native": "Permanently native system-bootstrap cohort.",
   "legacy-plan-child-native":
     "Return when legacy proposed-plan parents can be explicitly registered before child creation.",
@@ -15,18 +14,23 @@ export const DV5_NATIVE_COHORTS = {
     "Return through A2's spawn_agent verb; do not route OrchestratorMcp delegate_task through this launch policy.",
 } as const;
 
+export const DV5_SCHEDULED_NEW_THREAD_POLICY = {
+  kind: "unsupported-refused" as const,
+  message:
+    "Scheduled new-thread execution is unsupported until scheduling context can select an explicit existing Squadron.",
+  returnCondition: "Return with future scheduling context selection.",
+};
+
 export type SquadronLaunchPolicy =
   | { readonly kind: "require-squadron" }
   | {
       readonly kind: "native-exception";
       readonly cohort:
         | "mobile-future-squadron"
-        | "scheduled-future-context"
         | "system-bootstrap-native"
         | "legacy-plan-child-native";
       readonly returnCondition: (typeof DV5_NATIVE_COHORTS)[
         | "mobile-future-squadron"
-        | "scheduled-future-context"
         | "system-bootstrap-native"
         | "legacy-plan-child-native"];
     };
@@ -49,18 +53,16 @@ export const resolveSquadronLaunchPolicy = (input: {
       returnCondition: DV5_NATIVE_COHORTS["mobile-future-squadron"],
     };
   }
-  if (input.createdBy === "system" && input.creationSource === "server") {
-    return input.hasInitialMessage
-      ? {
-          kind: "native-exception",
-          cohort: "scheduled-future-context",
-          returnCondition: DV5_NATIVE_COHORTS["scheduled-future-context"],
-        }
-      : {
-          kind: "native-exception",
-          cohort: "system-bootstrap-native",
-          returnCondition: DV5_NATIVE_COHORTS["system-bootstrap-native"],
-        };
+  if (
+    input.createdBy === "system" &&
+    input.creationSource === "server" &&
+    !input.hasInitialMessage
+  ) {
+    return {
+      kind: "native-exception",
+      cohort: "system-bootstrap-native",
+      returnCondition: DV5_NATIVE_COHORTS["system-bootstrap-native"],
+    };
   }
   if (input.sourcePlanHasRegisteredHome === false) {
     return {
