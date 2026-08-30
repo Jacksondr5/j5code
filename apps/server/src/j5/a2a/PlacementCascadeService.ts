@@ -66,6 +66,11 @@ type AgentParticipantPlacementView = Omit<ParticipantPlacementView, "participant
  * Runs one per-thread primitive over the J5 placement subtree in leaves-first
  * order. Provenance is deliberately absent from traversal: siblings and forks
  * do not move together unless their mutable placement pointers say they do.
+ *
+ * This is the future Crew lifecycle engine. It is deliberately not exposed by
+ * any MCP tool or handler until Crews supply the owning command surface. Its
+ * direct service tests exercise traversal and dispatch without implying that a
+ * user- or agent-callable cascade exists today.
  */
 export const runPlacementCascade = <A, E>(input: {
   readonly placement: Pick<ParticipantPlacementServiceShape, "listSubtree">;

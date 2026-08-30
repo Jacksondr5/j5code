@@ -6,7 +6,6 @@ import * as Crypto from "effect/Crypto";
 import * as McpInvocationContext from "../../../mcp/McpInvocationContext.ts";
 import { A2A_LIST_TOOL_DESCRIPTION, A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
-import { PlacementCascadeRow, PlacementCascadeService } from "../PlacementCascadeService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import {
@@ -14,7 +13,6 @@ import {
   ParticipantDirectoryRow,
   ParticipantId,
   SendMessageResult,
-  SquadronId,
   Urgency,
 } from "../contracts.ts";
 import { ParticipantProvenanceView } from "../placementContracts.ts";
@@ -47,16 +45,6 @@ export const J5ListParticipantsResult = Schema.Struct({
   participants: Schema.Array(J5ParticipantDirectoryRow),
 });
 
-export const J5PlacementCascadeInput = Schema.Struct({
-  client_request_id: Schema.String.check(Schema.isNonEmpty()),
-  squadron_id: SquadronId,
-  participant_id: ParticipantId,
-});
-
-export const J5PlacementCascadeResult = Schema.Struct({
-  results: Schema.Array(PlacementCascadeRow),
-});
-
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
   A2ASendService,
@@ -64,11 +52,7 @@ const dependencies = [
   Crypto.Crypto,
 ];
 
-const placementDependencies = [
-  ...dependencies,
-  ParticipantPlacementService,
-  PlacementCascadeService,
-];
+const placementDependencies = [...dependencies, ParticipantPlacementService];
 
 export const J5SendMessageTool = Tool.make("send_message", {
   description: A2A_SEND_TOOL_DESCRIPTION,
@@ -97,38 +81,5 @@ export const J5ListParticipantsTool = Tool.make("list_participants", {
   .annotate(Tool.Idempotent, true)
   .annotate(Tool.OpenWorld, false);
 
-export const J5StopAgentTool = Tool.make("stop_agent", {
-  description:
-    "Stop one J5 participant and every agent below it in the mutable placement tree, leaves first. The caller must be a current member of squadron_id. Cascade never follows provenance: a fork placed beside its source is not stopped with that source.",
-  parameters: J5PlacementCascadeInput,
-  success: J5PlacementCascadeResult,
-  failure: J5McpFailure,
-  failureMode: "return",
-  dependencies: placementDependencies,
-})
-  .annotate(Tool.Title, "Stop a J5 placement subtree")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, true)
-  .annotate(Tool.Idempotent, true);
-
-export const J5ArchiveAgentTool = Tool.make("archive_agent", {
-  description:
-    "Archive one J5 participant and every agent below it in the mutable placement tree, leaves first. The caller must be a current member of squadron_id. Cascade never follows provenance: a fork placed beside its source is not archived with that source.",
-  parameters: J5PlacementCascadeInput,
-  success: J5PlacementCascadeResult,
-  failure: J5McpFailure,
-  failureMode: "return",
-  dependencies: placementDependencies,
-})
-  .annotate(Tool.Title, "Archive a J5 placement subtree")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, true)
-  .annotate(Tool.Idempotent, true);
-
 /** Shared J5 toolkit bootstrap. Later J5 milestones append their tools here. */
-export const J5Toolkit = Toolkit.make(
-  J5SendMessageTool,
-  J5ListParticipantsTool,
-  J5StopAgentTool,
-  J5ArchiveAgentTool,
-);
+export const J5Toolkit = Toolkit.make(J5SendMessageTool, J5ListParticipantsTool);

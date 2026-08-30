@@ -11,6 +11,7 @@ import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleSe
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
+import { PlacementCascadeService } from "./PlacementCascadeService.ts";
 import { A2ASilenceDetector } from "./SilenceDetector.ts";
 import { makeJ5A2ARuntimeLayer } from "./runtimeLayer.ts";
 
@@ -34,6 +35,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
       const threadManagement = Layer.mock(ThreadManagementService)({
         streamStoredEventsFrom: () => Stream.never,
       });
+      const threadLifecycle = Layer.mock(ThreadLifecycleService)({});
       const runtime = makeJ5A2ARuntimeLayer({ ledger: countedLedger });
       const httpConsumer = Layer.effectDiscard(A2ALedger.pipe(Effect.asVoid));
       const mcpConsumer = Layer.effectDiscard(A2ASilenceDetector.pipe(Effect.asVoid));
@@ -41,7 +43,12 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
         Layer.mergeAll(
           nested === "http" ? httpConsumer.pipe(Layer.provide(runtime)) : httpConsumer,
           nested === "mcp" ? mcpConsumer.pipe(Layer.provide(runtime)) : mcpConsumer,
-        ).pipe(Layer.provide(runtime), Layer.provide(threadManagement), Layer.provide(database)),
+        ).pipe(
+          Layer.provide(runtime),
+          Layer.provide(threadLifecycle),
+          Layer.provide(threadManagement),
+          Layer.provide(database),
+        ),
       );
       return ledgerBuilds;
     }),
@@ -74,18 +81,11 @@ it.effect("shares one runtime across the combined HTTP and MCP-style route graph
       );
       const ledgerConsumer = Layer.effectDiscard(A2ALedger.pipe(Effect.asVoid));
       const secondThreadConsumer = Layer.effectDiscard(ThreadManagementService.pipe(Effect.asVoid));
-      const secondLifecycleConsumer = Layer.effectDiscard(
-        ThreadLifecycleService.pipe(Effect.asVoid),
-      );
+      const cascadeConsumer = Layer.effectDiscard(PlacementCascadeService.pipe(Effect.asVoid));
       const silenceConsumer = Layer.effectDiscard(A2ASilenceDetector.pipe(Effect.asVoid));
       const runtime = makeJ5A2ARuntimeLayer({ ledger: countedLedger });
       yield* Layer.build(
-        Layer.mergeAll(
-          ledgerConsumer,
-          secondThreadConsumer,
-          secondLifecycleConsumer,
-          silenceConsumer,
-        ).pipe(
+        Layer.mergeAll(ledgerConsumer, secondThreadConsumer, cascadeConsumer, silenceConsumer).pipe(
           Layer.provideMerge(runtime),
           Layer.provide(countedThreadLifecycle),
           Layer.provide(countedThreadManagement),

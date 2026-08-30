@@ -1,8 +1,5 @@
-import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 
-import * as ThreadLifecycle from "../../orchestration-v2/ThreadLifecycleService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import { layer as homeRegistrarLayer } from "./HomeRegistrar.ts";
@@ -13,16 +10,6 @@ import { layer as participantPlacementLayer } from "./PlacementService.ts";
 import { layer as sendServiceLayer } from "./SendService.ts";
 import { layer as silenceDetectorLayer } from "./SilenceDetector.ts";
 import { layer as humanInboxLayer } from "./HumanInboxService.ts";
-
-const sharedThreadLifecycleOrStandaloneFallback = Layer.effect(
-  ThreadLifecycle.ThreadLifecycleService,
-  Effect.gen(function* () {
-    const shared = yield* Effect.serviceOption(ThreadLifecycle.ThreadLifecycleService);
-    // Production supplies the V2 runtime's shared service. The fallback keeps
-    // isolated toolkit/listing layers buildable from ThreadManagement alone.
-    return Option.isSome(shared) ? shared.value : yield* ThreadLifecycle.make;
-  }),
-);
 
 export const makeJ5A2ARuntimeLayer = (
   options: {
@@ -38,8 +25,11 @@ export const makeJ5A2ARuntimeLayer = (
   const silenceDetectorProvided = silenceDetectorLayer.pipe(
     Layer.provideMerge(deliveryWorkerProvided),
   );
+  // Retain the unexposed cascade engine in the production graph for the future
+  // Crew command consumer. It requires the one shared upstream lifecycle
+  // service; no fallback constructs a second instance, and no current MCP tool
+  // or handler reaches this service.
   const placementCascadeProvided = placementCascadeLayer.pipe(
-    Layer.provide(sharedThreadLifecycleOrStandaloneFallback),
     Layer.provideMerge(participantPlacementLayer),
   );
 
@@ -54,5 +44,5 @@ export const makeJ5A2ARuntimeLayer = (
   ).pipe(Layer.provideMerge(ledgerProvided));
 };
 
-/** Production J5 A2A services; SQL and V2 thread management stay shared runtime dependencies. */
+/** Production J5 A2A services; SQL and V2 thread/lifecycle services stay shared dependencies. */
 export const J5A2ARuntimeLayer = makeJ5A2ARuntimeLayer();
