@@ -150,7 +150,8 @@ function parseSilenceSummary(noticeType: string, body: string): string | null {
   }
 
   if (noticeType === "stopped/cancelled") {
-    const match = /^(.+?) was (stopped|cancelled) without replying on [^.]+\. .+$/.exec(body);
+    const match =
+      /^(.+?) was (interrupted|cancelled|rolled_back) without replying on [^.]+\. .+$/.exec(body);
     return match ? counterpartSummary(match[1]!, ` was ${match[2]} without replying`) : null;
   }
 

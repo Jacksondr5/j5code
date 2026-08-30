@@ -178,8 +178,18 @@ describe("ThreadA2ADeliveryRenderer", () => {
     ],
     [
       "stopped/cancelled",
-      "agent:counterpart was stopped without replying on exchange:one. The participant was stopped.",
-      "agent:counterpart was stopped without replying",
+      "agent:counterpart was interrupted without replying on exchange:one. The participant was interrupted.",
+      "agent:counterpart was interrupted without replying",
+    ],
+    [
+      "stopped/cancelled",
+      "agent:counterpart was cancelled without replying on exchange:one. The participant was cancelled.",
+      "agent:counterpart was cancelled without replying",
+    ],
+    [
+      "stopped/cancelled",
+      "agent:counterpart was rolled_back without replying on exchange:one. The participant was rolled back.",
+      "agent:counterpart was rolled_back without replying",
     ],
     [
       "awaiting-human",
@@ -228,6 +238,26 @@ describe("ThreadA2ADeliveryRenderer", () => {
     });
     expect(markup).toContain(raw);
     expect(markup).toMatch(/<details[^>]*\bopen(?:=|\s|>)/);
+  });
+
+  it("raw-renders a stopped/cancelled body outside the production lifecycle forms", () => {
+    const raw = [
+      "[Cross-agent messaging system notice: stopped/cancelled]",
+      "",
+      "agent:counterpart was stopped without replying on exchange:one. The participant was stopped.",
+      "",
+      "This is a platform-authored delivery signal, not a peer reply.",
+    ].join("\n");
+    const source = message({
+      id: deliveryId("silence-stopped-mismatch"),
+      createdBy: "system",
+      text: raw,
+    });
+
+    expect(presentThreadA2ADelivery({ message: source })).toEqual({
+      kind: "raw",
+      rawEnvelope: raw,
+    });
   });
 
   it("raw-renders an unknown silence type instead of exposing its slug", () => {
