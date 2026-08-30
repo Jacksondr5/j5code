@@ -22,7 +22,11 @@ export function SquadronDraftChip({
 }) {
   const { status, squadrons } = useSquadronDirectory();
   const draft = useSquadronDraftScope(draftKey);
-  const choices = squadrons.map(({ squadron }) => ({ id: squadron.id, name: squadron.name }));
+  const choices = squadrons.map(({ squadron, projectIds }) => ({
+    id: squadron.id,
+    name: squadron.name,
+    projectIds,
+  }));
   const selected = resolveSquadronScope(choices, draft.squadronId ?? ambientSquadronId);
 
   return (

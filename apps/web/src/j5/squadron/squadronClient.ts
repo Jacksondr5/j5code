@@ -4,7 +4,7 @@ import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
 import { browserCryptoLayer } from "../../cloud/dpop";
 import { primaryEnvironmentHttpLayer } from "../../environments/primary/httpLayer";
@@ -21,6 +21,7 @@ const ManagedSquadron = Schema.Struct({
 export type ManagedSquadron = typeof ManagedSquadron.Type;
 
 const SquadronListResponse = Schema.Struct({ squadrons: Schema.Array(ManagedSquadron) });
+const CreateSquadronResponse = Schema.Struct({ squadron: ManagedSquadron });
 const runtime = ManagedRuntime.make(Layer.merge(primaryEnvironmentHttpLayer, browserCryptoLayer));
 
 const ErrorResponse = Schema.Struct({ message: Schema.String });
@@ -56,3 +57,19 @@ export const listSquadronsEffect = Effect.fn("j5.squadronClient.list")(function*
 
 export const listSquadrons = (): Promise<ReadonlyArray<ManagedSquadron>> =>
   runtime.runPromise(listSquadronsEffect());
+
+export const createSquadronEffect = Effect.fn("j5.squadronClient.create")(function* (input: {
+  readonly name: string;
+  readonly projectId: ProjectId;
+}) {
+  const client = yield* HttpClient.HttpClient;
+  const request = yield* HttpClientRequest.post(
+    resolvePrimaryEnvironmentHttpUrl("/api/j5/squadrons"),
+  ).pipe(HttpClientRequest.bodyJson(input));
+  const response = yield* client.execute(request);
+  const success = yield* requireSquadronSuccess(response);
+  return (yield* HttpClientResponse.schemaBodyJson(CreateSquadronResponse)(success)).squadron;
+});
+
+export const createSquadron = (input: { readonly name: string; readonly projectId: ProjectId }) =>
+  runtime.runPromise(createSquadronEffect(input));

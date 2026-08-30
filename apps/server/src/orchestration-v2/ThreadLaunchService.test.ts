@@ -79,6 +79,7 @@ interface HarnessOptions {
   readonly serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
   readonly providers?: ReadonlyArray<ServerProvider>;
   readonly registerAtDurableLaunch?: SquadronThreadCreationService["Service"]["registerAtDurableLaunch"];
+  readonly findRegisteredHome?: SquadronThreadCreationService["Service"]["findRegisteredHome"];
 }
 
 function makeHarness(options: HarnessOptions = {}) {
@@ -154,6 +155,7 @@ function makeHarness(options: HarnessOptions = {}) {
                 squadronId: "squadron:launch-test" as never,
                 participantId: "agent:launch-test" as never,
               })),
+          findRegisteredHome: options.findRegisteredHome ?? (() => Effect.succeed(null)),
         }),
       ),
     ),
@@ -304,6 +306,63 @@ it.effect("replays the identical registration command after durable thread creat
     assert.lengthOf(registrations, 2);
     assert.deepStrictEqual(registrations[1], registrations[0]);
     assert.equal(registrations[0]?.threadId, launch.threadId);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("inherits the Registrar home from a proposed-plan parent at durable launch", () => {
+  const registrations: Array<{ readonly squadronId?: string }> = [];
+  const harness = makeHarness({
+    findRegisteredHome: () =>
+      Effect.succeed({
+        squadronId: "squadron:parent-home" as never,
+        participantId: "agent:parent" as never,
+      }),
+    registerAtDurableLaunch: (input) => {
+      registrations.push(input);
+      return Effect.succeed({
+        squadronId: "squadron:parent-home" as never,
+        participantId: "agent:child" as never,
+      });
+    },
+  });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    yield* launches.launch({
+      ...launchInput({
+        command: "command:launch:plan-home",
+        thread: "thread:launch:plan-home",
+        squadronId: null,
+      }),
+      sourcePlanRef: {
+        threadId: ThreadId.make("thread:launch:parent"),
+        planId: "plan:launch:parent" as never,
+      },
+    });
+    assert.deepStrictEqual(
+      registrations.map((registration) => registration.squadronId),
+      ["squadron:parent-home"],
+    );
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("keeps a proposed-plan child of a no-home legacy parent native", () => {
+  const harness = makeHarness({
+    registerAtDurableLaunch: () => Effect.die("legacy no-home child must not register"),
+  });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const launched = yield* launches.launch({
+      ...launchInput({
+        command: "command:launch:legacy-plan",
+        thread: "thread:launch:legacy-plan",
+        squadronId: null,
+      }),
+      sourcePlanRef: {
+        threadId: ThreadId.make("thread:launch:legacy-parent"),
+        planId: "plan:launch:legacy-parent" as never,
+      },
+    });
+    assert.equal(launched.threadId, ThreadId.make("thread:launch:legacy-plan"));
   }).pipe(Effect.provide(harness.layer));
 });
 

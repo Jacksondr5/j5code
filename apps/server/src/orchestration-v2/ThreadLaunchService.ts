@@ -6,6 +6,7 @@ import {
   type OrchestrationV2Actor,
   type OrchestrationV2CreationSource,
   type OrchestrationV2ThreadProjection,
+  type PlanId,
   type ProviderInteractionMode,
   ProjectId,
   type RunId,
@@ -27,6 +28,7 @@ import { buildTemporaryWorktreeBranchName, isTemporaryWorktreeBranch } from "@t3
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import { SquadronThreadCreationService } from "../j5/a2a/SquadronThreadCreationService.ts";
+import { resolveSquadronLaunchPolicy } from "../j5/a2a/SquadronLaunchPolicy.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
@@ -71,6 +73,8 @@ export interface ThreadLaunchInput {
   readonly interactionMode: ProviderInteractionMode;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
   readonly initialMessage?: ThreadLaunchInitialMessage;
+  /** Generic provenance for a child created from a proposed plan. */
+  readonly sourcePlanRef?: { readonly threadId: ThreadId; readonly planId: PlanId };
   readonly createdBy: OrchestrationV2Actor;
   readonly creationSource: OrchestrationV2CreationSource;
 }
@@ -541,22 +545,50 @@ export const make = Effect.gen(function* () {
         const projection = yield* threads
           .getThreadProjection(threadId)
           .pipe(Effect.mapError(mapError(input, "create-thread", threadId)));
-        const squadronCreationInput = {
-          ...(input.squadronId === undefined ? {} : { squadronId: input.squadronId }),
-          commandId: input.commandId,
-          threadId,
-          projectId: input.projectId,
-          createdAt: DateTime.formatIso(projection.thread.createdAt),
-        };
-        const registration = yield* Effect.result(
-          squadronCreation.registerAtDurableLaunch(squadronCreationInput),
-        );
-        if (Result.isFailure(registration)) {
-          return yield* failPreparedRun(input, threadId, runId, registration.failure).pipe(
+        const parentHomeResult =
+          input.sourcePlanRef === undefined
+            ? null
+            : yield* Effect.result(
+                squadronCreation.findRegisteredHome(input.sourcePlanRef.threadId),
+              );
+        if (parentHomeResult !== null && Result.isFailure(parentHomeResult)) {
+          return yield* failPreparedRun(input, threadId, runId, parentHomeResult.failure).pipe(
             Effect.andThen(() =>
-              Effect.fail(mapError(input, "register-squadron", threadId)(registration.failure)),
+              Effect.fail(mapError(input, "register-squadron", threadId)(parentHomeResult.failure)),
             ),
           );
+        }
+        const inheritedSquadronId =
+          parentHomeResult === null || Result.isFailure(parentHomeResult)
+            ? undefined
+            : (parentHomeResult.success?.squadronId ?? undefined);
+        const squadronPolicy = resolveSquadronLaunchPolicy({
+          createdBy: input.createdBy,
+          creationSource: input.creationSource,
+          hasInitialMessage: input.initialMessage !== undefined,
+          sourcePlanHasRegisteredHome:
+            input.sourcePlanRef === undefined ? null : inheritedSquadronId !== undefined,
+        });
+        if (squadronPolicy.kind === "require-squadron") {
+          const squadronCreationInput = {
+            ...(inheritedSquadronId === undefined && input.squadronId === undefined
+              ? {}
+              : { squadronId: inheritedSquadronId ?? input.squadronId }),
+            commandId: input.commandId,
+            threadId,
+            projectId: input.projectId,
+            createdAt: DateTime.formatIso(projection.thread.createdAt),
+          };
+          const registration = yield* Effect.result(
+            squadronCreation.registerAtDurableLaunch(squadronCreationInput),
+          );
+          if (Result.isFailure(registration)) {
+            return yield* failPreparedRun(input, threadId, runId, registration.failure).pipe(
+              Effect.andThen(() =>
+                Effect.fail(mapError(input, "register-squadron", threadId)(registration.failure)),
+              ),
+            );
+          }
         }
         const runIsPreparing =
           runId !== null &&

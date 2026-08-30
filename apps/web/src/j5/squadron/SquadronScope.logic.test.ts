@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  filterThreadsForSquadronScope,
   freezeSquadronForFirstSend,
   resolveSquadronScope,
   selectSquadronForDraft,
@@ -8,13 +9,25 @@ import {
 
 describe("Squadron scope logic", () => {
   const choices = [
-    { id: "squadron:alpha", name: "Alpha" },
-    { id: "squadron:bravo", name: "Bravo" },
+    { id: "squadron:alpha", name: "Alpha", projectIds: ["project:alpha"] },
+    { id: "squadron:bravo", name: "Bravo", projectIds: ["project:bravo"] },
   ];
 
   it("does not invent an ambient scope", () => {
     expect(resolveSquadronScope(choices, null)).toBeNull();
     expect(resolveSquadronScope(choices, "squadron:missing")).toBeNull();
+  });
+
+  it("filters the sidebar list from the selected Squadron's explicit folder references", () => {
+    expect(
+      filterThreadsForSquadronScope(
+        [
+          { id: "thread:one", projectId: "project:alpha" },
+          { id: "thread:two", projectId: "project:bravo" },
+        ],
+        { id: "squadron:alpha", name: "Alpha", projectIds: ["project:alpha"] },
+      ),
+    ).toEqual([{ id: "thread:one", projectId: "project:alpha" }]);
   });
 
   it("changes only the pre-send Squadron selection and preserves typed draft content", () => {

@@ -275,6 +275,10 @@ describe("V2 environment commands", () => {
         runtimeMode: "full-access",
         interactionMode: "default",
         titleSeed: "Continue here",
+        sourceProposedPlan: {
+          threadId: ThreadId.make("thread-parent-home"),
+          planId: PlanId.make("plan-parent-home"),
+        },
         bootstrap: {
           createThread: {
             projectId: ProjectId.make("project-1"),
@@ -292,6 +296,10 @@ describe("V2 environment commands", () => {
       expect(launches[0]).toMatchObject({
         threadId: v2ThreadId,
         squadronId: "squadron:explicit-home",
+        sourcePlanRef: {
+          threadId: "thread-parent-home",
+          planId: "plan-parent-home",
+        },
         title: "Continue here",
         generateTitle: true,
         workspaceStrategy: {

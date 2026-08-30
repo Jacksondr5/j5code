@@ -19,9 +19,9 @@ const subscribe = (listener: () => void) => {
 };
 const getSnapshot = () => snapshot;
 
-export const refreshSquadronDirectory = () => {
+export const refreshSquadronDirectory = (options: { readonly force?: boolean } = {}) => {
   if (loading !== null) return loading;
-  if (hasLoaded) return Promise.resolve();
+  if (hasLoaded && options.force !== true) return Promise.resolve();
   snapshot = { status: "loading", squadrons: snapshot.squadrons };
   notify();
   loading = listSquadrons()

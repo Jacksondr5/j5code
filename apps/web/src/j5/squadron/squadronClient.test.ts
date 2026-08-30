@@ -1,8 +1,9 @@
 import { assert, it, vi } from "@effect/vitest";
+import { ProjectId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
-import { listSquadronsEffect, SquadronHttpError } from "./squadronClient";
+import { createSquadronEffect, listSquadronsEffect, SquadronHttpError } from "./squadronClient";
 
 vi.stubGlobal("window", { location: new URL("http://environment.test/") });
 
@@ -36,6 +37,40 @@ it.effect("reads the authenticated Squadron list from the J5 route", () =>
 
     assert.equal(urls[0]?.pathname, "/api/j5/squadrons");
     assert.equal(squadrons[0]?.squadron.name, "Alpha");
+  }),
+);
+
+it.effect("creates a Squadron only from the explicitly selected existing folder", () =>
+  Effect.gen(function* () {
+    const requests: Array<{ readonly method: string; readonly url: URL }> = [];
+    const client = HttpClient.make((request) => {
+      requests.push({ method: request.method, url: new URL(request.url) });
+      return Effect.succeed(
+        HttpClientResponse.fromWeb(
+          request,
+          Response.json({
+            squadron: {
+              squadron: {
+                id: "squadron:created",
+                name: "Created",
+                createdAt: "2026-08-29T00:00:00Z",
+              },
+              projectIds: ["project:selected"],
+            },
+          }),
+        ),
+      );
+    });
+
+    const created = yield* createSquadronEffect({
+      name: "Created",
+      projectId: ProjectId.make("project:selected"),
+    }).pipe(Effect.provideService(HttpClient.HttpClient, client));
+
+    assert.deepStrictEqual(requests, [
+      { method: "POST", url: new URL("http://environment.test/api/j5/squadrons") },
+    ]);
+    assert.deepStrictEqual(created.projectIds, [ProjectId.make("project:selected")]);
   }),
 );
 

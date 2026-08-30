@@ -16,7 +16,11 @@ import { resolveSquadronScope } from "./SquadronScope.logic";
 export function SquadronScopeDropdown() {
   const { status, squadrons } = useSquadronDirectory();
   const selectedId = useSquadronAmbientScope();
-  const choices = squadrons.map(({ squadron }) => ({ id: squadron.id, name: squadron.name }));
+  const choices = squadrons.map(({ squadron, projectIds }) => ({
+    id: squadron.id,
+    name: squadron.name,
+    projectIds,
+  }));
   const selected = resolveSquadronScope(choices, selectedId);
 
   return (

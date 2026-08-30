@@ -7,6 +7,8 @@ import { CommandId, ProjectId, ThreadId } from "@t3tools/contracts";
 import {
   A2AHomeRegistrar,
   type A2AHomeRegistrationError,
+  type A2AHomeLookupError,
+  A2AHomeNotFoundError,
   type RegisteredThreadHome,
 } from "./HomeRegistrar.ts";
 import { CommCommandId, SquadronId } from "./contracts.ts";
@@ -62,6 +64,17 @@ export interface SquadronThreadCreationServiceShape {
   readonly registerAtDurableLaunch: (
     input: SquadronThreadCreationInput,
   ) => Effect.Effect<SquadronThreadCreationResult, SquadronThreadCreationError>;
+  /**
+   * Finds a pre-existing parent home for a creation edge. A legacy parent
+   * without a Registrar entry remains explicitly native; this never chooses a
+   * home from its project or current UI context.
+   */
+  readonly findRegisteredHome: (
+    threadId: ThreadId,
+  ) => Effect.Effect<
+    RegisteredThreadHome | null,
+    Exclude<A2AHomeLookupError, A2AHomeNotFoundError>
+  >;
 }
 
 /**
@@ -116,6 +129,13 @@ export const layer: Layer.Layer<
         });
       });
 
-    return SquadronThreadCreationService.of({ registerAtDurableLaunch });
+    const findRegisteredHome: SquadronThreadCreationServiceShape["findRegisteredHome"] = (
+      threadId,
+    ) =>
+      registrar
+        .getHomeForThread(threadId)
+        .pipe(Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)));
+
+    return SquadronThreadCreationService.of({ registerAtDurableLaunch, findRegisteredHome });
   }),
 );

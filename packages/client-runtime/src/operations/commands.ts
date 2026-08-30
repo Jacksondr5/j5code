@@ -575,6 +575,9 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       commandId,
       creationSource: input.creationSource ?? "web",
       ...(input.squadronId === undefined ? {} : { squadronId: input.squadronId }),
+      ...(input.sourceProposedPlan === undefined
+        ? {}
+        : { sourcePlanRef: input.sourceProposedPlan }),
       threadId: input.threadId,
       ...(bootstrap === undefined ? { reuseExistingThread: true } : {}),
       projectId: thread.projectId,
