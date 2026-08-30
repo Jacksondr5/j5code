@@ -85,14 +85,26 @@ const handlers = {
             `${row.squadronId}\u0000${row.participantId}`,
           );
           return {
-            ...row,
-            threadId: row.participant.kind === "agent" ? row.participant.threadId : null,
+            squadron_id: row.squadronId,
+            participant_id: row.participantId,
+            participant:
+              row.participant.kind === "agent"
+                ? {
+                    kind: row.participant.kind,
+                    id: row.participant.id,
+                    thread_id: row.participant.threadId,
+                  }
+                : row.participant,
+            can_receive_message: row.canReceiveMessage,
+            can_open_exchange: row.canOpenExchange,
+            accepts_urgency: row.acceptsUrgency,
+            thread_id: row.participant.kind === "agent" ? row.participant.threadId : null,
             provenance:
               placement?.provenance ??
               (row.participant.kind === "human"
                 ? ({ kind: "not-applicable" } as const)
                 : ({ kind: "unrecorded" } as const)),
-            placementParentId: placement?.placementParentId ?? null,
+            placement_parent_id: placement?.placementParentId ?? null,
             display_name:
               row.participant.kind === "agent"
                 ? (titleByThreadId.get(row.participant.threadId) ?? null)

@@ -10,10 +10,12 @@ import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import {
+  AgentParticipant,
   ExchangeId,
-  ParticipantDirectoryRow,
+  HumanParticipant,
   ParticipantId,
   SendMessageResult,
+  SquadronId,
   Urgency,
 } from "../contracts.ts";
 import { ParticipantProvenanceView } from "../placementContracts.ts";
@@ -35,11 +37,24 @@ export const J5SendMessageInput = Schema.Struct({
 });
 export type J5SendMessageInput = typeof J5SendMessageInput.Type;
 
+const J5AgentParticipant = Schema.Struct({
+  kind: AgentParticipant.fields.kind,
+  id: AgentParticipant.fields.id,
+  thread_id: AgentParticipant.fields.threadId,
+});
+
+const J5Participant = Schema.Union([J5AgentParticipant, HumanParticipant]);
+
 export const J5ParticipantDirectoryRow = Schema.Struct({
-  ...ParticipantDirectoryRow.fields,
-  threadId: Schema.NullOr(ThreadId),
+  squadron_id: SquadronId,
+  participant_id: ParticipantId,
+  participant: J5Participant,
+  can_receive_message: Schema.Boolean,
+  can_open_exchange: Schema.Boolean,
+  accepts_urgency: Schema.Boolean,
+  thread_id: Schema.NullOr(ThreadId),
   provenance: ParticipantProvenanceView,
-  placementParentId: Schema.NullOr(ParticipantId),
+  placement_parent_id: Schema.NullOr(ParticipantId),
   display_name: Schema.NullOr(Schema.String),
 });
 export type J5ParticipantDirectoryRow = typeof J5ParticipantDirectoryRow.Type;

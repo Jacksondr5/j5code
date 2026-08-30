@@ -35,6 +35,12 @@ import { J5ToolkitHandlersLive } from "./handlers.ts";
 import { J5ListParticipantsResult, J5Toolkit, type J5SendMessageInput } from "./tools.ts";
 
 const decodeJ5ListParticipantsResult = Schema.decodeUnknownEffect(J5ListParticipantsResult);
+const hasKey = (value: unknown, key: string): boolean => {
+  if (Array.isArray(value)) return value.some((item) => hasKey(item, key));
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Readonly<Record<string, unknown>>;
+  return key in record || Object.values(record).some((item) => hasKey(item, key));
+};
 
 const invocation = {
   environmentId: EnvironmentId.make("environment:j5:mcp-handler"),
@@ -183,14 +189,14 @@ it.effect("keeps participant listing placement-read-only", () =>
         listed.result as unknown as {
           readonly participants: ReadonlyArray<{
             readonly provenance: { readonly kind: string };
-            readonly placementParentId: ParticipantId | null;
+            readonly placement_parent_id: ParticipantId | null;
           }>;
         }
       ).participants;
       assert.equal(listedRows[0]?.provenance.kind, "unknown");
-      assert.equal(listedRows[0]?.placementParentId, displayParentId);
+      assert.equal(listedRows[0]?.placement_parent_id, displayParentId);
       assert.deepStrictEqual(listedRows[1]?.provenance, { kind: "not-applicable" });
-      assert.equal(listedRows[1]?.placementParentId, null);
+      assert.equal(listedRows[1]?.placement_parent_id, null);
       assert.equal(yield* Ref.get(placementWrites), 0);
     }).pipe(Effect.provide(layer));
   }),
@@ -322,18 +328,67 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
     const directory = yield* decodeJ5ListParticipantsResult(result.encodedResult);
     assert.equal(yield* Ref.get(shellSnapshotCalls), 1);
 
-    assert.deepStrictEqual(
-      directory.participants.map(({ participantId, display_name }) => ({
-        participantId,
-        display_name,
-      })),
-      [
-        { participantId: activeParticipantId, display_name: "Release reviewer" },
-        { participantId: archivedParticipantId, display_name: "Archived researcher" },
-        { participantId: missingParticipantId, display_name: null },
-        { participantId: humanParticipantId, display_name: null },
-      ],
-    );
+    assert.deepStrictEqual(directory.participants, [
+      {
+        squadron_id: squadronId,
+        participant_id: activeParticipantId,
+        participant: { kind: "agent", id: activeParticipantId, thread_id: activeThreadId },
+        can_receive_message: true,
+        can_open_exchange: true,
+        accepts_urgency: false,
+        thread_id: activeThreadId,
+        provenance: { kind: "unrecorded" },
+        placement_parent_id: null,
+        display_name: "Release reviewer",
+      },
+      {
+        squadron_id: squadronId,
+        participant_id: archivedParticipantId,
+        participant: { kind: "agent", id: archivedParticipantId, thread_id: archivedThreadId },
+        can_receive_message: true,
+        can_open_exchange: true,
+        accepts_urgency: false,
+        thread_id: archivedThreadId,
+        provenance: { kind: "unrecorded" },
+        placement_parent_id: null,
+        display_name: "Archived researcher",
+      },
+      {
+        squadron_id: squadronId,
+        participant_id: missingParticipantId,
+        participant: { kind: "agent", id: missingParticipantId, thread_id: missingThreadId },
+        can_receive_message: true,
+        can_open_exchange: true,
+        accepts_urgency: false,
+        thread_id: missingThreadId,
+        provenance: { kind: "unrecorded" },
+        placement_parent_id: null,
+        display_name: null,
+      },
+      {
+        squadron_id: squadronId,
+        participant_id: humanParticipantId,
+        participant: { kind: "human", id: humanParticipantId },
+        can_receive_message: true,
+        can_open_exchange: true,
+        accepts_urgency: true,
+        thread_id: null,
+        provenance: { kind: "not-applicable" },
+        placement_parent_id: null,
+        display_name: null,
+      },
+    ]);
+    for (const camelCaseKey of [
+      "squadronId",
+      "participantId",
+      "threadId",
+      "placementParentId",
+      "canReceiveMessage",
+      "canOpenExchange",
+      "acceptsUrgency",
+    ]) {
+      assert.isFalse(hasKey(result.encodedResult, camelCaseKey));
+    }
   }),
 );
 
