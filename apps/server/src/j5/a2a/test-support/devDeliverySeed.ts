@@ -56,6 +56,9 @@ import {
   live as deliveryTransportLayer,
 } from "../DeliveryTransport.ts";
 import { manualLayer as deliveryWorkerLayer, A2ADeliveryWorker } from "../DeliveryWorker.ts";
+import { formatHumanEnvelope } from "../EnvelopeFormatter.ts";
+import { A2AHumanInbox, layer as humanInboxLayer } from "../HumanInboxService.ts";
+import { ensureLocalOperatorHumanPerson } from "../HumanPersonRegistry.ts";
 import { A2ALedger, layer as ledgerLayer } from "../LedgerService.ts";
 import { A2ASendService, layer as sendServiceLayer } from "../SendService.ts";
 import { A2ASilenceDetector, manualLayer as silenceDetectorLayer } from "../SilenceDetector.ts";
@@ -93,6 +96,14 @@ export interface DevDeliverySeedReceipt {
       readonly exchangeId: ExchangeId;
       readonly targetThreadId: ThreadId;
     };
+    readonly ta2HumanAnswer: {
+      readonly personId: ParticipantId;
+      readonly inboxRequestLedgerMessageId: LedgerMessageId;
+      readonly exchangeId: ExchangeId;
+      readonly replyLedgerMessageId: LedgerMessageId;
+      readonly replyDeliveryMessageId: MessageId;
+      readonly targetThreadId: ThreadId;
+    };
     readonly ta3Silence: {
       readonly sourceLedgerMessageId: LedgerMessageId;
       readonly sourceDeliveryMessageId: MessageId;
@@ -119,10 +130,6 @@ export interface DevDeliverySeedReceipt {
     readonly nextClaimableAt: null;
   };
   readonly notSeeded: {
-    readonly ta2HumanAnswer: {
-      readonly status: "deferred-not-implemented-this-runner";
-      readonly reason: "TA2 must use the merged #11 HumanInbox production flow; this runner does not fabricate a thread row.";
-    };
     readonly ta4Trailing: {
       readonly status: "held";
       readonly reason: "TA4 remains behind its separately authorized timeline seam.";
@@ -257,10 +264,12 @@ const makeRuntimeLayer = (baseDir: string) => {
   );
   const deliveryWorker = deliveryWorkerLayer.pipe(Layer.provideMerge(deliveryTransportLayer));
   const silenceDetector = silenceDetectorLayer.pipe(Layer.provideMerge(deliveryWorker));
-  const a2a = Layer.mergeAll(sendServiceLayer, deliveryWorker, silenceDetector).pipe(
-    Layer.provideMerge(ledgerLayer),
-    Layer.provide(orchestration),
-  );
+  const a2a = Layer.mergeAll(
+    sendServiceLayer,
+    deliveryWorker,
+    silenceDetector,
+    humanInboxLayer,
+  ).pipe(Layer.provideMerge(ledgerLayer), Layer.provide(orchestration));
   // Reuse the same outbox layer reference as the V2 event sink so the receipt
   // can prove each provider-start effect is cancelled before this process exits.
   const exposedOutbox = effectOutboxLayer.pipe(Layer.provide(database));
@@ -426,12 +435,19 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
       const sender = yield* A2ASendService;
       const deliveries = yield* A2ADeliveryWorker;
       const silence = yield* A2ASilenceDetector;
+      const inbox = yield* A2AHumanInbox;
       const outbox = yield* EffectOutboxV2;
 
       yield* assertTargetServerStopped({
         squadronId: SquadronId.make(seededId(runId, "server-off-preflight")),
         createdAt: now,
       });
+      // This is the production host-local registry bootstrap, deliberately outside
+      // a scenario transaction: it has no Squadron or thread state and must exist
+      // before the real HumanInbox send/answer scenario can address a person.
+      const localOperatorPersonId = yield* ensureLocalOperatorHumanPerson(
+        yield* SqlClient.SqlClient,
+      );
 
       yield* atomicScenario(
         "bootstrap",
@@ -504,6 +520,85 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
             deliveryMessageId: deliveryMessageId(result.messageId),
             exchangeId: result.exchangeId,
             targetThreadId: receiverThreadId,
+          };
+        }),
+      );
+
+      const ta2 = yield* atomicScenario(
+        "ta2-human-answer",
+        Effect.gen(function* () {
+          const opened = yield* sender.send({
+            commandId: CommCommandId.make(seededId(runId, "ta2:ask-human")),
+            senderThreadId,
+            to: localOperatorPersonId,
+            message: "Human inbox seed: reply through this exchange.",
+            expectReply: true,
+            intent: "Seed a real HumanInbox answer delivery.",
+            urgency: "soon",
+            acceptedAt: now,
+          });
+          if (opened.exchangeId === null) {
+            return yield* Effect.die("TA2 seed did not open a human exchange.");
+          }
+          yield* deliveries.drain;
+
+          const resolvedPersonId = yield* inbox.resolvePersonId();
+          if (resolvedPersonId !== localOperatorPersonId) {
+            return yield* Effect.die("TA2 HumanInbox resolved a different local operator.");
+          }
+          const pending = yield* inbox.list(resolvedPersonId);
+          const pendingItem = pending.find((item) => item.exchangeId === opened.exchangeId);
+          if (
+            pendingItem === undefined ||
+            pendingItem.senderId !== senderId ||
+            pendingItem.message !== "Human inbox seed: reply through this exchange."
+          ) {
+            return yield* Effect.die("TA2 seed did not create the expected HumanInbox item.");
+          }
+
+          const replyText = "Human inbox answer seed: this reply came through the real inbox.";
+          const answered = yield* inbox.answer({
+            commandId: CommCommandId.make(seededId(runId, "ta2:answer-human")),
+            personId: resolvedPersonId,
+            exchangeId: pendingItem.exchangeId,
+            message: replyText,
+            acceptedAt: now,
+          });
+          if (answered.exchangeState !== "closed" || answered.exchangeId !== opened.exchangeId) {
+            return yield* Effect.die("TA2 HumanInbox answer did not close its exchange.");
+          }
+          yield* deliveries.drain;
+
+          const replyDeliveryMessageId = deliveryMessageId(answered.messageId);
+          const projected = yield* threads.getThreadProjection(senderThreadId);
+          const reply = projected.messages.find((message) => message.id === replyDeliveryMessageId);
+          const expectedEnvelope = formatHumanEnvelope({
+            senderId: localOperatorPersonId,
+            exchangeId: opened.exchangeId,
+            message: replyText,
+          });
+          if (
+            reply?.role !== "user" ||
+            reply.createdBy !== "user" ||
+            reply.creationSource !== "mcp" ||
+            reply.text !== expectedEnvelope
+          ) {
+            return yield* Effect.die(
+              "TA2 reply was not the v7 human envelope with user/MCP provenance.",
+            );
+          }
+          yield* interruptActiveSeedRun({
+            projectId,
+            threadId: senderThreadId,
+            commandId: CommandId.make(seededId(runId, "ta2:cancel-provider-start")),
+          });
+          return {
+            personId: localOperatorPersonId,
+            inboxRequestLedgerMessageId: opened.messageId,
+            exchangeId: opened.exchangeId,
+            replyLedgerMessageId: answered.messageId,
+            replyDeliveryMessageId,
+            targetThreadId: senderThreadId,
           };
         }),
       );
@@ -632,6 +727,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
       }
       const effectedCommandIds = [
         deliveryCommandId(ta1.ledgerMessageId),
+        deliveryCommandId(ta2.replyLedgerMessageId),
         deliveryCommandId(ta3.sourceLedgerMessageId),
         deliveryCommandId(ta3.noticeLedgerMessageId),
         deliveryCommandId(rawFutureEnvelope.ledgerMessageId),
@@ -665,6 +761,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         },
         scenarios: {
           ta1PeerExchange: ta1,
+          ta2HumanAnswer: ta2,
           ta3Silence: ta3,
           rawFutureEnvelope,
           normalNonA2AContrast,
@@ -678,11 +775,6 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
           nextClaimableAt: null,
         },
         notSeeded: {
-          ta2HumanAnswer: {
-            status: "deferred-not-implemented-this-runner",
-            reason:
-              "TA2 must use the merged #11 HumanInbox production flow; this runner does not fabricate a thread row.",
-          },
           ta4Trailing: {
             status: "held",
             reason: "TA4 remains behind its separately authorized timeline seam.",

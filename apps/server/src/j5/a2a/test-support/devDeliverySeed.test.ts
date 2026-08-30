@@ -47,6 +47,16 @@ it.effect("requires an explicit isolated base and emits a provider-safe receipt"
       assert.isTrue(
         receipt.scenarios.ta1PeerExchange.deliveryMessageId.startsWith("message:j5:a2a:delivery:"),
       );
+      assert.match(receipt.scenarios.ta2HumanAnswer.personId, /^human:/);
+      assert.isTrue(
+        receipt.scenarios.ta2HumanAnswer.replyDeliveryMessageId.startsWith(
+          "message:j5:a2a:delivery:",
+        ),
+      );
+      assert.equal(
+        receipt.scenarios.ta2HumanAnswer.targetThreadId,
+        receipt.threads.sender.threadId,
+      );
       assert.isTrue(
         receipt.scenarios.ta3Silence.noticeDeliveryMessageId.startsWith("message:j5:a2a:delivery:"),
       );
@@ -60,9 +70,8 @@ it.effect("requires an explicit isolated base and emits a provider-safe receipt"
       assert.equal(receipt.noProviderWork.providerAdapterOpenSessionCalls, 0);
       assert.equal(receipt.noProviderWork.activeProviderSessionCount, 0);
       assert.equal(receipt.noProviderWork.activeRunCount, 0);
-      assert.equal(receipt.noProviderWork.cancelledProviderStartEffectCount, 5);
+      assert.equal(receipt.noProviderWork.cancelledProviderStartEffectCount, 6);
       assert.equal(receipt.noProviderWork.nextClaimableAt, null);
-      assert.equal(receipt.notSeeded.ta2HumanAnswer.status, "deferred-not-implemented-this-runner");
       assert.equal(receipt.notSeeded.ta4Trailing.status, "held");
       const lock = new DatabaseSync(receipt.dbPath);
       lock.exec("BEGIN IMMEDIATE");
