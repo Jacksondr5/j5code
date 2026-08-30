@@ -644,6 +644,9 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
             intent: "Seed a truthful silence notice.",
             acceptedAt: now,
           });
+          if (source.exchangeId === null) {
+            return yield* Effect.die("TA3 seed did not open an exchange.");
+          }
           yield* deliveries.drain;
           yield* interruptActiveSeedRun({
             projectId,
@@ -657,7 +660,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
             return yield* Effect.die("TA3 seed did not produce a silence notice.");
           }
           const noticeMessageId = LedgerMessageId.make(
-            `message:j5:a2a:silence:${encodeURIComponent(squadronId)}:${encodeURIComponent(source.exchangeId!)}:${encodeURIComponent(source.messageId)}`,
+            `message:j5:a2a:silence:${encodeURIComponent(squadronId)}:${encodeURIComponent(source.exchangeId)}:${encodeURIComponent(source.messageId)}`,
           );
           yield* deliveries.drain;
           yield* interruptActiveSeedRun({
