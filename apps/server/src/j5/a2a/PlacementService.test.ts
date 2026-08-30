@@ -15,6 +15,7 @@ import {
   PlacementParentIneligibleError,
   PlacementParentNotFoundError,
   PlacementParticipantNotFoundError,
+  PlacementSquadronNotFoundError,
   ParticipantPlacementService,
   layer as placementLayer,
 } from "./PlacementService.ts";
@@ -30,6 +31,7 @@ const isHumanTarget = Schema.is(PlacementHumanTargetError);
 const isParentIneligible = Schema.is(PlacementParentIneligibleError);
 const isParentNotFound = Schema.is(PlacementParentNotFoundError);
 const isParticipantNotFound = Schema.is(PlacementParticipantNotFoundError);
+const isSquadronNotFound = Schema.is(PlacementSquadronNotFoundError);
 const TestLayer = Layer.merge(ledgerLayer, placementLayer).pipe(
   Layer.provideMerge(NodeSqliteClient.layerMemory()),
 );
@@ -523,6 +525,31 @@ it.effect("detects corrupt stored cycles in creation and subtree traversal", () 
     );
     assert.isTrue(isGraphCorrupt(traversalError));
     assert.include(traversalError.message, "Placement graph state");
+  }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect("distinguishes missing Squadron state from a missing subtree participant", () =>
+  Effect.gen(function* () {
+    const missingSquadronId = SquadronId.make("squadron:placement-missing");
+    const missingParticipantId = ParticipantId.make("agent:placement-missing");
+    yield* prepare([]);
+    const placements = yield* ParticipantPlacementService;
+
+    const squadronError = yield* Effect.flip(
+      placements.listSubtree({
+        squadronId: missingSquadronId,
+        participantId: missingParticipantId,
+      }),
+    );
+    assert.isTrue(isSquadronNotFound(squadronError));
+    assert.include(squadronError.message, missingSquadronId);
+
+    const participantError = yield* Effect.flip(
+      placements.listSubtree({ squadronId, participantId: missingParticipantId }),
+    );
+    assert.isTrue(isParticipantNotFound(participantError));
+    assert.include(participantError.message, squadronId);
+    assert.include(participantError.message, missingParticipantId);
   }).pipe(Effect.provide(TestLayer)),
 );
 

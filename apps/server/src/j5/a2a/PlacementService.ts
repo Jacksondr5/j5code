@@ -762,6 +762,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
           ),
         listSubtree: ({ squadronId, participantId }) =>
           Effect.gen(function* () {
+            yield* ensureSquadron(squadronId);
             yield* ensureParticipant(squadronId, participantId);
             const participants = yield* listParticipantsEffect(squadronId);
             const byId = new Map(
