@@ -62,6 +62,57 @@ Against upstream pin `993407dd9e57f1edf2f5681d70140bfefeca93cc`, the complete A2
 
 DV5 extends cases 9–12 without opening a second creation door. `apps/web/src/j5/squadron/FirstRunGate.tsx` creates a named Squadron only from the one explicitly selected primary-environment folder, and state-names a non-primary refusal; `Sidebar.tsx` replaces the old project scope zone with a Squadron scope whose pure predicate filters the real thread list only by immutable Registrar home: selected scope excludes unknown/native, while the explicit unscoped state shows all rows. `DraftHeroHeadline.tsx` renders only `What should we build in ⟨Squadron⟩?`. The plan→implementation behavior is recorded separately in case 11, including its additive `sourcePlanRef` contract exception. On every rebase, verify the inherited-home lookup remains after durable child identity and before preparation, the Sidebar home read has no project proxy, and the separately named mobile, scheduled, system-bootstrap, and agent-spawn returns remain explicit in `SquadronLaunchPolicy.ts` and `docs/j5/product/dogfood-v0.md` DV5.
 
+### A2 root-spawn and single-target stop composition
+
+The post-A6 A2 verb slice starts from merged `j5/main` at
+`f2655a6b3f042bf71cd2cb30ee47b2363ab5adcd`. It extends only the J5-owned MCP
+toolkit and runtime composition: `spawn_agent` creates an ordinary root-lineage
+thread, atomically records immutable home plus placement/provenance facts through
+the existing A6 services, and then dispatches one stable first-turn brief;
+`stop_agent` resolves exactly one participant with `listParticipants` and calls
+the unchanged single-thread interrupt primitive. `PlacementCascadeService` and
+`listSubtree` have no A2 consumer.
+
+The authoritative total lifecycle lock order is `drainPermit ≺ appendPermit ≺
+mutationPermit ≺ DB`. Spawn never drains: its coordinator never acquires
+DeliveryWorker's private `drainPermit`, and a delivery drain may run concurrently
+while contending for `appendPermit`. The coordinator starts at `appendPermit`, then
+takes the placement `mutationPermit`, then opens one outer SQL transaction. Its
+non-reentrant permits are acquired once; the permit-free home/placement primitives
+never re-acquire them or start a nested transaction, and the ledger publishes
+`participant.joined` only after the outer commit succeeds. If a future lifecycle
+path exposes and holds a drain permit while composing, it must acquire that permit
+before `appendPermit`. A forced-interleave DeliveryWorker regression is the gate
+against restoring the former DB-permit-first lock inversion; rollback must leave
+neither durable facts nor a committed-event publication.
+
+Spawn results report the committed A6 provenance source `j5_spawn`; they never
+translate it to the stale `j5_wrapper` wording whose Product documentation true-up
+is in flight. Models without a reasoning-option descriptor, including Grok and
+custom settings models, remain excluded because this contract requires an
+explicit reasoning selection. Admitting them requires a future contract amendment,
+not a default or no-op selection. Optional client request keys make both lifecycle
+tools non-idempotent at the MCP hint level: supplying a stable key still provides
+replay, while a previously rejected create permanently binds that key and requires
+a fresh one. A post-create fact failure can leave a visible unregistered thread;
+A9, not this slice, owns its eventual retirement path.
+
+For `stop_agent`, Squadron membership is the authorization boundary. Placement
+selects exactly one agent/thread; that target thread's committed projection supplies
+the project id required by the unchanged interrupt primitive. Caller project scope
+is deliberately not used as authority or routing truth.
+
+`archive_agent` remains absent by construction until A9 supplies its owned public
+open-Exchange read and dropped-obligation closure services. This slice adds no
+migration, placement store, archive adapter, or nested runtime provider. The
+single shared J5 runtime provide remains the protected `server.ts` composition in
+case 5 above.
+
+PR #19 remains a separate integration boundary. After it merges, this slice must
+rebase onto merged `j5/main` and prove the exact fail-closed production MCP
+allowlist plus the fully contracted `list_participants` result without copying or
+stacking #19's implementation here.
+
 These are per-instance Director/Jackson-authorized exceptions, not standing category permission. The earlier fork rebrand is separately complete at `0c0de1acefea00a34f9529bb97be32ff5056cfcc`; its rebase-critical boundary is recorded in `BRANDING.md:1-5,24-35`. The supporting fork setup plan (`artifacts/fork-setup-plan/index.md:8-12`) and its six T1-T6 ticket artifacts are internal project records and are not present in this repository.
 
 If a required change cannot fit this discipline, stop and review the exception before implementing it.

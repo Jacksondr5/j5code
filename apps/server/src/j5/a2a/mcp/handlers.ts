@@ -1,16 +1,35 @@
+import { CommandId, MessageId, ThreadId, type ModelSelection } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
+import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
-import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
+import {
+  McpInvocationContext,
+  type McpInvocationScope,
+} from "../../../mcp/McpInvocationContext.ts";
+import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
+import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
+import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
+import { A2ALedger } from "../LedgerService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
-import { CommCommandId } from "../contracts.ts";
-import type { ParticipantProvenanceView } from "../placementContracts.ts";
+import { SpawnCompositionService } from "../SpawnCompositionService.ts";
+import { CommCommandId, type ParticipantDirectoryRow, type SquadronId } from "../contracts.ts";
+import { PlacementCommandId, type ParticipantProvenanceView } from "../placementContracts.ts";
 import { J5Toolkit, type J5McpFailure } from "./tools.ts";
+
+class J5AgentToolStateError extends Data.TaggedError("J5AgentToolStateError")<{
+  readonly state: string;
+  readonly nextCommand: string;
+}> {
+  override get message(): string {
+    return `${this.state} ${this.nextCommand}`;
+  }
+}
 
 const failure = (error: unknown): J5McpFailure => ({
   code:
@@ -41,6 +60,49 @@ const projectProvenance = (provenance: ParticipantProvenanceView) => {
   }
 };
 
+const lifecycleId = (input: {
+  readonly kind: "command" | "message" | "thread";
+  readonly providerSessionId: string;
+  readonly requestKey: string;
+  readonly operation: string;
+}) =>
+  [
+    input.kind,
+    "j5",
+    "a2a",
+    "mcp",
+    stablePart(input.providerSessionId),
+    stablePart(input.operation),
+    stablePart(input.requestKey),
+  ].join(":");
+
+const lifecycleCommandId = (input: {
+  readonly providerSessionId: string;
+  readonly requestKey: string;
+  readonly operation: string;
+}) => CommandId.make(lifecycleId({ kind: "command", ...input }));
+
+const spawnThreadId = (input: {
+  readonly providerSessionId: string;
+  readonly requestKey: string;
+}) => ThreadId.make(lifecycleId({ kind: "thread", operation: "spawn", ...input }));
+
+const spawnMessageId = (input: {
+  readonly providerSessionId: string;
+  readonly requestKey: string;
+}) => MessageId.make(lifecycleId({ kind: "message", operation: "spawn-brief", ...input }));
+
+const spawnHomeCommandId = (input: {
+  readonly providerSessionId: string;
+  readonly requestKey: string;
+}) => CommCommandId.make(lifecycleId({ kind: "command", operation: "spawn-home", ...input }));
+
+const spawnPlacementCommandId = (input: {
+  readonly providerSessionId: string;
+  readonly requestKey: string;
+}) =>
+  PlacementCommandId.make(lifecycleId({ kind: "command", operation: "spawn-placement", ...input }));
+
 export const commandIdForRequest = (input: {
   readonly providerSessionId: string;
   readonly requestKey: string;
@@ -48,6 +110,163 @@ export const commandIdForRequest = (input: {
   CommCommandId.make(
     `command:j5:a2a:mcp:${stablePart(input.providerSessionId)}:${stablePart(input.requestKey)}`,
   );
+
+type AgentDirectoryRow = ParticipantDirectoryRow & {
+  readonly participant: Extract<ParticipantDirectoryRow["participant"], { readonly kind: "agent" }>;
+};
+
+const stateError = (state: string, nextCommand: string) =>
+  new J5AgentToolStateError({ state, nextCommand });
+
+const resolveCallerMembership = Effect.fn("j5.a2a.mcp.resolveCallerMembership")(function* (
+  scope: McpInvocationScope,
+) {
+  const directory = yield* (yield* A2ASendService)
+    .listParticipants(scope.threadId)
+    .pipe(
+      Effect.mapError((error) =>
+        stateError(
+          `Caller thread ${scope.threadId} has no usable current Squadron membership: ${error instanceof Error ? error.message : String(error)}.`,
+          "Call list_participants to inspect current Squadron membership before retrying.",
+        ),
+      ),
+    );
+  const memberships = directory.filter(
+    (row): row is AgentDirectoryRow =>
+      row.participant.kind === "agent" && row.participant.threadId === scope.threadId,
+  );
+  if (memberships.length === 0) {
+    return yield* stateError(
+      `Caller membership is missing for thread ${scope.threadId}.`,
+      "Call list_participants to inspect current Squadron membership before retrying.",
+    );
+  }
+  if (memberships.length !== 1) {
+    return yield* stateError(
+      `Caller membership for thread ${scope.threadId} is ambiguous across Squadrons ${memberships.map((row) => row.squadronId).join(", ")}.`,
+      "Call list_participants to inspect current Squadron membership before retrying.",
+    );
+  }
+  return memberships[0]!;
+});
+
+const preflightSpawnCaller = Effect.fn("j5.a2a.mcp.preflightSpawnCaller")(function* (
+  scope: McpInvocationScope,
+) {
+  const homes = yield* A2AHomeRegistrar;
+  const ledger = yield* A2ALedger;
+  const home = yield* homes
+    .getHomeForThread(scope.threadId)
+    .pipe(
+      Effect.mapError((error) =>
+        stateError(
+          `Caller thread ${scope.threadId} has no usable immutable Squadron home: ${error instanceof Error ? error.message : String(error)}.`,
+          "Call list_participants to inspect current membership, then ask the human to restore a sanctioned home before retrying spawn_agent.",
+        ),
+      ),
+    );
+  yield* ledger
+    .readSquadron(home.squadronId)
+    .pipe(
+      Effect.mapError((error) =>
+        stateError(
+          `Caller thread ${scope.threadId} names home Squadron ${home.squadronId}, but that Squadron is unavailable: ${error instanceof Error ? error.message : String(error)}.`,
+          "Ask the human to repair the caller's Squadron home before retrying spawn_agent.",
+        ),
+      ),
+    );
+  const membership = yield* resolveCallerMembership(scope);
+  if (
+    membership.squadronId !== home.squadronId ||
+    membership.participantId !== home.participantId
+  ) {
+    return yield* stateError(
+      `Caller thread ${scope.threadId} has immutable home ${home.squadronId}/${home.participantId}, but its current membership is ${membership.squadronId}/${membership.participantId}.`,
+      "Call list_participants to inspect current membership, then ask the human to repair the mismatch before retrying spawn_agent.",
+    );
+  }
+  return membership;
+});
+
+const requireCallerSquadron = Effect.fn("j5.a2a.mcp.requireCallerSquadron")(function* (
+  scope: McpInvocationScope,
+  squadronId: SquadronId,
+  command: "stop_agent",
+) {
+  const caller = yield* resolveCallerMembership(scope);
+  if (caller.squadronId !== squadronId) {
+    return yield* stateError(
+      `Caller thread ${scope.threadId} is currently in Squadron ${caller.squadronId}, but ${command} targeted ${squadronId}.`,
+      `Retry ${command} with squadron_id=${caller.squadronId}.`,
+    );
+  }
+  return caller;
+});
+
+const spawnTitle = (brief: string, title: string | undefined): string => {
+  const value = title?.trim() || brief.trim();
+  return value.length > 80 ? `${value.slice(0, 77)}...` : value;
+};
+
+const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
+  scope: McpInvocationScope,
+  input: { readonly provider: string; readonly model: string; readonly reasoning: string },
+) {
+  const capabilities = yield* (yield* OrchestratorMcpService)
+    .capabilities(scope)
+    .pipe(
+      Effect.mapError((error) =>
+        stateError(
+          `Provider capabilities are unavailable for spawn_agent: ${error.message}.`,
+          "Call orchestrator_capabilities, choose an available provider, model, and reasoning option, then retry spawn_agent.",
+        ),
+      ),
+    );
+  const provider = capabilities.providers.find(
+    (candidate) => candidate.providerInstanceId === input.provider,
+  );
+  if (provider === undefined) {
+    return yield* stateError(
+      `Provider ${input.provider} is not present in current orchestrator capabilities.`,
+      "Call orchestrator_capabilities and retry spawn_agent with a listed provider.",
+    );
+  }
+  if (provider.constraints.length > 0) {
+    return yield* stateError(
+      `Provider ${input.provider} is currently unavailable: ${provider.constraints.join(" ")}`,
+      "Call orchestrator_capabilities and retry spawn_agent with an unconstrained provider.",
+    );
+  }
+  const model = provider.models.find((candidate) => candidate.id === input.model);
+  if (model === undefined) {
+    return yield* stateError(
+      `Model ${input.model} is not listed for provider ${input.provider}.`,
+      "Call orchestrator_capabilities and retry spawn_agent with a model listed for that provider.",
+    );
+  }
+  const reasoningDescriptor = model.options?.find(
+    (descriptor) =>
+      descriptor.type === "select" &&
+      ["reasoningEffort", "effort", "variant"].includes(descriptor.id),
+  );
+  if (reasoningDescriptor === undefined || reasoningDescriptor.type !== "select") {
+    return yield* stateError(
+      `Model ${input.model} on provider ${input.provider} exposes no reasoning options; spawn_agent requires explicit reasoning selection.`,
+      "Call orchestrator_capabilities and choose a model that exposes reasoning options before retrying spawn_agent.",
+    );
+  }
+  if (!reasoningDescriptor.options.some((option) => option.id === input.reasoning)) {
+    return yield* stateError(
+      `Reasoning ${input.reasoning} is not listed for model ${input.model} on provider ${input.provider}.`,
+      `Call orchestrator_capabilities and retry spawn_agent with one of: ${reasoningDescriptor.options.map((option) => option.id).join(", ")}.`,
+    );
+  }
+  return {
+    instanceId: provider.providerInstanceId,
+    model: model.id,
+    options: [{ id: reasoningDescriptor.id, value: input.reasoning }],
+  } satisfies ModelSelection;
+});
 
 const handlers = {
   send_message: (input) =>
@@ -133,6 +352,182 @@ const handlers = {
           };
         }),
       };
+    }).pipe(Effect.mapError(failure)),
+  spawn_agent: (input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
+      const crypto = yield* Crypto.Crypto;
+      const caller = yield* preflightSpawnCaller(scope);
+      const modelSelection = yield* selectSpawnModel(scope, input);
+      const threadManagement = yield* ThreadManagementService;
+      const parent = yield* threadManagement
+        .getThreadProjection(scope.threadId)
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              `Caller thread ${scope.threadId} cannot be read for spawn_agent: ${error.message}.`,
+              "Read the caller thread state and retry spawn_agent after it is available.",
+            ),
+          ),
+        );
+      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
+      const stableInput = {
+        providerSessionId: scope.providerSessionId,
+        requestKey,
+      };
+      const threadId = spawnThreadId(stableInput);
+      yield* threadManagement
+        .dispatch({
+          type: "thread.create",
+          createdBy: "agent",
+          creationSource: "mcp",
+          commandId: lifecycleCommandId({ ...stableInput, operation: "spawn-create" }),
+          threadId,
+          projectId: parent.thread.projectId,
+          title: spawnTitle(input.brief, input.title),
+          modelSelection,
+          runtimeMode: parent.thread.runtimeMode,
+          interactionMode: parent.thread.interactionMode,
+          branch: parent.thread.branch,
+          worktreePath: parent.thread.worktreePath,
+        })
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              `Peer Agent thread ${threadId} could not be created: ${error.message}.`,
+              error._tag === "OrchestratorCommandPreviouslyRejectedError"
+                ? "Inspect the rejection, correct the request, and retry spawn_agent with a fresh client_request_id; the rejected key is permanently bound."
+                : "Inspect the caller thread and provider state, then retry spawn_agent with the same client_request_id.",
+            ),
+          ),
+        );
+      const child = yield* threadManagement
+        .getThreadProjection(threadId)
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              `Created Peer Agent thread ${threadId} is not readable: ${error.message}.`,
+              "Retry spawn_agent with the same client_request_id so registration can continue safely.",
+            ),
+          ),
+        );
+      const facts = yield* (yield* SpawnCompositionService)
+        .recordFacts({
+          homeCommandId: spawnHomeCommandId(stableInput),
+          placementCommandId: spawnPlacementCommandId(stableInput),
+          squadronId: caller.squadronId,
+          threadId,
+          spawnedByParticipantId: caller.participantId,
+          createdAt: DateTime.formatIso(child.thread.createdAt),
+        })
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              `Peer Agent thread ${threadId} exists as a visible orphan without committed home/placement facts or a started brief: ${error.message}.`,
+              "Retry spawn_agent with the same client_request_id only after repairing transient state; otherwise ask the human operator to retire or repair the orphan after A9 lifecycle support lands.",
+            ),
+          ),
+        );
+      if (
+        facts.placement.provenance.kind !== "spawned-by" ||
+        facts.placement.provenance.source !== "j5_spawn" ||
+        facts.placement.placementParentId === null
+      ) {
+        return yield* stateError(
+          `Peer Agent ${facts.home.participantId} committed placement facts that do not satisfy the J5 spawn contract.`,
+          "Call list_participants to inspect committed placement truth and ask the human operator to repair the inconsistent record.",
+        );
+      }
+      yield* threadManagement
+        .dispatch({
+          type: "message.dispatch",
+          createdBy: "agent",
+          creationSource: "mcp",
+          commandId: lifecycleCommandId({ ...stableInput, operation: "spawn-brief" }),
+          threadId,
+          messageId: spawnMessageId(stableInput),
+          text: input.brief,
+          attachments: [],
+          modelSelection,
+          dispatchMode: { type: "start_immediately" },
+        })
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              `Peer Agent ${facts.home.participantId} is registered and addressable, but its brief did not start: ${error.message}.`,
+              "Retry spawn_agent with the same client_request_id to start the same brief safely.",
+            ),
+          ),
+        );
+      return {
+        participant_id: facts.home.participantId,
+        thread_id: threadId,
+        squadron_id: facts.home.squadronId,
+        placement: {
+          placement_parent_id: facts.placement.placementParentId,
+          provenance: {
+            kind: "spawned-by" as const,
+            spawned_by_participant_id: facts.placement.provenance.spawnedByParticipantId,
+            source: facts.placement.provenance.source,
+          },
+        },
+      };
+    }).pipe(Effect.mapError(failure)),
+  stop_agent: (input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
+      const crypto = yield* Crypto.Crypto;
+      yield* requireCallerSquadron(scope, input.squadron_id, "stop_agent");
+      const placements = yield* ParticipantPlacementService;
+      const matches = (yield* placements.listParticipants(input.squadron_id)).filter(
+        (row) => row.participantId === input.participant_id,
+      );
+      if (matches.length !== 1) {
+        return yield* stateError(
+          `Squadron ${input.squadron_id} has ${matches.length === 0 ? "no" : "ambiguous"} participant ${input.participant_id}.`,
+          "Call list_participants and retry stop_agent with exactly one listed agent participant_id.",
+        );
+      }
+      const target = matches[0]!;
+      if (target.participant.kind !== "agent" || target.threadId === null) {
+        return yield* stateError(
+          `Participant ${input.participant_id} in Squadron ${input.squadron_id} is not an agent with a thread and cannot be stopped.`,
+          "Call list_participants and retry stop_agent with an agent participant_id.",
+        );
+      }
+      const threadManagement = yield* ThreadManagementService;
+      const targetProjection = yield* threadManagement
+        .getThreadProjection(target.threadId)
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              `Peer Agent thread ${target.threadId} cannot be read for stop_agent: ${error.message}.`,
+              "Call list_participants to confirm the target thread, then retry stop_agent.",
+            ),
+          ),
+        );
+      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
+      const result = yield* threadManagement
+        .interruptThread({
+          projectId: targetProjection.thread.projectId,
+          commandId: lifecycleCommandId({
+            providerSessionId: scope.providerSessionId,
+            requestKey,
+            operation: "stop-agent",
+          }),
+          threadId: target.threadId,
+        })
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              `Peer Agent ${input.participant_id} on thread ${target.threadId} could not be stopped: ${error.message}.`,
+              "Call list_participants to confirm the target, then retry stop_agent with the same client_request_id.",
+            ),
+          ),
+        );
+      return result.type === "interrupt_requested"
+        ? ("interrupt_requested" as const)
+        : ("already_idle" as const);
     }).pipe(Effect.mapError(failure)),
 } satisfies Parameters<typeof J5Toolkit.toLayer>[0];
 

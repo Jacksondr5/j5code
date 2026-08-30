@@ -15,6 +15,7 @@ import { runJ5A2AMigrations } from "./Migrations.ts";
 import { ParticipantPlacementService } from "./PlacementService.ts";
 import { A2ASilenceDetector } from "./SilenceDetector.ts";
 import { ThreadHomesService } from "./ThreadHomesService.ts";
+import { SpawnCompositionService } from "./SpawnCompositionService.ts";
 import { makeJ5A2ARuntimeLayer } from "./runtimeLayer.ts";
 
 const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
@@ -80,6 +81,9 @@ it.effect("shares one runtime across the combined HTTP and MCP-style route graph
       const lifecycleConsumer = Layer.effectDiscard(A2ALifecycleService.pipe(Effect.asVoid));
       const archiveFactsConsumer = Layer.effectDiscard(A2AArchiveFacts.pipe(Effect.asVoid));
       const threadHomesConsumer = Layer.effectDiscard(ThreadHomesService.pipe(Effect.asVoid));
+      const spawnCompositionConsumer = Layer.effectDiscard(
+        SpawnCompositionService.pipe(Effect.asVoid),
+      );
       const runtime = makeJ5A2ARuntimeLayer({ ledger: countedLedger });
       yield* Layer.build(
         Layer.mergeAll(
@@ -90,6 +94,7 @@ it.effect("shares one runtime across the combined HTTP and MCP-style route graph
           lifecycleConsumer,
           archiveFactsConsumer,
           threadHomesConsumer,
+          spawnCompositionConsumer,
         ).pipe(
           Layer.provideMerge(runtime),
           Layer.provide(countedThreadManagement),

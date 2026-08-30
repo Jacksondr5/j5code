@@ -6,8 +6,19 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
-import { type CommCommandId, ParticipantId, SquadronId } from "./contracts.ts";
-import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
+import {
+  type AppendCommEventCommand,
+  type CommCommandId,
+  ParticipantId,
+  SquadronId,
+  type StoredCommEvent,
+} from "./contracts.ts";
+import {
+  A2ALedger,
+  type A2ALedgerError,
+  A2ALedgerTransactionWriter,
+  type AppendResult,
+} from "./LedgerService.ts";
 
 export interface RegisteredThreadHome {
   readonly squadronId: SquadronId;
@@ -93,6 +104,23 @@ export interface A2AHomeRegistrarShape {
 export class A2AHomeRegistrar extends Context.Service<A2AHomeRegistrar, A2AHomeRegistrarShape>()(
   "t3/j5/a2a/HomeRegistrar/A2AHomeRegistrar",
 ) {}
+
+export interface RegisteredThreadHomeInTransaction {
+  readonly home: RegisteredThreadHome;
+  readonly committedEvents: ReadonlyArray<StoredCommEvent>;
+}
+
+/** Internal registration seam used only while the ledger write permit is already held. */
+export interface A2AHomeRegistrationTransactionShape {
+  readonly registerAtCreationInTransaction: (
+    input: RegisterAtCreationInput,
+  ) => Effect.Effect<RegisteredThreadHomeInTransaction, A2AHomeRegistrationError>;
+}
+
+export class A2AHomeRegistrationTransaction extends Context.Service<
+  A2AHomeRegistrationTransaction,
+  A2AHomeRegistrationTransactionShape
+>()("t3/j5/a2a/HomeRegistrar/A2AHomeRegistrationTransaction") {}
 
 interface HistoricalHomeRow {
   readonly home_squadron_id: string;
@@ -213,16 +241,91 @@ const threadHomeRows = (sql: SqlClient.SqlClient, threadIds: ReadonlyArray<Threa
     WHERE home_rank = 1
   `;
 
+const makeRegisterAtCreation = (input: {
+  readonly getHomeForThread: A2AHomeRegistrarShape["getHomeForThread"];
+  readonly readSquadron: A2ALedger["Service"]["readSquadron"];
+  readonly append: (command: AppendCommEventCommand) => Effect.Effect<AppendResult, A2ALedgerError>;
+}) =>
+  Effect.fn("j5.a2a.registerAtCreation")(function* (registration: RegisterAtCreationInput) {
+    const existing = yield* input
+      .getHomeForThread(registration.threadId)
+      .pipe(Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)));
+    if (existing !== null && existing.squadronId !== registration.squadronId) {
+      return yield* new A2AHomeConflictError({
+        threadId: registration.threadId,
+        existingSquadronId: existing.squadronId,
+        requestedSquadronId: registration.squadronId,
+      });
+    }
+
+    yield* input.readSquadron(registration.squadronId);
+    const participantId = participantIdForThread(registration.threadId);
+    const appendResult = yield* Effect.result(
+      input.append({
+        commandId: registration.commandId,
+        squadronId: registration.squadronId,
+        acceptedAt: registration.createdAt,
+        event: {
+          kind: "participant.joined",
+          sender: null,
+          receiver: participantId,
+          exchangeId: null,
+          correlationId: null,
+          payload: {
+            participant: {
+              kind: "agent",
+              id: participantId,
+              threadId: registration.threadId,
+            },
+          },
+          createdAt: registration.createdAt,
+        },
+      }),
+    );
+    if (appendResult._tag === "Failure") {
+      const racedHome = yield* input
+        .getHomeForThread(registration.threadId)
+        .pipe(Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)));
+      if (racedHome === null) return yield* appendResult.failure;
+      if (racedHome.squadronId !== registration.squadronId) {
+        return yield* new A2AHomeConflictError({
+          threadId: registration.threadId,
+          existingSquadronId: racedHome.squadronId,
+          requestedSquadronId: registration.squadronId,
+        });
+      }
+      return { home: racedHome, committedEvents: [] };
+    }
+
+    const event = appendResult.success.event;
+    if (
+      event.kind !== "participant.joined" ||
+      event.squadronId !== registration.squadronId ||
+      event.createdAt !== registration.createdAt ||
+      event.payload.participant.kind !== "agent" ||
+      event.payload.participant.threadId !== registration.threadId ||
+      event.payload.participant.id !== participantId
+    ) {
+      return yield* new A2AHomeCommandConflictError({
+        commandId: registration.commandId,
+        requestedThreadId: registration.threadId,
+        requestedSquadronId: registration.squadronId,
+      });
+    }
+    return {
+      home: { squadronId: registration.squadronId, participantId },
+      committedEvents: appendResult.success.committed ? [event] : [],
+    };
+  });
+
 export const layer: Layer.Layer<A2AHomeRegistrar, never, A2ALedger | SqlClient.SqlClient> =
   Layer.effect(
     A2AHomeRegistrar,
     Effect.gen(function* () {
       const ledger = yield* A2ALedger;
       const sql = yield* SqlClient.SqlClient;
-
       const getHomeForThread: A2AHomeRegistrarShape["getHomeForThread"] = (threadId) =>
         resolveThreadHome(sql, threadId).pipe(Effect.map((resolution) => resolution.home));
-
       const getHomesForThreads: A2AHomeRegistrarShape["getHomesForThreads"] = (threadIds) =>
         Effect.gen(function* () {
           const uniqueThreadIds = uniqueInFirstOccurrenceOrder(threadIds);
@@ -246,76 +349,37 @@ export const layer: Layer.Layer<A2AHomeRegistrar, never, A2ALedger | SqlClient.S
           });
         });
 
-      const registerAtCreation: A2AHomeRegistrarShape["registerAtCreation"] = (input) =>
-        Effect.gen(function* () {
-          const existing = yield* getHomeForThread(input.threadId).pipe(
-            Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)),
-          );
-          if (existing !== null && existing.squadronId !== input.squadronId) {
-            return yield* new A2AHomeConflictError({
-              threadId: input.threadId,
-              existingSquadronId: existing.squadronId,
-              requestedSquadronId: input.squadronId,
-            });
-          }
-
-          yield* ledger.readSquadron(input.squadronId);
-          const participantId = participantIdForThread(input.threadId);
-          const appendResult = yield* Effect.result(
-            ledger.append({
-              commandId: input.commandId,
-              squadronId: input.squadronId,
-              acceptedAt: input.createdAt,
-              event: {
-                kind: "participant.joined",
-                sender: null,
-                receiver: participantId,
-                exchangeId: null,
-                correlationId: null,
-                payload: {
-                  participant: {
-                    kind: "agent",
-                    id: participantId,
-                    threadId: input.threadId,
-                  },
-                },
-                createdAt: input.createdAt,
-              },
-            }),
-          );
-          if (appendResult._tag === "Failure") {
-            const racedHome = yield* getHomeForThread(input.threadId).pipe(
-              Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)),
-            );
-            if (racedHome === null) return yield* appendResult.failure;
-            if (racedHome.squadronId !== input.squadronId) {
-              return yield* new A2AHomeConflictError({
-                threadId: input.threadId,
-                existingSquadronId: racedHome.squadronId,
-                requestedSquadronId: input.squadronId,
-              });
-            }
-            return racedHome;
-          }
-
-          const event = appendResult.success.event;
-          if (
-            event.kind !== "participant.joined" ||
-            event.squadronId !== input.squadronId ||
-            event.createdAt !== input.createdAt ||
-            event.payload.participant.kind !== "agent" ||
-            event.payload.participant.threadId !== input.threadId ||
-            event.payload.participant.id !== participantId
-          ) {
-            return yield* new A2AHomeCommandConflictError({
-              commandId: input.commandId,
-              requestedThreadId: input.threadId,
-              requestedSquadronId: input.squadronId,
-            });
-          }
-          return { squadronId: input.squadronId, participantId };
-        });
-
-      return A2AHomeRegistrar.of({ registerAtCreation, getHomeForThread, getHomesForThreads });
+      const register = makeRegisterAtCreation({
+        getHomeForThread,
+        readSquadron: ledger.readSquadron,
+        append: ledger.append,
+      });
+      return A2AHomeRegistrar.of({
+        getHomeForThread,
+        getHomesForThreads,
+        registerAtCreation: (input) => register(input).pipe(Effect.map((result) => result.home)),
+      });
     }),
   );
+
+export const transactionLayer: Layer.Layer<
+  A2AHomeRegistrationTransaction,
+  never,
+  A2ALedger | A2ALedgerTransactionWriter | SqlClient.SqlClient
+> = Layer.effect(
+  A2AHomeRegistrationTransaction,
+  Effect.gen(function* () {
+    const ledger = yield* A2ALedger;
+    const ledgerWriter = yield* A2ALedgerTransactionWriter;
+    const sql = yield* SqlClient.SqlClient;
+    const getHomeForThread: A2AHomeRegistrarShape["getHomeForThread"] = (threadId) =>
+      resolveThreadHome(sql, threadId).pipe(Effect.map((resolution) => resolution.home));
+    return A2AHomeRegistrationTransaction.of({
+      registerAtCreationInTransaction: makeRegisterAtCreation({
+        getHomeForThread,
+        readSquadron: ledger.readSquadron,
+        append: ledgerWriter.appendInTransaction,
+      }),
+    });
+  }),
+);
