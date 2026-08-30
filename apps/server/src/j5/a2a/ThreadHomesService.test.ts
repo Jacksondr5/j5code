@@ -17,7 +17,7 @@ const makeTestLayer = () => {
   const database = NodeSqliteClient.layerMemory();
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const registrar = homeRegistrarLayer.pipe(Layer.provide(ledger), Layer.provide(database));
-  const threadHomes = threadHomesServiceLayer.pipe(Layer.provide(registrar), Layer.provide(ledger));
+  const threadHomes = threadHomesServiceLayer.pipe(Layer.provide(registrar));
   return Layer.mergeAll(database, ledger, registrar, threadHomes);
 };
 
@@ -78,4 +78,30 @@ it.effect(
       });
       assert.deepStrictEqual(yield* reads.threadHomes([]), { entries: [] });
     }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("delegates a visible thread set to one Registrar batch lookup", () =>
+  Effect.gen(function* () {
+    const firstThread = ThreadId.make("thread:thread-homes:batch:first");
+    const secondThread = ThreadId.make("thread:thread-homes:batch:second");
+    const calls: Array<ReadonlyArray<ThreadId>> = [];
+    const registrar = Layer.mock(A2AHomeRegistrar)({
+      getHomesForThreads: (threadIds) => {
+        calls.push(threadIds);
+        return Effect.succeed(
+          threadIds.map((threadId) => ({ threadId, home: { kind: "unknown" as const } })),
+        );
+      },
+    });
+    const reads = threadHomesServiceLayer.pipe(Layer.provide(registrar));
+    const service = yield* ThreadHomesService.pipe(Effect.provide(reads));
+
+    assert.deepStrictEqual(yield* service.threadHomes([firstThread, secondThread, firstThread]), {
+      entries: [
+        { threadId: firstThread, home: { kind: "unknown" } },
+        { threadId: secondThread, home: { kind: "unknown" } },
+      ],
+    });
+    assert.deepStrictEqual(calls, [[firstThread, secondThread]]);
+  }),
 );

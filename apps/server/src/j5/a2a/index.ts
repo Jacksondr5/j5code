@@ -29,6 +29,7 @@ export type {
   A2AHomeRegistrationError,
   RegisteredThreadHome,
   RegisterAtCreationInput,
+  ThreadHomeLookup,
 } from "./HomeRegistrar.ts";
 export * from "./LedgerService.ts";
 export {

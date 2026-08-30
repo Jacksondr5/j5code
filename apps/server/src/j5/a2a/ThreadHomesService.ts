@@ -5,7 +5,6 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
-import { type A2ALedgerError, A2ALedger } from "./LedgerService.ts";
 import { A2AHomeRegistrar } from "./HomeRegistrar.ts";
 import { SquadronId } from "./contracts.ts";
 
@@ -39,7 +38,7 @@ export const ThreadHomesResponse = Schema.Struct({
 });
 export type ThreadHomesResponse = typeof ThreadHomesResponse.Type;
 
-export type ThreadHomesError = A2ALedgerError | SqlError;
+export type ThreadHomesError = SqlError;
 
 export interface ThreadHomesShape {
   /**
@@ -58,42 +57,16 @@ export class ThreadHomesService extends Context.Service<ThreadHomesService, Thre
 const uniqueInFirstOccurrenceOrder = <Value>(values: ReadonlyArray<Value>) =>
   Array.from(new Set(values));
 
-const unknownHome = (): ThreadHome => ({ kind: "unknown" });
+export const layer: Layer.Layer<ThreadHomesService, never, A2AHomeRegistrar> = Layer.effect(
+  ThreadHomesService,
+  Effect.gen(function* () {
+    const registrar = yield* A2AHomeRegistrar;
 
-export const layer: Layer.Layer<ThreadHomesService, never, A2AHomeRegistrar | A2ALedger> =
-  Layer.effect(
-    ThreadHomesService,
-    Effect.gen(function* () {
-      const registrar = yield* A2AHomeRegistrar;
-      const ledger = yield* A2ALedger;
+    const threadHomes: ThreadHomesShape["threadHomes"] = (threadIds) =>
+      registrar
+        .getHomesForThreads(uniqueInFirstOccurrenceOrder(threadIds))
+        .pipe(Effect.map((entries) => ({ entries }) satisfies ThreadHomesResponse));
 
-      const threadHomes: ThreadHomesShape["threadHomes"] = (threadIds) =>
-        Effect.gen(function* () {
-          const uniqueThreadIds = uniqueInFirstOccurrenceOrder(threadIds);
-          const entries = yield* Effect.forEach(uniqueThreadIds, (threadId) =>
-            registrar.getHomeForThread(threadId).pipe(
-              Effect.flatMap((home) =>
-                ledger.readSquadron(home.squadronId).pipe(
-                  Effect.map(
-                    (squadron) =>
-                      ({
-                        threadId,
-                        home: {
-                          kind: "known",
-                          squadron: { id: squadron.id, name: squadron.name },
-                        },
-                      }) satisfies ThreadHomeEntry,
-                  ),
-                ),
-              ),
-              Effect.catchTag("A2AHomeNotFoundError", () =>
-                Effect.succeed({ threadId, home: unknownHome() } satisfies ThreadHomeEntry),
-              ),
-            ),
-          );
-          return { entries } satisfies ThreadHomesResponse;
-        });
-
-      return ThreadHomesService.of({ threadHomes });
-    }),
-  );
+    return ThreadHomesService.of({ threadHomes });
+  }),
+);

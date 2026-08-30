@@ -20,6 +20,7 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
   const knownThread = ThreadId.make("thread:thread-homes-http:known");
   const nativeThread = ThreadId.make("thread:thread-homes-http:native");
   const received: Array<ReadonlyArray<ThreadId>> = [];
+  let authMode: "missing" | "missing-read-scope" | "read" = "missing";
   const homes = Layer.mock(ThreadHomesService)({
     threadHomes: (threadIds) => {
       received.push(threadIds);
@@ -41,13 +42,17 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
     },
   });
   const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
-    authenticateHttpRequest: () =>
-      Effect.succeed({
+    authenticateHttpRequest: () => {
+      if (authMode === "missing") {
+        return Effect.fail(new EnvironmentAuth.ServerAuthMissingCredentialError({}));
+      }
+      return Effect.succeed({
         sessionId: AuthSessionId.make("auth-session:thread-homes"),
         subject: "thread-homes-test",
         method: "bearer-access-token",
-        scopes: [AuthOrchestrationReadScope],
-      }),
+        scopes: authMode === "read" ? [AuthOrchestrationReadScope] : [],
+      });
+    },
   });
   const routes = j5AuthenticatedRoutesLayer.pipe(
     Layer.provide(homes),
@@ -63,13 +68,23 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
   const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
 
   try {
-    const response = await handler(
-      new Request(`http://environment.test${THREAD_HOMES_PATH}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ threadIds: [knownThread, nativeThread, knownThread] }),
-      }),
-    );
+    const request = () =>
+      handler(
+        new Request(`http://environment.test${THREAD_HOMES_PATH}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ threadIds: [knownThread, nativeThread, knownThread] }),
+        }),
+      );
+    const unauthenticated = await request();
+    assert.equal(unauthenticated.status, 401);
+
+    authMode = "missing-read-scope";
+    const missingReadScope = await request();
+    assert.equal(missingReadScope.status, 403);
+
+    authMode = "read";
+    const response = await request();
     assert.equal(response.status, 200);
     assert.deepStrictEqual(await response.json(), {
       entries: [
