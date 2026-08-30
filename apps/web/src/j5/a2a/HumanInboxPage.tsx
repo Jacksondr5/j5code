@@ -37,6 +37,9 @@ const urgencyPresentation = {
   fyi: { label: "FYI", variant: "secondary" as const },
 };
 
+export const formatAnsweredAgeLabel = (elapsed: string) =>
+  elapsed === "just now" ? "answered just now" : elapsed ? `answered ${elapsed} ago` : "answered";
+
 export function captureHumanInboxAnswer(
   event: { readonly currentTarget: { readonly value: string } },
   exchangeId: string,
@@ -247,7 +250,7 @@ function AnsweredShelf({
                 <p className="break-words text-sm font-medium text-foreground/80">{item.intent}</p>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
                   {item.senderId} · {item.squadronName}
-                  {answeredDuration ? ` · answered ${answeredDuration} ago` : ""}
+                  {` · ${formatAnsweredAgeLabel(answeredDuration)}`}
                 </p>
               </div>
               <OpenThreadButton
@@ -283,9 +286,6 @@ export function HumanInboxPage() {
         listHumanInbox(requestedPersonId, "open"),
         listHumanInbox(requestedPersonId, "answered"),
       ]);
-      if (openResponse.personId !== answeredResponse.personId) {
-        throw new Error("The inbox returned conflicting local operator identities.");
-      }
       setPersonId(openResponse.personId);
       setItems(openResponse.items);
       setAnsweredItems(answeredResponse.items);
@@ -401,7 +401,7 @@ export function HumanInboxPage() {
                 </p>
               </div>
             ) : (
-              <ol aria-live="polite" className="divide-y divide-border/70">
+              <ol className="divide-y divide-border/70">
                 {items.map((item) => (
                   <OpenInboxItem
                     answer={answer}

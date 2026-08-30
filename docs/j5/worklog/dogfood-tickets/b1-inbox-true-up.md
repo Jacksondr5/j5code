@@ -28,3 +28,7 @@ Bell+badge placement and the footer-entry removal are B1's authorized SidebarChr
 ## Acceptance
 
 Bell + accurate open count visible from any view; expanding an item reveals body + inline answer; answer closes the exchange and the asker's delivery envelope states the exchange is closed (byte-equal answer preserved; envelope asserts no reply instruction); "Open thread →" lands on the asker's thread; an agent invoking clear-own-ask removes its item from the inbox with a ledger event and no reply; urgency ordering and "open Nh" rendering verified; manual person-id field gone. UI screenshots on the PR. Baseline suite green.
+
+## Closure-envelope invariant handoff (2026-08-30)
+
+Role-based closed-envelope selection is truthful under the current one-reply-closes invariant. `SendService` refuses a cross-Squadron reply when it cannot persist the matching `exchange.closed` fact, so that state cannot silently produce a closed envelope. If cross-Squadron replies become reachable, or any second role-without-closure path appears, re-plumb envelope selection to the persisted closure fact rather than adding another `exchangeRole` exception.

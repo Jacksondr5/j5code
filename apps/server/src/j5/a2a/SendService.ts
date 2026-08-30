@@ -161,6 +161,19 @@ export class A2AExchangeAlreadyAnsweredError extends Schema.TaggedErrorClass<A2A
   }
 }
 
+export class A2ACrossSquadronReplyInvariantError extends Schema.TaggedErrorClass<A2ACrossSquadronReplyInvariantError>()(
+  "A2ACrossSquadronReplyInvariantError",
+  {
+    exchangeId: Schema.String,
+    exchangeSquadronId: Schema.String,
+    senderSquadronId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Exchange ${this.exchangeId} belongs to ${this.exchangeSquadronId}, but the replying sender's immutable home is ${this.senderSquadronId}. A cross-Squadron reply cannot record the required closure fact, so nothing was sent. Stop this messaging attempt; repair the exchange/home projection, then retry send_message.`;
+  }
+}
+
 export class A2AClearOwnAskSenderMismatchError extends Schema.TaggedErrorClass<A2AClearOwnAskSenderMismatchError>()(
   "A2AClearOwnAskSenderMismatchError",
   {
@@ -208,6 +221,7 @@ export type A2ASendError =
   | A2AUrgencyRequiresExchangeError
   | A2AExchangeNotOpenError
   | A2AExchangeAlreadyAnsweredError
+  | A2ACrossSquadronReplyInvariantError
   | A2AExchangeParticipantMismatchError
   | A2AClearOwnAskSenderMismatchError
   | A2AClearOwnAskAlreadyClosedError
@@ -461,6 +475,13 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
           exchange[0].squadron_id !== row.squadron_id &&
           exchange[0].receiver_id === row.sender_id &&
           exchange[0].sender_id === row.receiver_id;
+        if (isCrossSquadronReply) {
+          return yield* new A2ACrossSquadronReplyInvariantError({
+            exchangeId: row.exchange_id!,
+            exchangeSquadronId: exchange[0]!.squadron_id,
+            senderSquadronId: row.squadron_id,
+          });
+        }
         return {
           messageId,
           exchangeId: row.exchange_id === null ? null : ExchangeId.make(row.exchange_id),
@@ -469,9 +490,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
               ? ("none" as const)
               : row.exchange_role !== "reply"
                 ? ("open" as const)
-                : isCrossSquadronReply
-                  ? ("closing" as const)
-                  : ("closed" as const),
+                : ("closed" as const),
           joinedExistingExchange: row.exchange_role === "followup",
           durableAtSeq: row.sent_seq,
         } satisfies SendMessageResult;
@@ -521,6 +540,13 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
             exchangeId = input.exchangeId;
             joinedExistingExchange = isFollowup;
             if (isReply) {
+              if (exchange.squadron_id !== sender.squadronId) {
+                return yield* new A2ACrossSquadronReplyInvariantError({
+                  exchangeId,
+                  exchangeSquadronId: exchange.squadron_id,
+                  senderSquadronId: sender.squadronId,
+                });
+              }
               const acceptedReplies = yield* sql<{ readonly count: number }>`
                 SELECT COUNT(*) AS count
                 FROM j5_a2a_delivery
@@ -530,18 +556,16 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
                 return yield* new A2AExchangeAlreadyAnsweredError({ exchangeId });
               }
               exchangeRole = "reply";
-              exchangeState = exchange.squadron_id === sender.squadronId ? "closed" : "closing";
-              if (exchange.squadron_id === sender.squadronId) {
-                closeEvent = {
-                  kind: "exchange.closed",
-                  sender: sender.participantId,
-                  receiver: receiverId,
-                  exchangeId,
-                  correlationId: correlationIdFor(input.commandId),
-                  payload: { replyMessageId: messageId },
-                  createdAt: input.acceptedAt,
-                };
-              }
+              exchangeState = "closed";
+              closeEvent = {
+                kind: "exchange.closed",
+                sender: sender.participantId,
+                receiver: receiverId,
+                exchangeId,
+                correlationId: correlationIdFor(input.commandId),
+                payload: { replyMessageId: messageId },
+                createdAt: input.acceptedAt,
+              };
             } else {
               exchangeRole = "followup";
               exchangeState = "open";

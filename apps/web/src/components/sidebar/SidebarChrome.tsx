@@ -8,6 +8,7 @@ import { memo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
+import { HumanInboxBell } from "../../j5/a2a/HumanInboxBell";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
 import {
@@ -30,7 +31,6 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
-import { HumanInboxBell } from "../../j5/a2a/HumanInboxBell";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,

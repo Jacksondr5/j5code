@@ -171,6 +171,65 @@ it.effect("opens once per sender-receiver pair, joins follow-ups, and one reply 
   }).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("refuses a reply whose exchange cannot record a same-squadron closure fact", () =>
+  Effect.gen(function* () {
+    yield* setupSameSquadron();
+    const service = yield* A2ASendService;
+    const ledgerService = yield* A2ALedger;
+    const sql = yield* SqlClient.SqlClient;
+    const opened = yield* service.send({
+      commandId: CommCommandId.make("command:cross-squadron-guard:open"),
+      senderThreadId: sender.threadId,
+      to: receiver.id,
+      message: "Can this exchange close durably?",
+      expectReply: true,
+      intent: "Exercise the closure invariant",
+      acceptedAt: timestamp,
+    });
+    const foreignSquadronId = SquadronId.make("squadron:cross-squadron-guard");
+    yield* ledgerService.createSquadron({
+      squadron: {
+        id: foreignSquadronId,
+        name: "Cross-squadron guard fixture",
+        createdAt: timestamp,
+      },
+    });
+    yield* sql`
+      UPDATE j5_a2a_exchange
+      SET squadron_id = ${foreignSquadronId}
+      WHERE exchange_id = ${opened.exchangeId}
+    `;
+
+    const error = yield* Effect.flip(
+      service.send({
+        commandId: CommCommandId.make("command:cross-squadron-guard:reply"),
+        senderThreadId: receiver.threadId,
+        to: sender.id,
+        message: "This reply must not claim closure.",
+        exchangeId: opened.exchangeId!,
+        acceptedAt: timestamp,
+      }),
+    );
+
+    assert.equal(error._tag, "A2ACrossSquadronReplyInvariantError");
+    if (error._tag === "A2ACrossSquadronReplyInvariantError") {
+      assert.equal(error.exchangeId, opened.exchangeId);
+      assert.equal(error.exchangeSquadronId, foreignSquadronId);
+      assert.include(error.message, "cannot record the required closure fact");
+      assert.include(error.message, "nothing was sent");
+      assert.include(error.message, "Stop this messaging attempt");
+      assert.include(error.message, "repair the exchange/home projection");
+    }
+    const replies = yield* sql<{ readonly count: number }>`
+      SELECT COUNT(*) AS count
+      FROM j5_a2a_delivery
+      WHERE exchange_id = ${opened.exchangeId}
+        AND exchange_role = 'reply'
+    `;
+    assert.deepStrictEqual(replies, [{ count: 0 }]);
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("validates intent and human-only urgency at exchange open", () =>
   Effect.gen(function* () {
     yield* setupSameSquadron();
