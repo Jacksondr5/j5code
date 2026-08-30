@@ -76,3 +76,36 @@ it("lists and creates explicit Squadron project references", async () => {
     await dispose();
   }
 });
+
+it("sanitizes and logs unmatched Squadron operation failures", async () => {
+  const management = Layer.mock(SquadronManagementService)({
+    list: () => Effect.fail(new Error("SQLITE driver detail must not reach the client")),
+    create: () => Effect.die("not reached"),
+  });
+  const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+    authenticateHttpRequest: () =>
+      Effect.succeed({
+        sessionId: AuthSessionId.make("auth-session:squadron-http"),
+        subject: "squadron-http-test",
+        method: "bearer-access-token",
+        scopes: [AuthOrchestrationReadScope, AuthOrchestrationOperateScope],
+      }),
+  });
+  const routes = squadronHttpRouteLayer.pipe(
+    Layer.provide(management),
+    Layer.provideMerge(auth),
+    Layer.provide(HttpServer.layerServices),
+  );
+  const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
+
+  try {
+    const response = await handler(new Request("http://environment.test/api/j5/squadrons"));
+    assert.equal(response.status, 500);
+    assert.deepStrictEqual(await response.json(), {
+      error: "SquadronOperationError",
+      message: "Squadron operation failed.",
+    });
+  } finally {
+    await dispose();
+  }
+});

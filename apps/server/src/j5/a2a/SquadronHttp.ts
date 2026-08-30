@@ -70,7 +70,17 @@ const operationFailure = (error: unknown) => {
             tag === "SchemaError"
           ? 400
           : 500;
-  return HttpServerResponse.jsonUnsafe({ error: tag, message }, { status });
+  if (status === 500) {
+    return Effect.logError("J5 Squadron operation failed", { cause: error }).pipe(
+      Effect.as(
+        HttpServerResponse.jsonUnsafe(
+          { error: "SquadronOperationError", message: "Squadron operation failed." },
+          { status: 500 },
+        ),
+      ),
+    );
+  }
+  return Effect.succeed(HttpServerResponse.jsonUnsafe({ error: tag, message }, { status }));
 };
 
 /** Authenticated raw routes keep SQ1's creation choreography out of shared wire contracts. */
@@ -84,9 +94,10 @@ export const squadronHttpRouteLayer = Layer.unwrap(
         yield* annotateEnvironmentRequest("j5.squadron.list");
         yield* authenticate(AuthOrchestrationReadScope);
         const result = yield* Effect.result(management.list());
-        return Result.isSuccess(result)
-          ? HttpServerResponse.jsonUnsafe({ squadrons: result.success })
-          : operationFailure(result.failure);
+        if (Result.isSuccess(result)) {
+          return HttpServerResponse.jsonUnsafe({ squadrons: result.success });
+        }
+        return yield* operationFailure(result.failure);
       }).pipe(
         Effect.catchTags({
           EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
@@ -109,9 +120,10 @@ export const squadronHttpRouteLayer = Layer.unwrap(
           return requestFailure("A Squadron name and exactly one existing project are required.");
         }
         const result = yield* Effect.result(management.create(decoded.success));
-        return Result.isSuccess(result)
-          ? HttpServerResponse.jsonUnsafe({ squadron: result.success }, { status: 201 })
-          : operationFailure(result.failure);
+        if (Result.isSuccess(result)) {
+          return HttpServerResponse.jsonUnsafe({ squadron: result.success }, { status: 201 });
+        }
+        return yield* operationFailure(result.failure);
       }).pipe(
         Effect.catchTags({
           EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
