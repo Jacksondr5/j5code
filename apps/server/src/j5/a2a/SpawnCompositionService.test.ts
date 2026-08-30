@@ -228,7 +228,13 @@ it.effect("rolls home registration back when placement fails afterward", () =>
     const observed = yield* Fiber.join(committedFiber);
     assert.isTrue(Option.isSome(observed));
     if (Option.isSome(observed)) {
-      assert.equal(observed.value.payload.participant.threadId, sentinelThreadId);
+      assert.equal(observed.value.kind, "participant.joined");
+      if (observed.value.kind === "participant.joined") {
+        assert.equal(observed.value.payload.participant.kind, "agent");
+        if (observed.value.payload.participant.kind === "agent") {
+          assert.equal(observed.value.payload.participant.threadId, sentinelThreadId);
+        }
+      }
     }
   }).pipe(Effect.provide(TestLayer)),
 );
