@@ -124,7 +124,6 @@ const handlersLayer = J5ToolkitHandlersLive.pipe(
 const liveLayer = Layer.mergeAll(
   orchestrationLayer,
   orchestratorMcpLayer,
-  providerRegistryLayer,
   j5Layer,
   handlersLayer,
 ).pipe(
@@ -133,7 +132,7 @@ const liveLayer = Layer.mergeAll(
   Layer.provide(checkpointStoreLayer),
   Layer.provide(serverConfigLayer),
   Layer.provide(serverSettingsLayer),
-  Layer.provide(providerRegistryLayer),
+  Layer.provideMerge(providerRegistryLayer),
   Layer.provide(providerInstanceRegistryLayer),
   Layer.provide(backgroundPolicyLayer),
   Layer.provide(NodeServices.layer),
