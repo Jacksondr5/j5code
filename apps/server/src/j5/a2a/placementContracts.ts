@@ -73,6 +73,11 @@ export const PlacementCreatedEvent = Schema.Struct({
 });
 export type PlacementCreatedEvent = typeof PlacementCreatedEvent.Type;
 
+/**
+ * Reserved ledger vocabulary; A6 ships no reparent producer. The future
+ * human-reparent surface must follow R21 and the A6 ticket's "Retired human
+ * reparent recovery note". Frozen implementation chain: 8fb7139d161aed2f7f9bb8d9d31e4130a3dd604a.
+ */
 export const PlacementReparentedEvent = Schema.Struct({
   seq: PositiveInt,
   commandId: PlacementCommandId,

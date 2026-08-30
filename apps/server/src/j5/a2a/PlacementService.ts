@@ -252,6 +252,12 @@ const placementFromRow = (row: PlacementRow) =>
     updatedEventSeq: row.updated_event_seq,
   });
 
+/**
+ * Decodes current creation events and reserved historical reparent vocabulary.
+ * No reparent producer ships; recovery belongs to the future human-reparent
+ * surface under R21 and the A6 ticket recovery note, from frozen chain
+ * 8fb7139d161aed2f7f9bb8d9d31e4130a3dd604a.
+ */
 const eventFromRow = (row: EventRow) =>
   decodeEvent(
     row.kind === "participant.placement_created"
