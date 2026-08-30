@@ -85,7 +85,7 @@ const readPendingThreadHomes = () => {
   pendingThreadIds.clear();
   void listThreadHomes(threadIds)
     .then((entries) => {
-      for (const entry of entries) homesByThreadId.set(entry.threadId, entry.home);
+      mergeThreadHomeEntries(homesByThreadId, entries);
     })
     // Under a selected scope, an unreadable home remains excluded rather than
     // being guessed from a project. The next changed sidebar set retries it.
@@ -97,12 +97,32 @@ const readPendingThreadHomes = () => {
     });
 };
 
-const requestThreadHomes = (threadIds: ReadonlyArray<ThreadId>) => {
+/** A successful reread replaces a transient unknown with its Registrar home. */
+export const mergeThreadHomeEntries = (
+  homes: Map<string, ThreadHome>,
+  entries: ReadonlyArray<ThreadHomeEntry>,
+) => {
+  for (const entry of entries) homes.set(entry.threadId, entry.home);
+  return homes;
+};
+
+export const shouldRequestThreadHome = (home: ThreadHome | undefined, force: boolean) =>
+  force || home === undefined;
+
+const requestThreadHomes = (threadIds: ReadonlyArray<ThreadId>, force = false) => {
   for (const threadId of threadIds) {
-    if (!homesByThreadId.has(threadId)) pendingThreadIds.add(threadId);
+    if (shouldRequestThreadHome(homesByThreadId.get(threadId), force))
+      pendingThreadIds.add(threadId);
   }
   readPendingThreadHomes();
 };
+
+/**
+ * Interactive J5 creation calls this after its launch succeeds: a row may have
+ * reached the Sidebar while its durable Registrar attachment was still pending.
+ */
+export const refreshThreadHomes = (threadIds: ReadonlyArray<ThreadId>) =>
+  requestThreadHomes(threadIds, true);
 
 /** Immutable Registrar-home cache for Sidebar rows; never derives a home from project metadata. */
 export function useThreadHomes(threadIds: ReadonlyArray<ThreadId>) {

@@ -254,6 +254,8 @@ import {
   useSquadronDraftScope,
 } from "../j5/squadron/SquadronDraftState";
 import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
+import { refreshThreadHomes } from "../j5/squadron/ThreadHomesClient";
+import { shouldShowSquadronDraftChip } from "../j5/squadron/SquadronScope.logic";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline, type MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
@@ -1810,6 +1812,10 @@ function ChatViewContent(props: ChatViewProps) {
   const effectiveSquadronName =
     squadrons.find(({ squadron }) => squadron.id === effectiveSquadronId)?.squadron.name ?? null;
   const isFirstMessageForActiveThread = !isServerThread || activeMessageCount === 0;
+  const showSquadronDraftChip = shouldShowSquadronDraftChip({
+    isFirstMessage: isFirstMessageForActiveThread,
+    frozenAtFirstSend: draftSquadron.frozenAtFirstSend,
+  });
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   }, [activeProjectRef, handleNewThread]);
@@ -5440,6 +5446,7 @@ function ChatViewContent(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        if (squadronIdForLaunch !== undefined) refreshThreadHomes([threadIdForSend]);
       }
     }
 
@@ -6557,7 +6564,7 @@ function ChatViewContent(props: ChatViewProps) {
                     >
                       <div className="chat-composer-glass-host relative z-10 w-full rounded-[22px]">
                         <div className="relative z-10">
-                          {isFirstMessageForActiveThread ? (
+                          {showSquadronDraftChip ? (
                             <div className="flex px-3 pt-2">
                               <SquadronDraftChip
                                 ambientSquadronId={ambientSquadronId}

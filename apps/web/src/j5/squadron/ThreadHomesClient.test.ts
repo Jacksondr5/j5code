@@ -1,9 +1,15 @@
-import { assert, it, vi } from "@effect/vitest";
+import { assert, expect, it, vi } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
-import { listThreadHomesEffect, ThreadHomesHttpError } from "./ThreadHomesClient";
+import {
+  listThreadHomesEffect,
+  mergeThreadHomeEntries,
+  shouldRequestThreadHome,
+  type ThreadHome,
+  ThreadHomesHttpError,
+} from "./ThreadHomesClient";
 
 vi.stubGlobal("window", { location: new URL("http://environment.test/") });
 
@@ -65,3 +71,24 @@ it.effect("preserves an authenticated thread-home read failure", () =>
     assert.equal(error.message, "Sign in again.");
   }),
 );
+
+it("replaces a transient unknown with the durable Registrar home after interactive launch", () => {
+  const homes = new Map<string, ThreadHome>();
+  mergeThreadHomeEntries(homes, [
+    { threadId: ThreadId.make("thread:alpha"), home: { kind: "unknown" } },
+  ]);
+
+  expect(shouldRequestThreadHome(homes.get("thread:alpha"), false)).toBe(false);
+  expect(shouldRequestThreadHome(homes.get("thread:alpha"), true)).toBe(true);
+
+  mergeThreadHomeEntries(homes, [
+    {
+      threadId: ThreadId.make("thread:alpha"),
+      home: { kind: "known", squadron: { id: "squadron:alpha", name: "Alpha" } },
+    },
+  ]);
+  expect(homes.get("thread:alpha")).toEqual({
+    kind: "known",
+    squadron: { id: "squadron:alpha", name: "Alpha" },
+  });
+});

@@ -42,3 +42,9 @@ export const selectSquadronForDraft = <TContent>(
 export const freezeSquadronForFirstSend = <TContent>(
   state: SquadronDraftState<TContent>,
 ): SquadronDraftState<TContent> => ({ ...state, frozenAtFirstSend: true });
+
+/** Keep the immutable Registrar choice visible after this draft's first send. */
+export const shouldShowSquadronDraftChip = (input: {
+  readonly isFirstMessage: boolean;
+  readonly frozenAtFirstSend: boolean;
+}) => input.isFirstMessage || input.frozenAtFirstSend;

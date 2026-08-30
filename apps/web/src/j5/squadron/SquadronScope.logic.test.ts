@@ -5,6 +5,7 @@ import {
   freezeSquadronForFirstSend,
   resolveSquadronScope,
   selectSquadronForDraft,
+  shouldShowSquadronDraftChip,
 } from "./SquadronScope.logic";
 
 describe("Squadron scope logic", () => {
@@ -80,5 +81,17 @@ describe("Squadron scope logic", () => {
       content: "typed",
     });
     expect(selectSquadronForDraft(frozen, "squadron:bravo")).toBe(frozen);
+  });
+
+  it("keeps only a frozen J5 choice visible after send", () => {
+    expect(shouldShowSquadronDraftChip({ isFirstMessage: true, frozenAtFirstSend: false })).toBe(
+      true,
+    );
+    expect(shouldShowSquadronDraftChip({ isFirstMessage: false, frozenAtFirstSend: true })).toBe(
+      true,
+    );
+    expect(shouldShowSquadronDraftChip({ isFirstMessage: false, frozenAtFirstSend: false })).toBe(
+      false,
+    );
   });
 });
