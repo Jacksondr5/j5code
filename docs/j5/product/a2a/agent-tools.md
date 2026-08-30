@@ -88,7 +88,8 @@ description's pitch. Read-only; no events.
 
 **Description (contract):** "Spawn a Peer Agent: a full-citizen teammate with its own top-level
 thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and
-records you as its immutable spawner; it is addressable the moment this returns. Choose provider,
+records you as its immutable spawner; it is addressable the moment this returns. In your brief,
+tell the new agent what it should do first and whether it should reply to you. Choose provider,
 model, and reasoning for the work in the brief — see orchestrator_capabilities for what's
 available. Reuse client_request_id to retry the same spawn safely."
 
@@ -111,12 +112,13 @@ caller-membership state (missing/ambiguous, with the `list_participants` next-co
 integrity, creation failure — each naming state and next command. Events: `participant.joined`,
 home registration, `participant.placement_created`.
 
-> **Come back to this — the agent spawning guide.** Provider/model/reasoning selection guidance,
-> spawn-then-communicate norms (when to ask a fresh spawn for a result without landing mid-first-
-> turn), report-back/ACK expectations for spawned Peer Agents, and brief-writing conventions are
-> the spawning guide's territory — with the Product lead as of 2026-08-29. The guide's requirements
-> include updating this contract and the implementation; the description deliberately carries no
-> spawn-then-ask steering until that guide rules.
+> **Spawning guide (settled 2026-08-30) — [`features/spawning-guide.md`](../features/spawning-guide.md).**
+> SP4 closed this contract's held slot: the description's single sentence of brief steering above
+> is the entire tool-side coaching — the report-back contract travels in the brief per the guide's
+> conventions, and receipt-ACKs get no written law anywhere. SP3: provider/model/reasoning stay
+> required and explicit even on Role-ful spawns — a Role's allowlist constrains the choice and an
+> out-of-list pick is an error naming the excluding Role, never a silent default. Provider/model
+> selection guidance and brief-writing conventions live in the guide, not here.
 
 ## `stop_agent` — single-target (amends the frozen A6 cascade contract)
 
