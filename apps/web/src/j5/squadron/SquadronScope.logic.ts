@@ -54,6 +54,13 @@ export interface DurableSquadronHome {
   readonly name: string;
 }
 
+/** A persisted Registrar home outranks mutable draft and ambient context. */
+export const resolveEffectiveSquadronId = (input: {
+  readonly durableHome: DurableSquadronHome | null;
+  readonly draftSquadronId: string | null;
+  readonly ambientSquadronId: string | null;
+}) => input.durableHome?.id ?? input.draftSquadronId ?? input.ambientSquadronId;
+
 /** A Registrar home is the durable, immutable source for an existing thread. */
 export const resolveSquadronDraftChipState = (input: {
   readonly durableHome: DurableSquadronHome | null;

@@ -3,6 +3,7 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
+import { ConnectionError, SqlError } from "effect/unstable/sql/SqlError";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
@@ -21,9 +22,20 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
   const nativeThread = ThreadId.make("thread:thread-homes-http:native");
   const received: Array<ReadonlyArray<ThreadId>> = [];
   let authMode: "missing" | "missing-read-scope" | "read" = "missing";
+  let shouldFailRead = false;
   const homes = Layer.mock(ThreadHomesService)({
     threadHomes: (threadIds) => {
       received.push(threadIds);
+      if (shouldFailRead) {
+        return Effect.fail(
+          new SqlError({
+            reason: new ConnectionError({
+              cause: new Error("SQLITE internal connection detail"),
+              message: "SQLITE internal connection detail",
+            }),
+          }),
+        );
+      }
       return Effect.succeed({
         entries: [
           {
@@ -99,6 +111,14 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
       ],
     });
     assert.deepStrictEqual(received, [[knownThread, nativeThread, knownThread]]);
+
+    shouldFailRead = true;
+    const failedRead = await request();
+    assert.equal(failedRead.status, 500);
+    assert.deepStrictEqual(await failedRead.json(), {
+      error: "SqlError",
+      message: "Thread-home lookup failed.",
+    });
   } finally {
     await dispose();
   }

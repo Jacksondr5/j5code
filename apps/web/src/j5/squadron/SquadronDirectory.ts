@@ -10,6 +10,7 @@ export type SquadronDirectoryState =
 let snapshot: SquadronDirectoryState = { status: "loading", squadrons: [] };
 const listeners = new Set<() => void>();
 let loading: Promise<void> | null = null;
+let queuedForceRefresh: Promise<void> | null = null;
 let hasLoaded = false;
 
 const notify = () => listeners.forEach((listener) => listener());
@@ -20,7 +21,20 @@ const subscribe = (listener: () => void) => {
 const getSnapshot = () => snapshot;
 
 export const refreshSquadronDirectory = (options: { readonly force?: boolean } = {}) => {
-  if (loading !== null) return loading;
+  if (options.force === true && queuedForceRefresh !== null) return queuedForceRefresh;
+  if (loading !== null) {
+    if (options.force !== true) return loading;
+    const queuedRefresh: Promise<void> = loading.then(() => {
+      // Clear before starting the queued read so it cannot return itself when
+      // it re-enters this single-flight function.
+      if (queuedForceRefresh === queuedRefresh) {
+        queuedForceRefresh = null;
+      }
+      return refreshSquadronDirectory({ force: true });
+    });
+    queuedForceRefresh = queuedRefresh;
+    return queuedForceRefresh;
+  }
   if (hasLoaded && options.force !== true) return Promise.resolve();
   snapshot = { status: "loading", squadrons: snapshot.squadrons };
   notify();
@@ -30,7 +44,10 @@ export const refreshSquadronDirectory = (options: { readonly force?: boolean } =
       hasLoaded = true;
     })
     .catch(() => {
-      snapshot = { status: "error", squadrons: [] };
+      // Keep the selected scope resolvable on a transient failure; clearing
+      // this list would silently turn a selected Squadron into zoom-out.
+      snapshot = { status: "error", squadrons: snapshot.squadrons };
+      hasLoaded = false;
     })
     .finally(() => {
       loading = null;

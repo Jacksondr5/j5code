@@ -255,7 +255,10 @@ import {
 } from "../j5/squadron/SquadronDraftState";
 import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
 import { refreshThreadHomes, useThreadHomes } from "../j5/squadron/ThreadHomesClient";
-import { resolveSquadronDraftChipState } from "../j5/squadron/SquadronScope.logic";
+import {
+  resolveEffectiveSquadronId,
+  resolveSquadronDraftChipState,
+} from "../j5/squadron/SquadronScope.logic";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline, type MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
@@ -1809,13 +1812,17 @@ function ChatViewContent(props: ChatViewProps) {
   const { squadrons } = useSquadronDirectory();
   const ambientSquadronId = useSquadronAmbientScope();
   const draftSquadron = useSquadronDraftScope(routeThreadKey);
-  const effectiveSquadronId = draftSquadron.squadronId ?? ambientSquadronId;
-  const effectiveSquadronName =
-    squadrons.find(({ squadron }) => squadron.id === effectiveSquadronId)?.squadron.name ?? null;
-  const isFirstMessageForActiveThread = !isServerThread || activeMessageCount === 0;
   const activeThreadHome =
     serverThread === null ? undefined : activeThreadHomes.get(serverThread.id);
   const durableSquadronHome = activeThreadHome?.kind === "known" ? activeThreadHome.squadron : null;
+  const effectiveSquadronId = resolveEffectiveSquadronId({
+    durableHome: durableSquadronHome,
+    draftSquadronId: draftSquadron.squadronId,
+    ambientSquadronId,
+  });
+  const effectiveSquadronName =
+    squadrons.find(({ squadron }) => squadron.id === effectiveSquadronId)?.squadron.name ?? null;
+  const isFirstMessageForActiveThread = !isServerThread || activeMessageCount === 0;
   const squadronDraftChip = resolveSquadronDraftChipState({
     durableHome: durableSquadronHome,
     draft: draftSquadron,

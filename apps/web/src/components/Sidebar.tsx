@@ -1889,13 +1889,17 @@ export default function Sidebar() {
   const { squadrons } = useSquadronDirectory();
   const squadronScopeId = useSquadronAmbientScope();
   const squadronScopeSelectionGeneration = useSquadronAmbientScopeSelectionGeneration();
-  const squadronScope = resolveSquadronScope(
-    squadrons.map(({ squadron, projectIds }) => ({
-      id: squadron.id,
-      name: squadron.name,
-      projectIds,
-    })),
-    squadronScopeId,
+  const squadronScope = useMemo(
+    () =>
+      resolveSquadronScope(
+        squadrons.map(({ squadron, projectIds }) => ({
+          id: squadron.id,
+          name: squadron.name,
+          projectIds,
+        })),
+        squadronScopeId,
+      ),
+    [squadronScopeId, squadrons],
   );
   const threadHomes = useThreadHomes(
     threads.map((thread) => thread.id),

@@ -84,14 +84,12 @@ export const layer: Layer.Layer<
       return yield* Effect.forEach(
         squadrons,
         (squadron) =>
-          references
-            .listForSquadron(squadron.id)
-            .pipe(
-              Effect.map((projectReferences) => ({
-                squadron,
-                projectIds: projectReferences.map((ref) => ref.projectId),
-              })),
-            ),
+          references.listForSquadron(squadron.id).pipe(
+            Effect.map((projectReferences) => ({
+              squadron,
+              projectIds: projectReferences.map((ref) => ref.projectId),
+            })),
+          ),
         { concurrency: 1 },
       );
     });

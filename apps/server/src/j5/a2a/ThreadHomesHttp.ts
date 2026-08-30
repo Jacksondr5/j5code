@@ -47,16 +47,20 @@ const authenticateRead = Effect.gen(function* () {
 const requestFailure = (message: string) =>
   HttpServerResponse.jsonUnsafe({ error: "invalid_request", message }, { status: 400 });
 
-const operationFailure = (error: unknown) =>
-  HttpServerResponse.jsonUnsafe(
-    {
-      error:
-        typeof error === "object" && error !== null && "_tag" in error
-          ? String(error._tag)
-          : "ThreadHomeReadError",
-      message: error instanceof Error ? error.message : "Thread-home lookup failed.",
-    },
-    { status: 500 },
+const operationFailure = (cause: unknown) =>
+  Effect.logError("J5 A2A thread-home read failed", { cause }).pipe(
+    Effect.as(
+      HttpServerResponse.jsonUnsafe(
+        {
+          error:
+            typeof cause === "object" && cause !== null && "_tag" in cause
+              ? String(cause._tag)
+              : "ThreadHomeReadError",
+          message: "Thread-home lookup failed.",
+        },
+        { status: 500 },
+      ),
+    ),
   );
 
 /** Authenticated raw route; SQ1's aggregate owns its sole server composition seam. */
@@ -81,9 +85,8 @@ export const threadHomesHttpRouteLayer = Layer.unwrap(
             .threadHomes(decoded.success.threadIds)
             .pipe(Effect.flatMap(encodeThreadHomesResponse)),
         );
-        return Result.isSuccess(result)
-          ? HttpServerResponse.jsonUnsafe(result.success)
-          : operationFailure(result.failure);
+        if (Result.isSuccess(result)) return HttpServerResponse.jsonUnsafe(result.success);
+        return yield* operationFailure(result.failure);
       }).pipe(
         Effect.catchTags({
           EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,

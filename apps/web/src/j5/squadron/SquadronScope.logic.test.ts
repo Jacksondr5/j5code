@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   filterThreadsForSquadronScope,
   freezeSquadronForFirstSend,
+  resolveEffectiveSquadronId,
   resolveSquadronDraftChipState,
   resolveSquadronScope,
   selectSquadronForDraft,
@@ -104,6 +105,16 @@ describe("Squadron scope logic", () => {
         isFirstMessage: false,
       }),
     ).toEqual({ visible: true, frozen: true, squadronId: "squadron:alpha" });
+  });
+
+  it("uses a durable Registrar home before draft or ambient context on a zero-message thread", () => {
+    expect(
+      resolveEffectiveSquadronId({
+        durableHome: { id: "squadron:alpha", name: "Alpha" },
+        draftSquadronId: "squadron:bravo",
+        ambientSquadronId: "squadron:bravo",
+      }),
+    ).toBe("squadron:alpha");
   });
 
   it("keeps unknown/native existing threads chip-free and preserves pre-send draft behavior", () => {
