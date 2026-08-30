@@ -7,6 +7,8 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import {
+  type ClearOwnAskInput,
+  type ClearOwnAskResult,
   CommCommandId,
   type CommEvent,
   CorrelationId,
@@ -159,6 +161,37 @@ export class A2AExchangeAlreadyAnsweredError extends Schema.TaggedErrorClass<A2A
   }
 }
 
+export class A2AClearOwnAskSenderMismatchError extends Schema.TaggedErrorClass<A2AClearOwnAskSenderMismatchError>()(
+  "A2AClearOwnAskSenderMismatchError",
+  {
+    exchangeId: Schema.String,
+    callerId: Schema.String,
+    senderId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Exchange ${this.exchangeId} was opened by ${this.senderId}, not ${this.callerId}. Only the sender may withdraw it; do not retry clear_own_ask from this thread.`;
+  }
+}
+
+export class A2AClearOwnAskAlreadyClosedError extends Schema.TaggedErrorClass<A2AClearOwnAskAlreadyClosedError>()(
+  "A2AClearOwnAskAlreadyClosedError",
+  { exchangeId: Schema.String },
+) {
+  override get message(): string {
+    return `Exchange ${this.exchangeId} is already closed. No action is needed; call send_message without exchange_id if a new exchange is needed.`;
+  }
+}
+
+export class A2AClearOwnAskUnknownExchangeError extends Schema.TaggedErrorClass<A2AClearOwnAskUnknownExchangeError>()(
+  "A2AClearOwnAskUnknownExchangeError",
+  { exchangeId: Schema.String },
+) {
+  override get message(): string {
+    return `Exchange ${this.exchangeId} does not exist in the messaging ledger. Check the exchange_id from the original ask and retry clear_own_ask.`;
+  }
+}
+
 export type A2ASendError =
   | A2ALedgerError
   | Schema.SchemaError
@@ -175,7 +208,10 @@ export type A2ASendError =
   | A2AUrgencyRequiresExchangeError
   | A2AExchangeNotOpenError
   | A2AExchangeAlreadyAnsweredError
-  | A2AExchangeParticipantMismatchError;
+  | A2AExchangeParticipantMismatchError
+  | A2AClearOwnAskSenderMismatchError
+  | A2AClearOwnAskAlreadyClosedError
+  | A2AClearOwnAskUnknownExchangeError;
 
 interface MembershipRow {
   readonly squadron_id: string;
@@ -204,6 +240,11 @@ interface ExistingMessageRow {
   readonly sent_seq: number;
 }
 
+interface ExistingSenderClearedRow {
+  readonly created_at: string;
+  readonly closure_kind: string | null;
+}
+
 const decodeParticipant = Schema.decodeUnknownEffect(Schema.fromJsonString(Participant));
 
 const messageIdFor = (commandId: CommCommandId) =>
@@ -217,6 +258,7 @@ const correlationIdFor = (commandId: CommCommandId) =>
 
 export interface A2ASendServiceShape {
   readonly send: (input: SendMessageInput) => Effect.Effect<SendMessageResult, A2ASendError>;
+  readonly clearOwnAsk: (input: ClearOwnAskInput) => Effect.Effect<ClearOwnAskResult, A2ASendError>;
   readonly listParticipants: (
     senderThreadId: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ParticipantDirectoryRow>, A2ASendError>;
@@ -588,6 +630,74 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
           } satisfies SendMessageResult;
         });
 
-      return A2ASendService.of({ send, listParticipants });
+      const clearOwnAsk: A2ASendServiceShape["clearOwnAsk"] = (input) =>
+        Effect.gen(function* () {
+          const sender = yield* senderMembership(input.senderThreadId);
+          const replay = yield* sql<ExistingSenderClearedRow>`
+            SELECT
+              created_at,
+              json_extract(payload, '$.closureKind') AS closure_kind
+            FROM j5_a2a_comm_event
+            WHERE command_id = ${input.commandId}
+              AND kind = 'exchange.closed'
+              AND sender = ${sender.participantId}
+              AND exchange_id = ${input.exchangeId}
+            LIMIT 2
+          `;
+          if (replay.length === 1 && replay[0]!.closure_kind === "sender-cleared") {
+            return {
+              exchangeId: input.exchangeId,
+              closureKind: "sender-cleared",
+              closedAt: replay[0]!.created_at,
+            } satisfies ClearOwnAskResult;
+          }
+
+          const rows = yield* sql<ExchangeRow>`
+            SELECT squadron_id, exchange_id, sender_id, receiver_id, status
+            FROM j5_a2a_exchange
+            WHERE exchange_id = ${input.exchangeId}
+            LIMIT 2
+          `;
+          const exchange = rows.length === 1 ? rows[0] : undefined;
+          if (exchange === undefined) {
+            return yield* new A2AClearOwnAskUnknownExchangeError({
+              exchangeId: input.exchangeId,
+            });
+          }
+          if (exchange.sender_id !== sender.participantId) {
+            return yield* new A2AClearOwnAskSenderMismatchError({
+              exchangeId: input.exchangeId,
+              callerId: sender.participantId,
+              senderId: exchange.sender_id,
+            });
+          }
+          if (exchange.status !== "open") {
+            return yield* new A2AClearOwnAskAlreadyClosedError({
+              exchangeId: input.exchangeId,
+            });
+          }
+
+          yield* ledger.append({
+            commandId: input.commandId,
+            squadronId: SquadronId.make(exchange.squadron_id),
+            acceptedAt: input.acceptedAt,
+            event: {
+              kind: "exchange.closed",
+              sender: sender.participantId,
+              receiver: ParticipantId.make(exchange.receiver_id),
+              exchangeId: input.exchangeId,
+              correlationId: correlationIdFor(input.commandId),
+              payload: { closureKind: "sender-cleared" },
+              createdAt: input.acceptedAt,
+            },
+          });
+          return {
+            exchangeId: input.exchangeId,
+            closureKind: "sender-cleared",
+            closedAt: input.acceptedAt,
+          } satisfies ClearOwnAskResult;
+        });
+
+      return A2ASendService.of({ send, clearOwnAsk, listParticipants });
     }),
   );

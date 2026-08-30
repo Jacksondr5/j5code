@@ -434,6 +434,21 @@ const handlers = {
       yield* worker.notify;
       return result;
     }).pipe(Effect.mapError(failure)),
+  clear_own_ask: (input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
+      const service = yield* A2ASendService;
+      const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+      return yield* service.clearOwnAsk({
+        commandId: commandIdForRequest({
+          providerSessionId: scope.providerSessionId,
+          requestKey: input.client_request_id,
+        }),
+        senderThreadId: scope.threadId,
+        exchangeId: input.exchange_id,
+        acceptedAt,
+      });
+    }).pipe(Effect.mapError(failure)),
   list_participants: () =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
@@ -715,3 +730,4 @@ const handlers = {
 } satisfies Parameters<typeof J5Toolkit.toLayer>[0];
 
 export const J5ToolkitHandlersLive = J5Toolkit.toLayer(handlers);
+

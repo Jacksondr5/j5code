@@ -30,6 +30,7 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
+import { HumanInboxBell } from "../../j5/a2a/HumanInboxBell";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -64,6 +65,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
         )}
       />
       <SidebarBrand onBackdrop={backdropVariant !== null} />
+      <HumanInboxBell onBackdrop={backdropVariant !== null} />
       {pillLabel ? (
         <Badge
           className="relative z-10 ml-1 rounded-full px-1.5 text-muted-foreground"
@@ -157,11 +159,6 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     void navigate({ to: "/usage" });
   }, [isMobile, navigate, setOpenMobile]);
 
-  const handleInboxClick = useCallback(() => {
-    closeMobileSidebar();
-    void navigate({ to: "/inbox" });
-  }, [closeMobileSidebar, navigate]);
-
   const handleBackClick = useCallback(() => {
     closeMobileSidebar();
     void navigate({ to: "/" });
@@ -181,11 +178,6 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
           </SidebarMenuItem>
         ) : (
           <>
-            <SidebarMenuItem className="shrink-0">
-              <SidebarMenuButton aria-label="Inbox" onClick={handleInboxClick}>
-                <span>Inbox</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
             <SidebarMenuItem className="shrink-0">
               <Tooltip>
                 <TooltipTrigger

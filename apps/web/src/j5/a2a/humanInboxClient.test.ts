@@ -40,6 +40,8 @@ it.effect(
       assert.deepStrictEqual(explicit, { personId: explicitPersonId, items: [] });
       assert.equal(urls[0]?.searchParams.has("personId"), false);
       assert.equal(urls[1]?.searchParams.get("personId"), explicitPersonId);
+      assert.equal(urls[0]?.searchParams.get("status"), "open");
+      assert.equal(urls[1]?.searchParams.get("status"), "open");
     }),
 );
 

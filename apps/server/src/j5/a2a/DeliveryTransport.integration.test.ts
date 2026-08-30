@@ -336,6 +336,7 @@ const seedTarget = (suffix: string) =>
         senderId,
         receiverId,
         exchangeId,
+        exchangeRole: "ask" as const,
         message,
         envelopeChannel: "peer" as const,
       },

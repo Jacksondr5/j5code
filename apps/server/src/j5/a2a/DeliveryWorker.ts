@@ -211,6 +211,7 @@ const makeLayer = (daemon: boolean) =>
             senderId,
             receiverId,
             exchangeId,
+            exchangeRole: row.exchange_role,
             message: row.message_text,
             envelopeChannel: row.envelope_channel,
             createdAt: row.created_at,
@@ -223,6 +224,7 @@ const makeLayer = (daemon: boolean) =>
             senderId,
             receiverId,
             exchangeId,
+            exchangeRole: row.exchange_role,
             message: row.message_text,
             envelopeChannel: row.envelope_channel,
           });

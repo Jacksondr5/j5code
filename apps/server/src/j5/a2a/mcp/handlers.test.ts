@@ -44,8 +44,9 @@ import { ParticipantPlacementService, PlacementStorageError } from "../Placement
 import { A2AHomeMembershipStateError, A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
 import {
-  LedgerMessageId,
+  type ClearOwnAskInput,
   ExchangeId,
+  LedgerMessageId,
   ParticipantId,
   SquadronId,
   type ParticipantDirectoryRow,
@@ -143,6 +144,7 @@ it.effect("refuses self-target archive before target resolution or archive side 
         A2ASendService,
         A2ASendService.of({
           send: () => Effect.die("unused"),
+          clearOwnAsk: () => Effect.die("unused"),
           listParticipants: () => Effect.succeed([callerRow]),
         }),
       ),
@@ -220,6 +222,7 @@ it.effect("projects a consequential archive refusal for exactly one active parti
         A2ASendService,
         A2ASendService.of({
           send: () => Effect.die("unused"),
+          clearOwnAsk: () => Effect.die("unused"),
           listParticipants: () => Effect.succeed([callerRow]),
         }),
       ),
@@ -354,6 +357,7 @@ it.effect("uses consume-only history only after the active archive row is absent
         A2ASendService,
         A2ASendService.of({
           send: () => Effect.die("unused"),
+          clearOwnAsk: () => Effect.die("unused"),
           listParticipants: () => Effect.succeed([callerRow]),
         }),
       ),
@@ -446,6 +450,7 @@ it.effect("refuses ambiguous historical archive identities without invoking the 
         A2ASendService,
         A2ASendService.of({
           send: () => Effect.die("unused"),
+          clearOwnAsk: () => Effect.die("unused"),
           listParticipants: () => Effect.succeed([callerRow]),
         }),
       ),
@@ -500,12 +505,14 @@ it.effect("derives send idempotency and sender identity from authenticated scope
   Effect.gen(function* () {
     assert.deepStrictEqual(Object.keys(J5Toolkit.tools).sort(), [
       "archive_agent",
+      "clear_own_ask",
       "list_participants",
       "send_message",
       "spawn_agent",
       "stop_agent",
     ]);
     const sends = yield* Ref.make<ReadonlyArray<SendMessageInput>>([]);
+    const clears = yield* Ref.make<ReadonlyArray<ClearOwnAskInput>>([]);
     const participantId = ParticipantId.make("agent:j5:mcp-handler");
     const callerParticipantId = participantIdForThread(invocation.threadId);
     const multiMembershipRecipientId = ParticipantId.make("agent:j5:mcp-multi-membership-target");
@@ -531,6 +538,14 @@ it.effect("derives send idempotency and sender identity from authenticated scope
                   durableAtSeq: 1,
                 }),
               ),
+        clearOwnAsk: (input) =>
+          Ref.update(clears, (items) => [...items, input]).pipe(
+            Effect.as({
+              exchangeId: input.exchangeId,
+              closureKind: "sender-cleared" as const,
+              closedAt: input.acceptedAt,
+            }),
+          ),
         listParticipants: () =>
           Effect.die(new Error("send_message must not resolve the participant directory")),
       }),
@@ -550,6 +565,18 @@ it.effect("derives send idempotency and sender identity from authenticated scope
       const call = (args: J5SendMessageInput) =>
         toolkit
           .handle("send_message", args)
+          .pipe(
+            Stream.unwrap,
+            Stream.run(Sink.last()),
+            Effect.flatMap(Effect.fromOption),
+            Effect.provideService(McpInvocationContext, invocation),
+          );
+      const callClear = (exchangeId: ExchangeId, clientRequestId: string) =>
+        toolkit
+          .handle("clear_own_ask", {
+            exchange_id: exchangeId,
+            client_request_id: clientRequestId,
+          })
           .pipe(
             Stream.unwrap,
             Stream.run(Sink.last()),
@@ -590,6 +617,14 @@ it.effect("derives send idempotency and sender identity from authenticated scope
       assert.lengthOf(captured, 2);
       assert.equal(captured[0]?.commandId, captured[1]?.commandId);
       assert.equal(captured[0]?.senderThreadId, invocation.threadId);
+      const exchangeId = ExchangeId.make("exchange:j5:mcp-handler:clear");
+      yield* callClear(exchangeId, "logical-clear-1");
+      yield* callClear(exchangeId, "logical-clear-1");
+      const capturedClears = yield* Ref.get(clears);
+      assert.lengthOf(capturedClears, 2);
+      assert.equal(capturedClears[0]?.commandId, capturedClears[1]?.commandId);
+      assert.equal(capturedClears[0]?.senderThreadId, invocation.threadId);
+      assert.equal(capturedClears[0]?.exchangeId, exchangeId);
     }).pipe(Effect.provide(layer));
   }),
 );

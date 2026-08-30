@@ -88,6 +88,10 @@ export const humanInboxHttpRouteLayer = Layer.unwrap(
         const url = HttpServerRequest.toURL(request);
         if (Option.isNone(url)) return requestFailure("The request URL is invalid.");
         const requestedPersonId = url.value.searchParams.get("personId");
+        const requestedStatus = url.value.searchParams.get("status") ?? "open";
+        if (requestedStatus !== "open" && requestedStatus !== "answered") {
+          return requestFailure("status must be open or answered.");
+        }
         const result = yield* Effect.result(
           Effect.gen(function* () {
             const personId = yield* inbox.resolvePersonId(
@@ -95,7 +99,7 @@ export const humanInboxHttpRouteLayer = Layer.unwrap(
                 ? undefined
                 : ParticipantId.make(requestedPersonId),
             );
-            return { personId, items: yield* inbox.list(personId) };
+            return { personId, items: yield* inbox.list(personId, requestedStatus) };
           }),
         );
         return Result.isSuccess(result)

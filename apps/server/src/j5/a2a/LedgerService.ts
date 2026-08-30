@@ -349,10 +349,12 @@ export const layer: Layer.Layer<
           return;
         }
         case "exchange.closed": {
-          yield* decodeExchangeClosed(event.payload);
+          const closure = yield* decodeExchangeClosed(event.payload);
           if (event.exchangeId === null) {
             return yield* new A2AStorageError({ operation: "project closed exchange" });
           }
+          const senderCleared =
+            "closureKind" in closure && closure.closureKind === "sender-cleared";
           yield* sql`
             UPDATE j5_a2a_exchange
             SET
@@ -368,10 +370,10 @@ export const layer: Layer.Layer<
           yield* sql`
             UPDATE j5_a2a_human_inbox
             SET
-              status = 'answered',
+              status = ${senderCleared ? "dropped" : "answered"},
               terminal_seq = ${event.seq},
               terminal_at = ${event.createdAt},
-              terminal_disposition = 'answered',
+              terminal_disposition = ${senderCleared ? "sender-cleared" : "answered"},
               terminal_cause = NULL,
               terminal_facts = NULL,
               terminal_notice_message_id = NULL

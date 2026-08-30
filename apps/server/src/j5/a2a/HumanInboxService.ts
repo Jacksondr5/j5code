@@ -4,6 +4,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { ThreadId } from "@t3tools/contracts";
 
 import {
   type AnswerHumanExchangeInput,
@@ -13,6 +14,7 @@ import {
   SquadronId,
   ExchangeId,
   type HumanInboxItem,
+  type HumanInboxListStatus,
   isDurableHumanParticipantId,
   LedgerMessageId,
   ParticipantId,
@@ -54,10 +56,13 @@ interface InboxRow {
   readonly squadron_name: string;
   readonly exchange_id: string;
   readonly sender_id: string;
+  readonly sender_thread_id: string | null;
   readonly intent: string;
   readonly urgency: "blocking" | "soon" | "fyi";
   readonly message: string;
   readonly opened_at: string;
+  readonly status: "open" | "answered";
+  readonly terminal_at: string | null;
 }
 
 interface ExchangeRow {
@@ -90,6 +95,7 @@ export interface A2AHumanInboxShape {
   ) => Effect.Effect<ParticipantId, A2AHumanInboxError>;
   readonly list: (
     personId: ParticipantId,
+    status?: HumanInboxListStatus,
   ) => Effect.Effect<ReadonlyArray<HumanInboxItem>, A2AHumanInboxError>;
   readonly answer: (
     input: AnswerHumanExchangeInput,
@@ -117,7 +123,7 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
           return personId;
         });
 
-      const list: A2AHumanInboxShape["list"] = (personId) =>
+      const list: A2AHumanInboxShape["list"] = (personId, status = "open") =>
         Effect.gen(function* () {
           yield* resolvePersonId(personId);
           const rows = yield* sql<InboxRow>`
@@ -127,25 +133,38 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
               squadron.name AS squadron_name,
               exchange.exchange_id,
               exchange.sender_id,
+              membership.thread_id AS sender_thread_id,
               exchange.intent,
               exchange.urgency,
               inbox.latest_message AS message,
-              inbox.opened_at
+              inbox.opened_at,
+              inbox.status,
+              inbox.terminal_at
             FROM j5_a2a_human_inbox AS inbox
             JOIN j5_a2a_squadron AS squadron ON squadron.id = inbox.squadron_id
             JOIN j5_a2a_exchange AS exchange
               ON exchange.squadron_id = inbox.squadron_id
              AND exchange.exchange_id = inbox.exchange_id
-            WHERE inbox.status = 'open'
-              AND exchange.status = 'open'
+            LEFT JOIN j5_a2a_squadron_membership AS membership
+              ON membership.squadron_id = inbox.squadron_id
+             AND membership.participant_id = inbox.sender_id
+            WHERE (
+                (${status} = 'open' AND inbox.status = 'open' AND exchange.status = 'open')
+                OR
+                (${status} = 'answered' AND inbox.status = 'answered'
+                  AND inbox.terminal_disposition = 'answered')
+              )
               AND inbox.person_id = ${personId}
             ORDER BY
-              CASE inbox.urgency
-                WHEN 'blocking' THEN 0
-                WHEN 'soon' THEN 1
-                WHEN 'fyi' THEN 2
+              CASE WHEN ${status} = 'open' THEN
+                CASE inbox.urgency
+                  WHEN 'blocking' THEN 0
+                  WHEN 'soon' THEN 1
+                  WHEN 'fyi' THEN 2
+                END
               END,
-              inbox.opened_at,
+              CASE WHEN ${status} = 'open' THEN inbox.opened_at END,
+              CASE WHEN ${status} = 'answered' THEN inbox.terminal_at END DESC,
               inbox.squadron_id,
               inbox.exchange_id
           `;
@@ -157,10 +176,14 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
                 squadronName: row.squadron_name,
                 exchangeId: ExchangeId.make(row.exchange_id),
                 senderId: ParticipantId.make(row.sender_id),
+                senderThreadId:
+                  row.sender_thread_id === null ? null : ThreadId.make(row.sender_thread_id),
                 intent: row.intent,
                 urgency: row.urgency,
                 message: row.message,
                 openedAt: row.opened_at,
+                status: row.status,
+                terminalAt: row.terminal_at,
               }) satisfies HumanInboxItem,
           );
         });

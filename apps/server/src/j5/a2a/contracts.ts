@@ -219,9 +219,10 @@ export const MessageDeliveryFailedPayload = Schema.Struct({
 });
 export type MessageDeliveryFailedPayload = typeof MessageDeliveryFailedPayload.Type;
 
-export const ExchangeClosedPayload = Schema.Struct({
-  replyMessageId: LedgerMessageId,
-});
+export const ExchangeClosedPayload = Schema.Union([
+  Schema.Struct({ replyMessageId: LedgerMessageId }),
+  Schema.Struct({ closureKind: Schema.Literal("sender-cleared") }),
+]);
 export type ExchangeClosedPayload = typeof ExchangeClosedPayload.Type;
 
 export const ExchangeDropDisposition = Schema.Literals(["receiver-retired", "sender-retired"]);
@@ -242,6 +243,21 @@ export const ExchangeDroppedPayload = Schema.Struct({
   noticeMessageId: LedgerMessageId,
 });
 export type ExchangeDroppedPayload = typeof ExchangeDroppedPayload.Type;
+
+export const ClearOwnAskInput = Schema.Struct({
+  commandId: CommCommandId,
+  senderThreadId: ThreadId,
+  exchangeId: ExchangeId,
+  acceptedAt: Schema.String,
+});
+export type ClearOwnAskInput = typeof ClearOwnAskInput.Type;
+
+export const ClearOwnAskResult = Schema.Struct({
+  exchangeId: ExchangeId,
+  closureKind: Schema.Literal("sender-cleared"),
+  closedAt: Schema.String,
+});
+export type ClearOwnAskResult = typeof ClearOwnAskResult.Type;
 
 export const SendMessageInput = Schema.Struct({
   commandId: CommCommandId,
@@ -325,12 +341,18 @@ export const HumanInboxItem = Schema.Struct({
   squadronName: SquadronName,
   exchangeId: ExchangeId,
   senderId: ParticipantId,
+  senderThreadId: Schema.NullOr(ThreadId),
   intent: Schema.String,
   urgency: Urgency,
   message: Schema.String,
   openedAt: Schema.String,
+  status: Schema.Literals(["open", "answered"]),
+  terminalAt: Schema.NullOr(Schema.String),
 });
 export type HumanInboxItem = typeof HumanInboxItem.Type;
+
+export const HumanInboxListStatus = Schema.Literals(["open", "answered"]);
+export type HumanInboxListStatus = typeof HumanInboxListStatus.Type;
 
 export const AnswerHumanExchangeInput = Schema.Struct({
   commandId: CommCommandId,

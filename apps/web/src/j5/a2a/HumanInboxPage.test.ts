@@ -33,10 +33,13 @@ it("clears pending state when answer attempt id generation fails", async () => {
     squadronName: "Answer test",
     exchangeId: "exchange:answer-test",
     senderId: "agent:answer-test",
+    senderThreadId: "thread:answer-test",
     intent: "Prove pending cleanup",
     urgency: "blocking",
     message: "Question",
     openedAt: "2026-08-27T00:00:00.000Z",
+    status: "open",
+    terminalAt: null,
   } satisfies HumanInboxItem;
   const pending: Array<string | null> = [];
   const errors: Array<string | null> = [];
@@ -72,10 +75,13 @@ it("reports a stale inbox without treating a delivered answer as failed", async 
     squadronName: "Refresh test",
     exchangeId: "exchange:refresh-test",
     senderId: "agent:refresh-test",
+    senderThreadId: "thread:refresh-test",
     intent: "Distinguish delivery from refresh",
     urgency: "blocking",
     message: "Question",
     openedAt: "2026-08-27T00:00:00.000Z",
+    status: "open",
+    terminalAt: null,
   } satisfies HumanInboxItem;
   const attempts = new Map<string, { message: string; clientRequestId: string }>();
   const pending: Array<string | null> = [];

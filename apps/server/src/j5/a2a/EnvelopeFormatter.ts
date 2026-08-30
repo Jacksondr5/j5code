@@ -5,6 +5,7 @@ import type { SquadronId, ExchangeId, ParticipantId } from "./contracts.ts";
 export const A2A_ENVELOPE_VERSION = config.version;
 export const A2A_SEND_TOOL_DESCRIPTION = config.sendToolDescription;
 export const A2A_LIST_TOOL_DESCRIPTION = config.listToolDescription;
+export const A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION = config.clearOwnAskToolDescription;
 
 const render = (template: string, values: Readonly<Record<string, string>>): string =>
   template.replace(/\{\{([^{}]+)\}\}/g, (placeholder, name: string) => values[name] ?? placeholder);
@@ -33,6 +34,18 @@ export const formatPeerEnvelope = (input: {
     exchangeInstruction: deliveryInstruction(input),
   });
 
+export const formatClosedPeerEnvelope = (input: {
+  readonly senderId: ParticipantId;
+  readonly originSquadronId: SquadronId;
+  readonly message: string;
+}): string =>
+  render(config.peerClosedMessage, {
+    senderId: input.senderId,
+    originSquadronId: input.originSquadronId,
+    message: input.message,
+    closedExchangeInstruction: config.closedExchangeInstruction,
+  });
+
 export const formatHumanEnvelope = (input: {
   readonly senderId: ParticipantId;
   readonly exchangeId: ExchangeId | null;
@@ -42,6 +55,16 @@ export const formatHumanEnvelope = (input: {
     senderId: input.senderId,
     message: input.message,
     exchangeInstruction: deliveryInstruction(input),
+  });
+
+export const formatClosedHumanEnvelope = (input: {
+  readonly senderId: ParticipantId;
+  readonly message: string;
+}): string =>
+  render(config.humanClosedMessage, {
+    senderId: input.senderId,
+    message: input.message,
+    closedExchangeInstruction: config.closedExchangeInstruction,
   });
 
 /** A3 supplies notice derivation; A2 owns this channel's stable rendering shape. */
