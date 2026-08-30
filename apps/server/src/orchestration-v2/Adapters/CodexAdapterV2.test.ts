@@ -36,6 +36,7 @@ import { ChildProcess } from "effect/unstable/process";
 
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import type { EventNdjsonLogger } from "../../provider/Layers/EventNdjsonLogger.ts";
+import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../provider/T3OrchestrationInstructions.ts";
 import { layer as idAllocatorLayer, IdAllocatorV2 } from "../IdAllocator.ts";
 import {
   ProviderAdapterOpenSessionError,
@@ -347,7 +348,7 @@ describe("CodexAdapterV2 runtime policy", () => {
       assert.equal(params.collaborationMode?.mode, "default");
       assert.include(
         params.collaborationMode?.settings.developer_instructions ?? "",
-        "use `delegate_task`",
+        T3_CODE_ORCHESTRATION_INSTRUCTIONS,
       );
       assert.include(
         params.collaborationMode?.settings.developer_instructions ?? "",

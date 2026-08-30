@@ -1,13 +1,26 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  type ModelSelection,
+  type OrchestrationV2ThreadShell,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
+import {
+  OrchestratorProjectionError,
+  OrchestratorV2,
+} from "../../../orchestration-v2/Orchestrator.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
@@ -19,7 +32,9 @@ import {
   type SendMessageInput,
 } from "../contracts.ts";
 import { J5ToolkitHandlersLive } from "./handlers.ts";
-import { J5Toolkit, type J5SendMessageInput } from "./tools.ts";
+import { J5ListParticipantsResult, J5Toolkit, type J5SendMessageInput } from "./tools.ts";
+
+const decodeJ5ListParticipantsResult = Schema.decodeUnknownEffect(J5ListParticipantsResult);
 
 const invocation = {
   environmentId: EnvironmentId.make("environment:j5:mcp-handler"),
@@ -58,6 +73,7 @@ it.effect("derives send idempotency and sender identity from authenticated scope
       sendService,
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      Layer.mock(OrchestratorV2)({}),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
@@ -143,6 +159,10 @@ it.effect("keeps participant listing placement-read-only", () =>
       sendService,
       placementService,
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      Layer.mock(OrchestratorV2)({
+        getShellSnapshot: () =>
+          Effect.fail(new OrchestratorProjectionError({ threadId: invocation.threadId })),
+      }),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
@@ -173,5 +193,224 @@ it.effect("keeps participant listing placement-read-only", () =>
       assert.equal(listedRows[1]?.placementParentId, null);
       assert.equal(yield* Ref.get(placementWrites), 0);
     }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("lists active and archived agent titles with one ambient shell snapshot", () =>
+  Effect.gen(function* () {
+    const squadronId = SquadronId.make("squadron:j5:mcp-directory");
+    const activeThreadId = ThreadId.make("thread:j5:mcp-directory:active");
+    const archivedThreadId = ThreadId.make("thread:j5:mcp-directory:archived");
+    const missingThreadId = ThreadId.make("thread:j5:mcp-directory:missing");
+    const activeParticipantId = ParticipantId.make("agent:j5:mcp-directory:active");
+    const archivedParticipantId = ParticipantId.make("agent:j5:mcp-directory:archived");
+    const missingParticipantId = ParticipantId.make("agent:j5:mcp-directory:missing");
+    const humanParticipantId = ParticipantId.make("human:j5:mcp-directory");
+    const row = (participant: ParticipantDirectoryRow["participant"]): ParticipantDirectoryRow => ({
+      squadronId,
+      participantId: participant.id,
+      participant,
+      canReceiveMessage: true,
+      canOpenExchange: true,
+      acceptsUrgency: participant.kind === "human",
+    });
+    const rows = [
+      row({ kind: "agent", id: activeParticipantId, threadId: activeThreadId }),
+      row({ kind: "agent", id: archivedParticipantId, threadId: archivedThreadId }),
+      row({ kind: "agent", id: missingParticipantId, threadId: missingThreadId }),
+      row({ kind: "human", id: humanParticipantId }),
+    ];
+    const now = DateTime.makeUnsafe("2026-08-29T12:00:00.000Z");
+    const modelSelection = {
+      instanceId: invocation.providerInstanceId,
+      model: "gpt-5.6-sol",
+    } satisfies ModelSelection;
+    const projectId = ProjectId.make("project:j5:mcp-directory");
+    const shell = (input: {
+      readonly id: ThreadId;
+      readonly title: string;
+      readonly archivedAt: DateTime.Utc | null;
+    }): OrchestrationV2ThreadShell => ({
+      createdBy: "agent",
+      creationSource: "mcp",
+      id: input.id,
+      projectId,
+      title: input.title,
+      providerInstanceId: invocation.providerInstanceId,
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      activeProviderThreadId: null,
+      lineage: {
+        parentThreadId: null,
+        relationshipToParent: null,
+        rootThreadId: input.id,
+      },
+      forkedFrom: null,
+      latestRunId: null,
+      activeRunId: null,
+      status: "idle",
+      pendingRuntimeRequest: null,
+      latestVisibleMessage: null,
+      latestUserMessageAt: null,
+      hasActionableProposedPlan: false,
+      itemCount: 0,
+      visibleItemCount: 0,
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: input.archivedAt,
+      settledOverride: null,
+      settledAt: null,
+      deletedAt: null,
+    });
+    const activeShell = shell({
+      id: activeThreadId,
+      title: "Release reviewer",
+      archivedAt: null,
+    });
+    const archivedShell = shell({
+      id: archivedThreadId,
+      title: "Archived researcher",
+      archivedAt: now,
+    });
+    const sendService = Layer.succeed(
+      A2ASendService,
+      A2ASendService.of({
+        send: () => Effect.die("unused"),
+        listParticipants: () => Effect.succeed(rows),
+      }),
+    );
+    const shellSnapshotCalls = yield* Ref.make(0);
+    const orchestrator = Layer.mock(OrchestratorV2)({
+      getShellSnapshot: () =>
+        Ref.update(shellSnapshotCalls, (calls) => calls + 1).pipe(
+          Effect.as({
+            schemaVersion: 2,
+            snapshotSequence: 1,
+            threads: [activeShell],
+            archivedThreads: [archivedShell],
+          }),
+        ),
+    });
+    const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(
+        Layer.mergeAll(
+          sendService,
+          orchestrator,
+          Layer.mock(ParticipantPlacementService)({
+            listParticipants: () => Effect.succeed([]),
+          }),
+          Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+          NodeServices.layer,
+        ),
+      ),
+    );
+
+    const result = yield* Effect.gen(function* () {
+      const toolkit = yield* J5Toolkit;
+      return yield* toolkit
+        .handle("list_participants", {})
+        .pipe(
+          Stream.unwrap,
+          Stream.run(Sink.last()),
+          Effect.flatMap(Effect.fromOption),
+          Effect.provideService(McpInvocationContext, invocation),
+        );
+    }).pipe(Effect.provide(layer));
+    const directory = yield* decodeJ5ListParticipantsResult(result.encodedResult);
+    assert.equal(yield* Ref.get(shellSnapshotCalls), 1);
+
+    assert.deepStrictEqual(
+      directory.participants.map(({ participantId, display_name }) => ({
+        participantId,
+        display_name,
+      })),
+      [
+        { participantId: activeParticipantId, display_name: "Release reviewer" },
+        { participantId: archivedParticipantId, display_name: "Archived researcher" },
+        { participantId: missingParticipantId, display_name: null },
+        { participantId: humanParticipantId, display_name: null },
+      ],
+    );
+  }),
+);
+
+it.effect("returns null display names when the ambient shell snapshot fails", () =>
+  Effect.gen(function* () {
+    const squadronId = SquadronId.make("squadron:j5:mcp-directory:snapshot-failure");
+    const agentParticipantId = ParticipantId.make("agent:j5:mcp-directory:snapshot-failure");
+    const humanParticipantId = ParticipantId.make("human:j5:mcp-directory:snapshot-failure");
+    const rows: ReadonlyArray<ParticipantDirectoryRow> = [
+      {
+        squadronId,
+        participantId: agentParticipantId,
+        participant: {
+          kind: "agent",
+          id: agentParticipantId,
+          threadId: ThreadId.make("thread:j5:mcp-directory:snapshot-failure"),
+        },
+        canReceiveMessage: true,
+        canOpenExchange: true,
+        acceptsUrgency: false,
+      },
+      {
+        squadronId,
+        participantId: humanParticipantId,
+        participant: { kind: "human", id: humanParticipantId },
+        canReceiveMessage: true,
+        canOpenExchange: true,
+        acceptsUrgency: true,
+      },
+    ];
+    const sendService = Layer.succeed(
+      A2ASendService,
+      A2ASendService.of({
+        send: () => Effect.die("unused"),
+        listParticipants: () => Effect.succeed(rows),
+      }),
+    );
+    const shellSnapshotCalls = yield* Ref.make(0);
+    const orchestrator = Layer.mock(OrchestratorV2)({
+      getShellSnapshot: () =>
+        Ref.update(shellSnapshotCalls, (calls) => calls + 1).pipe(
+          Effect.andThen(
+            Effect.fail(new OrchestratorProjectionError({ threadId: invocation.threadId })),
+          ),
+        ),
+    });
+    const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(
+        Layer.mergeAll(
+          sendService,
+          orchestrator,
+          Layer.mock(ParticipantPlacementService)({
+            listParticipants: () => Effect.succeed([]),
+          }),
+          Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+          NodeServices.layer,
+        ),
+      ),
+    );
+
+    const result = yield* Effect.gen(function* () {
+      const toolkit = yield* J5Toolkit;
+      return yield* toolkit
+        .handle("list_participants", {})
+        .pipe(
+          Stream.unwrap,
+          Stream.run(Sink.last()),
+          Effect.flatMap(Effect.fromOption),
+          Effect.provideService(McpInvocationContext, invocation),
+        );
+    }).pipe(Effect.provide(layer));
+    const directory = yield* decodeJ5ListParticipantsResult(result.encodedResult);
+
+    assert.equal(yield* Ref.get(shellSnapshotCalls), 1);
+    assert.deepStrictEqual(
+      directory.participants.map(({ display_name }) => display_name),
+      [null, null],
+    );
   }),
 );

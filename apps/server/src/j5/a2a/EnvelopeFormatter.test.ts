@@ -63,16 +63,23 @@ it("tells agents that human-origin exchanges require an explicit tool reply", ()
   assert.include(rendered, "[Message from human:formatter-person]");
   assert.include(rendered, "This person is not watching this chat");
   assert.include(rendered, 'exchange_id="exchange:human"');
-  assert.include(A2A_SEND_TOOL_DESCRIPTION, "returns after the sender ledger commit");
-  assert.include(A2A_SEND_TOOL_DESCRIPTION, "Durably send one message");
-  assert.include(A2A_LIST_TOOL_DESCRIPTION, "List reachable message recipients");
+  assert.equal(
+    A2A_SEND_TOOL_DESCRIPTION,
+    "Send one durable message to another agent or the human. Three uses: a plain send when you don't need a reply; an ask — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a reply — include the exchange_id from the ask you are answering, which closes that exchange. Set urgency only when asking the human. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. Reuse client_request_id to retry the same send safely. This tool is unavailable to a native thread without a registered home squadron. Participation currently requires a wrapper-spawned agent that already has a home squadron or controlled test seeding; native user-created home provisioning is deferred to the home-squadron registrar + A6 creation integrations follow-up.",
+  );
+  assert.equal(
+    A2A_LIST_TOOL_DESCRIPTION,
+    "Your address book: every participant row available to you — agents and the human — with a display name when known, a participant id to address, and capabilities showing whether it accepts messages, exchanges, or urgency. When you're told to message someone by name or role, resolve them here first. This tool is unavailable to a native thread without a registered home squadron. Participation currently requires a wrapper-spawned agent that already has a home squadron or controlled test seeding; native user-created home provisioning is deferred to the home-squadron registrar + A6 creation integrations follow-up.",
+  );
   for (const description of [A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION]) {
     assert.include(description, "native thread without a registered home squadron");
     assert.include(description, "wrapper-spawned agent");
     assert.include(description, "controlled test seeding");
-    assert.include(description, "home-squadron registrar + A6 creation integrations follow-up");
-    assert.notMatch(description, /ask the user|product workflow|list_participants again/i);
   }
+  assert.notMatch(
+    A2A_LIST_TOOL_DESCRIPTION,
+    /consult.*(?:spawn|archive)|(?:spawn|archive).*changes/i,
+  );
   assert.notMatch(
     [rendered, A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION].join("\n"),
     /\b(?:J5|A2A)\b/,

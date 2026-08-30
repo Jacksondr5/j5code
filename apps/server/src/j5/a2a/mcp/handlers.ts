@@ -1,8 +1,10 @@
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
+import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
@@ -56,7 +58,9 @@ const handlers = {
   list_participants: () =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
-      const directory = yield* (yield* A2ASendService).listParticipants(scope.threadId);
+      const service = yield* A2ASendService;
+      const orchestrator = yield* OrchestratorV2;
+      const directory = yield* service.listParticipants(scope.threadId);
       const placements = yield* ParticipantPlacementService;
       const squadronIds = [...new Set(directory.map((row) => row.squadronId))];
       const placementRows = (yield* Effect.forEach(
@@ -66,6 +70,14 @@ const handlers = {
       )).flat();
       const placementByParticipant = new Map(
         placementRows.map((row) => [`${row.squadronId}\u0000${row.participantId}`, row] as const),
+      );
+      const snapshot = yield* Effect.option(orchestrator.getShellSnapshot());
+      const titleByThreadId = new Map(
+        Option.match(snapshot, {
+          onNone: () => [],
+          onSome: ({ archivedThreads, threads }) =>
+            [...threads, ...archivedThreads].map((thread) => [thread.id, thread.title] as const),
+        }),
       );
       return {
         participants: directory.map((row) => {
@@ -81,6 +93,10 @@ const handlers = {
                 ? ({ kind: "not-applicable" } as const)
                 : ({ kind: "unrecorded" } as const)),
             placementParentId: placement?.placementParentId ?? null,
+            display_name:
+              row.participant.kind === "agent"
+                ? (titleByThreadId.get(row.participant.threadId) ?? null)
+                : null,
           };
         }),
       };

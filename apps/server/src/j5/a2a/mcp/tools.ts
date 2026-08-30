@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 import { ThreadId } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as McpInvocationContext from "../../../mcp/McpInvocationContext.ts";
+import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { A2A_LIST_TOOL_DESCRIPTION, A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
@@ -39,7 +40,9 @@ export const J5ParticipantDirectoryRow = Schema.Struct({
   threadId: Schema.NullOr(ThreadId),
   provenance: ParticipantProvenanceView,
   placementParentId: Schema.NullOr(ParticipantId),
+  display_name: Schema.NullOr(Schema.String),
 });
+export type J5ParticipantDirectoryRow = typeof J5ParticipantDirectoryRow.Type;
 
 export const J5ListParticipantsResult = Schema.Struct({
   participants: Schema.Array(J5ParticipantDirectoryRow),
@@ -50,6 +53,7 @@ const dependencies = [
   A2ASendService,
   A2ADeliveryWorker,
   Crypto.Crypto,
+  OrchestratorV2,
 ];
 
 const placementDependencies = [...dependencies, ParticipantPlacementService];
