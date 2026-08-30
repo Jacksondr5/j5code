@@ -5,6 +5,7 @@ import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import { layer as homeRegistrarLayer } from "./HomeRegistrar.ts";
 import { humanPersonRegistryLayer } from "./HumanPersonRegistry.ts";
 import { layer as ledgerLayer } from "./LedgerService.ts";
+import { layer as participantPlacementLayer } from "./PlacementService.ts";
 import { layer as sendServiceLayer } from "./SendService.ts";
 import { layer as silenceDetectorLayer } from "./SilenceDetector.ts";
 import { layer as humanInboxLayer } from "./HumanInboxService.ts";
@@ -23,7 +24,6 @@ export const makeJ5A2ARuntimeLayer = (
   const silenceDetectorProvided = silenceDetectorLayer.pipe(
     Layer.provideMerge(deliveryWorkerProvided),
   );
-
   return Layer.mergeAll(
     humanPersonRegistryLayer,
     homeRegistrarLayer,
@@ -31,8 +31,9 @@ export const makeJ5A2ARuntimeLayer = (
     deliveryWorkerProvided,
     silenceDetectorProvided,
     humanInboxLayer,
+    participantPlacementLayer,
   ).pipe(Layer.provideMerge(ledgerProvided));
 };
 
-/** Production J5 A2A services; SQL and V2 thread management stay shared runtime dependencies. */
+/** Production J5 A2A services; SQL and V2 thread management stay shared dependencies. */
 export const J5A2ARuntimeLayer = makeJ5A2ARuntimeLayer();

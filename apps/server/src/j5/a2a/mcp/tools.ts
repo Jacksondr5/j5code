@@ -1,10 +1,12 @@
 import { Tool, Toolkit } from "effect/unstable/ai";
 import * as Schema from "effect/Schema";
 
+import { ThreadId } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as McpInvocationContext from "../../../mcp/McpInvocationContext.ts";
 import { A2A_LIST_TOOL_DESCRIPTION, A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
+import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import {
   ExchangeId,
@@ -13,6 +15,7 @@ import {
   SendMessageResult,
   Urgency,
 } from "../contracts.ts";
+import { ParticipantProvenanceView } from "../placementContracts.ts";
 
 export const J5McpFailure = Schema.Struct({
   code: Schema.String,
@@ -31,8 +34,15 @@ export const J5SendMessageInput = Schema.Struct({
 });
 export type J5SendMessageInput = typeof J5SendMessageInput.Type;
 
+export const J5ParticipantDirectoryRow = Schema.Struct({
+  ...ParticipantDirectoryRow.fields,
+  threadId: Schema.NullOr(ThreadId),
+  provenance: ParticipantProvenanceView,
+  placementParentId: Schema.NullOr(ParticipantId),
+});
+
 export const J5ListParticipantsResult = Schema.Struct({
-  participants: Schema.Array(ParticipantDirectoryRow),
+  participants: Schema.Array(J5ParticipantDirectoryRow),
 });
 
 const dependencies = [
@@ -41,6 +51,8 @@ const dependencies = [
   A2ADeliveryWorker,
   Crypto.Crypto,
 ];
+
+const placementDependencies = [...dependencies, ParticipantPlacementService];
 
 export const J5SendMessageTool = Tool.make("send_message", {
   description: A2A_SEND_TOOL_DESCRIPTION,
@@ -61,7 +73,7 @@ export const J5ListParticipantsTool = Tool.make("list_participants", {
   success: J5ListParticipantsResult,
   failure: J5McpFailure,
   failureMode: "return",
-  dependencies,
+  dependencies: placementDependencies,
 })
   .annotate(Tool.Title, "List cross-agent messaging participants")
   .annotate(Tool.Readonly, true)

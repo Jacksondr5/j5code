@@ -45,10 +45,19 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 4, name: "SilenceNoticeChannel" },
       { migration_id: 5, name: "ImmutableThreadHome" },
       { migration_id: 6, name: "HumanNode" },
+      { migration_id: 7, name: "ParticipantPlacement" },
     ]);
     assert.deepStrictEqual(
-      migrationEntries.map(([id]) => id),
-      [1, 2, 3, 4, 5, 6],
+      migrationEntries.map(([id, name]) => [id, name]),
+      [
+        [1, "EpicCommunicationLedger"],
+        [2, "SendDeliverReply"],
+        [3, "SquadronRename"],
+        [4, "SilenceNoticeChannel"],
+        [5, "ImmutableThreadHome"],
+        [6, "HumanNode"],
+        [7, "ParticipantPlacement"],
+      ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
@@ -77,7 +86,9 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'j5_a2a_human_person',
           'j5_a2a_human_inbox',
           'j5_a2a_human_inbox_data',
-          'j5_a2a_silence_detector_cursor'
+          'j5_a2a_silence_detector_cursor',
+          'j5_a2a_placement_event',
+          'j5_a2a_participant_placement'
         )
       ORDER BY name
     `;
@@ -95,7 +106,9 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'j5_a2a_delivery_message_sender_idx',
           'j5_a2a_delivery_one_reply_idx',
           'j5_a2a_comm_event_agent_home_thread_idx',
-          'j5_a2a_human_person_local_operator_idx'
+          'j5_a2a_human_person_local_operator_idx',
+          'j5_a2a_placement_event_participant_idx',
+          'j5_a2a_participant_placement_parent_idx'
         )
       ORDER BY name
     `;
@@ -133,6 +146,8 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       { name: "j5_a2a_human_inbox" },
       { name: "j5_a2a_human_inbox_data" },
       { name: "j5_a2a_human_person" },
+      { name: "j5_a2a_participant_placement" },
+      { name: "j5_a2a_placement_event" },
       { name: "j5_a2a_silence_detector_cursor" },
       { name: "j5_a2a_squadron" },
       { name: "j5_a2a_squadron_membership" },
@@ -192,6 +207,14 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
     );
     assert.include(membershipSchema[0]?.sql ?? "", "participant_kind = 'agent'");
     assert.include(membershipSchema[0]?.sql ?? "", "participant_id NOT LIKE 'human:%'");
+    assert.include(
+      indexesByName.get("j5_a2a_participant_placement_parent_idx") ?? "",
+      "ON j5_a2a_participant_placement(squadron_id, placement_parent_id)",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_placement_event_participant_idx") ?? "",
+      "ON j5_a2a_placement_event(squadron_id, participant_id, seq)",
+    );
     const envelopeChannel = deliveryColumns.find((column) => column.name === "envelope_channel");
     assert.equal(envelopeChannel?.notnull, 1);
     assert.isNull(envelopeChannel?.dflt_value);
@@ -230,6 +253,72 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       WHERE participant_id = 'human:forbidden-membership'
     `;
     assert.deepStrictEqual(forbiddenRows, [{ count: 0 }]);
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect("requires a non-null, non-blank reparent actor subject", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations();
+    yield* sql`
+      INSERT INTO j5_a2a_squadron (id, name, created_at)
+      VALUES ('squadron:placement-actor-check', 'Placement actor check', '2026-08-28T00:00:00.000Z')
+    `;
+
+    const insertReparent = (seq: number, commandId: string, actorSubject: string | null) => sql`
+      INSERT INTO j5_a2a_placement_event (
+        seq,
+        command_id,
+        request_fingerprint,
+        squadron_id,
+        participant_id,
+        kind,
+        actor,
+        actor_session_id,
+        actor_subject,
+        auth_method,
+        provenance_kind,
+        provenance_participant_id,
+        provenance_source,
+        previous_parent_id,
+        placement_parent_id,
+        created_at
+      ) VALUES (
+        ${seq},
+        ${commandId},
+        'fingerprint:placement-actor-check',
+        'squadron:placement-actor-check',
+        'agent:placement-actor-check',
+        'participant.reparented',
+        'human',
+        'session:placement-actor-check',
+        ${actorSubject},
+        'browser-session-cookie',
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        '2026-08-28T00:00:00.000Z'
+      )
+    `;
+
+    yield* Effect.flip(insertReparent(1, "command:placement-actor-null", null));
+    yield* Effect.flip(insertReparent(2, "command:placement-actor-empty", ""));
+    yield* insertReparent(3, "command:placement-actor-valid", "human:placement-owner");
+
+    const rows = yield* sql<{ readonly actor_subject: string; readonly command_id: string }>`
+      SELECT command_id, actor_subject
+      FROM j5_a2a_placement_event
+      WHERE squadron_id = 'squadron:placement-actor-check'
+      ORDER BY seq
+    `;
+    assert.deepStrictEqual(rows, [
+      {
+        command_id: "command:placement-actor-valid",
+        actor_subject: "human:placement-owner",
+      },
+    ]);
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
 

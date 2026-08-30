@@ -6,7 +6,9 @@
 
 Production includes a non-agent-invocable home registrar for sanctioned creation paths. `registerAtCreation` accepts only an explicit existing squadron, records one immutable `participant.joined`, replays the same creation without another event, and rejects a different requested home. `getHomeForThread` reads historical join events so later lifecycle retirement cannot erase or reassign a thread's home. The registrar never creates, selects, moves, or leaves squadrons, and it is not an agent tool.
 
-No native user-created-thread hook consumes the registrar yet. Such threads remain explicit nonparticipants: `send_message` and `list_participants` fail closed when the caller has no home. The sanctioned consumers are the future A6 creation wrapper and controlled test seeding; neither a default squadron nor a production seeding helper exists here. A6 separately owns wrapper placement/provenance and final real-provider proof, so this registrar does not claim either integration.
+Placement and provenance are an agent-only organization overlay. Creation records immutable typed provenance (`spawned-by`, `forked-from`, or `unknown`) and derives the initial placement from that fact. Humans and person ids are never placement-tree nodes. This extraction ships no reparent or cascade command surface; the retained R21 human-only reparent law and Crew lifecycle recovery contracts live in the A6 ticket record.
+
+No native user-created-thread hook consumes the registrar. Such threads remain explicit nonparticipants: `send_message` and `list_participants` fail closed when the caller has no home. There is no default Squadron, agent-created home, move action, or production seeding helper.
 
 Human-inbox routes currently authenticate the environment scope, not the named person. The caller supplies the `human:<person-id>` used for reads and attributed answers; person-bound authentication remains deferred to X4's peer registry. Until that identity seam lands, an `orchestration:read` session can read any known person's inbox and an `orchestration:operate` session can answer as any known person.
 

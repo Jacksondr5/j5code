@@ -368,6 +368,20 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
     ];
     const before = yield* ledger.listMembership(squadronId);
     assert.deepStrictEqual(before, expected);
+    assert.equal(
+      yield* ledger.findHistoricalAgentParticipantId({
+        squadronId,
+        threadId: firstAgent.threadId,
+      }),
+      firstAgent.id,
+    );
+    assert.equal(
+      yield* ledger.findHistoricalAgentParticipantId({
+        squadronId,
+        threadId: ThreadId.make("thread:never-joined"),
+      }),
+      null,
+    );
 
     yield* sql`DELETE FROM j5_a2a_squadron_membership WHERE squadron_id = ${squadronId}`;
     const corrupted = yield* ledger.listMembership(squadronId);
@@ -399,6 +413,59 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
       ),
     );
     assert.equal(forbidden._tag, "A2AStorageError");
+  }).pipe(Effect.provide(memoryLedgerLayer())),
+);
+
+it.effect("rejects a malformed stored historical participant id", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const ledger = yield* A2ALedger;
+    const sql = yield* SqlClient.SqlClient;
+    const squadronId = SquadronId.make("squadron:malformed-historical-participant");
+    const threadId = ThreadId.make("thread:malformed-historical-participant");
+    yield* ledger.createSquadron({
+      squadron: {
+        id: squadronId,
+        name: "Malformed historical participant",
+        createdAt: timestamp,
+      },
+    });
+    yield* sql`
+      INSERT INTO j5_a2a_comm_event (
+        seq,
+        squadron_id,
+        kind,
+        sender,
+        receiver,
+        exchange_id,
+        correlation_id,
+        payload,
+        created_at,
+        command_id
+      ) VALUES (
+        1,
+        ${squadronId},
+        'participant.joined',
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        json_object(
+          'participant',
+          json_object('kind', 'agent', 'id', '', 'threadId', ${threadId})
+        ),
+        ${timestamp},
+        'command:malformed-historical-participant'
+      )
+    `;
+
+    const error = yield* Effect.flip(
+      ledger.findHistoricalAgentParticipantId({ squadronId, threadId }),
+    );
+    assert.isTrue(isA2AStorageError(error));
+    if (isA2AStorageError(error)) {
+      assert.equal(error.operation, "find historical agent participant");
+    }
   }).pipe(Effect.provide(memoryLedgerLayer())),
 );
 

@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
+import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { CommCommandId } from "../contracts.ts";
 import { J5Toolkit, type J5McpFailure } from "./tools.ts";
@@ -55,8 +56,34 @@ const handlers = {
   list_participants: () =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
-      const service = yield* A2ASendService;
-      return { participants: yield* service.listParticipants(scope.threadId) };
+      const directory = yield* (yield* A2ASendService).listParticipants(scope.threadId);
+      const placements = yield* ParticipantPlacementService;
+      const squadronIds = [...new Set(directory.map((row) => row.squadronId))];
+      const placementRows = (yield* Effect.forEach(
+        squadronIds,
+        (squadronId) => placements.listParticipants(squadronId),
+        { concurrency: 1 },
+      )).flat();
+      const placementByParticipant = new Map(
+        placementRows.map((row) => [`${row.squadronId}\u0000${row.participantId}`, row] as const),
+      );
+      return {
+        participants: directory.map((row) => {
+          const placement = placementByParticipant.get(
+            `${row.squadronId}\u0000${row.participantId}`,
+          );
+          return {
+            ...row,
+            threadId: row.participant.kind === "agent" ? row.participant.threadId : null,
+            provenance:
+              placement?.provenance ??
+              (row.participant.kind === "human"
+                ? ({ kind: "not-applicable" } as const)
+                : ({ kind: "unrecorded" } as const)),
+            placementParentId: placement?.placementParentId ?? null,
+          };
+        }),
+      };
     }).pipe(Effect.mapError(failure)),
 } satisfies Parameters<typeof J5Toolkit.toLayer>[0];
 

@@ -10,6 +10,7 @@ import { runMigrations } from "../../persistence/Migrations.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
+import { ParticipantPlacementService } from "./PlacementService.ts";
 import { A2ASilenceDetector } from "./SilenceDetector.ts";
 import { makeJ5A2ARuntimeLayer } from "./runtimeLayer.ts";
 
@@ -69,11 +70,19 @@ it.effect("shares one runtime across the combined HTTP and MCP-style route graph
       }).pipe(Layer.tap(() => Effect.sync(() => (threadManagementBuilds += 1))));
       const ledgerConsumer = Layer.effectDiscard(A2ALedger.pipe(Effect.asVoid));
       const secondThreadConsumer = Layer.effectDiscard(ThreadManagementService.pipe(Effect.asVoid));
+      const placementConsumer = Layer.effectDiscard(
+        ParticipantPlacementService.pipe(Effect.asVoid),
+      );
       const silenceConsumer = Layer.effectDiscard(A2ASilenceDetector.pipe(Effect.asVoid));
       const runtime = makeJ5A2ARuntimeLayer({ ledger: countedLedger });
       yield* Layer.build(
-        Layer.mergeAll(ledgerConsumer, silenceConsumer, secondThreadConsumer).pipe(
-          Layer.provide(runtime),
+        Layer.mergeAll(
+          ledgerConsumer,
+          secondThreadConsumer,
+          placementConsumer,
+          silenceConsumer,
+        ).pipe(
+          Layer.provideMerge(runtime),
           Layer.provide(countedThreadManagement),
           Layer.provide(database),
         ),

@@ -9,8 +9,15 @@ import * as Stream from "effect/Stream";
 
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
+import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
-import { LedgerMessageId, ParticipantId, type SendMessageInput } from "../contracts.ts";
+import {
+  LedgerMessageId,
+  ParticipantId,
+  SquadronId,
+  type ParticipantDirectoryRow,
+  type SendMessageInput,
+} from "../contracts.ts";
 import { J5ToolkitHandlersLive } from "./handlers.ts";
 import { J5Toolkit, type J5SendMessageInput } from "./tools.ts";
 
@@ -49,6 +56,7 @@ it.effect("derives send idempotency and sender identity from authenticated scope
     );
     const dependencies = Layer.mergeAll(
       sendService,
+      Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       NodeServices.layer,
     );
@@ -76,6 +84,94 @@ it.effect("derives send idempotency and sender identity from authenticated scope
       assert.lengthOf(captured, 2);
       assert.equal(captured[0]?.commandId, captured[1]?.commandId);
       assert.equal(captured[0]?.senderThreadId, invocation.threadId);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("keeps participant listing placement-read-only", () =>
+  Effect.gen(function* () {
+    const squadronId = SquadronId.make("squadron:j5:mcp-placement-handler");
+    const callerParticipantId = ParticipantId.make("agent:j5:mcp-placement-caller");
+    const personParticipantId = ParticipantId.make("human:placement-person");
+    const displayParentId = ParticipantId.make("agent:j5:mcp-display-parent");
+    const placementWrites = yield* Ref.make(0);
+    const callerRow = {
+      squadronId,
+      participantId: callerParticipantId,
+      participant: {
+        kind: "agent" as const,
+        id: callerParticipantId,
+        threadId: invocation.threadId,
+      },
+      canReceiveMessage: true,
+      canOpenExchange: true,
+      acceptsUrgency: false,
+    } satisfies ParticipantDirectoryRow;
+    const humanRow = {
+      squadronId,
+      participantId: personParticipantId,
+      participant: { kind: "human" as const, id: personParticipantId },
+      canReceiveMessage: true,
+      canOpenExchange: true,
+      acceptsUrgency: true,
+    } satisfies ParticipantDirectoryRow;
+    const sendService = Layer.succeed(
+      A2ASendService,
+      A2ASendService.of({
+        send: () => Effect.die("send_message is outside this placement-handler test"),
+        listParticipants: () => Effect.succeed([callerRow, humanRow]),
+      }),
+    );
+    const placementService = Layer.mock(ParticipantPlacementService)({
+      recordCreation: () =>
+        Ref.update(placementWrites, (count) => count + 1).pipe(
+          Effect.andThen(Effect.die("the read handler must not repair placement")),
+        ),
+      listParticipants: () =>
+        Effect.succeed([
+          {
+            squadronId,
+            participantId: callerParticipantId,
+            participant: callerRow.participant,
+            threadId: invocation.threadId,
+            provenance: { kind: "unknown" as const, source: "native_or_unobserved" as const },
+            placementParentId: displayParentId,
+          },
+        ]),
+    });
+    const dependencies = Layer.mergeAll(
+      sendService,
+      placementService,
+      Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      NodeServices.layer,
+    );
+    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+
+    yield* Effect.gen(function* () {
+      const toolkit = yield* J5Toolkit;
+      const callList = () =>
+        toolkit
+          .handle("list_participants", {})
+          .pipe(
+            Stream.unwrap,
+            Stream.run(Sink.last()),
+            Effect.flatMap(Effect.fromOption),
+            Effect.provideService(McpInvocationContext, invocation),
+          );
+      const listed = yield* callList();
+      const listedRows = (
+        listed.result as unknown as {
+          readonly participants: ReadonlyArray<{
+            readonly provenance: { readonly kind: string };
+            readonly placementParentId: ParticipantId | null;
+          }>;
+        }
+      ).participants;
+      assert.equal(listedRows[0]?.provenance.kind, "unknown");
+      assert.equal(listedRows[0]?.placementParentId, displayParentId);
+      assert.deepStrictEqual(listedRows[1]?.provenance, { kind: "not-applicable" });
+      assert.equal(listedRows[1]?.placementParentId, null);
+      assert.equal(yield* Ref.get(placementWrites), 0);
     }).pipe(Effect.provide(layer));
   }),
 );
