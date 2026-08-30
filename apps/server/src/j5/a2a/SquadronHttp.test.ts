@@ -8,6 +8,7 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
+import { ConnectionError, SqlError } from "effect/unstable/sql/SqlError";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import { SquadronManagementService } from "./SquadronManagementService.ts";
@@ -79,7 +80,15 @@ it("lists and creates explicit Squadron project references", async () => {
 
 it("sanitizes and logs unmatched Squadron operation failures", async () => {
   const management = Layer.mock(SquadronManagementService)({
-    list: () => Effect.fail(new Error("SQLITE driver detail must not reach the client")),
+    list: () =>
+      Effect.fail(
+        new SqlError({
+          reason: new ConnectionError({
+            cause: new Error("SQLITE driver detail must not reach the client"),
+            message: "SQLITE driver detail must not reach the client",
+          }),
+        }),
+      ),
     create: () => Effect.die("not reached"),
   });
   const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
