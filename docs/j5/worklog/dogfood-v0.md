@@ -41,6 +41,8 @@ status: 1
 
 - **Naming audit (Jackson, 2026-08-28):** examine the naming of everything against the settled glossary (Squadron et al.) — headline case: the `j5/a2a` module / `j5_a2a_*` table namespace has grown into the whole fleet-coordination substrate (Squadrons, membership, placement/provenance, messaging), so "a2a" now under-describes it. Rename cost grows with every milestone; run the audit immediately post-dogfood.
 
+- **Auth-subject→person binding (recorded 2026-08-31):** merged #11 authenticates but deliberately does not bind auth subjects to person ids — `resolvePersonId()` is explicit-or-local-default, per R9's "future auth binds to it" design. The binding becomes a product session when multi-person or remote access gets real; no current lane owns it.
+
 ## Explicitly NOT v0
 
 Roles/Crews implementation (item 3 — design session completed 2026-08-23 ahead of the retro; feature docs are the build-ready contract, rulings at [roles-crews-session-2026-08-23.md](roles-crews-session-2026-08-23.md); staffing is a separate call), Memos, Playbooks, Shared Squadrons, item-4 panes, Director migration, multi-dev ticket sharing.
