@@ -205,6 +205,8 @@ withdrawal honestly.
 - **`t3_thread_list`, `t3_thread_read`, `t3_thread_wait`** — consumed as-is (observation is
   unregulated). If upstream descriptions reference `delegate_task`, the J5 surface re-declares the
   affected tool with corrected prose.
-- **`create_threads` / `t3_thread_start`** — the open row (substrate.md): drop recommended,
-  undecided. If kept, their descriptions must be re-written here first — the shipped strings steer
-  callers toward `delegate_task`.
+- **`create_threads` / `t3_thread_start`** — **SETTLED-OMITTED (Director disposition, 2026-08-31,
+  under ST5's delegated realization; shipped fail-closed in the J5OrchestratorSurface).** Absent by
+  construction from the agent surface. Admission requires a contract amendment HERE first (corrected
+  descriptions included — the shipped upstream strings steer callers toward `delegate_task`), never a
+  registration change alone. Supersedes substrate.md's open row.
