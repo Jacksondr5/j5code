@@ -104,7 +104,7 @@ available. Reuse client_request_id to retry the same spawn safely."
 | `client_request_id` | string, non-empty                    | no       | Supply and reuse to make retries safe             |
 
 Result: `participant_id`, `thread_id`, `squadron_id`, `placement` (parent = caller, provenance
-`spawned-by`, source `j5_wrapper`). Semantics: creates an ordinary **root-lineage** thread via the
+`spawned-by`, source `j5_spawn`). Semantics: creates an ordinary **root-lineage** thread via the
 upstream creation seam (never `delegate_task`), registers the immutable Squadron home (fail-closed:
 refuses before creation if the caller's home no longer names an existing Squadron), records
 placement + provenance atomically, then starts the first turn with the brief. Errors:
