@@ -27,11 +27,11 @@ Prior art is Jackson's own fleet ([interview synthesis](../../research/jackson-p
 
 Provider/model/reasoning stay **required and explicit** on every agent-invoked spawn, Role or no Role. A Role's allowlist **constrains** the required choice (an out-of-list pick is an error naming the Role that excludes it); it never silently substitutes a default on the tool surface. The human composer keeps its ruled behavior unchanged ([roles.md](roles.md): first allowlisted entry as visible-cue default). The guide's territory is what the allowlist cannot decide: role-less spawns, and **which Role to pick** — cross-Role comparison lives here, complementing the per-Role purpose/posture/cost-tier the spawn listing already carries.
 
-## SP4 — Closing `spawn_agent`'s held slot _(proposed this session; awaiting Jackson)_
+## SP4 — Closing `spawn_agent`'s held slot _(settled 2026-08-30, as amended by Jackson)_
 
-The contract's come-back note deliberately left the description with "no spawn-then-ask steering until that guide rules." Proposed closure, consistent with SP2's exclusion:
+The contract's come-back note deliberately left the description with "no spawn-then-ask steering until that guide rules." Ruled:
 
-- **The slot closes empty** — no steering sentence is added to `spawn_agent`'s description. The report-back contract is brief content (SP2.2), so a spawner who wants to hear back writes it into the brief rather than being coached by the tool.
+- **The description gains exactly one sentence of brief steering** (Jackson's amendment to the proposed empty closure): _"In your brief, tell the new agent what it should do first and whether it should reply to you."_ The report-back contract still travels in the brief (SP2.2) — the tool's only coaching is the reminder to write it. Folding the sentence into the contract is with the Architecture agent (the `agent-tools.md` owner); the implementation string change rides wherever that contract lands.
 - **Receipt-ACKs: nothing is written anywhere.** The platform measures delivery (ledger receipts) — a social "got it" message is structurally redundant, and the prior-art fleet had to ban exactly that noise once courtesy-acks took hold. If ack noise appears in dogfood, the remedy is a line in the _user's_ guide then, added from observed need — not platform law now.
 - **Mid-first-turn delivery mechanics** (what happens when a send lands while a fresh spawn is still working its brief) are A2A delivery design — the Architecture lane's question, never guide content.
 
