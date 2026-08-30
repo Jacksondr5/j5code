@@ -142,6 +142,7 @@ const placementDependencies = [
   McpInvocationContext.McpInvocationContext,
   A2ASendService,
   ParticipantPlacementService,
+  OrchestratorV2,
 ];
 
 const spawnDependencies = [

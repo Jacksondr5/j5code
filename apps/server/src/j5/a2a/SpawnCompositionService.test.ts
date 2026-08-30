@@ -151,7 +151,10 @@ it.effect("commits joined home and placement facts in one transaction", () =>
     if (Option.isSome(observed)) {
       assert.equal(observed.value.kind, "participant.joined");
       if (observed.value.kind === "participant.joined") {
-        assert.equal(observed.value.payload.participant.threadId, childThreadId);
+        assert.equal(observed.value.payload.participant.kind, "agent");
+        if (observed.value.payload.participant.kind === "agent") {
+          assert.equal(observed.value.payload.participant.threadId, childThreadId);
+        }
       }
     }
   }).pipe(Effect.provide(TestLayer)),

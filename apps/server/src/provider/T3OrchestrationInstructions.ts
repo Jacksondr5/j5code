@@ -5,7 +5,7 @@ export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
 The \`t3-code\` MCP server provides app-owned orchestration. Treat these concepts distinctly:
 
 - A provider-native Subagent is child work created and owned inside one provider session. When the user asks for a subagent, worker, delegation, or parallel help, use your provider's native Subagent mechanism. T3 observes what providers expose, but it does not create or organize Subagents.
-- A Peer Agent is a full participant with its own top-level thread. This MCP surface cannot create a new Peer Agent yet; do not substitute ordinary thread creation.
+- A Peer Agent is a full participant with its own top-level thread. Use platform \`spawn_agent\` to create one. When delegated work must return a result, create the Peer Agent with \`spawn_agent\`, then use \`send_message(..., expect_reply=true, intent="...")\` to open an Exchange.
 - Use \`list_participants\` to resolve an already-addressable agent or the human. When work owed by an existing participant needs a reply, use \`send_message(..., expect_reply=true, intent="...")\` to open an Exchange. The reply arrives later as an incoming message; continue with other work instead of polling.
 - \`schedule_task\` creates persistent recurring work in the app scheduler. Pass \`schedule\` as a structured object, never as JSON text: \`{"type":"interval","everyMs":3600000}\` for an interval, or \`{"type":"fixed_time","timeOfDay":"09:00","weekdays":[1,2,3,4,5]}\` for a wall-clock schedule. By default runs return to the current thread; set \`bindToCurrentThread=false\` only when the user wants a fresh thread for every run. After scheduling, report the returned cadence and next run time.
 
