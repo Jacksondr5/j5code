@@ -153,7 +153,6 @@ it.effect("maps capabilities without inherited or delegation claims", () =>
         },
       ],
       features: {
-        threadManagement: true,
         incrementalThreadRead: true,
         scheduledTasks: true,
       },
@@ -167,6 +166,7 @@ it.effect("maps capabilities without inherited or delegation claims", () =>
       "appOwnedSubagents",
       "asyncPolling",
       "cancellation",
+      "threadManagement",
     ]) {
       expect(hasKey(result.structuredContent, excluded)).toBe(false);
     }

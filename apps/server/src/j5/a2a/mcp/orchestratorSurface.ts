@@ -47,7 +47,6 @@ export const J5OrchestratorCapabilitiesResult = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   providers: Schema.Array(J5OrchestratorProviderCapability),
   features: Schema.Struct({
-    threadManagement: Schema.Boolean,
     incrementalThreadRead: Schema.Boolean,
     scheduledTasks: Schema.Boolean,
   }),
@@ -71,7 +70,6 @@ export const mapJ5OrchestratorCapabilities = (
     constraints: provider.constraints,
   })),
   features: {
-    threadManagement: capabilities.features.threadManagement,
     incrementalThreadRead: capabilities.features.incrementalThreadRead,
     scheduledTasks: capabilities.features.scheduledTasks,
   },
