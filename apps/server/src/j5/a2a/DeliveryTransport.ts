@@ -49,7 +49,7 @@ export interface AgentDeliveryInput {
   readonly senderId: ParticipantId;
   readonly receiverId: ParticipantId;
   readonly exchangeId: ExchangeId | null;
-  readonly exchangeRole: "none" | "ask" | "followup" | "reply";
+  readonly exchangeRole: "none" | "ask" | "followup" | "reply" | "terminal_notice";
   readonly message: string;
   readonly envelopeChannel: DeliveryEnvelopeChannel;
 }
