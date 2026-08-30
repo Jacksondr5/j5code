@@ -18,7 +18,11 @@ import {
   SquadronId,
   Urgency,
 } from "../contracts.ts";
-import { ParticipantProvenanceView } from "../placementContracts.ts";
+import {
+  ForkedFromParticipantProvenance,
+  SpawnedByParticipantProvenance,
+  UnknownParticipantProvenance,
+} from "../placementContracts.ts";
 
 export const J5McpFailure = Schema.Struct({
   code: Schema.String,
@@ -45,6 +49,23 @@ const J5AgentParticipant = Schema.Struct({
 
 const J5Participant = Schema.Union([J5AgentParticipant, HumanParticipant]);
 
+export const J5ParticipantProvenanceView = Schema.Union([
+  Schema.Struct({
+    kind: SpawnedByParticipantProvenance.fields.kind,
+    spawned_by_participant_id: SpawnedByParticipantProvenance.fields.spawnedByParticipantId,
+    source: SpawnedByParticipantProvenance.fields.source,
+  }),
+  Schema.Struct({
+    kind: ForkedFromParticipantProvenance.fields.kind,
+    source_participant_id: ForkedFromParticipantProvenance.fields.sourceParticipantId,
+    source: ForkedFromParticipantProvenance.fields.source,
+  }),
+  UnknownParticipantProvenance,
+  Schema.Struct({ kind: Schema.Literal("unrecorded") }),
+  Schema.Struct({ kind: Schema.Literal("not-applicable") }),
+]);
+export type J5ParticipantProvenanceView = typeof J5ParticipantProvenanceView.Type;
+
 export const J5ParticipantDirectoryRow = Schema.Struct({
   squadron_id: SquadronId,
   participant_id: ParticipantId,
@@ -53,7 +74,7 @@ export const J5ParticipantDirectoryRow = Schema.Struct({
   can_open_exchange: Schema.Boolean,
   accepts_urgency: Schema.Boolean,
   thread_id: Schema.NullOr(ThreadId),
-  provenance: ParticipantProvenanceView,
+  provenance: J5ParticipantProvenanceView,
   placement_parent_id: Schema.NullOr(ParticipantId),
   display_name: Schema.NullOr(Schema.String),
 });

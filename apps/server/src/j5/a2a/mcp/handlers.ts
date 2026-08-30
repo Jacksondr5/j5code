@@ -9,6 +9,7 @@ import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { CommCommandId } from "../contracts.ts";
+import type { ParticipantProvenanceView } from "../placementContracts.ts";
 import { J5Toolkit, type J5McpFailure } from "./tools.ts";
 
 const failure = (error: unknown): J5McpFailure => ({
@@ -20,6 +21,25 @@ const failure = (error: unknown): J5McpFailure => ({
 });
 
 const stablePart = (value: string) => encodeURIComponent(value);
+
+const projectProvenance = (provenance: ParticipantProvenanceView) => {
+  switch (provenance.kind) {
+    case "spawned-by":
+      return {
+        kind: provenance.kind,
+        spawned_by_participant_id: provenance.spawnedByParticipantId,
+        source: provenance.source,
+      } as const;
+    case "forked-from":
+      return {
+        kind: provenance.kind,
+        source_participant_id: provenance.sourceParticipantId,
+        source: provenance.source,
+      } as const;
+    default:
+      return provenance;
+  }
+};
 
 export const commandIdForRequest = (input: {
   readonly providerSessionId: string;
@@ -99,11 +119,12 @@ const handlers = {
             can_open_exchange: row.canOpenExchange,
             accepts_urgency: row.acceptsUrgency,
             thread_id: row.participant.kind === "agent" ? row.participant.threadId : null,
-            provenance:
+            provenance: projectProvenance(
               placement?.provenance ??
-              (row.participant.kind === "human"
-                ? ({ kind: "not-applicable" } as const)
-                : ({ kind: "unrecorded" } as const)),
+                (row.participant.kind === "human"
+                  ? ({ kind: "not-applicable" } as const)
+                  : ({ kind: "unrecorded" } as const)),
+            ),
             placement_parent_id: placement?.placementParentId ?? null,
             display_name:
               row.participant.kind === "agent"

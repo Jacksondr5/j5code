@@ -41,6 +41,17 @@ const hasKey = (value: unknown, key: string): boolean => {
   const record = value as Readonly<Record<string, unknown>>;
   return key in record || Object.values(record).some((item) => hasKey(item, key));
 };
+const forbiddenCamelCaseKeys = [
+  "squadronId",
+  "participantId",
+  "threadId",
+  "placementParentId",
+  "spawnedByParticipantId",
+  "sourceParticipantId",
+  "canReceiveMessage",
+  "canOpenExchange",
+  "acceptsUrgency",
+] as const;
 
 const invocation = {
   environmentId: EnvironmentId.make("environment:j5:mcp-handler"),
@@ -114,8 +125,10 @@ it.effect("keeps participant listing placement-read-only", () =>
   Effect.gen(function* () {
     const squadronId = SquadronId.make("squadron:j5:mcp-placement-handler");
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-placement-caller");
+    const forkedParticipantId = ParticipantId.make("agent:j5:mcp-placement-forked");
     const personParticipantId = ParticipantId.make("human:placement-person");
     const displayParentId = ParticipantId.make("agent:j5:mcp-display-parent");
+    const forkSourceId = ParticipantId.make("agent:j5:mcp-fork-source");
     const placementWrites = yield* Ref.make(0);
     const callerRow = {
       squadronId,
@@ -124,6 +137,18 @@ it.effect("keeps participant listing placement-read-only", () =>
         kind: "agent" as const,
         id: callerParticipantId,
         threadId: invocation.threadId,
+      },
+      canReceiveMessage: true,
+      canOpenExchange: true,
+      acceptsUrgency: false,
+    } satisfies ParticipantDirectoryRow;
+    const forkedRow = {
+      squadronId,
+      participantId: forkedParticipantId,
+      participant: {
+        kind: "agent" as const,
+        id: forkedParticipantId,
+        threadId: ThreadId.make("thread:j5:mcp-placement-forked"),
       },
       canReceiveMessage: true,
       canOpenExchange: true,
@@ -141,7 +166,7 @@ it.effect("keeps participant listing placement-read-only", () =>
       A2ASendService,
       A2ASendService.of({
         send: () => Effect.die("send_message is outside this placement-handler test"),
-        listParticipants: () => Effect.succeed([callerRow, humanRow]),
+        listParticipants: () => Effect.succeed([callerRow, forkedRow, humanRow]),
       }),
     );
     const placementService = Layer.mock(ParticipantPlacementService)({
@@ -156,8 +181,24 @@ it.effect("keeps participant listing placement-read-only", () =>
             participantId: callerParticipantId,
             participant: callerRow.participant,
             threadId: invocation.threadId,
-            provenance: { kind: "unknown" as const, source: "native_or_unobserved" as const },
+            provenance: {
+              kind: "spawned-by" as const,
+              spawnedByParticipantId: displayParentId,
+              source: "j5_spawn" as const,
+            },
             placementParentId: displayParentId,
+          },
+          {
+            squadronId,
+            participantId: forkedParticipantId,
+            participant: forkedRow.participant,
+            threadId: forkedRow.participant.threadId,
+            provenance: {
+              kind: "forked-from" as const,
+              sourceParticipantId: forkSourceId,
+              source: "upstream_lineage" as const,
+            },
+            placementParentId: callerParticipantId,
           },
         ]),
     });
@@ -185,18 +226,24 @@ it.effect("keeps participant listing placement-read-only", () =>
             Effect.provideService(McpInvocationContext, invocation),
           );
       const listed = yield* callList();
-      const listedRows = (
-        listed.result as unknown as {
-          readonly participants: ReadonlyArray<{
-            readonly provenance: { readonly kind: string };
-            readonly placement_parent_id: ParticipantId | null;
-          }>;
-        }
-      ).participants;
-      assert.equal(listedRows[0]?.provenance.kind, "unknown");
+      const listedRows = (yield* decodeJ5ListParticipantsResult(listed.encodedResult)).participants;
+      assert.deepStrictEqual(listedRows[0]?.provenance, {
+        kind: "spawned-by",
+        spawned_by_participant_id: displayParentId,
+        source: "j5_spawn",
+      });
       assert.equal(listedRows[0]?.placement_parent_id, displayParentId);
-      assert.deepStrictEqual(listedRows[1]?.provenance, { kind: "not-applicable" });
-      assert.equal(listedRows[1]?.placement_parent_id, null);
+      assert.deepStrictEqual(listedRows[1]?.provenance, {
+        kind: "forked-from",
+        source_participant_id: forkSourceId,
+        source: "upstream_lineage",
+      });
+      assert.equal(listedRows[1]?.placement_parent_id, callerParticipantId);
+      assert.deepStrictEqual(listedRows[2]?.provenance, { kind: "not-applicable" });
+      assert.equal(listedRows[2]?.placement_parent_id, null);
+      for (const camelCaseKey of forbiddenCamelCaseKeys) {
+        assert.isFalse(hasKey(listed.encodedResult, camelCaseKey));
+      }
       assert.equal(yield* Ref.get(placementWrites), 0);
     }).pipe(Effect.provide(layer));
   }),
@@ -378,15 +425,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         display_name: null,
       },
     ]);
-    for (const camelCaseKey of [
-      "squadronId",
-      "participantId",
-      "threadId",
-      "placementParentId",
-      "canReceiveMessage",
-      "canOpenExchange",
-      "acceptsUrgency",
-    ]) {
+    for (const camelCaseKey of forbiddenCamelCaseKeys) {
       assert.isFalse(hasKey(result.encodedResult, camelCaseKey));
     }
   }),
