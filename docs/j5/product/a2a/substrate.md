@@ -98,6 +98,22 @@ Consequence worth recording: with agent-side raw creation dropped and human crea
 through SC3's composer chip, the "native creations bypass the wrapper" bound from A6 shrinks to
 approximately nothing — the `unknown`-provenance cohort loses both of its sources on this fork.
 
+### The J5 verb surface — including needed-but-unbuilt
+
+The J5 toolkit carries the verbs that wear the law: `send_message`, `list_participants`,
+`spawn_agent`, `stop_agent`, `archive_agent`. One verb is **ruled but unbuilt** and is recorded here
+so it gets an A-series home rather than living only in a feature doc:
+
+- **`clear_own_ask`** (working name) — a sender closes its **own** open Exchange without a reply
+  message. Required by the inbox design's flow 2 (IB1b,
+  [`features/inbox.md`](../features/inbox.md) "Platform dependency" block): an agent's ask lands in
+  the human inbox, the human resolves it in direct chat instead of the inbox answer API, and the
+  agent then withdraws its ask so the inbox item legitimately exits. Semantics: sender-judged
+  closure (R3) applied to the sender's own withdrawal; refuses non-sender callers; emits a ledger
+  event so the closure is visible in projections (inbox status, Exchange state, the eventual A5
+  graph). Until it ships, in-thread-resolved asks linger open in the human's queue — the known gap
+  the inbox doc tracks.
+
 ## Legacy cohort
 
 Children spawned through the A6 wrapper's `delegate_task` path before this ruling are **Peer Agents
