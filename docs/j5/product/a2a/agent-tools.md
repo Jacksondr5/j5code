@@ -46,9 +46,9 @@ Returns once the message is committed; delivery continues asynchronously — car
 and the reply arrives later as an incoming message. Reuse client_request_id to retry the same send
 safely."
 
-_(The shipped string differs: it leads with mechanics and appends an interim availability caveat
-about wrapper-spawned homes. Updating it to this contract — and dropping the caveat when
-creation-surface registration lands — is a small code change in `envelopes.v1.json`.)_
+_(The shipped `send_message` and `list_participants` descriptions each append the current runtime
+availability contract: the tool is unavailable to a native thread without a registered home
+Squadron. That fail-closed home requirement remains current.)_
 
 | Input               | Type              | Required                         | Meaning                                                |
 | ------------------- | ----------------- | -------------------------------- | ------------------------------------------------------ |
