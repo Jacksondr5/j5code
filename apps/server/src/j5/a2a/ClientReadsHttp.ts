@@ -71,10 +71,10 @@ const authenticateRead = Effect.gen(function* () {
 const invalidRequest = (message: string) =>
   HttpServerResponse.jsonUnsafe({ error: "invalid_request", message }, { status: 400 });
 
-const operationFailure = (error: unknown) => {
+const operationFailure = (cause: unknown) => {
   const tag =
-    typeof error === "object" && error !== null && "_tag" in error
-      ? String(error._tag)
+    typeof cause === "object" && cause !== null && "_tag" in cause
+      ? String(cause._tag)
       : "ClientReadsError";
   const status =
     tag === "A2AParticipantNotFoundError" || tag === "A2ALocalOperatorNotFoundError"
@@ -82,12 +82,24 @@ const operationFailure = (error: unknown) => {
       : tag === "A2AHumanPersonIdError"
         ? 400
         : 500;
-  return HttpServerResponse.jsonUnsafe(
-    {
-      error: tag,
-      message: error instanceof Error ? error.message : "Client read failed.",
-    },
-    { status },
+  if (status !== 500) {
+    return Effect.succeed(
+      HttpServerResponse.jsonUnsafe(
+        {
+          error: tag,
+          message: cause instanceof Error ? cause.message : "Client read failed.",
+        },
+        { status },
+      ),
+    );
+  }
+  return Effect.logError("J5 A2A client-read operation failed", { cause }).pipe(
+    Effect.as(
+      HttpServerResponse.jsonUnsafe(
+        { error: tag, message: "Client read failed." },
+        { status: 500 },
+      ),
+    ),
   );
 };
 
@@ -97,27 +109,29 @@ const jsonBody = Effect.gen(function* () {
 });
 
 const respondHomes = (effect: Effect.Effect<ParticipantHomesResponse, ClientReadsError>) =>
-  Effect.map(Effect.result(effect.pipe(Effect.flatMap(encodeParticipantHomesResponse))), (result) =>
-    Result.isSuccess(result)
-      ? HttpServerResponse.jsonUnsafe(result.success)
-      : operationFailure(result.failure),
+  Effect.flatMap(
+    Effect.result(effect.pipe(Effect.flatMap(encodeParticipantHomesResponse))),
+    (result) =>
+      Result.isSuccess(result)
+        ? Effect.succeed(HttpServerResponse.jsonUnsafe(result.success))
+        : operationFailure(result.failure),
   );
 
 const respondIdentities = (
   effect: Effect.Effect<ParticipantIdentitiesResponse, ClientReadsError>,
 ) =>
-  Effect.map(
+  Effect.flatMap(
     Effect.result(effect.pipe(Effect.flatMap(encodeParticipantIdentitiesResponse))),
     (result) =>
       Result.isSuccess(result)
-        ? HttpServerResponse.jsonUnsafe(result.success)
+        ? Effect.succeed(HttpServerResponse.jsonUnsafe(result.success))
         : operationFailure(result.failure),
   );
 
 const respondOpenInboxCount = (effect: Effect.Effect<OpenInboxCount, ClientReadsError>) =>
-  Effect.map(Effect.result(effect.pipe(Effect.flatMap(encodeOpenInboxCount))), (result) =>
+  Effect.flatMap(Effect.result(effect.pipe(Effect.flatMap(encodeOpenInboxCount))), (result) =>
     Result.isSuccess(result)
-      ? HttpServerResponse.jsonUnsafe(result.success)
+      ? Effect.succeed(HttpServerResponse.jsonUnsafe(result.success))
       : operationFailure(result.failure),
   );
 

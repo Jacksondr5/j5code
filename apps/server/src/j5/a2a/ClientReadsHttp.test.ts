@@ -245,7 +245,7 @@ it("executes home response validation before serializing a malformed Squadron na
       readonly message: string;
     };
     assert.equal(malformedBody.error, "SchemaError");
-    assert.match(malformedBody.message, /Squadron name must not be blank/);
+    assert.equal(malformedBody.message, "Client read failed.");
   } finally {
     await dispose();
   }
