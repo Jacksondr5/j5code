@@ -37,6 +37,23 @@ status: 1
 - **A7** (upstream rebase) fires whenever pingdotgg#2829 merges and briefly preempts everything (expected: days).
 - 4a (PR pane, issue #6) continues with the human engineers independently.
 
+## Dogfood work queue (RESERVED — Jackson, 2026-08-31)
+
+Tickets deliberately held as the first J5-native work: NOT staffable in Traycer regardless of free slots. Every ticket is self-contained on repo paths only — dogfood agents have no access to Traycer artifacts or agents. Ladder order:
+
+| Tier                  | Ticket                                                                                              | Size                                     |
+| --------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| Starter               | [DQ1 — SQ1 cleanup pair](dogfood-tickets/dq1-sq1-cleanup-pair.md)                                   | single agent, hours                      |
+| Starter               | [DQ2 — envelope role marker](dogfood-tickets/dq2-envelope-role-marker.md)                           | single agent, hours                      |
+| Starter (conditional) | List-own-asks agent read — ticket written if the in-flight measurement confirms no such read exists | small                                    |
+| Middle                | [A8 — envelope true-up](a2a-tickets/a8-envelope-true-up.md) (currency note inside)                  | small crew                               |
+| Middle                | [DQ3 — palette reuse-or-create hardening](dogfood-tickets/dq3-palette-reuse-hardening.md)           | small crew                               |
+| Meaty                 | [A10 — silence fact bundles](a2a-tickets/a10-silence-fact-bundles.md) (currency note inside)        | crew                                     |
+| Meaty                 | [A5 — graph read API](a2a-tickets/a5-graph-read-api.md) (currency note inside)                      | crew                                     |
+| Meaty                 | [DQ4 — Fleet page pair](dogfood-tickets/dq4-fleet-page.md)                                          | crew (natural phase-4 first-crew ticket) |
+
+NOT held: B4 (archive dialog — phase-3-blocking), and all mid-flight Traycer lanes (B6/B7/E7/#22/#23 finish where they started).
+
 ## Queued post-v0 (ratified, waiting on the milestone)
 
 - **Naming audit (Jackson, 2026-08-28):** examine the naming of everything against the settled glossary (Squadron et al.) — headline case: the `j5/a2a` module / `j5_a2a_*` table namespace has grown into the whole fleet-coordination substrate (Squadrons, membership, placement/provenance, messaging), so "a2a" now under-describes it. Rename cost grows with every milestone; run the audit immediately post-dogfood.

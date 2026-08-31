@@ -29,3 +29,5 @@ None hard (A2 merged). Coordinate ledger migration numbering with any in-flight 
 ## Acceptance
 
 Reply delivery to the sender renders the closure text with the exchange's time facts (snapshot test against versioned config); `regarding` set at open persists, round-trips through ledger reads, and appears in the open envelope; all four channels carry time facts (negative control: a hand-built envelope missing time facts must fail the formatter contract test); wording lives only in the versioned config (no literals in code paths — residue grep); baseline suite green.
+
+> **Currency note (2026-08-31, reserved for dogfood):** written before the CLI-review law, the closed-exchange envelope variant (shipped with the inbox true-up PR), and the pending role-marker ticket (DQ2). Before building: diff this ticket's scope against the CURRENT `apps/server/src/j5/a2a/envelopes.v1.json` + `EnvelopeFormatter.ts` and `docs/j5/product/a2a/agent-tools.md` — some R25/R3 items may already be partially shipped; build the remainder, and record per-item already-shipped dispositions in the PR.

@@ -30,3 +30,5 @@ A2/A3 merged. Coordinate with A8 (envelope true-up) on the formatter — sequenc
 ## Acceptance
 
 Same-fixture proof: a scenario with turn-ended + open human exchange + open peer exchange yields ONE notice row whose bundle contains all three facts, from which the projection derives a label — and changing the label-policy function re-labels the SAME historical row differently with zero migration (the R4 test made executable); dual-decode proven against pre-amendment rows; A3's original five scenario tests still pass end-to-end through the new path; zero-notices-for-healthy-idle negative control retained; baseline suite green.
+
+> **Currency note (2026-08-31, reserved for dogfood):** anchors cite the A3-era SilenceDetector; re-measure all anchors at your base (the detector has survived several merges unchanged in substance, but verify). The R4 law this implements is stated in `docs/j5/product/design-review-2026-08-21.md` and the fact-bundle philosophy now also governs shipped surfaces (e.g. inbox terminal_disposition) — keep vocabularies consistent with `docs/j5/product/a2a/agent-tools.md`.

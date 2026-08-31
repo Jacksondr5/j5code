@@ -38,3 +38,5 @@ Any UI (item 4). Cycle detection (item 4). Cross-machine subscriptions.
 ## Acceptance
 
 Byte-equal rebuild proven (negative control: a mutated projection row must fail the equivalence test); cursor subscription exactly-once under forced reconnect (and a deleted-row control must fail gap-free); reconciliation query matches subscription-accumulated state; playback renders a chosen historical state correctly against a scripted fixture; baseline suite green.
+
+> **Currency note (2026-08-31, reserved for dogfood):** written before the substrate ruling and several shipped reads. Before building: `docs/j5/product/a2a/substrate.md` is current architectural truth; the placement substrate, single-target lifecycle verbs, and several bounded client reads (sender identity, open-count, thread-home batch) have SHIPPED — A5 absorbs/supersedes those shapes rather than duplicating them (their absorbable-by-A5 discipline is recorded in `docs/j5/worklog/dogfood-tickets/b6-client-reads.md`). Re-scope against what exists at your base; record absorbed-vs-new per read in the PR.
