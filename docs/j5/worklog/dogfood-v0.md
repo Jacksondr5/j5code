@@ -47,6 +47,7 @@ Tickets live as GitHub issues (label `dogfood-queue`) so dogfood agents and futu
 | --------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------- |
 | Starter               | [DQ1 — SQ1 cleanup pair (#25)](https://github.com/Jacksondr5/j5code/issues/25)                      | single agent, hours                      |
 | Starter               | [DQ2 — envelope role marker (#26)](https://github.com/Jacksondr5/j5code/issues/26)                  | single agent, hours                      |
+| Starter               | [DQ5 — server default base dir → ~/.j5code (#33)](https://github.com/Jacksondr5/j5code/issues/33)   | single agent, hours                      |
 | Starter (conditional) | List-own-asks agent read — ticket written if the in-flight measurement confirms no such read exists | small                                    |
 | Middle                | [A8 — envelope true-up (#29)](https://github.com/Jacksondr5/j5code/issues/29)                       | small crew                               |
 | Middle                | [DQ3 — palette reuse-or-create hardening (#27)](https://github.com/Jacksondr5/j5code/issues/27)     | small crew                               |
