@@ -11,8 +11,12 @@ describe("T3 orchestration provider instructions", () => {
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "provider-native Subagent");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "your provider's native Subagent mechanism");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Use platform `spawn_agent`");
-    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "delegated work must return a result");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "what should come back in that brief");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Use `list_participants`");
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "later work owed by an existing participant",
+    );
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "expect_reply=true");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "open an Exchange");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "continue with other work");
@@ -23,6 +27,8 @@ describe("T3 orchestration provider instructions", () => {
       "create_threads",
       "t3_thread_start",
       "In your brief, tell the new agent",
+      "delegated work must return a result",
+      "then use `send_message",
     ]) {
       assert.notInclude(T3_CODE_ORCHESTRATION_INSTRUCTIONS, excluded);
     }

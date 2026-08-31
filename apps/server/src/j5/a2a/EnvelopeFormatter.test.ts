@@ -18,7 +18,7 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
     message: "Please verify the worker.",
   });
 
-  assert.equal(A2A_ENVELOPE_VERSION, 8);
+  assert.equal(A2A_ENVELOPE_VERSION, 9);
   assert.include(rendered, "Cross-agent message");
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
   assert.include(rendered, "agent:sender");
@@ -65,7 +65,7 @@ it("tells agents that human-origin exchanges require an explicit tool reply", ()
   assert.include(rendered, 'exchange_id="exchange:human"');
   assert.equal(
     A2A_SEND_TOOL_DESCRIPTION,
-    "Send one durable message to another agent or the human. Three uses: a plain send when you don't need a reply; an ask — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a reply — include the exchange_id from the ask you are answering, which closes that exchange. Set urgency only when asking the human. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. Reuse client_request_id to retry the same send safely. This tool is unavailable to a native thread without a registered home squadron. Participation currently requires a wrapper-spawned agent that already has a home squadron or controlled test seeding; native user-created home provisioning is deferred to the home-squadron registrar + A6 creation integrations follow-up.",
+    "Send one durable message to another agent or the human. Three uses: a plain send when you don't need a reply; an ask — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a reply — include the exchange_id from the ask you are answering, which closes that exchange. Use this tool only for participants already returned by list_participants; when creating a Peer Agent, put any reply expectation in spawn_agent's brief instead of sending a follow-up ask. Set urgency only when asking the human. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. Reuse client_request_id to retry the same send safely. This tool is unavailable to a native thread without a registered home squadron. Participation currently requires a wrapper-spawned agent that already has a home squadron or controlled test seeding; native user-created home provisioning is deferred to the home-squadron registrar + A6 creation integrations follow-up.",
   );
   assert.equal(
     A2A_LIST_TOOL_DESCRIPTION,
@@ -76,6 +76,8 @@ it("tells agents that human-origin exchanges require an explicit tool reply", ()
     assert.include(description, "wrapper-spawned agent");
     assert.include(description, "controlled test seeding");
   }
+  assert.include(A2A_SEND_TOOL_DESCRIPTION, "participants already returned by list_participants");
+  assert.include(A2A_SEND_TOOL_DESCRIPTION, "reply expectation in spawn_agent's brief");
   assert.notMatch(
     A2A_LIST_TOOL_DESCRIPTION,
     /consult.*(?:spawn|archive)|(?:spawn|archive).*changes/i,

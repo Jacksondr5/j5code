@@ -13,10 +13,11 @@ import {
 it("publishes the ratified spawn and single-target stop contracts fail-closed", () => {
   assert.equal(J5SpawnAgentTool.description, J5_SPAWN_AGENT_DESCRIPTION);
   assert.equal(J5StopAgentTool.description, J5_STOP_AGENT_DESCRIPTION);
-  assert.include(
-    J5SpawnAgentTool.description ?? "",
-    "tell the new agent what it should do first and whether it should reply to you",
-  );
+  const sp4BriefSteering =
+    "In your brief, tell the new agent what it should do first and whether it should reply to you.";
+  assert.equal(J5SpawnAgentTool.description?.split(sp4BriefSteering).length, 2);
+  assert.notInclude(J5SpawnAgentTool.description ?? "", "send_message");
+  assert.notInclude(J5SpawnAgentTool.description ?? "", "expect_reply");
   assert.notProperty(J5Toolkit.tools, "archive_agent");
 
   const spawnSchema = Tool.getJsonSchema(J5SpawnAgentTool) as {

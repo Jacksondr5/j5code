@@ -39,7 +39,9 @@ positive instruction over negation.
 **Description (contract):** "Send one durable message to another agent or the human. Three uses: a
 **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line
 intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id
-from the ask you are answering, which closes that exchange. Set urgency only when asking the human.
+from the ask you are answering, which closes that exchange. Use this tool only for participants
+already returned by list_participants; when creating a Peer Agent, put any reply expectation in
+spawn_agent's brief instead of sending a follow-up ask. Set urgency only when asking the human.
 Returns once the message is committed; delivery continues asynchronously — carry on with your work,
 and the reply arrives later as an incoming message. Reuse client_request_id to retry the same send
 safely."
@@ -133,6 +135,10 @@ states its own `participant_id` and Squadron as platform-provided facts — the 
 envelope's sender identity, composed by the platform because they are measured, not judgment. A
 fresh spawn is never id-blind about itself (live-test origin: an id-blind agent messaged itself).
 The spawner's brief remains untouched — this rides beside it, never inside it.
+
+**Contract clarification (ruled 2026-08-31, SP4):** the brief carries the initial task and whether
+and what reply is expected. The spawner does not follow `spawn_agent` with a reply-expected
+`send_message`; that Exchange form is for later work owed by an existing participant.
 
 > **Spawning guide (settled 2026-08-30) — [`features/spawning-guide.md`](../features/spawning-guide.md).**
 > SP4 closed this contract's held slot: the description's single sentence of brief steering above
