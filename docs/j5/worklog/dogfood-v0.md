@@ -75,6 +75,8 @@ NOT held: B4 (archive dialog — phase-3-blocking), and all mid-flight Traycer l
 
 - **Orphan policy (re-affirmed at #21 merge, 2026-08-31):** archiving a participant leaves its placed children working but parked under the retired node — no auto-re-parenting (platform composes nothing, per the Roles/Crews ruling; re-parent is human-only per R21, and even that mechanism awaits its rebuild in the placement-display/Fleet-page lane, recovery-recorded from #18). The substrate session's orphan-policy design pass decides what the platform SURFACES about orphans; runs before or with the Fleet page work. Jackson wants follow-up ensured.
 
+- **Agent self-retirement (recorded 2026-09-01):** archive_agent refuses self-targets fail-closed (same identity law as send_message's self-reject; a caller torn down mid-call can neither receive its response nor keep fact-keyed claims truthful). A finished agent retiring itself IS a legitimate future workflow — it needs a deliberate design (own verb or brief-carried contract solving the last-response problem), a product session candidate alongside the list-own-asks read.
+
 ## Explicitly NOT v0
 
 Roles/Crews implementation (item 3 — design session completed 2026-08-23 ahead of the retro; feature docs are the build-ready contract, rulings at [roles-crews-session-2026-08-23.md](roles-crews-session-2026-08-23.md); staffing is a separate call), Memos, Playbooks, Shared Squadrons, item-4 panes, Director migration, multi-dev ticket sharing.
