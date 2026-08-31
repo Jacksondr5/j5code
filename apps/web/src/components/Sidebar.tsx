@@ -3166,7 +3166,7 @@ export default function Sidebar() {
           case "archive": {
             let didArchive = false;
             const result = await archiveWithPreflight({
-              threadId: threadRef.threadId,
+              threadRef,
               threadTitle: thread.title,
               confirm: async (message) => {
                 const confirmed = await settlePromise(() =>

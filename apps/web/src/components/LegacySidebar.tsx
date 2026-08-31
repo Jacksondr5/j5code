@@ -172,6 +172,7 @@ import { openCommandPalette } from "../commandPaletteBus";
 import {
   archiveSelectedThreadEntries,
   buildMultiSelectThreadContextMenuItems,
+  createCleanBatchArchiveConfirmation,
   getSidebarThreadIdsToPrewarm,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
@@ -180,6 +181,7 @@ import {
   resolveProjectStatusIndicator,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
+  selectionKeysToRemoveAfterArchive,
   orderItemsByPreferredIds,
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
@@ -1811,25 +1813,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       }
 
       if (clicked === "archive") {
-        let cleanBatchConfirmed = false;
+        const confirmCleanArchive = createCleanBatchArchiveConfirmation({
+          confirm: () => api.dialogs.confirm(`Archive ${count} thread${count === 1 ? "" : "s"}?`),
+        });
 
         const archiveOutcome = await archiveSelectedThreadEntries({
           entries: selectedThreadEntries,
           archive: ({ threadRef, thread }, onArchived) =>
             archiveWithPreflight({
-              threadId: threadRef.threadId,
+              threadRef,
               threadTitle: thread.title,
               confirm: (message) => api.dialogs.confirm(message, { variant: "destructive" }),
               ...(appSettingsConfirmThreadArchive
                 ? {
-                    confirmCleanArchive: async () => {
-                      if (cleanBatchConfirmed) return true;
-                      const confirmed = await api.dialogs.confirm(
-                        `Archive ${count} thread${count === 1 ? "" : "s"}?`,
-                      );
-                      cleanBatchConfirmed = confirmed;
-                      return confirmed;
-                    },
+                    confirmCleanArchive,
                   }
                 : {}),
               archive: () => archiveThread(threadRef, { onArchived }),
@@ -1847,7 +1844,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           );
         }
         if (archiveOutcome.mutationFailure) {
-          removeFromSelection(archiveOutcome.archivedThreadKeys);
+          removeFromSelection(
+            selectionKeysToRemoveAfterArchive({
+              selectedThreadKeys: threadKeys,
+              entries: selectedThreadEntries,
+              archivedThreadKeys: archiveOutcome.archivedThreadKeys,
+            }),
+          );
           if (!isAtomCommandInterrupted(archiveOutcome.mutationFailure)) {
             const error = squashAtomCommandFailure(archiveOutcome.mutationFailure);
             toastManager.add(
@@ -1860,7 +1863,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           }
           return;
         }
-        removeFromSelection(archiveOutcome.archivedThreadKeys);
+        removeFromSelection(
+          selectionKeysToRemoveAfterArchive({
+            selectedThreadKeys: threadKeys,
+            entries: selectedThreadEntries,
+            archivedThreadKeys: archiveOutcome.archivedThreadKeys,
+          }),
+        );
         return;
       }
 
@@ -1995,7 +2004,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const thread = readThreadShell(threadRef);
       if (!api || !thread) return;
       const result = await archiveWithPreflight({
-        threadId: threadRef.threadId,
+        threadRef,
         threadTitle: thread.title,
         confirm: (message) => api.dialogs.confirm(message, { variant: "destructive" }),
         archive: () => archiveThread(threadRef),

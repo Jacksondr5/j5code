@@ -4,6 +4,7 @@ import {
   archiveSelectedThreadEntries,
   buildBulkTitleRegenerationContextMenuItem,
   buildMultiSelectThreadContextMenuItems,
+  createCleanBatchArchiveConfirmation,
   createThreadJumpHintVisibilityController,
   filterSidebarV2VisibleThreads,
   formatWorkingDurationLabel,
@@ -30,6 +31,7 @@ import {
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
+  selectionKeysToRemoveAfterArchive,
   searchSidebarThreadsByTitle,
   shouldClearThreadSelectionOnMouseDown,
   shouldNavigateAfterProjectRemoval,
@@ -169,6 +171,28 @@ describe("archiveSelectedThreadEntries", () => {
       mutationFailure: null,
       followupFailures: [],
     });
+  });
+});
+
+describe("archive selection cleanup", () => {
+  it("caches a cancelled clean-batch confirmation", async () => {
+    const confirm = vi.fn(async () => false);
+    const confirmCleanArchive = createCleanBatchArchiveConfirmation({ confirm });
+
+    await expect(confirmCleanArchive()).resolves.toBe(false);
+    await expect(confirmCleanArchive()).resolves.toBe(false);
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears an unresolvable selected row while keeping a cancelled resolved row", () => {
+    expect(
+      selectionKeysToRemoveAfterArchive({
+        selectedThreadKeys: ["archived", "cancelled", "missing"],
+        entries: [{ threadKey: "archived" }, { threadKey: "cancelled" }],
+        archivedThreadKeys: ["archived"],
+      }),
+    ).toEqual(["missing", "archived"]);
   });
 });
 

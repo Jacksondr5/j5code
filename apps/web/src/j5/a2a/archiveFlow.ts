@@ -1,4 +1,4 @@
-import type { ThreadId } from "@t3tools/contracts";
+import type { ScopedThreadRef } from "@t3tools/contracts";
 
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { readArchivePreflight, type ArchivePreflight } from "./archiveFlowClient";
@@ -77,7 +77,7 @@ export function formatArchiveWarning(input: {
 
 /** The action menu owns archive mutation; this J5 delegate owns preflight and the one warning. */
 export async function archiveWithPreflight<Result>(input: {
-  readonly threadId: ThreadId;
+  readonly threadRef: ScopedThreadRef;
   readonly threadTitle: string;
   readonly confirm: (message: string) => Promise<boolean>;
   /** Preserves the existing plain archive preference when no J5 warning is warranted. */
@@ -86,7 +86,7 @@ export async function archiveWithPreflight<Result>(input: {
 }): Promise<Result | undefined> {
   let preflight: ArchivePreflight;
   try {
-    preflight = await readArchivePreflight(input.threadId);
+    preflight = await readArchivePreflight(input.threadRef);
   } catch {
     preflight = { facts: null, participantLabels: new Map() };
   }

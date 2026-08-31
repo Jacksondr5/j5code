@@ -107,6 +107,35 @@ export async function archiveSelectedThreadEntries<
   return { archivedThreadKeys, mutationFailure: null, followupFailures };
 }
 
+/** A thread that disappeared before the action is no longer selectable; a cancelled read remains selected. */
+export function selectionKeysToRemoveAfterArchive<
+  TEntry extends { readonly threadKey: string },
+>(input: {
+  readonly selectedThreadKeys: ReadonlyArray<string>;
+  readonly entries: ReadonlyArray<TEntry>;
+  readonly archivedThreadKeys: ReadonlyArray<string>;
+}): readonly string[] {
+  const resolvedThreadKeys = new Set(input.entries.map((entry) => entry.threadKey));
+  return Array.from(
+    new Set([
+      ...input.selectedThreadKeys.filter((threadKey) => !resolvedThreadKeys.has(threadKey)),
+      ...input.archivedThreadKeys,
+    ]),
+  );
+}
+
+/** A batch asks once about clean rows whether the answer is to archive or cancel. */
+export function createCleanBatchArchiveConfirmation(input: {
+  readonly confirm: () => Promise<boolean>;
+}): () => Promise<boolean> {
+  let answer: boolean | undefined;
+  return async () => {
+    if (answer !== undefined) return answer;
+    answer = await input.confirm();
+    return answer;
+  };
+}
+
 export function buildMultiSelectThreadContextMenuItems(input: {
   count: number;
   hasRunningThread: boolean;

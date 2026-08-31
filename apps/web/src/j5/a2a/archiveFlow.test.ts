@@ -1,3 +1,4 @@
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ThreadId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -21,6 +22,11 @@ const registered = (overrides: Partial<client.PreArchiveFacts> = {}): client.Arc
     ["agent:child", "Child"],
   ]),
 });
+
+const archiveThreadRef = scopeThreadRef(
+  "environment:archive-flow" as never,
+  ThreadId.make("thread:archive-flow"),
+);
 
 describe("archive flow", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -91,7 +97,7 @@ describe("archive flow", () => {
 
     await expect(
       archiveWithPreflight({
-        threadId: ThreadId.make("thread:archive-flow"),
+        threadRef: archiveThreadRef,
         threadTitle: "Archive target",
         confirm,
         archive,
@@ -110,7 +116,7 @@ describe("archive flow", () => {
 
     await expect(
       archiveWithPreflight({
-        threadId: ThreadId.make("thread:archive-flow"),
+        threadRef: archiveThreadRef,
         threadTitle: "Archive target",
         confirm,
         archive,
@@ -128,7 +134,7 @@ describe("archive flow", () => {
 
     await expect(
       archiveWithPreflight({
-        threadId: ThreadId.make("thread:archive-flow"),
+        threadRef: archiveThreadRef,
         threadTitle: "Archive target",
         confirm,
         archive,
@@ -147,7 +153,7 @@ describe("archive flow", () => {
 
     await expect(
       archiveWithPreflight({
-        threadId: ThreadId.make("thread:archive-flow"),
+        threadRef: archiveThreadRef,
         threadTitle: "Archive target",
         confirm,
         confirmCleanArchive,
@@ -158,5 +164,43 @@ describe("archive flow", () => {
     expect(confirm).not.toHaveBeenCalled();
     expect(confirmCleanArchive).toHaveBeenCalledTimes(1);
     expect(archive).not.toHaveBeenCalled();
+  });
+
+  it("warns before archiving a consequential non-primary thread", async () => {
+    const remoteThreadRef = scopeThreadRef(
+      "environment:remote" as never,
+      ThreadId.make("thread:remote-archive-flow"),
+    );
+    vi.spyOn(client, "readArchivePreflight").mockImplementation(async (threadRef) => {
+      expect(threadRef).toEqual(remoteThreadRef);
+      return registered({
+        openExchanges: [
+          {
+            squadronId: "squadron:archive-flow",
+            exchangeId: "exchange:remote-inbound",
+            direction: "inbound",
+            replyObligation: "participant-owes-reply",
+            counterpartyId: "agent:waiter",
+            intent: "Wait for the remote archive",
+            urgency: "blocking",
+            openedAt: new Date().toISOString(),
+          },
+        ],
+      });
+    });
+    const confirm = vi.fn(async () => true);
+    const archive = vi.fn(async () => "archived");
+
+    await expect(
+      archiveWithPreflight({
+        threadRef: remoteThreadRef,
+        threadTitle: "Remote archive target",
+        confirm,
+        archive,
+      }),
+    ).resolves.toBe("archived");
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("1 participant waiting"));
+    expect(archive).toHaveBeenCalledTimes(1);
   });
 });
