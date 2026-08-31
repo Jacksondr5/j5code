@@ -145,6 +145,7 @@ import {
 import {
   buildSquadronPickerEntries,
   canCreateThreadWithoutSquadronPicker,
+  resolveCurrentThreadNewThreadDestination,
   startSquadronDraft,
 } from "../j5/squadron/SquadronPicker.logic";
 import {
@@ -1891,6 +1892,19 @@ export default function Sidebar() {
   const changeRequestSnapshotByKey = useAtomValue(threadChangeRequestSnapshotsAtom);
 
   const { status: squadronDirectoryStatus, squadrons } = useSquadronDirectory();
+  // Direct creation is safe only when the Registrar directory says there is
+  // exactly one Squadron. Folder/project cardinality is irrelevant: two
+  // Squadrons may intentionally share the same folder and must stay choices.
+  const squadronPickerEntries = useMemo(
+    () => buildSquadronPickerEntries({ squadrons, projects, primaryEnvironmentId }),
+    [primaryEnvironmentId, projects, squadrons],
+  );
+  // The per-row native context-menu callback remains stable through streaming;
+  // it reads current Registrar snapshots only when the user chooses an action.
+  const squadronDirectoryStatusRef = useRef(squadronDirectoryStatus);
+  squadronDirectoryStatusRef.current = squadronDirectoryStatus;
+  const squadronPickerEntriesRef = useRef(squadronPickerEntries);
+  squadronPickerEntriesRef.current = squadronPickerEntries;
   const [squadronCreateOpen, setSquadronCreateOpen] = useState(false);
   const squadronScopeId = useSquadronAmbientScope();
   const squadronScopeSelectionGeneration = useSquadronAmbientScopeSelectionGeneration();
@@ -1911,6 +1925,8 @@ export default function Sidebar() {
     squadronScopeId,
     squadronScopeSelectionGeneration,
   );
+  const threadHomesRef = useRef(threadHomes);
+  threadHomesRef.current = threadHomes;
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content
   // subscription. Selecting a number keeps typing in a draft composer from
@@ -3039,13 +3055,30 @@ export default function Sidebar() {
         switch (clicked.value) {
           case "new-thread-on-branch": {
             // Explicit branch carry-over: reuse the thread's worktree when it
-            // has one, otherwise its branch on the local checkout.
+            // has one, otherwise its branch on the local checkout. Its
+            // destination remains the immutable Registrar home, never the
+            // source thread's folder identity.
+            const home = threadHomesRef.current.get(thread.id);
+            const destination = resolveCurrentThreadNewThreadDestination(
+              home?.kind === "known" ? home.squadron.id : null,
+              squadronDirectoryStatusRef.current,
+              squadronPickerEntriesRef.current,
+            );
+            if (destination.kind === "picker") {
+              openCommandPalette({ open: "new-thread-in" });
+              return;
+            }
             const result = await settlePromise(() =>
-              handleNewThreadRef.current(scopeProjectRef(thread.environmentId, thread.projectId), {
-                branch: thread.branch,
-                worktreePath: thread.worktreePath,
-                envMode: thread.worktreePath ? "worktree" : "local",
-                startFromOrigin: false,
+              startSquadronDraft({
+                entry: destination.entry,
+                handleNewThread: (folder) =>
+                  handleNewThreadRef.current(scopeProjectRef(folder.environmentId, folder.id), {
+                    branch: thread.branch,
+                    worktreePath: thread.worktreePath,
+                    envMode: thread.worktreePath ? "worktree" : "local",
+                    startFromOrigin: false,
+                  }),
+                selectDraftSquadron,
               }),
             );
             if (result._tag === "Failure") {
@@ -3055,6 +3088,15 @@ export default function Sidebar() {
                   type: "error",
                   title: "Could not create thread",
                   description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+            } else if (result.value === null) {
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Squadron folder unavailable",
+                  description:
+                    "This Squadron needs an available folder before a new thread can start.",
                 }),
               );
             }
@@ -3275,13 +3317,6 @@ export default function Sidebar() {
     autoAnimate(node, { duration: 150, easing: "ease-out" });
   }, []);
 
-  // Direct creation is safe only when the Registrar directory says there is
-  // exactly one Squadron. Folder/project cardinality is irrelevant: two
-  // Squadrons may intentionally share the same folder and must stay choices.
-  const squadronPickerEntries = useMemo(
-    () => buildSquadronPickerEntries({ squadrons, projects, primaryEnvironmentId }),
-    [primaryEnvironmentId, projects, squadrons],
-  );
   const handleNewThreadClick = useCallback(() => {
     if (canCreateThreadWithoutSquadronPicker(squadronDirectoryStatus, squadrons.length)) {
       const entry = squadronPickerEntries[0];

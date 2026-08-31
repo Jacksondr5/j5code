@@ -151,6 +151,47 @@ describe("Squadron picker", () => {
     ).toMatchObject({ kind: "single-squadron", entry: { squadronId: "squadron:active" } });
   });
 
+  it("routes the Sidebar branch door through the source Registrar home and carrier", async () => {
+    const sourceFolder = {
+      environmentId: sharedFolder.environmentId,
+      id: ProjectId.make("project:branch-source"),
+      title: "Unscoped branch source",
+      workspaceRoot: "/work/branch-source",
+    } as const;
+    const homeEntry = {
+      squadronId: "squadron:home",
+      name: "Home",
+      folder: sharedFolder,
+    } as const;
+    const destination = resolveCurrentThreadNewThreadDestination("squadron:home", "ready", [
+      homeEntry,
+      { squadronId: "squadron:other", name: "Other", folder: sourceFolder },
+    ]);
+    const handleNewThread = vi.fn(async () => ({
+      draftId: "draft:branch-home",
+      threadId: ThreadId.make("thread:branch-home"),
+    }));
+    const selectDraftSquadron = vi.fn();
+
+    expect(destination).toEqual({ kind: "single-squadron", entry: homeEntry });
+    if (destination.kind === "single-squadron") {
+      await startSquadronDraft({
+        entry: destination.entry,
+        handleNewThread,
+        selectDraftSquadron,
+      });
+    }
+
+    expect(handleNewThread).toHaveBeenCalledWith(sharedFolder);
+    expect(handleNewThread).not.toHaveBeenCalledWith(sourceFolder);
+    expect(selectDraftSquadron).toHaveBeenCalledWith(
+      scopedThreadKey(
+        scopeThreadRef(sharedFolder.environmentId, ThreadId.make("thread:branch-home")),
+      ),
+      "squadron:home",
+    );
+  });
+
   it("only auto-starts the index route for a selected or sole Squadron", () => {
     const entries = [
       { squadronId: "squadron:alpha", name: "Alpha", folder: sharedFolder },
