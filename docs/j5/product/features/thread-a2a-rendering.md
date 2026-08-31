@@ -8,7 +8,11 @@ kind: spec
 Feature definition of record, settled 2026-08-29 with Jackson
 ([session rulings TA1–TA5](../../worklog/thread-a2a-session-2026-08-29.md));
 TA1 amended 2026-08-31, ratified by Jackson directly while live-testing
-B3's build (PR #16) — no session, amendments folded in below.
+B3's build (PR #16) — no session, amendments folded in below. **Further
+amended same day by the prominence session
+([TA6–TA10](../../worklog/thread-a2a-prominence-session-2026-08-31.md))**:
+card surfaces, clamp, sent-message cards, and exchange-pair linking — see
+"Card anatomy and states" below.
 The problem: in phase-3 dogfood the human lives inside agents' threads,
 and today every A2A delivery renders as a wall of envelope text — raw
 participant ids, per-message protocol boilerplate, silence notices
@@ -43,10 +47,12 @@ workspace (`product/thread-a2a/`).
    ended without replying · ⟨age⟩". Parsed notices carry no expander —
    the expander removal applies to parsed blocks everywhere; unparseable
    notice text falls back to raw rendering, as everywhere.
-4. **Outbound send** (TA4): a compact directional line — "→ ⟨receiver⟩ ·
-   expects reply" — carrying live exchange state (_open · 2h_ /
-   _✓ answered_) once the client can read it (A5); send-time static chips
-   until then.
+4. **Outbound send** (TA4, superseded 2026-08-31 by TA8): a full **sent
+   card** rendered in the sender's thread — same geometry as received
+   cards, border-only (no fill), lucide Send icon + "To ⟨receiver⟩", with
+   the state badge (Awaiting reply / Reply received). Live state ships
+   when feasible; "Reply received" is likely derivable without A5 by
+   pairing the closing reply locally by exchange id.
 
 > **Dogfood v0 note:** TA2's "You" label is overridden in v0 — the merged
 > auth principal carries no person binding, so v0 renders neutral
@@ -57,6 +63,34 @@ workspace (`product/thread-a2a/`).
 
 Everything else — conversation, tool calls, work logs — keeps upstream
 rendering untouched (TA5).
+
+## Card anatomy and states (TA6–TA10, 2026-08-31)
+
+Settled in the prominence session; approved all-states mockup in the
+design workspace (`product/thread-a2a/final-treatment/`).
+
+- **Surface** (TA6): upstream-subtle — received cards carry the app's
+  faint block fill, sent cards are border-only. **Badges are the only
+  colorful elements**: amber = still wants something, quiet green =
+  resolved, neutral chip = plain reply.
+- **States**: Sent-open → **Awaiting reply**; Sent-closed → **Reply
+  received**; Received-open → **Expects reply**; Received-closed →
+  **Replied**. All copy viewer-neutral.
+- **Clamp** (TA7): every card body clamps at 2 lines with the upstream
+  chevron pattern ("› N more lines"); UI limit, never content limit.
+- **Alignment & direction** (TA8): all A2A cards left-aligned (only the
+  human's messages sit right); lucide **Send** + "To ⟨name⟩" vs lucide
+  **Inbox** + "From ⟨name⟩".
+- **Time** (TA9): timestamps are time-since-sent from the delivery
+  record.
+- **Linking** (TA10): exchange-pair links only — no titles, no
+  summaries, no UUIDs. Every reply card (either direction) carries a
+  clickable verbatim one-line quote strip of the ask it closes; resolved
+  badges link to their paired message (same-thread
+  scroll-and-highlight); cross-thread reach is the clickable sender
+  name, exact-message deep-linking the stretch. **Caveat: if linking
+  turns technically difficult, the PR Group raises it to Jackson —
+  never overcomplicate the system for linking.**
 
 ## Scope
 
