@@ -17,8 +17,28 @@ import { SquadronCreateDialog } from "./SquadronCreateDialog";
 import { resolveSquadronScope } from "./SquadronScope.logic";
 
 /** Sidebar-zone-only ambient context. It never selects a Squadron for a draft. */
-export function SquadronScopeDropdown() {
-  const [createOpen, setCreateOpen] = useState(false);
+type SquadronScopeDropdownProps =
+  | {
+      readonly createOpen: boolean;
+      readonly onCreateOpenChange: (open: boolean) => void;
+    }
+  | {
+      readonly createOpen?: never;
+      readonly onCreateOpenChange?: never;
+    };
+
+function hasControlledCreateState(
+  props: SquadronScopeDropdownProps,
+): props is Extract<SquadronScopeDropdownProps, { readonly createOpen: boolean }> {
+  return "createOpen" in props;
+}
+
+export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
+  const [uncontrolledCreateOpen, setUncontrolledCreateOpen] = useState(false);
+  const createOpen = hasControlledCreateState(props) ? props.createOpen : uncontrolledCreateOpen;
+  const setCreateOpen = hasControlledCreateState(props)
+    ? props.onCreateOpenChange
+    : setUncontrolledCreateOpen;
   const { status, squadrons } = useSquadronDirectory();
   const selectedId = useSquadronAmbientScope();
   const choices = squadrons.map(({ squadron, projectIds }) => ({

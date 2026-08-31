@@ -69,7 +69,7 @@ export function SquadronCreateForm({ onCreated }: { readonly onCreated?: () => v
         Folder
         <div className="flex flex-col gap-2">
           <Button
-            aria-label="Choose folder with the project picker"
+            aria-label={selectedProject === null ? "Choose folder" : "Change folder"}
             size="sm"
             type="button"
             variant="outline"
@@ -80,9 +80,7 @@ export function SquadronCreateForm({ onCreated }: { readonly onCreated?: () => v
             {selectedProject === null ? "Choose folder" : "Change folder"}
           </Button>
           {selectedProject === null ? (
-            <p className="text-sm font-normal text-muted-foreground">
-              Choose one folder with the project picker.
-            </p>
+            <p className="text-sm font-normal text-muted-foreground">Choose one folder.</p>
           ) : (
             <p className="text-sm font-normal text-muted-foreground">
               {formatSquadronFolder(selectedProject)}

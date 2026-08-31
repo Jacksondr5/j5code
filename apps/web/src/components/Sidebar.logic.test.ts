@@ -22,6 +22,7 @@ import {
   planPinnedReorder,
   resolveAdjacentThreadId,
   resolveProjectStatusIndicator,
+  resolveSidebarEmptyState,
   resolveSidebarStageBadgeLabel,
   resolveSidebarThreadStatus,
   resolveSidebarV2TopStatus,
@@ -240,6 +241,25 @@ describe("resolveSidebarStageBadgeLabel", () => {
         fallbackStageLabel: "Alpha",
       }),
     ).toBe("Alpha");
+  });
+});
+
+describe("resolveSidebarEmptyState", () => {
+  it("keeps the loading state distinct from ready-with-zero Squadrons", () => {
+    const loading = resolveSidebarEmptyState({
+      directoryStatus: "loading",
+      squadronCount: 0,
+      squadronScopeName: null,
+    });
+    const readyWithZero = resolveSidebarEmptyState({
+      directoryStatus: "ready",
+      squadronCount: 0,
+      squadronScopeName: null,
+    });
+
+    expect(loading).toEqual({ kind: "loading", message: "Loading Squadrons…" });
+    expect(readyWithZero).toEqual({ kind: "no-squadrons", message: "No Squadrons yet" });
+    expect(loading).not.toEqual(readyWithZero);
   });
 });
 

@@ -30,6 +30,9 @@ import {
   readThreadShell,
 } from "../state/entities";
 import { readLocalApi } from "../localApi";
+import { selectDraftSquadron } from "../j5/squadron/SquadronDraftState";
+import { squadronDraftScopeKey } from "../j5/squadron/SquadronPicker.logic";
+import { useThreadHomes } from "../j5/squadron/ThreadHomesClient";
 import { useUiStateStore } from "../uiStateStore";
 import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
@@ -79,6 +82,7 @@ export function useThreadActionMenu(input: {
     reportFailure: false,
   });
   const handleNewThread = useNewThreadHandler();
+  const threadHomes = useThreadHomes(threadRef === null ? [] : [threadRef.threadId]);
   const markThreadUnread = useUiStateStore((s) => s.markThreadUnread);
   const autoSettleAfterDays = useClientSettings((s) => s.sidebarAutoSettleAfterDays);
   const autoSettleOnMerge = useClientSettings((s) => s.sidebarAutoSettleOnMerge);
@@ -190,6 +194,18 @@ export function useThreadActionMenu(input: {
           case "new-thread-on-branch": {
             // Explicit branch carry-over: reuse the thread's worktree when it
             // has one, otherwise its branch on the local checkout.
+            const home = threadHomes.get(threadRef.threadId);
+            if (home?.kind !== "known") {
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Squadron unavailable",
+                  description:
+                    "Wait for this thread's Squadron home before creating a branch thread.",
+                }),
+              );
+              return;
+            }
             const result = await settlePromise(() =>
               handleNewThread(scopeProjectRef(threadRef.environmentId, thread.projectId), {
                 branch: thread.branch,
@@ -200,6 +216,11 @@ export function useThreadActionMenu(input: {
             );
             if (result._tag === "Failure") {
               failureToast("Could not create thread", squashAtomCommandFailure(result));
+            } else if (result.value !== null) {
+              selectDraftSquadron(
+                squadronDraftScopeKey(threadRef.environmentId, result.value),
+                home.squadron.id,
+              );
             }
             return;
           }
@@ -329,6 +350,7 @@ export function useThreadActionMenu(input: {
       projectCwd,
       settleThread,
       snoozeThread,
+      threadHomes,
       threadRef,
       timestampFormat,
       unpinThread,

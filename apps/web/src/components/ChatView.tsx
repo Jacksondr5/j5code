@@ -254,6 +254,11 @@ import {
   useSquadronDraftScope,
 } from "../j5/squadron/SquadronDraftState";
 import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
+import {
+  buildSquadronPickerEntries,
+  resolveCurrentThreadNewThreadDestination,
+  startSquadronDraft,
+} from "../j5/squadron/SquadronPicker.logic";
 import { refreshThreadHomes, useThreadHomes } from "../j5/squadron/ThreadHomesClient";
 import {
   resolveEffectiveSquadronId,
@@ -265,6 +270,7 @@ import { MessagesTimeline, type MessagesTimelineHistoryControls } from "./chat/M
 import { resolveTimelineIsAtEnd } from "./chat/MessagesTimeline.logic";
 import { ChatHeader } from "./chat/ChatHeader";
 import { useRemoteOpenState } from "~/remoteOpen";
+import { openCommandPalette } from "../commandPaletteBus";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
 import { useOpenFavoriteEditorShortcut } from "./chat/OpenInPickerShortcut";
 import {
@@ -332,7 +338,6 @@ import {
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
   shouldShowComposerContextStrip,
-  startNewThreadForProject,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
@@ -1809,7 +1814,7 @@ function ChatViewContent(props: ChatViewProps) {
     [activeThread?.environmentId, activeThread?.projectId],
   );
   const activeProject = useProject(activeProjectRef);
-  const { squadrons } = useSquadronDirectory();
+  const { status: squadronDirectoryStatus, squadrons } = useSquadronDirectory();
   const ambientSquadronId = useSquadronAmbientScope();
   const draftSquadron = useSquadronDraftScope(routeThreadKey);
   const activeThreadHome =
@@ -1828,9 +1833,37 @@ function ChatViewContent(props: ChatViewProps) {
     draft: draftSquadron,
     isFirstMessage: isFirstMessageForActiveThread,
   });
+  const allProjects = useProjects();
+  const squadronPickerEntries = useMemo(
+    () =>
+      buildSquadronPickerEntries({
+        squadrons,
+        projects: allProjects,
+        primaryEnvironmentId: primaryEnvironment?.environmentId ?? null,
+      }),
+    [allProjects, primaryEnvironment?.environmentId, squadrons],
+  );
+  const newThreadDestination = useMemo(
+    () =>
+      resolveCurrentThreadNewThreadDestination(
+        durableSquadronHome?.id ?? null,
+        squadronDirectoryStatus,
+        squadronPickerEntries,
+      ),
+    [durableSquadronHome?.id, squadronDirectoryStatus, squadronPickerEntries],
+  );
   const handleNewThreadInActiveProject = useCallback(() => {
-    startNewThreadForProject(activeProjectRef, handleNewThread);
-  }, [activeProjectRef, handleNewThread]);
+    if (newThreadDestination.kind === "picker") {
+      openCommandPalette({ open: "new-thread-in" });
+      return;
+    }
+    void startSquadronDraft({
+      entry: newThreadDestination.entry,
+      handleNewThread: (folder) =>
+        handleNewThread(scopeProjectRef(folder.environmentId, folder.id)),
+      selectDraftSquadron,
+    });
+  }, [handleNewThread, newThreadDestination]);
   const activeEnvironmentShell = useEnvironmentQuery(
     activeThread ? environmentShell.stateAtom(activeThread.environmentId) : null,
   );
@@ -1874,7 +1907,6 @@ function ChatViewContent(props: ChatViewProps) {
 
   // Compute the list of environments this logical project spans, used to
   // drive the environment picker in BranchToolbar.
-  const allProjects = useProjects();
   const primaryEnvironmentId = primaryEnvironment?.environmentId ?? null;
   useEffect(() => {
     if (!activeThreadRef || !activeProjectRef) return;
@@ -6426,6 +6458,11 @@ function ChatViewContent(props: ChatViewProps) {
           <ChatHeader
             activeThreadEnvironmentId={activeThread.environmentId}
             activeThreadTitle={activeThread.title}
+            newThreadSquadronName={
+              newThreadDestination.kind === "single-squadron"
+                ? newThreadDestination.entry.name
+                : null
+            }
             activeProjectName={activeProject?.title}
             activeProjectCwd={activeProject?.workspaceRoot ?? null}
             rightPanelOpen={inlineRightPanelOwnsTitleBar}
