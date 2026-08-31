@@ -9,6 +9,9 @@ import { Button } from "../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { SquadronFirstRunGate } from "../j5/squadron/FirstRunGate";
+import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
+import { resolveSquadronFirstRunGateState } from "../j5/squadron/FirstRunGate.logic";
 import {
   useAllEnvironmentShellsBootstrapped,
   useProjects,
@@ -28,7 +31,26 @@ function ChatIndexRouteView() {
     return <HostedStaticOnboardingState />;
   }
 
-  return <IndexDraftLanding />;
+  return <SquadronFirstRunGateLive />;
+}
+
+function SquadronFirstRunGateLive() {
+  const { status, squadrons, refresh } = useSquadronDirectory();
+  const state = resolveSquadronFirstRunGateState({
+    authenticatedRouteAvailable: status !== "error",
+    squadronCount: status === "loading" ? null : squadrons.length,
+  });
+
+  return (
+    <SquadronFirstRunGate
+      state={state}
+      onRetry={() => {
+        void refresh({ force: true });
+      }}
+    >
+      <IndexDraftLanding />
+    </SquadronFirstRunGate>
+  );
 }
 
 /**

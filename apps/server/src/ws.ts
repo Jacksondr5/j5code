@@ -1229,6 +1229,10 @@ const makeWsRpcLayer = (
                         },
                       }),
                   createdBy: "user",
+                  ...(input.squadronId === undefined ? {} : { squadronId: input.squadronId }),
+                  ...(input.sourcePlanRef === undefined
+                    ? {}
+                    : { sourcePlanRef: input.sourcePlanRef }),
                   creationSource: input.creationSource ?? "web",
                 }),
               )

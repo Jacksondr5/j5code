@@ -29,6 +29,7 @@ export type {
   A2AHomeRegistrationError,
   RegisteredThreadHome,
   RegisterAtCreationInput,
+  ThreadHomeLookup,
 } from "./HomeRegistrar.ts";
 export * from "./LedgerService.ts";
 export {
@@ -55,6 +56,43 @@ export {
   type ParticipantPlacementServiceShape,
   type PlacementError,
 } from "./PlacementService.ts";
+export {
+  DuplicateSquadronProjectReferenceError,
+  SquadronProjectReferenceSquadronNotFoundError,
+  SquadronProjectReferences,
+  layer as squadronProjectReferencesLayer,
+} from "./SquadronProjectReferences.ts";
+export type {
+  ReplaceSquadronProjectReferencesInput,
+  SquadronProjectReference,
+  SquadronProjectReferenceError,
+  SquadronProjectReferencesShape,
+} from "./SquadronProjectReferences.ts";
+export {
+  registrationCommandIdForCreation,
+  SquadronThreadCreationMissingSquadronError,
+  SquadronThreadCreationProjectReferenceError,
+  SquadronThreadCreationService,
+  layer as squadronThreadCreationServiceLayer,
+} from "./SquadronThreadCreationService.ts";
+export {
+  SquadronManagementService,
+  SquadronNameRequiredError,
+  SquadronProjectNotFoundError,
+  layer as squadronManagementServiceLayer,
+} from "./SquadronManagementService.ts";
+export type {
+  CreateSquadronInput,
+  ManagedSquadron,
+  SquadronManagementError,
+  SquadronManagementServiceShape,
+} from "./SquadronManagementService.ts";
+export type {
+  SquadronThreadCreationError,
+  SquadronThreadCreationInput,
+  SquadronThreadCreationResult,
+  SquadronThreadCreationServiceShape,
+} from "./SquadronThreadCreationService.ts";
 export {
   A2ASilenceDetector,
   A2ASilenceDetectorError,

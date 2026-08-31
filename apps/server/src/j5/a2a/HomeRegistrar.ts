@@ -6,12 +6,22 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
-import { type CommCommandId, ParticipantId, type SquadronId } from "./contracts.ts";
+import { type CommCommandId, ParticipantId, SquadronId } from "./contracts.ts";
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 
 export interface RegisteredThreadHome {
   readonly squadronId: SquadronId;
   readonly participantId: ParticipantId;
+}
+
+export interface ThreadHomeLookup {
+  readonly threadId: ThreadId;
+  readonly home:
+    | {
+        readonly kind: "known";
+        readonly squadron: { readonly id: SquadronId; readonly name: string };
+      }
+    | { readonly kind: "unknown" };
 }
 
 export interface RegisterAtCreationInput {
@@ -71,6 +81,13 @@ export interface A2AHomeRegistrarShape {
   readonly getHomeForThread: (
     threadId: ThreadId,
   ) => Effect.Effect<RegisteredThreadHome, A2AHomeLookupError>;
+  /**
+   * Batch read for sidebar-visible thread sets. This reads immutable agent
+   * joins only; native and unregistered threads remain explicitly unknown.
+   */
+  readonly getHomesForThreads: (
+    threadIds: ReadonlyArray<ThreadId>,
+  ) => Effect.Effect<ReadonlyArray<ThreadHomeLookup>, SqlError>;
 }
 
 export class A2AHomeRegistrar extends Context.Service<A2AHomeRegistrar, A2AHomeRegistrarShape>()(
@@ -91,7 +108,27 @@ interface ThreadHomeResolution {
   readonly retired: boolean;
 }
 
+interface ThreadHomeLookupRow {
+  readonly thread_id: string;
+  readonly squadron_id: string;
+  readonly squadron_name: string;
+}
+
 const stablePart = (value: string) => encodeURIComponent(value);
+
+/** Leaves headroom under SQLite's bind-parameter ceiling for sidebar reads. */
+export const THREAD_HOME_LOOKUP_BATCH_SIZE = 900;
+
+const uniqueInFirstOccurrenceOrder = <Value>(values: ReadonlyArray<Value>) =>
+  Array.from(new Set(values));
+
+const batchesOf = <Value>(values: ReadonlyArray<Value>) => {
+  const batches: Array<ReadonlyArray<Value>> = [];
+  for (let index = 0; index < values.length; index += THREAD_HOME_LOOKUP_BATCH_SIZE) {
+    batches.push(values.slice(index, index + THREAD_HOME_LOOKUP_BATCH_SIZE));
+  }
+  return batches;
+};
 
 export const participantIdForThread = (threadId: ThreadId) =>
   ParticipantId.make(`agent:j5:a2a:${stablePart(threadId)}`);
@@ -154,6 +191,28 @@ export const resolveThreadHome = Effect.fn("j5.a2a.resolveThreadHome")(function*
   };
 });
 
+const threadHomeRows = (sql: SqlClient.SqlClient, threadIds: ReadonlyArray<ThreadId>) =>
+  sql<ThreadHomeLookupRow>`
+    WITH ranked_homes AS (
+      SELECT
+        json_extract(event.payload, '$.participant.threadId') AS thread_id,
+        squadron.id AS squadron_id,
+        squadron.name AS squadron_name,
+        ROW_NUMBER() OVER (
+          PARTITION BY json_extract(event.payload, '$.participant.threadId')
+          ORDER BY event.created_at ASC, event.squadron_id ASC, event.seq ASC
+        ) AS home_rank
+      FROM j5_a2a_comm_event AS event
+      JOIN j5_a2a_squadron AS squadron ON squadron.id = event.squadron_id
+      WHERE event.kind = 'participant.joined'
+        AND json_extract(event.payload, '$.participant.kind') = 'agent'
+        AND json_extract(event.payload, '$.participant.threadId') IN ${sql.in(threadIds)}
+    )
+    SELECT thread_id, squadron_id, squadron_name
+    FROM ranked_homes
+    WHERE home_rank = 1
+  `;
+
 export const layer: Layer.Layer<A2AHomeRegistrar, never, A2ALedger | SqlClient.SqlClient> =
   Layer.effect(
     A2AHomeRegistrar,
@@ -163,6 +222,29 @@ export const layer: Layer.Layer<A2AHomeRegistrar, never, A2ALedger | SqlClient.S
 
       const getHomeForThread: A2AHomeRegistrarShape["getHomeForThread"] = (threadId) =>
         resolveThreadHome(sql, threadId).pipe(Effect.map((resolution) => resolution.home));
+
+      const getHomesForThreads: A2AHomeRegistrarShape["getHomesForThreads"] = (threadIds) =>
+        Effect.gen(function* () {
+          const uniqueThreadIds = uniqueInFirstOccurrenceOrder(threadIds);
+          if (uniqueThreadIds.length === 0) return [];
+          const rows: Array<ThreadHomeLookupRow> = [];
+          for (const threadIdBatch of batchesOf(uniqueThreadIds)) {
+            rows.push(...(yield* threadHomeRows(sql, threadIdBatch)));
+          }
+          const rowsByThread = new Map(rows.map((row) => [row.thread_id, row]));
+          return uniqueThreadIds.map((threadId) => {
+            const row = rowsByThread.get(threadId);
+            return row === undefined
+              ? ({ threadId, home: { kind: "unknown" } } satisfies ThreadHomeLookup)
+              : ({
+                  threadId,
+                  home: {
+                    kind: "known",
+                    squadron: { id: SquadronId.make(row.squadron_id), name: row.squadron_name },
+                  },
+                } satisfies ThreadHomeLookup);
+          });
+        });
 
       const registerAtCreation: A2AHomeRegistrarShape["registerAtCreation"] = (input) =>
         Effect.gen(function* () {
@@ -234,6 +316,6 @@ export const layer: Layer.Layer<A2AHomeRegistrar, never, A2ALedger | SqlClient.S
           return { squadronId: input.squadronId, participantId };
         });
 
-      return A2AHomeRegistrar.of({ registerAtCreation, getHomeForThread });
+      return A2AHomeRegistrar.of({ registerAtCreation, getHomeForThread, getHomesForThreads });
     }),
   );

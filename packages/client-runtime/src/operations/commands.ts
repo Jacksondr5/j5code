@@ -21,6 +21,7 @@ import {
   type UploadChatAttachment,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 
 import { request } from "../rpc/client.ts";
@@ -140,7 +141,17 @@ interface StartThreadBootstrap {
   readonly runSetupScript?: boolean;
 }
 
+/** An explicit Squadron home can only enter the durable launch RPC. */
+export class SquadronLaunchRequiresBootstrapError extends Data.TaggedError(
+  "SquadronLaunchRequiresBootstrapError",
+)<{
+  readonly message: string;
+  readonly threadId: ThreadId;
+}> {}
+
 export interface StartThreadTurnInput extends ThreadCommandInput {
+  /** Explicit J5 home carried only by first-message launch callers. */
+  readonly squadronId?: string;
   readonly message: {
     readonly messageId: MessageId;
     readonly role: "user";
@@ -535,14 +546,21 @@ export const setThreadInteractionMode = Effect.fn("EnvironmentCommands.setThread
 export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(function* (
   input: StartThreadTurnInput,
 ) {
+  const bootstrap = input.bootstrap?.createThread;
+  const prepareWorktree = input.bootstrap?.prepareWorktree;
+  if (input.squadronId !== undefined && bootstrap === undefined && prepareWorktree === undefined) {
+    return yield* new SquadronLaunchRequiresBootstrapError({
+      threadId: input.threadId,
+      message:
+        "This empty thread cannot start with a Squadron after its original launch failed. Start a new thread and try again.",
+    });
+  }
   const commandId = yield* allocateCommandId(input);
   const attachments = yield* persistAttachments(
     input.threadId,
     input.message.messageId,
     input.message.attachments,
   );
-  const bootstrap = input.bootstrap?.createThread;
-  const prepareWorktree = input.bootstrap?.prepareWorktree;
   if (bootstrap !== undefined || prepareWorktree !== undefined) {
     const existingProjection =
       bootstrap === undefined ? yield* getProjection(input.threadId) : null;
@@ -572,6 +590,10 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
     return yield* request(ORCHESTRATION_V2_WS_METHODS.launchThread, {
       commandId,
       creationSource: input.creationSource ?? "web",
+      ...(input.squadronId === undefined ? {} : { squadronId: input.squadronId }),
+      ...(input.sourceProposedPlan === undefined
+        ? {}
+        : { sourcePlanRef: input.sourceProposedPlan }),
       threadId: input.threadId,
       ...(bootstrap === undefined ? { reuseExistingThread: true } : {}),
       projectId: thread.projectId,

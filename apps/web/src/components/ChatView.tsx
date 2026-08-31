@@ -246,6 +246,19 @@ import {
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
+import { SquadronDraftChip } from "../j5/squadron/SquadronDraftChip";
+import {
+  freezeDraftSquadronAtFirstSend,
+  selectDraftSquadron,
+  useSquadronAmbientScope,
+  useSquadronDraftScope,
+} from "../j5/squadron/SquadronDraftState";
+import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
+import { refreshThreadHomes, useThreadHomes } from "../j5/squadron/ThreadHomesClient";
+import {
+  resolveEffectiveSquadronId,
+  resolveSquadronDraftChipState,
+} from "../j5/squadron/SquadronScope.logic";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline, type MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
@@ -1216,8 +1229,6 @@ function ChatViewContent(props: ChatViewProps) {
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
-  const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
-  const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -1539,6 +1550,7 @@ function ChatViewContent(props: ChatViewProps) {
     [draftThread, fallbackDraftProject?.defaultModelSelection, threadId],
   );
   const isServerThread = serverThread !== null;
+  const activeThreadHomes = useThreadHomes(serverThread === null ? [] : [serverThread.id]);
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const serverLatestRun = useMemo(
     () => (serverProjection === null ? null : deriveLatestThreadRun(serverProjection)),
@@ -1797,6 +1809,25 @@ function ChatViewContent(props: ChatViewProps) {
     [activeThread?.environmentId, activeThread?.projectId],
   );
   const activeProject = useProject(activeProjectRef);
+  const { squadrons } = useSquadronDirectory();
+  const ambientSquadronId = useSquadronAmbientScope();
+  const draftSquadron = useSquadronDraftScope(routeThreadKey);
+  const activeThreadHome =
+    serverThread === null ? undefined : activeThreadHomes.get(serverThread.id);
+  const durableSquadronHome = activeThreadHome?.kind === "known" ? activeThreadHome.squadron : null;
+  const effectiveSquadronId = resolveEffectiveSquadronId({
+    durableHome: durableSquadronHome,
+    draftSquadronId: draftSquadron.squadronId,
+    ambientSquadronId,
+  });
+  const effectiveSquadronName =
+    squadrons.find(({ squadron }) => squadron.id === effectiveSquadronId)?.squadron.name ?? null;
+  const isFirstMessageForActiveThread = !isServerThread || activeMessageCount === 0;
+  const squadronDraftChip = resolveSquadronDraftChipState({
+    durableHome: durableSquadronHome,
+    draft: draftSquadron,
+    isFirstMessage: isFirstMessageForActiveThread,
+  });
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   }, [activeProjectRef, handleNewThread]);
@@ -5176,7 +5207,7 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
     const threadIdForSend = activeThread.id;
-    const isFirstMessage = !isServerThread || activeMessageCount === 0;
+    const isFirstMessage = isFirstMessageForActiveThread;
     const baseBranchForWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
         ? activeThreadBranch
@@ -5189,6 +5220,30 @@ function ChatViewContent(props: ChatViewProps) {
     if (shouldCreateWorktree && !activeThreadBranch) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return;
+    }
+
+    let squadronIdForLaunch: string | undefined;
+    if (isFirstMessage) {
+      if (effectiveSquadronId === null) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Choose a Squadron before sending",
+            description: "A new agent needs an explicit existing Squadron home.",
+          }),
+        );
+        return;
+      }
+      // Ambient scope is user-selected context, not an invented default. Persist
+      // it to this draft at the one-way send boundary before the RPC starts.
+      if (draftSquadron.squadronId === null) {
+        selectDraftSquadron(routeThreadKey, effectiveSquadronId);
+      }
+      const frozenSquadronId = freezeDraftSquadronAtFirstSend(routeThreadKey);
+      if (frozenSquadronId === null) {
+        return;
+      }
+      squadronIdForLaunch = frozenSquadronId;
     }
 
     sendInFlightRef.current = true;
@@ -5383,6 +5438,7 @@ function ChatViewContent(props: ChatViewProps) {
         environmentId,
         input: {
           threadId: threadIdForSend,
+          ...(squadronIdForLaunch === undefined ? {} : { squadronId: squadronIdForLaunch }),
           message: {
             messageId: messageIdForSend,
             role: "user",
@@ -5402,6 +5458,7 @@ function ChatViewContent(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        if (squadronIdForLaunch !== undefined) refreshThreadHomes([threadIdForSend]);
       }
     }
 
@@ -5835,47 +5892,41 @@ function ChatViewContent(props: ChatViewProps) {
       resetLocalDispatch();
     };
 
-    const createResult = await createThread({
+    const startResult = await startThreadTurn({
       environmentId,
       input: {
         threadId: nextThreadId,
-        projectId: activeProject.id,
-        title: nextThreadTitle,
-        modelSelection: nextThreadModelSelection,
+        message: {
+          messageId: newMessageId(),
+          role: "user",
+          text: outgoingImplementationPrompt,
+          attachments: [],
+        },
+        modelSelection: ctxSelectedModelSelection,
+        titleSeed: nextThreadTitle,
         runtimeMode,
         interactionMode: "default",
-        branch: activeThreadBranch,
-        worktreePath: activeThread.worktreePath,
+        bootstrap: {
+          createThread: {
+            projectId: activeProject.id,
+            title: nextThreadTitle,
+            modelSelection: nextThreadModelSelection,
+            runtimeMode,
+            interactionMode: "default",
+            branch: activeThreadBranch,
+            worktreePath: activeThread.worktreePath,
+            createdAt,
+          },
+        },
+        sourceProposedPlan: {
+          threadId: activeThread.id,
+          planId: activeProposedPlan.id,
+        },
         createdAt,
       },
     });
     let failure: AtomCommandResult<unknown, unknown> | null =
-      createResult._tag === "Failure" ? createResult : null;
-
-    if (failure === null) {
-      const startResult = await startThreadTurn({
-        environmentId,
-        input: {
-          threadId: nextThreadId,
-          message: {
-            messageId: newMessageId(),
-            role: "user",
-            text: outgoingImplementationPrompt,
-            attachments: [],
-          },
-          modelSelection: ctxSelectedModelSelection,
-          titleSeed: nextThreadTitle,
-          runtimeMode,
-          interactionMode: "default",
-          sourceProposedPlan: {
-            threadId: activeThread.id,
-            planId: activeProposedPlan.id,
-          },
-          createdAt,
-        },
-      });
-      failure = startResult._tag === "Failure" ? startResult : null;
-    }
+      startResult._tag === "Failure" ? startResult : null;
 
     if (failure === null) {
       const startedResult = await settlePromise(() =>
@@ -5898,18 +5949,6 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     if (failure !== null) {
-      const cleanupResult = await deleteThread({
-        environmentId,
-        input: {
-          threadId: nextThreadId,
-        },
-      });
-      if (cleanupResult._tag === "Failure" && !isAtomCommandInterrupted(cleanupResult)) {
-        console.warn(
-          "Failed to clean up implementation thread after start failure.",
-          squashAtomCommandFailure(cleanupResult),
-        );
-      }
       if (!isAtomCommandInterrupted(failure)) {
         const error = squashAtomCommandFailure(failure);
         toastManager.add(
@@ -5932,8 +5971,6 @@ function ChatViewContent(props: ChatViewProps) {
     activeThread,
     beginLocalDispatch,
     activeEnvironmentUnavailable,
-    createThread,
-    deleteThread,
     isConnecting,
     isSendBusy,
     isServerThread,
@@ -6508,10 +6545,7 @@ function ChatViewContent(props: ChatViewProps) {
                             : undefined
                         }
                       >
-                        <DraftHeroHeadline
-                          activeProjectRef={activeProjectRef}
-                          activeProjectTitle={activeProject?.title ?? null}
-                        />
+                        <DraftHeroHeadline squadronName={effectiveSquadronName} />
                       </div>
                       <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                     </div>
@@ -6542,6 +6576,16 @@ function ChatViewContent(props: ChatViewProps) {
                     >
                       <div className="chat-composer-glass-host relative z-10 w-full rounded-[22px]">
                         <div className="relative z-10">
+                          {squadronDraftChip.visible ? (
+                            <div className="flex px-3 pt-2">
+                              <SquadronDraftChip
+                                ambientSquadronId={ambientSquadronId}
+                                draftKey={routeThreadKey}
+                                durableHome={durableSquadronHome}
+                                frozen={squadronDraftChip.frozen}
+                              />
+                            </div>
+                          ) : null}
                           <ChatComposer
                             composerRef={composerRef}
                             composerDraftTarget={composerDraftTarget}
