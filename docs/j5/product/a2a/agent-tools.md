@@ -43,8 +43,8 @@ from the ask you are answering, which closes that exchange. Use this tool only f
 already returned by list_participants; when creating a Peer Agent, put any reply expectation in
 spawn_agent's brief instead of sending a follow-up ask. Set urgency only when asking the human.
 Returns once the message is committed; delivery continues asynchronously — carry on with your work,
-and the reply arrives later as an incoming message. Reuse client_request_id to retry the same send
-safely."
+and the reply arrives later as an incoming message. A caller without a registered home is refused.
+Reuse client_request_id to retry the same send safely."
 
 | Input               | Type              | Required                         | Meaning                                                |
 | ------------------- | ----------------- | -------------------------------- | ------------------------------------------------------ |
