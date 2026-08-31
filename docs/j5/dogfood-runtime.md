@@ -44,14 +44,14 @@ that produced it. Decisions and their load-bearing reasons are recorded inline.
 Defaults used throughout this document. All are adjustable; keep Ansible and this table in
 agreement.
 
-| Parameter        | Value                                   | Notes                                                               |
-| ---------------- | --------------------------------------- | ------------------------------------------------------------------- |
-| Service user     | `j5dev`                                 | Non-sudo, lingering enabled, mirrors `t3dev`                        |
-| Checkout         | `/home/j5dev/j5code`                    | Deploy-only clone of `j5/main`; never edited in place               |
-| State dir        | `/home/j5dev/.j5code`                   | Set explicitly — see warning below                                  |
-| Listener         | `127.0.0.1:5773`                        | Loopback only; the existing T3 service keeps `3773`                 |
-| Tailnet exposure | Tailscale Serve on HTTPS 8444           | Built into the server; 443 and 8443 are already in use on this node |
-| Unit             | `~/.config/systemd/user/j5code.service` | Journald logging (`journalctl --user -u j5code`)                    |
+| Parameter        | Value                                   | Notes                                                        |
+| ---------------- | --------------------------------------- | ------------------------------------------------------------ |
+| Service user     | `j5dev`                                 | Non-sudo, lingering enabled, mirrors `t3dev`                 |
+| Checkout         | `/home/j5dev/j5code`                    | Deploy-only clone of `j5/main`; never edited in place        |
+| State dir        | `/home/j5dev/.j5code`                   | Set explicitly — see warning below                           |
+| Listener         | `127.0.0.1:5773`                        | Loopback only; the existing T3 service keeps `3773`          |
+| Tailnet exposure | Tailscale Serve HTTPS 8444 → 5773       | Applied by root via Ansible, not by the unit; 443/8443 taken |
+| Unit             | `~/.config/systemd/user/j5code.service` | Journald logging (`journalctl --user -u j5code`)             |
 
 > **Warning — state dir collision.** The J5 server's built-in default state dir is still upstream's
 > `~/.t3` (only the desktop app was rebranded to `~/.j5code`). On a box that also runs real T3,
@@ -92,7 +92,7 @@ As `j5dev` (Ansible reconciles all of this):
    Type=simple
    WorkingDirectory=%h/j5code
    Environment=T3CODE_HOME=%h/.j5code
-   ExecStart=/usr/bin/env bash -lc 'exec fnm exec --using "$(cat .nvmrc)" node apps/server/dist/bin.mjs serve --port 5773 --host 127.0.0.1 --tailscale-serve --tailscale-serve-port 8444'
+   ExecStart=/usr/bin/env bash -lc 'exec fnm exec --using "$(cat .nvmrc)" node apps/server/dist/bin.mjs serve --port 5773 --host 127.0.0.1'
    Restart=always
    RestartSec=5
    KillMode=mixed
@@ -105,6 +105,10 @@ As `j5dev` (Ansible reconciles all of this):
    `bash -lc` exists to put `fnm` on PATH; if Ansible instead manages a stable Node path, point
    `ExecStart` at that node binary directly. `serve` runs headless: no browser launch, no
    auto-bootstrap of a project from the working directory.
+
+   The unit deliberately does **not** use the server's built-in `--tailscale-serve` flags: applying
+   Serve config requires root or the machine's single Tailscale operator slot, and `j5dev` stays
+   fully unprivileged. Tailnet exposure is a root-owned step instead (below).
 
    ```sh
    systemctl --user daemon-reload
@@ -142,7 +146,19 @@ As `j5dev` (Ansible reconciles all of this):
    systemctl --user enable --now j5code-snapshot.timer
    ```
 
-5. **Pairing.** Headless serve prints its pairing details (URL with token) on startup — read them
+5. **Tailnet exposure (as root, not `j5dev`).** One Serve mapping on the node's existing
+   tailscaled, alongside the T3 mapping — Serve config is a per-port map, so both coexist on one
+   instance:
+
+   ```sh
+   ufw allow in on tailscale0 to any port 8444 proto tcp
+   tailscale serve --bg --https=8444 http://127.0.0.1:5773
+   ```
+
+   In practice the homelab Ansible playbook owns this (with drift guards that refuse Serve entries
+   outside the sanctioned T3 + J5 set); the commands above are what it converges to.
+
+6. **Pairing.** Headless serve prints its pairing details (URL with token) on startup — read them
    with `journalctl --user -u j5code -e`. That startup URL carries admin scopes. To mint a fresh
    standard-scope token later:
 
