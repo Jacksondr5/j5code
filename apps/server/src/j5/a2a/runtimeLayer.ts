@@ -14,6 +14,7 @@ import { layer as lifecycleServiceLayer } from "./LifecycleService.ts";
 import { layer as sendServiceLayer } from "./SendService.ts";
 import { layer as silenceDetectorLayer } from "./SilenceDetector.ts";
 import { layer as humanInboxLayer } from "./HumanInboxService.ts";
+import { layer as clientReadsLayer } from "./ClientReadsService.ts";
 import { layer as squadronProjectReferencesLayer } from "./SquadronProjectReferences.ts";
 import { layer as squadronThreadCreationServiceLayer } from "./SquadronThreadCreationService.ts";
 import { layer as threadHomesServiceLayer } from "./ThreadHomesService.ts";
@@ -52,7 +53,7 @@ export const makeJ5A2AAuxiliaryLayer = (
   const archiveFactsProvided = archiveFactsLayer.pipe(
     Layer.provide(placementFactsUnavailableLayer),
   );
-  return Layer.mergeAll(
+  const runtimeWithoutClientReads = Layer.mergeAll(
     humanPersonRegistryLayer,
     sendServiceLayer,
     deliveryWorkerProvided,
@@ -63,6 +64,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     archiveFactsProvided,
     threadHomesServiceLayer,
   );
+  return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };
 
 export const makeJ5A2ARuntimeLayer = (
