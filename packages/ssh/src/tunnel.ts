@@ -672,6 +672,10 @@ export function buildRemoteNodeEnvScript(input?: RemoteT3RunnerOptions): string 
   );
 }
 
+/** Keep the server home aligned with the runner selected by REMOTE_RUNNER_SCRIPT. */
+const defaultServerHomeForRunner = (input?: RemoteT3RunnerOptions) =>
+  input?.nodeScriptPath?.trim() ? "$HOME/.j5code" : "$HOME/.t3";
+
 export function buildRemoteLaunchScript(input?: RemoteT3RunnerOptions): string {
   return applyScriptPlaceholders(REMOTE_LAUNCH_SCRIPT, {
     T3_NODE_ENV_SCRIPT: buildRemoteNodeEnvScript(input),
@@ -683,7 +687,7 @@ export function buildRemoteLaunchScript(input?: RemoteT3RunnerOptions): string {
     T3_READY_TIMEOUT_MS: String(REMOTE_READY_TIMEOUT_MS),
     T3_REUSE_READY_TIMEOUT_MS: String(REMOTE_REUSE_READY_TIMEOUT_MS),
     T3_READY_PROBE_TIMEOUT_MS: String(SSH_READY_PROBE_TIMEOUT_MS),
-    T3_DEFAULT_SERVER_HOME: input?.nodeScriptPath?.trim() ? "$HOME/.j5code" : "$HOME/.t3",
+    T3_DEFAULT_SERVER_HOME: defaultServerHomeForRunner(input),
   });
 }
 
@@ -694,7 +698,7 @@ export function buildRemotePairingScript(
   return applyScriptPlaceholders(REMOTE_PAIRING_SCRIPT, {
     T3_STATE_KEY: remoteStateKey(target),
     T3_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteT3RunnerScript(input)),
-    T3_DEFAULT_SERVER_HOME: input?.nodeScriptPath?.trim() ? "$HOME/.j5code" : "$HOME/.t3",
+    T3_DEFAULT_SERVER_HOME: defaultServerHomeForRunner(input),
   });
 }
 

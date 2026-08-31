@@ -14,6 +14,7 @@ Fork-owned values live in `scripts/lib/j5-branding.ts`:
 | Desktop / mobile app ID     | `codes.jackson.j5code` | `.dev` and `.preview` suffixes                          |
 | URL scheme                  | `j5code`               | `j5code-dev`, `j5code-preview`                          |
 | Default desktop state       | `~/.j5code/userdata`   | `~/.j5code/dev`                                         |
+| Default server state        | `~/.j5code/userdata`   | `~/.j5code/dev`                                         |
 | Desktop App Support         | `j5code`               | `j5code-dev`                                            |
 | Linux executable / WM class | `j5code`               | `j5code-dev`                                            |
 | Desktop artifact prefix     | `J5-Code-`             | same                                                    |

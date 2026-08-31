@@ -125,6 +125,7 @@ export interface RunSqliteStateInput {
 }
 
 export interface RunSqliteStateOptions {
+  /** Additional shared home to protect; canonical ~/.t3 and ~/.j5code are always protected. */
   readonly sharedHome?: string | undefined;
 }
 

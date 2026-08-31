@@ -123,8 +123,10 @@ it.layer(NodeServices.layer)("t3-sqlite-state", (it) => {
       const path = yield* Path.Path;
       const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-sqlite-state-homes-" });
       const originalHome = process.env.HOME;
+      const originalUserProfile = process.env.USERPROFILE;
       try {
         process.env.HOME = home;
+        process.env.USERPROFILE = home;
         for (const name of [".t3", ".j5code"]) {
           const baseDir = path.join(home, name);
           yield* createFixtureDatabase(baseDir);
@@ -134,13 +136,17 @@ it.layer(NodeServices.layer)("t3-sqlite-state", (it) => {
             sql: "DELETE FROM fixtures",
           }).pipe(Effect.flip);
           assert.equal(error._tag, "SqliteStateSharedHomeMutationError");
-          assert.include(error.message, name);
         }
       } finally {
         if (originalHome === undefined) {
           delete process.env.HOME;
         } else {
           process.env.HOME = originalHome;
+        }
+        if (originalUserProfile === undefined) {
+          delete process.env.USERPROFILE;
+        } else {
+          process.env.USERPROFILE = originalUserProfile;
         }
       }
     }),

@@ -144,9 +144,11 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       const path = yield* Path.Path;
       const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-config-default-home-" });
       const originalHome = process.env.HOME;
+      const originalUserProfile = process.env.USERPROFILE;
 
       try {
         process.env.HOME = home;
+        process.env.USERPROFILE = home;
         const resolved = yield* resolveServerConfig(
           {
             mode: Option.none(),
@@ -183,6 +185,11 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           delete process.env.HOME;
         } else {
           process.env.HOME = originalHome;
+        }
+        if (originalUserProfile === undefined) {
+          delete process.env.USERPROFILE;
+        } else {
+          process.env.USERPROFILE = originalUserProfile;
         }
       }
     }),
@@ -327,6 +334,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
       });
+      assert.equal(resolved.baseDir, baseDir);
+      assert.isTrue(resolved.baseDir !== "/tmp/t3-bootstrap-home");
     }),
   );
 
