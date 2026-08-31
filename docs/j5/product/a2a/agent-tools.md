@@ -39,14 +39,12 @@ positive instruction over negation.
 **Description (contract):** "Send one durable message to another agent or the human. Three uses: a
 **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line
 intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id
-from the ask you are answering, which closes that exchange. Set urgency only when asking the human.
+from the ask you are answering, which closes that exchange. Use this tool only for participants
+already returned by list_participants; when creating a Peer Agent, put any reply expectation in
+spawn_agent's brief instead of sending a follow-up ask. Set urgency only when asking the human.
 Returns once the message is committed; delivery continues asynchronously — carry on with your work,
-and the reply arrives later as an incoming message. Reuse client_request_id to retry the same send
-safely."
-
-_(The shipped string differs: it leads with mechanics and appends an interim availability caveat
-about wrapper-spawned homes. Updating it to this contract — and dropping the caveat when
-creation-surface registration lands — is a small code change in `envelopes.v1.json`.)_
+and the reply arrives later as an incoming message. A caller without a registered home is refused.
+Reuse client_request_id to retry the same send safely."
 
 | Input               | Type              | Required                         | Meaning                                                |
 | ------------------- | ----------------- | -------------------------------- | ------------------------------------------------------ |
@@ -70,15 +68,21 @@ participant id is rejected fail-closed — self-send is never legitimate (a self
 degenerate: the caller would owe itself a reply and the silence detector would type its own
 silence against it; the real self-shaped needs have dedicated verbs). Per the toolsmith rule, the
 error names the caller's own participant id and the next commands: `list_participants` to find the
-intended recipient, a Memo for notes-to-self, `schedule_task` for future-self triggers. Origin:
+intended recipient and `schedule_task` for future-self triggers. Origin:
 live test — an agent asked to message "the other agent" messaged itself.
+
+**Product sequencing note (2026-08-31):** Memo is post-v0. When Memos ship, the error and tool
+description gain Memo as the notes-to-self alternative; until then, shipped copy does not name it.
 
 ## `list_participants` — built (`j5/main`); contract revision: `display_name`
 
-**Description (contract):** "Your address book: every participant you can message — agents and the
-human — with the display name to recognize them by, the participant_id to address them with, and
-what each accepts (messages, exchanges, urgency). When you're told to message someone by name or
-role, resolve them here first; consult it again after any spawn or archive changes the roster."
+**Description (contract):** "Your address book: the participants around you — agents and the human —
+with the display name to recognize them by, the participant_id to address them with, and what each
+accepts (messages, exchanges, urgency). When you're told to message someone by name or role, resolve
+them here first. Your own row is marked self=true; it cannot receive messages or open exchanges from
+you — use schedule_task if you need a future trigger for yourself. Native threads that never
+received a Squadron home do not appear here and cannot be messaged. The roster changes — after you
+spawn an agent, or when a participant retires, call this again instead of reusing a stale listing."
 
 **Contract revision (found 2026-08-29):** rows carry no display name today
 (`AgentParticipant = {kind, id, threadId}`), which defeats the address-book purpose — "message the
@@ -90,6 +94,13 @@ ticket.
 **`self`** — the address book must answer "which one am I" before it can answer "who else is
 there" (adopts the prior art's `[self]` marker; same live-test origin as `send_message`'s
 self-send rejection). The description gains a clause telling the caller its own row is marked.
+
+**Canonical description amendment (ratified 2026-08-31, decision #72):** the exact contract above
+supersedes all partial drafts. It names the self row, native threads without a home, and roster
+refreshes without naming an unshipped lifecycle verb.
+(each description carries its own native-home caveat: send_message states the caller-side
+precondition — a sender without a registered home is refused; list_participants states the
+listing-side consequence — native threads without a home do not appear and cannot be messaged)
 
 No inputs. Result rows: `display_name`, `squadron_id`, `participant_id`, participant kind (thread
 id for agents), `can_receive_message`, `can_open_exchange`, `accepts_urgency`, plus `provenance`
@@ -130,6 +141,10 @@ states its own `participant_id` and Squadron as platform-provided facts — the 
 envelope's sender identity, composed by the platform because they are measured, not judgment. A
 fresh spawn is never id-blind about itself (live-test origin: an id-blind agent messaged itself).
 The spawner's brief remains untouched — this rides beside it, never inside it.
+
+**Contract clarification (ruled 2026-08-31, SP4):** the brief carries the initial task and whether
+and what reply is expected. The spawner does not follow `spawn_agent` with a reply-expected
+`send_message`; that Exchange form is for later work owed by an existing participant.
 
 > **Spawning guide (settled 2026-08-30) — [`features/spawning-guide.md`](../features/spawning-guide.md).**
 > SP4 closed this contract's held slot: the description's single sentence of brief steering above

@@ -15,7 +15,6 @@ import {
 import {
   ParticipantPlacement,
   type ParticipantPlacementView,
-  PlacementCommandId,
   PlacementEvent,
   type PlacementMutationResult,
   type RecordParticipantPlacementInput,
@@ -173,6 +172,24 @@ export class ParticipantPlacementService extends Context.Service<
   ParticipantPlacementServiceShape
 >()("t3/j5/a2a/PlacementService/ParticipantPlacementService") {}
 
+/**
+ * Internal write seam for multi-service transactions. Callers must preserve
+ * drainPermit ≺ appendPermit ≺ mutationPermit ≺ DB. This Semaphore(1) permit
+ * is non-reentrant: acquire it before BEGIN and use the provided raw
+ * in-transaction API instead of re-acquiring it through the public mutation.
+ */
+export interface ParticipantPlacementTransactionWriterShape {
+  readonly withPermit: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+  readonly recordCreationInTransaction: (
+    input: RecordParticipantPlacementInput,
+  ) => Effect.Effect<PlacementMutationResult, PlacementError>;
+}
+
+export class ParticipantPlacementTransactionWriter extends Context.Service<
+  ParticipantPlacementTransactionWriter,
+  ParticipantPlacementTransactionWriterShape
+>()("t3/j5/a2a/PlacementService/ParticipantPlacementTransactionWriter") {}
+
 interface EventRow {
   readonly seq: number;
   readonly command_id: string;
@@ -329,40 +346,42 @@ const creationFingerprint = (input: RecordParticipantPlacementInput): string => 
   });
 };
 
-export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.SqlClient> =
-  Layer.effect(
-    ParticipantPlacementService,
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      const mutationPermit = yield* Semaphore.make(1);
+export const layer: Layer.Layer<
+  ParticipantPlacementService | ParticipantPlacementTransactionWriter,
+  never,
+  SqlClient.SqlClient
+> = Layer.effectContext(
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const mutationPermit = yield* Semaphore.make(1);
 
-      const ensureSquadron = Effect.fn("j5.a2a.placement.ensureSquadron")(function* (
-        squadronId: SquadronId,
-      ) {
-        const rows = yield* sql<{ readonly id: string }>`
+    const ensureSquadron = Effect.fn("j5.a2a.placement.ensureSquadron")(function* (
+      squadronId: SquadronId,
+    ) {
+      const rows = yield* sql<{ readonly id: string }>`
           SELECT id FROM j5_a2a_squadron WHERE id = ${squadronId} LIMIT 1
         `;
-        if (rows[0] === undefined) return yield* new PlacementSquadronNotFoundError({ squadronId });
-      });
+      if (rows[0] === undefined) return yield* new PlacementSquadronNotFoundError({ squadronId });
+    });
 
-      const ensureParticipant = Effect.fn("j5.a2a.placement.ensureParticipant")(function* (
-        squadronId: SquadronId,
-        participantId: ParticipantId,
-      ) {
-        const rows = yield* sql<{ readonly participant_id: string }>`
+    const ensureParticipant = Effect.fn("j5.a2a.placement.ensureParticipant")(function* (
+      squadronId: SquadronId,
+      participantId: ParticipantId,
+    ) {
+      const rows = yield* sql<{ readonly participant_id: string }>`
           SELECT participant_id
           FROM j5_a2a_squadron_membership
           WHERE squadron_id = ${squadronId} AND participant_id = ${participantId}
           LIMIT 1
         `;
-        if (rows[0] === undefined) {
-          return yield* new PlacementParticipantNotFoundError({ squadronId, participantId });
-        }
-      });
+      if (rows[0] === undefined) {
+        return yield* new PlacementParticipantNotFoundError({ squadronId, participantId });
+      }
+    });
 
-      const ensureProvenanceParticipant = Effect.fn("j5.a2a.placement.ensureProvenanceParticipant")(
-        function* (squadronId: SquadronId, participantId: ParticipantId) {
-          const rows = yield* sql<{ readonly participant_id: string }>`
+    const ensureProvenanceParticipant = Effect.fn("j5.a2a.placement.ensureProvenanceParticipant")(
+      function* (squadronId: SquadronId, participantId: ParticipantId) {
+        const rows = yield* sql<{ readonly participant_id: string }>`
           SELECT json_extract(payload, '$.participant.id') AS participant_id
           FROM j5_a2a_comm_event
           WHERE squadron_id = ${squadronId}
@@ -370,52 +389,52 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             AND json_extract(payload, '$.participant.id') = ${participantId}
           LIMIT 1
         `;
-          if (rows[0] === undefined) {
-            return yield* new PlacementParticipantNotFoundError({ squadronId, participantId });
-          }
-        },
-      );
-
-      const ensureParent = Effect.fn("j5.a2a.placement.ensureParent")(function* (
-        squadronId: SquadronId,
-        parentParticipantId: ParticipantId | null,
-      ) {
-        if (parentParticipantId === null) return;
-        if (isHumanParticipantId(parentParticipantId)) {
-          return yield* new PlacementParentIneligibleError({
-            squadronId,
-            parentParticipantId,
-          });
+        if (rows[0] === undefined) {
+          return yield* new PlacementParticipantNotFoundError({ squadronId, participantId });
         }
-        const rows = yield* sql<{ readonly participant_id: string }>`
+      },
+    );
+
+    const ensureParent = Effect.fn("j5.a2a.placement.ensureParent")(function* (
+      squadronId: SquadronId,
+      parentParticipantId: ParticipantId | null,
+    ) {
+      if (parentParticipantId === null) return;
+      if (isHumanParticipantId(parentParticipantId)) {
+        return yield* new PlacementParentIneligibleError({
+          squadronId,
+          parentParticipantId,
+        });
+      }
+      const rows = yield* sql<{ readonly participant_id: string }>`
           SELECT participant_id
           FROM j5_a2a_squadron_membership
           WHERE squadron_id = ${squadronId} AND participant_id = ${parentParticipantId}
           LIMIT 1
         `;
-        if (rows[0] === undefined) {
-          return yield* new PlacementParentNotFoundError({ squadronId, parentParticipantId });
-        }
-      });
+      if (rows[0] === undefined) {
+        return yield* new PlacementParentNotFoundError({ squadronId, parentParticipantId });
+      }
+    });
 
-      const isCurrentParticipant = Effect.fn("j5.a2a.placement.isCurrentParticipant")(function* (
-        squadronId: SquadronId,
-        participantId: ParticipantId,
-      ) {
-        const rows = yield* sql<{ readonly participant_id: string }>`
+    const isCurrentParticipant = Effect.fn("j5.a2a.placement.isCurrentParticipant")(function* (
+      squadronId: SquadronId,
+      participantId: ParticipantId,
+    ) {
+      const rows = yield* sql<{ readonly participant_id: string }>`
             SELECT participant_id
             FROM j5_a2a_squadron_membership
             WHERE squadron_id = ${squadronId} AND participant_id = ${participantId}
             LIMIT 1
           `;
-        return rows[0] !== undefined;
-      });
+      return rows[0] !== undefined;
+    });
 
-      const selectPlacement = Effect.fn("j5.a2a.placement.selectPlacement")(function* (
-        squadronId: SquadronId,
-        participantId: ParticipantId,
-      ) {
-        const rows = yield* sql<PlacementRow>`
+    const selectPlacement = Effect.fn("j5.a2a.placement.selectPlacement")(function* (
+      squadronId: SquadronId,
+      participantId: ParticipantId,
+    ) {
+      const rows = yield* sql<PlacementRow>`
           SELECT
             squadron_id,
             participant_id,
@@ -429,13 +448,13 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
           WHERE squadron_id = ${squadronId} AND participant_id = ${participantId}
           LIMIT 1
         `;
-        return rows[0] === undefined ? null : yield* placementFromRow(rows[0]);
-      });
+      return rows[0] === undefined ? null : yield* placementFromRow(rows[0]);
+    });
 
-      const selectEventByCommand = Effect.fn("j5.a2a.placement.selectEventByCommand")(function* (
-        commandId: string,
-      ) {
-        const rows = yield* sql<EventRow>`
+    const selectEventByCommand = Effect.fn("j5.a2a.placement.selectEventByCommand")(function* (
+      commandId: string,
+    ) {
+      const rows = yield* sql<EventRow>`
             SELECT
               seq,
               command_id,
@@ -457,161 +476,160 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             WHERE command_id = ${commandId}
             LIMIT 1
           `;
-        return rows[0] ?? null;
-      });
+      return rows[0] ?? null;
+    });
 
-      const replay = Effect.fn("j5.a2a.placement.replay")(function* (
-        commandId: string,
-        fingerprint: string,
-      ) {
-        const row = yield* selectEventByCommand(commandId);
-        if (row === null) return null;
-        if (row.request_fingerprint !== fingerprint) {
-          return yield* new PlacementCommandConflictError({
-            commandId,
-            existingParticipantId: ParticipantId.make(row.participant_id),
-          });
-        }
-        const placement = yield* selectPlacement(
-          SquadronId.make(row.squadron_id),
-          ParticipantId.make(row.participant_id),
-        );
-        if (placement === null) {
-          return yield* new PlacementStorageError({ operation: "read replayed placement" });
-        }
-        return {
-          event: yield* eventFromRow(row),
-          placement,
-          committed: false as const,
-        };
-      });
+    const replay = Effect.fn("j5.a2a.placement.replay")(function* (
+      commandId: string,
+      fingerprint: string,
+    ) {
+      const row = yield* selectEventByCommand(commandId);
+      if (row === null) return null;
+      if (row.request_fingerprint !== fingerprint) {
+        return yield* new PlacementCommandConflictError({
+          commandId,
+          existingParticipantId: ParticipantId.make(row.participant_id),
+        });
+      }
+      const placement = yield* selectPlacement(
+        SquadronId.make(row.squadron_id),
+        ParticipantId.make(row.participant_id),
+      );
+      if (placement === null) {
+        return yield* new PlacementStorageError({ operation: "read replayed placement" });
+      }
+      return {
+        event: yield* eventFromRow(row),
+        placement,
+        committed: false as const,
+      };
+    });
 
-      const allocateSeq = Effect.fn("j5.a2a.placement.allocateSeq")(function* (
-        squadronId: SquadronId,
-      ) {
-        const rows = yield* sql<{ readonly next_seq: number }>`
+    const allocateSeq = Effect.fn("j5.a2a.placement.allocateSeq")(function* (
+      squadronId: SquadronId,
+    ) {
+      const rows = yield* sql<{ readonly next_seq: number }>`
           SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq
           FROM j5_a2a_placement_event
           WHERE squadron_id = ${squadronId}
         `;
-        const seq = rows[0]?.next_seq;
-        if (seq === undefined) {
-          return yield* new PlacementStorageError({ operation: "allocate placement sequence" });
-        }
-        return seq;
-      });
+      const seq = rows[0]?.next_seq;
+      if (seq === undefined) {
+        return yield* new PlacementStorageError({ operation: "allocate placement sequence" });
+      }
+      return seq;
+    });
 
-      const resolveProvenanceDefaultParent = Effect.fn(
-        "j5.a2a.placement.resolveProvenanceDefaultParent",
-      )(function* (input: RecordParticipantPlacementInput) {
-        switch (input.provenance.kind) {
-          case "spawned-by":
-            if (input.provenance.source === "j5_spawn") {
-              return input.provenance.spawnedByParticipantId;
-            }
-            return (yield* isCurrentParticipant(
-              input.squadronId,
-              input.provenance.spawnedByParticipantId,
-            ))
-              ? input.provenance.spawnedByParticipantId
-              : null;
-          case "forked-from": {
-            const source = yield* selectPlacement(
-              input.squadronId,
-              input.provenance.sourceParticipantId,
-            );
-            return source?.placementParentId ?? null;
+    const resolveProvenanceDefaultParent = Effect.fn(
+      "j5.a2a.placement.resolveProvenanceDefaultParent",
+    )(function* (input: RecordParticipantPlacementInput) {
+      switch (input.provenance.kind) {
+        case "spawned-by":
+          if (input.provenance.source === "j5_spawn") {
+            return input.provenance.spawnedByParticipantId;
           }
-          case "unknown":
-            return null;
+          return (yield* isCurrentParticipant(
+            input.squadronId,
+            input.provenance.spawnedByParticipantId,
+          ))
+            ? input.provenance.spawnedByParticipantId
+            : null;
+        case "forked-from": {
+          const source = yield* selectPlacement(
+            input.squadronId,
+            input.provenance.sourceParticipantId,
+          );
+          return source?.placementParentId ?? null;
         }
-      });
+        case "unknown":
+          return null;
+      }
+    });
 
-      const assertAcyclic = Effect.fn("j5.a2a.placement.assertAcyclic")(function* (input: {
-        readonly squadronId: SquadronId;
-        readonly participantId: ParticipantId;
-        readonly requestedParentId: ParticipantId | null;
-      }) {
-        if (input.requestedParentId === null) return;
-        const countRows = yield* sql<{ readonly count: number }>`
+    const assertAcyclic = Effect.fn("j5.a2a.placement.assertAcyclic")(function* (input: {
+      readonly squadronId: SquadronId;
+      readonly participantId: ParticipantId;
+      readonly requestedParentId: ParticipantId | null;
+    }) {
+      if (input.requestedParentId === null) return;
+      const countRows = yield* sql<{ readonly count: number }>`
           SELECT COUNT(*) AS count FROM j5_a2a_participant_placement WHERE squadron_id = ${input.squadronId}
         `;
-        const placementBound = (countRows[0]?.count ?? 0) + 1;
-        const visited = new Set<ParticipantId>();
-        const path: Array<ParticipantId> = [];
-        let current: ParticipantId | null = input.requestedParentId;
-        while (current !== null) {
-          path.push(current);
-          if (current === input.participantId) {
-            return yield* new PlacementCycleError({
-              participantId: input.participantId,
-              requestedParentId: input.requestedParentId,
-              path,
-            });
-          }
-          if (visited.has(current) || path.length > placementBound) {
-            return yield* new PlacementGraphCorruptError({ squadronId: input.squadronId, path });
-          }
-          visited.add(current);
-          const placement: ParticipantPlacement | null = yield* selectPlacement(
-            input.squadronId,
-            current,
-          );
-          current = placement?.placementParentId ?? null;
-        }
-      });
-
-      const recordCreationEffect = Effect.fn("j5.a2a.placement.recordCreation")(function* (
-        input: RecordParticipantPlacementInput,
-      ) {
-        if (isHumanParticipantId(input.participantId)) {
-          return yield* new PlacementHumanTargetError({
-            operation: "record-creation",
-            squadronId: input.squadronId,
-            participantId: input.participantId,
-          });
-        }
-        const fingerprint = creationFingerprint(input);
-        const replayed = yield* replay(input.commandId, fingerprint);
-        if (replayed !== null) return replayed;
-        yield* ensureSquadron(input.squadronId);
-        yield* ensureParticipant(input.squadronId, input.participantId);
-        if ((yield* selectPlacement(input.squadronId, input.participantId)) !== null) {
-          return yield* new PlacementAlreadyExistsError({
-            squadronId: input.squadronId,
-            participantId: input.participantId,
-          });
-        }
-        const provenanceParticipantId =
-          input.provenance.kind === "spawned-by"
-            ? input.provenance.spawnedByParticipantId
-            : input.provenance.kind === "forked-from"
-              ? input.provenance.sourceParticipantId
-              : null;
-        if (provenanceParticipantId !== null) {
-          // Immutable provenance may retain a departed source, but it must name
-          // an identity that actually joined this squadron at least once.
-          yield* ensureProvenanceParticipant(input.squadronId, provenanceParticipantId);
-        }
-        if (provenanceParticipantId === input.participantId) {
+      const placementBound = (countRows[0]?.count ?? 0) + 1;
+      const visited = new Set<ParticipantId>();
+      const path: Array<ParticipantId> = [];
+      let current: ParticipantId | null = input.requestedParentId;
+      while (current !== null) {
+        path.push(current);
+        if (current === input.participantId) {
           return yield* new PlacementCycleError({
             participantId: input.participantId,
-            requestedParentId: input.participantId,
-            path: [input.participantId],
+            requestedParentId: input.requestedParentId,
+            path,
           });
         }
-        const placementParentId = yield* resolveProvenanceDefaultParent(input);
-        yield* ensureParent(input.squadronId, placementParentId);
-        yield* assertAcyclic({
+        if (visited.has(current) || path.length > placementBound) {
+          return yield* new PlacementGraphCorruptError({ squadronId: input.squadronId, path });
+        }
+        visited.add(current);
+        const placement: ParticipantPlacement | null = yield* selectPlacement(
+          input.squadronId,
+          current,
+        );
+        current = placement?.placementParentId ?? null;
+      }
+    });
+
+    const recordCreationInTransactionRaw = Effect.fn("j5.a2a.placement.recordCreation")(function* (
+      input: RecordParticipantPlacementInput,
+    ) {
+      if (isHumanParticipantId(input.participantId)) {
+        return yield* new PlacementHumanTargetError({
+          operation: "record-creation",
           squadronId: input.squadronId,
           participantId: input.participantId,
-          requestedParentId: placementParentId,
         });
-        const seq = yield* allocateSeq(input.squadronId);
-        const provenanceKind = input.provenance.kind;
-        const provenanceSource =
-          input.provenance.kind === "unknown" ? null : input.provenance.source;
-        yield* sql`
+      }
+      const fingerprint = creationFingerprint(input);
+      const replayed = yield* replay(input.commandId, fingerprint);
+      if (replayed !== null) return replayed;
+      yield* ensureSquadron(input.squadronId);
+      yield* ensureParticipant(input.squadronId, input.participantId);
+      if ((yield* selectPlacement(input.squadronId, input.participantId)) !== null) {
+        return yield* new PlacementAlreadyExistsError({
+          squadronId: input.squadronId,
+          participantId: input.participantId,
+        });
+      }
+      const provenanceParticipantId =
+        input.provenance.kind === "spawned-by"
+          ? input.provenance.spawnedByParticipantId
+          : input.provenance.kind === "forked-from"
+            ? input.provenance.sourceParticipantId
+            : null;
+      if (provenanceParticipantId !== null) {
+        // Immutable provenance may retain a departed source, but it must name
+        // an identity that actually joined this squadron at least once.
+        yield* ensureProvenanceParticipant(input.squadronId, provenanceParticipantId);
+      }
+      if (provenanceParticipantId === input.participantId) {
+        return yield* new PlacementCycleError({
+          participantId: input.participantId,
+          requestedParentId: input.participantId,
+          path: [input.participantId],
+        });
+      }
+      const placementParentId = yield* resolveProvenanceDefaultParent(input);
+      yield* ensureParent(input.squadronId, placementParentId);
+      yield* assertAcyclic({
+        squadronId: input.squadronId,
+        participantId: input.participantId,
+        requestedParentId: placementParentId,
+      });
+      const seq = yield* allocateSeq(input.squadronId);
+      const provenanceKind = input.provenance.kind;
+      const provenanceSource = input.provenance.kind === "unknown" ? null : input.provenance.source;
+      yield* sql`
             INSERT INTO j5_a2a_placement_event (
               seq,
               command_id,
@@ -648,7 +666,7 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
               ${input.createdAt}
             )
           `;
-        yield* sql`
+      yield* sql`
             INSERT INTO j5_a2a_participant_placement (
               squadron_id,
               participant_id,
@@ -669,36 +687,42 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
               ${seq}
             )
           `;
-        const event = yield* eventFromRow({
-          seq,
-          command_id: input.commandId,
-          request_fingerprint: fingerprint,
-          squadron_id: input.squadronId,
-          participant_id: input.participantId,
-          kind: "participant.placement_created",
-          actor: input.actor,
-          actor_session_id: null,
-          actor_subject: null,
-          auth_method: null,
-          provenance_kind: provenanceKind,
-          provenance_participant_id: provenanceParticipantId,
-          provenance_source: provenanceSource,
-          previous_parent_id: null,
-          placement_parent_id: placementParentId,
-          created_at: input.createdAt,
-        });
-        const placement = yield* selectPlacement(input.squadronId, input.participantId);
-        if (placement === null) {
-          return yield* new PlacementStorageError({ operation: "read created placement" });
-        }
-        return { event, placement, committed: true as const };
+      const event = yield* eventFromRow({
+        seq,
+        command_id: input.commandId,
+        request_fingerprint: fingerprint,
+        squadron_id: input.squadronId,
+        participant_id: input.participantId,
+        kind: "participant.placement_created",
+        actor: input.actor,
+        actor_session_id: null,
+        actor_subject: null,
+        auth_method: null,
+        provenance_kind: provenanceKind,
+        provenance_participant_id: provenanceParticipantId,
+        provenance_source: provenanceSource,
+        previous_parent_id: null,
+        placement_parent_id: placementParentId,
+        created_at: input.createdAt,
       });
+      const placement = yield* selectPlacement(input.squadronId, input.participantId);
+      if (placement === null) {
+        return yield* new PlacementStorageError({ operation: "read created placement" });
+      }
+      return { event, placement, committed: true as const };
+    });
 
-      const listParticipantsEffect = Effect.fn("j5.a2a.placement.listParticipants")(function* (
-        squadronId: SquadronId,
-      ) {
-        yield* ensureSquadron(squadronId);
-        const rows = yield* sql<ParticipantRow>`
+    const recordCreationInTransaction: ParticipantPlacementTransactionWriterShape["recordCreationInTransaction"] =
+      (input) =>
+        recordCreationInTransactionRaw(input).pipe(
+          Effect.mapError(preserveDomainError("record participant placement in transaction")),
+        );
+
+    const listParticipantsEffect = Effect.fn("j5.a2a.placement.listParticipants")(function* (
+      squadronId: SquadronId,
+    ) {
+      yield* ensureSquadron(squadronId);
+      const rows = yield* sql<ParticipantRow>`
             SELECT
               m.payload,
               m.squadron_id,
@@ -713,91 +737,98 @@ export const layer: Layer.Layer<ParticipantPlacementService, never, SqlClient.Sq
             WHERE m.squadron_id = ${squadronId}
             ORDER BY m.participant_id
           `;
-        return yield* Effect.forEach(
-          rows,
-          (row) =>
-            Effect.gen(function* () {
-              const participant = yield* decodeParticipant(row.payload);
-              const id = participantIdOf(participant);
-              return {
-                squadronId,
-                participant,
-                participantId: id,
-                threadId: participant.kind === "agent" ? participant.threadId : null,
-                provenance:
-                  participant.kind === "human"
-                    ? ({ kind: "not-applicable" } as const)
-                    : row.provenance_kind === null
-                      ? ({ kind: "unrecorded" } as const)
-                      : provenanceFromRow({
-                          provenance_kind: row.provenance_kind,
-                          provenance_participant_id: row.provenance_participant_id,
-                          provenance_source: row.provenance_source,
-                        }),
-                placementParentId:
-                  participant.kind === "human"
+      return yield* Effect.forEach(
+        rows,
+        (row) =>
+          Effect.gen(function* () {
+            const participant = yield* decodeParticipant(row.payload);
+            const id = participantIdOf(participant);
+            return {
+              squadronId,
+              participant,
+              participantId: id,
+              threadId: participant.kind === "agent" ? participant.threadId : null,
+              provenance:
+                participant.kind === "human"
+                  ? ({ kind: "not-applicable" } as const)
+                  : row.provenance_kind === null
+                    ? ({ kind: "unrecorded" } as const)
+                    : provenanceFromRow({
+                        provenance_kind: row.provenance_kind,
+                        provenance_participant_id: row.provenance_participant_id,
+                        provenance_source: row.provenance_source,
+                      }),
+              placementParentId:
+                participant.kind === "human"
+                  ? null
+                  : row.placement_parent_id === null
                     ? null
-                    : row.placement_parent_id === null
-                      ? null
-                      : ParticipantId.make(row.placement_parent_id),
-              } satisfies ParticipantPlacementView;
-            }),
-          { concurrency: 1 },
-        );
-      });
+                    : ParticipantId.make(row.placement_parent_id),
+            } satisfies ParticipantPlacementView;
+          }),
+        { concurrency: 1 },
+      );
+    });
 
-      return ParticipantPlacementService.of({
-        recordCreation: (input) =>
-          mutationPermit
-            .withPermit(sql.withTransaction(recordCreationEffect(input)))
-            .pipe(Effect.mapError(preserveDomainError("record participant placement"))),
-        readPlacement: ({ squadronId, participantId }) =>
-          Effect.gen(function* () {
-            yield* ensureSquadron(squadronId);
-            return yield* selectPlacement(squadronId, participantId);
-          }).pipe(Effect.mapError(preserveDomainError("read participant placement"))),
-        listParticipants: (squadronId) =>
-          listParticipantsEffect(squadronId).pipe(
-            Effect.mapError(preserveDomainError("list participant placements")),
-          ),
-        listSubtree: ({ squadronId, participantId }) =>
-          Effect.gen(function* () {
-            yield* ensureSquadron(squadronId);
-            yield* ensureParticipant(squadronId, participantId);
-            const participants = yield* listParticipantsEffect(squadronId);
-            const byId = new Map(
-              participants.map((participant) => [participant.participantId, participant]),
-            );
-            const children = new Map<ParticipantId, Array<ParticipantId>>();
-            for (const participant of participants) {
-              if (participant.placementParentId === null) continue;
-              const siblings = children.get(participant.placementParentId) ?? [];
-              siblings.push(participant.participantId);
-              children.set(participant.placementParentId, siblings);
-            }
-            for (const siblings of children.values()) siblings.sort();
-            const visiting = new Set<ParticipantId>();
-            const visited = new Set<ParticipantId>();
-            const path: Array<ParticipantId> = [];
-            const ordered: Array<ParticipantPlacementView> = [];
-            const visit = (id: ParticipantId): Effect.Effect<void, PlacementGraphCorruptError> =>
-              Effect.gen(function* () {
-                if (visiting.has(id)) {
-                  return yield* new PlacementGraphCorruptError({ squadronId, path: [...path, id] });
-                }
-                if (visited.has(id)) return;
-                visiting.add(id);
-                path.push(id);
-                for (const childId of children.get(id) ?? []) yield* visit(childId);
-                path.pop();
-                visiting.delete(id);
-                visited.add(id);
-                const participant = byId.get(id);
-                if (participant !== undefined) ordered.push(participant);
-              });
-            yield* visit(participantId);
-            return ordered;
-          }).pipe(Effect.mapError(preserveDomainError("list placement subtree"))),
-      });
-    }),
-  );
+    const service = ParticipantPlacementService.of({
+      recordCreation: (input) =>
+        mutationPermit
+          .withPermit(sql.withTransaction(recordCreationInTransaction(input)))
+          .pipe(Effect.mapError(preserveDomainError("record participant placement"))),
+      readPlacement: ({ squadronId, participantId }) =>
+        Effect.gen(function* () {
+          yield* ensureSquadron(squadronId);
+          return yield* selectPlacement(squadronId, participantId);
+        }).pipe(Effect.mapError(preserveDomainError("read participant placement"))),
+      listParticipants: (squadronId) =>
+        listParticipantsEffect(squadronId).pipe(
+          Effect.mapError(preserveDomainError("list participant placements")),
+        ),
+      listSubtree: ({ squadronId, participantId }) =>
+        Effect.gen(function* () {
+          yield* ensureSquadron(squadronId);
+          yield* ensureParticipant(squadronId, participantId);
+          const participants = yield* listParticipantsEffect(squadronId);
+          const byId = new Map(
+            participants.map((participant) => [participant.participantId, participant]),
+          );
+          const children = new Map<ParticipantId, Array<ParticipantId>>();
+          for (const participant of participants) {
+            if (participant.placementParentId === null) continue;
+            const siblings = children.get(participant.placementParentId) ?? [];
+            siblings.push(participant.participantId);
+            children.set(participant.placementParentId, siblings);
+          }
+          for (const siblings of children.values()) siblings.sort();
+          const visiting = new Set<ParticipantId>();
+          const visited = new Set<ParticipantId>();
+          const path: Array<ParticipantId> = [];
+          const ordered: Array<ParticipantPlacementView> = [];
+          const visit = (id: ParticipantId): Effect.Effect<void, PlacementGraphCorruptError> =>
+            Effect.gen(function* () {
+              if (visiting.has(id)) {
+                return yield* new PlacementGraphCorruptError({ squadronId, path: [...path, id] });
+              }
+              if (visited.has(id)) return;
+              visiting.add(id);
+              path.push(id);
+              for (const childId of children.get(id) ?? []) yield* visit(childId);
+              path.pop();
+              visiting.delete(id);
+              visited.add(id);
+              const participant = byId.get(id);
+              if (participant !== undefined) ordered.push(participant);
+            });
+          yield* visit(participantId);
+          return ordered;
+        }).pipe(Effect.mapError(preserveDomainError("list placement subtree"))),
+    });
+    const transactionWriter = ParticipantPlacementTransactionWriter.of({
+      withPermit: (effect) => mutationPermit.withPermit(effect),
+      recordCreationInTransaction,
+    });
+    return Context.make(ParticipantPlacementService, service).pipe(
+      Context.add(ParticipantPlacementTransactionWriter, transactionWriter),
+    );
+  }),
+);

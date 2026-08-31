@@ -48,7 +48,7 @@ Against upstream pin `993407dd9e57f1edf2f5681d70140bfefeca93cc`, the complete A2
 5. A4's authenticated raw human-inbox route and shared-runtime composition: `apps/server/src/server.ts`, where `makeRoutesLayer` imports and appends `humanInboxHttpRouteLayer` after `websocketRpcRouteLayer`, imports `J5A2ARuntimeLayer`, and provides that runtime exactly once around the combined HTTP and MCP route graph. Its single `server.ts` entry is now the general J5 aggregate recorded at case 9. The J5-owned human-inbox route and MCP registration require that shared runtime and never provide nested copies. The route implementation remains in `apps/server/src/j5/a2a/HumanInboxHttp.ts`; `apps/server/src/http.ts` and shared wire contracts remain untouched.
 6. A4's visible human-inbox navigation append: `apps/web/src/components/sidebar/SidebarChrome.tsx`, where `SidebarChromeFooter` recognizes `/inbox` and appends its footer navigation button. The route and page remain under J5-owned files.
 7. B3's thread A2A rendering seam: `apps/web/src/components/chat/MessagesTimeline.tsx:47` imports J5-owned `renderThreadA2ADelivery`; `TimelineRowContent` at `:1038-1046,:1073-1076` calls it only for `row.kind === "message" && row.message.role === "user"`, passes the complete `ChatMessage` plus one `formatDayAwareTimestamp` label from `TimelineRowCtx`, and renders the generic `UserTimelineRow` only when `a2aDelivery === null`. Classification, envelope parsing, raw fallback, and focused proof remain in `apps/web/src/j5/a2a/ThreadA2ARenderer.tsx` and `.test.tsx`; TA4 stays absent.
-8. A2's provider steering seam: `apps/server/src/provider/T3OrchestrationInstructions.ts:7-12` replaces upstream delegated-task steering with current-head truth: provider-native Subagents remain provider-owned, this MCP surface cannot create Peer Agents yet, and Exchanges can be opened only with already listed participants. The schedule paragraph stays unchanged. `apps/server/src/provider/T3OrchestrationInstructions.test.ts:9-29`, test `steers only to current provider-native Subagents and addressable Peer Agents`, is the narrow terminology/phantom-tool proof. The composed-prompt assertions in `apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.test.ts` and `ClaudeAdapterV2.test.ts` import and assert `T3_CODE_ORCHESTRATION_INSTRUCTIONS` rather than pinning product wording; future authorized wording changes therefore require neither adapter-test edits nor another seam request. A rebase restoring an upstream literal is a protected-seam regression, not an authorized wording update. This A2 lane owns moving the ratified SP4 brief sentence into the actual J5 `spawn_agent` Tool description when that post-#18 verb lands; global steering must not name the unavailable Tool or carry its brief coaching in the interim.
+8. A2's provider steering seam: `apps/server/src/provider/T3OrchestrationInstructions.ts:7-12` replaces upstream delegated-task steering with current-head truth: provider-native Subagents remain provider-owned, platform `spawn_agent` creates a Peer Agent, and the spawn brief itself states the task plus whether and what reply is expected. A follow-up `send_message(..., expect_reply=true, intent="...")` opens an Exchange only for later work owed by an existing participant; it is never the second half of a spawn sequence. The schedule paragraph stays unchanged. `apps/server/src/provider/T3OrchestrationInstructions.test.ts`, test `steers to provider-native Subagents and platform Peer Agents`, is the narrow terminology/tool-availability proof and guards against restoring spawn-then-ask prose. The composed-prompt assertions in `apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.test.ts` and `ClaudeAdapterV2.test.ts` import and assert `T3_CODE_ORCHESTRATION_INSTRUCTIONS` rather than pinning product wording; future authorized wording changes therefore require neither adapter-test edits nor another seam request. A rebase restoring an upstream literal is a protected-seam regression, not an authorized wording update. The ratified SP4 brief sentence lives exactly once in the actual J5 `spawn_agent` Tool description; global steering restates the contract without duplicating that sentence.
 9. SQ1's first-run gate, visible Squadron controls, and authenticated J5 route aggregate: `apps/web/src/routes/_chat.index.tsx:12-53` imports J5-owned gate/directory logic and wraps only the non-hosted-static `IndexDraftLanding` return; the hosted-static onboarding branch at `:30-32` remains unchanged. The gate's state is a real authenticated `GET /api/j5/squadrons` read, not a hard-coded unavailable state; an unavailable read exposes only a forced retry, never an inferred home. `apps/web/src/components/Sidebar.tsx:140-150,1889-1904,<SquadronScopeDropdown />,3580-3587` is the sole sidebar-zone `<SquadronScopeDropdown />` mount and J5-owned scope consumer; it does not alter chrome, footer, inbox, or roster. `apps/web/src/j5/squadron/SquadronCreateForm.tsx` is shared by the first-run gate and the J5-only ScopeDropdown `Create Squadron…` action: both require explicit name plus one selected primary-environment folder, POST the existing route, refresh the directory, then select only the created Squadron. `apps/web/src/j5/squadron/SquadronDraftState.ts:9-18,43-50,76-83` retains scalar ambient scope semantics and increments a separate selection generation on every explicit choice, including Alpha→Alpha. `apps/web/src/j5/squadron/ThreadHomesClient.ts:109-121,132-145` reads B6's opaque batch `threadId → Registrar-home` response unchanged; Sidebar alone supplies that generation to reread its current raw thread ids for a named scope (zoom-out never forces), replacing stale `unknown` or failed/missing entries with durable Registrar homes. Its pure predicate admits only known homes matching a selected Squadron, excludes unknown/native rows, and the explicit `No ambient Squadron` state remains zoomed-out/all rows; it never proxies through `projectId`. `apps/web/src/components/ChatView.tsx:249-261,1552-1554,1812-1830,5225-5247,5437-5462,6579-6587` reads the active server thread through that opaque response; a known durable home takes precedence for a visible disabled chip, while unknown/native/legacy threads have none. Its J5-owned chip retains the pre-send explicit mutable draft behavior, freezes it before the initial RPC, and passes only the explicit selected id. `apps/web/src/components/chat/DraftHeroHeadline.tsx:1-10` is display-only. State, pure predicates, and UI stay in `apps/web/src/j5/squadron/`; no first choice is inferred. In `apps/server/src/server.ts:78-79,337-342,427-449`, `j5AuthenticatedRoutesLayer` is the one replacement for A4's raw route entry after `websocketRpcRouteLayer`, and the core J5 creation layer is provided once to the V2 runtime. The J5-owned aggregate in `apps/server/src/j5/a2a/J5AuthenticatedRoutes.ts:7-15` composes A4's human inbox with SQ1's Squadron list/create routes and B6's thread-home read. Future J5 authenticated route layers enter through this aggregate, never through another `server.ts` entry. On every rebase, verify these web mounts still have these boundaries, no project proxy, and the single server entry still follows `websocketRpcRouteLayer`.
 10. SQ1's lossless launch carrier and durable attach boundary: `packages/contracts/src/orchestrationV2.ts:2322-2342` adds additive-optional unbranded `squadronId` at `:2325`; `packages/client-runtime/src/operations/commands.ts:144-167,546-612` carries it only from an explicit first-message caller into the launch RPC and loudly rejects the otherwise-silent no-bootstrap retry with the typed `SquadronLaunchRequiresBootstrapError`, directing the user to start a new thread. Bootstrap re-carry for that rare partial-failure recovery remains a queued improvement, not an invented fallback. `apps/server/src/ws.ts:1231-1236` forwards it only when present before the fixed `creationSource`; and `apps/server/src/orchestration-v2/ThreadLaunchService.ts:63-79,545-611` sends the carrier to J5's shared creation engine only after the thread is durable and before preparation is scheduled. The shared engine is provided once in `apps/server/src/server.ts:337-342`; the boundary rejects absence or invalid references without defaults, preserves the named durable orphan on failure, and retry uses the same deterministic registration command. On every rebase, verify this exact client → contract → WebSocket → launch → J5-engine chain, one runtime provider, and no parallel HTTP launch door.
 11. SQ1's plan-provenance launch carrier is its own protected contract exception: `packages/contracts/src/orchestrationV2.ts:2322-2327` adds additive-optional `sourcePlanRef`; it is not an existing generic field and has no default. `packages/client-runtime/src/operations/commands.ts:152-167,590-596,624-629,669-683`, `apps/server/src/ws.ts:1231-1236`, and `apps/server/src/orchestration-v2/ThreadLaunchService.ts:63-79,548-592` pass it only from the plan→implementation launch. After durable child identity, ThreadLaunch reads the parent Registrar home through the shared engine: a known home is inherited; a legacy no-home parent remains the named native cohort, with neither refusal nor default. On every rebase, verify this additive contract field and the durable-before-preparation order.
@@ -61,6 +61,68 @@ Against upstream pin `993407dd9e57f1edf2f5681d70140bfefeca93cc`, the complete A2
 `apps/web/src/routeTree.gen.ts` is generated output, not a hand-authored exception. When a J5-owned route file changes, regenerate it with the normal web build and review only the generated route registration delta; never edit the generated tree directly.
 
 DV5 extends cases 9–12 without opening a second creation door. `apps/web/src/j5/squadron/FirstRunGate.tsx` creates a named Squadron only from the one explicitly selected primary-environment folder, and state-names a non-primary refusal; `Sidebar.tsx` replaces the old project scope zone with a Squadron scope whose pure predicate filters the real thread list only by immutable Registrar home: selected scope excludes unknown/native, while the explicit unscoped state shows all rows. `DraftHeroHeadline.tsx` renders only `What should we build in ⟨Squadron⟩?`. The plan→implementation behavior is recorded separately in case 11, including its additive `sourcePlanRef` contract exception. On every rebase, verify the inherited-home lookup remains after durable child identity and before preparation, the Sidebar home read has no project proxy, and the separately named mobile, scheduled, system-bootstrap, and agent-spawn returns remain explicit in `SquadronLaunchPolicy.ts` and `docs/j5/product/dogfood-v0.md` DV5.
+
+### A2 root-spawn and single-target stop composition
+
+The post-A6 A2 verb slice was rebased after the merged creation and Thread Homes work onto
+`j5/main` at `ee87660a175579267425426109e8fb8de634b8dd`, a docs-only descendant that
+includes the self-messaging law at `48037fadd6929e8b7f79c697a0031958a9ae416c`. It extends only the J5-owned
+MCP toolkit and runtime composition: `spawn_agent` creates an ordinary root-lineage
+thread, atomically records immutable home plus placement/provenance facts through
+the existing A6 services, and then dispatches one stable first-turn brief;
+`stop_agent` resolves exactly one participant with `listParticipants` and calls
+the unchanged single-thread interrupt primitive. `PlacementCascadeService` and
+`listSubtree` have no A2 consumer.
+
+The authoritative total lifecycle lock order is `drainPermit ≺ appendPermit ≺
+mutationPermit ≺ DB`. Spawn never drains: its coordinator never acquires
+DeliveryWorker's private `drainPermit`, and a delivery drain may run concurrently
+while contending for `appendPermit`. The coordinator starts at `appendPermit`, then
+takes the placement `mutationPermit`, then opens one outer SQL transaction. Its
+non-reentrant permits are acquired once; the permit-free home/placement primitives
+never re-acquire them or start a nested transaction, and the ledger publishes
+`participant.joined` only after the outer commit succeeds. If a future lifecycle
+path exposes and holds a drain permit while composing, it must acquire that permit
+before `appendPermit`. A forced-interleave DeliveryWorker regression is the gate
+against restoring the former DB-permit-first lock inversion; rollback must leave
+neither durable facts nor a committed-event publication.
+
+Spawn results report the committed A6 provenance source `j5_spawn`; they never
+translate it to the stale `j5_wrapper` wording whose Product documentation true-up
+is in flight. Models without a reasoning-option descriptor, including Grok and
+custom settings models, remain excluded because this contract requires an
+explicit reasoning selection. Admitting them requires a future contract amendment,
+not a default or no-op selection. Optional client request keys make both lifecycle
+tools non-idempotent at the MCP hint level: supplying a stable key still provides
+replay, while a previously rejected create permanently binds that key and requires
+a fresh one. A post-create fact failure can leave a visible unregistered thread;
+A9, not this slice, owns its eventual retirement path.
+
+The self-messaging revision is governed by `48037fadd` and
+`docs/j5/worklog/picker-and-self-messaging-rulings-2026-08-31.md`: the existing
+caller directory row is marked `self=true` with messaging/exchange capability
+disabled, `send_message` rejects the caller's own derived participant id before
+storage and names `list_participants` and `schedule_task` as the shipped alternatives,
+and the one replay-stable spawn turn carries committed `participant_id` plus
+Squadron facts in platform context beside the byte-preserved spawner brief.
+
+For `stop_agent`, Squadron membership is the authorization boundary. Placement
+selects exactly one agent/thread; that target thread's committed projection supplies
+the project id required by the unchanged interrupt primitive. Caller project scope
+is deliberately not used as authority or routing truth.
+
+`archive_agent` remains absent by construction until A9 supplies its owned public
+open-Exchange read and dropped-obligation closure services. This slice adds no
+migration, placement store, archive adapter, or nested runtime provider. The
+single shared J5 runtime provide remains the protected `server.ts` composition in
+case 5 above.
+
+PR #19 remains a separate integration boundary whose merged implementation is
+consumed through the rebase, never copied or stacked. The composed production
+registration proof asserts the exact fail-closed surface: the four J5 tools plus
+the eight retained upstream tools. The fully contracted `list_participants`
+projection remains the merged PR #19 implementation, including snake_case fields
+and A6 placement/provenance facts.
 
 These are per-instance Director/Jackson-authorized exceptions, not standing category permission. The earlier fork rebrand is separately complete at `0c0de1acefea00a34f9529bb97be32ff5056cfcc`; its rebase-critical boundary is recorded in `BRANDING.md:1-5,24-35`. The supporting fork setup plan (`artifacts/fork-setup-plan/index.md:8-12`) and its six T1-T6 ticket artifacts are internal project records and are not present in this repository.
 

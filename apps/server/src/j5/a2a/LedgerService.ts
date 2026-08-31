@@ -131,6 +131,29 @@ export class A2ALedger extends Context.Service<A2ALedger, A2ALedgerShape>()(
   "t3/j5/a2a/LedgerService/A2ALedger",
 ) {}
 
+/**
+ * Internal write seam for multi-service transactions. The authoritative total
+ * lifecycle order is drainPermit ≺ appendPermit ≺ mutationPermit ≺ DB. This
+ * Semaphore(1) permit is non-reentrant: callers of this seam must acquire it
+ * before BEGIN and use the provided raw in-transaction APIs instead of
+ * re-acquiring it through the public append methods.
+ */
+export interface A2ALedgerTransactionWriterShape {
+  readonly withPermit: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+  readonly appendInTransaction: (
+    command: AppendCommEventCommand,
+  ) => Effect.Effect<AppendResult, A2ALedgerError>;
+  readonly appendEventsInTransaction: (
+    command: AppendCommEventsCommand,
+  ) => Effect.Effect<AppendEventsResult, A2ALedgerError>;
+  readonly publishCommitted: (events: ReadonlyArray<StoredCommEvent>) => Effect.Effect<void>;
+}
+
+export class A2ALedgerTransactionWriter extends Context.Service<
+  A2ALedgerTransactionWriter,
+  A2ALedgerTransactionWriterShape
+>()("t3/j5/a2a/LedgerService/A2ALedgerTransactionWriter") {}
+
 interface SquadronRow {
   readonly id: string;
   readonly name: string;
@@ -222,8 +245,11 @@ const membershipFromRow = Effect.fn("j5.a2a.membershipFromRow")(function* (row: 
   });
 });
 
-export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.effect(
-  A2ALedger,
+export const layer: Layer.Layer<
+  A2ALedger | A2ALedgerTransactionWriter,
+  never,
+  SqlClient.SqlClient
+> = Layer.effectContext(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const appendPermit = yield* Semaphore.make(1);
@@ -517,7 +543,7 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
       },
     );
 
-    const appendEventsInTransaction = Effect.fn("j5.a2a.appendEventsInTransaction")(function* (
+    const appendEventsInTransactionRaw = Effect.fn("j5.a2a.appendEventsInTransaction")(function* (
       command: AppendCommEventsCommand,
     ) {
       yield* ensureSquadron(command.squadronId);
@@ -653,23 +679,47 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
       };
     });
 
-    const publishCommitted = Effect.fn("j5.a2a.publishCommitted")(function* (
-      result: AppendEventsResult,
-    ) {
-      if (result.committed) {
-        for (const event of result.events) {
-          yield* PubSub.publish(committed, event);
-        }
-      }
-      return result;
-    });
+    const appendEventsInTransaction: A2ALedgerTransactionWriterShape["appendEventsInTransaction"] =
+      (command) =>
+        appendEventsInTransactionRaw(command).pipe(
+          Effect.mapError(preserveDomainError("append communication events in transaction")),
+        );
+
+    const publishCommitted: A2ALedgerTransactionWriterShape["publishCommitted"] = (events) =>
+      Effect.forEach(events, (event) => PubSub.publish(committed, event), {
+        concurrency: 1,
+        discard: true,
+      });
+
+    const appendInTransaction: A2ALedgerTransactionWriterShape["appendInTransaction"] = (command) =>
+      appendEventsInTransaction({
+        commandId: command.commandId,
+        squadronId: command.squadronId,
+        acceptedAt: command.acceptedAt,
+        events: [command.event],
+      }).pipe(
+        Effect.flatMap((result) => {
+          const event = result.events[0];
+          return event === undefined
+            ? Effect.fail(new A2AStorageError({ operation: "read single appended event" }))
+            : Effect.succeed({
+                receipt: result.receipt,
+                event,
+                committed: result.committed,
+              });
+        }),
+      );
 
     const appendEventsEffect = Effect.fn("j5.a2a.appendEvents")(function* (
       command: AppendCommEventsCommand,
     ) {
       return yield* sql
         .withTransaction(appendEventsInTransaction(command))
-        .pipe(Effect.flatMap(publishCommitted));
+        .pipe(
+          Effect.tap((result) =>
+            result.committed ? publishCommitted(result.events) : Effect.void,
+          ),
+        );
     });
 
     const appendEventsIfExchangeOpenEffect = Effect.fn("j5.a2a.appendEventsIfExchangeOpen")(
@@ -688,11 +738,13 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
             return yield* appendEventsInTransaction(command);
           }),
         );
-        return result === null ? null : yield* publishCommitted(result);
+        if (result === null) return null;
+        if (result.committed) yield* publishCommitted(result.events);
+        return result;
       },
     );
 
-    return A2ALedger.of({
+    const ledger = A2ALedger.of({
       createSquadron: (command) =>
         Effect.gen(function* () {
           yield* sql`
@@ -864,5 +916,14 @@ export const layer: Layer.Layer<A2ALedger, never, SqlClient.SqlClient> = Layer.e
         Effect.map((subscription) => Stream.fromSubscription(subscription)),
       ),
     });
+    const transactionWriter = A2ALedgerTransactionWriter.of({
+      withPermit: (effect) => appendPermit.withPermit(effect),
+      appendInTransaction,
+      appendEventsInTransaction,
+      publishCommitted,
+    });
+    return Context.make(A2ALedger, ledger).pipe(
+      Context.add(A2ALedgerTransactionWriter, transactionWriter),
+    );
   }),
 );

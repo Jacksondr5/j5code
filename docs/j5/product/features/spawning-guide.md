@@ -32,6 +32,7 @@ Provider/model/reasoning stay **required and explicit** on every agent-invoked s
 The contract's come-back note deliberately left the description with "no spawn-then-ask steering until that guide rules." Ruled:
 
 - **The description gains exactly one sentence of brief steering** (Jackson's amendment to the proposed empty closure): _"In your brief, tell the new agent what it should do first and whether it should reply to you."_ The report-back contract still travels in the brief (SP2.2) — the tool's only coaching is the reminder to write it. Folding the sentence into the contract is with the Architecture agent (the `agent-tools.md` owner); the implementation string change rides wherever that contract lands.
+- **There is no spawn-then-ask sequence.** The initial brief carries the task and whether and what reply is expected. A reply-expected `send_message` opens an Exchange only for later work owed by an existing participant.
 - **Receipt-ACKs: nothing is written anywhere.** The platform measures delivery (ledger receipts) — a social "got it" message is structurally redundant, and the prior-art fleet had to ban exactly that noise once courtesy-acks took hold. If ack noise appears in dogfood, the remedy is a line in the _user's_ guide then, added from observed need — not platform law now.
 - **Mid-first-turn delivery mechanics** (what happens when a send lands while a fresh spawn is still working its brief) are A2A delivery design — the Architecture lane's question, never guide content.
 

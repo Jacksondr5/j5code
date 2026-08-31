@@ -6,7 +6,10 @@ import {
 } from "./ArchiveFactsService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
-import { layer as homeRegistrarLayer } from "./HomeRegistrar.ts";
+import {
+  layer as homeRegistrarLayer,
+  transactionLayer as homeRegistrationTransactionLayer,
+} from "./HomeRegistrar.ts";
 import { humanPersonRegistryLayer } from "./HumanPersonRegistry.ts";
 import { layer as ledgerLayer } from "./LedgerService.ts";
 import { layer as participantPlacementLayer } from "./PlacementService.ts";
@@ -18,6 +21,7 @@ import { layer as clientReadsLayer } from "./ClientReadsService.ts";
 import { layer as squadronProjectReferencesLayer } from "./SquadronProjectReferences.ts";
 import { layer as squadronThreadCreationServiceLayer } from "./SquadronThreadCreationService.ts";
 import { layer as threadHomesServiceLayer } from "./ThreadHomesService.ts";
+import { layer as spawnCompositionLayer } from "./SpawnCompositionService.ts";
 
 /**
  * The durable launch engine needs this subset before it can start preparing a
@@ -53,16 +57,20 @@ export const makeJ5A2AAuxiliaryLayer = (
   const archiveFactsProvided = archiveFactsLayer.pipe(
     Layer.provide(placementFactsUnavailableLayer),
   );
+  const spawnCompositionProvided = spawnCompositionLayer.pipe(
+    Layer.provideMerge(homeRegistrationTransactionLayer),
+    Layer.provideMerge(participantPlacementLayer),
+  );
   const runtimeWithoutClientReads = Layer.mergeAll(
     humanPersonRegistryLayer,
     sendServiceLayer,
     deliveryWorkerProvided,
     silenceDetectorProvided,
     humanInboxLayer,
-    participantPlacementLayer,
     lifecycleServiceProvided,
     archiveFactsProvided,
     threadHomesServiceLayer,
+    spawnCompositionProvided,
   );
   return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };
