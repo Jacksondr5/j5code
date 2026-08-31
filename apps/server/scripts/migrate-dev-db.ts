@@ -151,7 +151,7 @@ export interface RunMigrateDevDbInput {
 }
 
 export interface RunMigrateDevDbOptions {
-  /** Additional shared home to protect; canonical ~/.t3 and ~/.j5code are always protected. */
+  /** Additional shared home to protect and default copy source; canonical ~/.t3 and ~/.j5code are always protected. */
   readonly sharedHome?: string | undefined;
 }
 
