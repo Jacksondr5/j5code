@@ -206,6 +206,17 @@ not-caller's-Squadron, unknown participant, consequential-without-token (the ref
 — each naming state and next command. Events: archive + the obligation-closure events for each
 ended exchange (loud in the ledger, not just the dialog).
 
+**2026-08-31 implementation alignment (Decisions #86 and #88):** the shipped J5 composition is
+single-target and never consumes the placement cascade. An interrupt acknowledgement and an
+observed terminal run state are separate facts; the tool does not claim a turn stopped merely
+because interruption was requested. Cross-store partial failure is forward-only: committed thread
+archive and ledger retirement/terminal-notice facts are re-read on retry, and `already_archived`
+requires the participant-left timestamp plus completion of every terminal lifecycle notice. When
+an already-retired participant is absent from the active directory, the authorized Squadron's
+ledger is used only as a consume-only replay fallback and must contain exactly one matching
+`participant.joined` agent identity. Malformed or unknown-version confirmation tokens fail closed
+without disclosing target facts; a token for one target cannot authorize another.
+
 ## `clear_own_ask` — ruled, unbuilt (inbox IB1b; substrate.md "needed-but-unbuilt")
 
 **Description (contract):** "Withdraw an ask you sent: closes your open exchange without a reply

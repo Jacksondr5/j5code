@@ -111,15 +111,36 @@ selects exactly one agent/thread; that target thread's committed projection supp
 the project id required by the unchanged interrupt primitive. Caller project scope
 is deliberately not used as authority or routing truth.
 
-`archive_agent` remains absent by construction until A9 supplies its owned public
-open-Exchange read and dropped-obligation closure services. This slice adds no
-migration, placement store, archive adapter, or nested runtime provider. The
-single shared J5 runtime provide remains the protected `server.ts` composition in
-case 5 above.
+`archive_agent` is the J5-owned single-target composition over A9's public
+archive-facts and lifecycle-closure services. It resolves one active placement
+row and never calls `listSubtree` or `PlacementCascadeService`; only after that
+row is absent may an idempotent replay consume the authorized Squadron's ledger
+history, and exactly one matching `participant.joined` agent identity is
+required. The handler refuses ambiguous history instead of guessing. A clean
+target archives immediately; consequential work yields exact open-Exchange and
+active-run facts plus a signed, versioned, fact-bound token. Confirmation re-reads
+the target and rejects malformed, unknown-version, target-mismatched, or stale
+tokens before mutation. Thread archive and A9 lifecycle closure are separate
+durable commits: failures recover forward with the same request key, and
+`already_archived` is returned only after the thread is archived, a
+`participant.left` timestamp exists, no open Exchange remains, and every dropped
+Exchange has its terminal lifecycle notice. Completion reads durable events from
+all existing Squadrons because A9 writes a dropped cross-Squadron Exchange and
+its notice to that Exchange's owning ledger, which may differ from the retired
+agent's home. It filters those events back to the exact participant; it adds no
+global projection or cache. The response never claims a run is stopped merely
+because interruption was requested.
+
+Archive consumes the existing A9 and orchestration services without a migration,
+new store, parallel lifecycle adapter, or nested runtime provider. The total
+writer order remains a partial order: private `drainPermit` and
+`lifecyclePermit` are independent peers above `appendPermit`, followed by
+`mutationPermit` and DB. The single shared J5 runtime provide remains the
+protected `server.ts` composition in case 5 above.
 
 PR #19 remains a separate integration boundary whose merged implementation is
 consumed through the rebase, never copied or stacked. The composed production
-registration proof asserts the exact fail-closed surface: the four J5 tools plus
+registration proof asserts the exact fail-closed surface: the five J5 tools plus
 the eight retained upstream tools. The fully contracted `list_participants`
 projection remains the merged PR #19 implementation, including snake_case fields
 and A6 placement/provenance facts.

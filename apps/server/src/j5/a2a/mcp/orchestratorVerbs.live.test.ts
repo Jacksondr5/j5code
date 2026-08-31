@@ -23,11 +23,13 @@ import * as BackgroundPolicy from "../../../background/BackgroundPolicy.ts";
 import * as HostPowerMonitor from "../../../background/HostPowerMonitor.ts";
 import * as CheckpointStore from "../../../checkpointing/CheckpointStore.ts";
 import { ServerConfig } from "../../../config.ts";
+import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../../../mcp/McpSessionRegistry.testkit.ts";
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
 import * as OrchestratorMcpService from "../../../mcp/OrchestratorMcpService.ts";
 import { runDaemonWithOptions as runEffectWorkerDaemonWithOptions } from "../../../orchestration-v2/EffectWorker.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
+import { layer as threadLifecycleServiceLayer } from "../../../orchestration-v2/ThreadLifecycleService.ts";
 import { OrchestrationV2LayerLive } from "../../../orchestration-v2/runtimeLayer.ts";
 import { ProviderInstanceRegistryHydrationLive } from "../../../provider/Layers/ProviderInstanceRegistryHydration.ts";
 import { ProviderRegistryLive } from "../../../provider/Layers/ProviderRegistry.ts";
@@ -112,10 +114,19 @@ const providerRegistryLayer = ProviderRegistryLive.pipe(
   Layer.provide(NodeServices.layer),
 );
 const orchestrationLayer = OrchestrationV2LayerLive;
+const threadLifecycleLayer = threadLifecycleServiceLayer.pipe(Layer.provide(orchestrationLayer));
+const secretStoreLayer = ServerSecretStore.layer.pipe(
+  Layer.provide(serverConfigLayer),
+  Layer.provide(NodeServices.layer),
+);
 const orchestratorMcpLayer = OrchestratorMcpService.layer.pipe(
   Layer.provide(Layer.mergeAll(orchestrationLayer, Layer.mock(ScheduledTaskService)({}))),
 );
-const j5Layer = J5A2ARuntimeLayer.pipe(Layer.provideMerge(orchestrationLayer));
+const j5Layer = J5A2ARuntimeLayer.pipe(
+  Layer.provideMerge(orchestrationLayer),
+  Layer.provide(threadLifecycleLayer),
+  Layer.provide(secretStoreLayer),
+);
 const handlersLayer = J5ToolkitHandlersLive.pipe(
   Layer.provideMerge(j5Layer),
   Layer.provide(orchestrationLayer),
