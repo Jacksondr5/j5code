@@ -1,5 +1,7 @@
 import type { ChatMessage } from "~/types";
-import type { ReactNode } from "react";
+import { useNowMinute } from "~/hooks/useNowMinute";
+import { InboxIcon, SendIcon } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 /**
  * `deliveryMessageId` in the server A2A transport is deliberately stable across
@@ -31,6 +33,8 @@ export interface ThreadA2ADeliveryCompositionInput {
   readonly participantLabels?: ReadonlyMap<string, string> | undefined;
   /** The caller supplies this only when it can prove the authenticated viewer. */
   readonly resolveViewerParticipantId?: (() => string | null) | undefined;
+  /** Test-only clock injection; production cards read the current wall clock once per render. */
+  readonly now?: number | undefined;
 }
 
 export type ThreadA2ADeliveryPresentation =
@@ -42,6 +46,8 @@ export type ThreadA2ADeliveryPresentation =
       readonly squadronId: string;
       readonly body: string;
       readonly exchange: "expects-reply" | "plain";
+      /** Kept as a pairing fact only; protocol identifiers never render. */
+      readonly exchangeId: string | null;
     }
   | {
       readonly kind: "human";
@@ -71,8 +77,10 @@ export function isThreadA2ADeliveryMessage(message: ChatMessage): boolean {
 function parseKnownInstruction(input: {
   readonly senderId: string;
   readonly instruction: string;
-}): "expects-reply" | "plain" | null {
-  if (input.instruction === PLAIN_DELIVERY_INSTRUCTION) return "plain";
+}): { readonly exchange: "expects-reply" | "plain"; readonly exchangeId: string | null } | null {
+  if (input.instruction === PLAIN_DELIVERY_INSTRUCTION) {
+    return { exchange: "plain", exchangeId: null };
+  }
 
   const replyPrefix = `Reply once with send_message(to="${input.senderId}", exchange_id="`;
   if (!input.instruction.startsWith(replyPrefix)) return null;
@@ -85,7 +93,7 @@ function parseKnownInstruction(input: {
   ) {
     return null;
   }
-  return "expects-reply";
+  return { exchange: "expects-reply", exchangeId: exchangeIdAndSuffix.slice(0, separatorIndex) };
 }
 
 function parsePeerEnvelope(rawEnvelope: string) {
@@ -100,11 +108,11 @@ function parsePeerEnvelope(rawEnvelope: string) {
   const divider = content.lastIndexOf("\n\n");
   if (divider <= 0) return null;
   const body = content.slice(0, divider);
-  const exchange = parseKnownInstruction({
+  const instruction = parseKnownInstruction({
     senderId,
     instruction: content.slice(divider + 2),
   });
-  return exchange === null ? null : { senderId, squadronId, body, exchange };
+  return instruction === null ? null : { senderId, squadronId, body, ...instruction };
 }
 
 function parseHumanEnvelope(rawEnvelope: string) {
@@ -199,6 +207,7 @@ export function presentThreadA2ADelivery(
         squadronId: peer.squadronId,
         body: peer.body,
         exchange: peer.exchange,
+        exchangeId: peer.exchangeId,
       };
     }
   } else if (message.createdBy === "user") {
@@ -247,6 +256,247 @@ function RawEnvelopeExpander({
   );
 }
 
+export function formatTimeSinceSent(sentAt: string, now = Date.now()): string {
+  const sentAtMs = Date.parse(sentAt);
+  if (!Number.isFinite(sentAtMs)) return "sent earlier";
+
+  const elapsedSeconds = Math.max(0, Math.floor((now - sentAtMs) / 1_000));
+  if (elapsedSeconds < 60) return "just now";
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h`;
+  return `${Math.floor(elapsedHours / 24)}d`;
+}
+
+function A2ABodyClamp({ body }: { readonly body: string }) {
+  const bodyRef = useRef<HTMLParagraphElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [hiddenLineCount, setHiddenLineCount] = useState(0);
+
+  useEffect(() => {
+    const element = bodyRef.current;
+    if (!element) return;
+
+    const measure = () => {
+      const lineHeight = Number.parseFloat(window.getComputedStyle(element).lineHeight);
+      if (!Number.isFinite(lineHeight) || lineHeight <= 0) return;
+      const totalLines = Math.ceil(element.scrollHeight / lineHeight);
+      setHiddenLineCount(Math.max(0, totalLines - 2));
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [body]);
+
+  const canExpand = hiddenLineCount > 0;
+  return (
+    <div className="mt-2">
+      <p
+        ref={bodyRef}
+        className={
+          expanded
+            ? "whitespace-pre-wrap break-words text-sm leading-5"
+            : "line-clamp-2 whitespace-pre-wrap break-words text-sm leading-5"
+        }
+        data-j5-a2a-card-body
+      >
+        {body}
+      </p>
+      {canExpand ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          className="mt-1 cursor-pointer text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded
+            ? "⌄ Collapse"
+            : `› ${hiddenLineCount} more ${hiddenLineCount === 1 ? "line" : "lines"}`}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function PeerDeliveryCard({
+  body,
+  exchange,
+  now,
+  senderLabel,
+  sentAt,
+}: {
+  readonly body: string;
+  readonly exchange: "expects-reply" | "plain";
+  readonly now?: number | undefined;
+  readonly senderLabel: string;
+  readonly sentAt: string;
+}) {
+  const nowMinute = useNowMinute();
+  const currentNow = now ?? Date.parse(`${nowMinute}:00.000Z`);
+  const isOpen = exchange === "expects-reply";
+  return (
+    <section
+      className="max-w-[88%] rounded-[10px] border border-border/70 bg-muted/25 px-3.5 py-2.5"
+      data-j5-a2a-renderer="peer"
+    >
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        <span className="inline-flex items-center gap-1 text-muted-foreground">
+          <InboxIcon className="size-3.5 shrink-0" aria-hidden />
+          From
+        </span>
+        <span className="font-medium text-foreground">{senderLabel}</span>
+        {isOpen ? (
+          <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+            Expects reply
+          </span>
+        ) : null}
+        <time className="ml-auto tabular-nums text-muted-foreground" dateTime={sentAt}>
+          {formatTimeSinceSent(sentAt, currentNow)}
+        </time>
+      </div>
+      <A2ABodyClamp body={body} />
+    </section>
+  );
+}
+
+type UnknownRecord = Readonly<Record<string, unknown>>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function isJ5SendMessageTool(toolName: unknown) {
+  return toolName === "t3-code.send_message" || toolName === "mcp__t3-code__send_message";
+}
+
+type OutboundExchangeState = "none" | "open" | "closing" | "closed";
+
+export type ThreadA2AOutboundPresentation = {
+  readonly kind: "sent";
+  readonly recipientId: string;
+  readonly body: string;
+  readonly sentAt: string;
+  readonly exchangeId: string | null;
+  readonly exchangeState: OutboundExchangeState;
+  readonly isReply: boolean;
+};
+
+/**
+ * Owns the outbound dynamic-tool gate. The upstream timeline delegates every
+ * work entry here and preserves its exact generic row when this returns null.
+ */
+export function presentThreadA2AOutboundTool(input: {
+  readonly createdAt: string;
+  readonly toolLifecycleStatus?: string | undefined;
+  readonly structuredPayload?: unknown;
+}): ThreadA2AOutboundPresentation | null {
+  if (input.toolLifecycleStatus !== "completed" || !isRecord(input.structuredPayload)) {
+    return null;
+  }
+
+  const payload = input.structuredPayload;
+  if (payload.type !== "dynamic_tool" || !isJ5SendMessageTool(payload.toolName)) return null;
+  if (!isRecord(payload.input) || !isRecord(payload.output)) return null;
+
+  const recipientId = nonEmptyString(payload.input.to);
+  const body = nonEmptyString(payload.input.message);
+  const requestedExchangeId =
+    payload.input.exchange_id === undefined ? null : nonEmptyString(payload.input.exchange_id);
+  if (recipientId === null || body === null) return null;
+  if (payload.input.exchange_id !== undefined && requestedExchangeId === null) return null;
+
+  const messageId = nonEmptyString(payload.output.messageId);
+  const outputExchangeId =
+    payload.output.exchangeId === null ? null : nonEmptyString(payload.output.exchangeId);
+  const exchangeState = payload.output.exchangeState;
+  if (
+    messageId === null ||
+    (payload.output.exchangeId !== null && outputExchangeId === null) ||
+    (exchangeState === "open" && outputExchangeId === null) ||
+    (requestedExchangeId !== null && outputExchangeId !== requestedExchangeId) ||
+    (exchangeState !== "none" &&
+      exchangeState !== "open" &&
+      exchangeState !== "closing" &&
+      exchangeState !== "closed")
+  ) {
+    return null;
+  }
+
+  return {
+    kind: "sent",
+    recipientId,
+    body,
+    sentAt: input.createdAt,
+    exchangeId: outputExchangeId,
+    exchangeState,
+    isReply: requestedExchangeId !== null,
+  };
+}
+
+function SentMessageCard({
+  presentation,
+  now,
+}: {
+  readonly presentation: ThreadA2AOutboundPresentation;
+  readonly now?: number | undefined;
+}) {
+  const nowMinute = useNowMinute();
+  const currentNow = now ?? Date.parse(`${nowMinute}:00.000Z`);
+  const badge =
+    !presentation.isReply && presentation.exchangeState === "open"
+      ? { label: "Awaiting reply", className: "bg-amber-500/15 text-amber-700 dark:text-amber-300" }
+      : presentation.isReply && presentation.exchangeState === "closed"
+        ? { label: "Reply", className: "border border-border/70 text-muted-foreground" }
+        : null;
+  return (
+    <section
+      className="max-w-[88%] rounded-[10px] border border-border/70 px-3.5 py-2.5"
+      data-j5-a2a-renderer="sent"
+    >
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        <span className="inline-flex items-center gap-1 text-muted-foreground">
+          <SendIcon className="size-3.5 shrink-0" aria-hidden />
+          To
+        </span>
+        <span className="font-medium text-foreground">{presentation.recipientId}</span>
+        {badge ? (
+          <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${badge.className}`}>
+            {badge.label}
+          </span>
+        ) : null}
+        <time
+          className="ml-auto tabular-nums text-muted-foreground"
+          dateTime={presentation.sentAt}
+          title={presentation.sentAt}
+        >
+          {formatTimeSinceSent(presentation.sentAt, currentNow)}
+        </time>
+      </div>
+      <A2ABodyClamp body={presentation.body} />
+    </section>
+  );
+}
+
+export function renderThreadA2AOutboundTool(input: {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly now?: number | undefined;
+  readonly toolLifecycleStatus?: string | undefined;
+  readonly structuredPayload?: unknown;
+}): ReactNode {
+  const presentation = presentThreadA2AOutboundTool(input);
+  return presentation === null ? null : (
+    <SentMessageCard key={input.id} now={input.now} presentation={presentation} />
+  );
+}
+
 /**
  * The upstream user-row seam calls this function directly. It deliberately
  * returns null for non-A2A messages so the existing renderer owns that path.
@@ -257,18 +507,13 @@ export function renderThreadA2ADelivery(props: ThreadA2ADeliveryCompositionInput
 
   if (presentation.kind === "peer") {
     return (
-      <section
-        className="rounded-lg border border-border/70 bg-muted/25 px-3 py-2.5"
-        data-j5-a2a-renderer="peer"
-      >
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-          <span className="font-medium">{presentation.senderLabel}</span>
-          <span className="rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-            {presentation.exchange === "expects-reply" ? "Expects reply" : "plain"}
-          </span>
-        </div>
-        <p className="mt-2 whitespace-pre-wrap break-words text-sm">{presentation.body}</p>
-      </section>
+      <PeerDeliveryCard
+        body={presentation.body}
+        exchange={presentation.exchange}
+        now={props.now}
+        senderLabel={presentation.senderLabel}
+        sentAt={props.message.createdAt}
+      />
     );
   }
 
