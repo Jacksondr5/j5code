@@ -1,0 +1,11 @@
+Evidence head: 929619cd6c48ceeb39e6bf8ab018c6ce6df8c6db
+Environment: isolated /tmp/e7-final-evidence.WcBdn9 at http://localhost:8150
+Surface: SquadronCreateForm Create a Squadron dialog
+DOM query: button[aria-label]
+aria-label: Choose folder
+visible text: Choose folder
+match: true
+aria-label: Choose folder
+visible text: Choose folder
+match: true
+The folder control has no user-facing project-picker noun.
