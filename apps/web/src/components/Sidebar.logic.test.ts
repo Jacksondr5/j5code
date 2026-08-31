@@ -154,6 +154,22 @@ describe("archiveSelectedThreadEntries", () => {
       followupFailures: [failure],
     });
   });
+
+  it("leaves a cancelled entry selected and continues to the next entry", async () => {
+    const archive = vi.fn(async (entry: (typeof entries)[number], onArchived: () => void) => {
+      if (entry.threadKey === "two") return undefined;
+      onArchived();
+      return success;
+    });
+    const outcome = await archiveSelectedThreadEntries({ entries, archive });
+
+    expect(archive).toHaveBeenCalledTimes(3);
+    expect(outcome).toEqual({
+      archivedThreadKeys: ["one", "three"],
+      mutationFailure: null,
+      followupFailures: [],
+    });
+  });
 });
 
 describe("buildBulkTitleRegenerationContextMenuItem", () => {

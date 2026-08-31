@@ -79,7 +79,7 @@ export async function archiveSelectedThreadEntries<
   TResult extends { readonly _tag: "Success" | "Failure" },
 >(input: {
   entries: readonly TEntry[];
-  archive: (entry: TEntry, onArchived: () => void) => Promise<TResult>;
+  archive: (entry: TEntry, onArchived: () => void) => Promise<TResult | undefined>;
 }): Promise<{
   archivedThreadKeys: readonly string[];
   mutationFailure: Extract<TResult, { readonly _tag: "Failure" }> | null;
@@ -93,6 +93,7 @@ export async function archiveSelectedThreadEntries<
     const result = await input.archive(entry, () => {
       didArchive = true;
     });
+    if (result === undefined) continue;
     if (didArchive || result._tag === "Success") archivedThreadKeys.push(entry.threadKey);
     if (result._tag === "Success") continue;
     const failure = result as Extract<TResult, { readonly _tag: "Failure" }>;
