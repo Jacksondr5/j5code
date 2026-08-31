@@ -4,8 +4,15 @@ import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { afterEach, vi } from "vite-plus/test";
 
-import { readPreArchiveFactsEffect } from "./archiveFlowClient";
+const { readPreparedConnection } = vi.hoisted(() => ({ readPreparedConnection: vi.fn() }));
+
+vi.mock("../../state/session", () => ({ readPreparedConnection }));
+
+import { readArchivePreflightEffect, readPreArchiveFactsEffect } from "./archiveFlowClient";
+
+afterEach(() => vi.clearAllMocks());
 
 it.effect("reads consequential archive facts from the thread's non-primary environment", () =>
   Effect.gen(function* () {
@@ -57,5 +64,54 @@ it.effect("reads consequential archive facts from the thread's non-primary envir
     );
     assert.equal(facts.state, "registered");
     assert.equal(facts.openExchanges.length, 1);
+  }),
+);
+
+it.effect("resolves preflight from the scoped thread environment rather than the primary", () =>
+  Effect.gen(function* () {
+    const remoteThreadRef = scopeThreadRef(
+      "environment:remote" as never,
+      ThreadId.make("thread:remote-scoped-preflight"),
+    );
+    const primary = {
+      httpBaseUrl: "https://primary-environment.test:3773",
+      httpAuthorization: null,
+    } as PreparedConnection;
+    const remote = {
+      httpBaseUrl: "https://remote-environment.test:3773",
+      httpAuthorization: null,
+    } as PreparedConnection;
+    readPreparedConnection.mockImplementation((environmentId) =>
+      environmentId === remoteThreadRef.environmentId ? remote : primary,
+    );
+    const urls: URL[] = [];
+    const client = HttpClient.make((request) => {
+      urls.push(new URL(request.url));
+      return Effect.succeed(
+        HttpClientResponse.fromWeb(
+          request,
+          Response.json({
+            state: "registered",
+            threadId: remoteThreadRef.threadId,
+            squadronId: "squadron:remote",
+            participantId: "agent:remote",
+            retired: false,
+            openExchanges: [],
+            placementSubtree: { state: "none" },
+          }),
+        ),
+      );
+    });
+
+    const preflight = yield* readArchivePreflightEffect(remoteThreadRef).pipe(
+      Effect.provideService(HttpClient.HttpClient, client),
+    );
+
+    assert.deepStrictEqual(readPreparedConnection.mock.calls, [[remoteThreadRef.environmentId]]);
+    assert.equal(
+      urls[0]?.toString(),
+      "https://remote-environment.test:3773/api/j5/a2a/pre-archive-facts",
+    );
+    assert.equal(preflight.facts?.state, "registered");
   }),
 );
