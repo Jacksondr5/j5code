@@ -80,10 +80,11 @@ description gain Memo as the notes-to-self alternative; until then, shipped copy
 
 ## `list_participants` — built (`j5/main`); contract revision: `display_name`
 
-**Description (contract):** "Your address book: every participant you can message — agents and the
-human — with the display name to recognize them by, the participant_id to address them with, and
-what each accepts (messages, exchanges, urgency). When you're told to message someone by name or
-role, resolve them here first; consult it again after any spawn or archive changes the roster."
+**Description (contract):** "Your address book: the participants around you — agents and the human —
+with the display name to recognize them by, the participant_id to address them with, and what each
+accepts (messages, exchanges, urgency). When you're told to message someone by name or role, resolve
+them here first. The roster changes — after you spawn an agent, or when a participant retires, call
+this again instead of reusing a stale listing."
 
 **Contract revision (found 2026-08-29):** rows carry no display name today
 (`AgentParticipant = {kind, id, threadId}`), which defeats the address-book purpose — "message the
@@ -95,6 +96,10 @@ ticket.
 **`self`** — the address book must answer "which one am I" before it can answer "who else is
 there" (adopts the prior art's `[self]` marker; same live-test origin as `send_message`'s
 self-send rejection). The description gains a clause telling the caller its own row is marked.
+
+**Description amendment (ratified 2026-08-31, decision #72):** the exact contract above supersedes
+the earlier drafts. "Participants around you" truthfully includes non-addressable rows, and
+"retires" describes roster change without naming an unshipped lifecycle verb.
 
 No inputs. Result rows: `display_name`, `squadron_id`, `participant_id`, participant kind (thread
 id for agents), `can_receive_message`, `can_open_exchange`, `accepts_urgency`, plus `provenance`

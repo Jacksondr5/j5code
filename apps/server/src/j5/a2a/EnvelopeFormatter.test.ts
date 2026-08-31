@@ -18,7 +18,7 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
     message: "Please verify the worker.",
   });
 
-  assert.equal(A2A_ENVELOPE_VERSION, 10);
+  assert.equal(A2A_ENVELOPE_VERSION, 11);
   assert.include(rendered, "Cross-agent message");
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
   assert.include(rendered, "agent:sender");
@@ -69,10 +69,10 @@ it("tells agents that human-origin exchanges require an explicit tool reply", ()
   );
   assert.equal(
     A2A_LIST_TOOL_DESCRIPTION,
-    "Your address book: every participant row available to you — agents and the human — with a display name when known, a participant id to address, and capabilities showing whether it accepts messages, exchanges, or urgency. Your own row is marked self=true; it cannot receive messages or open exchanges from you. Use schedule_task if you need a future trigger for yourself. When you're told to message someone by name or role, resolve them here first. This tool is unavailable to a native thread without a registered home squadron.",
+    "Your address book: the participants around you — agents and the human — with the display name to recognize them by, the participant_id to address them with, and what each accepts (messages, exchanges, urgency). When you're told to message someone by name or role, resolve them here first. The roster changes — after you spawn an agent, or when a participant retires, call this again instead of reusing a stale listing.",
   );
+  assert.include(A2A_SEND_TOOL_DESCRIPTION, "native thread without a registered home squadron");
   for (const description of [A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION]) {
-    assert.include(description, "native thread without a registered home squadron");
     assert.notInclude(description, "wrapper-spawned");
   }
   assert.include(A2A_SEND_TOOL_DESCRIPTION, "participants already returned by list_participants");
