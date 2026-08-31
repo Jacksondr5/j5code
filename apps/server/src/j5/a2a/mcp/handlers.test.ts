@@ -616,6 +616,10 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       const captured = yield* Ref.get(sends);
       assert.lengthOf(captured, 2);
       assert.equal(captured[0]?.commandId, captured[1]?.commandId);
+      assert.equal(
+        captured[0]?.commandId,
+        "command:j5:a2a:mcp:provider-session%3Aj5%3Amcp-handler:send_message:shared-logical-request-1",
+      );
       assert.equal(captured[0]?.senderThreadId, invocation.threadId);
       const exchangeId = ExchangeId.make("exchange:j5:mcp-handler:clear");
       yield* callClear(exchangeId, "shared-logical-request-1");
@@ -623,6 +627,10 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       const capturedClears = yield* Ref.get(clears);
       assert.lengthOf(capturedClears, 2);
       assert.equal(capturedClears[0]?.commandId, capturedClears[1]?.commandId);
+      assert.equal(
+        capturedClears[0]?.commandId,
+        "command:j5:a2a:mcp:provider-session%3Aj5%3Amcp-handler:clear_own_ask:shared-logical-request-1",
+      );
       assert.notEqual(captured[0]?.commandId, capturedClears[0]?.commandId);
       assert.equal(capturedClears[0]?.senderThreadId, invocation.threadId);
       assert.equal(capturedClears[0]?.exchangeId, exchangeId);

@@ -167,11 +167,8 @@ export const commandIdForRequest = (input: {
   readonly providerSessionId: string;
   readonly requestKey: string;
 }) => {
-  // send_message already shipped with the unqualified form, so it remains the legacy namespace
-  // to preserve retries across upgrades. Every later mutating tool gets an explicit namespace.
-  const toolNamespace = input.toolName === "send_message" ? "" : `:${stablePart(input.toolName)}`;
   return CommCommandId.make(
-    `command:j5:a2a:mcp:${stablePart(input.providerSessionId)}${toolNamespace}:${stablePart(input.requestKey)}`,
+    `command:j5:a2a:mcp:${stablePart(input.providerSessionId)}:${stablePart(input.toolName)}:${stablePart(input.requestKey)}`,
   );
 };
 

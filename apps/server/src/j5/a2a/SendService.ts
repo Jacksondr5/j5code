@@ -170,7 +170,7 @@ export class A2ACrossSquadronReplyInvariantError extends Schema.TaggedErrorClass
   },
 ) {
   override get message(): string {
-    return `Exchange ${this.exchangeId} belongs to ${this.exchangeSquadronId}, but the replying sender's immutable home is ${this.senderSquadronId}. A cross-Squadron reply cannot record the required closure fact, so nothing was sent. Stop this messaging attempt; repair the exchange/home projection, then retry send_message.`;
+    return `Exchange ${this.exchangeId} belongs to ${this.exchangeSquadronId}, but the replying sender's immutable home is ${this.senderSquadronId}. A cross-Squadron reply cannot record the required closure fact, so nothing was sent. Report this invariant failure with the exchange and Squadron ids; do not retry send_message for this exchange.`;
   }
 }
 
@@ -183,7 +183,7 @@ export class A2AClearOwnAskSenderMismatchError extends Schema.TaggedErrorClass<A
   },
 ) {
   override get message(): string {
-    return `Exchange ${this.exchangeId} was opened by ${this.senderId}, not ${this.callerId}. Only the sender may withdraw it; do not retry clear_own_ask from this thread.`;
+    return `Exchange ${this.exchangeId} was opened by ${this.senderId}, not ${this.callerId}. Only that sender may withdraw this exchange. Do not retry clear_own_ask for exchange ${this.exchangeId} from this thread; other exchanges are unaffected.`;
   }
 }
 
@@ -192,7 +192,7 @@ export class A2AClearOwnAskAlreadyClosedError extends Schema.TaggedErrorClass<A2
   { exchangeId: Schema.String },
 ) {
   override get message(): string {
-    return `Exchange ${this.exchangeId} is already closed. No action is needed; call send_message without exchange_id if a new exchange is needed.`;
+    return `Exchange ${this.exchangeId} is already closed; clear_own_ask made no change.`;
   }
 }
 
@@ -201,7 +201,7 @@ export class A2AClearOwnAskUnknownExchangeError extends Schema.TaggedErrorClass<
   { exchangeId: Schema.String },
 ) {
   override get message(): string {
-    return `Exchange ${this.exchangeId} does not exist in the messaging ledger. Check the exchange_id from the original ask and retry clear_own_ask.`;
+    return `Exchange ${this.exchangeId} does not exist in the messaging ledger; clear_own_ask made no change. There is no agent-facing own-open-asks read at this head, so use only an exchange_id retained from the original send_message result; do not retry this unknown id.`;
   }
 }
 
@@ -210,7 +210,7 @@ export class A2AClearOwnAskCommandConflictError extends Schema.TaggedErrorClass<
   { commandId: Schema.String, exchangeId: Schema.String },
 ) {
   override get message(): string {
-    return `Command ${this.commandId} was already used for a different ledger mutation, so clear_own_ask did not close exchange ${this.exchangeId}. Check that the exchange is still open, then retry clear_own_ask with a new client_request_id.`;
+    return `The client_request_id behind command ${this.commandId} is already bound to a different request. This clear_own_ask call did not close exchange ${this.exchangeId}. Reusing a client_request_id for the same clear replays its original success; retry this different request with a unique client_request_id.`;
   }
 }
 

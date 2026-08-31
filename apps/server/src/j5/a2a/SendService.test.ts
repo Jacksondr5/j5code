@@ -269,8 +269,9 @@ it.effect("refuses a reply whose exchange cannot record a same-squadron closure 
       assert.equal(error.exchangeSquadronId, foreignSquadronId);
       assert.include(error.message, "cannot record the required closure fact");
       assert.include(error.message, "nothing was sent");
-      assert.include(error.message, "Stop this messaging attempt");
-      assert.include(error.message, "repair the exchange/home projection");
+      assert.include(error.message, "Report this invariant failure");
+      assert.include(error.message, "do not retry send_message for this exchange");
+      assert.notInclude(error.message, "repair the exchange/home projection");
     }
     const replies = yield* sql<{ readonly count: number }>`
       SELECT COUNT(*) AS count
