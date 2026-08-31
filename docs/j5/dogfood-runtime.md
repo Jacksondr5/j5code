@@ -44,14 +44,14 @@ that produced it. Decisions and their load-bearing reasons are recorded inline.
 Defaults used throughout this document. All are adjustable; keep Ansible and this table in
 agreement.
 
-| Parameter        | Value                                   | Notes                                                      |
-| ---------------- | --------------------------------------- | ---------------------------------------------------------- |
-| Service user     | `j5dev`                                 | Non-sudo, lingering enabled, mirrors `t3dev`               |
-| Checkout         | `/home/j5dev/j5code`                    | Deploy-only clone of `j5/main`; never edited in place      |
-| State dir        | `/home/j5dev/.j5code`                   | Set explicitly — see warning below                         |
-| Listener         | `127.0.0.1:5773`                        | Loopback only, mirrors the T3 service                      |
-| Tailnet exposure | Tailscale Serve on HTTPS 8443           | Built into the server; 443 assumed taken by the T3 service |
-| Unit             | `~/.config/systemd/user/j5code.service` | Journald logging (`journalctl --user -u j5code`)           |
+| Parameter        | Value                                   | Notes                                                               |
+| ---------------- | --------------------------------------- | ------------------------------------------------------------------- |
+| Service user     | `j5dev`                                 | Non-sudo, lingering enabled, mirrors `t3dev`                        |
+| Checkout         | `/home/j5dev/j5code`                    | Deploy-only clone of `j5/main`; never edited in place               |
+| State dir        | `/home/j5dev/.j5code`                   | Set explicitly — see warning below                                  |
+| Listener         | `127.0.0.1:5773`                        | Loopback only; the existing T3 service keeps `3773`                 |
+| Tailnet exposure | Tailscale Serve on HTTPS 8444           | Built into the server; 443 and 8443 are already in use on this node |
+| Unit             | `~/.config/systemd/user/j5code.service` | Journald logging (`journalctl --user -u j5code`)                    |
 
 > **Warning — state dir collision.** The J5 server's built-in default state dir is still upstream's
 > `~/.t3` (only the desktop app was rebranded to `~/.j5code`). On a box that also runs real T3,
@@ -92,7 +92,7 @@ As `j5dev` (Ansible reconciles all of this):
    Type=simple
    WorkingDirectory=%h/j5code
    Environment=T3CODE_HOME=%h/.j5code
-   ExecStart=/usr/bin/env bash -lc 'exec fnm exec --using "$(cat .nvmrc)" node apps/server/dist/bin.mjs serve --port 5773 --host 127.0.0.1 --tailscale-serve --tailscale-serve-port 8443'
+   ExecStart=/usr/bin/env bash -lc 'exec fnm exec --using "$(cat .nvmrc)" node apps/server/dist/bin.mjs serve --port 5773 --host 127.0.0.1 --tailscale-serve --tailscale-serve-port 8444'
    Restart=always
    RestartSec=5
    KillMode=mixed
@@ -153,7 +153,7 @@ As `j5dev` (Ansible reconciles all of this):
 
 ## Connecting the client
 
-Open the Tailscale Serve URL (`https://<box-tailnet-name>:8443`) in a browser on any tailnet
+Open the Tailscale Serve URL (`https://<box-tailnet-name>:8444`) in a browser on any tailnet
 device and complete pairing once; the browser stores the session. For an app-like feel, install
 the tab as a PWA/app shortcut — it is still the server-served, always-version-matched bundle.
 
