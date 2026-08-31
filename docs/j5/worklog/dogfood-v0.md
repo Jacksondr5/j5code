@@ -37,6 +37,14 @@ status: 1
 - **A7** (upstream rebase) fires whenever pingdotgg#2829 merges and briefly preempts everything (expected: days).
 - 4a (PR pane, issue #6) continues with the human engineers independently.
 
+## Phase-3 day-one itinerary (Jackson, start 2026-09-01)
+
+1. **Morning board**: overnight summary; #23 at formal READY on the full-surface head; B4/E7/archive-slice lane states.
+2. **#23 hands-on acceptance** (integrated environment, built on Jackson's word): full arc — create Squadron via UI → `spawn_agent` a real Luna Peer Agent → its ask arrives (live bell count) → answer inline → closed envelope observed → agent `clear_own_ask`. Bell alignment + the six error-message fixes verified visually. Then **merge #23** — the v0 interactive surface is complete on main.
+3. **Runtime setup** per `docs/j5/dogfood-runtime.md` (session output; proposal-form if the session hasn't closed): server on the Linux box over Tailscale, UI on the laptop, update/rollback/backup pattern confirmed.
+4. **Phase-3 first act**: create the real dogfood Squadron in the REAL environment (not a test dir), spawn the first working agent, and hand it **DQ1 (issue #25)** — the first J5-native ticket. DQ2 (#26) follows at Jackson's pace.
+5. **Friction list starts immediately** — every rough edge goes in the phase-3 retro record (the input the plan's phase-4 gate requires). Traycer lanes (E7, B4, archive slice) keep landing in parallel; the Director remains in Traycer per the ratified line.
+
 ## Dogfood work queue (RESERVED — Jackson, 2026-08-31)
 
 Tickets deliberately held as the first J5-native work: NOT staffable in Traycer regardless of free slots. Every ticket is self-contained on repo paths only — dogfood agents have no access to Traycer artifacts or agents. Ladder order:
