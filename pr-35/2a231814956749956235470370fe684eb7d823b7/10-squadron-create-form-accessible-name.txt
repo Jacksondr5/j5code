@@ -1,0 +1,6 @@
+Evidence head: 2a231814956749956235470370fe684eb7d823b7
+Environment: isolated /tmp/e7-final-evidence.WcBdn9 at http://localhost:8148
+Surface: SquadronCreateForm Create a Squadron dialog
+DOM query: button[aria-label="Choose folder"]
+matches: [{"ariaLabel":"Choose folder","visibleText":"Choose folder"},{"ariaLabel":"Choose folder","visibleText":"Choose folder"}]
+Assertion: every matching control has visible text "Choose folder"; no user-facing project noun appears.
