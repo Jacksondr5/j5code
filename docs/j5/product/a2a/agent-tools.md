@@ -83,8 +83,10 @@ description gain Memo as the notes-to-self alternative; until then, shipped copy
 **Description (contract):** "Your address book: the participants around you — agents and the human —
 with the display name to recognize them by, the participant_id to address them with, and what each
 accepts (messages, exchanges, urgency). When you're told to message someone by name or role, resolve
-them here first. The roster changes — after you spawn an agent, or when a participant retires, call
-this again instead of reusing a stale listing."
+them here first. Your own row is marked self=true; it cannot receive messages or open exchanges from
+you — use schedule_task if you need a future trigger for yourself. Native threads that never
+received a Squadron home do not appear here and cannot be messaged. The roster changes — after you
+spawn an agent, or when a participant retires, call this again instead of reusing a stale listing."
 
 **Contract revision (found 2026-08-29):** rows carry no display name today
 (`AgentParticipant = {kind, id, threadId}`), which defeats the address-book purpose — "message the
@@ -97,9 +99,9 @@ ticket.
 there" (adopts the prior art's `[self]` marker; same live-test origin as `send_message`'s
 self-send rejection). The description gains a clause telling the caller its own row is marked.
 
-**Description amendment (ratified 2026-08-31, decision #72):** the exact contract above supersedes
-the earlier drafts. "Participants around you" truthfully includes non-addressable rows, and
-"retires" describes roster change without naming an unshipped lifecycle verb.
+**Canonical description amendment (ratified 2026-08-31, decision #72):** the exact contract above
+supersedes all partial drafts. It names the self row, native threads without a home, and roster
+refreshes without naming an unshipped lifecycle verb.
 
 No inputs. Result rows: `display_name`, `squadron_id`, `participant_id`, participant kind (thread
 id for agents), `can_receive_message`, `can_open_exchange`, `accepts_urgency`, plus `provenance`
