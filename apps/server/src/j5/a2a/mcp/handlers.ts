@@ -165,7 +165,7 @@ const preflightSpawnCaller = Effect.fn("j5.a2a.mcp.preflightSpawnCaller")(functi
         ),
       ),
     );
-  yield* ledger
+  const squadron = yield* ledger
     .readSquadron(home.squadronId)
     .pipe(
       Effect.mapError((error) =>
@@ -185,7 +185,7 @@ const preflightSpawnCaller = Effect.fn("j5.a2a.mcp.preflightSpawnCaller")(functi
       "Call list_participants to inspect current membership, then ask the human to repair the mismatch before retrying spawn_agent.",
     );
   }
-  return membership;
+  return { ...membership, squadron };
 });
 
 const requireCallerSquadron = Effect.fn("j5.a2a.mcp.requireCallerSquadron")(function* (
@@ -207,6 +207,14 @@ const spawnTitle = (brief: string, title: string | undefined): string => {
   const value = title?.trim() || brief.trim();
   return value.length > 80 ? `${value.slice(0, 77)}...` : value;
 };
+
+const spawnFirstTurnText = (input: {
+  readonly brief: string;
+  readonly participantId: string;
+  readonly squadronId: string;
+  readonly squadronName: string;
+}) =>
+  `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${input.participantId}\nsquadron_id: ${input.squadronId}\nsquadron_name: ${input.squadronName}\n</j5_spawn_context>\n\n<spawner_brief>\n${input.brief}\n</spawner_brief>`;
 
 const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
   scope: McpInvocationScope,
@@ -272,6 +280,13 @@ const handlers = {
   send_message: (input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
+      const callerParticipantId = (yield* resolveCallerMembership(scope)).participantId;
+      if (input.to === callerParticipantId) {
+        return yield* stateError(
+          `send_message cannot target your own participant_id ${callerParticipantId}; self-messaging is not supported.`,
+          "Call list_participants to find the intended recipient, or use schedule_task if you need a future trigger for yourself.",
+        );
+      }
       const crypto = yield* Crypto.Crypto;
       const service = yield* A2ASendService;
       const worker = yield* A2ADeliveryWorker;
@@ -323,6 +338,8 @@ const handlers = {
           const placement = placementByParticipant.get(
             `${row.squadronId}\u0000${row.participantId}`,
           );
+          const self =
+            row.participant.kind === "agent" && row.participant.threadId === scope.threadId;
           return {
             squadron_id: row.squadronId,
             participant_id: row.participantId,
@@ -334,8 +351,9 @@ const handlers = {
                     thread_id: row.participant.threadId,
                   }
                 : row.participant,
-            can_receive_message: row.canReceiveMessage,
-            can_open_exchange: row.canOpenExchange,
+            self,
+            can_receive_message: !self && row.canReceiveMessage,
+            can_open_exchange: !self && row.canOpenExchange,
             accepts_urgency: row.acceptsUrgency,
             thread_id: row.participant.kind === "agent" ? row.participant.threadId : null,
             provenance: projectProvenance(
@@ -446,7 +464,12 @@ const handlers = {
           commandId: lifecycleCommandId({ ...stableInput, operation: "spawn-brief" }),
           threadId,
           messageId: spawnMessageId(stableInput),
-          text: input.brief,
+          text: spawnFirstTurnText({
+            brief: input.brief,
+            participantId: facts.home.participantId,
+            squadronId: facts.home.squadronId,
+            squadronName: caller.squadron.name,
+          }),
           attachments: [],
           modelSelection,
           dispatchMode: { type: "start_immediately" },

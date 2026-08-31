@@ -295,7 +295,8 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
           assert.equal(terminal.status, "interrupted");
 
           const replay = yield* callSpawn({
-            brief,
+            brief:
+              "A conflicting retry must not replace the first committed spawn context or brief.",
             title: "Luna verb E2E peer",
             provider: codexInstanceId,
             model: lunaSelection.model,
@@ -311,7 +312,11 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
           assert.equal(projection.thread.modelSelection.model, lunaSelection.model);
           assert.equal(projection.thread.runtimeMode, "approval-required");
           assert.equal(projection.thread.worktreePath, isolatedWorkspace);
-          assert.equal(projection.messages.filter((message) => message.text === brief).length, 1);
+          const firstTurnText = `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${spawned.participant_id}\nsquadron_id: ${squadronId}\nsquadron_name: J5 Luna verb E2E\n</j5_spawn_context>\n\n<spawner_brief>\n${brief}\n</spawner_brief>`;
+          assert.equal(
+            projection.messages.filter((message) => message.text === firstTurnText).length,
+            1,
+          );
           assert.equal(projection.runs.length, 1);
 
           const placement = yield* (yield* ParticipantPlacementService).readPlacement({

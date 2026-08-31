@@ -75,6 +75,7 @@ export const J5ParticipantDirectoryRow = Schema.Struct({
   squadron_id: SquadronId,
   participant_id: ParticipantId,
   participant: J5Participant,
+  self: Schema.Boolean,
   can_receive_message: Schema.Boolean,
   can_open_exchange: Schema.Boolean,
   accepts_urgency: Schema.Boolean,

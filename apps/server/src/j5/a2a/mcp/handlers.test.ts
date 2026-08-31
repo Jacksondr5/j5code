@@ -117,6 +117,8 @@ it.effect("derives send idempotency and sender identity from authenticated scope
     assert.notProperty(J5Toolkit.tools, "archive_agent");
     const sends = yield* Ref.make<ReadonlyArray<SendMessageInput>>([]);
     const participantId = ParticipantId.make("agent:j5:mcp-handler");
+    const callerParticipantId = ParticipantId.make("agent:j5:mcp-seeded-caller");
+    const callerSquadronId = SquadronId.make("squadron:j5:mcp-seeded-caller");
     const sendService = Layer.succeed(
       A2ASendService,
       A2ASendService.of({
@@ -130,7 +132,21 @@ it.effect("derives send idempotency and sender identity from authenticated scope
               durableAtSeq: 1,
             }),
           ),
-        listParticipants: () => Effect.succeed([]),
+        listParticipants: () =>
+          Effect.succeed([
+            {
+              squadronId: callerSquadronId,
+              participantId: callerParticipantId,
+              participant: {
+                kind: "agent" as const,
+                id: callerParticipantId,
+                threadId: invocation.threadId,
+              },
+              canReceiveMessage: true,
+              canOpenExchange: true,
+              acceptsUrgency: false,
+            },
+          ]),
       }),
     );
     const dependencies = Layer.mergeAll(
@@ -161,6 +177,16 @@ it.effect("derives send idempotency and sender identity from authenticated scope
       };
       yield* call(sendArguments);
       yield* call(sendArguments);
+      const selfSend = yield* call({
+        to: callerParticipantId,
+        message: "This must be rejected before storage.",
+      });
+      assert.isTrue(selfSend.isFailure);
+      const selfSendMessage = (selfSend.result as unknown as { readonly message: string }).message;
+      assert.include(selfSendMessage, callerParticipantId);
+      assert.include(selfSendMessage, "list_participants");
+      assert.include(selfSendMessage, "schedule_task");
+      assert.notInclude(selfSendMessage, "Memo");
       const captured = yield* Ref.get(sends);
       assert.lengthOf(captured, 2);
       assert.equal(captured[0]?.commandId, captured[1]?.commandId);
@@ -281,6 +307,9 @@ it.effect("keeps participant listing placement-read-only", () =>
         spawned_by_participant_id: displayParentId,
         source: "j5_spawn",
       });
+      assert.equal(listedRows[0]?.self, true);
+      assert.equal(listedRows[0]?.can_receive_message, false);
+      assert.equal(listedRows[0]?.can_open_exchange, false);
       assert.equal(listedRows[0]?.placement_parent_id, displayParentId);
       assert.deepStrictEqual(listedRows[1]?.provenance, {
         kind: "forked-from",
@@ -288,8 +317,10 @@ it.effect("keeps participant listing placement-read-only", () =>
         source: "upstream_lineage",
       });
       assert.equal(listedRows[1]?.placement_parent_id, callerParticipantId);
+      assert.equal(listedRows[1]?.self, false);
       assert.deepStrictEqual(listedRows[2]?.provenance, { kind: "not-applicable" });
       assert.equal(listedRows[2]?.placement_parent_id, null);
+      assert.equal(listedRows[2]?.self, false);
       for (const camelCaseKey of forbiddenCamelCaseKeys) {
         assert.isFalse(hasKey(listed.encodedResult, camelCaseKey));
       }
@@ -430,6 +461,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         squadron_id: squadronId,
         participant_id: activeParticipantId,
         participant: { kind: "agent", id: activeParticipantId, thread_id: activeThreadId },
+        self: false,
         can_receive_message: true,
         can_open_exchange: true,
         accepts_urgency: false,
@@ -442,6 +474,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         squadron_id: squadronId,
         participant_id: archivedParticipantId,
         participant: { kind: "agent", id: archivedParticipantId, thread_id: archivedThreadId },
+        self: false,
         can_receive_message: true,
         can_open_exchange: true,
         accepts_urgency: false,
@@ -454,6 +487,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         squadron_id: squadronId,
         participant_id: missingParticipantId,
         participant: { kind: "agent", id: missingParticipantId, thread_id: missingThreadId },
+        self: false,
         can_receive_message: true,
         can_open_exchange: true,
         accepts_urgency: false,
@@ -466,6 +500,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         squadron_id: squadronId,
         participant_id: humanParticipantId,
         participant: { kind: "human", id: humanParticipantId },
+        self: false,
         can_receive_message: true,
         can_open_exchange: true,
         accepts_urgency: true,
@@ -563,6 +598,7 @@ it.effect("returns null display names when the ambient shell snapshot fails", ()
 it.effect("preflights home before creation and records facts before the one stable brief", () =>
   Effect.gen(function* () {
     const squadronId = SquadronId.make("squadron:j5:mcp-spawn");
+    const squadronName = "Release proof Squadron";
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-spawn-caller");
     const childParticipantId = ParticipantId.make("agent:j5:mcp-spawn-child");
     const order = yield* Ref.make<ReadonlyArray<string>>([]);
@@ -598,7 +634,12 @@ it.effect("preflights home before creation and records facts before the one stab
       getHomeForThread: () => Effect.succeed({ squadronId, participantId: callerParticipantId }),
     });
     const ledger = Layer.mock(A2ALedger)({
-      readSquadron: () => Effect.succeed({} as never),
+      readSquadron: () =>
+        Effect.succeed({
+          id: squadronId,
+          name: squadronName,
+          createdAt: DateTime.formatIso(createdAt),
+        }),
     });
     const composition = Layer.mock(SpawnCompositionService)({
       recordFacts: (input) =>
@@ -781,6 +822,21 @@ it.effect("preflights home before creation and records facts before the one stab
           model: "gpt-5.6-luna",
           options: [{ id: "reasoningEffort", value: "high" }],
         });
+      }
+      const firstTurn = capturedCommands[1];
+      assert.equal(firstTurn?.type, "message.dispatch");
+      if (firstTurn?.type === "message.dispatch") {
+        assert.equal(
+          firstTurn.text,
+          `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${childParticipantId}\nsquadron_id: ${squadronId}\nsquadron_name: ${squadronName}\n</j5_spawn_context>\n\n<spawner_brief>\n${args.brief}\n</spawner_brief>`,
+        );
+      }
+      const replayTurn = capturedCommands[3];
+      assert.equal(replayTurn?.type, "message.dispatch");
+      if (firstTurn?.type === "message.dispatch" && replayTurn?.type === "message.dispatch") {
+        assert.equal(replayTurn.commandId, firstTurn.commandId);
+        assert.equal(replayTurn.messageId, firstTurn.messageId);
+        assert.equal(replayTurn.text, firstTurn.text);
       }
       assert.equal(capturedFacts[0]?.spawnedByParticipantId, callerParticipantId);
       const invalidReasoning = yield* call({

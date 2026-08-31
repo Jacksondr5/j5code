@@ -65,9 +65,10 @@ DV5 extends cases 9–12 without opening a second creation door. `apps/web/src/j
 ### A2 root-spawn and single-target stop composition
 
 The post-A6 A2 verb slice was rebased after PRs #19 and #21 onto merged
-`j5/main` at `a3d0a73b36f69dbd30e3e5ccd78a53220262797b`, a docs-only descendant of
-PR #21's `d07d0ccf720b0182ae37c8d39b3f91e3a38611e9`. It extends only the J5-owned MCP
-toolkit and runtime composition: `spawn_agent` creates an ordinary root-lineage
+`j5/main` at `e1a4d275cd394693710be509b71dfd36d7479289`, a docs-only descendant of
+PR #21's `d07d0ccf720b0182ae37c8d39b3f91e3a38611e9` that includes the
+self-messaging law at `48037fadd6929e8b7f79c697a0031958a9ae416c`. It extends only the J5-owned
+MCP toolkit and runtime composition: `spawn_agent` creates an ordinary root-lineage
 thread, atomically records immutable home plus placement/provenance facts through
 the existing A6 services, and then dispatches one stable first-turn brief;
 `stop_agent` resolves exactly one participant with `listParticipants` and calls
@@ -97,6 +98,14 @@ tools non-idempotent at the MCP hint level: supplying a stable key still provide
 replay, while a previously rejected create permanently binds that key and requires
 a fresh one. A post-create fact failure can leave a visible unregistered thread;
 A9, not this slice, owns its eventual retirement path.
+
+The self-messaging revision is governed by `48037fadd` and
+`docs/j5/worklog/picker-and-self-messaging-rulings-2026-08-31.md`: the existing
+caller directory row is marked `self=true` with messaging/exchange capability
+disabled, `send_message` rejects the caller's own derived participant id before
+storage and names `list_participants` and `schedule_task` as the shipped alternatives,
+and the one replay-stable spawn turn carries committed `participant_id` plus
+Squadron facts in platform context beside the byte-preserved spawner brief.
 
 For `stop_agent`, Squadron membership is the authorization boundary. Placement
 selects exactly one agent/thread; that target thread's committed projection supplies

@@ -70,8 +70,11 @@ participant id is rejected fail-closed — self-send is never legitimate (a self
 degenerate: the caller would owe itself a reply and the silence detector would type its own
 silence against it; the real self-shaped needs have dedicated verbs). Per the toolsmith rule, the
 error names the caller's own participant id and the next commands: `list_participants` to find the
-intended recipient, a Memo for notes-to-self, `schedule_task` for future-self triggers. Origin:
+intended recipient and `schedule_task` for future-self triggers. Origin:
 live test — an agent asked to message "the other agent" messaged itself.
+
+**Product sequencing note (2026-08-31):** Memo is post-v0. When Memos ship, the error and tool
+description gain Memo as the notes-to-self alternative; until then, shipped copy does not name it.
 
 ## `list_participants` — built (`j5/main`); contract revision: `display_name`
 

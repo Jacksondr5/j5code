@@ -18,7 +18,7 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
     message: "Please verify the worker.",
   });
 
-  assert.equal(A2A_ENVELOPE_VERSION, 7);
+  assert.equal(A2A_ENVELOPE_VERSION, 8);
   assert.include(rendered, "Cross-agent message");
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
   assert.include(rendered, "agent:sender");
@@ -69,7 +69,7 @@ it("tells agents that human-origin exchanges require an explicit tool reply", ()
   );
   assert.equal(
     A2A_LIST_TOOL_DESCRIPTION,
-    "Your address book: every participant row available to you — agents and the human — with a display name when known, a participant id to address, and capabilities showing whether it accepts messages, exchanges, or urgency. When you're told to message someone by name or role, resolve them here first. This tool is unavailable to a native thread without a registered home squadron. Participation currently requires a wrapper-spawned agent that already has a home squadron or controlled test seeding; native user-created home provisioning is deferred to the home-squadron registrar + A6 creation integrations follow-up.",
+    "Your address book: every participant row available to you — agents and the human — with a display name when known, a participant id to address, and capabilities showing whether it accepts messages, exchanges, or urgency. Your own row is marked self=true; it cannot receive messages or open exchanges from you. Use schedule_task if you need a future trigger for yourself. When you're told to message someone by name or role, resolve them here first. This tool is unavailable to a native thread without a registered home squadron. Participation currently requires a wrapper-spawned agent that already has a home squadron or controlled test seeding; native user-created home provisioning is deferred to the home-squadron registrar + A6 creation integrations follow-up.",
   );
   for (const description of [A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION]) {
     assert.include(description, "native thread without a registered home squadron");
