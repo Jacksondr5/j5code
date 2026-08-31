@@ -1072,6 +1072,7 @@ it.effect("preflights home before creation and records facts before the one stab
       A2ASendService,
       A2ASendService.of({
         send: () => Effect.die("send_message is outside this spawn test"),
+        clearOwnAsk: () => Effect.die("clear_own_ask is outside this spawn test"),
         listParticipants: () => Effect.succeed([callerRow]),
       }),
     );
@@ -1426,6 +1427,7 @@ it.effect("stops exactly one placed agent without consulting or touching descend
         A2ASendService,
         A2ASendService.of({
           send: () => Effect.die("send_message is outside this stop test"),
+          clearOwnAsk: () => Effect.die("clear_own_ask is outside this stop test"),
           listParticipants: () => Effect.succeed([callerRow]),
         }),
       ),

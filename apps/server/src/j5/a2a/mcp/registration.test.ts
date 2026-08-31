@@ -45,6 +45,7 @@ it.effect("registers the exact composed production J5 orchestration surface", ()
     const server = yield* McpServer.McpServer;
     assert.deepStrictEqual(server.tools.map(({ tool }) => tool.name).toSorted(), [
       "archive_agent",
+      "clear_own_ask",
       "delete_scheduled_task",
       "list_participants",
       "list_scheduled_tasks",
