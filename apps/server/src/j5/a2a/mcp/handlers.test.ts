@@ -28,10 +28,14 @@ import {
 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
-import { A2AHomeNotFoundError, A2AHomeRegistrar } from "../HomeRegistrar.ts";
+import {
+  A2AHomeNotFoundError,
+  A2AHomeRegistrar,
+  participantIdForThread,
+} from "../HomeRegistrar.ts";
 import { A2ALedger } from "../LedgerService.ts";
 import { ParticipantPlacementService, PlacementStorageError } from "../PlacementService.ts";
-import { A2ASendService } from "../SendService.ts";
+import { A2AHomeMembershipStateError, A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
 import {
   LedgerMessageId,
@@ -117,36 +121,32 @@ it.effect("derives send idempotency and sender identity from authenticated scope
     assert.notProperty(J5Toolkit.tools, "archive_agent");
     const sends = yield* Ref.make<ReadonlyArray<SendMessageInput>>([]);
     const participantId = ParticipantId.make("agent:j5:mcp-handler");
-    const callerParticipantId = ParticipantId.make("agent:j5:mcp-seeded-caller");
-    const callerSquadronId = SquadronId.make("squadron:j5:mcp-seeded-caller");
+    const callerParticipantId = participantIdForThread(invocation.threadId);
+    const multiMembershipRecipientId = ParticipantId.make("agent:j5:mcp-multi-membership-target");
     const sendService = Layer.succeed(
       A2ASendService,
       A2ASendService.of({
         send: (input) =>
-          Ref.update(sends, (items) => [...items, input]).pipe(
-            Effect.as({
-              messageId: LedgerMessageId.make("message:j5:mcp-handler"),
-              exchangeId: null,
-              exchangeState: "none" as const,
-              joinedExistingExchange: false,
-              durableAtSeq: 1,
-            }),
-          ),
+          input.to === multiMembershipRecipientId
+            ? Effect.fail(
+                new A2AHomeMembershipStateError({
+                  threadId: invocation.threadId,
+                  expectedSquadronId: "squadron:j5:mcp-home",
+                  expectedParticipantId: callerParticipantId,
+                  activeHomes: ["squadron:j5:mcp-home", "squadron:j5:mcp-extra"],
+                }),
+              )
+            : Ref.update(sends, (items) => [...items, input]).pipe(
+                Effect.as({
+                  messageId: LedgerMessageId.make("message:j5:mcp-handler"),
+                  exchangeId: null,
+                  exchangeState: "none" as const,
+                  joinedExistingExchange: false,
+                  durableAtSeq: 1,
+                }),
+              ),
         listParticipants: () =>
-          Effect.succeed([
-            {
-              squadronId: callerSquadronId,
-              participantId: callerParticipantId,
-              participant: {
-                kind: "agent" as const,
-                id: callerParticipantId,
-                threadId: invocation.threadId,
-              },
-              canReceiveMessage: true,
-              canOpenExchange: true,
-              acceptsUrgency: false,
-            },
-          ]),
+          Effect.die(new Error("send_message must not resolve the participant directory")),
       }),
     );
     const dependencies = Layer.mergeAll(
@@ -187,6 +187,19 @@ it.effect("derives send idempotency and sender identity from authenticated scope
       assert.include(selfSendMessage, "list_participants");
       assert.include(selfSendMessage, "schedule_task");
       assert.notInclude(selfSendMessage, "Memo");
+      const multiMembership = yield* call({
+        to: multiMembershipRecipientId,
+        message: "Preserve the sender membership error.",
+      });
+      assert.isTrue(multiMembership.isFailure);
+      assert.deepInclude(multiMembership.result, {
+        code: "A2AHomeMembershipStateError",
+      });
+      const multiMembershipMessage = (
+        multiMembership.result as unknown as { readonly message: string }
+      ).message;
+      assert.include(multiMembershipMessage, "immutable home");
+      assert.include(multiMembershipMessage, "active membership projection");
       const captured = yield* Ref.get(sends);
       assert.lengthOf(captured, 2);
       assert.equal(captured[0]?.commandId, captured[1]?.commandId);

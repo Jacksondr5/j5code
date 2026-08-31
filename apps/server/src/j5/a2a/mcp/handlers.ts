@@ -13,7 +13,7 @@ import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
-import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
+import { A2AHomeRegistrar, participantIdForThread } from "../HomeRegistrar.ts";
 import { A2ALedger } from "../LedgerService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
@@ -280,7 +280,7 @@ const handlers = {
   send_message: (input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
-      const callerParticipantId = (yield* resolveCallerMembership(scope)).participantId;
+      const callerParticipantId = participantIdForThread(scope.threadId);
       if (input.to === callerParticipantId) {
         return yield* stateError(
           `send_message cannot target your own participant_id ${callerParticipantId}; self-messaging is not supported.`,
