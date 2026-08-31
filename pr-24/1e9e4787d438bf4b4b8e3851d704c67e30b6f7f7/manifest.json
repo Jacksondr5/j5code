@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "pullRequest": 24,
+  "commit": "1e9e4787d438bf4b4b8e3851d704c67e30b6f7f7",
+  "environment": "isolated disposable T3",
+  "viewport": {
+    "width": 1200,
+    "height": 919,
+    "unit": "css-px"
+  },
+  "captures": [
+    {
+      "file": "cards-clamped.png",
+      "state": "collapsed",
+      "clampControl": "› 2 more lines",
+      "sha256": "bc33b8a683321408bdae3f7db6d9104b6a2503a0aeb99cf468654343418887c3"
+    },
+    {
+      "file": "cards-expanded.png",
+      "state": "expanded",
+      "clampControl": "⌄ Collapse",
+      "sha256": "5c58997494607936694d3836dc46c7d77d65bba97691ca7b7ff56ecc4fbfd556"
+    }
+  ]
+}
