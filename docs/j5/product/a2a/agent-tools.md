@@ -46,10 +46,6 @@ Returns once the message is committed; delivery continues asynchronously — car
 and the reply arrives later as an incoming message. Reuse client_request_id to retry the same send
 safely."
 
-_(The shipped `send_message` and `list_participants` descriptions each append the current runtime
-availability contract: the tool is unavailable to a native thread without a registered home
-Squadron. That fail-closed home requirement remains current.)_
-
 | Input               | Type              | Required                         | Meaning                                                |
 | ------------------- | ----------------- | -------------------------------- | ------------------------------------------------------ |
 | `to`                | ParticipantId     | yes                              | Directory-listed recipient                             |
@@ -102,6 +98,9 @@ self-send rejection). The description gains a clause telling the caller its own 
 **Canonical description amendment (ratified 2026-08-31, decision #72):** the exact contract above
 supersedes all partial drafts. It names the self row, native threads without a home, and roster
 refreshes without naming an unshipped lifecycle verb.
+(each description carries its own native-home caveat: send_message states the caller-side
+precondition — a sender without a registered home is refused; list_participants states the
+listing-side consequence — native threads without a home do not appear and cannot be messaged)
 
 No inputs. Result rows: `display_name`, `squadron_id`, `participant_id`, participant kind (thread
 id for agents), `can_receive_message`, `can_open_exchange`, `accepts_urgency`, plus `provenance`
