@@ -17,8 +17,10 @@ Backend contract: A4's inbox projection + idempotent `answer` API.
 
 ## Where it lives
 
-A **bell icon with a numbered open-count badge beside the rail logo**,
-opening a **main-view Inbox page** (IB2). The page starts full-width;
+A **bell icon with a numbered open-count badge in the rail header's trailing 32px
+control-grid slot, DOM-ordered after the rail logo and aligned with the search/create
+controls**, opening a **main-view Inbox page** (IB2; amended 2026-08-31 per Jackson's
+PR #23 review). The page starts full-width;
 iterate smaller as the product matures. The inbox is **person-scoped**
 (R9/R29 — never assume one human) and **not Squadron-scoped**: obligations
 are global to the person; each item wears its Squadron; the rail's scope
