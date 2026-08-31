@@ -44,7 +44,10 @@ import {
   resolveFileDiffPath,
 } from "../../lib/diffRendering";
 import ChatMarkdown from "../ChatMarkdown";
-import { renderThreadA2ADelivery } from "../../j5/a2a/ThreadA2ARenderer";
+import {
+  renderThreadA2ADelivery,
+  renderThreadA2AOutboundTool,
+} from "../../j5/a2a/ThreadA2ARenderer";
 import {
   BotIcon,
   CheckIcon,
@@ -1858,13 +1861,16 @@ const WorkGroupSection = memo(function WorkGroupSection({
         </p>
       )}
       <div className="space-y-px">
-        {visibleEntries.map((workEntry) => (
-          <SimpleWorkEntryRow
-            key={workEntry.id}
-            workEntry={workEntry}
-            workspaceRoot={workspaceRoot}
-          />
-        ))}
+        {visibleEntries.map(
+          (workEntry) =>
+            renderThreadA2AOutboundTool(workEntry) ?? (
+              <SimpleWorkEntryRow
+                key={workEntry.id}
+                workEntry={workEntry}
+                workspaceRoot={workspaceRoot}
+              />
+            ),
+        )}
       </div>
       {hasOverflow && (
         <button

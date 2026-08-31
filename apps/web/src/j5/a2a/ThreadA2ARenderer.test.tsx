@@ -4,9 +4,12 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { ChatMessage } from "~/types";
 import {
+  formatTimeSinceSent,
   J5_A2A_DELIVERY_MESSAGE_PREFIX,
   isThreadA2ADeliveryMessage,
+  presentThreadA2AOutboundTool,
   presentThreadA2ADelivery,
+  renderThreadA2AOutboundTool,
   renderThreadA2ADelivery,
   ThreadA2ADeliveryRenderer,
 } from "./ThreadA2ARenderer";
@@ -75,6 +78,7 @@ describe("ThreadA2ADeliveryRenderer", () => {
       <ThreadA2ADeliveryRenderer
         message={source}
         participantLabels={new Map([["agent:delivery-sender", "Alice"]])}
+        now={Date.parse(CREATED_AT) + 5 * 60_000}
       />,
     );
 
@@ -85,13 +89,18 @@ describe("ThreadA2ADeliveryRenderer", () => {
       squadronId: "squadron:alpha",
       body: "Please verify the worker.",
       exchange: "expects-reply",
+      exchangeId: "exchange:one",
       rawEnvelope: peerRaw,
     });
     expect(markup).toContain('data-j5-a2a-renderer="peer"');
-    expect(markup).toMatch(
-      /<span class="font-medium">Alice<\/span><span[^>]*>Expects reply<\/span>/,
-    );
+    expect(markup).toContain("From");
+    expect(markup).toContain("Alice");
+    expect(markup).toContain("Expects reply");
+    expect(markup).toContain(">5m<");
+    expect(markup).toContain('dateTime="2026-08-29T12:00:00.000Z"');
+    expect(markup).toContain("line-clamp-2");
     expect(markup).not.toContain("squadron:alpha");
+    expect(markup).not.toContain("exchange:one");
     expect(markup).not.toContain("Show raw envelope");
     expect(parsed?.rawEnvelope).toBe(peerRaw);
   });
@@ -101,12 +110,13 @@ describe("ThreadA2ADeliveryRenderer", () => {
     expect(parsed).toMatchObject({ kind: "peer", senderLabel: "agent:delivery-sender" });
   });
 
-  it("renders only the plain exchange state when no reply is expected", () => {
+  it("renders no chip for a one-shot delivery whose role is not a measured reply", () => {
     const markup = renderToStaticMarkup(
       <ThreadA2ADeliveryRenderer message={message({ text: peerPlainRaw })} />,
     );
 
-    expect(markup).toContain(">plain<");
+    expect(markup).not.toContain("Reply");
+    expect(markup).not.toContain("plain");
     expect(markup).not.toContain("closed");
   });
 
@@ -345,6 +355,119 @@ describe("ThreadA2ADeliveryRenderer", () => {
     expect(isThreadA2ADeliveryMessage(nativeMcpMessage)).toBe(false);
     expect(delegated).toBeNull();
     expect(markup).toContain('data-generic-user-row="true"');
+    expect(markup).not.toContain("data-j5-a2a-renderer");
+  });
+
+  it("formats sent time from the delivery record at a supplied clock instant", () => {
+    const sentAt = "2026-08-29T12:00:00.000Z";
+    expect(formatTimeSinceSent(sentAt, Date.parse(sentAt) + 59_000)).toBe("just now");
+    expect(formatTimeSinceSent(sentAt, Date.parse(sentAt) + 5 * 60_000)).toBe("5m");
+    expect(formatTimeSinceSent(sentAt, Date.parse(sentAt) + 3 * 60 * 60_000)).toBe("3h");
+    expect(formatTimeSinceSent(sentAt, Date.parse(sentAt) + 2 * 24 * 60 * 60_000)).toBe("2d");
+  });
+
+  it("renders an accepted, completed J5 send as an awaiting-reply card", () => {
+    const tool = {
+      id: "tool:send-open",
+      createdAt: CREATED_AT,
+      toolLifecycleStatus: "completed",
+      structuredPayload: {
+        type: "dynamic_tool",
+        toolName: "t3-code.send_message",
+        input: { to: "agent:receiver", message: "Please check the deployment." },
+        output: {
+          messageId: "message:j5:a2a:send-open",
+          exchangeId: "exchange:send-open",
+          exchangeState: "open",
+          joinedExistingExchange: false,
+          durableAtSeq: 1,
+        },
+      },
+    };
+    const presentation = presentThreadA2AOutboundTool(tool);
+    const markup = renderToStaticMarkup(renderThreadA2AOutboundTool(tool) ?? <p>generic</p>);
+
+    expect(presentation).toMatchObject({
+      kind: "sent",
+      recipientId: "agent:receiver",
+      body: "Please check the deployment.",
+      exchangeId: "exchange:send-open",
+      exchangeState: "open",
+      isReply: false,
+    });
+    expect(markup).toContain('data-j5-a2a-renderer="sent"');
+    expect(markup).toContain("To");
+    expect(markup).toContain("agent:receiver");
+    expect(markup).toContain("Awaiting reply");
+    expect(markup).not.toContain("exchange:send-open");
+  });
+
+  it("renders an accepted closed exchange reply with the neutral Reply chip", () => {
+    const tool = {
+      id: "tool:reply-closed",
+      createdAt: CREATED_AT,
+      toolLifecycleStatus: "completed",
+      structuredPayload: {
+        type: "dynamic_tool",
+        toolName: "mcp__t3-code__send_message",
+        input: {
+          to: "agent:sender",
+          message: "Deployment verified.",
+          exchange_id: "exchange:ask",
+        },
+        output: {
+          messageId: "message:j5:a2a:reply-closed",
+          exchangeId: "exchange:ask",
+          exchangeState: "closed",
+          joinedExistingExchange: false,
+          durableAtSeq: 2,
+        },
+      },
+    };
+    const markup = renderToStaticMarkup(renderThreadA2AOutboundTool(tool) ?? <p>generic</p>);
+
+    expect(markup).toContain('data-j5-a2a-renderer="sent"');
+    expect(markup).toContain(">Reply<");
+    expect(markup).not.toContain("Awaiting reply");
+  });
+
+  it("leaves a non-send dynamic tool untouched by the outbound delegate", () => {
+    const tool = {
+      id: "tool:list-participants",
+      createdAt: CREATED_AT,
+      toolLifecycleStatus: "completed",
+      structuredPayload: {
+        type: "dynamic_tool",
+        toolName: "t3-code.list_participants",
+        input: {},
+        output: {},
+      },
+    };
+    const rendered = renderThreadA2AOutboundTool(tool);
+    const markup = renderToStaticMarkup(rendered ?? <p data-generic-work-row="true">generic</p>);
+
+    expect(rendered).toBeNull();
+    expect(markup).toContain('data-generic-work-row="true"');
+    expect(markup).not.toContain("data-j5-a2a-renderer");
+  });
+
+  it("leaves a malformed send tool untouched rather than hiding or guessing", () => {
+    const tool = {
+      id: "tool:send-malformed",
+      createdAt: CREATED_AT,
+      toolLifecycleStatus: "completed",
+      structuredPayload: {
+        type: "dynamic_tool",
+        toolName: "t3-code.send_message",
+        input: { to: "agent:receiver", message: "Could be a send." },
+        output: { messageId: "message:j5:a2a:malformed", exchangeState: "open" },
+      },
+    };
+    const rendered = renderThreadA2AOutboundTool(tool);
+    const markup = renderToStaticMarkup(rendered ?? <p data-generic-work-row="true">generic</p>);
+
+    expect(rendered).toBeNull();
+    expect(markup).toContain('data-generic-work-row="true"');
     expect(markup).not.toContain("data-j5-a2a-renderer");
   });
 });
