@@ -75,7 +75,12 @@ design workspace (`product/thread-a2a/final-treatment/`).
   resolved, neutral chip = plain reply.
 - **States**: Sent-open → **Awaiting reply**; Sent-closed → **Reply
   received**; Received-open → **Expects reply**; Received-closed →
-  **Replied**. All copy viewer-neutral.
+  **Replied**. All copy viewer-neutral. **Chip copy follows the measured
+  `exchangeRole` and only that** (clarified 2026-08-31, B7 Reviewer
+  finding #130): role=reply → neutral "Reply" chip; role=none, absent,
+  or unrecognized → **no chip** (a plain message demands nothing;
+  never-guess forbids asserting an undeclared role); role=followup →
+  neutral "Follow-up" if the case is reachable.
 - **Clamp** (TA7): every card body clamps at 2 lines with the upstream
   chevron pattern ("› N more lines"); UI limit, never content limit.
 - **Alignment & direction** (TA8): all A2A cards left-aligned (only the
