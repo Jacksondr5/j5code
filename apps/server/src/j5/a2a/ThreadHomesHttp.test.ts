@@ -8,6 +8,7 @@ import { ConnectionError, SqlError } from "effect/unstable/sql/SqlError";
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
+import { ClientReadsService } from "./ClientReadsService.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { A2AHumanInbox } from "./HumanInboxService.ts";
 import { j5AuthenticatedRoutesLayer } from "./J5AuthenticatedRoutes.ts";
@@ -15,7 +16,7 @@ import { A2ALedger } from "./LedgerService.ts";
 import { SquadronProjectReferences } from "./SquadronProjectReferences.ts";
 import { THREAD_HOMES_PATH } from "./ThreadHomesHttp.ts";
 import { ThreadHomesService } from "./ThreadHomesService.ts";
-import { SquadronId } from "./contracts.ts";
+import { ParticipantId, SquadronId } from "./contracts.ts";
 
 it("wires the authenticated aggregate's thread-homes path without a parallel router", async () => {
   const knownThread = ThreadId.make("thread:thread-homes-http:known");
@@ -68,6 +69,17 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
   });
   const routes = j5AuthenticatedRoutesLayer.pipe(
     Layer.provide(homes),
+    Layer.provide(
+      Layer.mock(ClientReadsService)({
+        participantHomes: () => Effect.succeed([]),
+        participantIdentities: () => Effect.succeed({ entries: [] }),
+        openInboxCount: (personId) =>
+          Effect.succeed({
+            personId: personId ?? ParticipantId.make("human:thread-homes-http"),
+            count: 0,
+          }),
+      }),
+    ),
     Layer.provide(Layer.mock(A2AHumanInbox)({})),
     Layer.provide(Layer.mock(A2ADeliveryWorker)({})),
     Layer.provide(Layer.mock(A2ALedger)({})),

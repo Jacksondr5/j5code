@@ -49,6 +49,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 7, name: "ParticipantPlacement" },
       { migration_id: 8, name: "LifecycleClosure" },
       { migration_id: 9, name: "SquadronProjectReferences" },
+      { migration_id: 10, name: "OpenInboxCountIndex" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -62,6 +63,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [7, "ParticipantPlacement"],
         [8, "LifecycleClosure"],
         [9, "SquadronProjectReferences"],
+        [10, "OpenInboxCountIndex"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
@@ -116,7 +118,8 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
           'j5_a2a_human_person_local_operator_idx',
           'j5_a2a_placement_event_participant_idx',
           'j5_a2a_participant_placement_parent_idx',
-          'j5_a2a_squadron_project_reference_project_idx'
+          'j5_a2a_squadron_project_reference_project_idx',
+          'j5_a2a_human_inbox_open_person_idx'
         )
       ORDER BY name
     `;
@@ -228,6 +231,14 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
     assert.include(
       indexesByName.get("j5_a2a_squadron_project_reference_project_idx") ?? "",
       "ON j5_a2a_squadron_project_reference(project_id, squadron_id)",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_human_inbox_open_person_idx") ?? "",
+      "ON j5_a2a_human_inbox(person_id)",
+    );
+    assert.include(
+      indexesByName.get("j5_a2a_human_inbox_open_person_idx") ?? "",
+      "WHERE status = 'open'",
     );
     const envelopeChannel = deliveryColumns.find((column) => column.name === "envelope_channel");
     assert.equal(envelopeChannel?.notnull, 1);
