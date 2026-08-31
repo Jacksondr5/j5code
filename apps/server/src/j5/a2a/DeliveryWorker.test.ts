@@ -330,6 +330,7 @@ it.effect("refuses a cross-squadron reply before delivery or closure", () =>
         assert.equal(error.exchangeId, opened.exchangeId);
         assert.equal(error.exchangeSquadronId, senderSquadronId);
         assert.equal(error.senderSquadronId, receiverSquadronId);
+        assert.isFalse(error.replyPersisted);
         assert.include(error.message, "nothing was sent");
       }
 

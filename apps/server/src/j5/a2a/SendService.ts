@@ -167,10 +167,14 @@ export class A2ACrossSquadronReplyInvariantError extends Schema.TaggedErrorClass
     exchangeId: Schema.String,
     exchangeSquadronId: Schema.String,
     senderSquadronId: Schema.String,
+    replyPersisted: Schema.Boolean,
   },
 ) {
   override get message(): string {
-    return `Exchange ${this.exchangeId} belongs to ${this.exchangeSquadronId}, but the replying sender's immutable home is ${this.senderSquadronId}. A cross-Squadron reply cannot record the required closure fact, so nothing was sent. Report this invariant failure with the exchange and Squadron ids; do not retry send_message for this exchange.`;
+    const replyState = this.replyPersisted
+      ? "A durable reply is already persisted for this command under the cross-Squadron state; this replay sent nothing new."
+      : "A cross-Squadron reply cannot record the required closure fact, so nothing was sent.";
+    return `Exchange ${this.exchangeId} belongs to ${this.exchangeSquadronId}, but the replying sender's immutable home is ${this.senderSquadronId}. ${replyState} Report this invariant failure with the exchange and Squadron ids; do not retry send_message for this exchange.`;
   }
 }
 
@@ -490,6 +494,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
             exchangeId: row.exchange_id!,
             exchangeSquadronId: exchange[0]!.squadron_id,
             senderSquadronId: row.squadron_id,
+            replyPersisted: true,
           });
         }
         return {
@@ -555,6 +560,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
                   exchangeId,
                   exchangeSquadronId: exchange.squadron_id,
                   senderSquadronId: sender.squadronId,
+                  replyPersisted: false,
                 });
               }
               const acceptedReplies = yield* sql<{ readonly count: number }>`
