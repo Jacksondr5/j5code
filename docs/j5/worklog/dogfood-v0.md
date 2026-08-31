@@ -47,21 +47,21 @@ status: 1
 
 ## Dogfood work queue (RESERVED — Jackson, 2026-08-31)
 
-Tickets deliberately held as the first J5-native work: NOT staffable in Traycer regardless of free slots. Every ticket is self-contained on repo paths only — dogfood agents have no access to Traycer artifacts or agents. Ladder order:
+Tickets deliberately held as the first J5-native work: NOT staffable in Traycer regardless of free slots, except DQ5, which is being built in Traycer as a phase-3 runtime prerequisite. Every ticket is self-contained on repo paths only — dogfood agents have no access to Traycer artifacts or agents. Ladder order:
 
 Tickets live as GitHub issues (label `dogfood-queue`) so dogfood agents and future humans staff from the forge; durable context stays in this repo's docs, which each issue cites.
 
-| Tier                  | Ticket                                                                                              | Size                                     |
-| --------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| Starter               | [DQ1 — SQ1 cleanup pair (#25)](https://github.com/Jacksondr5/j5code/issues/25)                      | single agent, hours                      |
-| Starter               | [DQ2 — envelope role marker (#26)](https://github.com/Jacksondr5/j5code/issues/26)                  | single agent, hours                      |
-| Starter               | [DQ5 — server default base dir → ~/.j5code (#33)](https://github.com/Jacksondr5/j5code/issues/33)   | single agent, hours                      |
-| Starter (conditional) | List-own-asks agent read — ticket written if the in-flight measurement confirms no such read exists | small                                    |
-| Middle                | [A8 — envelope true-up (#29)](https://github.com/Jacksondr5/j5code/issues/29)                       | small crew                               |
-| Middle                | [DQ3 — palette reuse-or-create hardening (#27)](https://github.com/Jacksondr5/j5code/issues/27)     | small crew                               |
-| Meaty                 | [A10 — silence fact bundles (#30)](https://github.com/Jacksondr5/j5code/issues/30)                  | crew                                     |
-| Meaty                 | [A5 — graph read API (#31)](https://github.com/Jacksondr5/j5code/issues/31)                         | crew                                     |
-| Meaty                 | [DQ4 — Fleet page pair (#28)](https://github.com/Jacksondr5/j5code/issues/28)                       | crew (natural phase-4 first-crew ticket) |
+| Tier                            | Ticket                                                                                              | Size                                                       |
+| ------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Starter                         | [DQ1 — SQ1 cleanup pair (#25)](https://github.com/Jacksondr5/j5code/issues/25)                      | single agent, hours                                        |
+| Starter                         | [DQ2 — envelope role marker (#26)](https://github.com/Jacksondr5/j5code/issues/26)                  | single agent, hours                                        |
+| Prerequisite (in-build Traycer) | [DQ5 — server default base dir → ~/.j5code (#33)](https://github.com/Jacksondr5/j5code/issues/33)   | single agent, hours; required before phase 3 runtime setup |
+| Starter (conditional)           | List-own-asks agent read — ticket written if the in-flight measurement confirms no such read exists | small                                                      |
+| Middle                          | [A8 — envelope true-up (#29)](https://github.com/Jacksondr5/j5code/issues/29)                       | small crew                                                 |
+| Middle                          | [DQ3 — palette reuse-or-create hardening (#27)](https://github.com/Jacksondr5/j5code/issues/27)     | small crew                                                 |
+| Meaty                           | [A10 — silence fact bundles (#30)](https://github.com/Jacksondr5/j5code/issues/30)                  | crew                                                       |
+| Meaty                           | [A5 — graph read API (#31)](https://github.com/Jacksondr5/j5code/issues/31)                         | crew                                                       |
+| Meaty                           | [DQ4 — Fleet page pair (#28)](https://github.com/Jacksondr5/j5code/issues/28)                       | crew (natural phase-4 first-crew ticket)                   |
 
 NOT held: B4 (archive dialog — phase-3-blocking), and all mid-flight Traycer lanes (B6/B7/E7/#22/#23 finish where they started).
 

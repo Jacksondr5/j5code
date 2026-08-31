@@ -30,10 +30,32 @@ it.effect("requires an explicit isolated base and emits a provider-safe receipt"
     })();
     assert.isTrue(isDevDeliverySeedArgumentError(missingBaseDirError));
     const fileSystem = yield* FileSystem.FileSystem;
-    const sharedStateError = yield* Effect.flip(
-      validateIsolatedBaseDir(`${NodeOS.homedir()}/.t3/userdata`),
-    );
-    assert.isTrue(isDevDeliverySeedArgumentError(sharedStateError));
+    const fakeHome = yield* fileSystem.makeTempDirectoryScoped({ prefix: "j5-a2a-home-" });
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+    try {
+      process.env.HOME = fakeHome;
+      process.env.USERPROFILE = fakeHome;
+      for (const name of [".t3", ".j5code"]) {
+        const sharedHome = `${fakeHome}/${name}`;
+        yield* fileSystem.makeDirectory(sharedHome, { recursive: true });
+        const sharedStateError = yield* Effect.flip(
+          validateIsolatedBaseDir(`${sharedHome}/userdata`),
+        );
+        assert.isTrue(isDevDeliverySeedArgumentError(sharedStateError));
+      }
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (originalUserProfile === undefined) {
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = originalUserProfile;
+      }
+    }
     const baseDir = yield* fileSystem.makeTempDirectory({
       directory: NodeOS.tmpdir(),
       prefix: "j5-a2a-dev-delivery-seed-test-",
