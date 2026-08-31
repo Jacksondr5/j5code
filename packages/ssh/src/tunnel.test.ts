@@ -189,6 +189,12 @@ describe("ssh tunnel scripts", () => {
     assert.include(buildRemoteLaunchScript(), "wait_ready");
     assert.include(buildRemoteLaunchScript(), '"$RUNNER_FILE" serve --host 127.0.0.1');
     assert.include(buildRemoteLaunchScript(), '--base-dir "$DEFAULT_SERVER_HOME"');
+    assert.include(buildRemoteLaunchScript(), 'DEFAULT_SERVER_HOME="$HOME/.t3"');
+    const j5LaunchScript = buildRemoteLaunchScript({
+      nodeScriptPath: "/opt/j5code/apps/server/dist/bin.mjs",
+    });
+    assert.include(j5LaunchScript, 'DEFAULT_SERVER_HOME="$HOME/.j5code"');
+    assert.notInclude(j5LaunchScript, 'DEFAULT_SERVER_HOME="$HOME/.t3"');
     assert.notInclude(buildRemoteLaunchScript(), "server-home");
     assert.include(buildRemoteLaunchScript(), "Remote T3 server did not become ready");
     assert.include(buildRemoteLaunchScript(), 'wait_ready "60000"');
@@ -200,6 +206,12 @@ describe("ssh tunnel scripts", () => {
       '"$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --json',
     );
     assert.include(buildRemotePairingScript(target), 'PAIRING_BASE_DIR="$DEFAULT_SERVER_HOME"');
+    assert.include(buildRemotePairingScript(target), 'DEFAULT_SERVER_HOME="$HOME/.t3"');
+    const j5PairingScript = buildRemotePairingScript(target, {
+      nodeScriptPath: "/opt/j5code/apps/server/dist/bin.mjs",
+    });
+    assert.include(j5PairingScript, 'DEFAULT_SERVER_HOME="$HOME/.j5code"');
+    assert.notInclude(j5PairingScript, 'DEFAULT_SERVER_HOME="$HOME/.t3"');
     assert.notInclude(buildRemotePairingScript(target), "server-home");
     assert.include(buildRemotePairingScript(target, { packageSpec: "t3@nightly" }), "t3@nightly");
     assert.include(

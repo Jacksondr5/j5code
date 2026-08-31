@@ -201,29 +201,45 @@ export const validateIsolatedBaseDir = (baseDir: string) =>
       });
     }
     const requested = path.resolve(baseDir);
-    const configuredSharedT3Home = path.resolve(NodeOS.homedir(), ".t3");
-    const sharedT3Home = (yield* fileSystem.exists(configuredSharedT3Home))
-      ? yield* fileSystem.realPath(configuredSharedT3Home)
-      : configuredSharedT3Home;
+    const configuredSharedHomes = [".t3", ".j5code"].map((name) =>
+      path.resolve(NodeOS.homedir(), name),
+    );
+    const sharedHomes = yield* Effect.all(
+      configuredSharedHomes.map((sharedHome) =>
+        fileSystem
+          .exists(sharedHome)
+          .pipe(
+            Effect.flatMap((exists) =>
+              exists ? fileSystem.realPath(sharedHome) : Effect.succeed(sharedHome),
+            ),
+          ),
+      ),
+    );
     let existingParent = requested;
     while (!(yield* fileSystem.exists(existingParent))) {
       const parent = path.dirname(existingParent);
       if (parent === existingParent) break;
       existingParent = parent;
     }
+    const canonicalExistingParent = yield* fileSystem.realPath(existingParent);
     if (
-      isInside(path, requested, sharedT3Home) ||
-      isInside(path, yield* fileSystem.realPath(existingParent), sharedT3Home)
+      sharedHomes.some(
+        (sharedHome) =>
+          isInside(path, requested, sharedHome) ||
+          isInside(path, canonicalExistingParent, sharedHome),
+      )
     ) {
       return yield* new DevDeliverySeedArgumentError({
-        message: "--base-dir must not be ~/.t3 or anything below it, including ~/.t3/userdata.",
+        message:
+          "--base-dir must not be ~/.t3 or ~/.j5code or anything below either, including their userdata directories.",
       });
     }
     yield* fileSystem.makeDirectory(requested, { recursive: true });
     const resolvedBaseDir = yield* fileSystem.realPath(requested);
-    if (isInside(path, resolvedBaseDir, sharedT3Home)) {
+    if (sharedHomes.some((sharedHome) => isInside(path, resolvedBaseDir, sharedHome))) {
       return yield* new DevDeliverySeedArgumentError({
-        message: "--base-dir must not be ~/.t3 or anything below it, including ~/.t3/userdata.",
+        message:
+          "--base-dir must not be ~/.t3 or ~/.j5code or anything below either, including their userdata directories.",
       });
     }
     return resolvedBaseDir;

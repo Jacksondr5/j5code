@@ -53,11 +53,10 @@ agreement.
 | Tailnet exposure | Tailscale Serve HTTPS 8444 → 5773       | Applied by root via Ansible, not by the unit; 443/8443 taken |
 | Unit             | `~/.config/systemd/user/j5code.service` | Journald logging (`journalctl --user -u j5code`)             |
 
-> **Warning — state dir collision.** The J5 server's built-in default state dir is still upstream's
-> `~/.t3` (only the desktop app was rebranded to `~/.j5code`). On a box that also runs real T3,
-> starting the J5 server without an explicit `T3CODE_HOME` would land dogfood state inside the T3
-> install. Until the code default changes (tracked as a dogfood-queue issue), every invocation —
-> the unit, `pair`, ad-hoc CLI use — must carry `T3CODE_HOME=$HOME/.j5code`.
+> **Belt-and-braces state-dir check.** The J5 server now defaults to `~/.j5code`, separate from
+> the real T3 install at `~/.t3`. The unit and commands below still set `T3CODE_HOME=$HOME/.j5code`
+> explicitly so the intended location remains visible and safe if an older binary, wrapper, or
+> future launch path bypasses the built-in default.
 
 ## One-time box setup
 

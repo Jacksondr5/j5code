@@ -116,4 +116,33 @@ it.layer(NodeServices.layer)("t3-sqlite-state", (it) => {
       assert.equal(aliasError._tag, "SqliteStateSharedHomeMutationError");
     }),
   );
+
+  it.effect("refuses mutation of either installed T3 or J5 home", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-sqlite-state-homes-" });
+      const originalHome = process.env.HOME;
+      try {
+        process.env.HOME = home;
+        for (const name of [".t3", ".j5code"]) {
+          const baseDir = path.join(home, name);
+          yield* createFixtureDatabase(baseDir);
+          const error = yield* runSqliteState({
+            operation: "exec",
+            baseDir,
+            sql: "DELETE FROM fixtures",
+          }).pipe(Effect.flip);
+          assert.equal(error._tag, "SqliteStateSharedHomeMutationError");
+          assert.include(error.message, name);
+        }
+      } finally {
+        if (originalHome === undefined) {
+          delete process.env.HOME;
+        } else {
+          process.env.HOME = originalHome;
+        }
+      }
+    }),
+  );
 });
