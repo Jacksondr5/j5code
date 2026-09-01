@@ -59,7 +59,7 @@ import {
   live as deliveryTransportLayer,
 } from "../DeliveryTransport.ts";
 import { manualLayer as deliveryWorkerLayer, A2ADeliveryWorker } from "../DeliveryWorker.ts";
-import { formatHumanEnvelope } from "../EnvelopeFormatter.ts";
+import { formatClosedHumanEnvelope } from "../EnvelopeFormatter.ts";
 import { A2AHumanInbox, layer as humanInboxLayer } from "../HumanInboxService.ts";
 import { ensureLocalOperatorHumanPerson } from "../HumanPersonRegistry.ts";
 import { A2ALedger, layer as ledgerLayer } from "../LedgerService.ts";
@@ -617,9 +617,8 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
           const replyDeliveryMessageId = deliveryMessageId(answered.messageId);
           const projected = yield* threads.getThreadProjection(senderThreadId);
           const reply = projected.messages.find((message) => message.id === replyDeliveryMessageId);
-          const expectedEnvelope = formatHumanEnvelope({
+          const expectedEnvelope = formatClosedHumanEnvelope({
             senderId: localOperatorPersonId,
-            exchangeId: opened.exchangeId,
             message: replyText,
           });
           if (
@@ -629,7 +628,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
             reply.text !== expectedEnvelope
           ) {
             return yield* Effect.die(
-              "TA2 reply was not the v7 human envelope with user/MCP provenance.",
+              "TA2 reply was not the closed human envelope with user/MCP provenance.",
             );
           }
           yield* interruptActiveSeedRun({

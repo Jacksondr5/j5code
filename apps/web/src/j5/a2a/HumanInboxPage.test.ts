@@ -1,6 +1,10 @@
 import { assert, it, vi } from "@effect/vitest";
 
-import { captureHumanInboxAnswer, submitHumanInboxAnswer } from "./HumanInboxPage";
+import {
+  captureHumanInboxAnswer,
+  formatAnsweredAgeLabel,
+  submitHumanInboxAnswer,
+} from "./HumanInboxPage";
 import type { HumanInboxItem } from "./humanInboxClient";
 
 it("captures typed answer text before the state updater runs", () => {
@@ -26,6 +30,12 @@ it("captures typed answer text before the state updater runs", () => {
   });
 });
 
+it("formats answered ages without appending ago to just now", () => {
+  assert.equal(formatAnsweredAgeLabel("just now"), "answered just now");
+  assert.equal(formatAnsweredAgeLabel("4h"), "answered 4h ago");
+  assert.equal(formatAnsweredAgeLabel(""), "answered");
+});
+
 it("clears pending state when answer attempt id generation fails", async () => {
   const item = {
     personId: "human:local-operator",
@@ -33,15 +43,19 @@ it("clears pending state when answer attempt id generation fails", async () => {
     squadronName: "Answer test",
     exchangeId: "exchange:answer-test",
     senderId: "agent:answer-test",
+    senderThreadId: "thread:answer-test",
     intent: "Prove pending cleanup",
     urgency: "blocking",
     message: "Question",
     openedAt: "2026-08-27T00:00:00.000Z",
+    status: "open",
+    terminalAt: null,
   } satisfies HumanInboxItem;
   const pending: Array<string | null> = [];
   const errors: Array<string | null> = [];
   const send = vi.fn(async () => undefined);
   const refresh = vi.fn(async () => undefined);
+  const notifyChanged = vi.fn();
   const onAccepted = vi.fn();
 
   await submitHumanInboxAnswer({
@@ -53,6 +67,7 @@ it("clears pending state when answer attempt id generation fails", async () => {
     },
     send,
     refresh,
+    notifyChanged,
     onAccepted,
     setPendingExchangeId: (exchangeId) => pending.push(exchangeId),
     setError: (message) => errors.push(message),
@@ -62,6 +77,7 @@ it("clears pending state when answer attempt id generation fails", async () => {
   assert.deepStrictEqual(errors, [null, "Secure random ids are unavailable."]);
   assert.equal(send.mock.calls.length, 0);
   assert.equal(refresh.mock.calls.length, 0);
+  assert.equal(notifyChanged.mock.calls.length, 0);
   assert.equal(onAccepted.mock.calls.length, 0);
 });
 
@@ -72,10 +88,13 @@ it("reports a stale inbox without treating a delivered answer as failed", async 
     squadronName: "Refresh test",
     exchangeId: "exchange:refresh-test",
     senderId: "agent:refresh-test",
+    senderThreadId: "thread:refresh-test",
     intent: "Distinguish delivery from refresh",
     urgency: "blocking",
     message: "Question",
     openedAt: "2026-08-27T00:00:00.000Z",
+    status: "open",
+    terminalAt: null,
   } satisfies HumanInboxItem;
   const attempts = new Map<string, { message: string; clientRequestId: string }>();
   const pending: Array<string | null> = [];
@@ -84,6 +103,7 @@ it("reports a stale inbox without treating a delivered answer as failed", async 
   const refresh = vi.fn(async () => {
     throw new Error("Network unavailable.");
   });
+  const notifyChanged = vi.fn();
   const onAccepted = vi.fn();
 
   await submitHumanInboxAnswer({
@@ -93,6 +113,7 @@ it("reports a stale inbox without treating a delivered answer as failed", async 
     randomUUID: () => "request:refresh-test",
     send,
     refresh,
+    notifyChanged,
     onAccepted,
     setPendingExchangeId: (exchangeId) => pending.push(exchangeId),
     setError: (message) => errors.push(message),
@@ -105,6 +126,7 @@ it("reports a stale inbox without treating a delivered answer as failed", async 
   ]);
   assert.equal(send.mock.calls.length, 1);
   assert.equal(refresh.mock.calls.length, 1);
+  assert.equal(notifyChanged.mock.calls.length, 1);
   assert.equal(onAccepted.mock.calls.length, 1);
   assert.equal(attempts.has(item.exchangeId), false);
 });

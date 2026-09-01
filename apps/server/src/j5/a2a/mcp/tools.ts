@@ -8,7 +8,11 @@ import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { ArchiveAgentService } from "../ArchiveAgentService.ts";
-import { A2A_LIST_TOOL_DESCRIPTION, A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
+import {
+  A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION,
+  A2A_LIST_TOOL_DESCRIPTION,
+  A2A_SEND_TOOL_DESCRIPTION,
+} from "../EnvelopeFormatter.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
 import { A2ALedger } from "../LedgerService.ts";
@@ -17,6 +21,7 @@ import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
 import {
   AgentParticipant,
+  ClearOwnAskResult,
   ExchangeId,
   HumanParticipant,
   ParticipantId,
@@ -46,6 +51,12 @@ export const J5SendMessageInput = Schema.Struct({
   urgency: Schema.optional(Urgency),
 });
 export type J5SendMessageInput = typeof J5SendMessageInput.Type;
+
+export const J5ClearOwnAskInput = Schema.Struct({
+  exchange_id: ExchangeId,
+  client_request_id: Schema.String.check(Schema.isNonEmpty()),
+});
+export type J5ClearOwnAskInput = typeof J5ClearOwnAskInput.Type;
 
 const J5AgentParticipant = Schema.Struct({
   kind: AgentParticipant.fields.kind,
@@ -285,6 +296,20 @@ export const J5ArchiveAgentTool = Tool.make("archive_agent", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, false);
 
+export const J5ClearOwnAskTool = Tool.make("clear_own_ask", {
+  description: A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION,
+  parameters: J5ClearOwnAskInput,
+  success: ClearOwnAskResult,
+  failure: J5McpFailure,
+  failureMode: "return",
+  dependencies: [McpInvocationContext.McpInvocationContext, A2ASendService],
+})
+  .annotate(Tool.Title, "Withdraw your open ask")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, true)
+  .annotate(Tool.Idempotent, true)
+  .annotate(Tool.OpenWorld, false);
+
 /** Shared J5 toolkit bootstrap. Later J5 milestones append their tools here. */
 export const J5Toolkit = Toolkit.make(
   J5SendMessageTool,
@@ -292,4 +317,5 @@ export const J5Toolkit = Toolkit.make(
   J5SpawnAgentTool,
   J5StopAgentTool,
   J5ArchiveAgentTool,
+  J5ClearOwnAskTool,
 );

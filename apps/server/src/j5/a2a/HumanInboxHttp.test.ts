@@ -20,6 +20,7 @@ it("returns the resolved person above an empty inbox and preserves explicit sele
   const explicitPersonId = ParticipantId.make("human:second-person");
   const missingPersonId = ParticipantId.make("human:missing-person");
   const requested: Array<string | undefined> = [];
+  const requestedStatuses: Array<string | undefined> = [];
   const answerCommandIds: Array<string> = [];
   const inbox = Layer.mock(A2AHumanInbox)({
     resolvePersonId: (personId) => {
@@ -29,7 +30,10 @@ it("returns the resolved person above an empty inbox and preserves explicit sele
       }
       return Effect.succeed(personId ?? localPersonId);
     },
-    list: () => Effect.succeed([]),
+    list: (_personId, status) => {
+      requestedStatuses.push(status);
+      return Effect.succeed([]);
+    },
     answer: (input) => {
       answerCommandIds.push(input.commandId);
       return Effect.succeed({
@@ -70,6 +74,12 @@ it("returns the resolved person above an empty inbox and preserves explicit sele
         `http://environment.test/api/j5/a2a/inbox?personId=${encodeURIComponent(missingPersonId)}`,
       ),
     );
+    const answered = await handler(
+      new Request("http://environment.test/api/j5/a2a/inbox?status=answered"),
+    );
+    const invalidStatus = await handler(
+      new Request("http://environment.test/api/j5/a2a/inbox?status=unknown"),
+    );
 
     const discoveredBody = await discovered.json();
     assert.equal(discovered.status, 200, JSON.stringify(discoveredBody));
@@ -77,7 +87,10 @@ it("returns the resolved person above an empty inbox and preserves explicit sele
     assert.equal(explicit.status, 200);
     assert.deepStrictEqual(await explicit.json(), { personId: explicitPersonId, items: [] });
     assert.equal(missing.status, 404);
-    assert.deepStrictEqual(requested, [undefined, explicitPersonId, missingPersonId]);
+    assert.equal(answered.status, 200);
+    assert.equal(invalidStatus.status, 400);
+    assert.deepStrictEqual(requested, [undefined, explicitPersonId, missingPersonId, undefined]);
+    assert.deepStrictEqual(requestedStatuses, ["open", "open", "answered"]);
 
     const firstExchangeId = ExchangeId.make("exchange:same-client:first");
     const secondExchangeId = ExchangeId.make("exchange:same-client:second");

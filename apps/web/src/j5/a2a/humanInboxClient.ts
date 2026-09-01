@@ -15,10 +15,13 @@ const HumanInboxItem = Schema.Struct({
   squadronName: Schema.String,
   exchangeId: Schema.String,
   senderId: Schema.String,
+  senderThreadId: Schema.NullOr(Schema.String),
   intent: Schema.String,
   urgency: Schema.Literals(["blocking", "soon", "fyi"]),
   message: Schema.String,
   openedAt: Schema.String,
+  status: Schema.Literals(["open", "answered"]),
+  terminalAt: Schema.NullOr(Schema.String),
 });
 export type HumanInboxItem = typeof HumanInboxItem.Type;
 
@@ -69,17 +72,21 @@ const runtime = ManagedRuntime.make(Layer.merge(primaryEnvironmentHttpLayer, bro
 
 export const listHumanInboxEffect = Effect.fn("j5.a2a.humanInboxClient.list")(function* (
   personId?: string,
+  status: "open" | "answered" = "open",
 ) {
   const client = yield* HttpClient.HttpClient;
   const url = new URL(resolvePrimaryEnvironmentHttpUrl("/api/j5/a2a/inbox"));
   if (personId !== undefined) url.searchParams.set("personId", personId);
+  url.searchParams.set("status", status);
   const response = yield* client.get(url.toString());
   const success = yield* requireHumanInboxSuccess(response);
   return yield* HttpClientResponse.schemaBodyJson(InboxResponse)(success);
 });
 
-export const listHumanInbox = (personId?: string): Promise<HumanInboxResponse> =>
-  runtime.runPromise(listHumanInboxEffect(personId));
+export const listHumanInbox = (
+  personId?: string,
+  status: "open" | "answered" = "open",
+): Promise<HumanInboxResponse> => runtime.runPromise(listHumanInboxEffect(personId, status));
 
 export const answerHumanExchange = (input: {
   readonly personId: string;

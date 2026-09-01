@@ -6,7 +6,12 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
-import { formatHumanEnvelope, formatPeerEnvelope } from "./EnvelopeFormatter.ts";
+import {
+  formatClosedHumanEnvelope,
+  formatClosedPeerEnvelope,
+  formatHumanEnvelope,
+  formatPeerEnvelope,
+} from "./EnvelopeFormatter.ts";
 import {
   type DeliveryEnvelopeChannel,
   SquadronId,
@@ -44,6 +49,7 @@ export interface AgentDeliveryInput {
   readonly senderId: ParticipantId;
   readonly receiverId: ParticipantId;
   readonly exchangeId: ExchangeId | null;
+  readonly exchangeRole: "none" | "ask" | "followup" | "reply" | "terminal_notice";
   readonly message: string;
   readonly envelopeChannel: DeliveryEnvelopeChannel;
 }
@@ -102,18 +108,29 @@ const assertNever = (channel: never): never => {
 export const formatAgentDeliveryEnvelope = (input: AgentDeliveryInput): string => {
   switch (input.envelopeChannel) {
     case "peer":
-      return isHumanParticipantId(input.senderId)
-        ? formatHumanEnvelope({
-            senderId: input.senderId,
-            exchangeId: input.exchangeId,
-            message: input.message,
-          })
-        : formatPeerEnvelope({
-            senderId: input.senderId,
-            originSquadronId: input.originSquadronId,
-            exchangeId: input.exchangeId,
-            message: input.message,
-          });
+      return input.exchangeRole === "reply"
+        ? isHumanParticipantId(input.senderId)
+          ? formatClosedHumanEnvelope({
+              senderId: input.senderId,
+              message: input.message,
+            })
+          : formatClosedPeerEnvelope({
+              senderId: input.senderId,
+              originSquadronId: input.originSquadronId,
+              message: input.message,
+            })
+        : isHumanParticipantId(input.senderId)
+          ? formatHumanEnvelope({
+              senderId: input.senderId,
+              exchangeId: input.exchangeId,
+              message: input.message,
+            })
+          : formatPeerEnvelope({
+              senderId: input.senderId,
+              originSquadronId: input.originSquadronId,
+              exchangeId: input.exchangeId,
+              message: input.message,
+            });
     case "silence_notice":
     case "lifecycle_notice":
       return input.message;

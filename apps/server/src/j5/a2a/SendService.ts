@@ -7,6 +7,8 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import {
+  type ClearOwnAskInput,
+  type ClearOwnAskResult,
   CommCommandId,
   type CommEvent,
   CorrelationId,
@@ -159,6 +161,63 @@ export class A2AExchangeAlreadyAnsweredError extends Schema.TaggedErrorClass<A2A
   }
 }
 
+export class A2ACrossSquadronReplyInvariantError extends Schema.TaggedErrorClass<A2ACrossSquadronReplyInvariantError>()(
+  "A2ACrossSquadronReplyInvariantError",
+  {
+    exchangeId: Schema.String,
+    exchangeSquadronId: Schema.String,
+    senderSquadronId: Schema.String,
+    replyPersisted: Schema.Boolean,
+  },
+) {
+  override get message(): string {
+    const replyState = this.replyPersisted
+      ? "A durable reply is already persisted for this command under the cross-Squadron state; this replay sent nothing new."
+      : "A cross-Squadron reply cannot record the required closure fact, so nothing was sent.";
+    return `Exchange ${this.exchangeId} belongs to ${this.exchangeSquadronId}, but the replying sender's immutable home is ${this.senderSquadronId}. ${replyState} Report this invariant failure with the exchange and Squadron ids; do not retry send_message for this exchange.`;
+  }
+}
+
+export class A2AClearOwnAskSenderMismatchError extends Schema.TaggedErrorClass<A2AClearOwnAskSenderMismatchError>()(
+  "A2AClearOwnAskSenderMismatchError",
+  {
+    exchangeId: Schema.String,
+    callerId: Schema.String,
+    senderId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Exchange ${this.exchangeId} was opened by ${this.senderId}, not ${this.callerId}. Only that sender may withdraw this exchange. Do not retry clear_own_ask for exchange ${this.exchangeId} from this thread; other exchanges are unaffected.`;
+  }
+}
+
+export class A2AClearOwnAskAlreadyClosedError extends Schema.TaggedErrorClass<A2AClearOwnAskAlreadyClosedError>()(
+  "A2AClearOwnAskAlreadyClosedError",
+  { exchangeId: Schema.String },
+) {
+  override get message(): string {
+    return `Exchange ${this.exchangeId} is already closed; clear_own_ask made no change.`;
+  }
+}
+
+export class A2AClearOwnAskUnknownExchangeError extends Schema.TaggedErrorClass<A2AClearOwnAskUnknownExchangeError>()(
+  "A2AClearOwnAskUnknownExchangeError",
+  { exchangeId: Schema.String },
+) {
+  override get message(): string {
+    return `Exchange ${this.exchangeId} does not exist in the messaging ledger; clear_own_ask made no change. There is no agent-facing own-open-asks read at this head, so use only an exchange_id retained from the original send_message result; do not retry this unknown id.`;
+  }
+}
+
+export class A2AClearOwnAskCommandConflictError extends Schema.TaggedErrorClass<A2AClearOwnAskCommandConflictError>()(
+  "A2AClearOwnAskCommandConflictError",
+  { commandId: Schema.String, exchangeId: Schema.String },
+) {
+  override get message(): string {
+    return `The client_request_id behind command ${this.commandId} is already bound to a different request. This clear_own_ask call did not close exchange ${this.exchangeId}. Reusing a client_request_id for the same clear replays its original success; retry this different request with a unique client_request_id.`;
+  }
+}
+
 export type A2ASendError =
   | A2ALedgerError
   | Schema.SchemaError
@@ -175,7 +234,12 @@ export type A2ASendError =
   | A2AUrgencyRequiresExchangeError
   | A2AExchangeNotOpenError
   | A2AExchangeAlreadyAnsweredError
-  | A2AExchangeParticipantMismatchError;
+  | A2ACrossSquadronReplyInvariantError
+  | A2AExchangeParticipantMismatchError
+  | A2AClearOwnAskSenderMismatchError
+  | A2AClearOwnAskAlreadyClosedError
+  | A2AClearOwnAskUnknownExchangeError
+  | A2AClearOwnAskCommandConflictError;
 
 interface MembershipRow {
   readonly squadron_id: string;
@@ -204,6 +268,11 @@ interface ExistingMessageRow {
   readonly sent_seq: number;
 }
 
+interface ExistingSenderClearedRow {
+  readonly created_at: string;
+  readonly closure_kind: string | null;
+}
+
 const decodeParticipant = Schema.decodeUnknownEffect(Schema.fromJsonString(Participant));
 
 const messageIdFor = (commandId: CommCommandId) =>
@@ -217,6 +286,7 @@ const correlationIdFor = (commandId: CommCommandId) =>
 
 export interface A2ASendServiceShape {
   readonly send: (input: SendMessageInput) => Effect.Effect<SendMessageResult, A2ASendError>;
+  readonly clearOwnAsk: (input: ClearOwnAskInput) => Effect.Effect<ClearOwnAskResult, A2ASendError>;
   readonly listParticipants: (
     senderThreadId: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ParticipantDirectoryRow>, A2ASendError>;
@@ -419,6 +489,14 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
           exchange[0].squadron_id !== row.squadron_id &&
           exchange[0].receiver_id === row.sender_id &&
           exchange[0].sender_id === row.receiver_id;
+        if (isCrossSquadronReply) {
+          return yield* new A2ACrossSquadronReplyInvariantError({
+            exchangeId: row.exchange_id!,
+            exchangeSquadronId: exchange[0]!.squadron_id,
+            senderSquadronId: row.squadron_id,
+            replyPersisted: true,
+          });
+        }
         return {
           messageId,
           exchangeId: row.exchange_id === null ? null : ExchangeId.make(row.exchange_id),
@@ -427,9 +505,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
               ? ("none" as const)
               : row.exchange_role !== "reply"
                 ? ("open" as const)
-                : isCrossSquadronReply
-                  ? ("closing" as const)
-                  : ("closed" as const),
+                : ("closed" as const),
           joinedExistingExchange: row.exchange_role === "followup",
           durableAtSeq: row.sent_seq,
         } satisfies SendMessageResult;
@@ -479,6 +555,14 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
             exchangeId = input.exchangeId;
             joinedExistingExchange = isFollowup;
             if (isReply) {
+              if (exchange.squadron_id !== sender.squadronId) {
+                return yield* new A2ACrossSquadronReplyInvariantError({
+                  exchangeId,
+                  exchangeSquadronId: exchange.squadron_id,
+                  senderSquadronId: sender.squadronId,
+                  replyPersisted: false,
+                });
+              }
               const acceptedReplies = yield* sql<{ readonly count: number }>`
                 SELECT COUNT(*) AS count
                 FROM j5_a2a_delivery
@@ -488,18 +572,16 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
                 return yield* new A2AExchangeAlreadyAnsweredError({ exchangeId });
               }
               exchangeRole = "reply";
-              exchangeState = exchange.squadron_id === sender.squadronId ? "closed" : "closing";
-              if (exchange.squadron_id === sender.squadronId) {
-                closeEvent = {
-                  kind: "exchange.closed",
-                  sender: sender.participantId,
-                  receiver: receiverId,
-                  exchangeId,
-                  correlationId: correlationIdFor(input.commandId),
-                  payload: { replyMessageId: messageId },
-                  createdAt: input.acceptedAt,
-                };
-              }
+              exchangeState = "closed";
+              closeEvent = {
+                kind: "exchange.closed",
+                sender: sender.participantId,
+                receiver: receiverId,
+                exchangeId,
+                correlationId: correlationIdFor(input.commandId),
+                payload: { replyMessageId: messageId },
+                createdAt: input.acceptedAt,
+              };
             } else {
               exchangeRole = "followup";
               exchangeState = "open";
@@ -588,6 +670,90 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
           } satisfies SendMessageResult;
         });
 
-      return A2ASendService.of({ send, listParticipants });
+      const clearOwnAsk: A2ASendServiceShape["clearOwnAsk"] = (input) =>
+        Effect.gen(function* () {
+          const sender = yield* senderMembership(input.senderThreadId);
+          const replay = yield* sql<ExistingSenderClearedRow>`
+            SELECT
+              created_at,
+              json_extract(payload, '$.closureKind') AS closure_kind
+            FROM j5_a2a_comm_event
+            WHERE command_id = ${input.commandId}
+              AND kind = 'exchange.closed'
+              AND sender = ${sender.participantId}
+              AND exchange_id = ${input.exchangeId}
+            LIMIT 2
+          `;
+          if (replay.length === 1 && replay[0]!.closure_kind === "sender-cleared") {
+            return {
+              exchangeId: input.exchangeId,
+              closureKind: "sender-cleared",
+              closedAt: replay[0]!.created_at,
+            } satisfies ClearOwnAskResult;
+          }
+
+          const rows = yield* sql<ExchangeRow>`
+            SELECT squadron_id, exchange_id, sender_id, receiver_id, status
+            FROM j5_a2a_exchange
+            WHERE exchange_id = ${input.exchangeId}
+            LIMIT 2
+          `;
+          const exchange = rows.length === 1 ? rows[0] : undefined;
+          if (exchange === undefined) {
+            return yield* new A2AClearOwnAskUnknownExchangeError({
+              exchangeId: input.exchangeId,
+            });
+          }
+          if (exchange.sender_id !== sender.participantId) {
+            return yield* new A2AClearOwnAskSenderMismatchError({
+              exchangeId: input.exchangeId,
+              callerId: sender.participantId,
+              senderId: exchange.sender_id,
+            });
+          }
+          if (exchange.status !== "open") {
+            return yield* new A2AClearOwnAskAlreadyClosedError({
+              exchangeId: input.exchangeId,
+            });
+          }
+
+          const result = yield* ledger.append({
+            commandId: input.commandId,
+            squadronId: SquadronId.make(exchange.squadron_id),
+            acceptedAt: input.acceptedAt,
+            event: {
+              kind: "exchange.closed",
+              sender: sender.participantId,
+              receiver: ParticipantId.make(exchange.receiver_id),
+              exchangeId: input.exchangeId,
+              correlationId: correlationIdFor(input.commandId),
+              payload: { closureKind: "sender-cleared" },
+              createdAt: input.acceptedAt,
+            },
+          });
+          const eventMatchesClear =
+            result.event.kind === "exchange.closed" &&
+            result.event.exchangeId === input.exchangeId &&
+            result.event.sender === sender.participantId &&
+            typeof result.event.payload === "object" &&
+            result.event.payload !== null &&
+            "closureKind" in result.event.payload &&
+            result.event.payload.closureKind === "sender-cleared";
+          const clearResult = {
+            exchangeId: input.exchangeId,
+            closureKind: "sender-cleared" as const,
+            closedAt: result.event.createdAt,
+          } satisfies ClearOwnAskResult;
+          if (!result.committed && eventMatchesClear) return clearResult;
+          if (!result.committed || !eventMatchesClear) {
+            return yield* new A2AClearOwnAskCommandConflictError({
+              commandId: input.commandId,
+              exchangeId: input.exchangeId,
+            });
+          }
+          return clearResult;
+        });
+
+      return A2ASendService.of({ send, clearOwnAsk, listParticipants });
     }),
   );

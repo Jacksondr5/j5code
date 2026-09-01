@@ -28,3 +28,17 @@ Bell+badge placement and the footer-entry removal are B1's authorized SidebarChr
 ## Acceptance
 
 Bell + accurate open count visible from any view; expanding an item reveals body + inline answer; answer closes the exchange and the asker's delivery envelope states the exchange is closed (byte-equal answer preserved; envelope asserts no reply instruction); "Open thread →" lands on the asker's thread; an agent invoking clear-own-ask removes its item from the inbox with a ledger event and no reply; urgency ordering and "open Nh" rendering verified; manual person-id field gone. UI screenshots on the PR. Baseline suite green.
+
+## Closure-envelope invariant handoff (2026-08-30)
+
+Role-based closed-envelope selection is truthful under the current one-reply-closes invariant. `SendService` refuses a cross-Squadron reply when it cannot persist the matching `exchange.closed` fact, so that state cannot silently produce a closed envelope. If cross-Squadron replies become reachable, or any second role-without-closure path appears, re-plumb envelope selection to the persisted closure fact rather than adding another `exchangeRole` exception.
+
+## Badge freshness handoff (2026-08-31)
+
+The bell reads every 7.5 seconds while visible, refreshes on focus/visibility return, and refreshes immediately after a J5-owned inline inbox answer. **Named non-goal:** instant badge refresh on an observed agent-side `clear_own_ask` is poll-covered; no justified client composition seam observes that action, and this lane does not add push or touch `MessagesTimeline` to manufacture one.
+
+## Findings #135–#141 recovery record (2026-08-31)
+
+- **MCP command namespace:** the only host state database, `/Users/jackson/.t3/userdata/state.sqlite`, contains none of the J5 communication receipt, event, or delivery tables, and this dedicated worktree has no state database. The unqualified `send_message` receipt cohort is therefore nonexistent: zero receipts, events, or deliveries require compatibility recovery. Both mutating tools now use explicit tool-name namespaces. There is no automatic fallback to the unqualified form; if such a receipt is discovered later, stop and audit that database rather than silently replaying or duplicating it.
+- **Own-open-asks read:** no agent-facing read exists at this head. The J5 MCP toolkit exposes `send_message`, `list_participants`, and `clear_own_ask`; authenticated J5 HTTP routes expose the human inbox, Squadron management, and thread homes. The retained thread reads do not expose Exchange obligations. The unknown-exchange error therefore names this absence and accepts only an `exchange_id` retained from the original `send_message` result. A discoverable own-open-asks read remains a separate product/tooling gap; this ticket does not invent one.
+- **Clear replay versus collision:** replaying the same `clear_own_ask` command returns the original `sender-cleared` result and original `closedAt` without another event. A command receipt bound to a different request is a typed conflict and directs the caller to a unique `client_request_id`; it never claims the Exchange was cleared.

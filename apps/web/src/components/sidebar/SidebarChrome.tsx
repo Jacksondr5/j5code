@@ -8,6 +8,7 @@ import { memo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
+import { HumanInboxBell } from "../../j5/a2a/HumanInboxBell";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
 import {
@@ -74,6 +75,9 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           {pillLabel}
         </Badge>
       ) : null}
+      <div className="relative z-10 -me-1 ms-auto flex size-8 shrink-0 items-center justify-center md:me-[var(--sidebar-content-inset)]">
+        <HumanInboxBell onBackdrop={backdropVariant !== null} />
+      </div>
     </SidebarHeader>
   );
 });
@@ -157,11 +161,6 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     void navigate({ to: "/usage" });
   }, [isMobile, navigate, setOpenMobile]);
 
-  const handleInboxClick = useCallback(() => {
-    closeMobileSidebar();
-    void navigate({ to: "/inbox" });
-  }, [closeMobileSidebar, navigate]);
-
   const handleBackClick = useCallback(() => {
     closeMobileSidebar();
     void navigate({ to: "/" });
@@ -181,11 +180,6 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
           </SidebarMenuItem>
         ) : (
           <>
-            <SidebarMenuItem className="shrink-0">
-              <SidebarMenuButton aria-label="Inbox" onClick={handleInboxClick}>
-                <span>Inbox</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
             <SidebarMenuItem className="shrink-0">
               <Tooltip>
                 <TooltipTrigger

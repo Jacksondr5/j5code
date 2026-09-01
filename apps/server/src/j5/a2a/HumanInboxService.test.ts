@@ -19,6 +19,7 @@ import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
   CommCommandId,
+  ExchangeId,
   SquadronId,
   ParticipantId,
   type AgentParticipant,
@@ -186,11 +187,144 @@ it.effect(
         );
         assert.deepStrictEqual(new Set(firstInbox.map((item) => item.squadronId)).size, 4);
         assert.deepStrictEqual(
+          firstInbox.map((item) => item.senderThreadId),
+          [
+            ThreadId.make("thread:human-inbox:blocking-old"),
+            ThreadId.make("thread:human-inbox:blocking-new"),
+            ThreadId.make("thread:human-inbox:soon"),
+            ThreadId.make("thread:human-inbox:fyi-old"),
+          ],
+        );
+        assert.deepStrictEqual(
           (yield* inbox.list(secondPerson.id)).map((item) => item.intent),
           ["Second-person roundtrip"],
         );
         const retiredGlobal = yield* Effect.flip(inbox.list(ParticipantId.make("human:global")));
         assert.equal(retiredGlobal._tag, "A2AHumanPersonIdError");
+
+        const senderCleared = yield* open({
+          suffix: "sender-cleared",
+          person: firstPerson,
+          intent: "Resolved in the agent thread",
+          urgency: "soon",
+          openedAt: "2026-08-23T13:30:00.000Z",
+        });
+        const unknownClear = yield* Effect.flip(
+          send.clearOwnAsk({
+            commandId: CommCommandId.make("command:human-inbox:clear:unknown"),
+            senderThreadId: senderCleared.agent.threadId,
+            exchangeId: ExchangeId.make("exchange:human-inbox:missing"),
+            acceptedAt: "2026-08-23T13:40:00.000Z",
+          }),
+        );
+        assert.equal(unknownClear._tag, "A2AClearOwnAskUnknownExchangeError");
+        assert.include(unknownClear.message, "no agent-facing own-open-asks read");
+        assert.include(unknownClear.message, "original send_message result");
+        assert.include(unknownClear.message, "do not retry this unknown id");
+        const mismatchedClear = yield* Effect.flip(
+          send.clearOwnAsk({
+            commandId: CommCommandId.make("command:human-inbox:clear:mismatch"),
+            senderThreadId: second.agent.threadId,
+            exchangeId: senderCleared.exchangeId,
+            acceptedAt: "2026-08-23T13:41:00.000Z",
+          }),
+        );
+        assert.equal(mismatchedClear._tag, "A2AClearOwnAskSenderMismatchError");
+        assert.include(
+          mismatchedClear.message,
+          `Do not retry clear_own_ask for exchange ${senderCleared.exchangeId} from this thread`,
+        );
+        assert.include(mismatchedClear.message, "other exchanges are unaffected");
+        const collidingCommandId = CommCommandId.make(
+          "command:human-inbox:clear:colliding-receipt",
+        );
+        yield* send.send({
+          commandId: collidingCommandId,
+          senderThreadId: senderCleared.agent.threadId,
+          to: firstPerson.id,
+          message: "An unrelated send reserved this command id.",
+          acceptedAt: "2026-08-23T13:41:30.000Z",
+        });
+        const collidingClear = yield* Effect.flip(
+          send.clearOwnAsk({
+            commandId: collidingCommandId,
+            senderThreadId: senderCleared.agent.threadId,
+            exchangeId: senderCleared.exchangeId,
+            acceptedAt: "2026-08-23T13:41:31.000Z",
+          }),
+        );
+        assert.equal(collidingClear._tag, "A2AClearOwnAskCommandConflictError");
+        assert.include(collidingClear.message, "already bound to a different request");
+        assert.include(collidingClear.message, "same clear replays its original success");
+        assert.include(collidingClear.message, "unique client_request_id");
+        assert.include(
+          (yield* inbox.list(firstPerson.id)).map((item) => item.intent),
+          "Resolved in the agent thread",
+        );
+        const collidingEvents = yield* sql<{ readonly kind: string }>`
+          SELECT kind
+          FROM j5_a2a_comm_event
+          WHERE command_id = ${collidingCommandId}
+          ORDER BY seq
+        `;
+        assert.deepStrictEqual(collidingEvents, [{ kind: "message.sent" }]);
+        const clearCommand = {
+          commandId: CommCommandId.make("command:human-inbox:clear:sender-cleared"),
+          senderThreadId: senderCleared.agent.threadId,
+          exchangeId: senderCleared.exchangeId,
+          acceptedAt: "2026-08-23T13:42:00.000Z",
+        } as const;
+        const cleared = yield* send.clearOwnAsk(clearCommand);
+        const replayedClear = yield* send.clearOwnAsk({
+          ...clearCommand,
+          acceptedAt: "2026-08-23T13:43:00.000Z",
+        });
+        assert.deepStrictEqual(replayedClear, cleared);
+        assert.equal(replayedClear.closedAt, clearCommand.acceptedAt);
+        assert.equal(cleared.closureKind, "sender-cleared");
+        assert.notInclude(
+          (yield* inbox.list(firstPerson.id)).map((item) => item.intent),
+          "Resolved in the agent thread",
+        );
+        assert.notInclude(
+          (yield* inbox.list(firstPerson.id, "answered")).map((item) => item.intent),
+          "Resolved in the agent thread",
+        );
+        const clearedProjection = yield* sql<{
+          readonly status: string;
+          readonly terminal_disposition: string | null;
+        }>`
+          SELECT status, terminal_disposition
+          FROM j5_a2a_human_inbox
+          WHERE exchange_id = ${senderCleared.exchangeId}
+        `;
+        assert.deepStrictEqual(clearedProjection, [
+          { status: "dropped", terminal_disposition: "sender-cleared" },
+        ]);
+        const clearedEvents = yield* sql<{
+          readonly kind: string;
+          readonly payload: string;
+        }>`
+          SELECT kind, payload
+          FROM j5_a2a_comm_event
+          WHERE command_id = ${clearCommand.commandId}
+        `;
+        assert.deepStrictEqual(
+          clearedEvents.map((event) => ({ ...event, payload: JSON.parse(event.payload) })),
+          [{ kind: "exchange.closed", payload: { closureKind: "sender-cleared" } }],
+        );
+        const alreadyClosedClear = yield* Effect.flip(
+          send.clearOwnAsk({
+            ...clearCommand,
+            commandId: CommCommandId.make("command:human-inbox:clear:already-closed"),
+          }),
+        );
+        assert.equal(alreadyClosedClear._tag, "A2AClearOwnAskAlreadyClosedError");
+        assert.equal(
+          alreadyClosedClear.message,
+          `Exchange ${senderCleared.exchangeId} is already closed; clear_own_ask made no change.`,
+        );
+        assert.notInclude(alreadyClosedClear.message, "send_message");
 
         const exactAnswer = "  First line\nSecond line  ";
         const answerCommand = {
@@ -207,6 +341,10 @@ it.effect(
         assert.equal(answered.exchangeState, "closed");
         assert.deepStrictEqual(replayed, answered);
         assert.deepStrictEqual(yield* inbox.list(secondPerson.id), []);
+        assert.deepStrictEqual(
+          (yield* inbox.list(secondPerson.id, "answered")).map((item) => item.intent),
+          ["Second-person roundtrip"],
+        );
         assert.lengthOf(yield* inbox.list(firstPerson.id), 4);
         const answerDeliveries = (yield* Ref.get(deliveries)).filter(
           (delivery) => delivery.messageId === answered.messageId,
@@ -215,6 +353,7 @@ it.effect(
         assert.equal(answerDeliveries[0]?.senderId, secondPerson.id);
         assert.equal(answerDeliveries[0]?.receiverId, second.agent.id);
         assert.equal(answerDeliveries[0]?.message, exactAnswer);
+        assert.equal(answerDeliveries[0]?.exchangeRole, "reply");
 
         const durable = yield* sql<{
           readonly message_text: string;

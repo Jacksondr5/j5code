@@ -12,6 +12,8 @@ export const J5_A2A_DELIVERY_MESSAGE_PREFIX = "message:j5:a2a:delivery:";
 
 const PLAIN_DELIVERY_INSTRUCTION =
   "No reply is required. Use send_message without exchange_id only if a new message is needed.";
+const CLOSED_DELIVERY_INSTRUCTION =
+  "The platform closed this exchange when this reply was sent. No further reply is required.";
 const REPLY_DELIVERY_INSTRUCTION_SUFFIX =
   '", message="...") to close the exchange. Follow-ups from the asker carrying this id join the same exchange.';
 const HUMAN_DELIVERY_MARKER =
@@ -45,7 +47,7 @@ export type ThreadA2ADeliveryPresentation =
       readonly senderLabel: string;
       readonly squadronId: string;
       readonly body: string;
-      readonly exchange: "expects-reply" | "plain";
+      readonly exchange: "expects-reply" | "plain" | "closed";
       /** Kept as a pairing fact only; protocol identifiers never render. */
       readonly exchangeId: string | null;
     }
@@ -54,6 +56,7 @@ export type ThreadA2ADeliveryPresentation =
       readonly rawEnvelope: string;
       readonly senderId: string;
       readonly body: string;
+      readonly exchange: "expects-reply" | "plain" | "closed";
     }
   | {
       readonly kind: "silence";
@@ -77,9 +80,15 @@ export function isThreadA2ADeliveryMessage(message: ChatMessage): boolean {
 function parseKnownInstruction(input: {
   readonly senderId: string;
   readonly instruction: string;
-}): { readonly exchange: "expects-reply" | "plain"; readonly exchangeId: string | null } | null {
+}): {
+  readonly exchange: "expects-reply" | "plain" | "closed";
+  readonly exchangeId: string | null;
+} | null {
   if (input.instruction === PLAIN_DELIVERY_INSTRUCTION) {
     return { exchange: "plain", exchangeId: null };
+  }
+  if (input.instruction === CLOSED_DELIVERY_INSTRUCTION) {
+    return { exchange: "closed", exchangeId: null };
   }
 
   const replyPrefix = `Reply once with send_message(to="${input.senderId}", exchange_id="`;
@@ -122,11 +131,27 @@ function parseHumanEnvelope(rawEnvelope: string) {
 
   const senderId = header[1]!;
   const content = rawEnvelope.slice(header[0].length);
+  const divider = content.lastIndexOf("\n\n");
+  if (divider > 0) {
+    const closedInstruction = parseKnownInstruction({
+      senderId,
+      instruction: content.slice(divider + 2),
+    });
+    if (closedInstruction?.exchange === "closed") {
+      return { senderId, body: content.slice(0, divider), ...closedInstruction };
+    }
+  }
+
   const markerIndex = content.lastIndexOf(HUMAN_DELIVERY_MARKER);
   if (markerIndex <= 0) return null;
   const body = content.slice(0, markerIndex);
-  const instruction = content.slice(markerIndex + HUMAN_DELIVERY_MARKER.length);
-  return parseKnownInstruction({ senderId, instruction }) === null ? null : { senderId, body };
+  const instruction = parseKnownInstruction({
+    senderId,
+    instruction: content.slice(markerIndex + HUMAN_DELIVERY_MARKER.length),
+  });
+  return instruction === null || instruction.exchange === "closed"
+    ? null
+    : { senderId, body, ...instruction };
 }
 
 function counterpartSummary(counterpartId: string, suffix: string): string | null {
@@ -218,6 +243,7 @@ export function presentThreadA2ADelivery(
         rawEnvelope: message.text,
         senderId: human.senderId,
         body: human.body,
+        exchange: human.exchange,
       };
     }
   } else if (message.createdBy === "system") {
@@ -329,7 +355,7 @@ function PeerDeliveryCard({
   sentAt,
 }: {
   readonly body: string;
-  readonly exchange: "expects-reply" | "plain";
+  readonly exchange: "expects-reply" | "plain" | "closed";
   readonly now?: number | undefined;
   readonly senderLabel: string;
   readonly sentAt: string;
@@ -337,6 +363,7 @@ function PeerDeliveryCard({
   const nowMinute = useNowMinute();
   const currentNow = now ?? Date.parse(`${nowMinute}:00.000Z`);
   const isOpen = exchange === "expects-reply";
+  const isClosed = exchange === "closed";
   return (
     <section
       className="max-w-[88%] rounded-[10px] border border-border/70 bg-muted/25 px-3.5 py-2.5"
@@ -351,6 +378,11 @@ function PeerDeliveryCard({
         {isOpen ? (
           <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
             Expects reply
+          </span>
+        ) : null}
+        {isClosed ? (
+          <span className="rounded-md border border-border/70 px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
+            Closed your exchange
           </span>
         ) : null}
         <time className="ml-auto tabular-nums text-muted-foreground" dateTime={sentAt}>
@@ -525,7 +557,14 @@ export function renderThreadA2ADelivery(props: ThreadA2ADeliveryCompositionInput
         : `Via Inbox · ${presentation.senderId}`;
     return (
       <section className="rounded-lg bg-accent px-3 py-2.5" data-j5-a2a-renderer="human">
-        <p className="text-xs font-medium text-muted-foreground">{attribution}</p>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+          <p className="font-medium text-muted-foreground">{attribution}</p>
+          {presentation.exchange === "closed" ? (
+            <span className="rounded-md border border-border/70 px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
+              Closed your exchange
+            </span>
+          ) : null}
+        </div>
         <p className="mt-1 whitespace-pre-wrap break-words text-sm">{presentation.body}</p>
       </section>
     );
