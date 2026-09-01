@@ -111,3 +111,7 @@ Not a change to what agents receive (envelope content is A8/Director
 territory), not a summary layer (bodies render verbatim; the platform
 composes nothing), and not an inbox: exchange chips inform, they never
 demand — obligations live in [the inbox](inbox.md).
+
+## Copy amendment (Jackson, 2026-09-01, #23 final pass)
+
+Reply-delivery cards use the standard card vocabulary — the "Expects reply" / "Replied" family with the quiet-green resolved state — never exchange-closure rhetoric ("closed your exchange" is mechanics vocabulary, not reader copy). The split is deliberate: the agent-facing envelope TEXT keeps its mechanical instruction (the platform closed this exchange; no further reply is required) because agents need mechanics; human-facing UI says "Replied" because readers need plain words. Implementation rides the spawn-brief/sent-card lane (issue #41), which owns card-state vocabulary.
