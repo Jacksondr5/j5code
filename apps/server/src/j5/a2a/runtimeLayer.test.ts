@@ -5,9 +5,12 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
+import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { ArchiveAgentService } from "./ArchiveAgentService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import { A2ALifecycleService } from "./LifecycleService.ts";
@@ -17,6 +20,15 @@ import { A2ASilenceDetector } from "./SilenceDetector.ts";
 import { ThreadHomesService } from "./ThreadHomesService.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
 import { makeJ5A2ARuntimeLayer } from "./runtimeLayer.ts";
+
+const archiveDependencies = Layer.mergeAll(
+  Layer.mock(ServerSecretStore)({
+    getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(7)),
+  }),
+  Layer.mock(ThreadLifecycleService)({
+    archive: () => Effect.die("unused archive in runtime topology test"),
+  }),
+);
 
 const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
   Effect.scoped(
@@ -45,7 +57,12 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
         Layer.mergeAll(
           nested === "http" ? httpConsumer.pipe(Layer.provide(runtime)) : httpConsumer,
           nested === "mcp" ? mcpConsumer.pipe(Layer.provide(runtime)) : mcpConsumer,
-        ).pipe(Layer.provide(runtime), Layer.provide(threadManagement), Layer.provide(database)),
+        ).pipe(
+          Layer.provide(runtime),
+          Layer.provide(threadManagement),
+          Layer.provide(archiveDependencies),
+          Layer.provide(database),
+        ),
       );
       return ledgerBuilds;
     }),
@@ -80,6 +97,7 @@ it.effect("shares one runtime across the combined HTTP and MCP-style route graph
       const silenceConsumer = Layer.effectDiscard(A2ASilenceDetector.pipe(Effect.asVoid));
       const lifecycleConsumer = Layer.effectDiscard(A2ALifecycleService.pipe(Effect.asVoid));
       const archiveFactsConsumer = Layer.effectDiscard(A2AArchiveFacts.pipe(Effect.asVoid));
+      const archiveAgentConsumer = Layer.effectDiscard(ArchiveAgentService.pipe(Effect.asVoid));
       const threadHomesConsumer = Layer.effectDiscard(ThreadHomesService.pipe(Effect.asVoid));
       const spawnCompositionConsumer = Layer.effectDiscard(
         SpawnCompositionService.pipe(Effect.asVoid),
@@ -93,11 +111,13 @@ it.effect("shares one runtime across the combined HTTP and MCP-style route graph
           silenceConsumer,
           lifecycleConsumer,
           archiveFactsConsumer,
+          archiveAgentConsumer,
           threadHomesConsumer,
           spawnCompositionConsumer,
         ).pipe(
           Layer.provideMerge(runtime),
           Layer.provide(countedThreadManagement),
+          Layer.provide(archiveDependencies),
           Layer.provide(database),
         ),
       );

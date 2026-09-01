@@ -4,6 +4,7 @@ import {
   layer as archiveFactsLayer,
   placementFactsUnavailableLayer,
 } from "./ArchiveFactsService.ts";
+import { layer as archiveAgentLayer } from "./ArchiveAgentService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import {
@@ -57,6 +58,10 @@ export const makeJ5A2AAuxiliaryLayer = (
   const archiveFactsProvided = archiveFactsLayer.pipe(
     Layer.provide(placementFactsUnavailableLayer),
   );
+  const archiveAgentProvided = archiveAgentLayer.pipe(
+    Layer.provideMerge(archiveFactsProvided),
+    Layer.provideMerge(lifecycleServiceProvided),
+  );
   const spawnCompositionProvided = spawnCompositionLayer.pipe(
     Layer.provideMerge(homeRegistrationTransactionLayer),
     Layer.provideMerge(participantPlacementLayer),
@@ -69,6 +74,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     humanInboxLayer,
     lifecycleServiceProvided,
     archiveFactsProvided,
+    archiveAgentProvided,
     threadHomesServiceLayer,
     spawnCompositionProvided,
   );
