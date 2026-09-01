@@ -9,6 +9,7 @@ import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { type ReactNode } from "react";
 import { sortThreads } from "../lib/threadSort";
+import type { ThreadSortInput } from "@t3tools/client-runtime/state/thread-sort";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
 
@@ -294,6 +295,10 @@ export function filterCommandPaletteGroups(input: {
   query: string;
   isInSubmenu: boolean;
   projectSearchItems: ReadonlyArray<CommandPaletteActionItem>;
+  contextSearch?: {
+    readonly label: string;
+    readonly items: ReadonlyArray<CommandPaletteActionItem>;
+  };
   threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
   const isActionsFilter = input.query.startsWith(">");
@@ -316,11 +321,17 @@ export function filterCommandPaletteGroups(input: {
 
   const searchableGroups = [...baseGroups];
   if (!input.isInSubmenu && !isActionsFilter) {
-    if (input.projectSearchItems.length > 0) {
+    const contextSearch =
+      input.contextSearch === undefined
+        ? input.projectSearchItems.length > 0
+          ? { value: "projects-search", label: "Projects", items: input.projectSearchItems }
+          : null
+        : { value: "squadrons-search", ...input.contextSearch };
+    if (contextSearch !== null) {
       searchableGroups.push({
-        value: "projects-search",
-        label: "Projects",
-        items: input.projectSearchItems,
+        value: contextSearch.value,
+        label: contextSearch.label,
+        items: contextSearch.items,
       });
     }
     if (input.threadSearchItems.length > 0) {
@@ -354,6 +365,36 @@ export function filterCommandPaletteGroups(input: {
 
     return [{ value: group.value, label: group.label, items }];
   });
+}
+
+/**
+ * A Squadron picker may reuse its folder only to open a draft. Existing thread
+ * navigation is keyed exclusively by the immutable Registrar home.
+ */
+export function resolveSquadronPickerDestination<
+  T extends { readonly id: string; readonly archivedAt: string | null } & ThreadSortInput,
+>(input: {
+  readonly squadronId: string;
+  readonly threads: ReadonlyArray<T>;
+  readonly homesByThreadId: ReadonlyMap<
+    string,
+    | { readonly kind: "known"; readonly squadron: { readonly id: string } }
+    | { readonly kind: "unknown" }
+  >;
+  readonly sortOrder: SidebarThreadSortOrder;
+}): { readonly kind: "navigate"; readonly thread: T } | { readonly kind: "create-draft" } {
+  const match = sortThreads(
+    input.threads.filter((thread) => {
+      const home = input.homesByThreadId.get(thread.id);
+      return (
+        thread.archivedAt === null &&
+        home?.kind === "known" &&
+        home.squadron.id === input.squadronId
+      );
+    }),
+    input.sortOrder,
+  )[0];
+  return match === undefined ? { kind: "create-draft" } : { kind: "navigate", thread: match };
 }
 
 export function buildBrowseGroups(input: {

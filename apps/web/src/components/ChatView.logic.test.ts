@@ -27,9 +27,9 @@ import {
   isBranchMismatchDismissedForSession,
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
+  resolveFirstSendSquadronCarrier,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
-  startNewThreadForProject,
   shouldShowBranchMismatchBanner,
   shouldShowComposerContextStrip,
   shouldWriteThreadErrorToCurrentServerThread,
@@ -85,6 +85,38 @@ const readySession = {
   lastError: null,
   updatedAt: "2026-03-29T00:00:10.000Z",
 };
+
+describe("resolveFirstSendSquadronCarrier", () => {
+  it("refuses an ambient-only unselected draft without creating a launch carrier", () => {
+    expect(
+      resolveFirstSendSquadronCarrier({
+        durableSquadronId: null,
+        draftSquadronId: null,
+        ambientSquadronId: "squadron:alpha",
+      }),
+    ).toEqual({ kind: "missing-explicit-squadron" });
+  });
+
+  it("uses a durable Registrar home without persisting ambient scope into the draft", () => {
+    expect(
+      resolveFirstSendSquadronCarrier({
+        durableSquadronId: "squadron:alpha",
+        draftSquadronId: null,
+        ambientSquadronId: "squadron:bravo",
+      }),
+    ).toEqual({ kind: "durable-home", squadronId: "squadron:alpha" });
+  });
+
+  it("uses the local draft carrier before ambient context", () => {
+    expect(
+      resolveFirstSendSquadronCarrier({
+        durableSquadronId: null,
+        draftSquadronId: "squadron:bravo",
+        ambientSquadronId: "squadron:alpha",
+      }),
+    ).toEqual({ kind: "draft", squadronId: "squadron:bravo" });
+  });
+});
 
 describe("resolveThreadMetadataUpdateForNextTurn", () => {
   const modelSelection = {
@@ -470,33 +502,6 @@ describe("shouldWriteThreadErrorToCurrentServerThread", () => {
         targetThreadId: threadId,
       }),
     ).toBe(false);
-  });
-});
-
-describe("startNewThreadForProject", () => {
-  it("starts a thread through the supplied shared handler for the active project", () => {
-    const calls: Array<{ environmentId: EnvironmentId; projectId: ProjectId }> = [];
-    const projectRef = { environmentId, projectId };
-
-    expect(
-      startNewThreadForProject(projectRef, (nextProjectRef) => {
-        calls.push(nextProjectRef);
-        return Promise.resolve();
-      }),
-    ).toBe(true);
-    expect(calls).toEqual([projectRef]);
-  });
-
-  it("does nothing when the active project is unavailable", () => {
-    let called = false;
-
-    expect(
-      startNewThreadForProject(null, () => {
-        called = true;
-        return Promise.resolve();
-      }),
-    ).toBe(false);
-    expect(called).toBe(false);
   });
 });
 

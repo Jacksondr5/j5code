@@ -23,6 +23,30 @@ export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
 // it small; cold opens still render instantly from the cached snapshot.
 export const SIDEBAR_THREAD_PREWARM_LIMIT = 3;
 
+export type SidebarEmptyState =
+  | { readonly kind: "loading"; readonly message: "Loading Squadrons…" }
+  | { readonly kind: "no-squadrons"; readonly message: "No Squadrons yet" }
+  | { readonly kind: "scoped"; readonly message: string }
+  | { readonly kind: "empty"; readonly message: "No threads yet" };
+
+/** The first-run action is unavailable until the Registrar directory is authoritative. */
+export function resolveSidebarEmptyState(input: {
+  readonly directoryStatus: "loading" | "ready" | "error";
+  readonly squadronCount: number;
+  readonly squadronScopeName: string | null;
+}): SidebarEmptyState {
+  if (input.directoryStatus === "loading") {
+    return { kind: "loading", message: "Loading Squadrons…" };
+  }
+  if (input.directoryStatus === "ready" && input.squadronCount === 0) {
+    return { kind: "no-squadrons", message: "No Squadrons yet" };
+  }
+  if (input.squadronScopeName !== null) {
+    return { kind: "scoped", message: `No threads in ${input.squadronScopeName} yet` };
+  }
+  return { kind: "empty", message: "No threads yet" };
+}
+
 type SidebarProject = {
   id: string;
   title: string;
@@ -333,17 +357,6 @@ export function isSidebarNestedLinkClick(target: EventTarget | null): boolean {
       ? target.parentElement
       : null;
   return nodeClosest(parent, "a[href]") !== null;
-}
-
-// Shift+click on the new thread button creates directly in the current
-// project, skipping the command palette's project picker. With a single
-// project there is nothing to pick, so a plain click already creates
-// immediately and the modifier changes nothing.
-export function shouldCreateNewThreadInCurrentProject(
-  shiftKey: boolean,
-  projectGroupCount: number,
-): boolean {
-  return shiftKey || projectGroupCount <= 1;
 }
 
 export function orderItemsByPreferredIds<TItem, TId>(input: {

@@ -1,17 +1,14 @@
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect, useMemo } from "react";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { useCallback, useEffect, useMemo } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
-import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { openCommandPalette } from "../commandPaletteBus";
 import { useProjects } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
-import { selectProjectGroupingSettings } from "../logicalProject";
-import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { dispatchPreviewAction } from "../components/preview/previewActionBus";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
-import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { resolveShortcutCommand } from "../keybindings";
@@ -21,26 +18,35 @@ import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { primaryServerKeybindingsAtom } from "~/state/server";
+import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
+import { selectDraftSquadron } from "../j5/squadron/SquadronDraftState";
+import {
+  buildSquadronPickerEntries,
+  resolveNewThreadShortcutDestination,
+  startSquadronDraft,
+} from "../j5/squadron/SquadronPicker.logic";
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
   const selectedThreadKeysSize = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
-    useHandleNewThread();
+  const { handleNewThread, routeThreadRef } = useHandleNewThread();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const legacySidebarEnabled = useLegacySidebarEnabled();
-  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const projectGroupCount = useMemo(
-    () =>
-      buildSidebarProjectSnapshots({
-        projects,
-        settings: projectGroupingSettings,
-        primaryEnvironmentId,
-        resolveEnvironmentLabel: () => null,
-      }).length,
-    [primaryEnvironmentId, projectGroupingSettings, projects],
+  const { status: squadronDirectoryStatus, squadrons } = useSquadronDirectory();
+  const squadronEntries = useMemo(
+    () => buildSquadronPickerEntries({ squadrons, projects, primaryEnvironmentId }),
+    [primaryEnvironmentId, projects, squadrons],
+  );
+  const startShortcutThread = useCallback(
+    (entry: (typeof squadronEntries)[number]) =>
+      startSquadronDraft({
+        entry,
+        handleNewThread: (folder) =>
+          handleNewThread(scopeProjectRef(folder.environmentId, folder.id)),
+        selectDraftSquadron,
+      }),
+    [handleNewThread],
   );
   const terminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
@@ -77,34 +83,39 @@ function ChatRouteGlobalShortcuts() {
         return;
       }
 
-      if (command === "chat.newLocal") {
+      if (command === "chat.newLocal" || command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
-        void startNewThreadFromContext({
-          activeDraftThread,
-          activeThread: activeThread ?? undefined,
-          defaultProjectRef,
-          handleNewThread,
-        });
-        return;
-      }
-
-      if (command === "chat.new") {
-        event.preventDefault();
-        event.stopPropagation();
-        // The default sidebar routes creation through the command palette
-        // whenever there is a real choice to make; the legacy sidebar (and
-        // single-project setups) keep the immediate contextual create.
-        if (!legacySidebarEnabled && projectGroupCount > 1) {
+        const destination = resolveNewThreadShortcutDestination(
+          squadronDirectoryStatus,
+          squadronEntries,
+        );
+        if (destination.kind === "picker") {
           openCommandPalette({ open: "new-thread-in" });
           return;
         }
-        void startNewThreadFromContext({
-          activeDraftThread,
-          activeThread: activeThread ?? undefined,
-          defaultProjectRef,
-          handleNewThread,
-        });
+        void startShortcutThread(destination.entry).then(
+          (draft) => {
+            if (draft !== null) return;
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Squadron folder unavailable",
+                description:
+                  "This Squadron needs an available folder before a new thread can start.",
+              }),
+            );
+          },
+          () => {
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Couldn’t start a new thread",
+                description: "Try again after the Squadron folder is available.",
+              }),
+            );
+          },
+        );
         return;
       }
 
@@ -157,17 +168,15 @@ function ChatRouteGlobalShortcuts() {
       window.removeEventListener("keydown", onWindowKeyDown);
     };
   }, [
-    activeDraftThread,
-    activeThread,
     clearSelection,
     handleNewThread,
     keybindings,
-    defaultProjectRef,
     previewOpen,
-    projectGroupCount,
     routeThreadRef,
     selectedThreadKeysSize,
-    legacySidebarEnabled,
+    squadronDirectoryStatus,
+    squadronEntries,
+    startShortcutThread,
     terminalOpen,
   ]);
 

@@ -33,10 +33,10 @@ function render(props: Partial<typeof baseProps>): string {
 }
 
 describe("PullRequestListEmptyState", () => {
-  it("asks for a project ahead of anything a search or a filter could say", () => {
+  it("asks for a folder ahead of anything a search or a filter could say", () => {
     const text = render({ hasProjects: false, searching: true, query: "fix", filtered: true });
-    expect(text).toContain("No projects in this workspace");
-    expect(text).toContain("Add project");
+    expect(text).toContain("No folders in this workspace");
+    expect(text).toContain("Add folder");
   });
 
   it("leaves the retry off the states where asking again could not change the answer", () => {
@@ -50,5 +50,7 @@ describe("PullRequestListEmptyState", () => {
     expect(render({ query: "fix" })).toContain("Check again");
     expect(render({ canLoadMore: true })).toContain("Load more pull requests");
     expect(render({ refreshing: true })).toContain("Checking...");
+    expect(render({ filtered: true })).toContain("folder filter");
+    expect(render({})).toContain("every folder");
   });
 });

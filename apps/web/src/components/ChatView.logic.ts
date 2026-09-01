@@ -6,7 +6,6 @@ import {
   type OrchestrationV2ProjectedTurnItem,
   type ProviderDriverKind,
   type ServerProvider,
-  type ScopedProjectRef,
   type ScopedThreadRef,
   type ThreadId,
   type RunId,
@@ -31,6 +30,21 @@ export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3;
 export const ENVIRONMENT_RECONNECT_WARNING_GRACE_MS = 2_000;
 
+/** Ambient presentation context never substitutes for a first-send Squadron carrier. */
+export const resolveFirstSendSquadronCarrier = (input: {
+  readonly durableSquadronId: string | null;
+  readonly draftSquadronId: string | null;
+  readonly ambientSquadronId: string | null;
+}) => {
+  if (input.durableSquadronId !== null) {
+    return { kind: "durable-home", squadronId: input.durableSquadronId } as const;
+  }
+  if (input.draftSquadronId !== null) {
+    return { kind: "draft", squadronId: input.draftSquadronId } as const;
+  }
+  return { kind: "missing-explicit-squadron" } as const;
+};
+
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
 
 export function scheduleEnvironmentReconnectWarning(showWarning: () => void): () => void {
@@ -43,16 +57,6 @@ export function hasEnvironmentReconnectWarningGraceElapsed(
   elapsedEnvironmentId: EnvironmentId | null,
 ): boolean {
   return activeEnvironmentId !== null && activeEnvironmentId === elapsedEnvironmentId;
-}
-
-export function startNewThreadForProject(
-  projectRef: ScopedProjectRef | null,
-  handleNewThread: (projectRef: ScopedProjectRef) => Promise<unknown>,
-): boolean {
-  if (projectRef === null) return false;
-  void handleNewThread(projectRef);
-
-  return true;
 }
 
 export function resolveThreadMetadataUpdateForNextTurn(input: {

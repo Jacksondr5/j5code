@@ -1,23 +1,23 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { openCommandPalette } from "../commandPaletteBus";
-import { sortScopedProjectsForSidebar } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { SquadronFirstRunGate } from "../j5/squadron/FirstRunGate";
 import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
+import { selectDraftSquadron, useSquadronAmbientScope } from "../j5/squadron/SquadronDraftState";
 import { resolveSquadronFirstRunGateState } from "../j5/squadron/FirstRunGate.logic";
 import {
-  useAllEnvironmentShellsBootstrapped,
-  useProjects,
-  useThreadShells,
-} from "../state/entities";
-import { useEnvironments } from "../state/environments";
+  buildSquadronPickerEntries,
+  resolveIndexDraftDestination,
+  startSquadronDraft,
+} from "../j5/squadron/SquadronPicker.logic";
+import { useAllEnvironmentShellsBootstrapped, useProjects } from "../state/entities";
+import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { APP_DISPLAY_NAME } from "~/branding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { cn } from "~/lib/utils";
@@ -53,44 +53,63 @@ function SquadronFirstRunGateLive() {
   );
 }
 
-/**
- * Landing on the index route drops straight into a draft thread for the most
- * recently active project, so the first screen is a prompt instead of a dead
- * end. Falls back to an add-project hero when no project exists yet.
- */
+/** Landing creates only where the selected or sole Registrar home is determinate. */
 function IndexDraftLanding() {
   const projects = useProjects();
-  const threads = useThreadShells();
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const handleNewThread = useNewThreadHandler();
+  const { status: squadronDirectoryStatus, squadrons } = useSquadronDirectory();
+  const ambientSquadronId = useSquadronAmbientScope();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const startingRef = useRef(false);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
-
-  const mostRecentProject = useMemo(
-    () =>
-      bootstrapped
-        ? (sortScopedProjectsForSidebar(projects, threads, "updated_at")[0] ?? null)
-        : null,
-    [bootstrapped, projects, threads],
+  const squadronEntries = useMemo(
+    () => buildSquadronPickerEntries({ squadrons, projects, primaryEnvironmentId }),
+    [primaryEnvironmentId, projects, squadrons],
+  );
+  const destination = useMemo(
+    () => resolveIndexDraftDestination(ambientSquadronId, squadronDirectoryStatus, squadronEntries),
+    [ambientSquadronId, squadronDirectoryStatus, squadronEntries],
   );
 
   useEffect(() => {
-    if (mostRecentProject === null || startingRef.current) {
+    if (
+      !bootstrapped ||
+      destination.kind !== "single-squadron" ||
+      destination.entry.folder === null ||
+      startingRef.current
+    ) {
       return;
     }
     startingRef.current = true;
-    void handleNewThread(scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id), {
-      replace: true,
-    }).catch(() => {
-      startingRef.current = false;
-      setStartState((state) => ({ ...state, failed: true }));
-    });
-  }, [handleNewThread, mostRecentProject, startState.retryRequest]);
+    void startSquadronDraft({
+      entry: destination.entry,
+      handleNewThread: (folder) =>
+        handleNewThread(
+          { environmentId: folder.environmentId, projectId: folder.id },
+          { replace: true },
+        ),
+      selectDraftSquadron,
+    })
+      .then((draft) => {
+        if (draft === null) {
+          startingRef.current = false;
+          setStartState((state) => ({ ...state, failed: true }));
+        }
+      })
+      .catch(() => {
+        startingRef.current = false;
+        setStartState((state) => ({ ...state, failed: true }));
+      });
+  }, [bootstrapped, destination, handleNewThread, startState.retryRequest]);
 
   if (!bootstrapped) {
     return null;
   }
-  if (mostRecentProject !== null) {
+  if (destination.kind === "single-squadron") {
+    if (destination.entry.folder === null) {
+      return <SquadronFolderUnavailable />;
+    }
     return startState.failed ? (
       <DraftStartError
         onRetry={() => {
@@ -102,7 +121,23 @@ function IndexDraftLanding() {
       />
     ) : null;
   }
-  return <NoProjectsHero />;
+  return <SquadronChoiceLanding />;
+}
+
+function SquadronFolderUnavailable() {
+  return (
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+      <Empty className="flex-1">
+        <EmptyHeader className="max-w-md">
+          <EmptyTitle className="text-foreground text-xl">Squadron folder unavailable</EmptyTitle>
+          <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
+            This Squadron no longer has an available folder. Restore its folder before starting a
+            new thread.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    </SidebarInset>
+  );
 }
 
 function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
@@ -112,7 +147,7 @@ function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
         <EmptyHeader className="max-w-md">
           <EmptyTitle className="text-foreground text-xl">Couldn’t start a new thread</EmptyTitle>
           <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-            The project is still available. Try opening the draft again.
+            The folder is still available. Try opening the draft again.
           </EmptyDescription>
           <div className="mt-5 flex justify-center">
             <Button size="sm" onClick={onRetry}>
@@ -126,8 +161,8 @@ function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
   );
 }
 
-function NoProjectsHero() {
-  const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
+function SquadronChoiceLanding() {
+  const openSquadronPicker = useCallback(() => openCommandPalette({ open: "new-thread-in" }), []);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -139,12 +174,12 @@ function NoProjectsHero() {
                 What should we work on?
               </EmptyTitle>
               <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-                Add a project to start your first thread.
+                Choose a Squadron to start a new thread.
               </EmptyDescription>
               <div className="mt-6 flex justify-center">
-                <Button size="sm" onClick={openAddProject}>
+                <Button size="sm" onClick={openSquadronPicker}>
                   <PlusIcon className="size-4" />
-                  Add project
+                  Choose Squadron
                 </Button>
               </div>
             </EmptyHeader>

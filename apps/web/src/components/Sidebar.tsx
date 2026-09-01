@@ -41,7 +41,6 @@ import {
   CircleCheckIcon,
   CircleDashedIcon,
   ClockIcon,
-  FolderIcon,
   GitBranchIcon,
   MessageSquareIcon,
   PinIcon,
@@ -94,7 +93,6 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { openCommandPalette } from "../commandPaletteBus";
-import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { useClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
@@ -126,10 +124,10 @@ import {
   orderItemsByPreferredIds,
   planPinnedReorder,
   resolveAdjacentThreadId,
+  resolveSidebarEmptyState,
   resolveSettledTimestamp,
   resolveSidebarThreadStatus,
   searchSidebarThreadsByTitle,
-  shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
   sortLogicalProjectsForSidebar,
   sortPinnedThreadsForSidebar,
@@ -140,9 +138,16 @@ import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import { SquadronScopeDropdown } from "../j5/squadron/SquadronScopeDropdown";
 import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
 import {
+  selectDraftSquadron,
   useSquadronAmbientScope,
   useSquadronAmbientScopeSelectionGeneration,
 } from "../j5/squadron/SquadronDraftState";
+import {
+  buildSquadronPickerEntries,
+  canCreateThreadWithoutSquadronPicker,
+  resolveCurrentThreadNewThreadDestination,
+  startSquadronDraft,
+} from "../j5/squadron/SquadronPicker.logic";
 import {
   filterThreadsForSquadronScope,
   resolveSquadronScope,
@@ -1886,7 +1891,21 @@ export default function Sidebar() {
 
   const changeRequestSnapshotByKey = useAtomValue(threadChangeRequestSnapshotsAtom);
 
-  const { squadrons } = useSquadronDirectory();
+  const { status: squadronDirectoryStatus, squadrons } = useSquadronDirectory();
+  // Direct creation is safe only when the Registrar directory says there is
+  // exactly one Squadron. Folder/project cardinality is irrelevant: two
+  // Squadrons may intentionally share the same folder and must stay choices.
+  const squadronPickerEntries = useMemo(
+    () => buildSquadronPickerEntries({ squadrons, projects, primaryEnvironmentId }),
+    [primaryEnvironmentId, projects, squadrons],
+  );
+  // The per-row native context-menu callback remains stable through streaming;
+  // it reads current Registrar snapshots only when the user chooses an action.
+  const squadronDirectoryStatusRef = useRef(squadronDirectoryStatus);
+  squadronDirectoryStatusRef.current = squadronDirectoryStatus;
+  const squadronPickerEntriesRef = useRef(squadronPickerEntries);
+  squadronPickerEntriesRef.current = squadronPickerEntries;
+  const [squadronCreateOpen, setSquadronCreateOpen] = useState(false);
   const squadronScopeId = useSquadronAmbientScope();
   const squadronScopeSelectionGeneration = useSquadronAmbientScopeSelectionGeneration();
   const squadronScope = useMemo(
@@ -1906,6 +1925,8 @@ export default function Sidebar() {
     squadronScopeId,
     squadronScopeSelectionGeneration,
   );
+  const threadHomesRef = useRef(threadHomes);
+  threadHomesRef.current = threadHomes;
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content
   // subscription. Selecting a number keeps typing in a draft composer from
@@ -3034,13 +3055,30 @@ export default function Sidebar() {
         switch (clicked.value) {
           case "new-thread-on-branch": {
             // Explicit branch carry-over: reuse the thread's worktree when it
-            // has one, otherwise its branch on the local checkout.
+            // has one, otherwise its branch on the local checkout. Its
+            // destination remains the immutable Registrar home, never the
+            // source thread's folder identity.
+            const home = threadHomesRef.current.get(thread.id);
+            const destination = resolveCurrentThreadNewThreadDestination(
+              home?.kind === "known" ? home.squadron.id : null,
+              squadronDirectoryStatusRef.current,
+              squadronPickerEntriesRef.current,
+            );
+            if (destination.kind === "picker") {
+              openCommandPalette({ open: "new-thread-in" });
+              return;
+            }
             const result = await settlePromise(() =>
-              handleNewThreadRef.current(scopeProjectRef(thread.environmentId, thread.projectId), {
-                branch: thread.branch,
-                worktreePath: thread.worktreePath,
-                envMode: thread.worktreePath ? "worktree" : "local",
-                startFromOrigin: false,
+              startSquadronDraft({
+                entry: destination.entry,
+                handleNewThread: (folder) =>
+                  handleNewThreadRef.current(scopeProjectRef(folder.environmentId, folder.id), {
+                    branch: thread.branch,
+                    worktreePath: thread.worktreePath,
+                    envMode: thread.worktreePath ? "worktree" : "local",
+                    startFromOrigin: false,
+                  }),
+                selectDraftSquadron,
               }),
             );
             if (result._tag === "Failure") {
@@ -3050,6 +3088,15 @@ export default function Sidebar() {
                   type: "error",
                   title: "Could not create thread",
                   description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+            } else if (result.value === null) {
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Squadron folder unavailable",
+                  description:
+                    "This Squadron needs an available folder before a new thread can start.",
                 }),
               );
             }
@@ -3270,43 +3317,41 @@ export default function Sidebar() {
     autoAnimate(node, { duration: 150, easing: "ease-out" });
   }, []);
 
-  // New thread defaults to the project you're in (active thread's project,
-  // falling back to the top project) — same resolution the command palette
-  // uses. The command palette already offers a "New thread in..." submenu
-  // for multi-project setups.
-  const handleNewThreadClick = useCallback(
-    (event?: ReactMouseEvent) => {
-      // One project: nothing to pick, create immediately. Shift+click creates
-      // directly in the current project even with several projects, skipping
-      // the palette picker.
-      if (shouldCreateNewThreadInCurrentProject(event?.shiftKey ?? false, projectGroups.length)) {
-        if (isMobile) setOpenMobile(false);
-        void startNewThreadFromContext({
-          activeDraftThread: newThreadContext.activeDraftThread,
-          activeThread: newThreadContext.activeThread ?? undefined,
-          defaultProjectRef: newThreadContext.defaultProjectRef,
-          handleNewThread: newThreadContext.handleNewThread,
-        });
-        return;
-      }
+  const handleNewThreadClick = useCallback(() => {
+    if (canCreateThreadWithoutSquadronPicker(squadronDirectoryStatus, squadrons.length)) {
+      const entry = squadronPickerEntries[0];
+      if (entry === undefined) return;
       if (isMobile) setOpenMobile(false);
-      openCommandPalette({ open: "new-thread-in" });
-    },
-    [isMobile, newThreadContext, projectGroups.length, setOpenMobile],
-  );
+      void startSquadronDraft({
+        entry,
+        handleNewThread: (folder) =>
+          newThreadContext.handleNewThread(scopeProjectRef(folder.environmentId, folder.id)),
+        selectDraftSquadron,
+      });
+      return;
+    }
+    if (squadronDirectoryStatus === "ready" && squadrons.length === 0) {
+      if (isMobile) setOpenMobile(false);
+      setSquadronCreateOpen(true);
+      return;
+    }
+    if (isMobile) setOpenMobile(false);
+    openCommandPalette({ open: "new-thread-in" });
+  }, [
+    isMobile,
+    newThreadContext,
+    setOpenMobile,
+    squadronDirectoryStatus,
+    squadronPickerEntries,
+    squadrons.length,
+  ]);
 
-  // The button mirrors chat.new: in multi-project setups both route through
-  // the command palette's "New thread in..." picker, and in single-project
-  // setups both create immediately. In multi-project setups the label is only
-  // the picker's shortcut: falling back to chat.newLocal would advertise the
-  // same shortcut for both the picker and direct create. In single-project
-  // setups both commands create directly, so chat.newLocal is a valid
-  // fallback. The second tooltip line (multi-project only) advertises
-  // shift+click and its keyboard twin chat.newLocal for direct create.
-  const newThreadShortcutLabel =
-    shortcutLabelForCommand(keybindings, "chat.new") ??
-    (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
-  const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
+  const newThreadShortcutLabel = shortcutLabelForCommand(keybindings, "chat.new");
+  const sidebarEmptyState = resolveSidebarEmptyState({
+    directoryStatus: squadronDirectoryStatus,
+    squadronCount: squadrons.length,
+    squadronScopeName: squadronScope?.name ?? null,
+  });
   return (
     <>
       <SidebarChromeHeader isElectron={isElectron} />
@@ -3384,31 +3429,18 @@ export default function Sidebar() {
                     />
                   </TooltipTrigger>
                   <TooltipPopup side="right">
-                    {projectGroups.length > 1 ? (
-                      <span className="flex flex-col gap-0.5">
-                        <span>
-                          {newThreadShortcutLabel
-                            ? `New thread (${newThreadShortcutLabel})`
-                            : "New thread"}
-                        </span>
-                        <span className="text-muted-foreground">
-                          New thread in current project: Shift+click
-                          {newThreadInProjectShortcutLabel
-                            ? ` (${newThreadInProjectShortcutLabel})`
-                            : ""}
-                        </span>
-                      </span>
-                    ) : newThreadShortcutLabel ? (
-                      `New thread (${newThreadShortcutLabel})`
-                    ) : (
-                      "New thread"
-                    )}
+                    {newThreadShortcutLabel
+                      ? `New thread (${newThreadShortcutLabel})`
+                      : "New thread"}
                   </TooltipPopup>
                 </Tooltip>
               </div>
             </div>
             <div className="flex items-center gap-1">
-              <SquadronScopeDropdown />
+              <SquadronScopeDropdown
+                createOpen={squadronCreateOpen}
+                onCreateOpenChange={setSquadronCreateOpen}
+              />
             </div>
           </SidebarGroup>
         }
@@ -3740,22 +3772,20 @@ export default function Sidebar() {
             settledThreads.length ===
             0 ? (
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
-              {projects.length === 0 ? (
+              {sidebarEmptyState.kind === "no-squadrons" ? (
                 <>
-                  <span>No projects yet</span>
+                  <span>{sidebarEmptyState.message}</span>
                   <button
                     type="button"
-                    onClick={() => openCommandPalette({ open: "add-project" })}
+                    onClick={() => setSquadronCreateOpen(true)}
                     className="inline-flex items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-[11px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
                   >
                     <PlusIcon className="-mx-0.5 size-3" />
-                    Add project
+                    Create Squadron
                   </button>
                 </>
-              ) : squadronScope ? (
-                `No threads in ${squadronScope.name} yet`
               ) : (
-                "No threads yet"
+                sidebarEmptyState.message
               )}
             </div>
           ) : null}
