@@ -266,6 +266,7 @@ import {
 } from "../j5/squadron/SquadronScope.logic";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
+import { resolveFirstSendSquadronCarrier } from "./ChatView.logic";
 import { MessagesTimeline, type MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
 import { resolveTimelineIsAtEnd } from "./chat/MessagesTimeline.logic";
 import { ChatHeader } from "./chat/ChatHeader";
@@ -5256,7 +5257,12 @@ function ChatViewContent(props: ChatViewProps) {
 
     let squadronIdForLaunch: string | undefined;
     if (isFirstMessage) {
-      if (effectiveSquadronId === null) {
+      const firstSendSquadron = resolveFirstSendSquadronCarrier({
+        durableSquadronId: durableSquadronHome?.id ?? null,
+        draftSquadronId: draftSquadron.squadronId,
+        ambientSquadronId,
+      });
+      if (firstSendSquadron.kind === "missing-explicit-squadron") {
         toastManager.add(
           stackedThreadToast({
             type: "warning",
@@ -5266,16 +5272,15 @@ function ChatViewContent(props: ChatViewProps) {
         );
         return;
       }
-      // Ambient scope is user-selected context, not an invented default. Persist
-      // it to this draft at the one-way send boundary before the RPC starts.
-      if (draftSquadron.squadronId === null) {
-        selectDraftSquadron(routeThreadKey, effectiveSquadronId);
+      if (firstSendSquadron.kind === "durable-home") {
+        squadronIdForLaunch = firstSendSquadron.squadronId;
+      } else {
+        const frozenSquadronId = freezeDraftSquadronAtFirstSend(routeThreadKey);
+        if (frozenSquadronId === null) {
+          return;
+        }
+        squadronIdForLaunch = frozenSquadronId;
       }
-      const frozenSquadronId = freezeDraftSquadronAtFirstSend(routeThreadKey);
-      if (frozenSquadronId === null) {
-        return;
-      }
-      squadronIdForLaunch = frozenSquadronId;
     }
 
     sendInFlightRef.current = true;

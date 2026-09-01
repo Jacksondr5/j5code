@@ -79,3 +79,10 @@ introduced.
 therefore deleted with the orphan rather than resurrected. The still-live
 `threadActionMenu.logic.test.ts` remains: it proves the menu item rendered and handled by
 `Sidebar.tsx`, not the deleted hook.
+
+**Recovery record — ambient launch accommodation:** pre-dogfood state contains no legacy
+unselected drafts to recover. The E7 door trace proves every successful converted first-send door
+writes its Squadron through SQ1's draft-local carrier before composition, except an existing
+thread's immutable Registrar home is already its carrier; ambient scope remains a zoomed-out
+presentation/filter choice only. A zero-message draft without either carrier now refuses to send
+with “Choose a Squadron before sending” instead of copying and freezing ambient context.
