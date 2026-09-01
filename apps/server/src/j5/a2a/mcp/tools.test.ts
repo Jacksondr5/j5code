@@ -54,6 +54,7 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
     "spawn_agent",
     "stop_agent",
     "archive_agent",
+    "clear_own_ask",
   ]);
   assert.isFalse(Context.get(J5ArchiveAgentTool.annotations, Tool.Idempotent));
   assert.isTrue(Context.get(J5ArchiveAgentTool.annotations, Tool.Destructive));
