@@ -159,6 +159,7 @@ import {
 import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
 import { selectDraftSquadron } from "../j5/squadron/SquadronDraftState";
 import {
+  buildSquadronPickerRow,
   buildSquadronPickerEntries,
   startSquadronDraft,
   type SquadronPickerEntry,
@@ -991,14 +992,8 @@ function OpenCommandPaletteDialog(props: {
       entries.map((entry) => ({
         kind: "action",
         value: `${valuePrefix}:${entry.squadronId}`,
-        searchTerms: [entry.name, entry.folder?.title ?? "", entry.folder?.workspaceRoot ?? ""],
-        title: entry.name,
-        description:
-          entry.folder === null
-            ? "Folder unavailable"
-            : `Folder · ${entry.folder.title} — ${entry.folder.workspaceRoot}`,
+        ...buildSquadronPickerRow(entry),
         icon: <RadioIcon className={ITEM_ICON_CLASS} />,
-        ...(entry.folder === null ? { disabled: true } : {}),
         run: async () => {
           if (entry.folder !== null) await run(entry);
         },

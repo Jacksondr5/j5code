@@ -16,6 +16,13 @@ export type StartedSquadronDraft = {
   readonly threadId: ThreadId;
 };
 
+/** Picker rows expose the Squadron identity alone; folders remain search and launch substrate. */
+export const buildSquadronPickerRow = (entry: SquadronPickerEntry) => ({
+  searchTerms: [entry.name, entry.folder?.title ?? "", entry.folder?.workspaceRoot ?? ""],
+  title: entry.name,
+  ...(entry.folder === null ? { disabled: true } : {}),
+});
+
 /** The only valid storage key for a newly-created Squadron-scoped draft. */
 export function squadronDraftScopeKey(
   environmentId: EnvironmentId,

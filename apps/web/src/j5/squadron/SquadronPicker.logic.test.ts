@@ -4,6 +4,7 @@ import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environ
 
 import { filterThreadsForSquadronScope } from "./SquadronScope.logic";
 import {
+  buildSquadronPickerRow,
   buildSquadronPickerEntries,
   canCreateThreadWithoutSquadronPicker,
   resolveCurrentThreadNewThreadDestination,
@@ -21,6 +22,26 @@ const sharedFolder = {
 } as const;
 
 describe("Squadron picker", () => {
+  it("renders a Squadron picker row without a folder-description second line", () => {
+    const [entry] = buildSquadronPickerEntries({
+      squadrons: [
+        {
+          squadron: { id: "squadron:alpha", name: "Alpha", createdAt: "2026-08-31T00:00:00Z" },
+          projectIds: [sharedFolder.id],
+        },
+      ],
+      projects: [sharedFolder],
+      primaryEnvironmentId: sharedFolder.environmentId,
+    });
+
+    const row = buildSquadronPickerRow(entry!);
+    expect(row).toEqual({
+      searchTerms: ["Alpha", "Shared folder", "/work/shared"],
+      title: "Alpha",
+    });
+    expect(row).not.toHaveProperty("description");
+  });
+
   it("keys Squadron draft state by immutable returned thread id, never local draft id", () => {
     const draft = { draftId: "draft:sole", threadId: ThreadId.make("thread:sole") };
 
