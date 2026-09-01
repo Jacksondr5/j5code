@@ -1,0 +1,10 @@
+{
+  "sourceHead": "af0d55cf0750595d01a174f4e691be5ce02ab7d3",
+  "surface": "SquadronCreateForm Create a Squadron dialog",
+  "query": "getByRole(\"button\", { name: \"Choose folder\" })",
+  "matches": 1,
+  "visibleText": [
+    "Choose folder"
+  ],
+  "assertion": "The rendered button's accessible name and visible text are both Choose folder. This is a DOM/text assertion, not screenshot evidence."
+}
