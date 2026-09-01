@@ -33,6 +33,10 @@ Bell + accurate open count visible from any view; expanding an item reveals body
 
 Role-based closed-envelope selection is truthful under the current one-reply-closes invariant. `SendService` refuses a cross-Squadron reply when it cannot persist the matching `exchange.closed` fact, so that state cannot silently produce a closed envelope. If cross-Squadron replies become reachable, or any second role-without-closure path appears, re-plumb envelope selection to the persisted closure fact rather than adding another `exchangeRole` exception.
 
+## Badge freshness handoff (2026-08-31)
+
+The bell reads every 7.5 seconds while visible, refreshes on focus/visibility return, and refreshes immediately after a J5-owned inline inbox answer. **Named non-goal:** instant badge refresh on an observed agent-side `clear_own_ask` is poll-covered; no justified client composition seam observes that action, and this lane does not add push or touch `MessagesTimeline` to manufacture one.
+
 ## Findings #135–#141 recovery record (2026-08-31)
 
 - **MCP command namespace:** the only host state database, `/Users/jackson/.t3/userdata/state.sqlite`, contains none of the J5 communication receipt, event, or delivery tables, and this dedicated worktree has no state database. The unqualified `send_message` receipt cohort is therefore nonexistent: zero receipts, events, or deliveries require compatibility recovery. Both mutating tools now use explicit tool-name namespaces. There is no automatic fallback to the unqualified form; if such a receipt is discovered later, stop and audit that database rather than silently replaying or duplicating it.

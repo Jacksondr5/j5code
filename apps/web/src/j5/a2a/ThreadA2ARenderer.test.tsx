@@ -49,6 +49,17 @@ const peerPlainRaw = [
   "No reply is required. Use send_message without exchange_id only if a new message is needed.",
 ].join("\n");
 
+const closedInstruction =
+  "The platform closed this exchange when this reply was sent. No further reply is required.";
+
+const peerClosedRaw = [
+  "[Cross-agent message from agent:delivery-sender in squadron squadron:alpha]",
+  "",
+  "Peer reply delivered verbatim.",
+  "",
+  closedInstruction,
+].join("\n");
+
 const humanRaw = [
   "[Message from human:viewer]",
   "",
@@ -57,6 +68,14 @@ const humanRaw = [
   "This person is not watching this chat. They see only what you send back on this exchange.",
   "",
   'Reply once with send_message(to="human:viewer", exchange_id="exchange:human", message="...") to close the exchange. Follow-ups from the asker carrying this id join the same exchange.',
+].join("\n");
+
+const humanClosedRaw = [
+  "[Message from human:viewer]",
+  "",
+  "Human reply delivered verbatim.",
+  "",
+  closedInstruction,
 ].join("\n");
 
 const silenceRaw = [
@@ -120,6 +139,24 @@ describe("ThreadA2ADeliveryRenderer", () => {
     expect(markup).not.toContain("closed");
   });
 
+  it("renders the exact v13 peer reply as a closed exchange without reply instructions", () => {
+    const source = message({ id: deliveryId("peer-closed"), text: peerClosedRaw });
+    const presentation = presentThreadA2ADelivery({ message: source });
+    const markup = renderToStaticMarkup(<ThreadA2ADeliveryRenderer message={source} />);
+
+    expect(presentation).toMatchObject({
+      kind: "peer",
+      body: "Peer reply delivered verbatim.",
+      exchange: "closed",
+      exchangeId: null,
+    });
+    expect(markup).toContain("Closed your exchange");
+    expect(markup).not.toContain("Expects reply");
+    expect(markup).not.toContain(closedInstruction);
+    expect(markup).not.toContain("send_message");
+    expect(markup).not.toContain("Show raw envelope");
+  });
+
   it("renders a #11 human inbox reply with a literal id until local identity is proven", () => {
     const markup = renderToStaticMarkup(
       <ThreadA2ADeliveryRenderer
@@ -141,6 +178,59 @@ describe("ThreadA2ADeliveryRenderer", () => {
     );
 
     expect(markup).toContain("You · via Inbox");
+  });
+
+  it("renders the exact v13 human reply as a closed exchange without reply instructions", () => {
+    const source = message({
+      id: deliveryId("human-closed"),
+      createdBy: "user",
+      text: humanClosedRaw,
+    });
+    const presentation = presentThreadA2ADelivery({ message: source });
+    const markup = renderToStaticMarkup(
+      <ThreadA2ADeliveryRenderer
+        message={source}
+        resolveViewerParticipantId={() => "human:viewer"}
+      />,
+    );
+
+    expect(presentation).toMatchObject({
+      kind: "human",
+      senderId: "human:viewer",
+      body: "Human reply delivered verbatim.",
+      exchange: "closed",
+    });
+    expect(markup).toContain("You · via Inbox");
+    expect(markup).toContain("Closed your exchange");
+    expect(markup).not.toContain("Expects reply");
+    expect(markup).not.toContain(closedInstruction);
+    expect(markup).not.toContain("send_message");
+    expect(markup).not.toContain("Show raw envelope");
+  });
+
+  it.each([
+    [
+      "peer",
+      message({
+        id: deliveryId("peer-future-closed"),
+        text: peerClosedRaw.replace("No further reply is required.", "This exchange is complete."),
+      }),
+    ],
+    [
+      "human",
+      message({
+        id: deliveryId("human-future-closed"),
+        createdBy: "user",
+        text: humanClosedRaw.replace("No further reply is required.", "This exchange is complete."),
+      }),
+    ],
+  ] as const)("raw-renders a future %s closed instruction instead of guessing", (_kind, source) => {
+    const presentation = presentThreadA2ADelivery({ message: source });
+    const markup = renderToStaticMarkup(<ThreadA2ADeliveryRenderer message={source} />);
+
+    expect(presentation).toEqual({ kind: "raw", rawEnvelope: source.text });
+    expect(markup).toContain('data-j5-a2a-renderer="raw"');
+    expect(markup).toContain("Show raw envelope");
   });
 
   it("raw-renders the older v6 human template instead of treating it as #11", () => {
@@ -185,7 +275,12 @@ describe("ThreadA2ADeliveryRenderer", () => {
 
   it.each([
     ["peer", message({ text: peerRaw })],
+    ["peer closed", message({ id: deliveryId("peer-closed-parsed"), text: peerClosedRaw })],
     ["human", message({ id: deliveryId("human-parsed"), createdBy: "user", text: humanRaw })],
+    [
+      "human closed",
+      message({ id: deliveryId("human-closed-parsed"), createdBy: "user", text: humanClosedRaw }),
+    ],
     [
       "silence",
       message({ id: deliveryId("silence-parsed"), createdBy: "system", text: silenceRaw }),

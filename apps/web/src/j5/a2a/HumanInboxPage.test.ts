@@ -55,6 +55,7 @@ it("clears pending state when answer attempt id generation fails", async () => {
   const errors: Array<string | null> = [];
   const send = vi.fn(async () => undefined);
   const refresh = vi.fn(async () => undefined);
+  const notifyChanged = vi.fn();
   const onAccepted = vi.fn();
 
   await submitHumanInboxAnswer({
@@ -66,6 +67,7 @@ it("clears pending state when answer attempt id generation fails", async () => {
     },
     send,
     refresh,
+    notifyChanged,
     onAccepted,
     setPendingExchangeId: (exchangeId) => pending.push(exchangeId),
     setError: (message) => errors.push(message),
@@ -75,6 +77,7 @@ it("clears pending state when answer attempt id generation fails", async () => {
   assert.deepStrictEqual(errors, [null, "Secure random ids are unavailable."]);
   assert.equal(send.mock.calls.length, 0);
   assert.equal(refresh.mock.calls.length, 0);
+  assert.equal(notifyChanged.mock.calls.length, 0);
   assert.equal(onAccepted.mock.calls.length, 0);
 });
 
@@ -100,6 +103,7 @@ it("reports a stale inbox without treating a delivered answer as failed", async 
   const refresh = vi.fn(async () => {
     throw new Error("Network unavailable.");
   });
+  const notifyChanged = vi.fn();
   const onAccepted = vi.fn();
 
   await submitHumanInboxAnswer({
@@ -109,6 +113,7 @@ it("reports a stale inbox without treating a delivered answer as failed", async 
     randomUUID: () => "request:refresh-test",
     send,
     refresh,
+    notifyChanged,
     onAccepted,
     setPendingExchangeId: (exchangeId) => pending.push(exchangeId),
     setError: (message) => errors.push(message),
@@ -121,6 +126,7 @@ it("reports a stale inbox without treating a delivered answer as failed", async 
   ]);
   assert.equal(send.mock.calls.length, 1);
   assert.equal(refresh.mock.calls.length, 1);
+  assert.equal(notifyChanged.mock.calls.length, 1);
   assert.equal(onAccepted.mock.calls.length, 1);
   assert.equal(attempts.has(item.exchangeId), false);
 });

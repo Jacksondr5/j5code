@@ -23,6 +23,7 @@ import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { answerHumanExchange, listHumanInbox, type HumanInboxItem } from "./humanInboxClient";
+import { notifyHumanInboxChanged } from "./humanInboxRefresh";
 
 interface HumanInboxAnswerAttempt {
   readonly message: string;
@@ -64,6 +65,7 @@ export async function submitHumanInboxAnswer(input: {
     readonly clientRequestId: string;
   }) => Promise<unknown>;
   readonly refresh: (personId: string) => Promise<void>;
+  readonly notifyChanged: () => void;
   readonly onAccepted: () => void;
   readonly setPendingExchangeId: (exchangeId: string | null) => void;
   readonly setError: (message: string | null) => void;
@@ -89,6 +91,7 @@ export async function submitHumanInboxAnswer(input: {
       return;
     }
     input.attempts.delete(input.item.exchangeId);
+    input.notifyChanged();
     input.onAccepted();
     try {
       await input.refresh(input.item.personId);
@@ -311,6 +314,7 @@ export function HumanInboxPage() {
       randomUUID: () => window.crypto.randomUUID(),
       send: answerHumanExchange,
       refresh,
+      notifyChanged: notifyHumanInboxChanged,
       onAccepted: () =>
         setAnswers((current) => {
           const next = { ...current };
