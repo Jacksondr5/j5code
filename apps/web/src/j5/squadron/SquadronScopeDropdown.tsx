@@ -70,7 +70,7 @@ export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
             onValueChange={(value) => setAmbientSquadronId(value === "none" ? null : String(value))}
           >
             <MenuRadioItem value="none" closeOnClick>
-              All squadrons
+              All Squadrons
             </MenuRadioItem>
             {choices.map((choice) => (
               <MenuRadioItem key={choice.id} value={choice.id} closeOnClick>

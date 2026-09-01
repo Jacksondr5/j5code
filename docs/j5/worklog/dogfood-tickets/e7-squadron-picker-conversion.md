@@ -90,3 +90,7 @@ with “Choose a Squadron before sending” instead of copying and freezing ambi
 **Recovery record — picker row shape:** the later dogfood ruling removes folder-description
 second lines from Squadron picker rows. Their visible identity is the Squadron name alone; folder
 data remains only for search, availability, and the explicit launch substrate.
+
+**Recovery record — ambient label:** the null ambient-scope option is **All Squadrons**. It follows
+the measured sentence-case menu convention while preserving the J5 product proper noun; this is a
+zoomed-out filter state, not a draft-selection or launch behavior.
