@@ -112,7 +112,9 @@ const projection = (threadId: ThreadId): OrchestrationV2ThreadProjection =>
   }) as unknown as OrchestrationV2ThreadProjection;
 
 const unusedLifecycleDependencies = Layer.mergeAll(
-  Layer.mock(A2AHomeRegistrar)({}),
+  Layer.mock(A2AHomeRegistrar)({
+    getHomeForThread: (threadId) => Effect.fail(new A2AHomeNotFoundError({ threadId })),
+  }),
   Layer.mock(A2ALedger)({}),
   Layer.mock(SpawnCompositionService)({}),
   Layer.mock(ThreadManagementService)({}),

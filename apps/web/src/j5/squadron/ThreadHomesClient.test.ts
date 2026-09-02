@@ -9,7 +9,6 @@ import {
   replaceThreadHomeEntries,
   shouldForceThreadHomesForScope,
   shouldRequestThreadHome,
-  participantIdForThread,
   type ThreadHome,
   ThreadHomesHttpError,
 } from "./ThreadHomesClient";
@@ -17,7 +16,7 @@ import { filterThreadsForSquadronScope } from "./SquadronScope.logic";
 
 vi.stubGlobal("window", { location: new URL("http://environment.test/") });
 
-it.effect("reads B6's participant-home batch without project metadata", () =>
+it.effect("reads B6's thread-home batch without client-side participant-id derivation", () =>
   Effect.gen(function* () {
     const requests: Array<{ readonly method: string; readonly url: URL }> = [];
     const client = HttpClient.make((request) => {
@@ -28,10 +27,10 @@ it.effect("reads B6's participant-home batch without project metadata", () =>
           Response.json({
             entries: [
               {
-                participantId: "agent:j5:a2a:thread%3Aalpha",
+                threadId: "thread:alpha",
                 home: { kind: "known", squadron: { id: "squadron:alpha", name: "Alpha" } },
               },
-              { participantId: "agent:j5:a2a:thread%3Anative", home: { kind: "unknown" } },
+              { threadId: "thread:native", home: { kind: "unknown" } },
             ],
           }),
         ),
@@ -58,12 +57,6 @@ it.effect("reads B6's participant-home batch without project metadata", () =>
     ]);
   }),
 );
-
-it("derives the Registrar participant id without exposing it as card copy", () => {
-  expect(participantIdForThread(ThreadId.make("thread:alpha / beta"))).toBe(
-    "agent:j5:a2a:thread%3Aalpha%20%2F%20beta",
-  );
-});
 
 it.effect("preserves an authenticated thread-home read failure", () =>
   Effect.gen(function* () {

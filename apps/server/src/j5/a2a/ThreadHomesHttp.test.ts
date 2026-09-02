@@ -83,7 +83,7 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
     ),
     Layer.provide(
       Layer.mock(ClientReadsService)({
-        participantHomes: () => Effect.succeed([]),
+        threadHomes: () => Effect.succeed([]),
         participantIdentities: () => Effect.succeed({ entries: [] }),
         openInboxCount: (personId) =>
           Effect.succeed({

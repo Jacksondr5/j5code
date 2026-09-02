@@ -1,4 +1,4 @@
-import { AuthOrchestrationReadScope, AuthSessionId } from "@t3tools/contracts";
+import { AuthOrchestrationReadScope, AuthSessionId, ThreadId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -36,13 +36,13 @@ it("keeps B3 identity requests exact, ordered, and total before aggregate regist
   const alpha = ParticipantId.make("agent:client-reads:alpha");
   const unknown = ParticipantId.make("agent:client-reads:unknown");
   const received: Array<ReadonlyArray<ParticipantId>> = [];
-  const homesReceived: Array<ReadonlyArray<ParticipantId>> = [];
+  const homesReceived: Array<ReadonlyArray<ThreadId>> = [];
   const clientReads = Layer.mock(ClientReadsService)({
-    participantHomes: (participantIds) => {
-      homesReceived.push(participantIds);
+    threadHomes: (threadIds) => {
+      homesReceived.push(threadIds);
       return Effect.succeed(
-        Array.from(new Set(participantIds)).map((participantId) => ({
-          participantId,
+        Array.from(new Set(threadIds)).map((threadId) => ({
+          threadId,
           home: {
             kind: "known" as const,
             squadron: { id: SquadronId.make("squadron:client-reads"), name: "Client Reads" },
@@ -99,22 +99,28 @@ it("keeps B3 identity requests exact, ordered, and total before aggregate regist
       new Request(`http://environment.test${paths.participantHome}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ participantIds: [unknown, alpha, unknown] }),
+        body: JSON.stringify({ threadIds: ["thread:unknown", "thread:alpha", "thread:unknown"] }),
       }),
     );
     assert.equal(homes.status, 200);
-    assert.deepStrictEqual(homesReceived, [[unknown, alpha, unknown]]);
+    assert.deepStrictEqual(homesReceived, [
+      [
+        ThreadId.make("thread:unknown"),
+        ThreadId.make("thread:alpha"),
+        ThreadId.make("thread:unknown"),
+      ],
+    ]);
     assert.deepStrictEqual(await homes.json(), {
       entries: [
         {
-          participantId: unknown,
+          threadId: "thread:unknown",
           home: {
             kind: "known",
             squadron: { id: "squadron:client-reads", name: "Client Reads" },
           },
         },
         {
-          participantId: alpha,
+          threadId: "thread:alpha",
           home: {
             kind: "known",
             squadron: { id: "squadron:client-reads", name: "Client Reads" },
@@ -140,7 +146,7 @@ it("maps A4 resolver failures without treating a bad person selection as a serve
   const invalidPerson = ParticipantId.make("agent:client-reads:not-human");
   const missingPerson = ParticipantId.make("human:client-reads:missing");
   const clientReads = Layer.mock(ClientReadsService)({
-    participantHomes: () => Effect.succeed([]),
+    threadHomes: () => Effect.succeed([]),
     participantIdentities: () => Effect.succeed({ entries: [] }),
     openInboxCount: (personId) => {
       if (personId === invalidPerson) {
@@ -204,10 +210,10 @@ it("maps A4 resolver failures without treating a bad person selection as a serve
 it("executes home response validation before serializing a malformed Squadron name", async () => {
   const participantId = ParticipantId.make("agent:client-reads:bad-squadron");
   const clientReads = Layer.mock(ClientReadsService)({
-    participantHomes: () =>
+    threadHomes: () =>
       Effect.succeed([
         {
-          participantId,
+          threadId: ThreadId.make("thread:client-reads:bad-squadron"),
           home: {
             kind: "known" as const,
             squadron: { id: SquadronId.make("squadron:client-reads:bad"), name: "   " },
@@ -237,7 +243,7 @@ it("executes home response validation before serializing a malformed Squadron na
       new Request(`http://environment.test${paths.participantHome}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ participantIds: [participantId] }),
+        body: JSON.stringify({ threadIds: ["thread:malformed"] }),
       }),
     );
     assert.equal(response.status, 500);
@@ -259,12 +265,12 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
   const calls: Array<ReadonlyArray<ParticipantId>> = [];
   let authMode: "missing" | "missing-read-scope" | "read" = "missing";
   const clientReads = Layer.mock(ClientReadsService)({
-    participantHomes: (participantIds) =>
+    threadHomes: (threadIds) =>
       Effect.succeed(
-        Array.from(new Set(participantIds)).map((participantId) => ({
-          participantId,
+        Array.from(new Set(threadIds)).map((threadId) => ({
+          threadId,
           home:
-            participantId === unknown
+            threadId === ThreadId.make("thread:client-reads:aggregate-unknown")
               ? { kind: "unknown" as const }
               : {
                   kind: "known" as const,
@@ -360,14 +366,14 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
     });
 
     const homes = await request(CLIENT_READS_PARTICIPANT_HOMES_PATH, {
-      participantIds: [unknown, known],
+      threadIds: ["thread:client-reads:aggregate-unknown", "thread:client-reads:aggregate-known"],
     });
     assert.equal(homes.status, 200);
     assert.deepStrictEqual(await homes.json(), {
       entries: [
-        { participantId: unknown, home: { kind: "unknown" } },
+        { threadId: "thread:client-reads:aggregate-unknown", home: { kind: "unknown" } },
         {
-          participantId: known,
+          threadId: "thread:client-reads:aggregate-known",
           home: {
             kind: "known",
             squadron: {

@@ -1,4 +1,4 @@
-import { NonNegativeInt, TrimmedNonEmptyString } from "@t3tools/contracts";
+import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -22,22 +22,22 @@ export const ParticipantHome = Schema.Union([
 ]);
 export type ParticipantHome = typeof ParticipantHome.Type;
 
-export const ParticipantHomeEntry = Schema.Struct({
-  participantId: ParticipantId,
+export const ThreadHomeEntry = Schema.Struct({
+  threadId: ThreadId,
   home: ParticipantHome,
 });
-export type ParticipantHomeEntry = typeof ParticipantHomeEntry.Type;
+export type ThreadHomeEntry = typeof ThreadHomeEntry.Type;
 
-/** Sidebar rows resolve visible participants in one bounded, total request. */
-export const ParticipantHomesRequest = Schema.Struct({
-  participantIds: Schema.Array(ParticipantId),
+/** Sidebar rows resolve visible threads at the durable registrar boundary. */
+export const ThreadHomesRequest = Schema.Struct({
+  threadIds: Schema.Array(ThreadId),
 });
-export type ParticipantHomesRequest = typeof ParticipantHomesRequest.Type;
+export type ThreadHomesRequest = typeof ThreadHomesRequest.Type;
 
-export const ParticipantHomesResponse = Schema.Struct({
-  entries: Schema.Array(ParticipantHomeEntry),
+export const ThreadHomesResponse = Schema.Struct({
+  entries: Schema.Array(ThreadHomeEntry),
 });
-export type ParticipantHomesResponse = typeof ParticipantHomesResponse.Type;
+export type ThreadHomesResponse = typeof ThreadHomesResponse.Type;
 
 export const DisplayIdentity = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("known"), displayName: TrimmedNonEmptyString }),
@@ -71,7 +71,7 @@ export type OpenInboxCount = typeof OpenInboxCount.Type;
 export type ClientReadsError = SqlError | A2AHumanInboxError;
 
 interface HistoricalHomeRow {
-  readonly participant_id: string;
+  readonly thread_id: string;
   readonly squadron_id: string;
   readonly squadron_name: string;
 }
@@ -114,27 +114,24 @@ const toIdentity = (row: IdentityRow | undefined): DisplayIdentity => {
     : { kind: "known", displayName: TrimmedNonEmptyString.make(displayName) };
 };
 
-const participantHomeRows = (
-  sql: SqlClient.SqlClient,
-  participantIds: ReadonlyArray<ParticipantId>,
-) =>
+const threadHomeRows = (sql: SqlClient.SqlClient, threadIds: ReadonlyArray<ThreadId>) =>
   sql<HistoricalHomeRow>`
     WITH ranked_homes AS (
       SELECT
-        json_extract(event.payload, '$.participant.id') AS participant_id,
+        json_extract(event.payload, '$.participant.threadId') AS thread_id,
         squadron.id AS squadron_id,
         squadron.name AS squadron_name,
         ROW_NUMBER() OVER (
-          PARTITION BY json_extract(event.payload, '$.participant.id')
+          PARTITION BY json_extract(event.payload, '$.participant.threadId')
           ORDER BY event.created_at ASC, event.squadron_id ASC, event.seq ASC
         ) AS home_rank
       FROM j5_a2a_comm_event AS event
       JOIN j5_a2a_squadron AS squadron ON squadron.id = event.squadron_id
       WHERE event.kind = 'participant.joined'
         AND json_extract(event.payload, '$.participant.kind') = 'agent'
-        AND json_extract(event.payload, '$.participant.id') IN ${sql.in(participantIds)}
+        AND json_extract(event.payload, '$.participant.threadId') IN ${sql.in(threadIds)}
     )
-    SELECT participant_id, squadron_id, squadron_name
+    SELECT thread_id, squadron_id, squadron_name
     FROM ranked_homes
     WHERE home_rank = 1
   `;
@@ -187,10 +184,10 @@ export const explainOpenInboxCountStatement = (
 };
 
 export interface ClientReadsShape {
-  /** Resolves a participant's immutable join-history home without consulting active membership. */
-  readonly participantHomes: (
-    participantIds: ReadonlyArray<ParticipantId>,
-  ) => Effect.Effect<ReadonlyArray<ParticipantHomeEntry>, SqlError>;
+  /** Resolves a thread's immutable join-history home without re-deriving its participant id. */
+  readonly threadHomes: (
+    threadIds: ReadonlyArray<ThreadId>,
+  ) => Effect.Effect<ReadonlyArray<ThreadHomeEntry>, SqlError>;
   /** Batch-oriented, total identity resolution for B3 timelines and A4 inbox sender labels. */
   readonly participantIdentities: (
     input: ParticipantIdentitiesRequest,
@@ -212,19 +209,19 @@ export const layer: Layer.Layer<ClientReadsService, never, A2AHumanInbox | SqlCl
       const inbox = yield* A2AHumanInbox;
       const sql = yield* SqlClient.SqlClient;
 
-      const participantHomes: ClientReadsShape["participantHomes"] = (participantIds) =>
+      const threadHomes: ClientReadsShape["threadHomes"] = (threadIds) =>
         Effect.gen(function* () {
-          const uniqueParticipantIds = uniqueInFirstOccurrenceOrder(participantIds);
-          if (uniqueParticipantIds.length === 0) return [];
+          const uniqueThreadIds = uniqueInFirstOccurrenceOrder(threadIds);
+          if (uniqueThreadIds.length === 0) return [];
           const rows: Array<HistoricalHomeRow> = [];
-          for (const participantIdBatch of batchesOf(uniqueParticipantIds)) {
-            rows.push(...(yield* participantHomeRows(sql, participantIdBatch)));
+          for (const threadIdBatch of batchesOf(uniqueThreadIds)) {
+            rows.push(...(yield* threadHomeRows(sql, threadIdBatch)));
           }
-          const rowsByParticipant = Map.groupBy(rows, (row) => row.participant_id);
-          return uniqueParticipantIds.map((participantId) => {
-            const row = rowsByParticipant.get(participantId)?.[0];
+          const rowsByThread = Map.groupBy(rows, (row) => row.thread_id);
+          return uniqueThreadIds.map((threadId) => {
+            const row = rowsByThread.get(threadId)?.[0];
             return {
-              participantId,
+              threadId,
               home:
                 row === undefined
                   ? unknownHome()
@@ -235,7 +232,7 @@ export const layer: Layer.Layer<ClientReadsService, never, A2AHumanInbox | SqlCl
                         name: row.squadron_name,
                       },
                     },
-            } satisfies ParticipantHomeEntry;
+            } satisfies ThreadHomeEntry;
           });
         });
 
@@ -265,6 +262,6 @@ export const layer: Layer.Layer<ClientReadsService, never, A2AHumanInbox | SqlCl
           return { personId, count: rows[0]?.count ?? 0 } satisfies OpenInboxCount;
         });
 
-      return ClientReadsService.of({ participantHomes, participantIdentities, openInboxCount });
+      return ClientReadsService.of({ threadHomes, participantIdentities, openInboxCount });
     }),
   );

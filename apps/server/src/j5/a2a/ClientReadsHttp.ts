@@ -22,8 +22,8 @@ import {
   type ClientReadsError,
   ParticipantIdentitiesRequest,
   ParticipantIdentitiesResponse,
-  ParticipantHomesRequest,
-  ParticipantHomesResponse,
+  ThreadHomesRequest,
+  ThreadHomesResponse,
   OpenInboxCount,
 } from "./ClientReadsService.ts";
 import { ParticipantId } from "./contracts.ts";
@@ -34,10 +34,10 @@ export const CLIENT_READS_PARTICIPANT_IDENTITIES_PATH =
 export const CLIENT_READS_OPEN_COUNT_PATH = "/api/j5/a2a/client-reads/open-count";
 
 const OpenInboxCountRequest = Schema.Struct({ personId: Schema.optionalKey(ParticipantId) });
-const decodeParticipantHomesRequest = Schema.decodeUnknownEffect(ParticipantHomesRequest);
+const decodeThreadHomesRequest = Schema.decodeUnknownEffect(ThreadHomesRequest);
 const decodeParticipantIdentitiesRequest = Schema.decodeUnknownEffect(ParticipantIdentitiesRequest);
 const decodeOpenInboxCountRequest = Schema.decodeUnknownEffect(OpenInboxCountRequest);
-const encodeParticipantHomesResponse = Schema.encodeEffect(ParticipantHomesResponse);
+const encodeThreadHomesResponse = Schema.encodeEffect(ThreadHomesResponse);
 const encodeParticipantIdentitiesResponse = Schema.encodeEffect(ParticipantIdentitiesResponse);
 const encodeOpenInboxCount = Schema.encodeEffect(OpenInboxCount);
 
@@ -108,13 +108,11 @@ const jsonBody = Effect.gen(function* () {
   return yield* Effect.result(request.json);
 });
 
-const respondHomes = (effect: Effect.Effect<ParticipantHomesResponse, ClientReadsError>) =>
-  Effect.flatMap(
-    Effect.result(effect.pipe(Effect.flatMap(encodeParticipantHomesResponse))),
-    (result) =>
-      Result.isSuccess(result)
-        ? Effect.succeed(HttpServerResponse.jsonUnsafe(result.success))
-        : operationFailure(result.failure),
+const respondHomes = (effect: Effect.Effect<ThreadHomesResponse, ClientReadsError>) =>
+  Effect.flatMap(Effect.result(effect.pipe(Effect.flatMap(encodeThreadHomesResponse))), (result) =>
+    Result.isSuccess(result)
+      ? Effect.succeed(HttpServerResponse.jsonUnsafe(result.success))
+      : operationFailure(result.failure),
   );
 
 const respondIdentities = (
@@ -151,11 +149,11 @@ export const makeClientReadsHttpRouteLayer = (paths: ClientReadsHttpPaths) =>
           yield* authenticateRead;
           const body = yield* jsonBody;
           if (Result.isFailure(body)) return invalidRequest("The request body must be JSON.");
-          const decoded = yield* Effect.result(decodeParticipantHomesRequest(body.success));
-          if (Result.isFailure(decoded)) return invalidRequest("participantIds must be an array.");
+          const decoded = yield* Effect.result(decodeThreadHomesRequest(body.success));
+          if (Result.isFailure(decoded)) return invalidRequest("threadIds must be an array.");
           return yield* respondHomes(
             clientReads
-              .participantHomes(decoded.success.participantIds)
+              .threadHomes(decoded.success.threadIds)
               .pipe(Effect.map((entries) => ({ entries }))),
           );
         }).pipe(
