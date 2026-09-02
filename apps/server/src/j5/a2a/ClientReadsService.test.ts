@@ -39,12 +39,12 @@ it.effect(
 
       const alpha: AgentParticipant = {
         kind: "agent",
-        id: ParticipantId.make("agent:client-reads:alpha"),
+        id: ParticipantId.make("agent:j5:a2a:thread:client-reads:alpha"),
         threadId: ThreadId.make("thread:client-reads:alpha"),
       };
       const beta: AgentParticipant = {
         kind: "agent",
-        id: ParticipantId.make("agent:client-reads:beta"),
+        id: ParticipantId.make("agent:j5:a2a:thread%3Aclient-reads%3Abeta"),
         threadId: ThreadId.make("thread:client-reads:beta"),
       };
       const alphaSquadron = SquadronId.make("squadron:client-reads:alpha");
@@ -175,27 +175,26 @@ it.effect(
       `;
 
       const missing = ParticipantId.make("agent:client-reads:missing");
-      const homes = yield* reads.participantHomes([
-        beta.id,
-        duplicateHistory,
-        legacyHuman,
-        missing,
-        alpha.id,
-        beta.id,
+      const missingThread = ThreadId.make("thread:client-reads:missing");
+      const homes = yield* reads.threadHomes([
+        beta.threadId,
+        ThreadId.make("thread:client-reads:duplicate-history:second"),
+        missingThread,
+        alpha.threadId,
+        beta.threadId,
       ]);
       assert.deepStrictEqual(homes, [
         {
-          participantId: beta.id,
+          threadId: beta.threadId,
           home: { kind: "known", squadron: { id: betaSquadron, name: "Beta Squadron" } },
         },
         {
-          participantId: duplicateHistory,
+          threadId: ThreadId.make("thread:client-reads:duplicate-history:second"),
           home: { kind: "known", squadron: { id: betaSquadron, name: "Beta Squadron" } },
         },
-        { participantId: legacyHuman, home: { kind: "unknown" } },
-        { participantId: missing, home: { kind: "unknown" } },
+        { threadId: missingThread, home: { kind: "unknown" } },
         {
-          participantId: alpha.id,
+          threadId: alpha.threadId,
           home: { kind: "known", squadron: { id: alphaSquadron, name: "Alpha Squadron" } },
         },
       ]);

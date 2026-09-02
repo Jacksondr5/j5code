@@ -131,6 +131,45 @@ it.effect("returns the same durable home when a fresh command id repeats its cre
   }).pipe(Effect.provide(testLayer)),
 );
 
+it.effect(
+  "retains an encoded historical participant id when creation retries after the format change",
+  () =>
+    Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      const service = yield* A2AHomeRegistrar;
+      const ledgerService = yield* A2ALedger;
+      const squadronId = SquadronId.make("squadron:registrar:historical-id");
+      const threadId = ThreadId.make("thread:registrar:historical-id");
+      const historicalId = ParticipantId.make("agent:j5:a2a:thread%3Aregistrar%3Ahistorical-id");
+      yield* createSquadron(squadronId);
+      yield* ledgerService.append({
+        commandId: CommCommandId.make("command:registrar:historical-id:original"),
+        squadronId,
+        acceptedAt: createdAt,
+        event: {
+          kind: "participant.joined",
+          sender: null,
+          receiver: historicalId,
+          exchangeId: null,
+          correlationId: null,
+          payload: { participant: { kind: "agent", id: historicalId, threadId } },
+          createdAt,
+        },
+      });
+
+      const replay = yield* service.registerAtCreation({
+        squadronId,
+        threadId,
+        createdAt,
+        commandId: CommCommandId.make("command:registrar:historical-id:retry"),
+      });
+
+      assert.equal(participantIdForThread(threadId), "agent:j5:a2a:thread:registrar:historical-id");
+      assert.deepStrictEqual(replay, { squadronId, participantId: historicalId });
+      assert.equal(yield* countJoined(threadId), 1);
+    }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("rejects changed creation inputs when the command id replays", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();

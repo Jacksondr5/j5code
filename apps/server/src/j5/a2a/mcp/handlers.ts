@@ -407,7 +407,14 @@ const handlers = {
   send_message: (input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
-      const callerParticipantId = participantIdForThread(scope.threadId);
+      const registrar = yield* A2AHomeRegistrar;
+      const callerParticipantId = yield* registrar.getHomeForThread(scope.threadId).pipe(
+        Effect.map((home) => home.participantId),
+        // Preserve the ordinary send-path error for a thread with no home.
+        Effect.catchTag("A2AHomeNotFoundError", () =>
+          Effect.succeed(participantIdForThread(scope.threadId)),
+        ),
+      );
       if (input.to === callerParticipantId) {
         return yield* stateError(
           `send_message cannot target your own participant_id ${callerParticipantId}; self-messaging is not supported.`,

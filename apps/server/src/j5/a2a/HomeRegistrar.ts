@@ -142,8 +142,6 @@ interface ThreadHomeLookupRow {
   readonly squadron_name: string;
 }
 
-const stablePart = (value: string) => encodeURIComponent(value);
-
 /** Leaves headroom under SQLite's bind-parameter ceiling for sidebar reads. */
 export const THREAD_HOME_LOOKUP_BATCH_SIZE = 900;
 
@@ -159,7 +157,7 @@ const batchesOf = <Value>(values: ReadonlyArray<Value>) => {
 };
 
 export const participantIdForThread = (threadId: ThreadId) =>
-  ParticipantId.make(`agent:j5:a2a:${stablePart(threadId)}`);
+  ParticipantId.make(`agent:j5:a2a:${threadId}`);
 
 export const resolveThreadHome = Effect.fn("j5.a2a.resolveThreadHome")(function* (
   sql: SqlClient.SqlClient,
@@ -259,7 +257,9 @@ const makeRegisterAtCreation = (input: {
     }
 
     yield* input.readSquadron(registration.squadronId);
-    const participantId = participantIdForThread(registration.threadId);
+    // A historical home is ledger identity, not a value to re-derive after the
+    // ID format changes. Only a thread without one mints the current format.
+    const participantId = existing?.participantId ?? participantIdForThread(registration.threadId);
     const appendResult = yield* Effect.result(
       input.append({
         commandId: registration.commandId,

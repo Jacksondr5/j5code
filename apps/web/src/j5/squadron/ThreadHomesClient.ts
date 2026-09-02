@@ -16,8 +16,8 @@ const ThreadHome = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("known"), squadron: SquadronHome }),
   Schema.Struct({ kind: Schema.Literal("unknown") }),
 ]);
-const ParticipantHomeEntry = Schema.Struct({ participantId: Schema.String, home: ThreadHome });
-const ParticipantHomesResponse = Schema.Struct({ entries: Schema.Array(ParticipantHomeEntry) });
+const ThreadHomeEntry = Schema.Struct({ threadId: ThreadId, home: ThreadHome });
+const ThreadHomesResponse = Schema.Struct({ entries: Schema.Array(ThreadHomeEntry) });
 
 export type ThreadHome = typeof ThreadHome.Type;
 export type ThreadHomeEntry = { readonly threadId: ThreadId; readonly home: ThreadHome };
@@ -51,26 +51,15 @@ export const listThreadHomesEffect = Effect.fn("j5.threadHomesClient.list")(func
   threadIds: ReadonlyArray<ThreadId>,
 ) {
   const client = yield* HttpClient.HttpClient;
-  const threadIdByParticipantId = new Map(
-    threadIds.map((threadId) => [participantIdForThread(threadId), threadId] as const),
-  );
+  const uniqueThreadIds = Array.from(new Set(threadIds));
   const request = yield* HttpClientRequest.post(
     resolvePrimaryEnvironmentHttpUrl("/api/j5/a2a/client-reads/participant-homes"),
-  ).pipe(
-    HttpClientRequest.bodyJson({ participantIds: Array.from(threadIdByParticipantId.keys()) }),
-  );
+  ).pipe(HttpClientRequest.bodyJson({ threadIds: uniqueThreadIds }));
   const response = yield* client.execute(request);
   const success = yield* requireThreadHomesSuccess(response);
-  const decoded = yield* HttpClientResponse.schemaBodyJson(ParticipantHomesResponse)(success);
-  return decoded.entries.flatMap((entry) => {
-    const threadId = threadIdByParticipantId.get(entry.participantId);
-    return threadId === undefined ? [] : [{ threadId, home: entry.home } satisfies ThreadHomeEntry];
-  });
+  const decoded = yield* HttpClientResponse.schemaBodyJson(ThreadHomesResponse)(success);
+  return decoded.entries;
 });
-
-/** The Registrar persists this opaque participant identity at creation. */
-export const participantIdForThread = (threadId: ThreadId) =>
-  `agent:j5:a2a:${encodeURIComponent(threadId)}`;
 
 const listThreadHomes = (threadIds: ReadonlyArray<ThreadId>) =>
   runtime.runPromise(listThreadHomesEffect(threadIds));
