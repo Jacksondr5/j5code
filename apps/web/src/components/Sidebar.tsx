@@ -86,6 +86,7 @@ import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../termina
 import { isMacPlatform } from "~/lib/utils";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { readLocalApi } from "../localApi";
+import { requestConfirmDialog } from "../confirmDialog";
 import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
@@ -137,6 +138,7 @@ import {
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import { SquadronScopeDropdown } from "../j5/squadron/SquadronScopeDropdown";
 import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
+import { archiveWithPreflight } from "../j5/a2a/archiveFlow";
 import {
   selectDraftSquadron,
   useSquadronAmbientScope,
@@ -3163,18 +3165,39 @@ export default function Sidebar() {
             copyThreadIdToClipboard(thread.id, { threadId: thread.id });
             return;
           case "archive": {
-            if (confirmThreadArchive) {
-              const confirmed = await settlePromise(() =>
-                api.dialogs.confirm(`Archive thread "${thread.title}"?`),
-              );
-              if (confirmed._tag === "Failure" || !confirmed.value) return;
-            }
             let didArchive = false;
-            const result = await archiveThread(threadRef, {
-              onArchived: () => {
-                didArchive = true;
+            const result = await archiveWithPreflight({
+              threadRef,
+              threadTitle: thread.title,
+              confirm: async ({ message, content, confirmLabel }) => {
+                const confirmed = await settlePromise(
+                  () =>
+                    requestConfirmDialog(
+                      message,
+                      { variant: "destructive" },
+                      { content, confirmLabel },
+                    ) ?? Promise.resolve(false),
+                );
+                return confirmed._tag === "Success" && confirmed.value;
               },
+              ...(confirmThreadArchive
+                ? {
+                    confirmCleanArchive: async () => {
+                      const confirmed = await settlePromise(() =>
+                        api.dialogs.confirm(`Archive thread "${thread.title}"?`),
+                      );
+                      return confirmed._tag === "Success" && confirmed.value;
+                    },
+                  }
+                : {}),
+              archive: () =>
+                archiveThread(threadRef, {
+                  onArchived: () => {
+                    didArchive = true;
+                  },
+                }),
             });
+            if (result === undefined) return;
             if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
               const error = squashAtomCommandFailure(result);
               toastManager.add(

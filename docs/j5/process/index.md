@@ -5,4 +5,9 @@ kind: spec
 
 # Process
 
-Contributor-facing rules for working in this repository live in this directory — facts about the codebase and how changes land in it. How Jackson runs the agent fleet that builds J5 (PR Groups, sitters, review rounds, readiness) is his personal practice and lives outside the product repo, in his playbooks.
+Facts about working in this codebase. Product law lives under `product/`; build-time records under
+`worklog/`. How the fleet and its operator work — gates, evidence, staffing, personal preferences —
+is deliberately not here: that lives in the operator's playbooks, outside the repo.
+
+- [Working in the repo](working-in-the-repo.md) — durable tool traps, repo facts, and the contributor
+  rules that govern the code itself.
