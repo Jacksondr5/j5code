@@ -45,6 +45,8 @@ An agent's memory lives in its **provider session file**, not in J5's database:
   (`sqlite/`), so a transplant must satisfy that store, not merely drop a file (measure per Codex
   bench; do not infer from error strings).
 
+**On this Mac, the Traycer harness account's `projects` dir is a symlink to `~/.claude/projects`** (same inode) — Traycer and J5 share one session directory, so Stage 1 is a same-directory content-swap under a fresh uuid; the physical file move only happens at Stage 2. Consequence: the swap-target dir holds live originals next to carriers, so the neighbour proof is mandatory (each neighbour's INTERNAL `sessionId` must still equal its own filename — an overwrite changes it, live growth does not).
+
 **The munge rule** (cwd → project-dir name): every `/`, `.`, and `_` becomes `-`. Measured against a
 real recorded cwd, `/tmp/...` resolves to `/private/tmp/...` first — so **derive the munge from the
 cwd J5 actually records, never from the path you typed.**
@@ -64,7 +66,7 @@ rows are wiped. Instead:
 
 This needs **zero database surgery**: the DB is untouched, so startup verify passes and no rebuild
 fires. It is far less fragile than authoring provider-thread events by hand, and J5 citizenship
-(Squadron home, placement, provenance) comes free from having created the carrier in the Squadron.
+(Squadron home/membership via the Registrar) comes free from having created the carrier in the Squadron; placement and provenance are A6's store — unmerged at Stage-1 time — and its backfill absorbs migrated members when it lands (rows read `unrecorded` until then).
 
 ## Stage 1 — Traycer → local J5 on the Mac
 
@@ -110,7 +112,7 @@ the installed Claude CLI supports the model each thread will run.
 
 ### The transplant, per agent
 
-1. **Copy the session file** (read-only on the source): from the Traycer harness account,
+1. **Copy the session file at swap time** (read-only on the source; a live agent's file is mid-append, so validate the copy parses and trim a truncated trailing line if present): from the Traycer harness account,
    `harness-accounts/claude-code/<acct>/projects/<munged-traycer-worktree>/<uuid>.jsonl`. Keep the
    original untouched.
 2. **Grow the carrier**: in the destination Squadron, create a thread on the agent's chosen cwd and
@@ -120,11 +122,11 @@ the installed Claude CLI supports the model each thread will run.
 orchestration_v2_projection_provider_threads WHERE …` — and confirm `nativeConversationHeadRef`
    is null (a non-null head ref would force `--resume-session-at` at a message uuid the transplant
    lacks).
-4. **Stop the server.**
+4. **Stop the server** — or, on a live server you must not restart (the real dogfood env), use the **model-switch variant**: run the carrier's turn 1 on a cheaper model (Sonnet 5), swap, then dispatch the orientation turn on the target model (Fable 5). The adapter keeps a Claude query alive between turns and only re-spawns the CLI with `--resume` when the model selection changes — so the switch closes the old query and resumes against the swapped file. Proven on all five Stage-1 agents with no restart and nothing killed.
 5. **Swap**: overwrite `~/.claude/projects/<munge(cwd)>/<carrier-uuid>.jsonl` with the copied
    transcript, rewriting every record's `sessionId` to the carrier uuid and `cwd` to the carrier's
    recorded cwd. Back up the carrier's own turn-1 file first.
-6. **Restart the server** with the same base dir. No rebuild fires (DB untouched).
+6. **Restart the server** with the same base dir (skip under the model-switch variant). No rebuild fires (DB untouched).
 7. **Verify before the first resumed turn** (Claude has no resume-failure safety net — a bad
    transplant surfaces only as a failed turn, not a graceful fallback): confirm the JSONL sits under
    the exact munged project dir for the thread's cwd, named `<carrier-uuid>.jsonl`, last record a
@@ -163,7 +165,9 @@ before any real work, so the agent re-maps its tools before it acts. Template:
 >    `send_message` (plain send / ask with `expect_reply` / reply with `exchange_id`), `spawn_agent`,
 >    `stop_agent`, `archive_agent`, `clear_own_ask`. Do not call any `traycer_*` tool.
 > 3. **The human is reached through the inbox** — `send_message` to the human participant (with
->    `urgency` when it is an ask), not a Traycer channel.
+>    `urgency` when it is an ask), not a Traycer channel. **Until issue #44 lands, a message a person
+>    must SEE is an ask (`expect_reply` + `urgency`); a plain message to a person is ledger-only and
+>    invisible. No celebratory check-ins.**
 > 4. **Your operating principles** — how the human wants _you specifically_ to work. These carried
 >    over only in your memory; they are restated here so they survive the move:
 >    _&lt;per-agent operating principles — see below&gt;_
@@ -171,6 +175,8 @@ before any real work, so the agent re-maps its tools before it acts. Template:
 > Acknowledge this re-map in one line, then resume where you left off.
 
 Adjust the tool list to the J5 toolset actually installed at migration time.
+
+**Finding (issue #44, measured 2026-09-02):** a plain `send_message` to a person is **ledger-only and invisible** — no inbox row, no exchange; only an ask (`expect_reply` + `urgency`) surfaces. Three migrated agents sent celebratory check-ins that Jackson never saw. The template's item 3 now says so; do not let a migrated agent "check in" with a plain send.
 
 **The per-agent Operating Principles slot (item 4) is required, not optional.** The conduct
 knowledge that lives only in sessions — how Jackson wants each agent to work — is Role-definition
