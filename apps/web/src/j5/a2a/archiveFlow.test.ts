@@ -1,8 +1,14 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ThreadId } from "@t3tools/contracts";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { archiveWithPreflight, formatArchiveWarning, needsArchiveWarning } from "./archiveFlow";
+import {
+  archiveWithPreflight,
+  formatArchiveWarning,
+  needsArchiveWarning,
+  type ArchiveWarningConfirmation,
+} from "./archiveFlow";
 import * as client from "./archiveFlowClient";
 
 const registered = (overrides: Partial<client.PreArchiveFacts> = {}): client.ArchivePreflight => ({
@@ -35,7 +41,9 @@ describe("archive flow", () => {
     expect(needsArchiveWarning(registered())).toBe(false);
   });
 
-  it("renders every consequential fact and the R15 reassurance before destructive confirmation", () => {
+  it("builds every consequential fact into the existing dialog's two-line rows", () => {
+    const inboundOpenedAt = new Date(Date.now() - 4 * 60 * 60_000).toISOString();
+    const outboundOpenedAt = new Date(Date.now() - 15 * 60_000).toISOString();
     const preflight = registered({
       openExchanges: [
         {
@@ -46,7 +54,7 @@ describe("archive flow", () => {
           counterpartyId: "agent:waiter",
           intent: "Review the release",
           urgency: "blocking",
-          openedAt: new Date(Date.now() - 4 * 60 * 60_000).toISOString(),
+          openedAt: inboundOpenedAt,
         },
         {
           squadronId: "squadron:archive-flow",
@@ -56,35 +64,93 @@ describe("archive flow", () => {
           counterpartyId: "agent:recipient",
           intent: "Send the final note",
           urgency: "soon",
-          openedAt: new Date(Date.now() - 15 * 60_000).toISOString(),
+          openedAt: outboundOpenedAt,
         },
       ],
       placementSubtree: { state: "known", participantIds: ["agent:child"] },
     });
 
     const warning = formatArchiveWarning({ threadTitle: "Release agent", preflight });
+    const markup = renderToStaticMarkup(warning.content);
     expect(needsArchiveWarning(preflight)).toBe(true);
-    expect(warning).toContain("Archive Release agent anyway?");
-    expect(warning).toContain("Also archives 1 agent placed under Release agent: Child.");
-    expect(warning).toContain("1 participant waiting for Release agent:");
-    expect(warning).toContain("Waiter · blocking · Review the release · open 4h ago");
-    expect(warning).toContain("1 open ask sent by Release agent:");
-    expect(warning).toContain("Recipient · soon · Send the final note · open 15m ago");
-    expect(warning).toContain(
-      "Worktrees, branches, and pull requests remain. Cleanup is a separate action.",
-    );
+    expect(warning.message).toBe("Archive Release agent?");
+    expect(markup).toContain("Also archives 1 agent placed under Release agent:");
+    expect(markup).toContain("Child");
+    expect(markup).toContain("2 open asks will be terminated — counterparties are notified");
+    expect(markup).toContain("Blocking");
+    expect(markup).toContain("From");
+    expect(markup).toContain("Waiter");
+    expect(markup).toContain("Review the release");
+    expect(markup).toContain("Soon");
+    expect(markup).toContain("To");
+    expect(markup).toContain("Recipient");
+    expect(markup).toContain("Send the final note");
   });
 
   it("never presents an unreadable preflight as an empty clean list", () => {
     expect(needsArchiveWarning({ facts: null, participantLabels: new Map() })).toBe(true);
     expect(
-      formatArchiveWarning({
-        threadTitle: "Archive target",
-        preflight: registered({
-          placementSubtree: { state: "unknown", reason: "placement-query-failed" },
-        }),
-      }),
-    ).toContain("Placement subtree: couldn't check.");
+      renderToStaticMarkup(
+        formatArchiveWarning({
+          threadTitle: "Archive target",
+          preflight: registered({
+            placementSubtree: { state: "unknown", reason: "placement-query-failed" },
+          }),
+        }).content,
+      ),
+    ).toContain("Placement subtree: couldn&#x27;t check.");
+  });
+
+  it("keeps unknown raw ids out of rows while retaining them only for a tooltip", () => {
+    const unknownParticipantId = "agent:unresolved-counterparty";
+    const preflight = registered({
+      openExchanges: [
+        {
+          squadronId: "squadron:archive-flow",
+          exchangeId: "exchange:unknown",
+          direction: "inbound",
+          replyObligation: "participant-owes-reply",
+          counterpartyId: unknownParticipantId,
+          intent: "Need an answer before archive",
+          urgency: "fyi",
+          openedAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    const warning = formatArchiveWarning({ threadTitle: "Archive target", preflight });
+    const markup = renderToStaticMarkup(warning.content);
+    expect(warning.message).not.toContain(unknownParticipantId);
+    expect(markup).toContain("Unnamed participant");
+    expect(markup).toContain(`title="${unknownParticipantId}"`);
+  });
+
+  it("marks a resolved human counterparty as an inbox recipient", () => {
+    const humanParticipantId = "human:jackson";
+    const preflight = registered({
+      openExchanges: [
+        {
+          squadronId: "squadron:archive-flow",
+          exchangeId: "exchange:human",
+          direction: "outbound",
+          replyObligation: "counterparty-owes-reply",
+          counterpartyId: humanParticipantId,
+          intent: "Please confirm the rollout",
+          urgency: "soon",
+          openedAt: new Date().toISOString(),
+        },
+      ],
+    });
+    const withHumanLabel = {
+      ...preflight,
+      participantLabels: new Map([...preflight.participantLabels, [humanParticipantId, "Jackson"]]),
+    };
+
+    expect(
+      renderToStaticMarkup(
+        formatArchiveWarning({ threadTitle: "Archive target", preflight: withHumanLabel }).content,
+      ),
+    ).toContain("Jackson (inbox)");
   });
 
   it("opens exactly one destructive confirmation only when facts warrant it", async () => {
@@ -92,7 +158,9 @@ describe("archive flow", () => {
       placementSubtree: { state: "unknown", reason: "placement-query-failed" },
     });
     vi.spyOn(client, "readArchivePreflight").mockResolvedValue(preflight);
-    const confirm = vi.fn(async () => true);
+    const confirm = vi.fn<(confirmation: ArchiveWarningConfirmation) => Promise<boolean>>(
+      async () => true,
+    );
     const archive = vi.fn(async () => "archived");
 
     await expect(
@@ -105,13 +173,17 @@ describe("archive flow", () => {
     ).resolves.toBe("archived");
 
     expect(confirm).toHaveBeenCalledTimes(1);
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Archive Archive target anyway?"));
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Archive Archive target?" }),
+    );
     expect(archive).toHaveBeenCalledTimes(1);
   });
 
   it("warns and archives if production preflight reading fails", async () => {
     vi.spyOn(client, "readArchivePreflight").mockRejectedValue(new Error("network unavailable"));
-    const confirm = vi.fn(async () => true);
+    const confirm = vi.fn<(confirmation: ArchiveWarningConfirmation) => Promise<boolean>>(
+      async () => true,
+    );
     const archive = vi.fn(async () => "archived");
 
     await expect(
@@ -123,13 +195,17 @@ describe("archive flow", () => {
       }),
     ).resolves.toBe("archived");
 
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Couldn't check open asks"));
+    expect(renderToStaticMarkup(confirm.mock.calls[0]?.[0]?.content ?? null)).toContain(
+      "Couldn&#x27;t check open asks or the placement subtree.",
+    );
     expect(archive).toHaveBeenCalledTimes(1);
   });
 
   it("archives a measured clean participant without the J5 warning", async () => {
     vi.spyOn(client, "readArchivePreflight").mockResolvedValue(registered());
-    const confirm = vi.fn(async () => true);
+    const confirm = vi.fn<(confirmation: ArchiveWarningConfirmation) => Promise<boolean>>(
+      async () => true,
+    );
     const archive = vi.fn(async () => "archived");
 
     await expect(
@@ -147,7 +223,9 @@ describe("archive flow", () => {
 
   it("preserves a requested plain confirmation for a measured clean participant", async () => {
     vi.spyOn(client, "readArchivePreflight").mockResolvedValue(registered());
-    const confirm = vi.fn(async () => true);
+    const confirm = vi.fn<(confirmation: ArchiveWarningConfirmation) => Promise<boolean>>(
+      async () => true,
+    );
     const confirmCleanArchive = vi.fn(async () => false);
     const archive = vi.fn(async () => "archived");
 
@@ -188,7 +266,9 @@ describe("archive flow", () => {
         ],
       });
     });
-    const confirm = vi.fn(async () => true);
+    const confirm = vi.fn<(confirmation: ArchiveWarningConfirmation) => Promise<boolean>>(
+      async () => true,
+    );
     const archive = vi.fn(async () => "archived");
 
     await expect(
@@ -200,7 +280,9 @@ describe("archive flow", () => {
       }),
     ).resolves.toBe("archived");
 
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("1 participant waiting"));
+    expect(renderToStaticMarkup(confirm.mock.calls[0]?.[0]?.content ?? null)).toContain(
+      "Wait for the remote archive",
+    );
     expect(archive).toHaveBeenCalledTimes(1);
   });
 });

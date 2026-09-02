@@ -105,6 +105,7 @@ import {
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { ensureLocalApi, readLocalApi } from "../localApi";
+import { requestConfirmDialog } from "../confirmDialog";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
@@ -1823,7 +1824,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             archiveWithPreflight({
               threadRef,
               threadTitle: thread.title,
-              confirm: (message) => api.dialogs.confirm(message, { variant: "destructive" }),
+              confirm: ({ message, content }) =>
+                requestConfirmDialog(message, { variant: "destructive" }, content) ??
+                Promise.resolve(false),
               ...(appSettingsConfirmThreadArchive
                 ? {
                     confirmCleanArchive,
@@ -2006,7 +2009,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const result = await archiveWithPreflight({
         threadRef,
         threadTitle: thread.title,
-        confirm: (message) => api.dialogs.confirm(message, { variant: "destructive" }),
+        confirm: ({ message, content }) =>
+          requestConfirmDialog(message, { variant: "destructive" }, content) ??
+          Promise.resolve(false),
         archive: () => archiveThread(threadRef),
       });
       if (result === undefined) return;

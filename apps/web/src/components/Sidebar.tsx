@@ -86,6 +86,7 @@ import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../termina
 import { isMacPlatform } from "~/lib/utils";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { readLocalApi } from "../localApi";
+import { requestConfirmDialog } from "../confirmDialog";
 import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
@@ -3168,9 +3169,11 @@ export default function Sidebar() {
             const result = await archiveWithPreflight({
               threadRef,
               threadTitle: thread.title,
-              confirm: async (message) => {
-                const confirmed = await settlePromise(() =>
-                  api.dialogs.confirm(message, { variant: "destructive" }),
+              confirm: async ({ message, content }) => {
+                const confirmed = await settlePromise(
+                  () =>
+                    requestConfirmDialog(message, { variant: "destructive" }, content) ??
+                    Promise.resolve(false),
                 );
                 return confirmed._tag === "Success" && confirmed.value;
               },
