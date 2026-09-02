@@ -9,6 +9,7 @@ import {
   replaceThreadHomeEntries,
   shouldForceThreadHomesForScope,
   shouldRequestThreadHome,
+  participantIdForThread,
   type ThreadHome,
   ThreadHomesHttpError,
 } from "./ThreadHomesClient";
@@ -16,7 +17,7 @@ import { filterThreadsForSquadronScope } from "./SquadronScope.logic";
 
 vi.stubGlobal("window", { location: new URL("http://environment.test/") });
 
-it.effect("reads B6's opaque thread-home batch without project metadata", () =>
+it.effect("reads B6's participant-home batch without project metadata", () =>
   Effect.gen(function* () {
     const requests: Array<{ readonly method: string; readonly url: URL }> = [];
     const client = HttpClient.make((request) => {
@@ -27,10 +28,10 @@ it.effect("reads B6's opaque thread-home batch without project metadata", () =>
           Response.json({
             entries: [
               {
-                threadId: "thread:alpha",
+                participantId: "agent:j5:a2a:thread%3Aalpha",
                 home: { kind: "known", squadron: { id: "squadron:alpha", name: "Alpha" } },
               },
-              { threadId: "thread:native", home: { kind: "unknown" } },
+              { participantId: "agent:j5:a2a:thread%3Anative", home: { kind: "unknown" } },
             ],
           }),
         ),
@@ -43,7 +44,10 @@ it.effect("reads B6's opaque thread-home batch without project metadata", () =>
     ]).pipe(Effect.provideService(HttpClient.HttpClient, client));
 
     assert.deepStrictEqual(requests, [
-      { method: "POST", url: new URL("http://environment.test/api/j5/a2a/thread-homes") },
+      {
+        method: "POST",
+        url: new URL("http://environment.test/api/j5/a2a/client-reads/participant-homes"),
+      },
     ]);
     assert.deepStrictEqual(entries, [
       {
@@ -54,6 +58,12 @@ it.effect("reads B6's opaque thread-home batch without project metadata", () =>
     ]);
   }),
 );
+
+it("derives the Registrar participant id without exposing it as card copy", () => {
+  expect(participantIdForThread(ThreadId.make("thread:alpha / beta"))).toBe(
+    "agent:j5:a2a:thread%3Aalpha%20%2F%20beta",
+  );
+});
 
 it.effect("preserves an authenticated thread-home read failure", () =>
   Effect.gen(function* () {

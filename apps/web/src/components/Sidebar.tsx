@@ -154,7 +154,8 @@ import {
   filterThreadsForSquadronScope,
   resolveSquadronScope,
 } from "../j5/squadron/SquadronScope.logic";
-import { useThreadHomes } from "../j5/squadron/ThreadHomesClient";
+import { useThreadHomes, type ThreadHome } from "../j5/squadron/ThreadHomesClient";
+import { ThreadCardIdentity } from "../j5/squadron/ThreadCardIdentity";
 import {
   ThreadWorktreeIndicator,
   nextThreadChangeRequestSnapshot,
@@ -725,6 +726,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   projectCwd: string | null;
   projectFaviconPath: string | null;
   projectTitle: string | null;
+  threadHome: ThreadHome | undefined;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
   timestampFormat: TimestampFormat;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
@@ -1365,18 +1367,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 faviconPath={props.projectFaviconPath}
                 className="size-4 shrink-0"
               />
-              {props.projectTitle ? (
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate text-secondary-label text-xs",
-                    shouldRecede ? "font-normal" : "font-medium",
-                  )}
-                >
-                  {props.projectTitle}
-                </span>
-              ) : (
-                <span className="flex-1" />
-              )}
+              <span
+                className={cn(
+                  "min-w-0 flex-1 text-secondary-label text-xs",
+                  shouldRecede ? "font-normal" : "font-medium",
+                )}
+                data-testid={`thread-card-identity-${thread.id}`}
+              >
+                <ThreadCardIdentity home={props.threadHome} fallbackFolder={props.projectTitle} />
+              </span>
               {props.isPinned ? (
                 props.pinningSupported ? (
                   <Tooltip>
@@ -3614,6 +3613,7 @@ export default function Sidebar() {
                             `${thread.environmentId}:${thread.projectId}`,
                           ) ?? null
                         }
+                        threadHome={threadHomes.get(thread.id)}
                         providerEntryByInstanceId={providerEntryByInstanceId}
                         timestampFormat={timestampFormat}
                         onThreadClick={handleThreadClick}
