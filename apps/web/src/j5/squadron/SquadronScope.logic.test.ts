@@ -12,8 +12,8 @@ import {
 
 describe("Squadron scope logic", () => {
   const choices = [
-    { id: "squadron:alpha", name: "Alpha", projectIds: ["project:alpha"] },
-    { id: "squadron:bravo", name: "Bravo", projectIds: ["project:bravo"] },
+    { id: "squadron:alpha", name: "Alpha" },
+    { id: "squadron:bravo", name: "Bravo" },
   ];
 
   it("does not invent an ambient scope", () => {
@@ -34,18 +34,10 @@ describe("Squadron scope logic", () => {
     ]);
 
     expect(
-      filterThreadsForSquadronScope(
-        threads,
-        { id: "squadron:alpha", name: "Alpha", projectIds: ["project:shared"] },
-        homes,
-      ),
+      filterThreadsForSquadronScope(threads, { id: "squadron:alpha", name: "Alpha" }, homes),
     ).toEqual([threads[0]]);
     expect(
-      filterThreadsForSquadronScope(
-        threads,
-        { id: "squadron:bravo", name: "Bravo", projectIds: ["project:shared"] },
-        homes,
-      ),
+      filterThreadsForSquadronScope(threads, { id: "squadron:bravo", name: "Bravo" }, homes),
     ).toEqual([threads[1]]);
   });
 
@@ -57,11 +49,7 @@ describe("Squadron scope logic", () => {
     ]);
 
     expect(
-      filterThreadsForSquadronScope(
-        threads,
-        { id: "squadron:alpha", name: "Alpha", projectIds: [] },
-        homes,
-      ),
+      filterThreadsForSquadronScope(threads, { id: "squadron:alpha", name: "Alpha" }, homes),
     ).toEqual([threads[0]]);
     expect(filterThreadsForSquadronScope(threads, null, homes)).toEqual(threads);
   });

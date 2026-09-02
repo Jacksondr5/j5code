@@ -154,7 +154,12 @@ import {
   filterThreadsForSquadronScope,
   resolveSquadronScope,
 } from "../j5/squadron/SquadronScope.logic";
-import { useThreadHomes, type ThreadHome } from "../j5/squadron/ThreadHomesClient";
+import {
+  retryScopedThreadHomes,
+  useThreadHomes,
+  useThreadHomesScopeReadState,
+  type ThreadHome,
+} from "../j5/squadron/ThreadHomesClient";
 import { ThreadCardIdentity } from "../j5/squadron/ThreadCardIdentity";
 import {
   ThreadWorktreeIndicator,
@@ -1912,10 +1917,9 @@ export default function Sidebar() {
   const squadronScope = useMemo(
     () =>
       resolveSquadronScope(
-        squadrons.map(({ squadron, projectIds }) => ({
+        squadrons.map(({ squadron }) => ({
           id: squadron.id,
           name: squadron.name,
-          projectIds,
         })),
         squadronScopeId,
       ),
@@ -1926,6 +1930,8 @@ export default function Sidebar() {
     squadronScopeId,
     squadronScopeSelectionGeneration,
   );
+  const threadHomesScopeReadState = useThreadHomesScopeReadState();
+  const scopeReadFailed = squadronScope !== null && threadHomesScopeReadState === "failed";
   const threadHomesRef = useRef(threadHomes);
   threadHomesRef.current = threadHomes;
   // Count-only subscription: the parent needs "are there draft rows" for the
@@ -3373,6 +3379,7 @@ export default function Sidebar() {
     directoryStatus: squadronDirectoryStatus,
     squadronCount: squadrons.length,
     squadronScopeName: squadronScope?.name ?? null,
+    scopeReadFailed,
   });
   return (
     <>
@@ -3787,13 +3794,27 @@ export default function Sidebar() {
               </ul>
             </TooltipProvider>
           ) : null}
-          {!isSearchingThreads &&
-          visibleDraftSessionCount === 0 &&
-          pinnedThreads.length +
-            activeThreads.length +
-            snoozedThreads.length +
-            settledThreads.length ===
-            0 ? (
+          {!isSearchingThreads && scopeReadFailed ? (
+            <div
+              className="mx-2 mb-2 flex items-center justify-between gap-3 rounded-lg border border-destructive/35 bg-destructive/5 px-3 py-2 text-xs"
+              role="alert"
+            >
+              <span>Couldn’t read thread homes</span>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => retryScopedThreadHomes(threads.map((thread) => thread.id))}
+              >
+                Retry
+              </Button>
+            </div>
+          ) : !isSearchingThreads &&
+            visibleDraftSessionCount === 0 &&
+            pinnedThreads.length +
+              activeThreads.length +
+              snoozedThreads.length +
+              settledThreads.length ===
+              0 ? (
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
               {sidebarEmptyState.kind === "no-squadrons" ? (
                 <>

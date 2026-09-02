@@ -21,6 +21,7 @@ const ThreadHomesResponse = Schema.Struct({ entries: Schema.Array(ThreadHomeEntr
 
 export type ThreadHome = typeof ThreadHome.Type;
 export type ThreadHomeEntry = { readonly threadId: ThreadId; readonly home: ThreadHome };
+export type ThreadHomesScopeReadState = "ready" | "failed";
 
 const runtime = ManagedRuntime.make(Layer.merge(primaryEnvironmentHttpLayer, browserCryptoLayer));
 const ErrorResponse = Schema.Struct({ message: Schema.String });
@@ -72,7 +73,9 @@ interface ThreadHomesStore {
   homesByThreadId: ReadonlyMap<string, ThreadHome>;
   readonly listeners: Set<() => void>;
   readonly pendingThreadIds: Set<ThreadId>;
+  pendingScopeRead: boolean;
   reading: boolean;
+  scopeReadState: ThreadHomesScopeReadState;
 }
 
 const threadHomesStoreKey = "__t3J5ThreadHomesStore";
@@ -86,7 +89,9 @@ const threadHomesStore = (() => {
     homesByThreadId: new Map(),
     listeners: new Set(),
     pendingThreadIds: new Set(),
+    pendingScopeRead: false,
     reading: false,
+    scopeReadState: "ready",
   };
   target[threadHomesStoreKey] = created;
   return created;
@@ -97,6 +102,7 @@ const subscribe = (listener: () => void) => {
   return () => threadHomesStore.listeners.delete(listener);
 };
 const getSnapshot = () => threadHomesStore.homesByThreadId;
+const getScopeReadStateSnapshot = () => threadHomesStore.scopeReadState;
 const notify = () => {
   threadHomesStore.listeners.forEach((listener) => listener());
 };
@@ -105,17 +111,22 @@ const readPendingThreadHomes = () => {
   if (threadHomesStore.reading || threadHomesStore.pendingThreadIds.size === 0) return;
   threadHomesStore.reading = true;
   const threadIds = Array.from(threadHomesStore.pendingThreadIds);
+  const isScopeRead = threadHomesStore.pendingScopeRead;
   threadHomesStore.pendingThreadIds.clear();
+  threadHomesStore.pendingScopeRead = false;
   void listThreadHomes(threadIds)
     .then((entries) => {
       threadHomesStore.homesByThreadId = replaceThreadHomeEntries(
         threadHomesStore.homesByThreadId,
         entries,
       );
+      if (isScopeRead) threadHomesStore.scopeReadState = "ready";
     })
     // Under a selected scope, an unreadable home remains excluded rather than
-    // being guessed from a project. The next changed sidebar set retries it.
-    .catch(() => undefined)
+    // being guessed from a project. The Sidebar names this state and can retry.
+    .catch(() => {
+      if (isScopeRead) threadHomesStore.scopeReadState = "failed";
+    })
     .finally(() => {
       threadHomesStore.reading = false;
       notify();
@@ -145,11 +156,24 @@ export const shouldRequestThreadHome = (home: ThreadHome | undefined, force: boo
 export const shouldForceThreadHomesForScope = (selectedSquadronId: string | null) =>
   selectedSquadronId !== null;
 
-const requestThreadHomes = (threadIds: ReadonlyArray<ThreadId>, force = false) => {
+const requestThreadHomes = (
+  threadIds: ReadonlyArray<ThreadId>,
+  force = false,
+  isScopeRead = false,
+) => {
+  let resetScopeReadState = false;
   for (const threadId of threadIds) {
     if (shouldRequestThreadHome(threadHomesStore.homesByThreadId.get(threadId), force))
       threadHomesStore.pendingThreadIds.add(threadId);
   }
+  if (isScopeRead && threadHomesStore.pendingThreadIds.size > 0) {
+    threadHomesStore.pendingScopeRead = true;
+    if (threadHomesStore.scopeReadState !== "ready") {
+      threadHomesStore.scopeReadState = "ready";
+      resetScopeReadState = true;
+    }
+  }
+  if (resetScopeReadState) notify();
   readPendingThreadHomes();
 };
 
@@ -159,6 +183,15 @@ const requestThreadHomes = (threadIds: ReadonlyArray<ThreadId>, force = false) =
  */
 export const refreshThreadHomes = (threadIds: ReadonlyArray<ThreadId>) =>
   requestThreadHomes(threadIds, true);
+
+/** The scoped Sidebar retries the same opaque home read without a reload. */
+export const retryScopedThreadHomes = (threadIds: ReadonlyArray<ThreadId>) =>
+  requestThreadHomes(threadIds, true, true);
+
+/** Only a named Sidebar scope turns a failed Registrar-home read into visible state. */
+export function useThreadHomesScopeReadState(): ThreadHomesScopeReadState {
+  return useSyncExternalStore(subscribe, getScopeReadStateSnapshot, getScopeReadStateSnapshot);
+}
 
 /** Immutable Registrar-home cache for Sidebar rows; never derives a home from project metadata. */
 export function useThreadHomes(
@@ -173,7 +206,8 @@ export function useThreadHomes(
   );
   const homesSnapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   useEffect(() => {
-    requestThreadHomes(requestedThreadIds, shouldForceThreadHomesForScope(selectedSquadronId));
+    const isScopeRead = shouldForceThreadHomesForScope(selectedSquadronId);
+    requestThreadHomes(requestedThreadIds, isScopeRead, isScopeRead);
   }, [requestedThreadIds, selectedSquadronId, scopeSelectionGeneration]);
   return useMemo(
     () =>

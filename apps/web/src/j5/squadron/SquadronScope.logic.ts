@@ -1,7 +1,6 @@
 export interface SquadronChoice {
   readonly id: string;
   readonly name: string;
-  readonly projectIds: ReadonlyArray<string>;
 }
 
 export interface SquadronDraftState<TContent = unknown> {

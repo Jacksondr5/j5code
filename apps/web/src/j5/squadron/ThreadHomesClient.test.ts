@@ -80,7 +80,7 @@ it.effect("preserves an authenticated thread-home read failure", () =>
 
 it("replaces a missing or stale home in the exact cache map read by Squadron filtering", () => {
   const threads = [{ id: "thread:alpha" }, { id: "thread:native" }];
-  const alphaScope = { id: "squadron:alpha", name: "Alpha", projectIds: ["project:shared"] };
+  const alphaScope = { id: "squadron:alpha", name: "Alpha" };
   const homes = new Map<string, ThreadHome>();
   expect(filterThreadsForSquadronScope(threads, alphaScope, homes)).toEqual([]);
   mergeThreadHomeEntries(homes, [
@@ -121,7 +121,7 @@ it("replaces a missing or stale home in the exact cache map read by Squadron fil
 
 it("publishes a new rendered snapshot when a receipt replaces an initial unknown home", () => {
   const threads = [{ id: "thread:alpha" }];
-  const alphaScope = { id: "squadron:alpha", name: "Alpha", projectIds: ["project:shared"] };
+  const alphaScope = { id: "squadron:alpha", name: "Alpha" };
   const initialSnapshot = new Map<string, ThreadHome>([["thread:alpha", { kind: "unknown" }]]);
 
   expect(filterThreadsForSquadronScope(threads, alphaScope, initialSnapshot)).toEqual([]);
