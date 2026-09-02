@@ -144,7 +144,7 @@ export class A2AHumanFollowupNotAllowedError extends Schema.TaggedErrorClass<A2A
   { participantId: Schema.String },
 ) {
   override get message(): string {
-    return `A follow-up to human participant ${this.participantId} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or a reply with exchange_id; after an ask is open, wait for its reply. If nobody needs to act, say it in your own thread instead.`;
+    return `A follow-up to human participant ${this.participantId} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or a reply with exchange_id; after an ask is open, wait for its reply, or clear_own_ask on the open exchange and re-ask with the combined content. If nobody needs to act, say it in your own thread instead.`;
   }
 }
 
