@@ -1824,9 +1824,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             archiveWithPreflight({
               threadRef,
               threadTitle: thread.title,
-              confirm: ({ message, content }) =>
-                requestConfirmDialog(message, { variant: "destructive" }, content) ??
-                Promise.resolve(false),
+              confirm: ({ message, content, confirmLabel }) =>
+                requestConfirmDialog(
+                  message,
+                  { variant: "destructive" },
+                  { content, confirmLabel },
+                ) ?? Promise.resolve(false),
               ...(appSettingsConfirmThreadArchive
                 ? {
                     confirmCleanArchive,
@@ -2009,8 +2012,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const result = await archiveWithPreflight({
         threadRef,
         threadTitle: thread.title,
-        confirm: ({ message, content }) =>
-          requestConfirmDialog(message, { variant: "destructive" }, content) ??
+        confirm: ({ message, content, confirmLabel }) =>
+          requestConfirmDialog(message, { variant: "destructive" }, { content, confirmLabel }) ??
           Promise.resolve(false),
         archive: () => archiveThread(threadRef),
       });

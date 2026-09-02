@@ -55,13 +55,21 @@ describe("confirm dialog coordinator", () => {
   it("carries optional typed content without changing string-only state", () => {
     const unregister = registerConfirmDialogHost();
     const content = createElement("span", { "data-confirm-content": "archive" }, "Archive facts");
-    requestConfirmDialog("Archive thread?", { variant: "destructive" }, content);
+    requestConfirmDialog(
+      "Archive thread?",
+      { variant: "destructive" },
+      {
+        content,
+        confirmLabel: "Archive anyway",
+      },
+    );
 
     expect(readConfirmDialogState()).toEqual({
       status: "confirming",
       message: "Archive thread?",
       variant: "destructive",
       content,
+      confirmLabel: "Archive anyway",
     });
 
     unregister();

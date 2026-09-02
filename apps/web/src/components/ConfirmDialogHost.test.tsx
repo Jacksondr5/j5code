@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import { resetConfirmDialogForTests } from "../confirmDialog";
 import { ArchiveWarningContent } from "../j5/a2a/ArchiveWarningContent";
-import { ConfirmationDescription, resolveConfirmDialogCopy } from "./ConfirmDialogHost";
+import {
+  ConfirmationDescription,
+  resolveConfirmDialogActionLabel,
+  resolveConfirmDialogCopy,
+} from "./ConfirmDialogHost";
 
 describe("archive warning confirmation content", () => {
   beforeEach(() => {
@@ -27,6 +31,7 @@ describe("archive warning confirmation content", () => {
       description: "This is the existing description.",
     });
     expect(markup).toContain("This is the existing description.");
+    expect(resolveConfirmDialogActionLabel()).toBe("Confirm");
   });
 
   it("renders typed J5 content through the host's optional slot", () => {
@@ -83,5 +88,6 @@ describe("archive warning confirmation content", () => {
       "Worktrees, branches, and pull requests remain. Cleanup is a separate action.",
     );
     expect(markup).not.toContain("waiter");
+    expect(resolveConfirmDialogActionLabel("Archive anyway")).toBe("Archive anyway");
   });
 });

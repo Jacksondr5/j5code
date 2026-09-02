@@ -3169,11 +3169,14 @@ export default function Sidebar() {
             const result = await archiveWithPreflight({
               threadRef,
               threadTitle: thread.title,
-              confirm: async ({ message, content }) => {
+              confirm: async ({ message, content, confirmLabel }) => {
                 const confirmed = await settlePromise(
                   () =>
-                    requestConfirmDialog(message, { variant: "destructive" }, content) ??
-                    Promise.resolve(false),
+                    requestConfirmDialog(
+                      message,
+                      { variant: "destructive" },
+                      { content, confirmLabel },
+                    ) ?? Promise.resolve(false),
                 );
                 return confirmed._tag === "Success" && confirmed.value;
               },

@@ -13,6 +13,7 @@ import {
 export interface ArchiveWarningConfirmation {
   readonly message: string;
   readonly content: ReactNode;
+  readonly confirmLabel: "Archive" | "Archive anyway";
 }
 
 const displayParticipant = (
@@ -47,6 +48,7 @@ export function formatArchiveWarning(input: {
   if (facts === null) {
     return {
       message: title,
+      confirmLabel: "Archive",
       content: createElement(ArchiveWarningContent, {
         payload: {
           threadTitle,
@@ -58,7 +60,7 @@ export function formatArchiveWarning(input: {
     };
   }
   if (facts.state !== "registered") {
-    return { message: title, content: null };
+    return { message: title, content: null, confirmLabel: "Archive" };
   }
 
   const placement: ArchiveWarningPlacement =
@@ -85,7 +87,11 @@ export function formatArchiveWarning(input: {
     placement,
     openAsks,
   };
-  return { message: title, content: createElement(ArchiveWarningContent, { payload }) };
+  return {
+    message: title,
+    content: createElement(ArchiveWarningContent, { payload }),
+    confirmLabel: openAsks.length > 0 ? "Archive anyway" : "Archive",
+  };
 }
 
 /** The action menu owns archive mutation; this J5 delegate owns preflight and the one warning. */

@@ -24,6 +24,8 @@ type ConfirmationCopy = {
   readonly description: string | null;
 };
 
+export const resolveConfirmDialogActionLabel = (confirmLabel?: string) => confirmLabel ?? "Confirm";
+
 export function resolveConfirmDialogCopy(message: string): ConfirmationCopy {
   const normalizedMessage = message.trim();
   const lines = normalizedMessage.split("\n");
@@ -79,6 +81,8 @@ export function ConfirmDialogHost() {
   const content = state.status === "idle" ? undefined : state.content;
   const description = <ConfirmationDescription content={content} message={message} />;
   const confirmVariant = state.status === "idle" ? "default" : state.variant;
+  const confirmLabel =
+    state.status === "idle" ? "Confirm" : resolveConfirmDialogActionLabel(state.confirmLabel);
   const onCancel = () => respondToConfirmDialog(false);
   const onConfirm = () => respondToConfirmDialog(true);
 
@@ -108,7 +112,7 @@ export function ConfirmDialogHost() {
         <AlertDialogFooter>
           <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
           <Button variant={confirmVariant} onClick={onConfirm}>
-            Confirm
+            {confirmLabel}
           </Button>
         </AlertDialogFooter>
       </AlertDialogPopup>

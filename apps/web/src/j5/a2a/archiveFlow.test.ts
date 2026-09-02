@@ -74,6 +74,7 @@ describe("archive flow", () => {
     const markup = renderToStaticMarkup(warning.content);
     expect(needsArchiveWarning(preflight)).toBe(true);
     expect(warning.message).toBe("Archive Release agent?");
+    expect(warning.confirmLabel).toBe("Archive anyway");
     expect(markup).toContain("Also archives 1 agent placed under Release agent:");
     expect(markup).toContain("Child");
     expect(markup).toContain("2 open asks will be terminated — counterparties are notified");
@@ -198,6 +199,7 @@ describe("archive flow", () => {
     expect(renderToStaticMarkup(confirm.mock.calls[0]?.[0]?.content ?? null)).toContain(
       "Couldn&#x27;t check open asks or the placement subtree.",
     );
+    expect(confirm.mock.calls[0]?.[0]?.confirmLabel).toBe("Archive");
     expect(archive).toHaveBeenCalledTimes(1);
   });
 
