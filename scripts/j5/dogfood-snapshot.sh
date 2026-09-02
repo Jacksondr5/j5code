@@ -22,5 +22,11 @@ mkdir -p "$snapshot_dir"
 sqlite3 "$db_path" "VACUUM INTO '$snapshot_dir/state.sqlite'"
 echo "Snapshot written: $snapshot_dir/state.sqlite"
 
-# Prune the oldest snapshots beyond the retention cap (GNU head, Linux-only).
-ls -1d "$snapshot_root"/*/ | sort | head -n -"$keep" | xargs -r rm -rf
+# Prune the oldest snapshots beyond the retention cap. Portable across GNU and
+# BSD userlands (macOS `head` has no negative -n; BSD `xargs` has no -r).
+snapshots=()
+while IFS= read -r dir; do snapshots+=("$dir"); done < <(ls -1d "$snapshot_root"/*/ 2>/dev/null | sort)
+count=${#snapshots[@]}
+if (( count > keep )); then
+  for dir in "${snapshots[@]:0:count-keep}"; do rm -rf "$dir"; done
+fi
