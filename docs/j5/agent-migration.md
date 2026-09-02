@@ -222,7 +222,9 @@ that cwd, including disposable crew seats — never per-agent). The durable cont
   (grep on large files, formatting docs before commit, what web tests can and cannot prove).
 - [`operations/deployment-preferences.md`](operations/deployment-preferences.md) — Jackson's
   deployment-design preferences (state stays in `dogfood-runtime.md`).
-- The Spawner-owned standing process rules (`process/standing-rules.md`) — fleet law.
+- Fleet process law (gates, evidence, staffing, operating rules) — in the operator's playbooks
+  outside the repo, never a `docs/j5` page: a docs/j5 page holds facts about the product or the
+  codebase only (Jackson, 2026-09-01).
 
 An `autoMemoryEnabled` / per-thread `autoMemoryDirectory` adapter change was considered and
 rejected in that audit; do not build it for migration.
