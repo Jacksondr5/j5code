@@ -89,21 +89,11 @@ fires. It is far less fragile than authoring provider-thread events by hand, and
    **Consequence — one munged key for all five, and it is the key memory already lives under.** With
    cwd = `~/repos/jacksondr5/j5code`, the key is `-Users-jackson-repos-jacksondr5-j5code`. Measured
    against the real source: Traycer keys auto-memory by **repo path, not worktree cwd**, so the J5
-   agents' memory is _already_ one shared dir under exactly that key (12 files). The memory move is
-   therefore **config-dir-only** — same key, new root (`~/.claude/projects/<key>/memory/`). The one
-   exception is the Director, whose memory sits under the upstream `t3code` repo key (5 files); it
-   merges into the shared dir. Collision check across every source memory dir: **only `MEMORY.md`
-   collides** — it is the per-dir index, present everywhere by design — so merge the two indexes
-   (concatenate entries), never overwrite; every other file (including the Director's
-   `fleet-app-project.md`, the plausible-collision case) has a unique name and copies cleanly. No
-   per-agent subfolder or prefix is needed. Sharing one memory dir is the status quo, not a new
-   hazard.
-
-   Two mitigations to carry forward: (i) the memory files are **not auto-loaded by J5 today** anyway
-   (see [Auto-memory](#auto-memory)), so nothing depends on this dir until the adapter change lands;
-   (ii) **when that adapter change lands, key auto-memory PER THREAD** — the SDK's
-   `autoMemoryDirectory` is configurable per query — rather than per cwd, so cwd choice stops being
-   coupled to memory identity. Write that into the adapter-change spec.
+   agents' memory is _already_ one shared dir under exactly that key (12 files). **Memory files are not migrated** (audit ruling — see
+   [Auto-memory](#auto-memory--not-migrated)), so the shared key has no migration consequence. The
+   measurement is recorded because it informed the ruling: Traycer keys auto-memory by **repo path,
+   not worktree cwd**, so this dir was already one shared commons for every agent that ran with the
+   repo-clone cwd — including retired crew seats — never per-agent memory.
 
    **Git contention** with five agents on one checkout is the status quo under Traycer; noted, not
    solved here.
@@ -174,10 +164,24 @@ before any real work, so the agent re-maps its tools before it acts. Template:
 >    `stop_agent`, `archive_agent`, `clear_own_ask`. Do not call any `traycer_*` tool.
 > 3. **The human is reached through the inbox** — `send_message` to the human participant (with
 >    `urgency` when it is an ask), not a Traycer channel.
+> 4. **Your operating principles** — how the human wants _you specifically_ to work. These carried
+>    over only in your memory; they are restated here so they survive the move:
+>    _&lt;per-agent operating principles — see below&gt;_
 >
 > Acknowledge this re-map in one line, then resume where you left off.
 
 Adjust the tool list to the J5 toolset actually installed at migration time.
+
+**The per-agent Operating Principles slot (item 4) is required, not optional.** The conduct
+knowledge that lives only in sessions — how Jackson wants each agent to work — is Role-definition
+content; until Roles exist, the orientation brief is what carries it across the move (Product's
+framing). Write one block per migrated agent. Worked example, the Director's:
+
+> - Lead with WHAT and WHY; leave HOW to the lane doing the work.
+> - Give a recommendation, never a survey of options.
+> - Never a blocking prompt at Jackson — asks go on the board at his cadence.
+> - Nothing blocks on Jackson for something an agent can self-serve.
+> - The Director directs; the Director never codes.
 
 ### Leave the transplanted history verbatim — do not rewrite the Traycer prefix
 
@@ -205,22 +209,23 @@ If someone does it anyway (documented non-recommended option): edit only inside 
 never touch `uuid`/`parentUuid`/`sessionId`/structure, and expect the semantic inconsistencies
 above.
 
-### Auto-memory
+### Auto-memory — NOT migrated
 
-Auto-memory is a **native Claude Agent SDK capability** (`autoMemoryEnabled` / `autoMemoryDirectory`),
-keyed to `projects/<sanitized-cwd>/memory` under the config dir — the **same cwd-derived key** as the
-session file. But **J5's Claude adapter does not currently enable it** (it passes the `claude_code`
-system-prompt preset and no memory option). Consequences and options:
+**Ruled (Jackson, 2026-09-01, on the memory audit): the auto-memory files are not migrated, and no
+adapter change ships for them.** Conversation memory — the provider session, proven above — is the
+memory that matters. The standalone memory _files_ were audited and found to hold either state the
+repo already answers, retired-seat corrections, or durable content whose right home is a repo doc
+every agent reads (the source dir was a cwd-keyed commons written by every agent that ever ran with
+that cwd, including disposable crew seats — never per-agent). The durable content now lives in:
 
-- Place each agent's memory dir at `~/.claude/projects/<munge(cwd)>/memory/` (copied from the
-  Traycer harness account's `projects/<munged-traycer-worktree>/memory/`) so it is co-located with
-  the session under the same key.
-- To make it **auto-load**, either (a) enable `autoMemoryEnabled` (and optionally point
-  `autoMemoryDirectory`) in J5's Claude adapter — a small code change — or (b) low-touch:
-  materialize the memory files as a `CLAUDE.md` in the agent's cwd, which the `claude_code` preset
-  loads natively with no code change.
-- Confirm the chosen path in a Stage-1 dry run before trusting it. Conversation memory resumes
-  regardless; this is only about the standalone memory _files_.
+- [`process/working-in-the-repo.md`](process/working-in-the-repo.md) — tool traps and repo facts
+  (grep on large files, formatting docs before commit, what web tests can and cannot prove).
+- [`operations/deployment-preferences.md`](operations/deployment-preferences.md) — Jackson's
+  deployment-design preferences (state stays in `dogfood-runtime.md`).
+- The Spawner-owned standing process rules (`process/standing-rules.md`) — fleet law.
+
+An `autoMemoryEnabled` / per-thread `autoMemoryDirectory` adapter change was considered and
+rejected in that audit; do not build it for migration.
 
 ## Stage 2 — local J5 → the Linux box
 
@@ -232,7 +237,7 @@ Same mechanism (state dir + session files + project-key rename); what differs:
   the J5 instance sets `ClaudeSettings.homePath`, the session and memory go under that dir's
   `projects/<munged-cwd>/`; if not, `~/.claude`.
 - **cwd and munge.** Recompute the munged project dir from the Linux cwd (different absolute path →
-  different key). Move each session file and memory dir to the new key.
+  different key). Move each session file to the new key (memory files are not migrated).
 - **Model support.** Confirm the box's installed Claude CLI supports each thread's pinned model;
   re-select a supported model at the first resumed turn (the five core agents are Fable-pinned).
 
