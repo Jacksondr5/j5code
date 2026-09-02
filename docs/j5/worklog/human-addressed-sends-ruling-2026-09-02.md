@@ -14,6 +14,8 @@ Precisions ruled with it:
 2. **Permanent law**, not a dogfood-v0 override — the reasoning does not expire.
 3. **Not routing:** R22 stands (Captains never routers; agent↔agent plain sends fully open). The Captain/spawner is the holder of the work context and judges what rises to an ask; the human reads that thread when engaged.
 
+4. **Corollary confirmed same day (surfaced by PR #57's implementation, Director-accepted, Product-confirmed as the intended reading):** a second ask to a person while that pair's exchange is open is refused rather than coalesced — under D a follow-up delivery to a person is a plain delivery. This resolves #45 part 3 by refusal instead of a new inbox surface: the item the person sees is always the whole ask, and amending it is loud (clear_own_ask, then re-ask with the combined content). Parts 1–2 of #45 (sender-card overclaim; coalescing told to the sender) remain open — they are agent↔agent concerns and coalescing there is untouched.
+
 Accepted cost, named at ruling: chatty agents will convert check-ins into low-urgency asks. Judged the right failure mode — visible, countable per sender, fixed in briefs/Roles (operator content), where the prior-art fleet fixed the same thing. Invisible traffic was unfixable because nobody could see the pattern.
 
 Recommended, separate, **not ruled**: rename urgency `fyi` → `whenever` (an ask urgency named "no reply needed" mislabels an obligation; levels answer "when do you need my answer": blocking / soon / whenever). Friction-list entry exists (ab7b7b2cf).

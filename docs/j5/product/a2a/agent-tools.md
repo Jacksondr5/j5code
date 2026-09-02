@@ -87,7 +87,12 @@ The error names the two legal moves (ask with expect_reply + intent + urgency; r
 exchange_id) and the own-thread alternative. Accepted cost, stated at ruling: chatty agents will
 convert check-ins into low-urgency asks — the right failure mode, because it is visible and
 countable per sender in the inbox and fixed in the brief or Role, where the prior-art fleet fixed
-it too. Recommended and separate, not ruled: renaming urgency `fyi` → `whenever` (an ask urgency
+it too. **Corollary (confirmed 2026-09-02, from PR #57's implementation):** a second ask from an agent
+to a person while that pair already has an open exchange is also refused (typed
+`A2AHumanFollowupNotAllowedError`, before the ledger write) — under D a coalesced follow-up to a
+person is a plain delivery, and it was exactly #45's invisible-follow-up finding. The error names
+the way forward: wait for the reply, or `clear_own_ask` and re-ask with the combined content.
+Agent↔agent coalescing is untouched. Recommended and separate, not ruled: renaming urgency `fyi` → `whenever` (an ask urgency
 named "no reply needed" mislabels an obligation; the levels answer "when do you need my answer").
 Product record: [`../features/inbox.md`](../features/inbox.md) (sender-side mirror) and the
 [worklog record](../../worklog/human-addressed-sends-ruling-2026-09-02.md).

@@ -28,7 +28,11 @@ and chatty agents would otherwise flood the person with traffic that owes
 nothing. If nobody needs to act, the agent says so in its own thread or
 tells whoever holds the work context (spawner or Captain — the thread the
 human is already reading; not routing, R22 stands). If the person must see
-it, seeing it is the obligation: it is an ask. Permanent law, not a v0
+it, seeing it is the obligation: it is an ask. Corollary: **one open ask per
+agent→person pair** — a second ask while one is open is refused (a coalesced
+follow-up to a person would be an invisible plain delivery, #45's finding);
+the agent waits for the reply or clears its ask and re-asks with the combined
+content, so the item you see is always the whole ask. Permanent law, not a v0
 override; contract of record in [`../a2a/agent-tools.md`](../a2a/agent-tools.md).
 
 ## Where it lives
