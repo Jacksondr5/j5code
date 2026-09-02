@@ -249,7 +249,7 @@ Same mechanism (state dir + session files + project-key rename); what differs:
 - **Model support.** Confirm the box's installed Claude CLI supports each thread's pinned model;
   re-select a supported model at the first resumed turn (the five core agents are Fable-pinned).
 
-## Codex agents — measured; content-swap is NOT viable as-is
+## Codex agents — measured: content-swap fails; re-pointing at the existing thread works (same machine only)
 
 Benched 2026-09-02 on a disposable env under the standing Luna authorization, with a real retired
 Codex Sitter as subject (3.5 MB, 2,052 records, written by CLI 0.146). **Result: the Claude-style
@@ -284,14 +284,31 @@ while a **new rollout** appeared; (4) the deep probe answered `NO-MEMORY` — an
 resumed without all four**: native uuid unchanged, no `provider_resume_fallback` transfer, the
 swapped rollout growing, and a specific deep-memory answer the digest cannot contain.
 
-**Ruling for operators (until a second bench proves otherwise): migrate Codex agents as a fresh
-thread plus the agent's own written handoff** — the honest fallback the migration accepted. Two
-candidate techniques are proposed for the next bench, ranked: (b) match the carrier's
-`state_5.threads` row to the body (`history_mode`, `cli_version`) before resuming — a state-db row
-touch; or (b′) skip file surgery entirely and re-point J5's provider-thread native ref at the agent's
-**existing** codex thread id, which the shared store already resolves — J5-side surgery on one
-provider-thread event. Neither has been run; do not follow either on a real fleet until one passes
-all four discriminators.
+**Proven technique — re-point, don't swap (bench 2, 2026-09-02).** The same retired Sitter resumed with
+full memory when J5's provider thread was re-pointed at the agent's **existing** codex thread instead
+of swapping files: one `provider-thread.updated` event inserted into `orchestration_events` (clone the
+carrier's latest such event; set `nativeThreadRef` to `{driver:"codex", nativeId:<agent's codex thread
+id>, strength:"strong"}`; next `stream_version`; new event id; `application_event_version` 2), with
+the server stopped; on restart, startup verify sees the watermark behind the log and **rebuilds the
+projections from events** — no projection row is ever hand-edited. The recall turn then resumed the
+real thread: native uuid unchanged, **zero** `provider_resume_fallback` transfers, the agent's
+**original rollout grew** by the new turn, and the deep probe returned the exact closeout facts.
+
+Procedure per Codex agent:
+
+1. **Stop the source agent first.** This is a **cutover, not a copy**: J5 will drive the agent's real
+   codex thread and append to its real rollout. Two drivers on one thread would interleave.
+2. Confirm the agent's codex thread id exists in `~/.codex/state_5.sqlite` `threads` on the **same
+   machine** the J5 server runs on (same-store requirement; cross-machine needs the codex store moved
+   too — unmeasured).
+3. Create a carrier thread in the destination Squadron on a Codex model; run one trivial turn.
+4. Stop the J5 server; insert the one event above for the carrier's stream.
+5. Restart; verify the carrier's provider-thread `nativeThreadRef.nativeId` now equals the agent's
+   thread id (the rebuild did it).
+6. Drive one deep-memory turn and require **all four** discriminators below.
+
+Bench 1's content-swap failure stands as the record of what not to do; the `history_mode`
+legacy-vs-paginated mismatch did **not** block resuming the thread under its own consistent row.
 
 ## Failure taxonomy — classify before concluding
 
