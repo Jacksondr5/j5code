@@ -482,6 +482,40 @@ it.effect("refuses plain human sends while allowing human asks and replies", () 
     });
     assert.equal(ask.exchangeState, "open");
 
+    const explicitFollowup = yield* Effect.flip(
+      service.send({
+        commandId: CommCommandId.make("command:human-explicit-followup"),
+        senderThreadId: sender.threadId,
+        to: person.id,
+        message: "This must not follow up on the human ask.",
+        exchangeId: ask.exchangeId!,
+        acceptedAt: timestamp,
+      }),
+    );
+    assert.equal(explicitFollowup._tag, "A2AHumanFollowupNotAllowedError");
+
+    const implicitFollowup = yield* Effect.flip(
+      service.send({
+        commandId: CommCommandId.make("command:human-implicit-followup"),
+        senderThreadId: sender.threadId,
+        to: person.id,
+        message: "This also must not follow up on the human ask.",
+        expectReply: true,
+        acceptedAt: timestamp,
+      }),
+    );
+    assert.equal(implicitFollowup._tag, "A2AHumanFollowupNotAllowedError");
+    assert.equal(
+      implicitFollowup.message,
+      `A follow-up to human participant ${person.id} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or a reply with exchange_id; after an ask is open, wait for its reply. If nobody needs to act, say it in your own thread instead.`,
+    );
+    const followupWrites = yield* sql<{ readonly count: number }>`
+      SELECT COUNT(*) AS count
+      FROM j5_a2a_comm_event
+      WHERE command_id IN ('command:human-explicit-followup', 'command:human-implicit-followup')
+    `;
+    assert.deepStrictEqual(followupWrites, [{ count: 0 }]);
+
     const inboundExchangeId = ExchangeId.make("exchange:human-inbound");
     yield* ledgerService.append({
       commandId: CommCommandId.make("command:human-inbound"),
