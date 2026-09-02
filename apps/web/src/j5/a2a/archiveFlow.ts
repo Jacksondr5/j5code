@@ -2,6 +2,7 @@ import type { ScopedThreadRef } from "@t3tools/contracts";
 import { createElement, type ReactNode } from "react";
 
 import { readArchivePreflight, type ArchivePreflight } from "./archiveFlowClient";
+import { presentParticipantIdentity } from "./ParticipantIdentity";
 import {
   ArchiveWarningContent,
   type ArchiveWarningParticipant,
@@ -20,13 +21,14 @@ const displayParticipant = (
   participantId: string,
   labels: ReadonlyMap<string, string>,
 ): ArchiveWarningParticipant => {
-  const label = labels.get(participantId);
-  if (label === undefined) {
-    return { displayName: "Unnamed participant", tooltipParticipantId: participantId };
-  }
+  const presentation = presentParticipantIdentity({
+    participantId,
+    participantLabels: labels,
+    annotateHumanInbox: true,
+  });
   return {
-    displayName: participantId.startsWith("human:") ? `${label} (inbox)` : label,
-    tooltipParticipantId: null,
+    displayName: presentation.label,
+    tooltipParticipantId: presentation.tooltipParticipantId,
   };
 };
 

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 const state = vi.hoisted(() => ({
   projection: null as unknown,
   workflow: null as unknown,
+  participantLabels: new Map<string, string>(),
 }));
 
 vi.mock("@t3tools/client-runtime/environment", () => ({
@@ -29,6 +30,10 @@ vi.mock("../../state/threads", () => ({
 
 vi.mock("../../state/use-atom-command", () => ({
   useAtomCommand: () => async () => undefined,
+}));
+
+vi.mock("../../j5/a2a/ParticipantIdentitiesClient", () => ({
+  useParticipantLabels: () => state.participantLabels,
 }));
 
 import { QueuedRunsControl } from "./QueuedRunsControl";
@@ -65,5 +70,67 @@ describe("QueuedRunsControl automatic completion delivery", () => {
     );
 
     expect(html).toBe("");
+  });
+
+  it("renders queued peer delivery sender and first line through the shared timeline formatter", () => {
+    state.projection = { projection: {} };
+    state.workflow = {
+      activeRun: null,
+      canPromoteToSteer: false,
+      canReorder: false,
+      queuedRuns: [
+        {
+          run: { id: "run:queued", userMessageId: "message:queued" },
+          text: [
+            "[Cross-agent message from agent:delivery-sender in squadron squadron:alpha]",
+            "",
+            "First line of the queued delivery.",
+            "Second line is not the strip label.",
+            "",
+            "No reply is required. Use send_message without exchange_id only if a new message is needed.",
+          ].join("\n"),
+        },
+      ],
+    };
+    state.participantLabels = new Map([["agent:delivery-sender", "Alice"]]);
+
+    const html = renderToStaticMarkup(
+      <QueuedRunsControl
+        environmentId={"environment:test" as never}
+        optimisticMessages={[]}
+        threadId={"thread:test" as never}
+      />,
+    );
+
+    expect(html).toContain("From Alice — First line of the queued delivery.");
+    expect(html).not.toContain("Second line is not the strip label.");
+  });
+
+  it("keeps an unknown queued sender unnamed and exposes its durable id only in the tooltip", () => {
+    state.participantLabels = new Map();
+    const html = renderToStaticMarkup(
+      <QueuedRunsControl
+        environmentId={"environment:test" as never}
+        optimisticMessages={
+          [
+            {
+              id: "message:unknown",
+              inputIntent: "queued_turn",
+              text: [
+                "[Cross-agent message from agent:unknown in squadron squadron:alpha]",
+                "",
+                "Queue fallback body.",
+                "",
+                "No reply is required. Use send_message without exchange_id only if a new message is needed.",
+              ].join("\n"),
+            },
+          ] as never
+        }
+        threadId={"thread:test" as never}
+      />,
+    );
+
+    expect(html).toContain("From Unnamed participant — Queue fallback body.");
+    expect(html).toContain('title="agent:unknown"');
   });
 });

@@ -1,7 +1,7 @@
 import type { PreparedConnection } from "@t3tools/client-runtime/connection";
 import { environmentEndpointUrl } from "@t3tools/client-runtime/environment";
 import { ManagedRelay } from "@t3tools/client-runtime/relay";
-import { type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import { type EnvironmentId, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -184,6 +184,20 @@ const readParticipantLabelsEffect = Effect.fn("j5.a2a.archiveFlowClient.readPart
     );
   },
 );
+
+export const readParticipantLabels = (
+  environmentId: EnvironmentId,
+  participantIds: ReadonlyArray<string>,
+) => {
+  const prepared = readPreparedConnection(environmentId);
+  return prepared === null
+    ? Promise.resolve(new Map<string, string>())
+    : runtime.runPromise(
+        readParticipantLabelsEffect({ prepared, participantIds }).pipe(
+          Effect.orElseSucceed(() => new Map<string, string>()),
+        ),
+      );
+};
 
 export interface ArchivePreflight {
   readonly facts: PreArchiveFacts | null;

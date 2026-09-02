@@ -13,6 +13,11 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import {
+  formatThreadA2AQueuedDelivery,
+  participantIdsForThreadA2AEnvelope,
+} from "../../j5/a2a/ThreadA2ARenderer";
+import { useParticipantLabels } from "../../j5/a2a/ParticipantIdentitiesClient";
 import { threadEnvironment } from "../../state/threads";
 import { useThreadProjection } from "../../state/entities";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -60,6 +65,10 @@ export function QueuedRunsControl(props: {
       pending: true,
     })),
   ];
+  const participantLabels = useParticipantLabels(
+    props.environmentId,
+    items.flatMap((item) => participantIdsForThreadA2AEnvelope(item.text)),
+  );
 
   if (items.length === 0) return null;
 
@@ -139,6 +148,7 @@ export function QueuedRunsControl(props: {
             item.runId !== null && editing !== null && editing.runId === item.runId
               ? editing
               : null;
+          const delivery = formatThreadA2AQueuedDelivery(item.text, participantLabels);
           return (
             <li
               key={item.key}
@@ -201,8 +211,13 @@ export function QueuedRunsControl(props: {
                 </>
               ) : (
                 <>
-                  <span className="min-w-0 flex-1 truncate text-xs" title={item.text}>
-                    {item.text}
+                  <span
+                    className="min-w-0 flex-1 truncate text-xs"
+                    title={
+                      delivery === null ? item.text : (delivery.tooltipParticipantId ?? undefined)
+                    }
+                  >
+                    {delivery?.label ?? item.text}
                   </span>
                   <Button
                     size="icon-xs"
