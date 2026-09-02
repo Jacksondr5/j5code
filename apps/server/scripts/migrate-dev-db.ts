@@ -5,7 +5,7 @@
  * ~/.t3 database, then run this checkout's migrations against it.
  *
  * `vp run migrate-dev-db` from a worktree:
- *   1. Nukes `<worktree>/.t3/userdata/state.sqlite`.
+ *   1. Nukes `<worktree>/.j5code/userdata/state.sqlite`.
  *   2. Snapshots the real db (read-only VACUUM INTO) and prunes it to the
  *      most recently updated projects and, per project, the most recent
  *      threads that have fully stopped. Working, settled, and monitored
@@ -46,7 +46,7 @@ export class MigrateDevDbNotInWorktreeError extends Schema.TaggedErrorClass<Migr
   {},
 ) {
   override get message(): string {
-    return "Not inside a linked git worktree. Pass --base-dir to target an isolated .t3 directory.";
+    return "Not inside a linked git worktree. Pass --base-dir to target an isolated .j5code directory.";
   }
 }
 
@@ -142,7 +142,7 @@ export class MigrateDevDbPhaseError extends Schema.TaggedErrorClass<MigrateDevDb
 }
 
 export interface RunMigrateDevDbInput {
-  /** Isolated .t3 directory. Defaults to `<worktree>/.t3` of the cwd. */
+  /** Isolated .j5code directory. Defaults to `<worktree>/.j5code` of the cwd. */
   readonly baseDir?: string | undefined;
   /** Source database. Defaults to `~/.t3/userdata/state.sqlite`. */
   readonly source?: string | undefined;
@@ -526,7 +526,9 @@ export const migrateDevDbCommand = Command.make(
     ),
     baseDir: Flag.string("base-dir").pipe(
       Flag.optional,
-      Flag.withDescription("Isolated .t3 directory. Defaults to the current worktree's .t3."),
+      Flag.withDescription(
+        "Isolated .j5code directory. Defaults to the current worktree's .j5code.",
+      ),
     ),
     source: Flag.string("source").pipe(
       Flag.optional,
