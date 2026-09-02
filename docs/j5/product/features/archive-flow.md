@@ -25,8 +25,23 @@ Approved mockup in the design workspace (`product/archive-flow/`).
    without ceremony. Otherwise: the subtree line (cascade names), each
    waiting ask with sender/urgency/intent/age, the outbound asks that
    drop, a quiet R15 reassurance (worktrees, branches, PRs survive —
-   cleanup is a separate act), and one destructive-styled "Archive
-   anyway". One confirm; no type-to-confirm.
+   cleanup is a separate act), and one destructive-styled confirm. One
+   confirm; no type-to-confirm. _(Amended 2026-09-01 from Jackson's
+   live review of PR #36 — AR5, **row anatomy**: each open-ask row is
+   two lines mirroring the inbox item — header line = **urgency badge
+   first** (blocking/soon/fyi, inbox colors), direction glyph +
+   "To/From ⟨display name⟩" (agents → thread title; humans → person
+   name + "(inbox)"; **unknown → "Unnamed participant"**, raw ids never
+   in the row), time-since via the inbox's own
+   `open {formatElapsedDurationLabel(openedAt)}` helper so the surfaces
+   cannot diverge; second line = the intent verbatim, **clamped at ~3
+   lines with ellipsis**. Section header carries count + consequence
+   ("N open asks will be terminated — waiters are notified"). Title is
+   "Archive ⟨agent name⟩?" with the host's fixed Confirm — the question
+   lives in the title so Confirm is unambiguous; "Archive anyway" as a
+   button label is a nice-to-have riding any future host generalization,
+   never a seam opened for it alone. Mockup of record:
+   design workspace `product/archive-flow/dialog-rows/`, Variant B.)_
 4. **Aftermath**: agent waiters get R1 terminal notices rendered as
    muted platform notices (TA3); human inbox items leave immediately
    (IB6); rows leave the active sidebar/roster sets. Nothing is deleted.
