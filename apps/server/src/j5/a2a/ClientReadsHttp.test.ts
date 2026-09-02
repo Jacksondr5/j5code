@@ -194,7 +194,7 @@ it("maps A4 resolver failures without treating a bad person selection as a serve
     assert.deepStrictEqual(await missing.json(), {
       error: "A2AParticipantNotFoundError",
       message:
-        "Participant human:client-reads:missing is not currently reachable. Call list_participants and choose a row with canReceiveMessage=true.",
+        "Participant human:client-reads:missing is not currently reachable. Call list_participants and choose an agent row with canReceiveMessage=true, or a human row with canOpenExchange=true to open an ask.",
     });
     const absentLocalOperator = await count();
     assert.equal(absentLocalOperator.status, 404);
