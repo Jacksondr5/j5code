@@ -77,30 +77,41 @@ fires. It is far less fragile than authoring provider-thread events by hand, and
    hand-creates the carrier threads so their ids, provider refs, and placement are controlled.
 3. Read back and record: the base dir, the Squadron id and project id
    (`SELECT id, name FROM j5_a2a_squadron;` `SELECT project_id FROM projection_projects;`).
-4. **The carrier's cwd — J5 largely dictates it, so plan to move keys, not preserve them.** The cwd
-   fixes the key for both the session file and the auto-memory dir under
-   `~/.claude/projects/<munge(cwd)>/`. J5 assigns a thread its cwd from its own workspace model: a
-   **per-agent worktree off a Squadron folder** (SC1: "worktrees stay per-agent"), or the Squadron
-   folder directly. In the dogfood build, folder choice comes from the Squadron's targeted
-   folder(s); "Browse elsewhere" was cut from the critical path (DV3). So the carrier's cwd is
-   normally a J5 worktree of your repo clone, **not** the agent's old Traycer path.
+4. **The carrier's cwd — RULED (Jackson): the Squadron folder itself, the repo clone on `j5/main`,
+   for all five core agents. Not per-agent worktrees.** These are long-standing non-coding agents
+   (they read/write docs repo-direct on `j5/main`, commission work, never build features in
+   branches); worktrees would fragment their commits for no benefit, and they already share the
+   clone under Traycer today. Create each carrier as a **local thread on the Squadron folder** — the
+   `chat.newLocal` door (`mod+shift+n`, converted in #35), which resolves the Squadron destination
+   and starts a thread on its folder. **Confirmed live:** this "current checkout" path records the
+   thread's cwd as the folder itself, no worktree (the Stage-1 proof used exactly it).
 
-   **Why not just copy the source cwd?** (Jackson asked; ruled against, with the exception noted.)
-   On the Mac the Traycer worktree paths _do_ still exist (same machine — this is only false on
-   Stage 2's Linux box), so preserving is physically possible and would zero out the key rename and
-   keep the memory dir already-keyed-correctly. But it binds a live migrated agent to a
-   **Traycer-managed worktree path that housekeeping can prune out from under it**, and some of
-   those (e.g. a coordinator's) are worktrees of **upstream t3code, not j5code** — the wrong repo
-   for a J5 agent's cwd. Stage 2 forces the rename regardless. So the durable choice is: let J5
-   assign the cwd and move each agent's memory dir to the new key. Preserving is a defensible
-   _per-agent_ exception only when that agent's source worktree is a stable `j5code` worktree you're
-   content to keep it bound to.
+   **Consequence — one munged key for all five, and it is the key memory already lives under.** With
+   cwd = `~/repos/jacksondr5/j5code`, the key is `-Users-jackson-repos-jacksondr5-j5code`. Measured
+   against the real source: Traycer keys auto-memory by **repo path, not worktree cwd**, so the J5
+   agents' memory is _already_ one shared dir under exactly that key (12 files). The memory move is
+   therefore **config-dir-only** — same key, new root (`~/.claude/projects/<key>/memory/`). The one
+   exception is the Director, whose memory sits under the upstream `t3code` repo key (5 files); it
+   merges into the shared dir. Collision check across every source memory dir: **only `MEMORY.md`
+   collides** — it is the per-dir index, present everywhere by design — so merge the two indexes
+   (concatenate entries), never overwrite; every other file (including the Director's
+   `fleet-app-project.md`, the plausible-collision case) has a unique name and copies cleanly. No
+   per-agent subfolder or prefix is needed. Sharing one memory dir is the status quo, not a new
+   hazard.
 
-   Because J5 gives each thread its own per-agent worktree, each migrated agent lands on a distinct
-   cwd and therefore a distinct memory key automatically — the memory-collision worry only arises if
-   you force-share one cwd across agents, which you would not. (Note: agents that shared a worktree
-   under Traycer already shared one memory dir, so preserving cwd would preserve that existing
-   behavior, not introduce a new hazard.)
+   Two mitigations to carry forward: (i) the memory files are **not auto-loaded by J5 today** anyway
+   (see [Auto-memory](#auto-memory)), so nothing depends on this dir until the adapter change lands;
+   (ii) **when that adapter change lands, key auto-memory PER THREAD** — the SDK's
+   `autoMemoryDirectory` is configurable per query — rather than per cwd, so cwd choice stops being
+   coupled to memory identity. Write that into the adapter-change spec.
+
+   **Git contention** with five agents on one checkout is the status quo under Traycer; noted, not
+   solved here.
+
+   (Why not the agents' old Traycer worktree paths: they exist on the Mac but are
+   housekeeping-prunable and, for the Director, a worktree of upstream `t3code`; and Stage 2 forces a
+   rename regardless. Moot under this ruling — the Squadron folder is the same clone they already
+   use.)
 
 **Must not, before import:** re-run any `--fresh` after the Squadron exists (wipes state); archive,
 delete, or recreate the Squadron (its id changes and breaks the citizenship rows); log out of Claude
@@ -167,6 +178,32 @@ before any real work, so the agent re-maps its tools before it acts. Template:
 > Acknowledge this re-map in one line, then resume where you left off.
 
 Adjust the tool list to the J5 toolset actually installed at migration time.
+
+### Leave the transplanted history verbatim — do not rewrite the Traycer prefix
+
+Jackson asked whether the `[traycer:agent-message] …` prefix in inbound history should be rewritten
+to J5's envelope format. **Ruled: no. Leave history verbatim; the orientation turn does the re-map.**
+
+Measured, so the reasoning is precise. The rewrite is **structurally safe**: the record format has
+**no content hashes or checksums** (59 distinct keys, none integrity-related); the parser treats
+message text as opaque; and the `uuid`/`parentUuid` chain that the CLI reconstructs the conversation
+from is purely structural (487 uuids, 0 dangling refs) and untouched by editing content strings. A
+JSON-escaped string edit inside a content field would not corrupt the file.
+
+It is **semantically hazardous**, which is why it is not recommended:
+
+- Rewriting inbound history to look like J5 envelopes **fabricates deliveries and exchange ids that
+  never existed in J5's ledger** — the agent would then remember J5 exchanges the communication
+  graph has no record of, and could try to reply to or clear them.
+- The **outbound** side stays as it is: `mcp__traycer_a2a__*` tool_use blocks. Rewriting only the
+  inbound prefix leaves the history internally inconsistent (J5-shaped envelopes answered by
+  Traycer-shaped sends).
+- It buys nothing the orientation turn does not: the agent needs to know its tools changed, not to
+  have its past re-labeled.
+
+If someone does it anyway (documented non-recommended option): edit only inside content strings,
+never touch `uuid`/`parentUuid`/`sessionId`/structure, and expect the semantic inconsistencies
+above.
 
 ### Auto-memory
 
