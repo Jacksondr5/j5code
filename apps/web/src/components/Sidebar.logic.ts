@@ -26,6 +26,7 @@ export const SIDEBAR_THREAD_PREWARM_LIMIT = 3;
 export type SidebarEmptyState =
   | { readonly kind: "loading"; readonly message: "Loading Squadrons…" }
   | { readonly kind: "no-squadrons"; readonly message: "No Squadrons yet" }
+  | { readonly kind: "scope-read-failed"; readonly message: "Couldn’t read thread homes" }
   | { readonly kind: "scoped"; readonly message: string }
   | { readonly kind: "empty"; readonly message: "No threads yet" };
 
@@ -34,12 +35,16 @@ export function resolveSidebarEmptyState(input: {
   readonly directoryStatus: "loading" | "ready" | "error";
   readonly squadronCount: number;
   readonly squadronScopeName: string | null;
+  readonly scopeReadFailed?: boolean;
 }): SidebarEmptyState {
   if (input.directoryStatus === "loading") {
     return { kind: "loading", message: "Loading Squadrons…" };
   }
   if (input.directoryStatus === "ready" && input.squadronCount === 0) {
     return { kind: "no-squadrons", message: "No Squadrons yet" };
+  }
+  if (input.squadronScopeName !== null && input.scopeReadFailed === true) {
+    return { kind: "scope-read-failed", message: "Couldn’t read thread homes" };
   }
   if (input.squadronScopeName !== null) {
     return { kind: "scoped", message: `No threads in ${input.squadronScopeName} yet` };

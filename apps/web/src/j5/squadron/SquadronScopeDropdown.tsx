@@ -41,10 +41,9 @@ export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
     : setUncontrolledCreateOpen;
   const { status, squadrons } = useSquadronDirectory();
   const selectedId = useSquadronAmbientScope();
-  const choices = squadrons.map(({ squadron, projectIds }) => ({
+  const choices = squadrons.map(({ squadron }) => ({
     id: squadron.id,
     name: squadron.name,
-    projectIds,
   }));
   const selected = resolveSquadronScope(choices, selectedId);
 

@@ -309,7 +309,7 @@ describe("Squadron picker", () => {
     expect(
       filterThreadsForSquadronScope(
         [{ id: "thread:alpha" }, { id: "thread:bravo" }],
-        { id: "squadron:bravo", name: "Bravo", projectIds: [sharedFolder.id] },
+        { id: "squadron:bravo", name: "Bravo" },
         new Map([
           ["thread:alpha", { kind: "known" as const, squadron: { id: "squadron:alpha" } }],
           ["thread:bravo", { kind: "known" as const, squadron: { id: "squadron:bravo" } }],
