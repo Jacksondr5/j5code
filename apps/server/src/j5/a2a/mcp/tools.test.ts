@@ -2,8 +2,10 @@ import { assert, it } from "@effect/vitest";
 import * as Context from "effect/Context";
 import { Tool } from "effect/unstable/ai";
 
+import { A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
 import {
   J5ArchiveAgentTool,
+  J5SendMessageTool,
   J5SpawnAgentTool,
   J5StopAgentTool,
   J5Toolkit,
@@ -13,6 +15,11 @@ import {
 } from "./tools.ts";
 
 it("publishes the ratified single-target lifecycle contracts fail-closed", () => {
+  assert.equal(J5SendMessageTool.description, A2A_SEND_TOOL_DESCRIPTION);
+  assert.include(
+    J5SendMessageTool.description ?? "",
+    "To the human, only an ask or a reply: a plain send to a person is refused",
+  );
   assert.equal(J5ArchiveAgentTool.description, J5_ARCHIVE_AGENT_DESCRIPTION);
   assert.equal(J5SpawnAgentTool.description, J5_SPAWN_AGENT_DESCRIPTION);
   assert.equal(J5StopAgentTool.description, J5_STOP_AGENT_DESCRIPTION);

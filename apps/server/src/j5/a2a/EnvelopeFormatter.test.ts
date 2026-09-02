@@ -1,4 +1,7 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 
 import {
   A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION,
@@ -13,6 +16,31 @@ import {
 } from "./EnvelopeFormatter.ts";
 import { SquadronId, ExchangeId, ParticipantId } from "./contracts.ts";
 
+const documentedSendToolContract = new URL(
+  "../../../../../docs/j5/product/a2a/agent-tools.md",
+  import.meta.url,
+);
+
+const readDocumentedSendToolDescription = Effect.fn("readDocumentedSendToolDescription")(
+  function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const document = yield* fileSystem.readFileString(
+      decodeURIComponent(documentedSendToolContract.pathname),
+    );
+    const description = document.match(
+      /## `send_message`[\s\S]*?\*\*Description \(contract(?:, [^)]*)?\):\*\* "([\s\S]*?)"\n\n\| Input/,
+    )?.[1];
+    if (description === undefined) {
+      return yield* Effect.die("send_message contract description is missing from agent-tools.md");
+    }
+    return description
+      .split("\n")
+      .map((line) => line.trim())
+      .join(" ");
+  },
+  Effect.provide(NodeServices.layer),
+);
+
 it("renders the versioned peer envelope with exact reply semantics", () => {
   const rendered = formatPeerEnvelope({
     senderId: ParticipantId.make("agent:sender"),
@@ -21,7 +49,7 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
     message: "Please verify the worker.",
   });
 
-  assert.equal(A2A_ENVELOPE_VERSION, 13);
+  assert.equal(A2A_ENVELOPE_VERSION, 15);
   assert.include(rendered, "Cross-agent message");
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
   assert.include(rendered, "agent:sender");
@@ -31,6 +59,12 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
   assert.include(rendered, "Reply once");
   assert.notInclude(rendered, "{{");
 });
+
+it.effect("keeps the send_message runtime description byte-equal to its documented contract", () =>
+  Effect.gen(function* () {
+    assert.equal(yield* readDocumentedSendToolDescription(), A2A_SEND_TOOL_DESCRIPTION);
+  }),
+);
 
 it("renders reply closures without another reply instruction for either channel", () => {
   const peerMessage = "Peer reply bytes\n  stay exact.  ";
@@ -93,7 +127,11 @@ it("tells agents that human-origin exchanges require an explicit tool reply", ()
   assert.include(rendered, 'exchange_id="exchange:human"');
   assert.equal(
     A2A_SEND_TOOL_DESCRIPTION,
-    "Send one durable message to another agent or the human. Three uses: a plain send when you don't need a reply; an ask — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a reply — include the exchange_id from the ask you are answering, which closes that exchange. Use this tool only for participants already returned by list_participants; when creating a Peer Agent, put any reply expectation in spawn_agent's brief instead of sending a follow-up ask. Set urgency only when asking the human. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. Reuse client_request_id to retry the same send safely. This tool is unavailable to a native thread without a registered home squadron.",
+    "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask or a reply: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by list_participants; when creating a Peer Agent, put any reply expectation in spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. A caller without a registered home is refused. Reuse client_request_id to retry the same send safely.",
+  );
+  assert.include(
+    A2A_SEND_TOOL_DESCRIPTION,
+    "To the human, only an ask or a reply: a plain send to a person is refused",
   );
   assert.include(A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION, "Withdraw an ask you sent");
   assert.include(A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION, "sender-cleared");
@@ -110,7 +148,7 @@ it("tells agents that human-origin exchanges require an explicit tool reply", ()
   ]) {
     assert.include(A2A_LIST_TOOL_DESCRIPTION, clause);
   }
-  assert.include(A2A_SEND_TOOL_DESCRIPTION, "native thread without a registered home squadron");
+  assert.include(A2A_SEND_TOOL_DESCRIPTION, "A caller without a registered home is refused.");
   for (const description of [A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION]) {
     assert.notInclude(description, "wrapper-spawned");
   }

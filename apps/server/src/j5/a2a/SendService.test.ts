@@ -9,7 +9,13 @@ import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
-import { AgentParticipant, CommCommandId, SquadronId, ParticipantId } from "./contracts.ts";
+import {
+  AgentParticipant,
+  CommCommandId,
+  ExchangeId,
+  SquadronId,
+  ParticipantId,
+} from "./contracts.ts";
 
 const timestamp = "2026-08-16T12:00:00.000Z";
 
@@ -431,7 +437,75 @@ it.effect("validates intent and human-only urgency at exchange open", () =>
         acceptedAt: timestamp,
       }),
     );
-    assert.equal(oneShotUrgency._tag, "A2AUrgencyRequiresExchangeError");
+    assert.equal(oneShotUrgency._tag, "A2AHumanAskOrReplyRequiredError");
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("refuses plain human sends while allowing human asks and replies", () =>
+  Effect.gen(function* () {
+    const squadronId = yield* setupSameSquadron();
+    yield* registerPerson();
+    const service = yield* A2ASendService;
+    const ledgerService = yield* A2ALedger;
+    const sql = yield* SqlClient.SqlClient;
+
+    const plainSend = yield* Effect.flip(
+      service.send({
+        commandId: CommCommandId.make("command:human-plain-send"),
+        senderThreadId: sender.threadId,
+        to: person.id,
+        message: "This must not become ghost traffic.",
+        acceptedAt: timestamp,
+      }),
+    );
+    assert.equal(plainSend._tag, "A2AHumanAskOrReplyRequiredError");
+    assert.equal(
+      plainSend.message,
+      `A plain send to human participant ${person.id} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or a reply with exchange_id. If nobody needs to act, say it in your own thread instead.`,
+    );
+    const rejectedWrites = yield* sql<{ readonly count: number }>`
+      SELECT COUNT(*) AS count
+      FROM j5_a2a_comm_event
+      WHERE command_id = 'command:human-plain-send'
+    `;
+    assert.deepStrictEqual(rejectedWrites, [{ count: 0 }]);
+
+    const ask = yield* service.send({
+      commandId: CommCommandId.make("command:human-ask"),
+      senderThreadId: sender.threadId,
+      to: person.id,
+      message: "Please decide this visible question.",
+      expectReply: true,
+      intent: "Obtain a decision",
+      urgency: "soon",
+      acceptedAt: timestamp,
+    });
+    assert.equal(ask.exchangeState, "open");
+
+    const inboundExchangeId = ExchangeId.make("exchange:human-inbound");
+    yield* ledgerService.append({
+      commandId: CommCommandId.make("command:human-inbound"),
+      squadronId,
+      acceptedAt: timestamp,
+      event: {
+        kind: "exchange.opened",
+        sender: person.id,
+        receiver: sender.id,
+        exchangeId: inboundExchangeId,
+        correlationId: null,
+        payload: { intent: "Request a reply", urgency: "soon" },
+        createdAt: timestamp,
+      },
+    });
+    const reply = yield* service.send({
+      commandId: CommCommandId.make("command:human-reply"),
+      senderThreadId: sender.threadId,
+      to: person.id,
+      message: "Here is the requested reply.",
+      exchangeId: inboundExchangeId,
+      acceptedAt: timestamp,
+    });
+    assert.equal(reply.exchangeState, "closed");
   }).pipe(Effect.provide(testLayer)),
 );
 
@@ -837,13 +911,13 @@ it.effect("lists member agents and registry-derived person capabilities", () =>
         },
         {
           id: person.id,
-          canReceiveMessage: true,
+          canReceiveMessage: false,
           canOpenExchange: true,
           acceptsUrgency: true,
         },
         {
           id: secondPersonId,
-          canReceiveMessage: true,
+          canReceiveMessage: false,
           canOpenExchange: true,
           acceptsUrgency: true,
         },

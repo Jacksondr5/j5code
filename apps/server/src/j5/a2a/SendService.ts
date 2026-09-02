@@ -130,6 +130,15 @@ export class A2AUrgencyRequiresExchangeError extends Schema.TaggedErrorClass<A2A
   }
 }
 
+export class A2AHumanAskOrReplyRequiredError extends Schema.TaggedErrorClass<A2AHumanAskOrReplyRequiredError>()(
+  "A2AHumanAskOrReplyRequiredError",
+  { participantId: Schema.String },
+) {
+  override get message(): string {
+    return `A plain send to human participant ${this.participantId} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or a reply with exchange_id. If nobody needs to act, say it in your own thread instead.`;
+  }
+}
+
 export class A2AExchangeNotOpenError extends Schema.TaggedErrorClass<A2AExchangeNotOpenError>()(
   "A2AExchangeNotOpenError",
   { exchangeId: Schema.String },
@@ -232,6 +241,7 @@ export type A2ASendError =
   | A2AUrgencyRequiredError
   | A2AUrgencyNotAcceptedError
   | A2AUrgencyRequiresExchangeError
+  | A2AHumanAskOrReplyRequiredError
   | A2AExchangeNotOpenError
   | A2AExchangeAlreadyAnsweredError
   | A2ACrossSquadronReplyInvariantError
@@ -448,7 +458,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
                   squadronId: sender.squadronId,
                   participantId: personId,
                   participant: { kind: "human", id: personId },
-                  canReceiveMessage: true,
+                  canReceiveMessage: false,
                   canOpenExchange: true,
                   acceptsUrgency: true,
                 }) satisfies ParticipantDirectoryRow,
@@ -520,6 +530,13 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
 
           const receiver = yield* participantMembership(input.to, sender.squadronId);
           const receiverId = participantId(receiver.participant);
+          if (
+            receiver.participant.kind === "human" &&
+            input.expectReply !== true &&
+            input.exchangeId === undefined
+          ) {
+            return yield* new A2AHumanAskOrReplyRequiredError({ participantId: receiverId });
+          }
           let exchangeId: ExchangeId | null = null;
           let exchangeState: SendMessageResult["exchangeState"] = "none";
           let exchangeRole: "none" | "ask" | "followup" | "reply" = "none";
