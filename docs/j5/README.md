@@ -50,7 +50,9 @@ matches the workspace's folder structure — content, not paths, is what mirrors
   upstream this repo forks), Traycer's A2A/organization model, and the
   prior-art fleet studies. A quarantined, superseded early T3 snapshot was
   deliberately not mirrored.
-- `process/` — working-process notes for the agent teams building here.
+- `process/` — contributor-facing rules for working in this repository. How the
+  agent fleet is run is Jackson's personal practice and lives outside the product
+  repo, in his playbooks.
 - `worklog/` — build-time records, kept out of the evergreen docs: the A2A
   implementation tickets with their reviews and retros (`a2a-tickets/`), how
   this fork was established (`fork-setup-plan/` — base pin, rebrand, CI,
