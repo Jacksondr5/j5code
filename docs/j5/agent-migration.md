@@ -77,13 +77,30 @@ fires. It is far less fragile than authoring provider-thread events by hand, and
    hand-creates the carrier threads so their ids, provider refs, and placement are controlled.
 3. Read back and record: the base dir, the Squadron id and project id
    (`SELECT id, name FROM j5_a2a_squadron;` `SELECT project_id FROM projection_projects;`).
-4. **Choose each migrated agent's cwd — the load-bearing choice.** The cwd fixes the key for both the
-   session file and the auto-memory dir under `~/.claude/projects/<munge(cwd)>/`. Give each migrated
-   agent its **own distinct cwd** (a per-agent worktree of the repo — matches J5's normal
-   thread-gets-a-worktree model and isolates git state; a per-agent plain subdirectory is the
-   low-surgery fallback). Do **not** share one cwd across agents: they would share one session
-   project dir and one memory dir and collide. The Traycer worktree cwds do not exist here; the cwd
-   is chosen fresh and the key recomputed.
+4. **The carrier's cwd — J5 largely dictates it, so plan to move keys, not preserve them.** The cwd
+   fixes the key for both the session file and the auto-memory dir under
+   `~/.claude/projects/<munge(cwd)>/`. J5 assigns a thread its cwd from its own workspace model: a
+   **per-agent worktree off a Squadron folder** (SC1: "worktrees stay per-agent"), or the Squadron
+   folder directly. In the dogfood build, folder choice comes from the Squadron's targeted
+   folder(s); "Browse elsewhere" was cut from the critical path (DV3). So the carrier's cwd is
+   normally a J5 worktree of your repo clone, **not** the agent's old Traycer path.
+
+   **Why not just copy the source cwd?** (Jackson asked; ruled against, with the exception noted.)
+   On the Mac the Traycer worktree paths _do_ still exist (same machine — this is only false on
+   Stage 2's Linux box), so preserving is physically possible and would zero out the key rename and
+   keep the memory dir already-keyed-correctly. But it binds a live migrated agent to a
+   **Traycer-managed worktree path that housekeeping can prune out from under it**, and some of
+   those (e.g. a coordinator's) are worktrees of **upstream t3code, not j5code** — the wrong repo
+   for a J5 agent's cwd. Stage 2 forces the rename regardless. So the durable choice is: let J5
+   assign the cwd and move each agent's memory dir to the new key. Preserving is a defensible
+   _per-agent_ exception only when that agent's source worktree is a stable `j5code` worktree you're
+   content to keep it bound to.
+
+   Because J5 gives each thread its own per-agent worktree, each migrated agent lands on a distinct
+   cwd and therefore a distinct memory key automatically — the memory-collision worry only arises if
+   you force-share one cwd across agents, which you would not. (Note: agents that shared a worktree
+   under Traycer already shared one memory dir, so preserving cwd would preserve that existing
+   behavior, not introduce a new hazard.)
 
 **Must not, before import:** re-run any `--fresh` after the Squadron exists (wipes state); archive,
 delete, or recreate the Squadron (its id changes and breaks the citizenship rows); log out of Claude
@@ -111,8 +128,45 @@ orchestration_v2_projection_provider_threads WHERE …` — and confirm `nativeC
    transplant surfaces only as a failed turn, not a graceful fallback): confirm the JSONL sits under
    the exact munged project dir for the thread's cwd, named `<carrier-uuid>.jsonl`, last record a
    clean completed state.
-8. **Drive one turn** and confirm memory recall. Set the model explicitly to a currently-supported
-   one.
+8. **Send the orientation message as the FIRST resumed turn** (mandatory — see below), then confirm
+   memory recall on the turn after. Set the model explicitly to a currently-supported one.
+
+### A2A history and the tool-surface change across the move
+
+The migrated agent's transcript is full of its old Traycer coordination. Measured against a real
+session: **inbound A2A** appears as user-turn text carrying the `[traycer:agent-message] from …`
+prefix, and **outbound A2A** appears as `tool_use` blocks for `mcp__traycer_a2a__*` tools
+(`traycer_send_message`, etc.). Two consequences:
+
+- **None of that pre-transplant history renders in the J5 timeline** — it is model context only, per
+  the honest line. The agent _remembers_ its A2A exchanges; J5 does not _display_ them.
+- **The history references tools that do not exist in J5's toolset.** J5 exposes `send_message`,
+  `list_participants`, `spawn_agent`, `stop_agent`, `archive_agent`, `clear_own_ask` — not the
+  `mcp__traycer_a2a__*` or `traycer_*` tools the transcript is full of. **Resuming a session whose
+  history contains those dead tool_use blocks works with no API error** — proven in the Stage-1
+  live run (the resumed session was dense with `mcp__traycer_a2a__traycer_send_message` blocks and
+  completed its turn normally). The risk is not a crash; it is the agent _reaching for a dead tool_
+  on its next turn out of habit.
+
+**Therefore a first-turn orientation message is mandatory.** Send it as the very first resumed turn,
+before any real work, so the agent re-maps its tools before it acts. Template:
+
+> You have been migrated into J5 Code, and your memory has carried over — everything you remember is
+> still valid. Three things have changed and take effect now:
+>
+> 1. You are a Peer Agent in the J5 Squadron **"<squadron-name>"**. Your prior Traycer epic/agents
+>    are not here; your peers are the participants J5 lists.
+> 2. **Your tools changed.** The Traycer tools you used before (`traycer_send_message`,
+>    `traycer_create_agent`, `traycer_get_transcript`, every `mcp__traycer_a2a__*`) **no longer
+>    exist**. Your A2A surface is now: `list_participants` (your address book — call it first),
+>    `send_message` (plain send / ask with `expect_reply` / reply with `exchange_id`), `spawn_agent`,
+>    `stop_agent`, `archive_agent`, `clear_own_ask`. Do not call any `traycer_*` tool.
+> 3. **The human is reached through the inbox** — `send_message` to the human participant (with
+>    `urgency` when it is an ask), not a Traycer channel.
+>
+> Acknowledge this re-map in one line, then resume where you left off.
+
+Adjust the tool list to the J5 toolset actually installed at migration time.
 
 ### Auto-memory
 
