@@ -16,11 +16,11 @@ const ThreadHome = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("known"), squadron: SquadronHome }),
   Schema.Struct({ kind: Schema.Literal("unknown") }),
 ]);
-const ThreadHomeEntry = Schema.Struct({ threadId: ThreadId, home: ThreadHome });
-const ThreadHomesResponse = Schema.Struct({ entries: Schema.Array(ThreadHomeEntry) });
+const ParticipantHomeEntry = Schema.Struct({ participantId: Schema.String, home: ThreadHome });
+const ParticipantHomesResponse = Schema.Struct({ entries: Schema.Array(ParticipantHomeEntry) });
 
 export type ThreadHome = typeof ThreadHome.Type;
-export type ThreadHomeEntry = typeof ThreadHomeEntry.Type;
+export type ThreadHomeEntry = { readonly threadId: ThreadId; readonly home: ThreadHome };
 
 const runtime = ManagedRuntime.make(Layer.merge(primaryEnvironmentHttpLayer, browserCryptoLayer));
 const ErrorResponse = Schema.Struct({ message: Schema.String });
@@ -51,13 +51,26 @@ export const listThreadHomesEffect = Effect.fn("j5.threadHomesClient.list")(func
   threadIds: ReadonlyArray<ThreadId>,
 ) {
   const client = yield* HttpClient.HttpClient;
+  const threadIdByParticipantId = new Map(
+    threadIds.map((threadId) => [participantIdForThread(threadId), threadId] as const),
+  );
   const request = yield* HttpClientRequest.post(
-    resolvePrimaryEnvironmentHttpUrl("/api/j5/a2a/thread-homes"),
-  ).pipe(HttpClientRequest.bodyJson({ threadIds }));
+    resolvePrimaryEnvironmentHttpUrl("/api/j5/a2a/client-reads/participant-homes"),
+  ).pipe(
+    HttpClientRequest.bodyJson({ participantIds: Array.from(threadIdByParticipantId.keys()) }),
+  );
   const response = yield* client.execute(request);
   const success = yield* requireThreadHomesSuccess(response);
-  return (yield* HttpClientResponse.schemaBodyJson(ThreadHomesResponse)(success)).entries;
+  const decoded = yield* HttpClientResponse.schemaBodyJson(ParticipantHomesResponse)(success);
+  return decoded.entries.flatMap((entry) => {
+    const threadId = threadIdByParticipantId.get(entry.participantId);
+    return threadId === undefined ? [] : [{ threadId, home: entry.home } satisfies ThreadHomeEntry];
+  });
 });
+
+/** The Registrar persists this opaque participant identity at creation. */
+export const participantIdForThread = (threadId: ThreadId) =>
+  `agent:j5:a2a:${encodeURIComponent(threadId)}`;
 
 const listThreadHomes = (threadIds: ReadonlyArray<ThreadId>) =>
   runtime.runPromise(listThreadHomesEffect(threadIds));
