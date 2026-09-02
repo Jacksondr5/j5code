@@ -54,7 +54,7 @@ agreement.
 | Unit             | `~/.config/systemd/user/j5code.service` | Journald logging (`journalctl --user -u j5code`)             |
 
 > **Belt-and-braces state-dir check.** The J5 server now defaults to `~/.j5code`, separate from
-> the real T3 install at `~/.t3`. The unit and commands below still set `T3CODE_HOME=$HOME/.j5code`
+> the real T3 install at `~/.t3`. The unit and commands below still set `J5CODE_HOME=$HOME/.j5code`
 > explicitly so the intended location remains visible and safe if an older binary, wrapper, or
 > future launch path bypasses the built-in default.
 
@@ -90,7 +90,7 @@ As `j5dev` (Ansible reconciles all of this):
    [Service]
    Type=simple
    WorkingDirectory=%h/j5code
-   Environment=T3CODE_HOME=%h/.j5code
+   Environment=J5CODE_HOME=%h/.j5code
    ExecStart=/usr/bin/env bash -lc 'exec fnm exec --using "$(cat .nvmrc)" node apps/server/dist/bin.mjs serve --port 5773 --host 127.0.0.1'
    Restart=always
    RestartSec=5
@@ -163,7 +163,7 @@ As `j5dev` (Ansible reconciles all of this):
 
    ```sh
    cd ~/j5code
-   T3CODE_HOME=$HOME/.j5code fnm exec --using "$(cat .nvmrc)" node apps/server/dist/bin.mjs pair
+   J5CODE_HOME=$HOME/.j5code fnm exec --using "$(cat .nvmrc)" node apps/server/dist/bin.mjs pair
    ```
 
 ## Connecting the client
