@@ -187,6 +187,7 @@ export const J5_ARCHIVE_AGENT_DESCRIPTION =
 const sendDependencies = [
   McpInvocationContext.McpInvocationContext,
   A2ASendService,
+  A2AHomeRegistrar,
   A2ADeliveryWorker,
   Crypto.Crypto,
   OrchestratorV2,
