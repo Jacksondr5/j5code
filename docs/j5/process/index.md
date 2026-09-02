@@ -5,9 +5,9 @@ kind: spec
 
 # Process
 
-How work gets done in this fork. Product law lives under `product/`; build-time records under
-`worklog/`; the fleet's standing process rules are Spawner-owned.
+Facts about working in this codebase. Product law lives under `product/`; build-time records under
+`worklog/`. How the fleet and its operator work — gates, evidence, staffing, personal preferences —
+is deliberately not here: that lives in the operator's playbooks, outside the repo.
 
-- [PR groups](pr-groups.md) — the PR-group practice: seats, gates, readiness.
-- [Working in the repo](working-in-the-repo.md) — durable tool traps and repo facts every agent hits
-  (grep on large files, formatting docs before commit, what web tests can and cannot prove).
+- [Working in the repo](working-in-the-repo.md) — durable tool traps, repo facts, and the contributor
+  rules that govern the code itself.

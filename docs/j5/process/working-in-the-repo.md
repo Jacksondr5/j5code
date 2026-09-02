@@ -1,15 +1,34 @@
 ---
-title: "Working in the repo — tool traps and facts every agent hits"
+title: "Working in the repo — tool traps, repo facts, and contributor rules"
 kind: spec
 ---
 
 # Working in the repo
 
-Durable, non-obvious facts about this repository and its tooling that agents rediscover the hard
-way. Each entry earned its place by producing a wrong conclusion or a broken CI run at least once.
-This doc holds **repo facts and tool traps only** — process law lives in the Spawner-owned standing
-rules, and UI conventions in the Design-owned conventions doc. Nothing here goes into upstream-owned
-files (`CLAUDE.md`, `README.md`): J5 guidance lives only under `docs/j5/`.
+Durable, non-obvious facts about this repository and its tooling, plus the rules that govern the
+code itself. Each entry earned its place by producing a wrong conclusion, a broken CI run, or a
+rebase tax at least once. The test for what belongs here: **is it a fact about the codebase?**
+How the fleet or its operator works — gates, evidence, staffing, personal preferences — is
+deliberately not here; that lives in the operator's playbooks outside the repo. Nothing here goes
+into upstream-owned files (`CLAUDE.md`, `README.md`): J5 guidance lives only under `docs/j5/`.
+
+## Contributor rules — what governs the code
+
+One line each, with the why.
+
+- **No dead code ships without a reachable or named imminent consumer** (2026-08-31). Existence is
+  not reachability: a hook with zero call sites is a maintenance trap, not a feature, and two
+  authorized change maps once targeted exactly such a hook. Name the consumer or don't ship it.
+- **Pre-dogfood, no legacy-compatibility code, ever** (Jackson, 2026-09-01). Accommodations for
+  data or states that cannot exist yet (no users, no legacy drafts) are YAGNI and get deleted;
+  invariants stay and fail closed, loudly.
+- **J5 content lives only under `docs/j5/` and the `j5/` code paths; upstream-owned files are edited
+  only as the integration cases enumerated in [`FORK.md`](../../../FORK.md)** ("Add, don't modify").
+  Every edit to an upstream-owned file is a permanent rebase-conflict tax against upstream; the
+  fork's discipline is add-beside, and the sanctioned exceptions are listed there, not improvised.
+- **UI copy capitalization follows upstream's measured convention** (Jackson, 2026-09-01).
+  Capitalization and copy style for labels, menus, and options are determined by measuring
+  comparable upstream surfaces, never assumed — a codebase-consistency fact, not taste.
 
 ## `grep` silently returns nothing on large files — use `-a`
 
@@ -58,5 +77,4 @@ behavior — check whether anything actually exercises the handler, and say so i
 nothing does. For a user-visible surface, either get a real UI pass before signing off or state the
 limitation explicitly. When a fix arrives with a rendering test attached, verify the test can fail
 before crediting it. The discriminating unit-test form for deferred-updater bugs is to extract the
-handler and invoke the returned updater _after_ nulling `currentTarget`. This is the empirical basis
-for the fleet's UI-screenshot-before-merge rule — it is load-bearing, not ceremony.
+handler and invoke the returned updater _after_ nulling `currentTarget`.
