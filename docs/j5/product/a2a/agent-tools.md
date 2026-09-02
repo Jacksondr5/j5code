@@ -36,32 +36,61 @@ positive instruction over negation.
 
 ## `send_message` — built (`j5/main`); description update is a small code ticket
 
-**Description (contract):** "Send one durable message to another agent or the human. Three uses: a
-**plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line
-intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id
-from the ask you are answering, which closes that exchange. Use this tool only for participants
-already returned by list_participants; when creating a Peer Agent, put any reply expectation in
-spawn_agent's brief instead of sending a follow-up ask. Set urgency only when asking the human.
-Returns once the message is committed; delivery continues asynchronously — carry on with your work,
-and the reply arrives later as an incoming message. A caller without a registered home is refused.
-Reuse client_request_id to retry the same send safely."
+**Description (contract, amended 2026-09-02 — see the human-addressed-sends revision below; the
+shipped string updates with that ticket):** "Send one durable message. To another agent, three
+uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a
+one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the
+exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask
+or a reply: a plain send to a person is refused — if nobody needs to act, say it in your own thread
+instead. Set urgency only when asking the human. Use this tool only for participants already
+returned by list_participants; when creating a Peer Agent, put any reply expectation in
+spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed;
+delivery continues asynchronously — carry on with your work, and the reply arrives later as an
+incoming message. A caller without a registered home is refused. Reuse client_request_id to retry
+the same send safely."
 
-| Input               | Type              | Required                         | Meaning                                                |
-| ------------------- | ----------------- | -------------------------------- | ------------------------------------------------------ |
-| `to`                | ParticipantId     | yes                              | Directory-listed recipient                             |
-| `message`           | string, non-empty | yes                              | Body; envelope adds sender identity/Squadron           |
-| `client_request_id` | string            | no (yes for retries)             | Idempotency key                                        |
-| `expect_reply`      | boolean           | no                               | Opens/joins an Exchange; requires `intent`             |
-| `exchange_id`       | ExchangeId        | no                               | Marks this send as the reply that closes that Exchange |
-| `intent`            | string            | with `expect_reply`              | One-line summary carried in projections                |
-| `urgency`           | Urgency           | opening an Exchange to the human | Inbox priority                                         |
+| Input               | Type              | Required                         | Meaning                                                                      |
+| ------------------- | ----------------- | -------------------------------- | ---------------------------------------------------------------------------- |
+| `to`                | ParticipantId     | yes                              | Directory-listed recipient; a human requires `expect_reply` or `exchange_id` |
+| `message`           | string, non-empty | yes                              | Body; envelope adds sender identity/Squadron                                 |
+| `client_request_id` | string            | no (yes for retries)             | Idempotency key                                                              |
+| `expect_reply`      | boolean           | no                               | Opens/joins an Exchange; requires `intent`                                   |
+| `exchange_id`       | ExchangeId        | no                               | Marks this send as the reply that closes that Exchange                       |
+| `intent`            | string            | with `expect_reply`              | One-line summary carried in projections                                      |
+| `urgency`           | Urgency           | opening an Exchange to the human | Inbox priority                                                               |
 
 Result: `SendMessageResult` (message id, exchange state). Errors (each naming the actual state and
 the next command): sender membership (`A2ASenderNotJoinedError` family); recipient not addressable
 (with the `list_participants` next-command); `expect_reply` without `intent` (an ask must carry its
 one-line intent); an `exchange_id` that is unknown, already closed, or not an exchange the caller
 participates in (naming the exchange's actual state); opening an exchange to the human without
-`urgency`. Events: message + exchange ledger events; delivery receipts follow asynchronously.
+`urgency`; a plain send to a human — neither `expect_reply` nor `exchange_id` — refused, naming the
+two legal moves and the own-thread alternative. Events: message + exchange ledger events; delivery
+receipts follow asynchronously.
+
+**Contract revision (ruled 2026-09-02, human-addressed sends — Jackson, in session with Product;
+supersedes issue #44's A/B/C disposition and PR #57's "invisible in v0" wording):** **an
+agent-to-human send must be an ask or a reply; a plain message to a person is refused
+fail-closed.** Permanent law, not a v0 override. Why: (1) the inbox is asks-only (R5, IB1) — if
+the receiving side shows only asks, the sending side must accept only asks, or the contract lies in
+one direction; (2) a plain message to a person carries no information the sender's own thread does
+not already carry — the sender's words are already there, and the human reads that thread when
+engaged — so the verb's only distinctive property is that it feels like notifying while doing
+nothing (the ghost-traffic class found in Jackson's 2026-09-01 session and reproduced by two
+migrated agents); (3) agents on the chatty end of the spectrum would otherwise flood the person.
+What an agent does instead: if nobody needs to act, it says so in its own thread, or tells the
+agent holding the work context (its spawner or Captain) — not as routing (R22 stands: Captains are
+never routers; agent-to-agent plain sends stay fully open) but because that thread is where the
+human is already reading, and its owner judges what rises to an ask. If the person must see it,
+seeing it IS the obligation: an ask with intent and urgency, which the person closes by replying.
+The error names the two legal moves (ask with expect_reply + intent + urgency; reply with
+exchange_id) and the own-thread alternative. Accepted cost, stated at ruling: chatty agents will
+convert check-ins into low-urgency asks — the right failure mode, because it is visible and
+countable per sender in the inbox and fixed in the brief or Role, where the prior-art fleet fixed
+it too. Recommended and separate, not ruled: renaming urgency `fyi` → `whenever` (an ask urgency
+named "no reply needed" mislabels an obligation; the levels answer "when do you need my answer").
+Product record: [`../features/inbox.md`](../features/inbox.md) (sender-side mirror) and the
+[worklog record](../../worklog/human-addressed-sends-ruling-2026-09-02.md).
 
 **Contract revision (ruled 2026-08-31, self-messaging):** `to` equal to the caller's own
 participant id is rejected fail-closed — self-send is never legitimate (a self-Exchange is
@@ -101,6 +130,11 @@ refreshes without naming an unshipped lifecycle verb.
 (each description carries its own native-home caveat: send_message states the caller-side
 precondition — a sender without a registered home is refused; list_participants states the
 listing-side consequence — native threads without a home do not appear and cannot be messaged)
+
+**Contract revision (ruled 2026-09-02, human-addressed sends):** human rows report
+`can_receive_message: false`, `can_open_exchange: true`, `accepts_urgency: true` — the existing
+capability flags already express the rule that a person receives only asks; the shipped
+`true/true` row is therefore lying today and changes with the `send_message` refusal ticket.
 
 No inputs. Result rows: `display_name`, `squadron_id`, `participant_id`, participant kind (thread
 id for agents), `can_receive_message`, `can_open_exchange`, `accepts_urgency`, plus `provenance`

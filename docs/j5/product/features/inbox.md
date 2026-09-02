@@ -15,6 +15,22 @@ verbatim answer closes the exchange. Approved mockup in the design
 workspace (`product/inbox/mockups/`); decision aid, not pixel spec.
 Backend contract: A4's inbox projection + idempotent `answer` API.
 
+## Only asks reach a person (ruled 2026-09-02)
+
+The inbox's purity has a sender-side mirror: **an agent cannot send a
+person a plain message at all** — every agent-to-human send is an ask
+(intent + urgency, closed by the person's reply) or a reply to the
+person's own ask. A plain send to a human is refused by the tool,
+fail-closed, and the address book reports the human row as
+`can_receive_message: false, can_open_exchange: true`. Why: a plain message
+to a person carries nothing the sender's own thread does not already show,
+and chatty agents would otherwise flood the person with traffic that owes
+nothing. If nobody needs to act, the agent says so in its own thread or
+tells whoever holds the work context (spawner or Captain — the thread the
+human is already reading; not routing, R22 stands). If the person must see
+it, seeing it is the obligation: it is an ask. Permanent law, not a v0
+override; contract of record in [`../a2a/agent-tools.md`](../a2a/agent-tools.md).
+
 ## Where it lives
 
 A **bell icon with a numbered open-count badge in the rail header's trailing 32px
