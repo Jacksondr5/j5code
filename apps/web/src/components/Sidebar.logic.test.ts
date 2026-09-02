@@ -4,6 +4,7 @@ import {
   archiveSelectedThreadEntries,
   buildBulkTitleRegenerationContextMenuItem,
   buildMultiSelectThreadContextMenuItems,
+  createCleanBatchArchiveConfirmation,
   createThreadJumpHintVisibilityController,
   filterSidebarV2VisibleThreads,
   formatWorkingDurationLabel,
@@ -30,6 +31,7 @@ import {
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
+  selectionKeysToRemoveAfterArchive,
   searchSidebarThreadsByTitle,
   shouldClearThreadSelectionOnMouseDown,
   shouldNavigateAfterProjectRemoval,
@@ -153,6 +155,44 @@ describe("archiveSelectedThreadEntries", () => {
       mutationFailure: null,
       followupFailures: [failure],
     });
+  });
+
+  it("leaves a cancelled entry selected and continues to the next entry", async () => {
+    const archive = vi.fn(async (entry: (typeof entries)[number], onArchived: () => void) => {
+      if (entry.threadKey === "two") return undefined;
+      onArchived();
+      return success;
+    });
+    const outcome = await archiveSelectedThreadEntries({ entries, archive });
+
+    expect(archive).toHaveBeenCalledTimes(3);
+    expect(outcome).toEqual({
+      archivedThreadKeys: ["one", "three"],
+      mutationFailure: null,
+      followupFailures: [],
+    });
+  });
+});
+
+describe("archive selection cleanup", () => {
+  it("caches a cancelled clean-batch confirmation", async () => {
+    const confirm = vi.fn(async () => false);
+    const confirmCleanArchive = createCleanBatchArchiveConfirmation({ confirm });
+
+    await expect(confirmCleanArchive()).resolves.toBe(false);
+    await expect(confirmCleanArchive()).resolves.toBe(false);
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears an unresolvable selected row while keeping a cancelled resolved row", () => {
+    expect(
+      selectionKeysToRemoveAfterArchive({
+        selectedThreadKeys: ["archived", "cancelled", "missing"],
+        entries: [{ threadKey: "archived" }, { threadKey: "cancelled" }],
+        archivedThreadKeys: ["archived"],
+      }),
+    ).toEqual(["missing", "archived"]);
   });
 });
 

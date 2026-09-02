@@ -1,9 +1,6 @@
 import * as Layer from "effect/Layer";
 
-import {
-  layer as archiveFactsLayer,
-  placementFactsUnavailableLayer,
-} from "./ArchiveFactsService.ts";
+import { layer as archiveFactsLayer, placementFactsLayer } from "./ArchiveFactsService.ts";
 import { layer as archiveAgentLayer } from "./ArchiveAgentService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
@@ -55,16 +52,13 @@ export const makeJ5A2AAuxiliaryLayer = (
   const lifecycleServiceProvided = lifecycleServiceLayer.pipe(
     Layer.provideMerge(deliveryWorkerProvided),
   );
-  const archiveFactsProvided = archiveFactsLayer.pipe(
-    Layer.provide(placementFactsUnavailableLayer),
-  );
+  const archiveFactsProvided = archiveFactsLayer.pipe(Layer.provide(placementFactsLayer));
   const archiveAgentProvided = archiveAgentLayer.pipe(
     Layer.provideMerge(archiveFactsProvided),
     Layer.provideMerge(lifecycleServiceProvided),
   );
   const spawnCompositionProvided = spawnCompositionLayer.pipe(
     Layer.provideMerge(homeRegistrationTransactionLayer),
-    Layer.provideMerge(participantPlacementLayer),
   );
   const runtimeWithoutClientReads = Layer.mergeAll(
     humanPersonRegistryLayer,
@@ -77,7 +71,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     archiveAgentProvided,
     threadHomesServiceLayer,
     spawnCompositionProvided,
-  );
+  ).pipe(Layer.provideMerge(participantPlacementLayer));
   return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };
 

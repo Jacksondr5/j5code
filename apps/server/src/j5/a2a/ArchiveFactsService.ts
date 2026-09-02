@@ -6,12 +6,13 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { resolveThreadHome } from "./HomeRegistrar.ts";
+import { ParticipantPlacementService } from "./PlacementService.ts";
 import { ExchangeId, ParticipantId, SquadronId, type Urgency } from "./contracts.ts";
 
 export type ArchivePlacementSubtree =
   | {
       readonly state: "unknown";
-      readonly reason: "placement-provider-unavailable" | "placement-query-failed";
+      readonly reason: "placement-query-failed";
     }
   | { readonly state: "none" }
   | {
@@ -36,14 +37,38 @@ export class A2AArchivePlacementFactsProvider extends Context.Service<
   A2AArchivePlacementFactsProviderShape
 >()("t3/j5/a2a/ArchiveFactsService/A2AArchivePlacementFactsProvider") {}
 
-export const placementFactsUnavailableLayer = Layer.succeed(
+/**
+ * AR2's production placement reader. `listSubtree` includes the requested
+ * participant, while the warning only names agents additionally affected by
+ * archive, so the root is deliberately omitted here.
+ */
+export const placementFactsLayer = Layer.effect(
   A2AArchivePlacementFactsProvider,
-  A2AArchivePlacementFactsProvider.of({
-    readSubtree: () =>
-      Effect.succeed({
-        state: "unknown",
-        reason: "placement-provider-unavailable",
-      }),
+  Effect.gen(function* () {
+    const placements = yield* ParticipantPlacementService;
+    return A2AArchivePlacementFactsProvider.of({
+      readSubtree: (input) =>
+        placements.listSubtree(input).pipe(
+          Effect.map((subtree) => {
+            const descendantIds = subtree
+              .map((entry) => entry.participantId)
+              .filter((participantId) => participantId !== input.participantId);
+            return descendantIds.length === 0
+              ? { state: "none" as const }
+              : {
+                  state: "known" as const,
+                  participantIds: descendantIds as [ParticipantId, ...Array<ParticipantId>],
+                };
+          }),
+          Effect.mapError(
+            (cause) =>
+              new A2AArchivePlacementFactsProviderError({
+                operation: "read placement subtree",
+                cause,
+              }),
+          ),
+        ),
+    });
   }),
 );
 

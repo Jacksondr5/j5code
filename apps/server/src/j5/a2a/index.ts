@@ -5,7 +5,7 @@ export {
   A2AArchivePlacementFactsProviderError,
   A2AArchivePlacementFactsProvider,
   layer as archiveFactsLayer,
-  placementFactsUnavailableLayer,
+  placementFactsLayer,
 } from "./ArchiveFactsService.ts";
 export type {
   A2AArchiveFactsShape,

@@ -9,6 +9,7 @@ import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import { ClientReadsService } from "./ClientReadsService.ts";
+import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { A2AHumanInbox } from "./HumanInboxService.ts";
 import { j5AuthenticatedRoutesLayer } from "./J5AuthenticatedRoutes.ts";
@@ -69,6 +70,17 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
   });
   const routes = j5AuthenticatedRoutesLayer.pipe(
     Layer.provide(homes),
+    Layer.provide(
+      Layer.mock(A2AArchiveFacts)({
+        readForThread: (threadId) =>
+          Effect.succeed({
+            state: "not-an-a2a-participant" as const,
+            threadId,
+            openExchanges: [],
+            placementSubtree: { state: "not-applicable" as const },
+          }),
+      }),
+    ),
     Layer.provide(
       Layer.mock(ClientReadsService)({
         participantHomes: () => Effect.succeed([]),

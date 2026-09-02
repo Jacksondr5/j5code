@@ -8,6 +8,7 @@ import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import { ClientReadsService } from "./ClientReadsService.ts";
+import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import {
   CLIENT_READS_OPEN_COUNT_PATH,
   CLIENT_READS_PARTICIPANT_HOMES_PATH,
@@ -304,6 +305,17 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
   });
   const routes = j5AuthenticatedRoutesLayer.pipe(
     Layer.provide(clientReads),
+    Layer.provide(
+      Layer.mock(A2AArchiveFacts)({
+        readForThread: (threadId) =>
+          Effect.succeed({
+            state: "not-an-a2a-participant" as const,
+            threadId,
+            openExchanges: [],
+            placementSubtree: { state: "not-applicable" as const },
+          }),
+      }),
+    ),
     Layer.provide(
       Layer.mock(ThreadHomesService)({ threadHomes: () => Effect.succeed({ entries: [] }) }),
     ),
