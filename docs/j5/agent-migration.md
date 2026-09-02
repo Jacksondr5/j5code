@@ -249,6 +249,50 @@ Same mechanism (state dir + session files + project-key rename); what differs:
 - **Model support.** Confirm the box's installed Claude CLI supports each thread's pinned model;
   re-select a supported model at the first resumed turn (the five core agents are Fable-pinned).
 
+## Codex agents — measured; content-swap is NOT viable as-is
+
+Benched 2026-09-02 on a disposable env under the standing Luna authorization, with a real retired
+Codex Sitter as subject (3.5 MB, 2,052 records, written by CLI 0.146). **Result: the Claude-style
+content-swap fails for Codex, and the failure is silent** — the turn succeeds on a fresh thread
+re-primed from a T3 digest. Every step below is what the bench measured.
+
+**What is the same as Claude.** J5's codex driver uses the **ambient `~/.codex`** (CODEX_HOME unset):
+the carrier's rollout landed in `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl` and its row
+appeared in `~/.codex/state_5.sqlite` — the same store the Traycer codex agents write to. (The
+`~/.codex/sqlite/codex-dev.db` catalog is the desktop app's stale artifact — a trap; the CLI's
+resolver is **`state_5.sqlite`**, whose `threads` table maps thread id → absolute `rollout_path`.)
+Rollouts for real long-running codex agents here run to **60 MB**.
+
+**What is different — and why the swap failed.** A rollout carries one thread-level id
+(`session_meta.payload.id`, also in the filename); the body's `turn_id`s are per-turn. The bench
+swapped the subject's body under the carrier's own `session_meta` at the carrier's registered
+`rollout_path` (internally consistent, no old-id residue), restarted the server so the codex
+app-server had to reload from disk, and drove a deep recall turn. Codex's `thread/resume` did not
+load it; J5's floor caught the failure and re-primed a **new native thread** from a
+`full_thread_summary` digest of the carrier's own turns. The measured discriminator between the
+rejected and accepted rows is **`threads.history_mode`**: the subject's row (CLI 0.146) is `legacy`;
+rows CLI 0.152 creates are `paginated`. The swapped body was a legacy-format transcript under a
+paginated row — version skew at the codex store level. Codex writes no log here, so the exact
+refusal string is unmeasured; the row mismatch is the evidence.
+
+**The silent-fallback hazard, and the mandatory discriminators.** After the recall turn: (1) the
+provider thread's `nativeThreadRef.nativeId` had **changed** to a new uuid; (2) a context-transfer row
+with id `context-transfer:type:provider_resume_fallback:…` and a `full_thread_summary` handoff
+existed (summary text = the carrier's READY exchange only); (3) the swapped rollout **did not grow**
+while a **new rollout** appeared; (4) the deep probe answered `NO-MEMORY` — and the run status was
+`completed`. A shallow probe would have called this a pass. **Never declare a Codex transplant
+resumed without all four**: native uuid unchanged, no `provider_resume_fallback` transfer, the
+swapped rollout growing, and a specific deep-memory answer the digest cannot contain.
+
+**Ruling for operators (until a second bench proves otherwise): migrate Codex agents as a fresh
+thread plus the agent's own written handoff** — the honest fallback the migration accepted. Two
+candidate techniques are proposed for the next bench, ranked: (b) match the carrier's
+`state_5.threads` row to the body (`history_mode`, `cli_version`) before resuming — a state-db row
+touch; or (b′) skip file surgery entirely and re-point J5's provider-thread native ref at the agent's
+**existing** codex thread id, which the shared store already resolves — J5-side surgery on one
+provider-thread event. Neither has been run; do not follow either on a real fleet until one passes
+all four discriminators.
+
 ## Failure taxonomy — classify before concluding
 
 If a resumed turn fails, it is one of three distinct classes; identify which before touching the
