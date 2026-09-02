@@ -36,20 +36,20 @@ flowchart TB
     J -- "approve + merge" --> GH
 ```
 
-## Installation on this machine (done 2026-08-16)
+## Installation on this machine (agent-ops, since 2026-08-30)
 
-| Piece              | Where                                                                                                       | State                                                                                                |
-| ------------------ | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Playbooks          | `~/repos/jacksondr5/pr-group`, symlinked at `~/.pr-group`                                                   | cloned from `Jacksondr5/pr-group`                                                                    |
-| Dashboard + `prg`  | `~/repos/jacksondr5/pr-group-dashboard`, symlinked at `~/.pr-group-dashboard`                               | cloned from `Jacksondr5/pr-group-dashboard`                                                          |
-| Board service      | `~/Library/LaunchAgents/ai.fh.pr-group-dashboard.plist`, `http://localhost:7317`                            | running (self-polls: agents 20s, GitHub 60s)                                                         |
-| `prg` on PATH      | `/opt/homebrew/bin/prg` (wrapper → `~/.pr-group-dashboard/bin/prg`)                                         | verified: `prg gates` measures live                                                                  |
-| Watchdog           | `~/.traycer/pr-sitter/watchdog.sh` + `ai.fh.pr-sitter-watchdog` LaunchAgent                                 | pre-existing, running; reads `epic_id` per registry entry, so j5code entries need no watchdog change |
-| Dashboard identity | Traycer agent `60be3b6a-7997-4446-8984-12d762a7d2d9` — "PR Group Dashboard (identity pin — do not archive)" | pinned in `.env` and the plist; archiving it makes liveness polling go quiet (fails safe)            |
+The pr-group-dashboard was replaced by **agent-ops** as the control plane on 2026-08-30 (Jackson). Groups registered before that date kept their old registrations until they retired; every group since follows the agent-ops path.
 
-`.env` (not committed): `TRAYCER_EPIC_ID=5690b096…` (this epic, as connection anchor — the board spans all epics), `TRAYCER_AGENT_ID=60be3b6a…`, `PRG_AGENT_LOGIN=Jacksondr5`, `PRG_DEFAULT_REPO=Jacksondr5/j5code`. Bitbucket is unused here.
+| Piece              | Where                                                                                                                              | State                                                                                 |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Playbooks          | `~/repos/jacksondr5/pr-group`, symlinked at `~/.pr-group`, checked out on branch `personal` (the CLI-review-law variant)           | read as-is; never brief from `main`'s bot wording                                     |
+| Control plane      | `~/repos/jacksondr5/agent-ops` (source), deployed runtime at `~/.agent-ops-runtime`, data at `~/.agent-ops` (`dashboard.db`, logs) | deployed via `runtime-deploy.js`; the runtime and its launchd jobs are shared infra   |
+| Board service      | `~/Library/LaunchAgents/ai.fh.pr-group-dashboard.plist`, `http://localhost:7317`                                                   | running; the board is read-only — agents change state only through the canonical CLI  |
+| `prg` on PATH      | `/opt/homebrew/bin/prg` → `~/.agent-ops-runtime/bin/prg`                                                                           | verified: `prg gates` measures live; register with full agent UUIDs, never prefixes   |
+| Watchdog           | `ai.fh.agent-ops-pr-only-watchd` LaunchAgent                                                                                       | polls PRs and wakes Sitters; per-registry `epic_id`, so j5code entries need no change |
+| Dashboard identity | Traycer agent `60be3b6a-7997-4446-8984-12d762a7d2d9` — "PR Group Dashboard (identity pin — do not archive)"                        | pinned; archiving it makes liveness polling go quiet (fails safe)                     |
 
-Service management: `launchctl kickstart -k gui/$UID/ai.fh.pr-group-dashboard` to restart / pick up code changes; logs in `~/.pr-group-dashboard/dashboard.log`.
+Group registration: `prg group register --sitter <id> --builder <id> --reviewer <id> --spawner <id> --slug <slug>` — include `--spawner` so escalations resolve, and pass full UUIDs (the CLI stores ids verbatim; a prefix-registered group refuses its own sitter's full-id writes).
 
 ## Operating rules for j5code builder agents
 

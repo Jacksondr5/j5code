@@ -67,6 +67,14 @@ NOT held: B4 (archive dialog — phase-3-blocking), and all mid-flight Traycer l
 
 ## Queued post-v0 (ratified, waiting on the milestone)
 
+- **Coalescing UX (Jackson live session, 2026-08-31):** the unique-open-pair law folds a second ask into the open exchange as a followup — truthful, but three surfaces don't say so: the sender's card still shows "Awaiting reply" for the folded ask; the sending agent isn't told its ask coalesced; and the receiving human never sees the followup's text — it rides the open exchange invisibly until the agent explains. One product candidate, three parts; `clear_own_ask` semantics were confirmed correct in the same session.
+
+- **Squadron-first agent cards ([#47](https://github.com/Jacksondr5/j5code/issues/47), Jackson 2026-09-01):** thread cards lead with the Squadron, the folder demotes to the hover card; dogfood-queue only, not Traycer-staffable.
+
+- **Creation-dialog picker sizing ([#48](https://github.com/Jacksondr5/j5code/issues/48)):** the folder source picker renders at two sizes depending on its entry door and the create form is cramped — pre-existing shared-primitive layout, measured during the #35 live review.
+
+- **Reply-card copy unification (Jackson, 2026-09-01):** rides the paired-cards ticket ([#41](https://github.com/Jacksondr5/j5code/issues/41)) — reader-facing cards use the standard "Expects reply"/"Replied" vocabulary; exchange-closure language stays in the agent-facing envelope. The split is deliberate: agents get mechanics, humans get plain words.
+
 - **Naming audit (Jackson, 2026-08-28):** examine the naming of everything against the settled glossary (Squadron et al.) — headline case: the `j5/a2a` module / `j5_a2a_*` table namespace has grown into the whole fleet-coordination substrate (Squadrons, membership, placement/provenance, messaging), so "a2a" now under-describes it. Rename cost grows with every milestone; run the audit immediately post-dogfood.
 
 - **Auth-subject→person binding (recorded 2026-08-31):** merged #11 authenticates but deliberately does not bind auth subjects to person ids — `resolvePersonId()` is explicit-or-local-default, per R9's "future auth binds to it" design. The binding becomes a product session when multi-person or remote access gets real; no current lane owns it.
