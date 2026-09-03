@@ -205,7 +205,7 @@ Phase 1 ends with this definition contract. It does not add contracts to `packag
 
 ## Phase 2: application catalog
 
-Phase 2 materializes this contract as the built-in application catalog at `apps/server/src/j5/agentPersonas.ts`.
+Phase 2 materializes this contract as the built-in application catalog at `apps/server/src/j5/agents/agentPersonas.ts`.
 
 - The catalog is server-owned and has no persistence or environment-specific state.
 - Each definition has a stable id, version, description, accepted-input summary, typed input and output artifacts, authority choices, and an ordered two-target model route.
@@ -240,7 +240,7 @@ Phase 4 makes a resolved persona assignment durable at thread creation.
 - The assignment field is optional so existing events, projections, and ordinary threads remain compatible.
 - Forks inherit the source thread's assignment. Provider-created subagent threads do not inherit it because they are not activations of the application persona.
 
-The assignment is immutable launch-time provenance. An explicit later provider/model switch may change the thread's active model selection but does not rewrite which persona definition and route launched the thread.
+The assignment and resolved model route are immutable for the lifetime of the thread. Model-selection and provider-switch commands are rejected for persona threads so the displayed route and effective runtime cannot drift apart.
 
 Phase 4 assigns only newly created threads; attaching or replacing a persona on an existing thread is not supported. Prompt composition, authority enforcement, UI selection, artifact validation, and orchestrator behavior remain deferred.
 
@@ -248,15 +248,17 @@ Phase 4 assigns only newly created threads; attaching or replacing a persona on 
 
 Phase 5 translates the durable application authority policy into the canonical runtime policy already consumed by provider adapters. Translation occurs whenever the application resolves runtime policy for session open, resume, fork, or turn start, so the durable persona policy takes precedence over the thread's generic runtime-mode setting.
 
-| Application authority                         | Canonical runtime policy                                            | Codex effective policy                               | Claude effective policy                         |
-| --------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------- |
-| `read-only`, `critic-review`                  | Non-interactive read-only sandbox; network disabled                 | `never` approvals with `readOnly` sandbox            | `dontAsk` with the built-in read-only tool list |
-| `workspace-write`, `critic-fix`, `diagnostic` | Workspace-write sandbox; network disabled; normal command approvals | `on-request` approvals with `workspaceWrite` sandbox | `acceptEdits`                                   |
-| `publish-only`                                | Unrestricted runtime with no approval prompts                       | `never` approvals with `dangerFullAccess` sandbox    | `bypassPermissions`                             |
+| Application authority        | Eligible providers | Effective policy                                                                  |
+| ---------------------------- | ------------------ | --------------------------------------------------------------------------------- |
+| `read-only`, `critic-review` | Codex and Claude   | Non-interactive read-only access; Claude receives only its read-only tool list    |
+| `workspace-write`            | Codex              | `never` approvals with a network-disabled `workspaceWrite` sandbox                |
+| `critic-fix`                 | Codex              | Same workspace sandbox, only after Fix Mode is explicitly requested               |
+| `diagnostic`                 | None yet           | Blocked until a clean-product-source completion guard enforces the write boundary |
+| `publish-only`               | None yet           | Blocked until publication is exposed through restricted non-merge operations      |
 
-Ordinary threads without an agent assignment continue to use their selected runtime mode. The same application policy is translated after a supported provider switch; it is not tied to the provider route that originally launched the thread.
+Ordinary threads without an agent assignment continue to use their selected runtime mode. Persona threads retain their server-resolved provider and model for their lifetime.
 
-This phase enforces only the coarse permissions providers can express. A workspace-write sandbox cannot prove that Builder or Critic avoided commits, `diagnostic` still needs a clean-product-source handoff check, and unrestricted Publisher access cannot distinguish push or pull-request updates from merge. Prompt composition and action-level authority guards remain deferred.
+Routing now includes authority enforceability. Claude write modes are not treated as workspace/git sandboxes, and any unsafe historical assignment degrades to read-only at runtime. Investigator and Publisher remain visible but blocked until their completion and action-level guards exist; no persona receives unrestricted provider access.
 
 ## Phase 6: top-level UX
 
@@ -266,6 +268,26 @@ Phase 6 makes built-in personas discoverable across web, desktop, and mobile wit
 - A server read endpoint projects this presentation-safe catalog together with availability resolved from the selected environment's live provider snapshots. Clients do not duplicate persona definitions or routing rules.
 - Agent activation remains an application/orchestrator operation. New-task composers retain their existing model, reasoning, runtime, and interaction controls and do not offer a persona selector.
 - Critic Review versus Fix remains an explicit activation-policy choice for an orchestrator, not an end-user composer control.
-- After an orchestrator launches a persona, the durable assignment is shown as a fixed label on the thread. It cannot be attached, removed, or replaced from the client.
+- After an orchestrator launches a persona, the durable assignment and its exact provider/model route are shown as fixed labels on the thread. They cannot be attached, removed, replaced, or switched from the client.
 
 Desktop inherits the web settings surface. Prompt composition, skill-orchestrator invocation, artifact validation, and action-level authority guards remain deferred.
+
+## Phase 7: verification
+
+Phase 7 verifies the Phase 1–6 contract at the server, shared-client, persistence, and provider-policy boundaries. It reflects the Phase 6 decision that personas are informational in Settings and activated by skill orchestrators rather than selected in a new-task composer.
+
+Acceptance requires:
+
+- The server catalog contains exactly the eleven stable persona ids. Web and mobile both render the complete server response through the same one-to-one presentation helper; desktop inherits web.
+- Every persona resolves to its declared primary model only when both the route and authority are enforceable.
+- Every persona resolves only to its declared secondary model after the primary is rejected. No third fallback is accepted.
+- If both declared routes fail, Settings displays **Blocked** with either “Primary and fallback models unavailable” or “Required authority is not yet enforceable,” and a launch attempt fails before thread creation at the same clear boundary.
+- Builder's application authority allows workspace edits but denies commit, push, pull-request mutation, and merge.
+- Publisher remains blocked until commit, push, and pull-request publication can be brokered without exposing merge authority.
+- Read-only personas and Critic Review Mode compile to non-interactive read-only provider policies.
+- Critic defaults to Review Mode; workspace editing is available only when an activation request explicitly carries `critic-fix`.
+- The complete resolved assignment remains in the `thread.created` event and survives projection rebuilds without consulting the current definition. Definition changes therefore do not rewrite running or historical assignments, and later provider/model mutations are rejected.
+- Environment availability and the resolved provider, model, and primary-or-fallback result are calculated by the server. Web and mobile present those values without client-side route resolution, including for remote environments.
+- A skill orchestrator can request one persona through the ordinary new-thread launch contract without constructing a workflow graph or sequence. There is no direct persona selector in client composers.
+
+The focused acceptance suite covers the catalog, all-persona route matrix, authority-aware blocked states, provider translation, Critic mode selection, server-owned assignment validation, direct launch, and durable projection rebuild. Narrower Investigator and Publisher operations remain later work and fail closed until implemented.

@@ -127,7 +127,7 @@ function threadCreatedEvent(input: {
 }
 
 it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
-  it.effect("preserves an agent persona assignment through projection rebuild", () =>
+  it.effect("preserves the exact historical agent assignment through projection rebuilds", () =>
     Effect.gen(function* () {
       const eventSink = yield* EventSinkV2;
       const projectionStore = yield* ProjectionStoreV2;
