@@ -17,6 +17,11 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
         label: "environment-data:orchestration-v2:dispatch-command",
         tag: ORCHESTRATION_V2_WS_METHODS.dispatchCommand,
       }),
+      agentPersonaCatalog: createEnvironmentRpcQueryAtomFamily(runtime, {
+        label: "environment-data:orchestration-v2:agent-persona-catalog",
+        tag: ORCHESTRATION_V2_WS_METHODS.getAgentPersonaCatalog,
+        staleTimeMs: 30_000,
+      }),
       threadProjection: createEnvironmentRpcQueryAtomFamily(runtime, {
         label: "environment-data:orchestration-v2:thread-projection",
         tag: ORCHESTRATION_V2_WS_METHODS.getThreadProjection,
