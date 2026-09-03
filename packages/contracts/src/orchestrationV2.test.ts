@@ -26,6 +26,7 @@ import {
   OrchestrationV2DomainEvent,
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderThreadJson,
+  OrchestrationV2PublicCommand,
   OrchestrationV2ShellSnapshot,
   OrchestrationV2Subagent,
   OrchestrationV2ThreadProjection,
@@ -43,6 +44,7 @@ const LegacyShellStreamItem = Schema.Union([
 ]);
 const decodeLegacyShellStreamItem = Schema.decodeUnknownSync(LegacyShellStreamItem);
 const decodeOrchestrationV2Command = Schema.decodeUnknownSync(OrchestrationV2Command);
+const decodeOrchestrationV2PublicCommand = Schema.decodeUnknownSync(OrchestrationV2PublicCommand);
 const decodeOrchestrationV2TurnItem = Schema.decodeUnknownSync(OrchestrationV2TurnItem);
 const decodeOrchestrationV2CheckpointScope = Schema.decodeUnknownSync(
   OrchestrationV2CheckpointScope,
@@ -61,6 +63,36 @@ const decodeOrchestrationV2ProviderThread = Schema.decodeUnknownSync(Orchestrati
 const decodeOrchestrationV2ThreadShell = Schema.decodeUnknownSync(OrchestrationV2ThreadShell);
 
 describe("orchestration V2 contracts", () => {
+  it("rejects server-owned persona assignments on the public command boundary", () => {
+    const command = {
+      type: "thread.create",
+      createdBy: "user",
+      creationSource: "web",
+      commandId: "command-public-persona",
+      threadId: "thread-public-persona",
+      projectId: "project-public-persona",
+      title: "Public persona",
+      modelSelection: { instanceId: "codex", model: "gpt-5.6-terra" },
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      agentPersonaAssignment: {
+        personaId: "scout",
+        definitionVersion: 1,
+        authorityPolicy: "publish-only",
+        resolvedRoute: "primary",
+        resolvedDriver: "codex",
+        resolvedModelSelection: { instanceId: "codex", model: "gpt-5.6-terra" },
+      },
+    };
+
+    expect(() => decodeOrchestrationV2PublicCommand(command)).toThrow(
+      "Resolved agent persona assignments are server-owned.",
+    );
+    expect(decodeOrchestrationV2Command(command).type).toBe("thread.create");
+  });
+
   it("lets legacy snapshot decoders ignore enrichment metadata", () => {
     const decoded = decodeLegacyShellStreamItem({
       kind: "snapshot",
