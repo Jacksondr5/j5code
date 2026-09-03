@@ -5,6 +5,7 @@ import type {
   ChatFileAttachment,
   EnvironmentId,
   ModelSelection,
+  OrchestrationV2AgentPersonaAssignment,
   PreviewAnnotationPayload,
   ProviderApprovalDecision,
   ProviderInteractionMode,
@@ -22,6 +23,7 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
+import { presentAgentPersonaAssignment } from "@t3tools/client-runtime/state/agent-personas";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import {
@@ -857,6 +859,49 @@ const runtimeModeConfig: Record<
 };
 
 const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[];
+function AgentPersonaAssignmentControl(props: {
+  readonly assignment: OrchestrationV2AgentPersonaAssignment;
+}) {
+  const presentation = presentAgentPersonaAssignment(props.assignment);
+
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <ComposerControl
+              type="button"
+              disabled
+              aria-label={`Agent persona: ${presentation.personaLabel}`}
+            />
+          }
+        >
+          <ComposerControlIcon icon={BotIcon} opticalSize="large" />
+          {presentation.personaLabel}
+        </TooltipTrigger>
+        <TooltipPopup side="top">
+          Assigned by an agent orchestrator when this task started.
+        </TooltipPopup>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <ComposerControl
+              type="button"
+              disabled
+              aria-label={`Assigned model: ${presentation.routeLabel}`}
+              className="max-w-64 overflow-hidden text-ellipsis whitespace-nowrap"
+            />
+          }
+        >
+          {presentation.routeLabel}
+        </TooltipTrigger>
+        <TooltipPopup side="top">This persona's model route is fixed for this task.</TooltipPopup>
+      </Tooltip>
+    </>
+  );
+}
+
 const extendReplacementRangeForTrailingSpace = (
   text: string,
   rangeEnd: number,
@@ -1232,6 +1277,7 @@ export interface ChatComposerProps {
   // Mode
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
+  agentPersonaAssignment?: OrchestrationV2AgentPersonaAssignment;
 
   // Provider / model
   lockedProvider: ProviderDriverKind | null;
@@ -1358,6 +1404,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProposedPlan,
     runtimeMode,
     interactionMode: requestedInteractionMode,
+    agentPersonaAssignment,
     lockedProvider,
     providerStatuses,
     activeProjectDefaultModelSelection,
@@ -3883,7 +3930,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const hiddenRestingBlockIds = restingBlockDefs
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
     .map((def) => def.id);
-  const composerControls = noProviderAvailable ? (
+  const composerControls = agentPersonaAssignment ? (
+    <AgentPersonaAssignmentControl assignment={agentPersonaAssignment} />
+  ) : noProviderAvailable ? (
     <Button
       type="button"
       size="sm"
