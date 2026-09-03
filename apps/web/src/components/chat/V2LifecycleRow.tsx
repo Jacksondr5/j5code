@@ -7,10 +7,12 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
+import { formatSubagentDisplayTitle } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
   ArrowRightLeftIcon,
   ArrowRightIcon,
   BotIcon,
+  CheckIcon,
   ChevronDownIcon,
   ExternalLinkIcon,
   GitForkIcon,
@@ -200,15 +202,20 @@ export function V2LifecycleRow(props: {
   }
   if (item.type === "subagent") {
     const streamedResult = item.result?.trim() ? item.result : null;
-    const finalResult = FINAL_RESULT_SUBAGENT_STATUSES.has(item.status) ? streamedResult : null;
+    const genericSuccess =
+      item.status === "completed" &&
+      streamedResult !== null &&
+      /^(ok|done|complete|completed|success|succeeded)[.!]?$/i.test(streamedResult);
+    const meaningfulResult = genericSuccess ? null : streamedResult;
+    const finalResult = FINAL_RESULT_SUBAGENT_STATUSES.has(item.status) ? meaningfulResult : null;
     const detail = TERMINAL_SUBAGENT_STATUSES.has(item.status)
-      ? (streamedResult ?? item.progress ?? item.prompt)
-      : (item.progress ?? streamedResult ?? item.prompt);
+      ? (meaningfulResult ?? item.progress ?? (item.status === "completed" ? null : item.prompt))
+      : (item.progress ?? meaningfulResult ?? item.prompt);
     return (
       <RelatedThreadCard
         itemType={item.type}
         icon={BotIcon}
-        title={subagentDisplayTitle(item.title ?? "Subagent")}
+        title={formatSubagentDisplayTitle(item.title ?? "Subagent")}
         detail={detail}
         badge={item.status}
         threadId={item.childThreadId}
@@ -224,7 +231,7 @@ function RelatedThreadCard(props: {
   readonly itemType: "subagent" | "thread_created";
   readonly icon: LucideIcon;
   readonly title: string;
-  readonly detail: string;
+  readonly detail: string | null;
   readonly expandedDetail?: string | null;
   readonly badge: string;
   readonly threadId: ThreadId | null;
@@ -233,13 +240,33 @@ function RelatedThreadCard(props: {
   const Icon = props.icon;
   const threadId = props.threadId;
   const expandedDetail = props.expandedDetail ?? null;
+  const badgeLabel = props.badge
+    .replaceAll(/[-_]+/g, " ")
+    .replace(/^./, (letter) => letter.toUpperCase());
+  const badgeClass =
+    props.badge === "completed"
+      ? "border-success/25 bg-success/10 text-success-foreground"
+      : props.badge === "failed"
+        ? "border-destructive/25 bg-destructive/10 text-destructive-foreground"
+        : props.badge === "running" || props.badge === "pending" || props.badge === "waiting"
+          ? "border-info/25 bg-info/10 text-info-foreground"
+          : "border-border/70 bg-muted/30 text-muted-foreground";
   const content = (
     <>
-      <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate text-xs font-medium">{props.title}</span>
-      <span className="max-w-[50%] truncate text-xs text-muted-foreground">{props.detail}</span>
-      <span className="rounded-full border border-border/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-        {props.badge}
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-background/65 text-muted-foreground shadow-xs/5">
+        <Icon className="size-3.5" aria-hidden="true" />
+      </span>
+      <span className="min-w-0 flex-1 truncate text-[.82rem] font-semibold tracking-tight">
+        {props.title}
+      </span>
+      {props.detail === null ? null : (
+        <span className="max-w-[46%] truncate text-xs text-muted-foreground">{props.detail}</span>
+      )}
+      <span
+        className={`inline-flex h-5 items-center gap-1 rounded-full border px-1.5 text-[.65rem] font-medium ${badgeClass}`}
+      >
+        {props.badge === "completed" ? <CheckIcon className="size-2.5" aria-hidden="true" /> : null}
+        {badgeLabel}
       </span>
     </>
   );
@@ -248,12 +275,12 @@ function RelatedThreadCard(props: {
     return (
       <div
         data-v2-item-type={props.itemType}
-        className="relative min-w-0 overflow-hidden rounded-lg border border-border/60 bg-card/30"
+        className="relative min-w-0 overflow-hidden rounded-xl border border-border/60 bg-card/40 shadow-xs/5"
       >
         <details className="group" data-v2-subagent-result-disclosure="true">
           <summary
             aria-label={`Show full result for ${props.title}`}
-            className="flex min-w-0 cursor-pointer list-none items-center gap-2 px-3 py-2 pr-11 text-left transition-colors hover:bg-muted/50 [&::-webkit-details-marker]:hidden"
+            className="flex min-w-0 cursor-pointer list-none items-center gap-2.5 px-3 py-2.5 pr-11 text-left transition-colors hover:bg-muted/45 [&::-webkit-details-marker]:hidden"
           >
             {content}
             <ChevronDownIcon
@@ -272,7 +299,7 @@ function RelatedThreadCard(props: {
             type="button"
             aria-label={`Open ${props.title}`}
             onClick={() => props.onOpenThread(threadId)}
-            className="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="absolute right-1.5 top-1.5 flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <ExternalLinkIcon className="size-3" aria-hidden="true" />
           </button>
@@ -284,7 +311,7 @@ function RelatedThreadCard(props: {
   return threadId === null ? (
     <div
       data-v2-item-type={props.itemType}
-      className="flex min-w-0 items-center gap-2 rounded-lg border border-border/60 bg-card/30 px-3 py-2"
+      className="flex min-w-0 items-center gap-2.5 rounded-xl border border-border/60 bg-card/40 px-3 py-2.5 shadow-xs/5"
     >
       {content}
     </div>
@@ -294,16 +321,12 @@ function RelatedThreadCard(props: {
       data-v2-item-type={props.itemType}
       aria-label={`Open ${props.title}`}
       onClick={() => props.onOpenThread(threadId)}
-      className="flex w-full min-w-0 items-center gap-2 rounded-lg border border-border/60 bg-card/30 px-3 py-2 text-left transition-colors hover:bg-muted/50"
+      className="flex w-full min-w-0 items-center gap-2.5 rounded-xl border border-border/60 bg-card/40 px-3 py-2.5 text-left shadow-xs/5 transition-colors hover:bg-muted/45"
     >
       {content}
       <ExternalLinkIcon className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
     </button>
   );
-}
-
-function subagentDisplayTitle(title: string): string {
-  return title.replace(/^Subagent:\s*/i, "");
 }
 
 /**

@@ -1300,7 +1300,7 @@ describe("MessagesTimeline", () => {
                 parentItemId: null,
                 ordinal: 1,
                 status: "completed",
-                title: "Isolation report",
+                title: "/root/scout",
                 startedAt: null,
                 completedAt: null,
                 updatedAt: {},
@@ -1322,8 +1322,9 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-v2-item-type="subagent"');
     expect(markup).toContain('data-v2-subagent-result-disclosure="true"');
     expect(markup).toContain('data-v2-subagent-result="true"');
-    expect(markup).toContain('aria-label="Show full result for Isolation report"');
-    expect(markup).toContain('aria-label="Open Isolation report"');
+    expect(markup).toContain('aria-label="Show full result for Scout"');
+    expect(markup).toContain('aria-label="Open Scout"');
+    expect(markup).not.toContain("/root/scout");
     expect(markup).toContain("Tests should be isolated.");
     expect(markup).toContain("Result: no shared state.");
     expect(markup).not.toContain("Explain test isolation");

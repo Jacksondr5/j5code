@@ -18,8 +18,10 @@ import type {
   RuntimeSubagent,
 } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
+  formatSubagentDisplayTitle,
   formatSubagentModelLabel,
   formatSubagentTokenCount,
+  isTerminalSubagentStatus,
 } from "@t3tools/client-runtime/state/subagentRuntime";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { Bot, Braces, Check, ChevronDown, ChevronRight, X } from "lucide-react";
@@ -36,17 +38,52 @@ import { Button } from "~/components/ui/button";
  * stalled/waiting/queued subagent is still the fleet doing its job, not a
  * user problem). Only settled states differentiate.
  */
-const STATUS_VISUALS: Record<RuntimeSubagent["status"], { dotClass: string; label: string }> = {
-  pending: { dotClass: "bg-info", label: "Working" },
-  running: { dotClass: "bg-info", label: "Working" },
-  waiting: { dotClass: "bg-info", label: "Working" },
+const STATUS_VISUALS: Record<
+  RuntimeSubagent["status"],
+  { dotClass: string; label: string; pillClass: string }
+> = {
+  pending: {
+    dotClass: "bg-info",
+    label: "Working",
+    pillClass: "border-info/25 bg-info/10 text-info-foreground",
+  },
+  running: {
+    dotClass: "bg-info",
+    label: "Working",
+    pillClass: "border-info/25 bg-info/10 text-info-foreground",
+  },
+  waiting: {
+    dotClass: "bg-info",
+    label: "Working",
+    pillClass: "border-info/25 bg-info/10 text-info-foreground",
+  },
   // Idle reads as settled (muted, not sky): a resting Codex child looks done
   // unless resumed — live-test: sky idle dots read as stuck in-progress.
-  idle: { dotClass: "bg-muted-foreground/50", label: "Idle · resumable" },
-  completed: { dotClass: "bg-success", label: "Completed" },
-  failed: { dotClass: "bg-destructive", label: "Failed" },
-  cancelled: { dotClass: "bg-muted-foreground/60", label: "Stopped" },
-  interrupted: { dotClass: "bg-muted-foreground/60", label: "Stopped" },
+  idle: {
+    dotClass: "bg-muted-foreground/50",
+    label: "Idle",
+    pillClass: "border-border/70 bg-muted/35 text-muted-foreground",
+  },
+  completed: {
+    dotClass: "bg-success",
+    label: "Completed",
+    pillClass: "border-success/25 bg-success/10 text-success-foreground",
+  },
+  failed: {
+    dotClass: "bg-destructive",
+    label: "Failed",
+    pillClass: "border-destructive/25 bg-destructive/10 text-destructive-foreground",
+  },
+  cancelled: {
+    dotClass: "bg-muted-foreground/60",
+    label: "Stopped",
+    pillClass: "border-border/70 bg-muted/35 text-muted-foreground",
+  },
+  interrupted: {
+    dotClass: "bg-muted-foreground/60",
+    label: "Stopped",
+    pillClass: "border-border/70 bg-muted/35 text-muted-foreground",
+  },
 };
 
 function StatusDot({ status }: { status: RuntimeSubagent["status"] }) {
@@ -55,6 +92,27 @@ function StatusDot({ status }: { status: RuntimeSubagent["status"] }) {
       aria-hidden
       className={cn("size-1.5 shrink-0 rounded-full", STATUS_VISUALS[status].dotClass)}
     />
+  );
+}
+
+function StatusPill({ status }: { status: RuntimeSubagent["status"] }) {
+  const visuals = STATUS_VISUALS[status];
+  return (
+    <span
+      className={cn(
+        "inline-flex h-5 items-center gap-1 rounded-full border px-1.5 text-[.65rem] font-medium",
+        visuals.pillClass,
+      )}
+    >
+      {status === "completed" ? (
+        <Check aria-hidden className="size-2.5" />
+      ) : status === "failed" ? (
+        <X aria-hidden className="size-2.5" />
+      ) : (
+        <StatusDot status={status} />
+      )}
+      {visuals.label}
+    </span>
   );
 }
 
@@ -129,64 +187,80 @@ function agentActivityText(agent: RuntimeSubagent): string | null {
       agent.error
     );
   }
-  return (
+  const activity =
     agent.error ??
     agent.result ??
     agent.progress ??
-    (agent.lastToolName ? `▸ ${agent.lastToolName}` : null)
-  );
+    (agent.lastToolName ? `▸ ${agent.lastToolName}` : null);
+  return agent.status === "completed" && activity?.trim().toLowerCase() === "ok"
+    ? "Completed successfully"
+    : activity;
 }
 
-/** Flat, non-interactive agent status line. No unfold. */
+function agentIdentity(title: string): { label: string; path: string | null } {
+  const trimmed = title.trim();
+  return {
+    label: formatSubagentDisplayTitle(trimmed),
+    path: trimmed.startsWith("/") ? trimmed : null,
+  };
+}
+
+/** Flat, non-interactive agent card. No unfold. */
 function AgentRow({ agent }: { agent: RuntimeSubagent }) {
-  const visuals = STATUS_VISUALS[agent.status];
   const activity = agentActivityText(agent);
+  const identity = agentIdentity(agent.title);
   const modelLabel = formatSubagentModelLabel(agent.model, agent.effort);
   const role =
-    agent.role?.trim().toLocaleLowerCase() === agent.title.trim().toLocaleLowerCase()
-      ? null
-      : agent.role;
+    agent.role?.trim().toLowerCase() === identity.label.toLowerCase() ? null : agent.role;
+  const usageLabel = agent.usage
+    ? `${formatSubagentTokenCount(agent.usage.totalTokens)} tokens`
+    : isTerminalSubagentStatus(agent.status)
+      ? "No usage reported"
+      : "Usage pending";
   const metadata = [
+    identity.path,
     modelLabel,
-    agent.usage ? `${formatSubagentTokenCount(agent.usage.totalTokens)} tok` : "— tok",
+    usageLabel,
     agent.usage?.toolUses !== undefined ? `${agent.usage.toolUses} tools` : null,
     agent.activationCount > 1 ? `run ${agent.activationCount}` : null,
   ].filter((value): value is string => value !== null);
 
   return (
-    <div className="grid h-[3.875rem] grid-cols-[0.375rem_minmax(0,1fr)_auto] grid-rows-[1.25rem_1.125rem_1rem] items-center gap-x-2 rounded-md px-1.5 py-1">
-      <span className="col-start-1 row-start-1 flex items-center">
-        <StatusDot status={agent.status} />
+    <article className="grid h-[5rem] grid-cols-[2rem_minmax(0,1fr)_auto] grid-rows-[1.5rem_1.25rem_1rem] items-center gap-x-2.5 rounded-xl border border-border/60 bg-card/35 px-2.5 py-2 shadow-xs/5 transition-colors hover:bg-card/60">
+      <span className="relative col-start-1 row-span-3 row-start-1 flex size-8 items-center justify-center self-start rounded-lg border border-border/60 bg-background/70 text-muted-foreground shadow-xs/5">
+        <Bot aria-hidden className="size-4" />
+        <span className="absolute -bottom-0.5 -right-0.5 flex size-3 items-center justify-center rounded-full border-2 border-card bg-card">
+          <StatusDot status={agent.status} />
+        </span>
       </span>
       <span className="col-start-2 row-start-1 flex min-w-0 items-baseline gap-2">
-        <span className="min-w-0 truncate text-sm font-medium">{agent.title}</span>
+        <span className="min-w-0 truncate text-sm font-semibold tracking-tight">
+          {identity.label}
+        </span>
         {role ? (
-          <span className="max-w-28 shrink-0 truncate rounded-sm border border-border/60 px-1 font-mono text-[.65rem] text-muted-foreground">
+          <span className="max-w-28 shrink-0 truncate rounded-md border border-border/60 bg-muted/25 px-1.5 text-[.65rem] text-muted-foreground">
             {role}
           </span>
         ) : null}
       </span>
-      <span className="col-start-3 row-start-1 min-w-14 text-right font-mono text-[.7rem] text-muted-foreground/80">
-        <span className="inline-flex items-center gap-1">
-          <AgentElapsed agent={agent} />
-          {agent.status === "completed" ? (
-            <Check aria-hidden className="size-3 text-success" />
-          ) : null}
-        </span>
+      <span className="col-start-3 row-start-1">
+        <StatusPill status={agent.status} />
       </span>
       <span
         className={cn(
-          "col-start-2 col-end-4 row-start-2 block truncate text-xs",
+          "col-start-2 row-start-2 block truncate text-xs",
           agent.status === "failed" ? "text-destructive-foreground" : "text-muted-foreground",
         )}
       >
-        {activity ?? visuals.label}
+        {activity ?? STATUS_VISUALS[agent.status].label}
       </span>
-      <span className="col-start-2 col-end-4 row-start-3 truncate font-mono text-[.7rem] tabular-nums text-muted-foreground/70">
+      <span className="col-start-3 row-start-2 text-right font-mono text-[.7rem] tabular-nums text-muted-foreground/70">
+        <AgentElapsed agent={agent} />
+      </span>
+      <span className="col-start-2 col-end-4 row-start-3 truncate font-mono text-[.68rem] tabular-nums text-muted-foreground/65">
         {metadata.join(" · ")}
       </span>
-      <span className="sr-only">{visuals.label}</span>
-    </div>
+    </article>
   );
 }
 
@@ -531,13 +605,17 @@ export function AgentsPanel({
 }) {
   if (!model.hasAgents) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-        <Bot aria-hidden className="size-6 text-muted-foreground/60" />
-        <p className="text-sm font-medium">No agents yet</p>
-        <p className="max-w-56 text-xs text-muted-foreground">
-          When this thread spawns subagents or runs a workflow, they show up here with live status,
-          activity, and token usage.
-        </p>
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+        <span className="flex size-11 items-center justify-center rounded-2xl border border-border/60 bg-card/50 text-muted-foreground shadow-sm/5">
+          <Bot aria-hidden className="size-5" />
+        </span>
+        <div className="space-y-1">
+          <p className="text-sm font-semibold tracking-tight">No agents yet</p>
+          <p className="max-w-60 text-xs leading-relaxed text-muted-foreground">
+            When this thread spawns subagents or runs a workflow, they show up here with live
+            status, activity, and token usage.
+          </p>
+        </div>
       </div>
     );
   }
@@ -556,27 +634,37 @@ export function AgentsPanel({
           ))}
           {model.directAgents.length > 0 ? (
             <section>
-              <div className="px-1.5 pt-1 text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground">
-                Direct spawns
+              <div className="flex items-center justify-between px-1 pb-2 pt-1">
+                <span className="text-[.68rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  Direct agents
+                </span>
+                <span className="rounded-full bg-muted/50 px-1.5 py-0.5 font-mono text-[.65rem] tabular-nums text-muted-foreground">
+                  {model.directAgents.length}
+                </span>
               </div>
-              {model.directAgents.map((agent) => (
-                <AgentRow key={agent.id} agent={agent} />
-              ))}
+              <div className="grid gap-2">
+                {model.directAgents.map((agent) => (
+                  <AgentRow key={agent.id} agent={agent} />
+                ))}
+              </div>
             </section>
           ) : null}
         </div>
       </ScrollArea>
-      <footer className="flex items-center justify-between border-t border-border/60 px-3 py-1.5 font-mono text-[.7rem] text-muted-foreground">
-        <span className="flex items-center gap-2">
+      <footer className="flex items-center justify-between border-t border-border/60 bg-muted/10 px-3 py-2 text-[.7rem] text-muted-foreground">
+        <span className="flex items-center gap-3">
           {model.runningCount + model.waitingCount > 0 ? (
-            <span className="text-info-foreground">
-              ● {model.runningCount + model.waitingCount} working
+            <span className="inline-flex items-center gap-1.5 text-info-foreground">
+              <span className="size-1.5 rounded-full bg-info" />
+              {model.runningCount + model.waitingCount} working
             </span>
           ) : null}
           {model.idleCount > 0 ? <span>{model.idleCount} idle</span> : null}
           {model.settledCount > 0 ? <span>{model.settledCount} settled</span> : null}
         </span>
-        <span className="tabular-nums">Σ {formatSubagentTokenCount(model.totalTokens)} tok</span>
+        <span className="font-mono tabular-nums">
+          {formatSubagentTokenCount(model.totalTokens)} tokens
+        </span>
       </footer>
     </div>
   );
