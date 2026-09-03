@@ -1111,6 +1111,15 @@ export const WsOrchestrationV2DispatchCommandRpc = Rpc.make(
   },
 );
 
+export const WsOrchestrationV2GetAgentPersonaCatalogRpc = Rpc.make(
+  ORCHESTRATION_V2_WS_METHODS.getAgentPersonaCatalog,
+  {
+    payload: OrchestrationV2RpcSchemas.getAgentPersonaCatalog.input,
+    success: OrchestrationV2RpcSchemas.getAgentPersonaCatalog.output,
+    error: EnvironmentAuthorizationError,
+  },
+);
+
 export const WsOrchestrationV2GetTurnDiffRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.getTurnDiff, {
   payload: OrchestrationV2RpcSchemas.getTurnDiff.input,
   success: OrchestrationV2RpcSchemas.getTurnDiff.output,
@@ -1417,6 +1426,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeBackgroundPolicyRpc,
   WsSubscribeResourceTelemetryRpc,
   WsOrchestrationV2DispatchCommandRpc,
+  WsOrchestrationV2GetAgentPersonaCatalogRpc,
   WsOrchestrationV2GetWorkflowScriptRpc,
   WsOrchestrationV2GetTurnDiffRpc,
   WsOrchestrationV2GetFullThreadDiffRpc,

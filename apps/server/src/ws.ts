@@ -133,6 +133,7 @@ import {
   observeRpcStreamEffect as instrumentRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
+import { buildBuiltInAgentPersonaCatalog } from "./j5/agents/agentPersonaRouting.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
@@ -1380,6 +1381,12 @@ const makeWsRpcLayer = (
                 ? { "orchestration_v2.source_thread_id": command.sourceThreadId }
                 : {}),
             },
+          ),
+        [ORCHESTRATION_V2_WS_METHODS.getAgentPersonaCatalog]: (_input) =>
+          observeRpcEffect(
+            ORCHESTRATION_V2_WS_METHODS.getAgentPersonaCatalog,
+            providerRegistry.getProviders.pipe(Effect.map(buildBuiltInAgentPersonaCatalog)),
+            { "rpc.aggregate": "orchestrationV2" },
           ),
         [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
           observeRpcEffect(

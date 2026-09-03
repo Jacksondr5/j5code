@@ -181,6 +181,7 @@ export function buildBuiltInAgentPersonaCatalog(
       });
       return {
         personaId: definition.id,
+        definitionVersion: definition.version,
         displayName: definition.displayName,
         description: definition.description,
         acceptedInput: definition.acceptedInput,

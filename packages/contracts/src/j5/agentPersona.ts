@@ -87,6 +87,7 @@ export type OrchestrationV2AgentPersonaAvailability =
 /** Environment-specific, presentation-safe view of one built-in persona. */
 export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
   personaId: BuiltInAgentPersonaId,
+  definitionVersion: PositiveInt,
   displayName: TrimmedNonEmptyString,
   description: TrimmedNonEmptyString,
   acceptedInput: TrimmedNonEmptyString,
