@@ -2,6 +2,7 @@ import {
   defaultInstanceIdForDriver,
   isProviderAvailable,
   ProviderDriverKind,
+  type AgentPersonaAuthorityPolicy,
   type ModelSelection,
   type OrchestrationV2AgentPersonaCatalog,
   type ProviderInstanceId,
@@ -14,6 +15,7 @@ import {
   type AgentModelTarget,
   type AgentPersonaId,
 } from "./agentPersonas.ts";
+import { providerCanEnforceAgentPersonaAuthority } from "./agentPersonaProviderPolicy.ts";
 
 export type AgentPersonaRouteFailureCode =
   | "provider-not-configured"
@@ -23,7 +25,8 @@ export type AgentPersonaRouteFailureCode =
   | "provider-error"
   | "provider-unauthenticated"
   | "model-not-advertised"
-  | "reasoning-effort-not-advertised";
+  | "reasoning-effort-not-advertised"
+  | "authority-not-enforceable";
 
 export interface AgentPersonaRouteFailure {
   readonly code: AgentPersonaRouteFailureCode;
@@ -53,6 +56,17 @@ export type AgentPersonaRouteResolution =
       readonly attempts: ReadonlyArray<AgentPersonaRouteAttempt>;
     };
 
+export function unavailableAgentPersonaReason(
+  resolution: Extract<AgentPersonaRouteResolution, { status: "unavailable" }>,
+): "routes-unavailable" | "authority-not-enforceable" {
+  return resolution.attempts.every(
+    ({ failures }) =>
+      failures.length > 0 && failures.every(({ code }) => code === "authority-not-enforceable"),
+  )
+    ? "authority-not-enforceable"
+    : "routes-unavailable";
+}
+
 function unavailableReason(
   provider: ServerProvider,
   target: AgentModelTarget,
@@ -62,7 +76,6 @@ function unavailableReason(
   if (!provider.installed) return "provider-not-installed";
   if (provider.status === "error" || provider.status === "disabled") return "provider-error";
   if (provider.auth.status === "unauthenticated") return "provider-unauthenticated";
-
   const model = provider.models.find((candidate) => candidate.slug === target.model);
   if (model === undefined) return "model-not-advertised";
 
@@ -99,14 +112,25 @@ function candidatesForTarget(
 export function resolveBuiltInAgentPersonaRoute(input: {
   readonly personaId: AgentPersonaId;
   readonly providers: ReadonlyArray<ServerProvider>;
+  readonly authorityPolicy?: AgentPersonaAuthorityPolicy;
 }): AgentPersonaRouteResolution {
   const definition = getBuiltInAgentPersona(input.personaId);
+  const authorityPolicy = input.authorityPolicy ?? definition.authority.defaultPolicy;
   const rejectedTargets: Array<AgentPersonaRouteAttempt> = [];
 
   for (const [index, target] of definition.modelRoute.entries()) {
     const route = index === 0 ? "primary" : "fallback";
     const candidates = candidatesForTarget(input.providers, target);
     const failures: Array<AgentPersonaRouteFailure> = [];
+
+    if (!providerCanEnforceAgentPersonaAuthority(target.driver, authorityPolicy)) {
+      rejectedTargets.push({
+        route,
+        target,
+        failures: [{ code: "authority-not-enforceable" }],
+      });
+      continue;
+    }
 
     if (candidates.length === 0) {
       failures.push({ code: "provider-not-configured" });
@@ -171,7 +195,10 @@ export function buildBuiltInAgentPersonaCatalog(
                 resolvedDriver: ProviderDriverKind.make(resolution.driver),
                 resolvedModelSelection: resolution.modelSelection,
               }
-            : { status: "unavailable" as const },
+            : {
+                status: "unavailable" as const,
+                reason: unavailableAgentPersonaReason(resolution),
+              },
       };
     }),
   };
