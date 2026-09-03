@@ -2368,6 +2368,7 @@ export type OrchestrationV2PublicCommand = typeof OrchestrationV2PublicCommand.T
 
 export const ORCHESTRATION_V2_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
+  getAgentPersonaCatalog: "orchestration.getAgentPersonaCatalog",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
@@ -2665,6 +2666,10 @@ export const OrchestrationV2RpcSchemas = {
   dispatchCommand: {
     input: OrchestrationV2PublicCommand,
     output: OrchestrationV2DispatchCommandResult,
+  },
+  getAgentPersonaCatalog: {
+    input: Schema.Struct({}),
+    output: OrchestrationV2AgentPersonaCatalog,
   },
   getTurnDiff: {
     input: OrchestrationGetTurnDiffInput,
