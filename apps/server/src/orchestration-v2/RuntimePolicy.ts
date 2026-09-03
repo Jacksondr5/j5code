@@ -11,6 +11,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as ProjectionProjects from "../persistence/Services/ProjectionProjects.ts";
+import { translateAgentPersonaProviderPolicy } from "../j5/agents/agentPersonaProviderPolicy.ts";
 import {
   ProviderAdapterV2RuntimePolicy,
   type ProviderAdapterV2RuntimePolicy as ProviderAdapterV2RuntimePolicyType,
@@ -57,16 +58,33 @@ export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePol
   "t3/orchestration-v2/RuntimePolicy/RuntimePolicyV2",
 ) {}
 
+function runtimePolicyForThread(input: {
+  readonly thread: OrchestrationV2AppThread;
+  readonly cwd: string | null;
+}): ProviderAdapterV2RuntimePolicyType {
+  const authorityPolicy = input.thread.agentPersonaAssignment?.authorityPolicy;
+  const providerPolicy =
+    authorityPolicy === undefined
+      ? { runtimeMode: input.thread.runtimeMode }
+      : translateAgentPersonaProviderPolicy(
+          authorityPolicy,
+          input.thread.agentPersonaAssignment!.resolvedDriver,
+        );
+  return ProviderAdapterV2RuntimePolicy.make({
+    ...providerPolicy,
+    interactionMode: input.thread.interactionMode,
+    cwd: input.cwd,
+  });
+}
+
 /**
  * IMPLEMENTATIONS
  */
 export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2, {
   resolve: (input) =>
-    Effect.succeed({
-      runtimeMode: input.thread.runtimeMode,
-      interactionMode: input.thread.interactionMode,
-      cwd: input.thread.worktreePath,
-    }),
+    Effect.succeed(
+      runtimePolicyForThread({ thread: input.thread, cwd: input.thread.worktreePath }),
+    ),
 });
 
 export const layerFromProjectRepository: Layer.Layer<
@@ -104,11 +122,7 @@ export const layerFromProjectRepository: Layer.Layer<
               }),
             ),
           ));
-        return ProviderAdapterV2RuntimePolicy.make({
-          runtimeMode: input.thread.runtimeMode,
-          interactionMode: input.thread.interactionMode,
-          cwd,
-        });
+        return runtimePolicyForThread({ thread: input.thread, cwd });
       }),
     });
   }),
