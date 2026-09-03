@@ -993,6 +993,20 @@ export function formatSubagentModelLabel(
   return effort ? `${compact} · ${effort}` : compact;
 }
 
+/** Human-facing name for provider paths such as `/root/security_review`. */
+export function formatSubagentDisplayTitle(title: string): string {
+  const normalized = title.replace(/^Subagent:\s*/i, "").trim();
+  if (!normalized.startsWith("/")) {
+    return normalized;
+  }
+  const leaf = normalized.slice(normalized.lastIndexOf("/") + 1);
+  if (!leaf) {
+    return normalized;
+  }
+  const words = leaf.replaceAll(/[-_]+/g, " ");
+  return `${words[0]?.toUpperCase() ?? ""}${words.slice(1)}`;
+}
+
 export function formatSubagentTokenCount(totalTokens: number): string {
   if (totalTokens < 1000) {
     return `${totalTokens}`;
