@@ -860,6 +860,9 @@ export function threadShellFromProjection(
     modelSelection: projection.thread.modelSelection,
     runtimeMode: projection.thread.runtimeMode,
     interactionMode: projection.thread.interactionMode,
+    ...(projection.thread.agentPersonaAssignment === undefined
+      ? {}
+      : { agentPersonaAssignment: projection.thread.agentPersonaAssignment }),
     branch: projection.thread.branch,
     worktreePath: projection.thread.worktreePath,
     lineage: projection.thread.lineage,
@@ -1040,6 +1043,9 @@ function shellFromState(input: {
     modelSelection: input.state.thread.modelSelection,
     runtimeMode: input.state.thread.runtimeMode,
     interactionMode: input.state.thread.interactionMode,
+    ...(input.state.thread.agentPersonaAssignment === undefined
+      ? {}
+      : { agentPersonaAssignment: input.state.thread.agentPersonaAssignment }),
     branch: input.state.thread.branch,
     worktreePath: input.state.thread.worktreePath,
     lineage: input.state.thread.lineage,

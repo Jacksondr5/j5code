@@ -324,6 +324,7 @@ describe("V2 environment commands", () => {
             branch: "feature",
             worktreePath: "/workspace/project-worktrees/feature",
             createdAt: "2026-06-20T00:00:00.000Z",
+            agentPersona: { personaId: "critic", authorityPolicy: "critic-fix" },
           },
         },
       }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
@@ -337,6 +338,7 @@ describe("V2 environment commands", () => {
         },
         title: "Continue here",
         generateTitle: true,
+        agentPersona: { personaId: "critic", authorityPolicy: "critic-fix" },
         workspaceStrategy: {
           type: "existing_worktree",
           worktreePath: "/workspace/project-worktrees/feature",
