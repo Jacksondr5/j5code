@@ -1312,6 +1312,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     command: Extract<OrchestrationV2Command, { readonly type: "thread.create" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
   ) {
+    if (
+      command.agentPersonaAssignment !== undefined &&
+      !modelSelectionsEqual(
+        command.modelSelection,
+        command.agentPersonaAssignment.resolvedModelSelection,
+      )
+    ) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "Agent persona assignment must match the thread model selection.",
+      });
+    }
+
     yield* Effect.annotateCurrentSpan({
       "orchestration_v2.command_id": command.commandId,
       "orchestration_v2.command_type": command.type,
@@ -1331,6 +1345,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       modelSelection: command.modelSelection,
       runtimeMode: command.runtimeMode,
       interactionMode: command.interactionMode,
+      ...(command.agentPersonaAssignment === undefined
+        ? {}
+        : { agentPersonaAssignment: command.agentPersonaAssignment }),
       branch: command.branch,
       worktreePath: command.worktreePath,
       activeProviderThreadId: null,

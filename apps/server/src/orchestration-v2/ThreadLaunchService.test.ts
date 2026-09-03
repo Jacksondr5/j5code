@@ -365,7 +365,78 @@ it.effect("keeps a proposed-plan child of a no-home legacy parent native", () =>
     assert.equal(launched.threadId, ThreadId.make("thread:launch:legacy-plan"));
   }).pipe(Effect.provide(harness.layer));
 });
+it.effect("resolves and persists a built-in agent persona assignment", () =>
+  Effect.gen(function* () {
+    const harness = makeHarness({
+      providers: [
+        {
+          instanceId: ProviderInstanceId.make("codex"),
+          driver: ProviderDriverKind.make("codex"),
+          enabled: true,
+          installed: true,
+          version: null,
+          status: "ready",
+          auth: { status: "authenticated" },
+          checkedAt: "2026-09-02T00:00:00.000Z",
+          availability: "available",
+          models: [
+            {
+              slug: "gpt-5.6-terra",
+              name: "GPT-5.6 Terra",
+              isCustom: false,
+              capabilities: {
+                optionDescriptors: [
+                  {
+                    id: "reasoningEffort",
+                    label: "Reasoning",
+                    type: "select",
+                    options: [{ id: "high", label: "High" }],
+                  },
+                ],
+              },
+            },
+          ],
+          slashCommands: [],
+          skills: [],
+        },
+      ],
+    });
 
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const launched = yield* launches.launch({
+        ...launchInput({
+          command: "command:launch:agent-persona",
+          thread: "thread:launch:agent-persona",
+        }),
+        agentPersona: { personaId: "scout" },
+      });
+
+      const expectedAssignment = {
+        personaId: "scout",
+        definitionVersion: 1,
+        authorityPolicy: "read-only",
+        resolvedRoute: "primary",
+        resolvedDriver: ProviderDriverKind.make("codex"),
+        resolvedModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.6-terra",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        },
+      } as const;
+      assert.deepEqual(launched.projection.thread.agentPersonaAssignment, expectedAssignment);
+      assert.deepEqual(
+        launched.projection.thread.modelSelection,
+        expectedAssignment.resolvedModelSelection,
+      );
+      assert.deepEqual(
+        (yield* threads.getThreadShell(launched.threadId))?.agentPersonaAssignment,
+        expectedAssignment,
+      );
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
 it.effect("returns a visible preparing message while provisioning is still blocked", () =>
   Effect.gen(function* () {
     const worktreeEntered = yield* Deferred.make<void>();
