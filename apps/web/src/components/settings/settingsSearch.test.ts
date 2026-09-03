@@ -239,4 +239,11 @@ describe("searchSettings", () => {
       targetId: "browser-profiles",
     });
   });
+
+  it("exposes the informational Agents destination", () => {
+    expect(searchSettings("agents")[0]).toMatchObject({
+      id: "agents",
+      to: "/settings/agents",
+    });
+  });
 });

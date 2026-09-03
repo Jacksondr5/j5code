@@ -8600,6 +8600,12 @@ export default function ChatView(props: ChatViewProps) {
                             threadSyncPhase={activeEnvironmentUnavailable ? null : threadSyncPhase}
                             runtimeMode={runtimeMode}
                             interactionMode={interactionMode}
+                            {...(serverProjection?.thread.agentPersonaAssignment === undefined
+                              ? {}
+                              : {
+                                  agentPersonaAssignment:
+                                    serverProjection.thread.agentPersonaAssignment,
+                                })}
                             lockedProvider={modelPickerLockedProvider}
                             providerStatuses={providerStatuses as ServerProvider[]}
                             activeProjectDefaultModelSelection={
