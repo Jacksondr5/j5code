@@ -728,6 +728,7 @@ export function makeClaudeQueryOptions(input: {
   readonly onUserDialog?: ClaudeQueryOptions["onUserDialog"];
   readonly supportedDialogKinds?: ClaudeQueryOptions["supportedDialogKinds"];
   readonly allowDangerouslySkipPermissions?: boolean;
+  readonly agentPersonaInstructions?: string;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
   const extraArgs =
@@ -753,6 +754,13 @@ export function makeClaudeQueryOptions(input: {
           ...(typeof querySettings === "object" && querySettings !== null ? querySettings : {}),
           autoCompactWindow: Number(input.settings.autoCompactWindow),
         } as ClaudeSdkSettings);
+  const systemPromptAppend = [
+    buildRuntimeInstructions({ harness: "Claude Code" }),
+    input.mcpServers === undefined ? undefined : T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+    input.agentPersonaInstructions,
+  ]
+    .filter((instructions): instructions is string => instructions !== undefined)
+    .join("\n\n");
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
     tools: claudeAgentSdkQueryToolsForSdk(selectedTools),
@@ -784,9 +792,7 @@ export function makeClaudeQueryOptions(input: {
     systemPrompt: {
       type: "preset" as const,
       preset: "claude_code" as const,
-      append:
-        buildRuntimeInstructions({ harness: "Claude Code" }) +
-        (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS),
+      append: systemPromptAppend,
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
   };
@@ -5275,6 +5281,11 @@ export function makeClaudeAdapterV2(
                 canUseTool,
                 onUserDialog,
                 supportedDialogKinds: ["resume_return"],
+                ...(turnInput.runtimePolicy.agentPersonaInstructions === undefined
+                  ? {}
+                  : {
+                      agentPersonaInstructions: turnInput.runtimePolicy.agentPersonaInstructions,
+                    }),
               }),
             })
             .pipe(
