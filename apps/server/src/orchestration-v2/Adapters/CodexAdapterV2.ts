@@ -596,21 +596,24 @@ export function buildCodexTurnStartParams(input: {
     const effort =
       selectedEffort === undefined ? undefined : yield* decodeTurnReasoningEffort(selectedEffort);
     const serviceTier = getCodexServiceTierOptionValue(input.modelSelection);
-    const developerInstructions =
+    const modeInstructions =
       input.hasT3Mcp !== true
         ? undefined
         : input.runtimePolicy.interactionMode === "plan"
           ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
           : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
+    const developerInstructions = [modeInstructions, input.runtimePolicy.agentPersonaInstructions]
+      .filter((instructions): instructions is string => instructions !== undefined)
+      .join("\n\n");
     const collaborationMode: CodexSchema.ClientRequest__CollaborationMode | undefined =
-      input.runtimePolicy.interactionMode !== "plan" && developerInstructions === undefined
+      input.runtimePolicy.interactionMode !== "plan" && developerInstructions.length === 0
         ? undefined
         : {
             mode: input.runtimePolicy.interactionMode === "plan" ? "plan" : "default",
             settings: {
               model: input.modelSelection.model,
               reasoning_effort: effort ?? "medium",
-              ...(developerInstructions === undefined
+              ...(developerInstructions.length === 0
                 ? {}
                 : { developer_instructions: developerInstructions }),
             },
