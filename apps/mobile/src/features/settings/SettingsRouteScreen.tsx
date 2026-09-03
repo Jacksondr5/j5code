@@ -536,6 +536,7 @@ function GeneralSettingsSection() {
 
   return (
     <SettingsSection title="General">
+      <SettingsRow icon="person.2" label="Agents" target="SettingsAgents" />
       <SettingsRow icon="folder" label="Project Grouping" target="SettingsProjectGrouping" />
       <SettingsSwitchRow
         icon="arrow.triangle.branch"

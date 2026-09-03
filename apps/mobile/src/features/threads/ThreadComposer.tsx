@@ -1,5 +1,5 @@
-import { isLiquidGlassSupported, LiquidGlassView } from "@callstack/liquid-glass";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import { presentAgentPersonaAssignment } from "@t3tools/client-runtime/state/agent-personas";
 import type {
   EnvironmentId,
   MessageId,
@@ -614,6 +614,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         option.selection.instanceId === currentModelSelection.instanceId &&
         option.selection.model === currentModelSelection.model,
     ) ?? null;
+  const agentPersonaAssignment = props.selectedThread.agentPersonaAssignment;
+  const agentPersonaPresentation = agentPersonaAssignment
+    ? presentAgentPersonaAssignment(agentPersonaAssignment)
+    : null;
   const providerOptionDescriptors = useMemo(
     () =>
       resolveProviderOptionDescriptors({
@@ -856,16 +860,35 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                   onPress={() => void props.onPickDraftImages()}
                   showChevron={false}
                 />
-                <ComposerInlineControl
-                  accessibilityLabel="Model and reasoning settings"
-                  emphasized
-                  iconNode={
-                    <ProviderIcon provider={currentModelOption?.providerDriver} size={16} />
-                  }
-                  label={currentModelOption?.label ?? currentModelSelection.model}
-                  maxWidth={152}
-                  onPress={openSettings}
-                />
+                {agentPersonaPresentation ? (
+                  <>
+                    <ComposerInlineControl
+                      accessibilityLabel={`Agent persona: ${agentPersonaPresentation.personaLabel}`}
+                      emphasized
+                      icon="person.crop.circle"
+                      label={agentPersonaPresentation.personaLabel}
+                      maxWidth={152}
+                      static
+                    />
+                    <ComposerInlineControl
+                      accessibilityLabel={`Assigned model: ${agentPersonaPresentation.routeLabel}`}
+                      label={agentPersonaPresentation.routeLabel}
+                      maxWidth={200}
+                      static
+                    />
+                  </>
+                ) : (
+                  <ComposerInlineControl
+                    accessibilityLabel="Model and reasoning settings"
+                    emphasized
+                    iconNode={
+                      <ProviderIcon provider={currentModelOption?.providerDriver} size={16} />
+                    }
+                    label={currentModelOption?.label ?? currentModelSelection.model}
+                    maxWidth={152}
+                    onPress={openSettings}
+                  />
+                )}
                 {showStopAction ? (
                   <ComposerToolbarButton
                     accessibilityLabel="Stop"

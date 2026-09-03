@@ -6660,6 +6660,12 @@ function ChatViewContent(props: ChatViewProps) {
                             activeProposedPlan={activeProposedPlan}
                             runtimeMode={runtimeMode}
                             interactionMode={interactionMode}
+                            {...(serverProjection?.thread.agentPersonaAssignment === undefined
+                              ? {}
+                              : {
+                                  agentPersonaAssignment:
+                                    serverProjection.thread.agentPersonaAssignment,
+                                })}
                             lockedProvider={modelPickerLockedProvider}
                             providerCatalogLoaded={serverConfig !== null}
                             providerStatuses={providerStatuses as ServerProvider[]}

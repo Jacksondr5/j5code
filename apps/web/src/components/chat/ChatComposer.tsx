@@ -1,6 +1,7 @@
 import type {
   EnvironmentId,
   ModelSelection,
+  OrchestrationV2AgentPersonaAssignment,
   OrchestrationV2ProjectedTurnItem,
   PreviewAnnotationPayload,
   ProviderApprovalDecision,
@@ -20,6 +21,7 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
+import { presentAgentPersonaAssignment } from "@t3tools/client-runtime/state/agent-personas";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import {
@@ -234,10 +236,7 @@ import type {
   PendingUserInput,
 } from "../../session-logic";
 import { resolveComposerDispatchMode, type ComposerDispatchMode } from "./composerDispatch";
-import {
-  deriveLatestContextWindowSnapshot,
-  formatProviderDisplayName,
-} from "../../lib/contextWindow";
+import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
@@ -277,6 +276,49 @@ const COMPOSER_FLOATING_LAYER_SELECTOR = [
   '[data-slot="combobox-popup"]',
   '[data-slot="autocomplete-popup"]',
 ].join(",");
+
+function AgentPersonaAssignmentControl(props: {
+  readonly assignment: OrchestrationV2AgentPersonaAssignment;
+}) {
+  const presentation = presentAgentPersonaAssignment(props.assignment);
+
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <ComposerControl
+              type="button"
+              disabled
+              aria-label={`Agent persona: ${presentation.personaLabel}`}
+            />
+          }
+        >
+          <ComposerControlIcon icon={BotIcon} opticalSize="large" />
+          {presentation.personaLabel}
+        </TooltipTrigger>
+        <TooltipPopup side="top">
+          Assigned by an agent orchestrator when this task started.
+        </TooltipPopup>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <ComposerControl
+              type="button"
+              disabled
+              aria-label={`Assigned model: ${presentation.routeLabel}`}
+              className="max-w-64 overflow-hidden text-ellipsis whitespace-nowrap"
+            />
+          }
+        >
+          {presentation.routeLabel}
+        </TooltipTrigger>
+        <TooltipPopup side="top">This persona's model route is fixed for this task.</TooltipPopup>
+      </Tooltip>
+    </>
+  );
+}
 
 const extendReplacementRangeForTrailingSpace = (
   text: string,
@@ -565,6 +607,7 @@ export interface ChatComposerProps {
   // Mode
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
+  agentPersonaAssignment?: OrchestrationV2AgentPersonaAssignment;
 
   // Provider / model
   lockedProvider: ProviderDriverKind | null;
@@ -661,6 +704,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProposedPlan,
     runtimeMode,
     interactionMode,
+    agentPersonaAssignment,
     lockedProvider,
     providerCatalogLoaded,
     providerStatuses,
@@ -861,6 +905,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     selectedEntry: selectedProviderEntry,
   });
   const noProviderAvailable = providerCatalogAvailability !== "ready";
+  const hasAgentPersona = agentPersonaAssignment !== undefined;
   const providerAvailabilityCopy =
     providerCatalogAvailability === "loading"
       ? {
@@ -3189,7 +3234,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               )}
             >
               <div className="-m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {noProviderAvailable ? (
+                {agentPersonaAssignment ? (
+                  <AgentPersonaAssignmentControl assignment={agentPersonaAssignment} />
+                ) : null}
+                {!hasAgentPersona && noProviderAvailable ? (
                   <Button
                     type="button"
                     size="sm"
@@ -3206,7 +3254,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     )}
                     {providerAvailabilityCopy.label}
                   </Button>
-                ) : (
+                ) : !hasAgentPersona ? (
                   <ProviderModelPicker
                     compact={isComposerFooterCompact}
                     activeInstanceId={selectedInstanceId}
@@ -3231,9 +3279,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     getModelDisabledReason={getModelDisabledReason}
                     onInstanceModelChange={onProviderModelSelect}
                   />
-                )}
+                ) : null}
 
-                {isComposerFooterCompact ? (
+                {hasAgentPersona ? null : isComposerFooterCompact ? (
                   <CompactComposerControlsMenu
                     interactionMode={interactionMode}
                     runtimeMode={runtimeMode}
