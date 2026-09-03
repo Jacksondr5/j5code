@@ -43,6 +43,10 @@
       "types": "./src/state/auth.ts",
       "default": "./src/state/auth.ts"
     },
+    "./state/agent-personas": {
+      "types": "./src/state/agentPersonas.ts",
+      "default": "./src/state/agentPersonas.ts"
+    },
     "./state/assets": {
       "types": "./src/state/assets.ts",
       "default": "./src/state/assets.ts"
