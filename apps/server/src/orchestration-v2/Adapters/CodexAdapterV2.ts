@@ -422,7 +422,7 @@ function approvalDecisionToLegacyReviewDecision(
     case "acceptForSession":
       return "approved_for_session";
     case "decline":
-      return "denied";
+      return { denied: { rejection: "The user declined this request." } };
     case "cancel":
       return "abort";
   }
@@ -1104,7 +1104,7 @@ export function codexThreadRuntimeParams(input: {
 }): {
   readonly cwd?: string;
   readonly model?: string;
-  readonly config?: Readonly<Record<string, unknown>>;
+  readonly config?: Readonly<Record<string, Schema.Json>>;
 } {
   const mcpSession =
     input.threadId === null ? undefined : McpProviderSession.readMcpProviderSession(input.threadId);

@@ -336,6 +336,7 @@ function makeThreadStartedNotification(
         id: threadId,
         modelProvider: "openai",
         preview: "",
+        projectId: null,
         sessionId: threadId,
         source,
         status: { type: "idle" as const },

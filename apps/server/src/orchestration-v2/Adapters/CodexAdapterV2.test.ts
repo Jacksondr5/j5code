@@ -922,7 +922,7 @@ function codexReplayPreamble(input: {
       frame: {
         id: 1,
         result: {
-          userAgent: "t3code_desktop/0.144.0",
+          userAgent: "t3code_desktop/0.152.1",
           codexHome: "/tmp/codex-home",
           platformFamily: "unix",
           platformOs: "macos",
@@ -945,6 +945,7 @@ function codexReplayPreamble(input: {
             id: input.nativeThreadId,
             sessionId: input.nativeThreadId,
             forkedFromId: null,
+            projectId: null,
             preview: "",
             ephemeral: false,
             modelProvider: "openai",
