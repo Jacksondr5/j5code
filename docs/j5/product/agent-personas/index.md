@@ -291,3 +291,19 @@ Acceptance requires:
 - A skill orchestrator can request one persona through the ordinary new-thread launch contract without constructing a workflow graph or sequence. There is no direct persona selector in client composers.
 
 The focused acceptance suite covers the catalog, all-persona route matrix, authority-aware blocked states, provider translation, Critic mode selection, server-owned assignment validation, direct launch, and durable projection rebuild. Narrower Investigator and Publisher operations remain later work and fail closed until implemented.
+
+## Phase 8: Builder prompt
+
+Phase 8 begins persona prompt composition with Builder definition version 1.
+
+- The server resolves Builder's versioned instructions from its durable persona assignment and sends them through the provider's native developer or system instruction channel. The governing handoff remains the user message.
+- Builder accepts a `PlanHandoff`, `DiagnosisHandoff`, or `ReviewInbox`; a review inbox directs it to apply and disposition Critic and Sentry findings.
+- Builder returns the defined `CodeCompleteHandoff`, including changed behavior, validation, residual risk, review-ready diff identity, and an explicit no-commit/no-push statement.
+- The prompt reinforces but does not replace the `workspace-write` runtime authority policy. Builder must never commit, push, mutate a pull request, or merge.
+- Other persona prompts and artifact wire validation remain later work.
+
+## Agents right-panel boundary
+
+The web and desktop Agents right panel remains a runtime activity surface for provider-native child agents and workflows. It does not present durable persona assignments or the built-in persona catalog.
+
+Built-in agent discovery remains under Settings, and skill orchestrators continue to own persona activation. This keeps reusable application definitions separate from agents that have actually been launched for a task.

@@ -378,6 +378,32 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
+  it.effect("adds persona instructions without requiring the T3 MCP server", () =>
+    Effect.gen(function* () {
+      const params = yield* buildCodexTurnStartParams({
+        nativeThreadId: "native-builder-instructions",
+        codexInput: [{ type: "text", text: "implement this handoff" }],
+        runtimePolicy: {
+          runtimeMode: "auto-accept-edits",
+          interactionMode: "default",
+          cwd: "/workspace",
+          agentPersonaInstructions: "Builder instructions",
+        },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.6-sol",
+        },
+        hasT3Mcp: false,
+      });
+
+      assert.equal(params.collaborationMode?.mode, "default");
+      assert.equal(
+        params.collaborationMode?.settings.developer_instructions,
+        "Builder instructions",
+      );
+    }),
+  );
+
   it.effect("adds T3 plan-mode developer instructions when the T3 MCP server is attached", () =>
     Effect.gen(function* () {
       const params = yield* buildCodexTurnStartParams({
