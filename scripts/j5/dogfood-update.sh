@@ -11,7 +11,6 @@ service="${J5_DOGFOOD_SERVICE:-j5code.service}"
 port="${J5_DOGFOOD_PORT:-5773}"
 
 cd "$repo_root"
-node_version="$(<"$repo_root/.nvmrc")"
 
 previous_ref="$(git rev-parse --short HEAD)"
 echo "Server currently at $previous_ref — the rollback target if this update goes bad."
@@ -22,7 +21,10 @@ git switch j5/main
 git pull --ff-only origin j5/main
 echo "Now at $(git rev-parse --short HEAD)."
 
+node_version="$(<"$repo_root/.nvmrc")"
 fnm install "$node_version"
+package_manager="$(fnm exec --using "$node_version" node -p 'require("./package.json").packageManager.split("+")[0]')"
+fnm exec --using "$node_version" npm install --global "$package_manager"
 fnm exec --using "$node_version" pnpm install --frozen-lockfile
 fnm exec --using "$node_version" pnpm exec vp run --filter t3 build
 
