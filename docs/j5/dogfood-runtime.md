@@ -48,7 +48,7 @@ agreement.
 | ---------------- | --------------------------------------- | ------------------------------------------------------------ |
 | Service user     | `j5dev`                                 | Non-sudo, lingering enabled, mirrors `t3dev`                 |
 | Checkout         | `/home/j5dev/j5code`                    | Deploy-only clone of `j5/main`; never edited in place        |
-| Development      | `/home/j5dev/src/j5code`                | Separate clone for agent work and development worktrees     |
+| Development      | `/home/j5dev/src/j5code`                | Separate clone for agent work and development worktrees      |
 | State dir        | `/home/j5dev/.j5code`                   | Set explicitly — see warning below                           |
 | Listener         | `127.0.0.1:5773`                        | Loopback only; the existing T3 service keeps `3773`          |
 | Tailnet exposure | Tailscale Serve HTTPS 8444 → 5773       | Applied by root via Ansible, not by the unit; 443/8443 taken |
