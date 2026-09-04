@@ -1,5 +1,7 @@
 import type { ThreadHome } from "./ThreadHomesClient";
 
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
+
 /**
  * Thread cards identify registered work by its immutable Registrar Squadron.
  * Native threads have no Registrar home, so their existing folder label stays
@@ -13,6 +15,9 @@ export function ThreadCardIdentity(props: {
   return label === null ? (
     <span className="flex-1" />
   ) : (
-    <span className="min-w-0 flex-1 truncate">{label}</span>
+    <Tooltip>
+      <TooltipTrigger render={<span className="block truncate">{label}</span>} />
+      <TooltipPopup>{label}</TooltipPopup>
+    </Tooltip>
   );
 }

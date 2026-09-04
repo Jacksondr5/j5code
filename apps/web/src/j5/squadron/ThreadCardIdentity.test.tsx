@@ -23,6 +23,20 @@ it("keeps the existing folder label for a thread without a Registrar home", () =
   expect(markup).toContain("Native folder");
 });
 
+it("clips a long identity label and keeps its full text in the sidebar tooltip pattern", () => {
+  const label = "J5 disposable A2A evidence Squadron with a deliberately long label";
+  const markup = renderToStaticMarkup(
+    <ThreadCardIdentity
+      home={{ kind: "known", squadron: { id: "squadron:long", name: label } }}
+      fallbackFolder="Shared folder"
+    />,
+  );
+
+  expect(markup).toContain("block truncate");
+  expect(markup).toContain('data-slot="tooltip-trigger"');
+  expect(markup).toContain(label);
+});
+
 it("keeps two Squadrons over one folder distinguishable", () => {
   const alpha = renderToStaticMarkup(
     <ThreadCardIdentity
