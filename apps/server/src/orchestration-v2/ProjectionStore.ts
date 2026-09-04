@@ -91,11 +91,24 @@ export class ProjectionStoreReadError extends Schema.TaggedErrorClass<Projection
   }
 }
 
+export class ProjectionStoreRunsReadError extends Schema.TaggedErrorClass<ProjectionStoreRunsReadError>()(
+  "ProjectionStoreRunsReadError",
+  {
+    status: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `Failed to read orchestration runs with status ${this.status}.`;
+  }
+}
+
 export const ProjectionStoreV2Error = Schema.Union([
   ProjectionStoreSetupError,
   ProjectionStoreApplyEventError,
   ProjectionStoreThreadNotFoundError,
   ProjectionStoreReadError,
+  ProjectionStoreRunsReadError,
 ]);
 export type ProjectionStoreV2Error = typeof ProjectionStoreV2Error.Type;
 
@@ -112,6 +125,11 @@ export interface ProjectionStoreV2Shape {
   readonly getThreadProjection: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2ThreadProjection, ProjectionStoreV2Error>;
+  readonly listRunsByStatus: (input: {
+    readonly status: OrchestrationV2Run["status"];
+    readonly requestedBefore: DateTime.Utc;
+    readonly limit: number;
+  }) => Effect.Effect<ReadonlyArray<OrchestrationV2Run>, ProjectionStoreV2Error>;
   readonly getThreadSnapshot: (threadId: ThreadId) => Effect.Effect<
     {
       readonly schemaVersion: number;
@@ -2174,6 +2192,23 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     const getThreadProjection: ProjectionStoreV2Shape["getThreadProjection"] = (threadId) =>
       readProjection(threadId, new Set());
 
+    const listRunsByStatus: ProjectionStoreV2Shape["listRunsByStatus"] = (input) =>
+      sql<PayloadRow>`
+        SELECT r.payload_json
+        FROM orchestration_v2_projection_threads AS t
+        INNER JOIN orchestration_v2_projection_runs AS r
+          INDEXED BY orchestration_v2_projection_runs_thread_status_idx
+          ON r.thread_id = t.thread_id
+          AND r.status = ${input.status}
+        WHERE r.requested_at <= ${DateTime.formatIso(input.requestedBefore)}
+        LIMIT ${input.limit}
+      `.pipe(
+        Effect.flatMap((rows) => Effect.forEach(rows, (row) => decodeRunPayload(row.payload_json))),
+        Effect.mapError(
+          (cause) => new ProjectionStoreRunsReadError({ status: input.status, cause }),
+        ),
+      );
+
     const getThreadSnapshot: ProjectionStoreV2Shape["getThreadSnapshot"] = (threadId) =>
       sql
         .withTransaction(
@@ -2689,6 +2724,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getShellSnapshot,
       getThreadShell,
       getThreadProjection,
+      listRunsByStatus,
       getThreadSnapshot,
     } satisfies ProjectionStoreV2Shape;
   }),
@@ -2789,6 +2825,20 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
           }
           return projection;
         }),
+      listRunsByStatus: (input) =>
+        Ref.get(replayState).pipe(
+          Effect.map(({ projections }) =>
+            [...projections.values()]
+              .flatMap((projection) => projection.runs)
+              .filter(
+                (run) =>
+                  run.status === input.status &&
+                  DateTime.toEpochMillis(run.requestedAt) <=
+                    DateTime.toEpochMillis(input.requestedBefore),
+              )
+              .slice(0, input.limit),
+          ),
+        ),
       getThreadSnapshot: (threadId) =>
         service.getThreadProjection(threadId).pipe(
           Effect.flatMap((projection) =>

@@ -13,7 +13,12 @@ import { expect, it } from "vite-plus/test";
 import * as EventSink from "../../orchestration-v2/EventSink.ts";
 import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
-import { layer, QueuedRunWatchdog, QUEUED_RUN_WATCHDOG_DELAY_MS } from "./QueuedRunWatchdog.ts";
+import {
+  layer,
+  QueuedRunWatchdog,
+  QUEUED_RUN_WATCHDOG_DELAY_MS,
+  QUEUED_RUN_WATCHDOG_MAX_CANDIDATES,
+} from "./QueuedRunWatchdog.ts";
 
 it("records one durable waiting fact for a promoted run that has not dispatched", async () =>
   Effect.gen(function* () {
@@ -45,12 +50,27 @@ it("records one durable waiting fact for a promoted run that has not dispatched"
       turnItems,
     } as unknown as OrchestrationV2ThreadProjection;
     const written: Array<unknown> = [];
+    const runQueries: Array<{
+      readonly status: string;
+      readonly requestedBefore: DateTime.Utc;
+      readonly limit: number;
+    }> = [];
+    const projectionReadIds: Array<ThreadId> = [];
     const testLayer = layer.pipe(
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
-            getShellSnapshot: () => Effect.succeed({ threads: [{ id: threadId }] } as never),
-            getThreadProjection: () => Effect.succeed(projection),
+            getShellSnapshot: () => Effect.die("watchdog must query runs by status"),
+            listRunsByStatus: (input) =>
+              Effect.sync(() => {
+                runQueries.push(input);
+                return projection.runs;
+              }),
+            getThreadProjection: (id) =>
+              Effect.sync(() => {
+                projectionReadIds.push(id);
+                return projection;
+              }),
           }),
           Layer.mock(EventSink.EventSinkV2)({
             writeIfRunCurrent: (input) =>
@@ -73,6 +93,16 @@ it("records one durable waiting fact for a promoted run that has not dispatched"
     }).pipe(Effect.provide(testLayer));
 
     expect(written).toHaveLength(1);
+    expect(runQueries).toHaveLength(2);
+    expect(runQueries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "starting",
+          limit: QUEUED_RUN_WATCHDOG_MAX_CANDIDATES,
+        }),
+      ]),
+    );
+    expect(projectionReadIds).toEqual([threadId, threadId]);
     const event = (written[0] as { events: Array<unknown> }).events[0] as {
       readonly type: string;
       readonly payload: {
