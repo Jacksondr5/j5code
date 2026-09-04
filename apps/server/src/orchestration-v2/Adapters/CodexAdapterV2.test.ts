@@ -46,6 +46,7 @@ import {
 } from "../ProviderAdapter.ts";
 import type { ProviderContinuationRequest } from "../ProviderContinuationRequests.ts";
 import {
+  approvalDecisionToLegacyReviewDecision,
   buildCodexTurnStartParams,
   CODEX_DEFAULT_INSTANCE_ID,
   CODEX_DRIVER_KIND,
@@ -3539,4 +3540,20 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       }).pipe(Effect.provide(Layer.merge(idAllocatorLayer, NodeServices.layer))),
     ),
   );
+});
+
+describe("CodexAdapterV2 approval decisions", () => {
+  it("maps a decline to Codex's structured denial with truthful J5 wording", () => {
+    // J5 cannot tell a human decline from a policy one at this seam, so the
+    // rejection never claims the user did it.
+    assert.deepEqual(approvalDecisionToLegacyReviewDecision("decline"), {
+      denied: { rejection: "J5 did not approve this request." },
+    });
+    assert.strictEqual(approvalDecisionToLegacyReviewDecision("accept"), "approved");
+    assert.strictEqual(
+      approvalDecisionToLegacyReviewDecision("acceptForSession"),
+      "approved_for_session",
+    );
+    assert.strictEqual(approvalDecisionToLegacyReviewDecision("cancel"), "abort");
+  });
 });

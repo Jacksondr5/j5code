@@ -333,15 +333,15 @@ it("records the resume failure on the fallback transfer and warns with thread id
   expect(transferEvent.payload.resolution?.strategy).toBe("portable_context");
   const error = transferEvent.payload.error;
   expect(typeof error).toBe("string");
-  expect(error).toContain('"_tag":"ProviderAdapterResumeThreadError"');
-  expect(error).toContain('"_tag":"CodexAppServerRequestError"');
-  expect(error).toContain('"method":"thread/resume"');
-  expect(error).toContain('"operation":"decode-payload"');
-  expect(error).toContain('"issueCount":');
-  expect(error).toContain('"issueKinds":');
-  expect(error).toContain('"_tag":"SchemaError"');
-  expect(error).toContain('at [\\"thread\\"][\\"turns\\"][0][\\"items\\"][0]');
-  expect(error).not.toContain('"issue":');
+  expect(error).toContain(
+    "ProviderAdapterResumeThreadError: Failed to resume codex provider thread",
+  );
+  expect(error).toContain(
+    "[cause]: CodexAppServerRequestError: Invalid payload for method 'thread/resume' during 'decode-payload'",
+  );
+  expect(error).toContain("[cause]: SchemaError: Expected");
+  expect(error).toContain('at ["thread"]["turns"][0]["items"][0]');
+  expect(error).not.toMatch(/^\s+at (?!\[)/mu);
 
   const warning = logCapture.records.find((record) => "nativeThreadId" in record);
   expect(warning).toMatchObject({

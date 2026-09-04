@@ -8,6 +8,7 @@ import {
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -23,10 +24,7 @@ import { IdAllocatorV2 } from "./IdAllocator.ts";
 import { findCodexCliVersionUnsupportedError } from "../j5/codex/CodexCliVersionGate.ts";
 import { ProjectionStoreV2 } from "./ProjectionStore.ts";
 import { ProviderAdapterProtocolError } from "./ProviderAdapter.ts";
-import {
-  MAX_PROVIDER_FAILURE_MESSAGE_LENGTH,
-  redactProviderFailureText,
-} from "./ProviderFailure.ts";
+import { makeProviderFailure } from "./ProviderFailure.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import {
   canRouteRelatedSubagent,
@@ -45,77 +43,17 @@ export class ProviderTurnStartError extends Schema.TaggedErrorClass<ProviderTurn
 
 const isProviderTurnStartError = Schema.is(ProviderTurnStartError);
 
-const MAX_RESUME_FAILURE_DEPTH = 4;
-const MAX_RESUME_FAILURE_FIELD_LENGTH = 1_024;
-
-function boundedFailureText(value: string, maxLength: number): string {
-  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`;
-}
-
 /**
- * Flattens a provider resume failure (adapter error → Codex request error →
- * schema error) into a JSON-safe record. Each tagged error keeps its own
- * fields, which is where the Codex schema issue diagnostics live, while issue
- * trees and stacks are dropped and the cause chain is walked last.
+ * Renders the provider resume failure and its cause chain (adapter error →
+ * Codex request error → schema error with its path) without stack frames,
+ * redacted and bounded like every other provider failure message.
  */
-function describeResumeFailure(value: unknown, depth: number): unknown {
-  if (typeof value === "string") {
-    return boundedFailureText(value, MAX_RESUME_FAILURE_FIELD_LENGTH);
-  }
-  if (typeof value === "bigint" || typeof value === "symbol" || typeof value === "function") {
-    return String(value);
-  }
-  if (value === null || typeof value !== "object") {
-    return value;
-  }
-  if (depth >= MAX_RESUME_FAILURE_DEPTH) {
-    return value instanceof Error
-      ? boundedFailureText(value.message, MAX_RESUME_FAILURE_FIELD_LENGTH)
-      : "[truncated]";
-  }
-  if (Array.isArray(value)) {
-    return value.slice(0, 32).map((entry) => describeResumeFailure(entry, depth + 1));
-  }
-  const record: Record<string, unknown> = {};
-  const tag = (value as { readonly _tag?: unknown })._tag;
-  if (typeof tag === "string") {
-    record._tag = tag;
-  } else if (value instanceof Error) {
-    record.name = value.name;
-  }
-  if (value instanceof Error) {
-    record.message = boundedFailureText(value.message, MAX_RESUME_FAILURE_FIELD_LENGTH);
-  }
-  for (const [key, child] of Object.entries(value)) {
-    if (
-      key === "_tag" ||
-      key === "message" ||
-      key === "stack" ||
-      key === "issue" ||
-      key === "cause" ||
-      key.startsWith("~") ||
-      typeof child === "function"
-    ) {
-      continue;
-    }
-    record[key] = describeResumeFailure(child, depth + 1);
-  }
-  const cause = (value as { readonly cause?: unknown }).cause;
-  if (cause !== undefined) {
-    record.cause = describeResumeFailure(cause, depth + 1);
-  }
-  return record;
-}
-
-/** Serializes the failure that forced a provider resume fallback for the transfer row and logs. */
-export function serializeResumeFailure(error: unknown): string {
-  let text: string;
-  try {
-    text = JSON.stringify(describeResumeFailure(error, 0)) ?? String(error);
-  } catch {
-    text = String(error);
-  }
-  return boundedFailureText(redactProviderFailureText(text), MAX_PROVIDER_FAILURE_MESSAGE_LENGTH);
+function resumeFailureText(error: unknown): string {
+  const text = Cause.pretty(Cause.fail(error))
+    .split("\n")
+    .filter((line) => !/^\s+at (?!\[)/u.test(line) && !/^\s*[{}]\s*$/u.test(line))
+    .join("\n");
+  return makeProviderFailure({ message: text }).message;
 }
 
 export interface ProviderTurnStartServiceV2Shape {
@@ -309,7 +247,7 @@ export const layer: Layer.Layer<
           return yield* resumed.failure;
         }
 
-        const resumeFailure = serializeResumeFailure(resumed.failure);
+        const resumeFailure = resumeFailureText(resumed.failure);
         yield* Effect.logWarning(
           "orchestration V2 provider resume failed; replacing the native thread with portable context",
           {

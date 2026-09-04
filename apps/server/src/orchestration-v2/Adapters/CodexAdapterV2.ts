@@ -414,7 +414,7 @@ function codexPlanStepStatus(
   }
 }
 
-function approvalDecisionToLegacyReviewDecision(
+export function approvalDecisionToLegacyReviewDecision(
   decision: ProviderApprovalDecision,
 ): CodexSchema.ExecCommandApprovalResponse__ReviewDecision {
   switch (decision) {
@@ -423,7 +423,7 @@ function approvalDecisionToLegacyReviewDecision(
     case "acceptForSession":
       return "approved_for_session";
     case "decline":
-      return { denied: { rejection: "The user declined this request." } };
+      return { denied: { rejection: "J5 did not approve this request." } };
     case "cancel":
       return "abort";
   }
