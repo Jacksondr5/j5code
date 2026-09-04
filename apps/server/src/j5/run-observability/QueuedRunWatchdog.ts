@@ -3,11 +3,15 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { IdAllocatorV2 } from "../../orchestration-v2/IdAllocator.ts";
-import { ProjectionStoreV2 } from "../../orchestration-v2/ProjectionStore.ts";
+import {
+  type ProjectionStoreRunStatusCursor,
+  ProjectionStoreV2,
+} from "../../orchestration-v2/ProjectionStore.ts";
 import { makeProviderFailure } from "../../orchestration-v2/ProviderFailure.ts";
 
 export const QUEUED_RUN_WATCHDOG_DELAY_MS = 5 * 60 * 1000;
@@ -53,6 +57,9 @@ export const layer = Layer.effect(
     const events = yield* EventSinkV2;
     const ids = yield* IdAllocatorV2;
     const projections = yield* ProjectionStoreV2;
+    const startingRunCursor = yield* Ref.make<ProjectionStoreRunStatusCursor | undefined>(
+      undefined,
+    );
 
     const writeFact = Effect.fn("QueuedRunWatchdog.writeFact")(function* (input: {
       readonly projection: OrchestrationV2ThreadProjection;
@@ -111,13 +118,22 @@ export const layer = Layer.effect(
 
     const scanEffect = Effect.fn("QueuedRunWatchdog.scan")(function* () {
       const now = yield* DateTime.now;
+      const after = yield* Ref.get(startingRunCursor);
       const candidates = yield* projections.listRunsByStatus({
         status: "starting",
         requestedBefore: DateTime.makeUnsafe(
           DateTime.toEpochMillis(now) - QUEUED_RUN_WATCHDOG_DELAY_MS,
         ),
+        ...(after === undefined ? {} : { after }),
         limit: QUEUED_RUN_WATCHDOG_MAX_CANDIDATES,
       });
+      const lastCandidate = candidates.at(-1);
+      yield* Ref.set(
+        startingRunCursor,
+        candidates.length === QUEUED_RUN_WATCHDOG_MAX_CANDIDATES && lastCandidate !== undefined
+          ? { requestedAt: lastCandidate.requestedAt, runId: lastCandidate.id }
+          : undefined,
+      );
       yield* Effect.forEach(
         candidates,
         (candidate) =>

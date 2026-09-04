@@ -103,6 +103,20 @@ export class ProjectionStoreRunsReadError extends Schema.TaggedErrorClass<Projec
   }
 }
 
+export interface ProjectionStoreRunStatusCursor {
+  readonly requestedAt: DateTime.Utc;
+  readonly runId: RunId;
+}
+
+export interface ProjectionStoreRunsByStatusInput {
+  readonly status: OrchestrationV2Run["status"];
+  readonly requestedBefore: DateTime.Utc;
+  readonly after?: ProjectionStoreRunStatusCursor;
+  readonly limit: number;
+}
+
+type QueryPlanRow = { readonly detail: string };
+
 export const ProjectionStoreV2Error = Schema.Union([
   ProjectionStoreSetupError,
   ProjectionStoreApplyEventError,
@@ -125,11 +139,9 @@ export interface ProjectionStoreV2Shape {
   readonly getThreadProjection: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2ThreadProjection, ProjectionStoreV2Error>;
-  readonly listRunsByStatus: (input: {
-    readonly status: OrchestrationV2Run["status"];
-    readonly requestedBefore: DateTime.Utc;
-    readonly limit: number;
-  }) => Effect.Effect<ReadonlyArray<OrchestrationV2Run>, ProjectionStoreV2Error>;
+  readonly listRunsByStatus: (
+    input: ProjectionStoreRunsByStatusInput,
+  ) => Effect.Effect<ReadonlyArray<OrchestrationV2Run>, ProjectionStoreV2Error>;
   readonly getThreadSnapshot: (threadId: ThreadId) => Effect.Effect<
     {
       readonly schemaVersion: number;
@@ -448,6 +460,49 @@ export function applyToProjectionReplayState(
 
 type PayloadRow = {
   readonly payload_json: string;
+};
+
+export const listRunsByStatusStatement = (
+  sql: SqlClient.SqlClient,
+  input: ProjectionStoreRunsByStatusInput,
+) => {
+  const requestedBefore = DateTime.formatIso(input.requestedBefore);
+  if (input.after === undefined) {
+    return sql<PayloadRow>`
+      SELECT r.payload_json
+      FROM orchestration_v2_projection_runs AS r
+      INNER JOIN orchestration_v2_projection_threads AS t ON t.thread_id = r.thread_id
+      WHERE r.status = ${input.status}
+        AND r.requested_at <= ${requestedBefore}
+        AND t.archived_at IS NULL
+        AND t.deleted_at IS NULL
+      ORDER BY r.requested_at ASC, r.run_id ASC
+      LIMIT ${input.limit}
+    `;
+  }
+  const afterRequestedAt = DateTime.formatIso(input.after.requestedAt);
+  return sql<PayloadRow>`
+    SELECT r.payload_json
+    FROM orchestration_v2_projection_runs AS r
+    INNER JOIN orchestration_v2_projection_threads AS t ON t.thread_id = r.thread_id
+    WHERE r.status = ${input.status}
+      AND r.requested_at <= ${requestedBefore}
+      AND (r.requested_at > ${afterRequestedAt}
+        OR (r.requested_at = ${afterRequestedAt} AND r.run_id > ${input.after.runId}))
+      AND t.archived_at IS NULL
+      AND t.deleted_at IS NULL
+    ORDER BY r.requested_at ASC, r.run_id ASC
+    LIMIT ${input.limit}
+  `;
+};
+
+/** Test-facing plan hook that compiles the production status-read statement. */
+export const explainListRunsByStatusStatement = (
+  sql: SqlClient.SqlClient,
+  input: ProjectionStoreRunsByStatusInput,
+) => {
+  const [statement, parameters] = listRunsByStatusStatement(sql, input).compile();
+  return sql.unsafe<QueryPlanRow>(`EXPLAIN QUERY PLAN ${statement}`, parameters);
 };
 
 type ShellThreadRow = {
@@ -2193,16 +2248,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       readProjection(threadId, new Set());
 
     const listRunsByStatus: ProjectionStoreV2Shape["listRunsByStatus"] = (input) =>
-      sql<PayloadRow>`
-        SELECT r.payload_json
-        FROM orchestration_v2_projection_threads AS t
-        INNER JOIN orchestration_v2_projection_runs AS r
-          INDEXED BY orchestration_v2_projection_runs_thread_status_idx
-          ON r.thread_id = t.thread_id
-          AND r.status = ${input.status}
-        WHERE r.requested_at <= ${DateTime.formatIso(input.requestedBefore)}
-        LIMIT ${input.limit}
-      `.pipe(
+      listRunsByStatusStatement(sql, input).pipe(
         Effect.flatMap((rows) => Effect.forEach(rows, (row) => decodeRunPayload(row.payload_json))),
         Effect.mapError(
           (cause) => new ProjectionStoreRunsReadError({ status: input.status, cause }),
@@ -2834,7 +2880,19 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                 (run) =>
                   run.status === input.status &&
                   DateTime.toEpochMillis(run.requestedAt) <=
-                    DateTime.toEpochMillis(input.requestedBefore),
+                    DateTime.toEpochMillis(input.requestedBefore) &&
+                  (input.after === undefined ||
+                    DateTime.toEpochMillis(run.requestedAt) >
+                      DateTime.toEpochMillis(input.after.requestedAt) ||
+                    (DateTime.toEpochMillis(run.requestedAt) ===
+                      DateTime.toEpochMillis(input.after.requestedAt) &&
+                      String(run.id) > String(input.after.runId))),
+              )
+              .toSorted(
+                (left, right) =>
+                  DateTime.toEpochMillis(left.requestedAt) -
+                    DateTime.toEpochMillis(right.requestedAt) ||
+                  String(left.id).localeCompare(String(right.id)),
               )
               .slice(0, input.limit),
           ),
