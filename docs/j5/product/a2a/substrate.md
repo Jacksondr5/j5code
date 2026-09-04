@@ -44,7 +44,10 @@ A2A delivery path is **proven** for the busy-receiver case and code-verified for
 terminalizes). Revised 2026-09-03 (issue #73): the busy case originally steered the ask into the
 receiver's active turn; that aborted the receiver's unstarted sibling tool calls, so delivery now
 **queues** behind the active turn and starts when it ends. Steer is an explicit human action on
-the queued row, never a delivery mode. The one v1 proof "failure" was an
+the queued row or the composer's Mod+Enter chord, never a delivery mode; the control says what a
+steer does on that provider (active steering on Claude, Codex, and OpenCode; interrupt-and-restart
+on Cursor, ACP, and Grok), and when nothing is steerable it names the run's phase and offers
+Interrupt instead of falling through (ruling record QS3/QS4). The one v1 proof "failure" was an
 instructed silence misread as a delivery bug. `delegate_task`'s completion wake therefore fills no
 gap Exchanges leave open.
 
