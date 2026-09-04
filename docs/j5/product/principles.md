@@ -143,4 +143,4 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 ## Scoped principles
 
-Principles with narrower jurisdiction live with their stories, not here. Currently one: **authority never replicates — messages cross, read-models merge**, which governs all distributed-state design and lives in [the cross-device position paper](./cross-device.md).
+Principles with narrower jurisdiction live with their stories, not here. Currently two: **authority never replicates — messages cross, read-models merge**, which governs all distributed-state design and lives in [the cross-device position paper](./cross-device.md); and **steering is a controller's act, and in J5 the only controller of a turn is the human** — agent deliveries always queue, the human steers explicitly and is told what a steer does on that provider — which governs mid-turn message dispatch and lives in [the queue-vs-steer ruling record](../worklog/queue-vs-steer-ruling-2026-09-03.md).
