@@ -14,6 +14,8 @@ import {
   type CandidateQuery,
 } from "./QueuedRunCandidates.ts";
 
+const encodePayload = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+
 const testLayer = layer.pipe(Layer.provideMerge(SqlitePersistenceMemory));
 
 it.effect("pages indexed starting-run candidates without scanning unrelated histories", () =>
@@ -52,7 +54,7 @@ it.effect("pages indexed starting-run candidates without scanning unrelated hist
       ["deleted", "deleted", "starting", old],
     ] as const) {
       ordinal += 1;
-      const payload = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))({
+      const payload = yield* encodePayload({
         id,
         threadId,
         ordinal,

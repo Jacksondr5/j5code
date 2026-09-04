@@ -22,6 +22,9 @@ import * as RunFinalization from "../../orchestration-v2/RunFinalizationService.
 import { QueuedRunCandidates } from "./QueuedRunCandidates.ts";
 import { layer, QueuedRunWatchdog } from "./QueuedRunWatchdog.ts";
 
+const isCaptureError = Schema.is(CheckpointCapture.CheckpointCaptureExecutionError);
+const isRefreshError = Schema.is(RunFinalization.RunFinalizationRefreshError);
+
 const input = {
   threadId: ThreadId.make("observation-thread"),
   runId: RunId.make("observation-run"),
@@ -112,16 +115,10 @@ for (const phase of ["checkpoint", "refresh"] as const) {
               observation,
               projections,
               Layer.mock(CheckpointCapture.CheckpointCaptureServiceV2)({
-                execute: () =>
-                  Schema.is(CheckpointCapture.CheckpointCaptureExecutionError)(wrapped)
-                    ? Effect.fail(wrapped)
-                    : Effect.void,
+                execute: () => (isCaptureError(wrapped) ? Effect.fail(wrapped) : Effect.void),
               }),
               Layer.succeed(RunFinalization.RunFinalizationObserver, {
-                refresh: () =>
-                  Schema.is(RunFinalization.RunFinalizationRefreshError)(wrapped)
-                    ? Effect.fail(wrapped)
-                    : Effect.void,
+                refresh: () => (isRefreshError(wrapped) ? Effect.fail(wrapped) : Effect.void),
               }),
             ),
           ),

@@ -122,7 +122,7 @@ it("records one durable waiting fact for a promoted run that has not dispatched"
     });
   }).pipe(Effect.runPromise));
 
-it("advances a bounded watchdog scan past the first 100 stale runs", async () =>
+it("fairly observes more than 100 stale runs within bounded watchdog ticks", async () =>
   Effect.gen(function* () {
     const threadId = ThreadId.make("thread_queued_run_watchdog_fairness");
     const now = yield* DateTime.now;
@@ -130,7 +130,7 @@ it("advances a bounded watchdog scan past the first 100 stale runs", async () =>
       DateTime.toEpochMillis(now) - QUEUED_RUN_WATCHDOG_DELAY_MS,
     );
     const staleRuns = Array.from(
-      { length: QUEUED_RUN_WATCHDOG_MAX_CANDIDATES + 1 },
+      { length: QUEUED_RUN_WATCHDOG_MAX_CANDIDATES * 2 + 1 },
       (_, index) => ({
         id: RunId.make(`run_queued_run_watchdog_fairness_${String(index).padStart(3, "0")}`),
         threadId,
@@ -194,15 +194,20 @@ it("advances a bounded watchdog scan past the first 100 stale runs", async () =>
       const watchdog = yield* QueuedRunWatchdog;
       yield* watchdog.scan();
       yield* watchdog.scan();
+      yield* watchdog.scan();
     }).pipe(Effect.provide(testLayer));
 
-    expect(queries).toHaveLength(2);
+    expect(queries).toHaveLength(3);
     expect(queries[0]).toMatchObject({ limit: QUEUED_RUN_WATCHDOG_MAX_CANDIDATES });
     expect(queries[1]?.after).toEqual({
       requestedAt,
       runId: staleRuns[QUEUED_RUN_WATCHDOG_MAX_CANDIDATES - 1]?.id,
     });
-    expect(observedRunIds).toContain(staleRuns[QUEUED_RUN_WATCHDOG_MAX_CANDIDATES]?.id);
+    expect(queries[2]?.after).toEqual({
+      requestedAt,
+      runId: staleRuns[QUEUED_RUN_WATCHDOG_MAX_CANDIDATES * 2 - 1]?.id,
+    });
+    expect(observedRunIds).toEqual(expect.arrayContaining(staleRuns.map((run) => run.id)));
   }).pipe(Effect.runPromise));
 
 it("records one sanitized VCS observation fact without changing the run", async () =>
