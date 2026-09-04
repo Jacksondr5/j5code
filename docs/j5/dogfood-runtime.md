@@ -51,6 +51,7 @@ agreement.
 | ---------------- | --------------------------------------- | ------------------------------------------------------------ |
 | Service user     | `j5dev`                                 | Non-sudo, lingering enabled, mirrors `t3dev`                 |
 | Checkout         | `/home/j5dev/j5code`                    | Deploy-only clone of `j5/main`; never edited in place        |
+| Development      | `/home/j5dev/src/j5code`                | Separate clone for agent work and development worktrees      |
 | State dir        | `/home/j5dev/.j5code`                   | Set explicitly — see warning below                           |
 | Listener         | `127.0.0.1:5773`                        | Loopback only; the existing T3 service keeps `3773`          |
 | Tailnet exposure | Tailscale Serve HTTPS 8444 → 5773       | Applied by root via Ansible, not by the unit; 443/8443 taken |
@@ -65,17 +66,22 @@ agreement.
 
 As `j5dev` (Ansible reconciles all of this):
 
-1. **Toolchain.** `git`, `sqlite3`, `fnm`, and via fnm the Node version in the checkout's `.nvmrc`
-   (currently 24.14.0). Enable corepack under that Node (`corepack enable`) so the repo's
-   `packageManager` field provides pnpm 11.10.0. Rust is **not** required — it is only used for
-   desktop packaging. Codex CLI **≥ 0.151.0** is required: the server refuses an older app-server
-   with a named turn failure instead of decoding its responses.
+1. **Toolchain.** `git`, `gh`, `sqlite3`, `build-essential`, `python3`, `fnm`, and via fnm the Node
+   version in the checkout's `.nvmrc` (currently 24.14.0). Install the pnpm version from the repo's
+   `packageManager` field under that
+   Node; the server's Node distribution has no Corepack executable. Rust is **not** required —
+   it is only used for desktop packaging. Codex CLI **≥ 0.151.0** is the protocol floor; use the
+   tested **0.153.3** for GPT-6 Astra. The server refuses an older app-server with a named turn
+   failure instead of decoding its responses. The C/C++ toolchain and Python
+   support native dependency builds; `gh` supports repository and pull-request work.
 2. **Checkout and first build.**
 
    ```sh
-   git clone https://github.com/Jacksondr5/j5code.git ~/j5code
+   git clone --branch j5/main https://github.com/Jacksondr5/j5code.git ~/j5code
    cd ~/j5code
    fnm install
+   package_manager="$(fnm exec --using "$(cat .nvmrc)" node -p 'require("./package.json").packageManager.split("+")[0]')"
+   fnm exec --using "$(cat .nvmrc)" npm install --global "$package_manager"
    fnm exec --using "$(cat .nvmrc)" pnpm install --frozen-lockfile
    fnm exec --using "$(cat .nvmrc)" pnpm exec vp run --filter t3 build
    ```
@@ -84,6 +90,18 @@ As `j5dev` (Ansible reconciles all of this):
    `apps/server/dist/client` — that copy is what makes the served UI version-matched. If the build
    ever warns `Web dist not found — skipping client bundle`, the server will answer HTTP 503
    instead of serving the app; rebuild rather than start it.
+
+   Keep agent work in a second clone so edits, branch switches, and development builds cannot
+   replace the running server's files:
+
+   ```sh
+   mkdir -p ~/src
+   git clone --branch j5/main https://github.com/Jacksondr5/j5code.git ~/src/j5code
+   git -C ~/src/j5code remote add upstream https://github.com/pingdotgg/t3code.git
+   ```
+
+   Select `~/src/j5code` when creating the J5 development Squadron. Other initiatives get their
+   own clones under `~/src`. Development servers use their worktrees' isolated homes.
 
 3. **Unit.** `~/.config/systemd/user/j5code.service`:
 
@@ -95,7 +113,8 @@ As `j5dev` (Ansible reconciles all of this):
    Type=simple
    WorkingDirectory=%h/j5code
    Environment=J5CODE_HOME=%h/.j5code
-   ExecStart=/usr/bin/env bash -lc 'exec fnm exec --using "$(cat .nvmrc)" node apps/server/dist/bin.mjs serve --port 5773 --host 127.0.0.1'
+   ExecStart=/usr/bin/env bash -lc 'exec node apps/server/dist/bin.mjs serve --port 5773 --host 127.0.0.1'
+   SuccessExitStatus=130
    Restart=always
    RestartSec=5
    KillMode=mixed
@@ -105,9 +124,14 @@ As `j5dev` (Ansible reconciles all of this):
    WantedBy=default.target
    ```
 
-   `bash -lc` exists to put `fnm` on PATH; if Ansible instead manages a stable Node path, point
-   `ExecStart` at that node binary directly. `serve` runs headless: no browser launch, no
-   auto-bootstrap of a project from the working directory.
+   Ansible configures `.profile` to read the deployment checkout's `.nvmrc` on each login and
+   prepend that fnm Node installation's `bin` directory to PATH. The login shell therefore
+   resolves the updated pin after a deployment, then `exec` makes Node systemd's main process
+   so SIGTERM reaches the server for graceful shutdown. Verify the executable behind the unit's
+   `MainPID` after startup. The server exits 130 after signal-driven shutdown reconciliation;
+   `SuccessExitStatus=130` treats that normal shutdown as successful in systemd.
+   `serve` runs headless: no browser launch, no auto-bootstrap of a project from the working
+   directory.
 
    The unit deliberately does **not** use the server's built-in `--tailscale-serve` flags: applying
    Serve config requires root or the machine's single Tailscale operator slot, and `j5dev` stays
@@ -161,23 +185,76 @@ As `j5dev` (Ansible reconciles all of this):
    In practice the homelab Ansible playbook owns this (with drift guards that refuse Serve entries
    outside the sanctioned T3 + J5 set); the commands above are what it converges to.
 
-6. **Pairing.** The printed pairing URL is the readiness signal; a listening port or `Listening on` is not. Headless serve prints its pairing details (URL with token) on startup — read them
-   with `journalctl --user -u j5code -e`. That startup URL carries admin scopes. To mint a fresh
-   standard-scope token later:
+   **Tailnet policy is a separate prerequisite.** Add a grant from Jackson's identity to the
+   server's tag for TCP 8444, retaining the existing T3 grant for 8443 and SSH access. Add policy
+   tests accepting 8443 and 8444 while denying direct backend ports 3773 and 5773. The server
+   remains bound to loopback; only its HTTPS proxy should be reachable remotely. Verify HTTPS
+   from a second tailnet device: working Serve configuration and a successful request on the
+   server itself do not prove that tailnet policy admits the client.
+
+6. **Pairing.** Headless serve prints pairing details after startup — read them with
+   `journalctl --user -u j5code -e`. The startup token carries admin scopes, and its link uses the
+   loopback origin. For a fresh standard-scope client token with the private HTTPS origin already
+   included, run:
 
    ```sh
    cd ~/j5code
-   J5CODE_HOME=$HOME/.j5code fnm exec --using "$(cat .nvmrc)" node apps/server/dist/bin.mjs pair
+   J5CODE_HOME=$HOME/.j5code fnm exec --using "$(cat .nvmrc)" \
+     node apps/server/dist/bin.mjs auth pairing create \
+     --base-url 'https://<box-tailnet-name>:8444' --ttl 1h --json
    ```
+
+   Substitute the actual tailnet hostname, then open the returned pairing URL on the client
+   before the token expires. If using a startup admin link instead, replace only its loopback
+   origin with the private HTTPS origin, preserving `/pair#token=...`. Do not run `pair --tailscale`
+   as `j5dev`; Ansible owns the Serve mapping. Token issuance alone does not verify client access.
+
+7. **Provider CLIs and accounts.** Ansible installs pinned Codex and Claude CLIs into the
+   user-owned npm prefix `~/.local` and puts `~/.local/bin` first on the service account's PATH.
+   This stable prefix keeps provider commands available when the checkout's Node pin changes.
+   Node and pnpm remain pinned per checkout, with pnpm installed under the selected fnm Node.
+   Claude Fable 5.1 requires
+   Claude CLI **≥ 2.1.257**. Authenticate as `j5dev`, the same account that runs provider turns;
+   a login under `t3dev` or the SSH administrator does not authenticate J5's providers.
+
+   ```sh
+   codex --version
+   claude --version
+   codex login
+   claude auth login
+   codex login status
+   claude auth status
+   ```
+
+   Complete the CLI login instructions from an interactive SSH session. Keep their credentials
+   in `j5dev`'s own home; do not symlink T3's provider state. Check provider readiness in J5 and
+   complete one real turn with each provider before treating the environment as ready for work.
+   Codex 0.153.3 with GPT-6 Astra and Claude 2.1.261 with Fable 5.1 completed real J5 turns on the
+   remote host. Restart the J5 service after updating a provider CLI: persistent provider
+   subprocesses keep using the old executable until restarted. Prefer a quiet fleet because
+   that restart cancels active turns.
+
+8. **Git and GitHub identity.** Configure the intended commit identity and authenticate GitHub
+   manually as `j5dev` before agents push branches or create pull requests:
+
+   ```sh
+   git config --global user.name '<your commit name>'
+   git config --global user.email '<your commit email>'
+   gh auth login
+   gh auth setup-git
+   gh auth status
+   ```
+
+   Use repository-local git configuration instead if initiatives need different commit identities.
 
 ## Connecting the client
 
-Open the Tailscale Serve URL (`https://<box-tailnet-name>:8444`) in a browser on any tailnet
-device and complete pairing once; the browser stores the session. For an app-like feel, install
+Open the full private HTTPS pairing link above in a browser on any tailnet device; the browser
+stores the session at `https://<box-tailnet-name>:8444`. For an app-like feel, install
 the tab as a PWA/app shortcut — it is still the server-served, always-version-matched bundle.
 
 After a server update, reload the tab. If the session is ever rejected after an update, re-pair
-with a fresh token from `pair` above.
+with a fresh token from `auth pairing create` above.
 
 The ad-hoc-signed macOS desktop app (see [macos-packaging.md](macos-packaging.md)) remains a
 packaging capability, not the dogfood client. If it is ever pointed at this server as a saved
@@ -195,9 +272,12 @@ cd ~/j5code
 ```
 
 The script, in order: prints the current commit (the rollback target), snapshots the database via
-`VACUUM INTO` (safe while the server runs), fast-forwards `j5/main`, reinstalls dependencies with
-the frozen lockfile, rebuilds server + web bundle, restarts the unit, and waits until the server
-answers on the loopback port. Build happens before restart, so downtime is the restart itself.
+`VACUUM INTO` (safe while the server runs), fast-forwards `j5/main`, installs that commit's Node
+and pnpm versions, reinstalls dependencies with the frozen lockfile, rebuilds server + web bundle,
+restarts the unit, and waits until the server answers on the loopback port. Build happens before
+restart, so downtime is the restart itself. Readiness gets 30 probes, each with a one-second
+connection timeout and two-second total request timeout, separated by one-second delays. The
+check fails after about 90 seconds at most, rather than hanging on a stalled response.
 
 What everyone sees at restart: in-flight agent turns end as "Cancelled because the server
 restarted before the provider work completed"; queued A2A deliveries drain on boot; nothing else
@@ -212,6 +292,9 @@ rare, and each step is a decision point.
 systemctl --user stop j5code.service
 cd ~/j5code
 git checkout <previous-commit>        # printed by the update script; also in the snapshot dir name
+fnm install "$(cat .nvmrc)"
+package_manager="$(fnm exec --using "$(cat .nvmrc)" node -p 'require("./package.json").packageManager.split("+")[0]')"
+fnm exec --using "$(cat .nvmrc)" npm install --global "$package_manager"
 fnm exec --using "$(cat .nvmrc)" pnpm install --frozen-lockfile
 fnm exec --using "$(cat .nvmrc)" pnpm exec vp run --filter t3 build
 rm -f ~/.j5code/userdata/state.sqlite ~/.j5code/userdata/state.sqlite-wal ~/.j5code/userdata/state.sqlite-shm
