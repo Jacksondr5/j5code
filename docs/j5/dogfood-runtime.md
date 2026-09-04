@@ -119,10 +119,11 @@ As `j5dev` (Ansible reconciles all of this):
    WantedBy=default.target
    ```
 
-   Ansible configures `.profile` to prepend the checkout-pinned fnm Node installation's `bin`
-   directory to PATH. The login shell resolves that Node, then `exec` makes Node systemd's main
-   process so SIGTERM reaches the server for graceful shutdown. Keep that PATH aligned when the
-   checkout's Node pin changes; verify the executable behind the unit's `MainPID` after startup.
+   Ansible configures `.profile` to read the deployment checkout's `.nvmrc` on each login and
+   prepend that fnm Node installation's `bin` directory to PATH. The login shell therefore
+   resolves the updated pin after a deployment, then `exec` makes Node systemd's main process
+   so SIGTERM reaches the server for graceful shutdown. Verify the executable behind the unit's
+   `MainPID` after startup.
    `serve` runs headless: no browser launch, no auto-bootstrap of a project from the working
    directory.
 
