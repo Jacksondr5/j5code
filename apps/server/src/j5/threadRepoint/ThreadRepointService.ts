@@ -27,6 +27,8 @@ export class ThreadRepointError extends Schema.TaggedErrorClass<ThreadRepointErr
   }
 }
 
+const isThreadRepointError = Schema.is(ThreadRepointError);
+
 export class NativeThreadValidationError extends Schema.TaggedErrorClass<NativeThreadValidationError>()(
   "NativeThreadValidationError",
   { detail: Schema.String, cause: Schema.optional(Schema.Defect()) },
@@ -207,7 +209,7 @@ export const layer = (
             return { providerThreadId: providerThread.id, driver: providerThread.driver, nativeId };
           }).pipe(
             Effect.mapError((cause) =>
-              cause instanceof ThreadRepointError
+              isThreadRepointError(cause)
                 ? cause
                 : new ThreadRepointError({
                     threadId: input.threadId,
