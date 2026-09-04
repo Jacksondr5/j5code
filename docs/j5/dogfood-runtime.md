@@ -36,6 +36,13 @@ that produced it. Decisions and their load-bearing reasons are recorded inline.
 - **Native provider history is never silently replaced.** If a provider thread with a native
   reference cannot resume, its turn fails with the recorded cause; only a future explicit
   fall-back act may request a digest re-prime.
+- **Repair a stopped native reference deliberately.** When an operator has recovered the real
+  native history, run `t3 thread repoint <thread-id> --native <native-id>` against the server's
+  data directory. The command refuses any nonterminal run, probes a Codex id with `thread/resume`
+  or checks the Claude session file in its workspace-munged project directory, then records both
+  the provider-thread update and a visible timeline fact. It writes through the normal event sink,
+  so the projection and its sequence metadata advance together; do not insert repair events in
+  SQLite or force a projection rebuild.
 - **Managed like the box's other services.** The box already runs upstream T3 as an
   Ansible-reconciled per-user systemd service with an exact-version pin. J5 mirrors that template —
   dedicated service user, per-user unit, Ansible owns reconciliation — with one difference: the
