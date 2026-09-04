@@ -12,6 +12,7 @@ import { makeProviderFailure } from "../../orchestration-v2/ProviderFailure.ts";
 
 export const QUEUED_RUN_WATCHDOG_DELAY_MS = 5 * 60 * 1000;
 export const QUEUED_RUN_WATCHDOG_POLL_MS = 60 * 1000;
+export const QUEUED_RUN_WATCHDOG_MAX_CANDIDATES = 100;
 
 export class QueuedRunWatchdogError extends Schema.TaggedErrorClass<QueuedRunWatchdogError>()(
   "QueuedRunWatchdogError",
@@ -110,34 +111,40 @@ export const layer = Layer.effect(
 
     const scanEffect = Effect.fn("QueuedRunWatchdog.scan")(function* () {
       const now = yield* DateTime.now;
-      const shell = yield* projections.getShellSnapshot();
+      const candidates = yield* projections.listRunsByStatus({
+        status: "starting",
+        requestedBefore: DateTime.makeUnsafe(
+          DateTime.toEpochMillis(now) - QUEUED_RUN_WATCHDOG_DELAY_MS,
+        ),
+        limit: QUEUED_RUN_WATCHDOG_MAX_CANDIDATES,
+      });
       yield* Effect.forEach(
-        shell.threads,
-        (thread) =>
-          projections.getThreadProjection(thread.id).pipe(
-            Effect.flatMap((projection) =>
-              Effect.forEach(
-                projection.runs.filter(
-                  (run) =>
-                    run.status === "starting" &&
-                    run.startedAt === null &&
-                    DateTime.toEpochMillis(now) - DateTime.toEpochMillis(run.requestedAt) >=
-                      QUEUED_RUN_WATCHDOG_DELAY_MS,
-                ),
-                (run) =>
-                  writeFact({
-                    projection,
-                    run,
-                    signal: "queued-run-watchdog",
-                    title: "Run waiting",
-                    message: `Run waiting ${waitingMinutes(run, now)}m, not yet dispatched.`,
-                    code: "queued_run_waiting",
-                    expectedStatus: "starting",
-                  }),
-                { discard: true },
-              ),
-            ),
-          ),
+        candidates,
+        (candidate) =>
+          Effect.gen(function* () {
+            // A full projection is only needed for a bounded candidate, where
+            // it provides deduplication and rechecks current run state.
+            const projection = yield* projections.getThreadProjection(candidate.threadId);
+            const run = projection.runs.find((current) => current.id === candidate.id);
+            if (
+              run === undefined ||
+              run.status !== "starting" ||
+              run.startedAt !== null ||
+              DateTime.toEpochMillis(now) - DateTime.toEpochMillis(run.requestedAt) <
+                QUEUED_RUN_WATCHDOG_DELAY_MS
+            ) {
+              return;
+            }
+            yield* writeFact({
+              projection,
+              run,
+              signal: "queued-run-watchdog",
+              title: "Run waiting",
+              message: `Run waiting ${waitingMinutes(run, now)}m, not yet dispatched.`,
+              code: "queued_run_waiting",
+              expectedStatus: "starting",
+            });
+          }),
         { discard: true },
       );
     });
