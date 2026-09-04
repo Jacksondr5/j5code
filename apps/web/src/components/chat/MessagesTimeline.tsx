@@ -45,9 +45,11 @@ import {
 } from "../../lib/diffRendering";
 import ChatMarkdown from "../ChatMarkdown";
 import {
+  participantIdsForThreadA2ADelivery,
   renderThreadA2ADelivery,
   renderThreadA2AOutboundTool,
 } from "../../j5/a2a/ThreadA2ARenderer";
+import { useParticipantLabels } from "../../j5/a2a/ParticipantIdentitiesClient";
 import {
   BotIcon,
   CheckIcon,
@@ -154,6 +156,7 @@ interface TimelineRowSharedState {
   /** Projection runs, for recovering handoff models on legacy items. */
   runs: ReadonlyArray<HandoffTimelineRun>;
   activeThreadEnvironmentId: EnvironmentId;
+  participantLabels: ReadonlyMap<string, string>;
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
@@ -310,6 +313,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
+  const participantIds = useMemo(
+    () =>
+      timelineEntries.flatMap((entry) =>
+        entry.kind === "message" ? participantIdsForThreadA2ADelivery(entry.message) : [],
+      ),
+    [timelineEntries],
+  );
+  const participantLabels = useParticipantLabels(activeThreadEnvironmentId, participantIds);
   const disclosureAnchorKeyRef = useRef<string | null>(null);
   const disclosureSettleFrameRef = useRef<number | null>(null);
   const disclosureSettleSecondFrameRef = useRef<number | null>(null);
@@ -558,6 +569,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       providerStatuses,
       runs,
       activeThreadEnvironmentId,
+      participantLabels,
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
@@ -577,6 +589,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       providerStatuses,
       runs,
       activeThreadEnvironmentId,
+      participantLabels,
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
@@ -1045,6 +1058,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       ? renderThreadA2ADelivery({
           message: row.message,
           timestampLabel: formatDayAwareTimestamp(row.message.createdAt, ctx.timestampFormat),
+          participantLabels: ctx.participantLabels,
         })
       : null;
 

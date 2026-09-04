@@ -6,6 +6,7 @@ import type { ChatMessage } from "~/types";
 import {
   formatTimeSinceSent,
   J5_A2A_DELIVERY_MESSAGE_PREFIX,
+  formatThreadA2AQueuedDelivery,
   isThreadA2ADeliveryMessage,
   presentThreadA2AOutboundTool,
   presentThreadA2ADelivery,
@@ -124,9 +125,23 @@ describe("ThreadA2ADeliveryRenderer", () => {
     expect(parsed?.rawEnvelope).toBe(peerRaw);
   });
 
-  it("falls back to the literal participant id before B6 supplies a label", () => {
+  it("falls back to an explicitly unnamed participant before the identity read supplies a label", () => {
     const parsed = presentThreadA2ADelivery({ message: message({ text: peerRaw }) });
-    expect(parsed).toMatchObject({ kind: "peer", senderLabel: "agent:delivery-sender" });
+    expect(parsed).toMatchObject({ kind: "peer", senderLabel: "Unnamed participant" });
+    expect(parsed).toMatchObject({ senderTooltipParticipantId: "agent:delivery-sender" });
+    expect(
+      renderToStaticMarkup(<ThreadA2ADeliveryRenderer message={message({ text: peerRaw })} />),
+    ).toContain('title="agent:delivery-sender"');
+  });
+
+  it("formats queued peer deliveries with the timeline identity formatter", () => {
+    expect(
+      formatThreadA2AQueuedDelivery(peerPlainRaw, new Map([["agent:delivery-sender", "Alice"]])),
+    ).toEqual({ label: "From Alice — Nothing further is needed.", tooltipParticipantId: null });
+    expect(formatThreadA2AQueuedDelivery(peerPlainRaw, new Map())).toEqual({
+      label: "From Unnamed participant — Nothing further is needed.",
+      tooltipParticipantId: "agent:delivery-sender",
+    });
   });
 
   it("renders no chip for a one-shot delivery whose role is not a measured reply", () => {

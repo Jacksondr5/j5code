@@ -3,6 +3,8 @@ import { useNowMinute } from "~/hooks/useNowMinute";
 import { InboxIcon, SendIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { presentParticipantIdentity } from "./ParticipantIdentity";
+
 /**
  * `deliveryMessageId` in the server A2A transport is deliberately stable across
  * retries. The upstream composition seam requires this exact prefix and a user
@@ -29,8 +31,8 @@ export interface ThreadA2ADeliveryCompositionInput {
    */
   readonly timestampLabel?: string | undefined;
   /**
-   * Optional B6 read result. Until B6 supplies it, the participant id itself
-   * is the intentional, non-invented display label.
+   * Optional participant-identities read result. Missing identities remain
+   * explicitly unnamed, with the durable id available only as a tooltip.
    */
   readonly participantLabels?: ReadonlyMap<string, string> | undefined;
   /** The caller supplies this only when it can prove the authenticated viewer. */
@@ -45,6 +47,7 @@ export type ThreadA2ADeliveryPresentation =
       readonly rawEnvelope: string;
       readonly senderId: string;
       readonly senderLabel: string;
+      readonly senderTooltipParticipantId: string | null;
       readonly squadronId: string;
       readonly body: string;
       readonly exchange: "expects-reply" | "plain" | "closed";
@@ -224,11 +227,16 @@ export function presentThreadA2ADelivery(
   if (message.createdBy === "agent") {
     const peer = parsePeerEnvelope(message.text);
     if (peer) {
+      const sender = presentParticipantIdentity({
+        participantId: peer.senderId,
+        participantLabels: input.participantLabels ?? new Map(),
+      });
       return {
         kind: "peer",
         rawEnvelope: message.text,
         senderId: peer.senderId,
-        senderLabel: input.participantLabels?.get(peer.senderId) ?? peer.senderId,
+        senderLabel: sender.label,
+        senderTooltipParticipantId: sender.tooltipParticipantId,
         squadronId: peer.squadronId,
         body: peer.body,
         exchange: peer.exchange,
@@ -258,6 +266,30 @@ export function presentThreadA2ADelivery(
   }
 
   return { kind: "raw", rawEnvelope: message.text };
+}
+
+export function participantIdsForThreadA2ADelivery(message: ChatMessage): ReadonlyArray<string> {
+  const presentation = presentThreadA2ADelivery({ message });
+  return presentation?.kind === "peer" ? [presentation.senderId] : [];
+}
+
+export function formatThreadA2AQueuedDelivery(
+  text: string,
+  participantLabels: ReadonlyMap<string, string>,
+): { readonly label: string; readonly tooltipParticipantId: string | null } | null {
+  const peer = parsePeerEnvelope(text);
+  if (peer === null) return null;
+  const sender = presentParticipantIdentity({ participantId: peer.senderId, participantLabels });
+  const firstLine = peer.body.split("\n")[0]?.trim() ?? "";
+  return {
+    label: `From ${sender.label} — ${firstLine || "Message content unavailable"}`,
+    tooltipParticipantId: sender.tooltipParticipantId,
+  };
+}
+
+export function participantIdsForThreadA2AEnvelope(text: string): ReadonlyArray<string> {
+  const peer = parsePeerEnvelope(text);
+  return peer === null ? [] : [peer.senderId];
 }
 
 function RawEnvelopeExpander({
@@ -352,12 +384,14 @@ function PeerDeliveryCard({
   exchange,
   now,
   senderLabel,
+  senderTooltipParticipantId,
   sentAt,
 }: {
   readonly body: string;
   readonly exchange: "expects-reply" | "plain" | "closed";
   readonly now?: number | undefined;
   readonly senderLabel: string;
+  readonly senderTooltipParticipantId: string | null;
   readonly sentAt: string;
 }) {
   const nowMinute = useNowMinute();
@@ -374,7 +408,12 @@ function PeerDeliveryCard({
           <InboxIcon className="size-3.5 shrink-0" aria-hidden />
           From
         </span>
-        <span className="font-medium text-foreground">{senderLabel}</span>
+        <span
+          className="font-medium text-foreground"
+          title={senderTooltipParticipantId ?? undefined}
+        >
+          {senderLabel}
+        </span>
         {isOpen ? (
           <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
             Expects reply
@@ -544,6 +583,7 @@ export function renderThreadA2ADelivery(props: ThreadA2ADeliveryCompositionInput
         exchange={presentation.exchange}
         now={props.now}
         senderLabel={presentation.senderLabel}
+        senderTooltipParticipantId={presentation.senderTooltipParticipantId}
         sentAt={props.message.createdAt}
       />
     );
