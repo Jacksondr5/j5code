@@ -119,6 +119,87 @@ it("records one durable waiting fact for a promoted run that has not dispatched"
     });
   }).pipe(Effect.runPromise));
 
+it("advances a bounded watchdog scan past the first 100 stale runs", async () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread_queued_run_watchdog_fairness");
+    const now = yield* DateTime.now;
+    const requestedAt = DateTime.makeUnsafe(
+      DateTime.toEpochMillis(now) - QUEUED_RUN_WATCHDOG_DELAY_MS,
+    );
+    const staleRuns = Array.from(
+      { length: QUEUED_RUN_WATCHDOG_MAX_CANDIDATES + 1 },
+      (_, index) => ({
+        id: RunId.make(`run_queued_run_watchdog_fairness_${String(index).padStart(3, "0")}`),
+        threadId,
+        ordinal: index + 1,
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        status: "starting" as const,
+        startedAt: null,
+        requestedAt,
+        activeAttemptId: RunAttemptId.make(`attempt_queued_run_watchdog_fairness_${index}`),
+        rootNodeId: null,
+        providerThreadId: null,
+        modelSelection: { model: "gpt-5.4" },
+        userMessageId: `message_queued_run_watchdog_fairness_${index}`,
+        queuePosition: null,
+        completedAt: null,
+        checkpointId: null,
+        contextHandoffId: null,
+      }),
+    );
+    const projection = {
+      thread: { id: threadId },
+      runs: staleRuns,
+      turnItems: [],
+    } as unknown as OrchestrationV2ThreadProjection;
+    const queries: Array<ProjectionStore.ProjectionStoreRunsByStatusInput> = [];
+    const observedRunIds: Array<RunId> = [];
+    const testLayer = layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(ProjectionStore.ProjectionStoreV2)({
+            listRunsByStatus: (input) =>
+              Effect.sync(() => {
+                queries.push(input);
+                return projection.runs
+                  .filter(
+                    (run) =>
+                      input.after === undefined || String(run.id) > String(input.after.runId),
+                  )
+                  .slice(0, input.limit);
+              }),
+            getThreadProjection: () => Effect.succeed(projection),
+          }),
+          Layer.mock(EventSink.EventSinkV2)({
+            writeIfRunCurrent: (input) =>
+              Effect.sync(() => {
+                const event = input.events[0];
+                if (event?.type === "turn-item.updated" && event.runId !== undefined) {
+                  observedRunIds.push(event.runId);
+                }
+                return { committed: true, storedEvents: [] } as never;
+              }),
+          }),
+          IdAllocator.layer,
+        ),
+      ),
+    );
+
+    yield* Effect.gen(function* () {
+      const watchdog = yield* QueuedRunWatchdog;
+      yield* watchdog.scan();
+      yield* watchdog.scan();
+    }).pipe(Effect.provide(testLayer));
+
+    expect(queries).toHaveLength(2);
+    expect(queries[0]).toMatchObject({ limit: QUEUED_RUN_WATCHDOG_MAX_CANDIDATES });
+    expect(queries[1]?.after).toEqual({
+      requestedAt,
+      runId: staleRuns[QUEUED_RUN_WATCHDOG_MAX_CANDIDATES - 1]?.id,
+    });
+    expect(observedRunIds).toContain(staleRuns[QUEUED_RUN_WATCHDOG_MAX_CANDIDATES]?.id);
+  }).pipe(Effect.runPromise));
+
 it("records one sanitized VCS observation fact without changing the run", async () =>
   Effect.gen(function* () {
     const threadId = ThreadId.make("thread_vcs_observation");
