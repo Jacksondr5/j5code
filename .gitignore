@@ -16,6 +16,7 @@ release/
 release-mock/
 release-j5/
 .t3
+.j5code
 .idea/
 apps/web/.playwright
 apps/web/playwright-report

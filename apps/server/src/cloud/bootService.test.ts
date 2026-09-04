@@ -31,6 +31,8 @@ it("keeps systemd pinned to the stable launcher rather than a versioned server",
   });
 
   expect(unit).toContain("ExecStart=/usr/bin/node /home/theo/.t3/runtime/service-launcher.mjs");
+  expect(unit).toContain("Environment=J5CODE_HOME=/home/theo/.t3");
+  expect(unit).not.toContain("T3CODE_HOME");
   expect(unit).toContain("KillMode=mixed");
   expect(unit).not.toContain("versions/1.2.3");
 });

@@ -37,7 +37,7 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 
 ## Deliberately unchanged upstream internals
 
-- All `T3CODE_*` environment variables, including the explicit `T3CODE_HOME` override.
+- The `T3CODE_*` environment variables other than the base-directory override, which is `J5CODE_HOME`. An ambient `T3CODE_HOME` is ignored, and a linked worktree's dev state lives in `<worktree>/.j5code`, so J5 never shares state with an installed T3 Code (FORK.md case 24).
 - Internal workspace/package names such as `@t3tools/*`, `t3`, and upstream lint rule names.
 - Database schema names, persisted mobile storage keys, internal CLI flags, and code identifiers.
 - General upstream product copy and documentation outside the identity sites above.
