@@ -592,6 +592,19 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       };
       yield* call(sendArguments);
       yield* call(sendArguments);
+      yield* call({
+        to: participantId,
+        message: "Omitted optional MCP fields stay absent.",
+      });
+      yield* call({
+        to: participantId,
+        message: "Null optional MCP fields stay absent.",
+        client_request_id: null,
+        expect_reply: null,
+        exchange_id: null,
+        intent: null,
+        urgency: null,
+      });
       const selfSend = yield* call({
         to: callerParticipantId,
         message: "This must be rejected before storage.",
@@ -616,13 +629,19 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       assert.include(multiMembershipMessage, "immutable home");
       assert.include(multiMembershipMessage, "active membership projection");
       const captured = yield* Ref.get(sends);
-      assert.lengthOf(captured, 2);
+      assert.lengthOf(captured, 4);
       assert.equal(captured[0]?.commandId, captured[1]?.commandId);
       assert.equal(
         captured[0]?.commandId,
         "command:j5:a2a:mcp:provider-session%3Aj5%3Amcp-handler:send_message:shared-logical-request-1",
       );
       assert.equal(captured[0]?.senderThreadId, invocation.threadId);
+      for (const input of captured.slice(2)) {
+        assert.notProperty(input, "expectReply");
+        assert.notProperty(input, "exchangeId");
+        assert.notProperty(input, "intent");
+        assert.notProperty(input, "urgency");
+      }
       const exchangeId = ExchangeId.make("exchange:j5:mcp-handler:clear");
       yield* callClear(exchangeId, "shared-logical-request-1");
       yield* callClear(exchangeId, "shared-logical-request-1");
