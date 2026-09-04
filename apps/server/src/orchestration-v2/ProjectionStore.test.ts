@@ -373,6 +373,22 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
         payload: run,
       });
 
+      const runningRuns = yield* projectionStore.listRunsByStatus({
+        status: "running",
+        requestedBefore: now,
+        limit: 1,
+      });
+      const startingRuns = yield* projectionStore.listRunsByStatus({
+        status: "starting",
+        requestedBefore: now,
+        limit: 1,
+      });
+      assert.deepEqual(
+        runningRuns.map((candidate) => candidate.id),
+        [runId],
+      );
+      assert.deepEqual(startingRuns, []);
+
       let shell = (yield* projectionStore.getShellSnapshot()).threads.find(
         (thread) => thread.id === threadId,
       );
