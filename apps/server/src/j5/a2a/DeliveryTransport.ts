@@ -174,11 +174,10 @@ export const live: Layer.Layer<
             });
           }
           const target = yield* threads.getThreadProjection(participant.threadId);
-          // Interject peer traffic into a busy agent's active turn so blocked-on-peer
-          // work resumes before silence classification. Queue mode starts immediately
-          // when idle without reintroducing ThreadManagement's implicit auto branch.
-          const mode =
-            ThreadManagement.latestSteerableRun(target) === undefined ? "queue" : "steer";
+          // A2A delivery always queues: it starts a turn immediately when the
+          // recipient is idle and waits behind an active turn otherwise. Steering
+          // a busy recipient aborts its in-flight tool batch (issue #73), so steer
+          // stays an explicit human action on the queued row, never a delivery mode.
           const envelope = formatAgentDeliveryEnvelope(input);
           yield* threads.sendToThread({
             projectId: target.thread.projectId,
@@ -187,7 +186,7 @@ export const live: Layer.Layer<
             messageId: deliveryMessageId(input.messageId),
             text: envelope,
             attachments: [],
-            mode,
+            mode: "queue",
             createdBy:
               input.envelopeChannel === "silence_notice" ||
               input.envelopeChannel === "lifecycle_notice"

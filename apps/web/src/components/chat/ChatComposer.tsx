@@ -233,7 +233,8 @@ import type {
   PendingApproval,
   PendingUserInput,
 } from "../../session-logic";
-import { resolveComposerDispatchMode, type ComposerDispatchMode } from "./composerDispatch";
+import type { ComposerDispatchMode } from "./composerDispatch";
+import { resolveComposerDispatchMode } from "../../j5/composer/composerDispatch";
 import {
   deriveLatestContextWindowSnapshot,
   formatProviderDisplayName,
@@ -441,7 +442,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
       ) : null}
       {props.isRunning && props.hasSendableContent ? (
         <span className="hidden text-[11px] text-muted-foreground/70 sm:inline">
-          <kbd className="font-mono">{props.queueShortcutLabel}</kbd> to queue
+          <kbd className="font-mono">{props.queueShortcutLabel}</kbd> to steer now
         </span>
       ) : null}
       <ComposerPrimaryActions
