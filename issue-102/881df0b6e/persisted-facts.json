@@ -1,0 +1,42 @@
+{
+  "orchestration_v2_projection_runs": [
+    {
+      "thread_id": "893a6581-ae06-449c-8c96-5739df2ae423",
+      "status": "completed",
+      "requested_at": "2026-09-04T21:45:09.244Z",
+      "completed_at": "2026-09-04T21:45:17.184Z"
+    },
+    {
+      "thread_id": "d787bc07-09ff-4e20-8800-583859d0f161",
+      "status": "completed",
+      "requested_at": "2026-09-04T21:47:15.005Z",
+      "completed_at": "2026-09-04T21:47:22.058Z"
+    }
+  ],
+  "orchestration_v2_projection_messages": [
+    {
+      "thread_id": "893a6581-ae06-449c-8c96-5739df2ae423",
+      "role": "user",
+      "text": "UI verification only: reply exactly ISSUE102_OK. Do not use tools, read files, or make changes.",
+      "created_at": "2026-09-04T21:45:09.244Z"
+    },
+    {
+      "thread_id": "893a6581-ae06-449c-8c96-5739df2ae423",
+      "role": "assistant",
+      "text": "ISSUE102_OK",
+      "created_at": "2026-09-04T21:45:14.672Z"
+    },
+    {
+      "thread_id": "d787bc07-09ff-4e20-8800-583859d0f161",
+      "role": "user",
+      "text": "UI verification only: reply exactly ISSUE102_FIXED. Do not use tools, read files, or make changes.",
+      "created_at": "2026-09-04T21:47:15.005Z"
+    },
+    {
+      "thread_id": "d787bc07-09ff-4e20-8800-583859d0f161",
+      "role": "assistant",
+      "text": "ISSUE102_FIXED",
+      "created_at": "2026-09-04T21:47:20.201Z"
+    }
+  ]
+}
