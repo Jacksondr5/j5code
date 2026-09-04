@@ -13,7 +13,7 @@ const ACTIVE_RUN_STATUSES = new Set<Projection["runs"][number]["status"]>([
 ]);
 
 const activeThreadRun = (projection: Projection) =>
-  projection.runs.findLast((run) => ACTIVE_RUN_STATUSES.has(run.status)) ?? null;
+  projection.runs?.findLast((run) => ACTIVE_RUN_STATUSES.has(run.status)) ?? null;
 
 const turnCapabilities = (projection: Projection, activeRun: Projection["runs"][number]) => {
   const providerThreadId = activeRun.providerThreadId ?? projection.thread.activeProviderThreadId;

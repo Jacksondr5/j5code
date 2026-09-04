@@ -67,6 +67,10 @@ const projection = (input: {
   }) as never;
 
 describe("deriveSteerState", () => {
+  it("degrades incomplete surface mocks to idle", () => {
+    expect(deriveSteerState({} as never)).toEqual({ kind: "idle" });
+  });
+
   it("is idle without an active run", () => {
     expect(
       deriveSteerState(projection({ runStatus: "completed", providerTurnStatus: null })),
