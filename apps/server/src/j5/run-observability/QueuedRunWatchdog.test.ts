@@ -1,0 +1,171 @@
+import {
+  ProviderInstanceId,
+  RunAttemptId,
+  RunId,
+  ThreadId,
+  type OrchestrationV2ThreadProjection,
+} from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import { expect, it } from "vite-plus/test";
+
+import * as EventSink from "../../orchestration-v2/EventSink.ts";
+import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
+import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
+import { layer, QueuedRunWatchdog, QUEUED_RUN_WATCHDOG_DELAY_MS } from "./QueuedRunWatchdog.ts";
+
+it("records one durable waiting fact for a promoted run that has not dispatched", async () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread_queued_run_watchdog");
+    const runId = RunId.make("run_queued_run_watchdog");
+    const now = yield* DateTime.now;
+    const run = {
+      id: runId,
+      threadId,
+      ordinal: 1,
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      status: "starting",
+      startedAt: null,
+      requestedAt: DateTime.makeUnsafe(DateTime.toEpochMillis(now) - QUEUED_RUN_WATCHDOG_DELAY_MS),
+      activeAttemptId: RunAttemptId.make("attempt_queued_run_watchdog"),
+      rootNodeId: null,
+      providerThreadId: null,
+      modelSelection: { model: "gpt-5.4" },
+      userMessageId: "message_queued_run_watchdog",
+      queuePosition: null,
+      completedAt: null,
+      checkpointId: null,
+      contextHandoffId: null,
+    };
+    const turnItems: Array<OrchestrationV2ThreadProjection["turnItems"][number]> = [];
+    const projection = {
+      thread: { id: threadId },
+      runs: [run],
+      turnItems,
+    } as unknown as OrchestrationV2ThreadProjection;
+    const written: Array<unknown> = [];
+    const testLayer = layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(ProjectionStore.ProjectionStoreV2)({
+            getShellSnapshot: () => Effect.succeed({ threads: [{ id: threadId }] } as never),
+            getThreadProjection: () => Effect.succeed(projection),
+          }),
+          Layer.mock(EventSink.EventSinkV2)({
+            writeIfRunCurrent: (input) =>
+              Effect.sync(() => {
+                written.push(input);
+                const event = input.events[0];
+                if (event?.type === "turn-item.updated") turnItems.push(event.payload);
+                return { committed: true, storedEvents: [] } as never;
+              }),
+          }),
+          IdAllocator.layer,
+        ),
+      ),
+    );
+
+    yield* Effect.gen(function* () {
+      const watchdog = yield* QueuedRunWatchdog;
+      yield* watchdog.scan();
+      yield* watchdog.scan();
+    }).pipe(Effect.provide(testLayer));
+
+    expect(written).toHaveLength(1);
+    const event = (written[0] as { events: Array<unknown> }).events[0] as {
+      readonly type: string;
+      readonly payload: {
+        readonly title: string | null;
+        readonly status: string;
+        readonly failure: { readonly message: string; readonly code: string | null };
+      };
+    };
+    expect(event.type).toBe("turn-item.updated");
+    expect(event.payload).toMatchObject({
+      title: "Run waiting",
+      status: "completed",
+      failure: { code: "queued_run_waiting", message: "Run waiting 5m, not yet dispatched." },
+    });
+  }).pipe(Effect.runPromise));
+
+it("records one sanitized VCS observation fact without changing the run", async () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread_vcs_observation");
+    const runId = RunId.make("run_vcs_observation");
+    const now = yield* DateTime.now;
+    const run = {
+      id: runId,
+      threadId,
+      ordinal: 1,
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      status: "starting",
+      startedAt: null,
+      requestedAt: now,
+      activeAttemptId: RunAttemptId.make("attempt_vcs_observation"),
+      rootNodeId: null,
+      providerThreadId: null,
+      modelSelection: { model: "gpt-5.4" },
+      userMessageId: "message_vcs_observation",
+      queuePosition: null,
+      completedAt: null,
+      checkpointId: null,
+      contextHandoffId: null,
+    };
+    const turnItems: Array<OrchestrationV2ThreadProjection["turnItems"][number]> = [];
+    const projection = {
+      thread: { id: threadId },
+      runs: [run],
+      turnItems,
+    } as unknown as OrchestrationV2ThreadProjection;
+    const written: Array<unknown> = [];
+    const testLayer = layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(ProjectionStore.ProjectionStoreV2)({
+            getThreadProjection: () => Effect.succeed(projection),
+          }),
+          Layer.mock(EventSink.EventSinkV2)({
+            write: (input) =>
+              Effect.sync(() => {
+                written.push(input);
+                const event = input.events[0];
+                if (event?.type === "turn-item.updated") turnItems.push(event.payload);
+                return [] as never;
+              }),
+          }),
+          IdAllocator.layer,
+        ),
+      ),
+    );
+
+    yield* Effect.gen(function* () {
+      const watchdog = yield* QueuedRunWatchdog;
+      const input = {
+        threadId,
+        runId,
+        phase: "start" as const,
+        cause: new Error("git credential secret=should-not-reach-the-timeline"),
+      };
+      yield* watchdog.recordVcsFailure(input);
+      yield* watchdog.recordVcsFailure(input);
+    }).pipe(Effect.provide(testLayer));
+
+    expect(written).toHaveLength(1);
+    const event = (written[0] as { events: Array<unknown> }).events[0] as {
+      readonly type: string;
+      readonly payload: {
+        readonly status: string;
+        readonly title: string | null;
+        readonly failure: { readonly message: string; readonly code: string | null };
+      };
+    };
+    expect(event.type).toBe("turn-item.updated");
+    expect(event.payload).toMatchObject({
+      status: "completed",
+      title: "Run start delayed",
+      failure: { code: "vcs_start_failure" },
+    });
+    expect(event.payload.failure.message).toContain("secret=[REDACTED]");
+    expect(event.payload.failure.message).not.toContain("should-not-reach-the-timeline");
+  }).pipe(Effect.runPromise));

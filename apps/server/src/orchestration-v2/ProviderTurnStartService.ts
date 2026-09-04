@@ -7,6 +7,7 @@ import {
   type OrchestrationV2RunAttempt,
   RunId,
   ThreadId,
+  VcsError,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -15,6 +16,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
+import { QueuedRunWatchdog } from "../j5/run-observability/QueuedRunWatchdog.ts";
 import { EventSinkV2 } from "./EventSink.ts";
 import {
   ContextHandoffServiceV2,
@@ -89,6 +91,8 @@ export const layer: Layer.Layer<
     const providerSessions = yield* ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicyV2;
+    const queuedRunWatchdog = yield* QueuedRunWatchdog;
+    const isVcsError = Schema.is(VcsError);
 
     const start = Effect.fn("orchestrationV2.providerTurnStart.start")(function* (input: {
       readonly threadId: ThreadId;
@@ -561,6 +565,18 @@ export const layer: Layer.Layer<
             isProviderTurnStartError(cause)
               ? cause
               : new ProviderTurnStartError({ runId: input.runId, cause }),
+          ),
+          Effect.tapError((error) =>
+            isVcsError(error.cause)
+              ? queuedRunWatchdog
+                  .recordVcsFailure({
+                    threadId: input.threadId,
+                    runId: input.runId,
+                    phase: "start",
+                    cause: error.cause,
+                  })
+                  .pipe(Effect.catchCause(() => Effect.void))
+              : Effect.void,
           ),
         ),
     });
