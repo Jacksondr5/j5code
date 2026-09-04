@@ -1,4 +1,4 @@
-import { CheckpointScopeId, RunId, ThreadId } from "@t3tools/contracts";
+import { CheckpointScopeId, RunId, ThreadId, VcsError } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema";
 
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../workspace/WorkspaceEntries.ts";
+import { QueuedRunWatchdog } from "../j5/run-observability/QueuedRunWatchdog.ts";
 import * as CheckpointCapture from "./CheckpointCaptureService.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 
@@ -46,6 +47,8 @@ export const make = Effect.gen(function* () {
   const checkpointCapture = yield* CheckpointCapture.CheckpointCaptureServiceV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const observer = yield* RunFinalizationObserver;
+  const queuedRunWatchdog = yield* QueuedRunWatchdog;
+  const isVcsError = Schema.is(VcsError);
 
   const finalize: RunFinalizationService["Service"]["finalize"] = Effect.fn(
     "RunFinalizationService.finalize",
@@ -76,7 +79,23 @@ export const make = Effect.gen(function* () {
         );
     }
   });
-  return RunFinalizationService.of({ finalize });
+  return RunFinalizationService.of({
+    finalize: (input) =>
+      finalize(input).pipe(
+        Effect.tapError((error) =>
+          isVcsError(error.cause)
+            ? queuedRunWatchdog
+                .recordVcsFailure({
+                  threadId: input.threadId,
+                  runId: input.runId,
+                  phase: "finalization",
+                  cause: error.cause,
+                })
+                .pipe(Effect.catchCause(() => Effect.void))
+            : Effect.void,
+        ),
+      ),
+  });
 });
 
 export const layer = Layer.effect(RunFinalizationService, make);
