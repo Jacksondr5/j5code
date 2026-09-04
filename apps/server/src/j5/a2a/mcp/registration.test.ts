@@ -15,6 +15,7 @@ import { A2ALedger } from "../LedgerService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
+import { A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
 import {
   J5OrchestratorSurfaceRegistrationLive,
   J5ToolkitRegistrationLive,
@@ -59,5 +60,7 @@ it.effect("registers the exact composed production J5 orchestration surface", ()
       "t3_thread_wait",
       "update_scheduled_task",
     ]);
+    const sendTool = server.tools.find(({ tool }) => tool.name === "send_message")?.tool;
+    assert.equal(sendTool?.description, A2A_SEND_TOOL_DESCRIPTION);
   }).pipe(Effect.provide(TestLayer)),
 );

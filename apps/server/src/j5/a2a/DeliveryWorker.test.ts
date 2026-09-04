@@ -575,88 +575,108 @@ it.effect("delivers to the human through the idempotent inbox-data transport", (
   }),
 );
 
-it.effect("treats a follow-up delivered after the human answered as a successful no-op", () =>
-  Effect.gen(function* () {
-    const database = NodeSqliteClient.layerMemory();
-    const ledger = ledgerLayer.pipe(Layer.provide(database));
-    const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
-    const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));
-    const transport = deliveryTransportLive.pipe(
-      Layer.provide(database),
-      Layer.provide(Layer.mock(ThreadManagementService)({})),
-    );
-    const worker = deliveryWorkerLayerWithHooks(false).pipe(
-      Layer.provide(ledger),
-      Layer.provide(database),
-      Layer.provide(transport),
-      Layer.provide(
-        Layer.succeed(
-          A2ADeliveryHooks,
-          A2ADeliveryHooks.of({ afterTransportSuccess: () => Effect.void }),
+it.effect(
+  "treats a historical follow-up delivered after the human answered as a successful no-op",
+  () =>
+    Effect.gen(function* () {
+      const database = NodeSqliteClient.layerMemory();
+      const ledger = ledgerLayer.pipe(Layer.provide(database));
+      const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+      const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+      const transport = deliveryTransportLive.pipe(
+        Layer.provide(database),
+        Layer.provide(Layer.mock(ThreadManagementService)({})),
+      );
+      const worker = deliveryWorkerLayerWithHooks(false).pipe(
+        Layer.provide(ledger),
+        Layer.provide(database),
+        Layer.provide(transport),
+        Layer.provide(
+          Layer.succeed(
+            A2ADeliveryHooks,
+            A2ADeliveryHooks.of({ afterTransportSuccess: () => Effect.void }),
+          ),
         ),
-      ),
-    );
-    const layer = Layer.mergeAll(database, ledger, send, inbox, transport, worker);
+      );
+      const layer = Layer.mergeAll(database, ledger, send, inbox, transport, worker);
 
-    yield* Effect.gen(function* () {
-      yield* runJ5A2AMigrations();
-      const ledgerService = yield* A2ALedger;
-      const sendService = yield* A2ASendService;
-      const deliveryWorker = yield* A2ADeliveryWorker;
-      const sql = yield* SqlClient.SqlClient;
-      const squadronId = SquadronId.make("squadron:delivery:human-followup-race");
-      yield* ledgerService.createSquadron({
-        squadron: { id: squadronId, name: "Human follow-up race", createdAt: timestamp },
-      });
-      yield* join(squadronId, sender, "human-followup-race-sender");
-      yield* sql`
+      yield* Effect.gen(function* () {
+        yield* runJ5A2AMigrations();
+        const ledgerService = yield* A2ALedger;
+        const sendService = yield* A2ASendService;
+        const deliveryWorker = yield* A2ADeliveryWorker;
+        const sql = yield* SqlClient.SqlClient;
+        const squadronId = SquadronId.make("squadron:delivery:human-followup-race");
+        yield* ledgerService.createSquadron({
+          squadron: { id: squadronId, name: "Human follow-up race", createdAt: timestamp },
+        });
+        yield* join(squadronId, sender, "human-followup-race-sender");
+        yield* sql`
         INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
         VALUES (${person.id}, 1, ${timestamp})
       `;
-      const opened = yield* sendService.send({
-        commandId: CommCommandId.make("command:delivery:human-followup-race:open"),
-        senderThreadId: sender.threadId,
-        to: person.id,
-        message: "Initial question",
-        expectReply: true,
-        intent: "Reproduce answer racing a follow-up",
-        urgency: "blocking",
-        acceptedAt: timestamp,
-      });
-      assert.equal((yield* deliveryWorker.runOnce)?.state, "delivered");
+        const opened = yield* sendService.send({
+          commandId: CommCommandId.make("command:delivery:human-followup-race:open"),
+          senderThreadId: sender.threadId,
+          to: person.id,
+          message: "Initial question",
+          expectReply: true,
+          intent: "Reproduce answer racing a follow-up",
+          urgency: "blocking",
+          acceptedAt: timestamp,
+        });
+        assert.equal((yield* deliveryWorker.runOnce)?.state, "delivered");
 
-      const followup = yield* sendService.send({
-        commandId: CommCommandId.make("command:delivery:human-followup-race:followup"),
-        senderThreadId: sender.threadId,
-        to: person.id,
-        message: "Pending follow-up",
-        exchangeId: opened.exchangeId!,
-        acceptedAt: "2026-08-16T12:00:01.000Z",
-      });
-      yield* (yield* A2AHumanInbox).answer({
-        commandId: CommCommandId.make("command:delivery:human-followup-race:answer"),
-        personId: person.id,
-        exchangeId: opened.exchangeId!,
-        message: "Answered before follow-up transport",
-        acceptedAt: "2026-08-16T12:00:02.000Z",
-      });
+        const followupMessageId = LedgerMessageId.make(
+          "message:delivery:human-followup-race:legacy-followup",
+        );
+        yield* ledgerService.append({
+          commandId: CommCommandId.make("command:delivery:human-followup-race:legacy-followup"),
+          squadronId,
+          acceptedAt: "2026-08-16T12:00:01.000Z",
+          event: {
+            kind: "message.sent",
+            sender: sender.id,
+            receiver: person.id,
+            exchangeId: opened.exchangeId!,
+            correlationId: CorrelationId.make(
+              "correlation:delivery:human-followup-race:legacy-followup",
+            ),
+            payload: {
+              messageId: followupMessageId,
+              text: "Pending historical follow-up",
+              originSquadronId: squadronId,
+              receiverSquadronId: squadronId,
+              exchangeRole: "followup",
+              envelopeChannel: "peer",
+            },
+            createdAt: "2026-08-16T12:00:01.000Z",
+          },
+        });
+        yield* (yield* A2AHumanInbox).answer({
+          commandId: CommCommandId.make("command:delivery:human-followup-race:answer"),
+          personId: person.id,
+          exchangeId: opened.exchangeId!,
+          message: "Answered before follow-up transport",
+          acceptedAt: "2026-08-16T12:00:02.000Z",
+        });
 
-      const milestone = yield* deliveryWorker.runOnce;
-      assert.equal(milestone?.messageId, followup.messageId);
-      assert.equal(milestone?.state, "delivered");
-      const rows = yield* sql<{
-        readonly attempts: number;
-        readonly last_error: string | null;
-        readonly status: string;
-      }>`
+        const milestone = yield* deliveryWorker.runOnce;
+        assert.equal(milestone?.messageId, followupMessageId);
+        assert.equal(milestone?.state, "delivered");
+        const rows = yield* sql<{
+          readonly attempts: number;
+          readonly last_error: string | null;
+          readonly status: string;
+        }>`
         SELECT status, attempts, last_error
         FROM j5_a2a_delivery
-        WHERE message_id = ${followup.messageId}
+        WHERE message_id = ${followupMessageId}
       `;
-      assert.deepStrictEqual(rows, [{ status: "delivered", attempts: 1, last_error: null }]);
-      assert.deepStrictEqual(yield* deliveryWorker.listAlarms, []);
-    }).pipe(Effect.provide(layer));
-  }),
+        assert.deepStrictEqual(rows, [{ status: "delivered", attempts: 1, last_error: null }]);
+        assert.deepStrictEqual(yield* deliveryWorker.listAlarms, []);
+      }).pipe(Effect.provide(layer));
+    }),
 );
 
 it.effect("receipts a human lifecycle notice without creating a second actionable inbox row", () =>

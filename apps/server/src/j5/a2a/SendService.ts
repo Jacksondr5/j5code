@@ -69,7 +69,7 @@ export class A2AParticipantNotFoundError extends Schema.TaggedErrorClass<A2APart
   { participantId: Schema.String },
 ) {
   override get message(): string {
-    return `Participant ${this.participantId} is not currently reachable. Call list_participants and choose a row with canReceiveMessage=true.`;
+    return `Participant ${this.participantId} is not currently reachable. Call list_participants and choose an agent row with canReceiveMessage=true, or a human row with canOpenExchange=true to open an ask.`;
   }
 }
 
@@ -127,6 +127,24 @@ export class A2AUrgencyRequiresExchangeError extends Schema.TaggedErrorClass<A2A
 ) {
   override get message(): string {
     return "Urgency applies only when opening a reply-expected exchange to the human. Retry without urgency, or set expect_reply=true with intent and urgency.";
+  }
+}
+
+export class A2AHumanAskOrReplyRequiredError extends Schema.TaggedErrorClass<A2AHumanAskOrReplyRequiredError>()(
+  "A2AHumanAskOrReplyRequiredError",
+  { participantId: Schema.String },
+) {
+  override get message(): string {
+    return `A plain send to human participant ${this.participantId} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or a reply with exchange_id. If nobody needs to act, say it in your own thread instead.`;
+  }
+}
+
+export class A2AHumanFollowupNotAllowedError extends Schema.TaggedErrorClass<A2AHumanFollowupNotAllowedError>()(
+  "A2AHumanFollowupNotAllowedError",
+  { participantId: Schema.String },
+) {
+  override get message(): string {
+    return `A follow-up to human participant ${this.participantId} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or a reply with exchange_id; after an ask is open, wait for its reply, or clear_own_ask on the open exchange and re-ask with the combined content. If nobody needs to act, say it in your own thread instead.`;
   }
 }
 
@@ -232,6 +250,8 @@ export type A2ASendError =
   | A2AUrgencyRequiredError
   | A2AUrgencyNotAcceptedError
   | A2AUrgencyRequiresExchangeError
+  | A2AHumanAskOrReplyRequiredError
+  | A2AHumanFollowupNotAllowedError
   | A2AExchangeNotOpenError
   | A2AExchangeAlreadyAnsweredError
   | A2ACrossSquadronReplyInvariantError
@@ -448,7 +468,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
                   squadronId: sender.squadronId,
                   participantId: personId,
                   participant: { kind: "human", id: personId },
-                  canReceiveMessage: true,
+                  canReceiveMessage: false,
                   canOpenExchange: true,
                   acceptsUrgency: true,
                 }) satisfies ParticipantDirectoryRow,
@@ -520,6 +540,13 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
 
           const receiver = yield* participantMembership(input.to, sender.squadronId);
           const receiverId = participantId(receiver.participant);
+          if (
+            receiver.participant.kind === "human" &&
+            input.expectReply !== true &&
+            input.exchangeId === undefined
+          ) {
+            return yield* new A2AHumanAskOrReplyRequiredError({ participantId: receiverId });
+          }
           let exchangeId: ExchangeId | null = null;
           let exchangeState: SendMessageResult["exchangeState"] = "none";
           let exchangeRole: "none" | "ask" | "followup" | "reply" = "none";
@@ -626,6 +653,10 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
             exchangeState = "open";
           } else if (input.urgency !== undefined) {
             return yield* new A2AUrgencyRequiresExchangeError();
+          }
+
+          if (receiver.participant.kind === "human" && exchangeRole === "followup") {
+            return yield* new A2AHumanFollowupNotAllowedError({ participantId: receiverId });
           }
 
           const correlationId = correlationIdFor(input.commandId);

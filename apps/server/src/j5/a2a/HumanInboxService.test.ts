@@ -241,8 +241,8 @@ it.effect(
         yield* send.send({
           commandId: collidingCommandId,
           senderThreadId: senderCleared.agent.threadId,
-          to: firstPerson.id,
-          message: "An unrelated send reserved this command id.",
+          to: second.agent.id,
+          message: "An unrelated agent send reserved this command id.",
           acceptedAt: "2026-08-23T13:41:30.000Z",
         });
         const collidingClear = yield* Effect.flip(
