@@ -399,9 +399,10 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
         plan.some(
           (row) =>
             row.detail.includes("SEARCH r USING INDEX") &&
-            row.detail.includes("orchestration_v2_projection_runs_status_requested_run_idx"),
+            row.detail.includes("orchestration_v2_projection_runs_status_requested_idx"),
         ),
       );
+      assert.isFalse(plan.some((row) => row.detail.includes("SCAN r")));
 
       let shell = (yield* projectionStore.getShellSnapshot()).threads.find(
         (thread) => thread.id === threadId,

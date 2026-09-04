@@ -6,7 +6,7 @@ export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   yield* sql`
-    CREATE INDEX orchestration_v2_projection_runs_status_requested_run_idx
-    ON orchestration_v2_projection_runs(status, requested_at, run_id)
+    CREATE INDEX orchestration_v2_projection_runs_status_requested_idx
+    ON orchestration_v2_projection_runs(status, requested_at)
   `;
 });
