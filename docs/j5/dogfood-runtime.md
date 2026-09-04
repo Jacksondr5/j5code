@@ -206,8 +206,11 @@ As `j5dev` (Ansible reconciles all of this):
    origin with the private HTTPS origin, preserving `/pair#token=...`. Do not run `pair --tailscale`
    as `j5dev`; Ansible owns the Serve mapping. Token issuance alone does not verify client access.
 
-7. **Provider CLIs and accounts.** Ansible installs pinned Codex and Claude CLIs globally under
-   fnm's Node and adds its `bin` directory to the service account's PATH. Claude Fable 5.1 requires
+7. **Provider CLIs and accounts.** Ansible installs pinned Codex and Claude CLIs into the
+   user-owned npm prefix `~/.local` and puts `~/.local/bin` first on the service account's PATH.
+   This stable prefix keeps provider commands available when the checkout's Node pin changes.
+   Node and pnpm remain pinned per checkout, with pnpm installed under the selected fnm Node.
+   Claude Fable 5.1 requires
    Claude CLI **≥ 2.1.257**. Authenticate as `j5dev`, the same account that runs provider turns;
    a login under `t3dev` or the SSH administrator does not authenticate J5's providers.
 
@@ -227,6 +230,19 @@ As `j5dev` (Ansible reconciles all of this):
    remote host. Restart the J5 service after updating a provider CLI: persistent provider
    subprocesses keep using the old executable until restarted. Prefer a quiet fleet because
    that restart cancels active turns.
+
+8. **Git and GitHub identity.** Configure the intended commit identity and authenticate GitHub
+   manually as `j5dev` before agents push branches or create pull requests:
+
+   ```sh
+   git config --global user.name '<your commit name>'
+   git config --global user.email '<your commit email>'
+   gh auth login
+   gh auth setup-git
+   gh auth status
+   ```
+
+   Use repository-local git configuration instead if initiatives need different commit identities.
 
 ## Connecting the client
 
