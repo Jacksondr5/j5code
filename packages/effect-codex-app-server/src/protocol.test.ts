@@ -93,6 +93,60 @@ it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
     }),
   );
 
+  it.effect("decodes completed subAgentActivity items in resumes and item notifications", () =>
+    Effect.gen(function* () {
+      // Codex 0.153.0 emitted this completed activity in the failed resume that
+      // exposed the July schema drift. The pre-0.152.1 schema rejected its kind.
+      const item = {
+        type: "subAgentActivity" as const,
+        id: "subagent-activity-1",
+        agentThreadId: "thread-subagent-1",
+        agentPath: "root/subagent-1",
+        kind: "completed" as const,
+      };
+      const resumed = yield* decodeThreadResumeResponse({
+        approvalPolicy: "never",
+        approvalsReviewer: "user",
+        cwd: "/tmp/project",
+        model: "gpt-5.3-codex",
+        modelProvider: "openai",
+        sandbox: { type: "dangerFullAccess" },
+        thread: {
+          cliVersion: "0.153.0",
+          createdAt: 1756771200,
+          cwd: "/tmp/project",
+          ephemeral: false,
+          id: "thread-1",
+          modelProvider: "openai",
+          preview: "",
+          projectId: null,
+          sessionId: "session-1",
+          source: "appServer",
+          status: { type: "idle" },
+          turns: [{ id: "turn-1", status: "interrupted", items: [item] }],
+          updatedAt: 1756771200,
+        },
+      });
+      assert.deepEqual(resumed.thread.turns[0]?.items, [item]);
+
+      const started = yield* decodeItemStartedParams({
+        threadId: "thread-1",
+        turnId: "turn-1",
+        startedAtMs: 1,
+        item,
+      });
+      assert.deepEqual(started.item, item);
+
+      const completed = yield* decodeItemCompletedParams({
+        threadId: "thread-1",
+        turnId: "turn-1",
+        completedAtMs: 2,
+        item,
+      });
+      assert.deepEqual(completed.item, item);
+    }),
+  );
+
   it.effect("maps earned rate-limit reset credits from account rate-limit snapshots", () =>
     Effect.gen(function* () {
       assert.strictEqual(
