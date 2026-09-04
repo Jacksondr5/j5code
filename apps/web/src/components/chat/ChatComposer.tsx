@@ -647,7 +647,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadId,
     activeThreadEnvironmentId: _activeThreadEnvironmentId,
     activeThread,
-    isServerThread: _isServerThread,
+    isServerThread,
     isLocalDraftThread: _isLocalDraftThread,
     forceExpandedOnMobile,
     projectSelectionRequired,
@@ -705,7 +705,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setThreadError,
     onExpandImage,
   } = props;
-  const j5SteerState = useJ5SteerState(environmentId, activeThreadId);
+  const j5SteerState = useJ5SteerState(environmentId, isServerThread ? activeThreadId : null);
   const [j5SteerNoticeRequested, setJ5SteerNoticeRequested] = useState(false);
 
   // ------------------------------------------------------------------
