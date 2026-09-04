@@ -37,8 +37,10 @@ const codexCaps: ModelCapabilities = createModelCapabilities({
 
 describe("model slug normalization", () => {
   it("preserves exact custom slugs instead of expanding provider aliases", () => {
+    const codex = ProviderDriverKind.make("codex");
     const claude = ProviderDriverKind.make("claudeAgent");
 
+    expect(normalizeModelSlug("astra", codex)).toBe("gpt-6-astra");
     expect(normalizeModelSlug("fable", claude)).toBe("claude-fable-5-1");
     expect(normalizeModelSlug("opus", claude)).toBe("claude-opus-5");
     expect(normalizeCustomModelSlug(" opus ")).toBe("opus");
