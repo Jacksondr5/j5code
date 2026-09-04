@@ -435,10 +435,10 @@ const handlers = {
         senderThreadId: scope.threadId,
         to: input.to,
         message: input.message,
-        ...(input.expect_reply === undefined ? {} : { expectReply: input.expect_reply }),
-        ...(input.exchange_id === undefined ? {} : { exchangeId: input.exchange_id }),
-        ...(input.intent === undefined ? {} : { intent: input.intent }),
-        ...(input.urgency === undefined ? {} : { urgency: input.urgency }),
+        ...(input.expect_reply == null ? {} : { expectReply: input.expect_reply }),
+        ...(input.exchange_id == null ? {} : { exchangeId: input.exchange_id }),
+        ...(input.intent == null ? {} : { intent: input.intent }),
+        ...(input.urgency == null ? {} : { urgency: input.urgency }),
         acceptedAt,
       });
       yield* worker.notify;

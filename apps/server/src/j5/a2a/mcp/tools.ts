@@ -44,11 +44,11 @@ export type J5McpFailure = typeof J5McpFailure.Type;
 export const J5SendMessageInput = Schema.Struct({
   to: ParticipantId,
   message: Schema.String.check(Schema.isNonEmpty()),
-  client_request_id: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
-  expect_reply: Schema.optional(Schema.Boolean),
-  exchange_id: Schema.optional(ExchangeId),
-  intent: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
-  urgency: Schema.optional(Urgency),
+  client_request_id: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isNonEmpty()))),
+  expect_reply: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  exchange_id: Schema.optional(Schema.NullOr(ExchangeId)),
+  intent: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isNonEmpty()))),
+  urgency: Schema.optional(Schema.NullOr(Urgency)),
 });
 export type J5SendMessageInput = typeof J5SendMessageInput.Type;
 
