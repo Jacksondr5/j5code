@@ -1,4 +1,4 @@
-import { CheckpointScopeId, RunId, ThreadId, VcsError } from "@t3tools/contracts";
+import { CheckpointScopeId, RunId, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -48,18 +48,6 @@ export const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const observer = yield* RunFinalizationObserver;
   const queuedRunWatchdog = yield* QueuedRunWatchdog;
-  const isVcsError = Schema.is(VcsError);
-
-  const findVcsError = (cause: unknown) => {
-    const seen = new Set<unknown>();
-    let current = cause;
-    while (typeof current === "object" && current !== null && !seen.has(current)) {
-      if (isVcsError(current)) return current;
-      seen.add(current);
-      current = "cause" in current ? current.cause : undefined;
-    }
-    return undefined;
-  };
 
   const finalize: RunFinalizationService["Service"]["finalize"] = Effect.fn(
     "RunFinalizationService.finalize",
@@ -93,19 +81,14 @@ export const make = Effect.gen(function* () {
   return RunFinalizationService.of({
     finalize: (input) =>
       finalize(input).pipe(
-        Effect.tapError((error) => {
-          const vcsError = findVcsError(error.cause);
-          return vcsError === undefined
-            ? Effect.void
-            : queuedRunWatchdog
-                .recordVcsFailure({
-                  threadId: input.threadId,
-                  runId: input.runId,
-                  phase: "finalization",
-                  cause: vcsError,
-                })
-                .pipe(Effect.catchCause(() => Effect.void));
-        }),
+        Effect.tapError((cause) =>
+          queuedRunWatchdog.recordVcsFailure({
+            threadId: input.threadId,
+            runId: input.runId,
+            phase: "finalization",
+            cause,
+          }),
+        ),
       ),
   });
 });

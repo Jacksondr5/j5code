@@ -46,7 +46,7 @@ import { layer as threadForkServiceLayer } from "./ThreadForkService.ts";
 import { layer as turnItemPositionStoreLayer } from "./TurnItemPositionStore.ts";
 import { layer as scheduledTaskServiceLayer } from "../scheduledTasks/ScheduledTaskService.ts";
 import {
-  layer as queuedRunWatchdogLayer,
+  live as queuedRunWatchdogLayer,
   workerLive as queuedRunWatchdogWorkerLive,
 } from "../j5/run-observability/QueuedRunWatchdog.ts";
 

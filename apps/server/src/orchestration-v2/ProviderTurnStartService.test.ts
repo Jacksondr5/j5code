@@ -28,6 +28,7 @@ import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import {
+  ProviderAdapterEnsureThreadError,
   ProviderAdapterResumeThreadError,
   type ProviderAdapterV2SessionRuntime,
 } from "./ProviderAdapter.ts";
@@ -154,7 +155,7 @@ const makeCodexResumeSchemaFailure = Effect.fn("makeCodexResumeSchemaFailure")(f
 
 function makeResumeFallbackFixture(input: {
   readonly suffix: string;
-  readonly existingFallbackTransferId?: ContextTransferId;
+  readonly requestedFallbackTransferId?: ContextTransferId;
 }) {
   const threadId = ThreadId.make(`thread_resume_fallback_${input.suffix}`);
   const runId = RunId.make(`run_resume_fallback_${input.suffix}`);
@@ -211,21 +212,26 @@ function makeResumeFallbackFixture(input: {
     checkpointScopes: [{ id: checkpointScopeId }],
     contextHandoffs: [],
     contextTransfers:
-      input.existingFallbackTransferId === undefined
+      input.requestedFallbackTransferId === undefined
         ? []
         : [
             {
-              id: input.existingFallbackTransferId,
+              id: input.requestedFallbackTransferId,
               type: "provider_handoff",
               sourceThreadId: threadId,
               targetThreadId: threadId,
+              sourcePoint: { threadId },
+              basePoint: null,
+              sourceProviderInstanceId: providerInstanceId,
+              targetProviderInstanceId: providerInstanceId,
               targetRunId: runId,
-              status: "resolved_portable",
-              resolution: {
-                strategy: "portable_context",
-                contextHandoffId: ContextHandoffId.make(`handoff_existing_${input.suffix}`),
-              },
-              error: "earlier failure",
+              status: "pending",
+              resolution: null,
+              createdBy: "user",
+              error: null,
+              createdAt,
+              updatedAt: createdAt,
+              consumedAt: null,
             },
           ],
     turnItems: [],
@@ -254,7 +260,7 @@ function makeLogCapture() {
   return { records, layer: Logger.layer([logger], { mergeWithExisting: false }) };
 }
 
-it("records the resume failure on the fallback transfer and warns with thread identifiers", async () => {
+it("fails a native-resume run with its recorded cause and creates no context transfer", async () => {
   const fixture = makeResumeFallbackFixture({ suffix: "recorded" });
   const written: Array<ReadonlyArray<OrchestrationV2DomainEvent>> = [];
   const write = vi.fn((input: { readonly events: ReadonlyArray<OrchestrationV2DomainEvent> }) => {
@@ -262,7 +268,11 @@ it("records the resume failure on the fallback transfer and warns with thread id
     return Effect.succeed([] as never);
   });
   const logCapture = makeLogCapture();
-  const startRootRun = vi.fn(() => Effect.void);
+  let startedSession: ProviderAdapterV2SessionRuntime | undefined;
+  const startRootRun = vi.fn((input: { readonly session: ProviderAdapterV2SessionRuntime }) => {
+    startedSession = input.session;
+    return Effect.void;
+  });
   const layer = ProviderTurnStart.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -286,11 +296,16 @@ it("records the resume failure on the fallback transfer and warns with thread id
         }),
         Layer.mock(EventSink.EventSinkV2)({
           write,
-          writeIfRunCurrent: () => Effect.succeed({ committed: false, storedEvents: [] }),
+          writeIfRunCurrent: () => Effect.succeed({ committed: true, storedEvents: [] }),
         }),
         IdAllocator.layer,
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getThreadProjection: () => Effect.succeed(fixture.projection),
+          getThreadProjection: () =>
+            Effect.succeed({
+              ...fixture.projection,
+              providerTurns: [],
+              subagents: [],
+            } as unknown as OrchestrationV2ThreadProjection),
         }),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
           open: () =>
@@ -325,47 +340,60 @@ it("records the resume failure on the fallback transfer and warns with thread id
     service.start({ threadId: fixture.threadId, runId: fixture.runId }),
   ).pipe(Effect.provide(Layer.merge(layer, logCapture.layer)), Effect.runPromise);
 
-  expect(write).toHaveBeenCalledTimes(1);
-  const transferEvent = written.flat().find((event) => event.type === "context-transfer.updated");
-  expect(transferEvent?.type).toBe("context-transfer.updated");
-  if (transferEvent?.type !== "context-transfer.updated") return;
-  expect(transferEvent.payload.status).toBe("resolved_portable");
-  expect(transferEvent.payload.resolution?.strategy).toBe("portable_context");
-  const error = transferEvent.payload.error;
-  expect(typeof error).toBe("string");
-  expect(error).toContain(
+  expect(write).not.toHaveBeenCalled();
+  expect(written.flat().find((event) => event.type === "context-transfer.updated")).toBeUndefined();
+  expect(startRootRun).toHaveBeenCalledTimes(1);
+  expect(startedSession).toBeDefined();
+  const startFailure = await startedSession!
+    .startTurn({} as never)
+    .pipe(Effect.flip, Effect.runPromise);
+  expect(startFailure._tag).toBe("ProviderResumeFailedError");
+  expect(startFailure.message).toContain(
+    "Native codex provider resume failed for provider_thread_resume_fallback_recorded",
+  );
+  expect(startFailure.message).toContain(
     "ProviderAdapterResumeThreadError: Failed to resume codex provider thread",
   );
-  expect(error).toContain(
+  expect(startFailure.message).toContain(
     "[cause]: CodexAppServerRequestError: Invalid payload for method 'thread/resume' during 'decode-payload'",
   );
-  expect(error).toContain("[cause]: SchemaError: Expected");
-  expect(error).toContain('at ["thread"]["turns"][0]["items"][0]');
-  expect(error).not.toMatch(/^\s+at (?!\[)/mu);
-
-  const warning = logCapture.records.find((record) => "nativeThreadId" in record);
-  expect(warning).toMatchObject({
-    threadId: fixture.threadId,
-    providerThreadId: fixture.providerThreadId,
-    nativeThreadId: fixture.nativeThreadId,
-    runId: fixture.runId,
-    error,
-  });
-  expect(startRootRun).not.toHaveBeenCalled();
+  expect(startFailure.message).toContain("[cause]: SchemaError: Expected");
+  expect(logCapture.records.filter((record) => "nativeThreadId" in record)).toHaveLength(0);
 });
 
-it("warns instead of writing a second transfer when a resume fallback already exists", async () => {
-  const existingTransferId = ContextTransferId.make("transfer_resume_fallback_existing");
+it("takes the digest path only for an explicit fallback request and warns", async () => {
+  const requestedTransferId = ContextTransferId.make("transfer_resume_fallback_requested");
   const fixture = makeResumeFallbackFixture({
-    suffix: "existing",
-    existingFallbackTransferId: existingTransferId,
+    suffix: "requested",
+    requestedFallbackTransferId: requestedTransferId,
   });
-  const write = vi.fn(() => Effect.succeed([] as never));
+  const written: Array<ReadonlyArray<OrchestrationV2DomainEvent>> = [];
+  const write = vi.fn((input: { readonly events: ReadonlyArray<OrchestrationV2DomainEvent> }) => {
+    written.push(input.events);
+    return Effect.succeed([] as never);
+  });
   const logCapture = makeLogCapture();
   const layer = ProviderTurnStart.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({}),
+        Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({
+          prepareProviderHandoff: (input) =>
+            Effect.succeed({
+              id: ContextHandoffId.make("handoff_resume_fallback_requested"),
+              transferId: input.transferId,
+              threadId: input.threadId,
+              targetRunId: input.targetRunId,
+              fromProviderThreadIds: input.fromProviderThreadIds,
+              toProviderThreadId: input.toProviderThreadId,
+              coveredRunOrdinals: input.coveredRunOrdinals,
+              strategy: input.strategy,
+              status: "ready",
+              summaryMessageId: null,
+              summaryText: "summary",
+              createdByProviderInstanceId: input.toProviderInstanceId,
+              createdAt: input.createdAt,
+            } as never),
+        }),
         Layer.mock(EventSink.EventSinkV2)({
           write,
           writeIfRunCurrent: () => Effect.succeed({ committed: false, storedEvents: [] }),
@@ -387,7 +415,7 @@ it("warns instead of writing a second transfer when a resume fallback already ex
               ensureThread: () => Effect.succeed(fixture.providerThread),
             } as never),
         }),
-        Layer.mock(RunExecutionService.RunExecutionServiceV2)({}),
+        Layer.mock(RunExecutionService.RunExecutionServiceV2)({ startRootRun: () => Effect.void }),
         Layer.mock(RuntimePolicy.RuntimePolicyV2)({
           resolve: () => Effect.succeed({} as never),
         }),
@@ -399,17 +427,141 @@ it("warns instead of writing a second transfer when a resume fallback already ex
     service.start({ threadId: fixture.threadId, runId: fixture.runId }),
   ).pipe(Effect.provide(Layer.merge(layer, logCapture.layer)), Effect.runPromise);
 
-  expect(write).not.toHaveBeenCalled();
-  const warnings = logCapture.records.filter((record) => "nativeThreadId" in record);
-  expect(warnings).toHaveLength(2);
-  expect(warnings[1]).toMatchObject({
+  expect(write).toHaveBeenCalledTimes(1);
+  const transferEvent = written.flat().find((event) => event.type === "context-transfer.updated");
+  expect(transferEvent?.type).toBe("context-transfer.updated");
+  if (transferEvent?.type !== "context-transfer.updated") return;
+  expect(transferEvent.payload.id).toBe(requestedTransferId);
+  expect(transferEvent.payload.status).toBe("resolved_portable");
+  expect(transferEvent.payload.resolution?.strategy).toBe("portable_context");
+  const warning = logCapture.records.find((record) => "nativeThreadId" in record);
+  expect(warning).toMatchObject({
     threadId: fixture.threadId,
     providerThreadId: fixture.providerThreadId,
     nativeThreadId: fixture.nativeThreadId,
     runId: fixture.runId,
-    transferId: existingTransferId,
   });
-  expect(typeof warnings[1]?.error).toBe("string");
+  expect(typeof warning?.error).toBe("string");
+});
+
+it("keeps the no-native-ref fresh-start path unchanged", async () => {
+  const fixture = makeResumeFallbackFixture({ suffix: "no_native_ref" });
+  const providerThread = { ...fixture.providerThread, nativeThreadRef: null };
+  const projection = {
+    ...fixture.projection,
+    providerThreads: [providerThread],
+    providerTurns: [],
+    subagents: [],
+  } as unknown as OrchestrationV2ThreadProjection;
+  const resumeThread = vi.fn(() => Effect.die("resumeThread must not run without a native ref"));
+  const ensureThread = vi.fn(() => Effect.succeed(providerThread));
+  const startRootRun = vi.fn(() => Effect.void);
+  const layer = ProviderTurnStart.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({}),
+        Layer.mock(EventSink.EventSinkV2)({
+          writeIfRunCurrent: () => Effect.succeed({ committed: true, storedEvents: [] }),
+        }),
+        IdAllocator.layer,
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getThreadProjection: () => Effect.succeed(projection),
+        }),
+        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
+          open: () =>
+            Effect.succeed({
+              driver: CODEX_DRIVER,
+              providerSession: { id: fixture.providerSessionId },
+              resumeThread,
+              ensureThread,
+            } as never),
+        }),
+        Layer.mock(RunExecutionService.RunExecutionServiceV2)({ startRootRun }),
+        Layer.mock(RuntimePolicy.RuntimePolicyV2)({
+          resolve: () => Effect.succeed({} as never),
+        }),
+      ),
+    ),
+  );
+
+  await Effect.flatMap(ProviderTurnStart.ProviderTurnStartServiceV2, (service) =>
+    service.start({ threadId: fixture.threadId, runId: fixture.runId }),
+  ).pipe(Effect.provide(layer), Effect.runPromise);
+
+  expect(resumeThread).not.toHaveBeenCalled();
+  expect(ensureThread).toHaveBeenCalledTimes(1);
+  expect(startRootRun).toHaveBeenCalledTimes(1);
+});
+
+it("fails a fresh provider thread through run execution when the Codex CLI is unsupported", async () => {
+  const fixture = makeResumeFallbackFixture({ suffix: "fresh_unsupported_cli" });
+  const providerThread = { ...fixture.providerThread, nativeThreadRef: null };
+  const projection = {
+    ...fixture.projection,
+    providerThreads: [providerThread],
+    providerTurns: [],
+    subagents: [],
+  } as unknown as OrchestrationV2ThreadProjection;
+  const resumeThread = vi.fn(() => Effect.die("resumeThread must not run without a native ref"));
+  let startedSession: ProviderAdapterV2SessionRuntime | undefined;
+  const startRootRun = vi.fn((input: { readonly session: ProviderAdapterV2SessionRuntime }) => {
+    startedSession = input.session;
+    return Effect.void;
+  });
+  const layer = ProviderTurnStart.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({}),
+        Layer.mock(EventSink.EventSinkV2)({
+          writeIfRunCurrent: () => Effect.succeed({ committed: true, storedEvents: [] }),
+        }),
+        IdAllocator.layer,
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getThreadProjection: () => Effect.succeed(projection),
+        }),
+        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
+          open: () =>
+            Effect.succeed({
+              driver: CODEX_DRIVER,
+              providerSession: { id: fixture.providerSessionId },
+              resumeThread,
+              ensureThread: () =>
+                assertSupportedCodexCliVersion(
+                  "t3code_desktop/0.120.0 (Mac OS 26.4.1; arm64)",
+                ).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ProviderAdapterEnsureThreadError({
+                        driver: CODEX_DRIVER,
+                        threadId: fixture.threadId,
+                        cause,
+                      }),
+                  ),
+                ),
+            } as never),
+        }),
+        Layer.mock(RunExecutionService.RunExecutionServiceV2)({
+          startRootRun: startRootRun as never,
+        }),
+        Layer.mock(RuntimePolicy.RuntimePolicyV2)({
+          resolve: () => Effect.succeed({} as never),
+        }),
+      ),
+    ),
+  );
+
+  await Effect.flatMap(ProviderTurnStart.ProviderTurnStartServiceV2, (service) =>
+    service.start({ threadId: fixture.threadId, runId: fixture.runId }),
+  ).pipe(Effect.provide(layer), Effect.runPromise);
+
+  expect(resumeThread).not.toHaveBeenCalled();
+  expect(startRootRun).toHaveBeenCalledTimes(1);
+  expect(startedSession).toBeDefined();
+  const startFailure = await startedSession!
+    .startTurn({} as never)
+    .pipe(Effect.flip, Effect.runPromise);
+  expect(startFailure._tag).toBe("ProviderAdapterProtocolError");
+  expect(startFailure.message).toContain("J5 requires Codex CLI ≥ 0.151.0; found 0.120.0");
 });
 
 it("fails the run through run execution instead of falling back when the Codex CLI is unsupported", async () => {
@@ -481,6 +633,6 @@ it("fails the run through run execution instead of falling back when the Codex C
   const startFailure = await startedSession!
     .startTurn({} as never)
     .pipe(Effect.flip, Effect.runPromise);
-  expect(startFailure._tag).toBe("ProviderAdapterProtocolError");
+  expect(startFailure._tag).toBe("ProviderResumeFailedError");
   expect(startFailure.message).toContain("J5 requires Codex CLI ≥ 0.151.0; found 0.120.0");
 });

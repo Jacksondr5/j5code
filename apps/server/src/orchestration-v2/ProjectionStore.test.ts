@@ -24,7 +24,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import {
-  explainListRunsByStatusStatement,
   isTurnItemAtOrBeforeRun,
   ProjectionStoreV2,
   layer as projectionStoreLayer,
@@ -373,35 +372,6 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
         occurredAt: now,
         payload: run,
       });
-
-      const runningRuns = yield* projectionStore.listRunsByStatus({
-        status: "running",
-        requestedBefore: now,
-        limit: 1,
-      });
-      const startingRuns = yield* projectionStore.listRunsByStatus({
-        status: "starting",
-        requestedBefore: now,
-        limit: 1,
-      });
-      assert.deepEqual(
-        runningRuns.map((candidate) => candidate.id),
-        [runId],
-      );
-      assert.deepEqual(startingRuns, []);
-      const sql = yield* SqlClient.SqlClient;
-      const plan = yield* explainListRunsByStatusStatement(sql, {
-        status: "starting",
-        requestedBefore: now,
-        limit: 100,
-      });
-      assert.isTrue(
-        plan.some(
-          (row) =>
-            row.detail.includes("SEARCH r USING INDEX") &&
-            row.detail.includes("orchestration_v2_projection_runs_status_requested_run_idx"),
-        ),
-      );
 
       let shell = (yield* projectionStore.getShellSnapshot()).threads.find(
         (thread) => thread.id === threadId,

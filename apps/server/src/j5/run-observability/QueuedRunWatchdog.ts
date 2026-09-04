@@ -1,4 +1,8 @@
-import { type OrchestrationV2Run, type OrchestrationV2ThreadProjection } from "@t3tools/contracts";
+import {
+  VcsError,
+  type OrchestrationV2Run,
+  type OrchestrationV2ThreadProjection,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -8,10 +12,12 @@ import * as Schema from "effect/Schema";
 
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { IdAllocatorV2 } from "../../orchestration-v2/IdAllocator.ts";
+import { ProjectionStoreV2 } from "../../orchestration-v2/ProjectionStore.ts";
 import {
-  type ProjectionStoreRunStatusCursor,
-  ProjectionStoreV2,
-} from "../../orchestration-v2/ProjectionStore.ts";
+  type CandidateCursor,
+  QueuedRunCandidates,
+  layer as candidateLayer,
+} from "./QueuedRunCandidates.ts";
 import { makeProviderFailure } from "../../orchestration-v2/ProviderFailure.ts";
 
 export const QUEUED_RUN_WATCHDOG_DELAY_MS = 5 * 60 * 1000;
@@ -30,7 +36,7 @@ export class QueuedRunWatchdog extends Context.Reference<{
     readonly runId: OrchestrationV2Run["id"];
     readonly phase: "start" | "finalization";
     readonly cause: unknown;
-  }) => Effect.Effect<void, QueuedRunWatchdogError>;
+  }) => Effect.Effect<void>;
 }>("j5/queued-run-watchdog/QueuedRunWatchdog", {
   defaultValue: () => ({ scan: () => Effect.void, recordVcsFailure: () => Effect.void }),
 }) {}
@@ -51,15 +57,26 @@ function hasFact(
   return projection.turnItems.some((item) => item.id === id);
 }
 
+const isVcsError = Schema.is(VcsError);
+function findVcsError(cause: unknown) {
+  const seen = new Set<unknown>();
+  let current = cause;
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    if (isVcsError(current)) return current;
+    seen.add(current);
+    current = "cause" in current ? current.cause : undefined;
+  }
+  return undefined;
+}
+
 export const layer = Layer.effect(
   QueuedRunWatchdog,
   Effect.gen(function* () {
     const events = yield* EventSinkV2;
     const ids = yield* IdAllocatorV2;
     const projections = yield* ProjectionStoreV2;
-    const startingRunCursor = yield* Ref.make<ProjectionStoreRunStatusCursor | undefined>(
-      undefined,
-    );
+    const candidatesStore = yield* QueuedRunCandidates;
+    const startingRunCursor = yield* Ref.make<CandidateCursor | undefined>(undefined);
 
     const writeFact = Effect.fn("QueuedRunWatchdog.writeFact")(function* (input: {
       readonly projection: OrchestrationV2ThreadProjection;
@@ -119,7 +136,7 @@ export const layer = Layer.effect(
     const scanEffect = Effect.fn("QueuedRunWatchdog.scan")(function* () {
       const now = yield* DateTime.now;
       const after = yield* Ref.get(startingRunCursor);
-      const candidates = yield* projections.listRunsByStatus({
+      const candidates = yield* candidatesStore.list({
         status: "starting",
         requestedBefore: DateTime.makeUnsafe(
           DateTime.toEpochMillis(now) - QUEUED_RUN_WATCHDOG_DELAY_MS,
@@ -174,10 +191,12 @@ export const layer = Layer.effect(
         readonly phase: "start" | "finalization";
         readonly cause: unknown;
       }) {
+        const vcsError = findVcsError(input.cause);
+        if (vcsError === undefined) return;
         const projection = yield* projections.getThreadProjection(input.threadId);
         const run = projection.runs.find((candidate) => candidate.id === input.runId);
         if (run === undefined) return;
-        const failure = makeProviderFailure({ cause: input.cause, class: "unknown" });
+        const failure = makeProviderFailure({ cause: vcsError, class: "unknown" });
         yield* writeFact({
           projection,
           run,
@@ -196,14 +215,13 @@ export const layer = Layer.effect(
       readonly runId: OrchestrationV2Run["id"];
       readonly phase: "start" | "finalization";
       readonly cause: unknown;
-    }) =>
-      recordVcsFailureEffect(input).pipe(
-        Effect.mapError((cause) => new QueuedRunWatchdogError({ cause })),
-      );
+    }) => recordVcsFailureEffect(input).pipe(Effect.catchCause(() => Effect.void));
 
     return { scan, recordVcsFailure };
   }),
 );
+
+export const live = layer.pipe(Layer.provide(candidateLayer));
 
 export const workerLive = Layer.effectDiscard(
   Effect.gen(function* () {

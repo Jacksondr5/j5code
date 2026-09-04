@@ -1,5 +1,6 @@
 import {
   ProviderInstanceId,
+  VcsProcessExitError,
   RunAttemptId,
   RunId,
   ThreadId,
@@ -12,6 +13,7 @@ import { expect, it } from "vite-plus/test";
 
 import * as EventSink from "../../orchestration-v2/EventSink.ts";
 import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
+import { QueuedRunCandidates, type CandidateQuery } from "./QueuedRunCandidates.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import {
   layer,
@@ -59,13 +61,14 @@ it("records one durable waiting fact for a promoted run that has not dispatched"
     const testLayer = layer.pipe(
       Layer.provide(
         Layer.mergeAll(
-          Layer.mock(ProjectionStore.ProjectionStoreV2)({
-            getShellSnapshot: () => Effect.die("watchdog must query runs by status"),
-            listRunsByStatus: (input) =>
+          Layer.mock(QueuedRunCandidates)({
+            list: (input) =>
               Effect.sync(() => {
                 runQueries.push(input);
                 return projection.runs;
               }),
+          }),
+          Layer.mock(ProjectionStore.ProjectionStoreV2)({
             getThreadProjection: (id) =>
               Effect.sync(() => {
                 projectionReadIds.push(id);
@@ -152,13 +155,13 @@ it("advances a bounded watchdog scan past the first 100 stale runs", async () =>
       runs: staleRuns,
       turnItems: [],
     } as unknown as OrchestrationV2ThreadProjection;
-    const queries: Array<ProjectionStore.ProjectionStoreRunsByStatusInput> = [];
+    const queries: Array<CandidateQuery> = [];
     const observedRunIds: Array<RunId> = [];
     const testLayer = layer.pipe(
       Layer.provide(
         Layer.mergeAll(
-          Layer.mock(ProjectionStore.ProjectionStoreV2)({
-            listRunsByStatus: (input) =>
+          Layer.mock(QueuedRunCandidates)({
+            list: (input) =>
               Effect.sync(() => {
                 queries.push(input);
                 return projection.runs
@@ -168,6 +171,8 @@ it("advances a bounded watchdog scan past the first 100 stale runs", async () =>
                   )
                   .slice(0, input.limit);
               }),
+          }),
+          Layer.mock(ProjectionStore.ProjectionStoreV2)({
             getThreadProjection: () => Effect.succeed(projection),
           }),
           Layer.mock(EventSink.EventSinkV2)({
@@ -245,6 +250,7 @@ it("records one sanitized VCS observation fact without changing the run", async 
                 return [] as never;
               }),
           }),
+          Layer.mock(QueuedRunCandidates)({}),
           IdAllocator.layer,
         ),
       ),
@@ -256,7 +262,13 @@ it("records one sanitized VCS observation fact without changing the run", async 
         threadId,
         runId,
         phase: "start" as const,
-        cause: new Error("git credential secret=should-not-reach-the-timeline"),
+        cause: new VcsProcessExitError({
+          operation: "start",
+          command: "git",
+          cwd: "/repo",
+          exitCode: 1,
+          detail: "credential secret=should-not-reach-the-timeline",
+        }),
       };
       yield* watchdog.recordVcsFailure(input);
       yield* watchdog.recordVcsFailure(input);

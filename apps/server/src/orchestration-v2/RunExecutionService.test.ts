@@ -38,7 +38,7 @@ import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import { EventSinkV2 } from "./EventSink.ts";
 import { IdAllocatorV2, layer as idAllocatorLayer } from "./IdAllocator.ts";
 import {
-  ProviderAdapterProtocolError,
+  ProviderResumeFailedError,
   type ProviderAdapterV2Event,
   type ProviderAdapterV2SessionRuntime,
 } from "./ProviderAdapter.ts";
@@ -575,7 +575,7 @@ it.effect("refreshes MCP credential liveness before calling the provider", () =>
   }).pipe(Effect.provide(RunExecutionTestLayer)),
 );
 
-it.effect("terminalizes the run when the provider rejects its first turn", () =>
+it.effect("terminalizes the run when native provider resume fails before its first turn", () =>
   Effect.gen(function* () {
     const threadId = ThreadId.make("thread:run-execution-start-failure");
     const runId = RunId.make("run:run-execution-start-failure");
@@ -608,9 +608,10 @@ it.effect("terminalizes the run when the provider rejects its first turn", () =>
           events: Stream.never,
           startTurn: () =>
             Effect.fail(
-              new ProviderAdapterProtocolError({
+              new ProviderResumeFailedError({
                 driver,
-                detail: "unsupported Codex CLI",
+                providerThreadId,
+                detail: "recorded native resume cause",
               }),
             ),
         } as unknown as ProviderAdapterV2SessionRuntime,
@@ -675,6 +676,12 @@ it.effect("terminalizes the run when the provider rejects its first turn", () =>
         (event) => event.type === "turn-item.updated" && event.payload.status === "failed",
       ),
     );
+    const failureItem = events.find(
+      (event) => event.type === "turn-item.updated" && "failure" in event.payload,
+    );
+    assert.isDefined(failureItem);
+    if (failureItem === undefined || !("failure" in failureItem.payload)) return;
+    assert.include(failureItem.payload.failure.message, "recorded native resume cause");
   }),
 );
 
