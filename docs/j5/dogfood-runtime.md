@@ -33,6 +33,9 @@ that produced it. Decisions and their load-bearing reasons are recorded inline.
   with idempotent retries. **A restart costs in-flight turns, never ledger messages or
   obligations.** Operating discipline: prefer updating when the fleet is quiet; restarting under
   load is acceptable when needed.
+- **Native provider history is never silently replaced.** If a provider thread with a native
+  reference cannot resume, its turn fails with the recorded cause; only a future explicit
+  fall-back act may request a digest re-prime.
 - **Managed like the box's other services.** The box already runs upstream T3 as an
   Ansible-reconciled per-user systemd service with an exact-version pin. J5 mirrors that template —
   dedicated service user, per-user unit, Ansible owns reconciliation — with one difference: the
