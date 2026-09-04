@@ -157,7 +157,7 @@ As `j5dev` (Ansible reconciles all of this):
    In practice the homelab Ansible playbook owns this (with drift guards that refuse Serve entries
    outside the sanctioned T3 + J5 set); the commands above are what it converges to.
 
-6. **Pairing.** Headless serve prints its pairing details (URL with token) on startup — read them
+6. **Pairing.** The printed pairing URL is the readiness signal; a listening port or `Listening on` is not. Headless serve prints its pairing details (URL with token) on startup — read them
    with `journalctl --user -u j5code -e`. That startup URL carries admin scopes. To mint a fresh
    standard-scope token later:
 

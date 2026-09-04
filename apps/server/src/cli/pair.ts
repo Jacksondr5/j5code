@@ -57,6 +57,11 @@ import { baseDirFlag, DurationFromString } from "./config.ts";
 
 const WELL_KNOWN_ENVIRONMENT_PATH = "/.well-known/t3/environment";
 const PAIR_PROBE_TIMEOUT = Duration.millis(2_500);
+// The runtime file is deliberately written only once the server accepts
+// commands. A just-started server can therefore be listening before this file
+// exists; give activation a small, bounded chance to finish.
+const RUNTIME_FILE_RETRY_ATTEMPTS = 4;
+const RUNTIME_FILE_RETRY_DELAY = Duration.seconds(1);
 // Tailscale provisions an HTTPS certificate on the first request to a fresh
 // serve mapping, which can take a few seconds.
 const TAILSCALE_PROBE_ATTEMPTS = 5;
@@ -80,6 +85,28 @@ export class NoRunningServerError extends Schema.TaggedErrorClass<NoRunningServe
       ...this.checkedStatePaths.map((statePath) => `  checked ${statePath}`),
       "Start one with `npx t3 serve`, or connect this machine with T3 Connect: `npx t3 connect`.",
     ].join("\n");
+  }
+}
+
+export class NoRuntimeFileUnderBaseError extends Schema.TaggedErrorClass<NoRuntimeFileUnderBaseError>()(
+  "NoRuntimeFileUnderBaseError",
+  {
+    baseDir: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `No runtime file under ${this.baseDir} — either no server is running, or one is still starting. The file appears at activation; wait for the printed pairing URL, then retry.`;
+  }
+}
+
+export class WorktreePairingRefusedError extends Schema.TaggedErrorClass<WorktreePairingRefusedError>()(
+  "WorktreePairingRefusedError",
+  {
+    worktreeHome: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `No running server found under worktree home ${this.worktreeHome}. Refusing to fall through to another home; start one here, or pass --base-dir <path> to target another server explicitly.`;
   }
 }
 
@@ -247,25 +274,15 @@ interface DiscoveredPairTarget {
   readonly descriptor: ExecutionEnvironmentDescriptor;
 }
 
-const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
-  explicitBaseDir: string | undefined,
-) {
-  const bases: Array<string> = [];
-  if (explicitBaseDir !== undefined && explicitBaseDir.trim().length > 0) {
-    bases.push(yield* resolveBaseDir(explicitBaseDir));
-  } else {
-    // Same precedence as dev-runner: inside a linked worktree its own `.j5code`
-    // outranks the shared home, so `t3 pair` in a worktree pairs with the dev
-    // server under test rather than the daily-driver install.
-    const worktreeHome = yield* resolveWorktreeT3Home(process.cwd());
-    if (worktreeHome !== undefined) {
-      bases.push(worktreeHome);
-    }
-    const envHome = yield* Config.string("J5CODE_HOME").pipe(Config.option);
-    bases.push(yield* resolveBaseDir(Option.getOrUndefined(envHome)));
-  }
+interface PairTargetScan {
+  readonly checkedStatePaths: ReadonlyArray<string>;
+  readonly foundRuntimeFile: boolean;
+  readonly target: DiscoveredPairTarget | undefined;
+}
 
+const scanPairTargets = Effect.fn("pair.scanPairTargets")(function* (bases: ReadonlyArray<string>) {
   const checkedStatePaths: Array<string> = [];
+  let foundRuntimeFile = false;
   for (const baseDir of new Set(bases)) {
     for (const variant of ["userdata", "dev"] as const) {
       const derivedPaths = yield* ServerConfig.deriveServerPaths(
@@ -279,6 +296,7 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
       if (Option.isNone(state)) {
         continue;
       }
+      foundRuntimeFile = true;
       // The pid check guards against a dead server's state file whose port
       // was since reused by a different server: pairing would then mint a
       // token in the old database while the QR code points at the new server.
@@ -290,14 +308,60 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
         continue;
       }
       return {
-        baseDir,
-        variant,
-        state: state.value,
-        descriptor: probed.descriptor,
-      } satisfies DiscoveredPairTarget;
+        checkedStatePaths,
+        foundRuntimeFile,
+        target: {
+          baseDir,
+          variant,
+          state: state.value,
+          descriptor: probed.descriptor,
+        } satisfies DiscoveredPairTarget,
+      } satisfies PairTargetScan;
     }
   }
-  return yield* new NoRunningServerError({ checkedStatePaths });
+  return { checkedStatePaths, foundRuntimeFile, target: undefined } satisfies PairTargetScan;
+});
+
+const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
+  explicitBaseDir: string | undefined,
+) {
+  if (explicitBaseDir !== undefined && explicitBaseDir.trim().length > 0) {
+    const baseDir = yield* resolveBaseDir(explicitBaseDir);
+    let scan = yield* scanPairTargets([baseDir]);
+    for (
+      let attempt = 1;
+      scan.target === undefined && !scan.foundRuntimeFile && attempt < RUNTIME_FILE_RETRY_ATTEMPTS;
+      attempt += 1
+    ) {
+      yield* Effect.sleep(RUNTIME_FILE_RETRY_DELAY);
+      scan = yield* scanPairTargets([baseDir]);
+    }
+    if (scan.target !== undefined) {
+      return scan.target;
+    }
+    if (!scan.foundRuntimeFile) {
+      return yield* new NoRuntimeFileUnderBaseError({ baseDir });
+    }
+    return yield* new NoRunningServerError({ checkedStatePaths: [...scan.checkedStatePaths] });
+  }
+
+  // A linked worktree is an isolation boundary. Its home must never silently
+  // fall through to an ambient or default shared home.
+  const worktreeHome = yield* resolveWorktreeT3Home(process.cwd());
+  if (worktreeHome !== undefined) {
+    const scan = yield* scanPairTargets([worktreeHome]);
+    if (scan.target !== undefined) {
+      return scan.target;
+    }
+    return yield* new WorktreePairingRefusedError({ worktreeHome });
+  }
+
+  const envHome = yield* Config.string("J5CODE_HOME").pipe(Config.option);
+  const scan = yield* scanPairTargets([yield* resolveBaseDir(Option.getOrUndefined(envHome))]);
+  if (scan.target !== undefined) {
+    return scan.target;
+  }
+  return yield* new NoRunningServerError({ checkedStatePaths: [...scan.checkedStatePaths] });
 });
 
 /**
