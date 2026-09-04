@@ -3,6 +3,7 @@ import { classifyTaskAgentKind, type OrchestrationThreadActivity } from "@t3tool
 import {
   deriveAgentPanelModel,
   foldSubagentActivities,
+  formatSubagentDisplayTitle,
   formatSubagentModelLabel,
   formatSubagentTokenCount,
   isAgentAttributedToolActivity,
@@ -582,6 +583,14 @@ describe("formatSubagentTokenCount", () => {
     expect(formatSubagentTokenCount(41200)).toBe("41.2k");
     expect(formatSubagentTokenCount(247000)).toBe("247k");
     expect(formatSubagentTokenCount(1_400_000)).toBe("1.4M");
+  });
+});
+
+describe("formatSubagentDisplayTitle", () => {
+  it("turns canonical paths into concise human-facing names", () => {
+    expect(formatSubagentDisplayTitle("/root/scout")).toBe("Scout");
+    expect(formatSubagentDisplayTitle("/root/security_review")).toBe("Security review");
+    expect(formatSubagentDisplayTitle("Subagent: Package audit")).toBe("Package audit");
   });
 });
 
