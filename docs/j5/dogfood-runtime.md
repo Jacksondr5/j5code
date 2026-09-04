@@ -63,11 +63,13 @@ agreement.
 
 As `j5dev` (Ansible reconciles all of this):
 
-1. **Toolchain.** `git`, `sqlite3`, `fnm`, and via fnm the Node version in the checkout's `.nvmrc`
-   (currently 24.14.0). Install the pnpm version from the repo's `packageManager` field under that
+1. **Toolchain.** `git`, `gh`, `sqlite3`, `build-essential`, `python3`, `fnm`, and via fnm the Node
+   version in the checkout's `.nvmrc` (currently 24.14.0). Install the pnpm version from the repo's
+   `packageManager` field under that
    Node; the server's Node distribution has no Corepack executable. Rust is **not** required —
    it is only used for desktop packaging. Codex CLI **≥ 0.151.0** is required: the server refuses an older app-server
-   with a named turn failure instead of decoding its responses.
+   with a named turn failure instead of decoding its responses. The C/C++ toolchain and Python
+   support native dependency builds; `gh` supports repository and pull-request work.
 2. **Checkout and first build.**
 
    ```sh
@@ -107,7 +109,7 @@ As `j5dev` (Ansible reconciles all of this):
    Type=simple
    WorkingDirectory=%h/j5code
    Environment=J5CODE_HOME=%h/.j5code
-   ExecStart=/usr/bin/env bash -lc 'exec fnm exec --using "$(cat .nvmrc)" node apps/server/dist/bin.mjs serve --port 5773 --host 127.0.0.1'
+   ExecStart=/usr/bin/env bash -lc 'exec node apps/server/dist/bin.mjs serve --port 5773 --host 127.0.0.1'
    Restart=always
    RestartSec=5
    KillMode=mixed
@@ -117,9 +119,12 @@ As `j5dev` (Ansible reconciles all of this):
    WantedBy=default.target
    ```
 
-   `bash -lc` exists to put `fnm` on PATH; if Ansible instead manages a stable Node path, point
-   `ExecStart` at that node binary directly. `serve` runs headless: no browser launch, no
-   auto-bootstrap of a project from the working directory.
+   Ansible configures `.profile` to prepend the checkout-pinned fnm Node installation's `bin`
+   directory to PATH. The login shell resolves that Node, then `exec` makes Node systemd's main
+   process so SIGTERM reaches the server for graceful shutdown. Keep that PATH aligned when the
+   checkout's Node pin changes; verify the executable behind the unit's `MainPID` after startup.
+   `serve` runs headless: no browser launch, no auto-bootstrap of a project from the working
+   directory.
 
    The unit deliberately does **not** use the server's built-in `--tailscale-serve` flags: applying
    Serve config requires root or the machine's single Tailscale operator slot, and `j5dev` stays
