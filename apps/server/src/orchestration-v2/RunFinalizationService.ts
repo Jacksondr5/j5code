@@ -50,6 +50,17 @@ export const make = Effect.gen(function* () {
   const queuedRunWatchdog = yield* QueuedRunWatchdog;
   const isVcsError = Schema.is(VcsError);
 
+  const findVcsError = (cause: unknown) => {
+    const seen = new Set<unknown>();
+    let current = cause;
+    while (typeof current === "object" && current !== null && !seen.has(current)) {
+      if (isVcsError(current)) return current;
+      seen.add(current);
+      current = "cause" in current ? current.cause : undefined;
+    }
+    return undefined;
+  };
+
   const finalize: RunFinalizationService["Service"]["finalize"] = Effect.fn(
     "RunFinalizationService.finalize",
   )(function* (input) {
@@ -82,18 +93,19 @@ export const make = Effect.gen(function* () {
   return RunFinalizationService.of({
     finalize: (input) =>
       finalize(input).pipe(
-        Effect.tapError((error) =>
-          isVcsError(error.cause)
-            ? queuedRunWatchdog
+        Effect.tapError((error) => {
+          const vcsError = findVcsError(error.cause);
+          return vcsError === undefined
+            ? Effect.void
+            : queuedRunWatchdog
                 .recordVcsFailure({
                   threadId: input.threadId,
                   runId: input.runId,
                   phase: "finalization",
-                  cause: error.cause,
+                  cause: vcsError,
                 })
-                .pipe(Effect.catchCause(() => Effect.void))
-            : Effect.void,
-        ),
+                .pipe(Effect.catchCause(() => Effect.void));
+        }),
       ),
   });
 });
