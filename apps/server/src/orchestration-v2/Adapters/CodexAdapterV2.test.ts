@@ -46,6 +46,7 @@ import {
 } from "../ProviderAdapter.ts";
 import type { ProviderContinuationRequest } from "../ProviderContinuationRequests.ts";
 import {
+  approvalDecisionToLegacyReviewDecision,
   buildCodexTurnStartParams,
   CODEX_DEFAULT_INSTANCE_ID,
   CODEX_DRIVER_KIND,
@@ -922,7 +923,7 @@ function codexReplayPreamble(input: {
       frame: {
         id: 1,
         result: {
-          userAgent: "t3code_desktop/0.144.0",
+          userAgent: "t3code_desktop/0.152.1",
           codexHome: "/tmp/codex-home",
           platformFamily: "unix",
           platformOs: "macos",
@@ -945,6 +946,7 @@ function codexReplayPreamble(input: {
             id: input.nativeThreadId,
             sessionId: input.nativeThreadId,
             forkedFromId: null,
+            projectId: null,
             preview: "",
             ephemeral: false,
             modelProvider: "openai",
@@ -3538,4 +3540,20 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       }).pipe(Effect.provide(Layer.merge(idAllocatorLayer, NodeServices.layer))),
     ),
   );
+});
+
+describe("CodexAdapterV2 approval decisions", () => {
+  it("maps a decline to Codex's structured denial with truthful J5 wording", () => {
+    // J5 cannot tell a human decline from a policy one at this seam, so the
+    // rejection never claims the user did it.
+    assert.deepEqual(approvalDecisionToLegacyReviewDecision("decline"), {
+      denied: { rejection: "J5 did not approve this request." },
+    });
+    assert.strictEqual(approvalDecisionToLegacyReviewDecision("accept"), "approved");
+    assert.strictEqual(
+      approvalDecisionToLegacyReviewDecision("acceptForSession"),
+      "approved_for_session",
+    );
+    assert.strictEqual(approvalDecisionToLegacyReviewDecision("cancel"), "abort");
+  });
 });
