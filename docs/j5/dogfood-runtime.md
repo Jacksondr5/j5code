@@ -67,8 +67,9 @@ As `j5dev` (Ansible reconciles all of this):
    version in the checkout's `.nvmrc` (currently 24.14.0). Install the pnpm version from the repo's
    `packageManager` field under that
    Node; the server's Node distribution has no Corepack executable. Rust is **not** required —
-   it is only used for desktop packaging. Codex CLI **≥ 0.151.0** is required: the server refuses an older app-server
-   with a named turn failure instead of decoding its responses. The C/C++ toolchain and Python
+   it is only used for desktop packaging. Codex CLI **≥ 0.151.0** is the protocol floor; use the
+   tested **0.153.3** for GPT-6 Astra. The server refuses an older app-server with a named turn
+   failure instead of decoding its responses. The C/C++ toolchain and Python
    support native dependency builds; `gh` supports repository and pull-request work.
 2. **Checkout and first build.**
 
@@ -110,6 +111,7 @@ As `j5dev` (Ansible reconciles all of this):
    WorkingDirectory=%h/j5code
    Environment=J5CODE_HOME=%h/.j5code
    ExecStart=/usr/bin/env bash -lc 'exec node apps/server/dist/bin.mjs serve --port 5773 --host 127.0.0.1'
+   SuccessExitStatus=130
    Restart=always
    RestartSec=5
    KillMode=mixed
@@ -123,7 +125,8 @@ As `j5dev` (Ansible reconciles all of this):
    prepend that fnm Node installation's `bin` directory to PATH. The login shell therefore
    resolves the updated pin after a deployment, then `exec` makes Node systemd's main process
    so SIGTERM reaches the server for graceful shutdown. Verify the executable behind the unit's
-   `MainPID` after startup.
+   `MainPID` after startup. The server exits 130 after signal-driven shutdown reconciliation;
+   `SuccessExitStatus=130` treats that normal shutdown as successful in systemd.
    `serve` runs headless: no browser launch, no auto-bootstrap of a project from the working
    directory.
 
@@ -220,6 +223,10 @@ As `j5dev` (Ansible reconciles all of this):
    Complete the CLI login instructions from an interactive SSH session. Keep their credentials
    in `j5dev`'s own home; do not symlink T3's provider state. Check provider readiness in J5 and
    complete one real turn with each provider before treating the environment as ready for work.
+   Codex 0.153.3 with GPT-6 Astra and Claude 2.1.261 with Fable 5.1 completed real J5 turns on the
+   remote host. Restart the J5 service after updating a provider CLI: persistent provider
+   subprocesses keep using the old executable until restarted. Prefer a quiet fleet because
+   that restart cancels active turns.
 
 ## Connecting the client
 
