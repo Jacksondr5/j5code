@@ -272,7 +272,9 @@ The script, in order: prints the current commit (the rollback target), snapshots
 `VACUUM INTO` (safe while the server runs), fast-forwards `j5/main`, installs that commit's Node
 and pnpm versions, reinstalls dependencies with the frozen lockfile, rebuilds server + web bundle,
 restarts the unit, and waits until the server answers on the loopback port. Build happens before
-restart, so downtime is the restart itself.
+restart, so downtime is the restart itself. Readiness gets 30 probes, each with a one-second
+connection timeout and two-second total request timeout, separated by one-second delays. The
+check fails after about 90 seconds at most, rather than hanging on a stalled response.
 
 What everyone sees at restart: in-flight agent turns end as "Cancelled because the server
 restarted before the provider work completed"; queued A2A deliveries drain on boot; nothing else

@@ -31,13 +31,13 @@ fnm exec --using "$node_version" pnpm exec vp run --filter t3 build
 systemctl --user restart "$service"
 
 for _ in $(seq 1 30); do
-  if curl -fsS "http://127.0.0.1:$port/" >/dev/null 2>&1; then
+  if curl --connect-timeout 1 --max-time 2 -fsS "http://127.0.0.1:$port/" >/dev/null 2>&1; then
     echo "Server is answering on 127.0.0.1:$port."
     exit 0
   fi
   sleep 1
 done
 
-echo "Server did not answer within 30s. Inspect: journalctl --user -u $service -e" >&2
+echo "Server did not answer after 30 probes (2s request limit, 1s retry delay). Inspect: journalctl --user -u $service -e" >&2
 echo "Rollback: git checkout $previous_ref, rebuild, restore the pre-update snapshot (docs/j5/dogfood-runtime.md)." >&2
 exit 1
