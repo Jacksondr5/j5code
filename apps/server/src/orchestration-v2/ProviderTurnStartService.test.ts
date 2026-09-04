@@ -28,6 +28,7 @@ import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import {
+  ProviderAdapterEnsureThreadError,
   ProviderAdapterResumeThreadError,
   type ProviderAdapterV2SessionRuntime,
 } from "./ProviderAdapter.ts";
@@ -490,6 +491,77 @@ it("keeps the no-native-ref fresh-start path unchanged", async () => {
   expect(resumeThread).not.toHaveBeenCalled();
   expect(ensureThread).toHaveBeenCalledTimes(1);
   expect(startRootRun).toHaveBeenCalledTimes(1);
+});
+
+it("fails a fresh provider thread through run execution when the Codex CLI is unsupported", async () => {
+  const fixture = makeResumeFallbackFixture({ suffix: "fresh_unsupported_cli" });
+  const providerThread = { ...fixture.providerThread, nativeThreadRef: null };
+  const projection = {
+    ...fixture.projection,
+    providerThreads: [providerThread],
+    providerTurns: [],
+    subagents: [],
+  } as unknown as OrchestrationV2ThreadProjection;
+  const resumeThread = vi.fn(() => Effect.die("resumeThread must not run without a native ref"));
+  let startedSession: ProviderAdapterV2SessionRuntime | undefined;
+  const startRootRun = vi.fn((input: { readonly session: ProviderAdapterV2SessionRuntime }) => {
+    startedSession = input.session;
+    return Effect.void;
+  });
+  const layer = ProviderTurnStart.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({}),
+        Layer.mock(EventSink.EventSinkV2)({
+          writeIfRunCurrent: () => Effect.succeed({ committed: true, storedEvents: [] }),
+        }),
+        IdAllocator.layer,
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getThreadProjection: () => Effect.succeed(projection),
+        }),
+        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
+          open: () =>
+            Effect.succeed({
+              driver: CODEX_DRIVER,
+              providerSession: { id: fixture.providerSessionId },
+              resumeThread,
+              ensureThread: () =>
+                assertSupportedCodexCliVersion(
+                  "t3code_desktop/0.120.0 (Mac OS 26.4.1; arm64)",
+                ).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ProviderAdapterEnsureThreadError({
+                        driver: CODEX_DRIVER,
+                        threadId: fixture.threadId,
+                        cause,
+                      }),
+                  ),
+                ),
+            } as never),
+        }),
+        Layer.mock(RunExecutionService.RunExecutionServiceV2)({
+          startRootRun: startRootRun as never,
+        }),
+        Layer.mock(RuntimePolicy.RuntimePolicyV2)({
+          resolve: () => Effect.succeed({} as never),
+        }),
+      ),
+    ),
+  );
+
+  await Effect.flatMap(ProviderTurnStart.ProviderTurnStartServiceV2, (service) =>
+    service.start({ threadId: fixture.threadId, runId: fixture.runId }),
+  ).pipe(Effect.provide(layer), Effect.runPromise);
+
+  expect(resumeThread).not.toHaveBeenCalled();
+  expect(startRootRun).toHaveBeenCalledTimes(1);
+  expect(startedSession).toBeDefined();
+  const startFailure = await startedSession!
+    .startTurn({} as never)
+    .pipe(Effect.flip, Effect.runPromise);
+  expect(startFailure._tag).toBe("ProviderAdapterProtocolError");
+  expect(startFailure.message).toContain("J5 requires Codex CLI ≥ 0.151.0; found 0.120.0");
 });
 
 it("fails the run through run execution instead of falling back when the Codex CLI is unsupported", async () => {

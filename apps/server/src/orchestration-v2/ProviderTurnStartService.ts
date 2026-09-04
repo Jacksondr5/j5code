@@ -21,8 +21,9 @@ import {
   providerMessageWithContextHandoffs,
 } from "./ContextHandoffService.ts";
 import { IdAllocatorV2 } from "./IdAllocator.ts";
+import { findCodexCliVersionUnsupportedError } from "../j5/codex/CodexCliVersionGate.ts";
 import { ProjectionStoreV2 } from "./ProjectionStore.ts";
-import { ProviderResumeFailedError } from "./ProviderAdapter.ts";
+import { ProviderAdapterProtocolError, ProviderResumeFailedError } from "./ProviderAdapter.ts";
 import { makeProviderFailure } from "./ProviderFailure.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import {
@@ -321,13 +322,14 @@ export const layer: Layer.Layer<
         return replacement;
       });
       const loadResult = yield* Effect.result(loadProviderThread);
-      // J5: a native-resume failure is fatal. Surface it through run execution
-      // instead of retrying or replacing the provider thread.
+      // J5: native-resume failures and unsupported Codex CLIs are fatal. Surface
+      // either through run execution instead of retrying or replacing the provider
+      // thread.
       const fatalStartFailure =
         loadResult._tag === "Failure"
           ? isProviderResumeFailedError(loadResult.failure)
             ? loadResult.failure
-            : undefined
+            : findCodexCliVersionUnsupportedError(loadResult.failure)
           : undefined;
       if (loadResult._tag === "Failure" && fatalStartFailure === undefined) {
         return yield* loadResult.failure;
@@ -339,7 +341,15 @@ export const layer: Layer.Layer<
           ? openedSession
           : {
               ...openedSession,
-              startTurn: () => Effect.fail(fatalStartFailure),
+              startTurn: () =>
+                isProviderResumeFailedError(fatalStartFailure)
+                  ? Effect.fail(fatalStartFailure)
+                  : Effect.fail(
+                      new ProviderAdapterProtocolError({
+                        driver: openedSession.driver,
+                        detail: fatalStartFailure.message,
+                      }),
+                    ),
             };
       if (!(yield* isCurrentAttemptInStatus("starting"))) {
         return;
