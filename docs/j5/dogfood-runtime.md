@@ -65,7 +65,8 @@ As `j5dev` (Ansible reconciles all of this):
 1. **Toolchain.** `git`, `sqlite3`, `fnm`, and via fnm the Node version in the checkout's `.nvmrc`
    (currently 24.14.0). Enable corepack under that Node (`corepack enable`) so the repo's
    `packageManager` field provides pnpm 11.10.0. Rust is **not** required — it is only used for
-   desktop packaging.
+   desktop packaging. Codex CLI **≥ 0.151.0** is required: the server refuses an older app-server
+   with a named turn failure instead of decoding its responses.
 2. **Checkout and first build.**
 
    ```sh

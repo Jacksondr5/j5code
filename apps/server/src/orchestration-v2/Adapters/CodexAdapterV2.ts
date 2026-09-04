@@ -47,6 +47,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+import { assertSupportedCodexCliVersion } from "../../j5/codex/CodexCliVersionGate.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import { ServerConfig } from "../../config.ts";
@@ -1440,10 +1441,13 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
             return;
           }
 
-          yield* client.request("initialize", {
+          const initializeResponse = yield* client.request("initialize", {
             clientInfo: CODEX_CLIENT_INFO,
             capabilities: CODEX_CLIENT_CAPABILITIES,
           });
+          // J5: fail closed before any thread request reaches an app-server older
+          // than the generated protocol schema (see j5/codex/CodexCliVersionGate.ts).
+          yield* assertSupportedCodexCliVersion(initializeResponse.userAgent);
           yield* client.notify("initialized", undefined);
           yield* Ref.set(initialized, true);
         });

@@ -20,7 +20,13 @@ import {
   providerMessageWithContextHandoffs,
 } from "./ContextHandoffService.ts";
 import { IdAllocatorV2 } from "./IdAllocator.ts";
+import { findCodexCliVersionUnsupportedError } from "../j5/codex/CodexCliVersionGate.ts";
 import { ProjectionStoreV2 } from "./ProjectionStore.ts";
+import { ProviderAdapterProtocolError } from "./ProviderAdapter.ts";
+import {
+  MAX_PROVIDER_FAILURE_MESSAGE_LENGTH,
+  redactProviderFailureText,
+} from "./ProviderFailure.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import {
   canRouteRelatedSubagent,
@@ -38,6 +44,79 @@ export class ProviderTurnStartError extends Schema.TaggedErrorClass<ProviderTurn
 ) {}
 
 const isProviderTurnStartError = Schema.is(ProviderTurnStartError);
+
+const MAX_RESUME_FAILURE_DEPTH = 4;
+const MAX_RESUME_FAILURE_FIELD_LENGTH = 1_024;
+
+function boundedFailureText(value: string, maxLength: number): string {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`;
+}
+
+/**
+ * Flattens a provider resume failure (adapter error → Codex request error →
+ * schema error) into a JSON-safe record. Each tagged error keeps its own
+ * fields, which is where the Codex schema issue diagnostics live, while issue
+ * trees and stacks are dropped and the cause chain is walked last.
+ */
+function describeResumeFailure(value: unknown, depth: number): unknown {
+  if (typeof value === "string") {
+    return boundedFailureText(value, MAX_RESUME_FAILURE_FIELD_LENGTH);
+  }
+  if (typeof value === "bigint" || typeof value === "symbol" || typeof value === "function") {
+    return String(value);
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (depth >= MAX_RESUME_FAILURE_DEPTH) {
+    return value instanceof Error
+      ? boundedFailureText(value.message, MAX_RESUME_FAILURE_FIELD_LENGTH)
+      : "[truncated]";
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, 32).map((entry) => describeResumeFailure(entry, depth + 1));
+  }
+  const record: Record<string, unknown> = {};
+  const tag = (value as { readonly _tag?: unknown })._tag;
+  if (typeof tag === "string") {
+    record._tag = tag;
+  } else if (value instanceof Error) {
+    record.name = value.name;
+  }
+  if (value instanceof Error) {
+    record.message = boundedFailureText(value.message, MAX_RESUME_FAILURE_FIELD_LENGTH);
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (
+      key === "_tag" ||
+      key === "message" ||
+      key === "stack" ||
+      key === "issue" ||
+      key === "cause" ||
+      key.startsWith("~") ||
+      typeof child === "function"
+    ) {
+      continue;
+    }
+    record[key] = describeResumeFailure(child, depth + 1);
+  }
+  const cause = (value as { readonly cause?: unknown }).cause;
+  if (cause !== undefined) {
+    record.cause = describeResumeFailure(cause, depth + 1);
+  }
+  return record;
+}
+
+/** Serializes the failure that forced a provider resume fallback for the transfer row and logs. */
+export function serializeResumeFailure(error: unknown): string {
+  let text: string;
+  try {
+    text = JSON.stringify(describeResumeFailure(error, 0)) ?? String(error);
+  } catch {
+    text = String(error);
+  }
+  return boundedFailureText(redactProviderFailureText(text), MAX_PROVIDER_FAILURE_MESSAGE_LENGTH);
+}
 
 export interface ProviderTurnStartServiceV2Shape {
   readonly start: (input: {
@@ -162,7 +241,7 @@ export const layer: Layer.Layer<
       const existingSessionProjection = projection.providerSessions.find(
         (candidate) => candidate.id === providerSessionId,
       );
-      const session = yield* providerSessions.open({
+      const openedSession = yield* providerSessions.open({
         threadId: projection.thread.id,
         providerSessionId,
         modelSelection: run.modelSelection,
@@ -172,7 +251,7 @@ export const layer: Layer.Layer<
           : { resumeFromSession: existingSessionProjection }),
       });
       let effectiveHandoffs = handoffs;
-      const loadedProviderThread = yield* Effect.gen(function* () {
+      const loadProviderThread = Effect.gen(function* () {
         if (nativeForkTransfer !== undefined) {
           const sourceProjection = yield* projectionStore.getThreadProjection(
             nativeForkTransfer.sourceThreadId,
@@ -197,7 +276,7 @@ export const layer: Layer.Layer<
               cause: `Native fork transfer ${nativeForkTransfer.id} has no source provider execution.`,
             });
           }
-          return yield* session.forkThread({
+          return yield* openedSession.forkThread({
             sourceProviderThread,
             sourceProviderTurns: sourceProjection.providerTurns,
             targetThreadId: projection.thread.id,
@@ -207,7 +286,7 @@ export const layer: Layer.Layer<
           });
         }
         if (providerThread.nativeThreadRef === null) {
-          return yield* session.ensureThread({
+          return yield* openedSession.ensureThread({
             threadId: projection.thread.id,
             modelSelection: run.modelSelection,
             runtimePolicy: resolvedRuntimePolicy,
@@ -215,7 +294,7 @@ export const layer: Layer.Layer<
           });
         }
         const resumed = yield* Effect.result(
-          session.resumeThread({
+          openedSession.resumeThread({
             providerThread,
             threadId: projection.thread.id,
             modelSelection: run.modelSelection,
@@ -225,14 +304,41 @@ export const layer: Layer.Layer<
         if (resumed._tag === "Success") {
           return resumed.success;
         }
+        if (findCodexCliVersionUnsupportedError(resumed.failure) !== undefined) {
+          // J5: an unsupported app-server cannot be worked around by a fresh thread.
+          return yield* resumed.failure;
+        }
 
-        const replacement = yield* session.ensureThread({
+        const resumeFailure = serializeResumeFailure(resumed.failure);
+        yield* Effect.logWarning(
+          "orchestration V2 provider resume failed; replacing the native thread with portable context",
+          {
+            threadId: projection.thread.id,
+            providerThreadId: providerThread.id,
+            nativeThreadId: providerThread.nativeThreadRef.nativeId,
+            runId: run.id,
+            driver: openedSession.driver,
+            error: resumeFailure,
+          },
+        );
+        const replacement = yield* openedSession.ensureThread({
           threadId: projection.thread.id,
           modelSelection: run.modelSelection,
           runtimePolicy: resolvedRuntimePolicy,
           providerSessionId,
         });
         if (existingResumeFallback !== undefined) {
+          yield* Effect.logWarning(
+            "orchestration V2 provider resume failed again; reusing the existing portable fallback transfer",
+            {
+              threadId: projection.thread.id,
+              providerThreadId: providerThread.id,
+              nativeThreadId: providerThread.nativeThreadRef.nativeId,
+              runId: run.id,
+              transferId: existingResumeFallback.id,
+              error: resumeFailure,
+            },
+          );
           return replacement;
         }
         const transferId = yield* idAllocator.allocate.contextTransfer({
@@ -286,7 +392,7 @@ export const layer: Layer.Layer<
                 status: "resolved_portable",
                 resolution: { strategy: "portable_context", contextHandoffId: handoff.id },
                 createdBy: "system",
-                error: null,
+                error: resumeFailure,
                 createdAt,
                 updatedAt: createdAt,
                 consumedAt: null,
@@ -296,6 +402,32 @@ export const layer: Layer.Layer<
         });
         return replacement;
       });
+      const loadResult = yield* Effect.result(loadProviderThread);
+      // J5: an unsupported Codex CLI (see j5/codex/CodexCliVersionGate.ts) is a fatal
+      // start failure. Surface it as a failed run through run execution's existing
+      // failure path instead of letting the effect worker retry it silently.
+      const fatalStartFailure =
+        loadResult._tag === "Failure"
+          ? findCodexCliVersionUnsupportedError(loadResult.failure)
+          : undefined;
+      if (loadResult._tag === "Failure" && fatalStartFailure === undefined) {
+        return yield* loadResult.failure;
+      }
+      const loadedProviderThread =
+        loadResult._tag === "Success" ? loadResult.success : providerThread;
+      const session =
+        fatalStartFailure === undefined
+          ? openedSession
+          : {
+              ...openedSession,
+              startTurn: () =>
+                Effect.fail(
+                  new ProviderAdapterProtocolError({
+                    driver: openedSession.driver,
+                    detail: fatalStartFailure.message,
+                  }),
+                ),
+            };
       if (!(yield* isCurrentAttemptInStatus("starting"))) {
         return;
       }
