@@ -1,5 +1,10 @@
 import * as Haptics from "expo-haptics";
 import { SymbolView } from "expo-symbols";
+import {
+  deriveSteerState,
+  queuedRowSteerTitle,
+  steerActLabel,
+} from "@t3tools/client-runtime/j5/steer-state";
 import { deriveThreadQueueWorkflowState } from "@t3tools/client-runtime/state/thread-workflows";
 import type { EnvironmentId, RunId, ThreadId } from "@t3tools/contracts";
 import { useMemo, useState } from "react";
@@ -22,6 +27,10 @@ export function ThreadQueueControl(props: {
   const scoped = useThreadProjection(props);
   const workflow = useMemo(
     () => (scoped ? deriveThreadQueueWorkflowState(scoped.projection) : null),
+    [scoped],
+  );
+  const steerState = useMemo(
+    () => (scoped ? deriveSteerState(scoped.projection) : ({ kind: "idle" } as const)),
     [scoped],
   );
   const reorder = useAtomCommand(threadEnvironment.reorderQueuedRun, "reorder queued message");
@@ -119,6 +128,7 @@ export function ThreadQueueControl(props: {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Promote queued message to steer"
+                accessibilityHint={queuedRowSteerTitle(steerState)}
                 disabled={!controls.canSteer}
                 onPress={() => void steer(run.id)}
                 className="min-h-8 flex-row items-center gap-1 rounded-lg border border-neutral-300/60 px-2 disabled:opacity-30 dark:border-white/[0.1]"
@@ -129,7 +139,9 @@ export function ThreadQueueControl(props: {
                   tintColor={iconColor}
                   type="monochrome"
                 />
-                <Text className="font-t3-medium text-2xs text-foreground">Steer</Text>
+                <Text className="font-t3-medium text-2xs text-foreground">
+                  {steerState.kind === "steerable" ? steerActLabel(steerState.act) : "Steer"}
+                </Text>
               </Pressable>
               <Pressable
                 accessibilityRole="button"

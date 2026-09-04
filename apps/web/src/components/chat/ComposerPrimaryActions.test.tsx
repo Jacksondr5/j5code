@@ -245,7 +245,7 @@ describe("ComposerPrimaryActions", () => {
     const markup = renderRunningActions(true, true);
 
     expect(markup).toContain('aria-label="Stop generation"');
-    expect(markup).toContain('aria-label="Send message to steer active turn"');
+    expect(markup).toContain('aria-label="Send message to queue after active turn"');
     expect(markup).toContain('type="submit"');
     expect(markup).toContain("size-9 sm:size-8");
   });
@@ -284,7 +284,7 @@ describe("active-turn primary action", () => {
     );
 
     expect(markup).toContain('aria-label="Stop generation"');
-    expect(markup).not.toContain("steer active turn");
+    expect(markup).not.toContain("queue after active turn");
   });
 
   it("keeps stop reachable while the active composer has content", () => {
@@ -297,10 +297,10 @@ describe("active-turn primary action", () => {
     );
 
     expect(markup).toContain('aria-label="Stop generation"');
-    expect(markup).not.toContain("steer active turn");
+    expect(markup).not.toContain("queue after active turn");
   });
 
-  it("adds the steering send beside stop when Enter-to-send is unavailable", () => {
+  it("adds the queueing send beside stop when Enter-to-send is unavailable", () => {
     const markup = renderToStaticMarkup(
       createElement(ComposerPrimaryActions, {
         ...activeTurnProps,
@@ -311,6 +311,6 @@ describe("active-turn primary action", () => {
     );
 
     expect(markup).toContain('aria-label="Stop generation"');
-    expect(markup).toContain('aria-label="Send message to steer active turn"');
+    expect(markup).toContain('aria-label="Send message to queue after active turn"');
   });
 });

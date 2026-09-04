@@ -233,7 +233,11 @@ import type {
   PendingApproval,
   PendingUserInput,
 } from "../../session-logic";
-import { resolveComposerDispatchMode, type ComposerDispatchMode } from "./composerDispatch";
+import type { ComposerDispatchMode } from "./composerDispatch";
+import { resolveComposerDispatchMode } from "../../j5/composer/composerDispatch";
+import { composerSteerHint } from "../../j5/composer/steerHint";
+import { SteerUnavailableNotice } from "../../j5/composer/SteerUnavailableNotice";
+import { useJ5SteerState } from "../../j5/composer/useJ5SteerState";
 import {
   deriveLatestContextWindowSnapshot,
   formatProviderDisplayName,
@@ -422,6 +426,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   isEnvironmentUnavailable: boolean;
   hasSendableContent: boolean;
   queueShortcutLabel: string;
+  steerHint: { readonly shortcut: boolean; readonly text: string };
   preserveComposerFocusOnPointerDown?: boolean;
   showSendWhileRunning?: boolean;
   onPreviousPendingQuestion: () => void;
@@ -441,7 +446,10 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
       ) : null}
       {props.isRunning && props.hasSendableContent ? (
         <span className="hidden text-[11px] text-muted-foreground/70 sm:inline">
-          <kbd className="font-mono">{props.queueShortcutLabel}</kbd> to queue
+          {props.steerHint.shortcut ? (
+            <kbd className="font-mono">{props.queueShortcutLabel}</kbd>
+          ) : null}{" "}
+          {props.steerHint.text}
         </span>
       ) : null}
       <ComposerPrimaryActions
@@ -697,6 +705,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setThreadError,
     onExpandImage,
   } = props;
+  const j5SteerState = useJ5SteerState(environmentId, activeThreadId);
+  const [j5SteerNoticeRequested, setJ5SteerNoticeRequested] = useState(false);
 
   // ------------------------------------------------------------------
   // Store subscriptions (prompt / images / terminal contexts)
@@ -1882,6 +1892,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         event?.preventDefault();
         return;
       }
+      // An explicit steer with nothing steerable never falls through: keep the
+      // draft and show the run's actual state with its named acts (J5 QS3).
+      if (dispatchMode === "steer" && j5SteerState.kind === "not-steerable") {
+        event?.preventDefault();
+        setJ5SteerNoticeRequested(true);
+        return;
+      }
       // A send while a pasted image is still compressing would strand that
       // image: the turn snapshot wouldn't include it, and it would surface
       // in the *next* draft instead. Only oversized images hit this — small
@@ -1920,6 +1937,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       activeThreadId,
       activePendingProgress,
       blurMobileComposerAfterSend,
+      j5SteerState,
       noProviderAvailable,
       onSend,
       phase,
@@ -3167,6 +3185,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             message={providerInputSubmissionError ?? composerSubmissionError}
           />
 
+          <SteerUnavailableNotice
+            requested={j5SteerNoticeRequested}
+            state={j5SteerState}
+            onInterrupt={handleInterruptPrimaryAction}
+            onQueueInstead={() => submitComposer(undefined, "queue")}
+            onDismiss={() => setJ5SteerNoticeRequested(false)}
+          />
           {/* Bottom toolbar */}
           {isComposerCollapsedMobile ? null : activePendingApproval ? (
             <div className="flex flex-wrap items-center justify-end gap-2 px-3 pb-3 sm:px-4 sm:pb-4">
@@ -3288,6 +3313,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   isPreparingWorktree={isPreparingWorktree}
                   hasSendableContent={composerSendState.hasSendableContent}
                   queueShortcutLabel={isMacPlatform(navigator.platform) ? "⌘↵" : "Ctrl+Enter"}
+                  steerHint={composerSteerHint(j5SteerState)}
                   preserveComposerFocusOnPointerDown={isMobileViewport}
                   showSendWhileRunning={isMobileViewport}
                   onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}

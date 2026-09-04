@@ -29,7 +29,7 @@ interface ComposerPrimaryActionsProps {
   hasSendableContent: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
   /** Enter-to-send is disabled on mobile viewports, where stop would otherwise
-   * be the only primary action and a running turn could not be steered. */
+   * be the only primary action and nothing could be queued behind a running turn. */
   showSendWhileRunning?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
@@ -231,7 +231,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
               : isSendBusy
                 ? "Sending"
                 : isRunning
-                  ? "Send message to steer active turn"
+                  ? "Send message to queue after active turn"
                   : "Send message"
       }
     >
@@ -266,7 +266,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       {showSendWhileRunning && hasSendableContent ? (
         <Tooltip>
           <TooltipTrigger render={sendButton} />
-          <TooltipPopup side="top">Send now to steer the active turn</TooltipPopup>
+          <TooltipPopup side="top">Queued until the active turn ends</TooltipPopup>
         </Tooltip>
       ) : null}
     </>

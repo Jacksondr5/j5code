@@ -39,9 +39,15 @@ platform's law.
 | **Build (nothing exists on either side)** | Open-exchange re-surfacing (a receiver that defers a delivered ask has no "later" — the successor to the retired "auto-wake" question; memo/inbox territory, R24–R35). Orphan/runaway observability (nothing reaps children under any substrate — observe via silence machinery, never auto-kill). Squadron creation UX (SC1–SC4).                                                                                                                                                                                                                                                  | Named build items; each needs its own design pass.                                                                                                                                                                                                                                       |
 
 Transport finding backing the rebuild column (measured 2026-08-29, retained proof databases): the
-A2A delivery path is **proven** for the busy-receiver case — asks steer into the receiver's active
-turn — and code-verified for the idle case (delivery starts a run when no run is active/waiting;
-queued runs are promoted when a blocking run terminalizes). The one v1 proof "failure" was an
+A2A delivery path is **proven** for the busy-receiver case and code-verified for the idle case
+(delivery starts a run when no run is active/waiting; queued runs are promoted when a blocking run
+terminalizes). Revised 2026-09-03 (issue #73): the busy case originally steered the ask into the
+receiver's active turn; that aborted the receiver's unstarted sibling tool calls, so delivery now
+**queues** behind the active turn and starts when it ends. Steer is an explicit human action on
+the queued row or the composer's Mod+Enter chord, never a delivery mode; the control says what a
+steer does on that provider (active steering on Claude, Codex, and OpenCode; interrupt-and-restart
+on Cursor, ACP, and Grok), and when nothing is steerable it names the run's phase and offers
+Interrupt instead of falling through (ruling record QS3/QS4). The one v1 proof "failure" was an
 instructed silence misread as a delivery bug. `delegate_task`'s completion wake therefore fills no
 gap Exchanges leave open.
 

@@ -1,4 +1,9 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  deriveSteerState,
+  queuedRowSteerTitle,
+  steerActLabel,
+} from "@t3tools/client-runtime/j5/steer-state";
 import { deriveThreadQueueWorkflowState } from "@t3tools/client-runtime/state/thread-workflows";
 import type { EnvironmentId, RunId, ThreadId } from "@t3tools/contracts";
 import {
@@ -18,6 +23,7 @@ import {
   participantIdsForThreadA2AEnvelope,
 } from "../../j5/a2a/ThreadA2ARenderer";
 import { useParticipantLabels } from "../../j5/a2a/ParticipantIdentitiesClient";
+import { QueueSteerState } from "../../j5/composer/QueueSteerState";
 import { threadEnvironment } from "../../state/threads";
 import { useThreadProjection } from "../../state/entities";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -71,6 +77,10 @@ export function QueuedRunsControl(props: {
   );
 
   if (items.length === 0) return null;
+
+  // J5 QS3/QS4: the steer control says what it does on this provider, or the
+  // run's actual phase when nothing is steerable.
+  const steerState = projection ? deriveSteerState(projection) : ({ kind: "idle" } as const);
 
   const move = async (runId: RunId, beforeRunId: RunId | null) => {
     setBusyRunId(runId);
@@ -141,6 +151,11 @@ export function QueuedRunsControl(props: {
         <span className="rounded-full bg-muted/70 px-1.5 text-[10px] tabular-nums">
           {items.length}
         </span>
+        <QueueSteerState
+          environmentId={props.environmentId}
+          threadId={props.threadId}
+          state={steerState}
+        />
       </header>
       <ol className="max-h-32 overflow-y-auto px-1">
         {items.map((item, index) => {
@@ -282,11 +297,7 @@ export function QueuedRunsControl(props: {
                     disabled={
                       item.runId === null || busyRunId !== null || !workflow?.canPromoteToSteer
                     }
-                    title={
-                      activeRun === null
-                        ? "There is no active run to steer"
-                        : "Send as a steer instead"
-                    }
+                    title={queuedRowSteerTitle(steerState)}
                     onClick={() => {
                       if (item.runId !== null) {
                         void steer(item.runId);
@@ -294,7 +305,7 @@ export function QueuedRunsControl(props: {
                     }}
                   >
                     <CornerUpRightIcon className="size-3" />
-                    Steer
+                    {steerState.kind === "steerable" ? steerActLabel(steerState.act) : "Steer"}
                   </Button>
                   <Button
                     size="icon-xs"

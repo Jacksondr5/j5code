@@ -13,6 +13,7 @@ import {
   ProviderThreadId,
   ProviderTurnId,
   ThreadId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -26,13 +27,18 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../../mcp/McpSessionRegistry.testkit.ts";
-import { OrchestrationEffectWorkerV2 } from "../../orchestration-v2/EffectWorker.ts";
+import {
+  OrchestrationEffectWorkerV2,
+  type OrchestrationEffectWorkerV2Shape,
+} from "../../orchestration-v2/EffectWorker.ts";
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import type {
   ProviderAdapterV2Event,
+  ProviderAdapterV2InterruptInput,
   ProviderAdapterV2Shape,
   ProviderAdapterV2SteerInput,
+  ProviderAdapterV2TurnInput,
 } from "../../orchestration-v2/ProviderAdapter.ts";
 import {
   OrchestrationV2EventSinkLayerLive,
@@ -100,14 +106,26 @@ interface DeliveryInvocation {
   readonly createdBy: "user" | "agent" | "system";
 }
 
+/** The fake provider's view of one started turn, so a test can drive its tool batch and ending. */
+interface FakeActiveTurn {
+  readonly events: PubSub.PubSub<ProviderAdapterV2Event>;
+  readonly threadId: ThreadId;
+  readonly runId: ProviderAdapterV2TurnInput["runId"];
+  readonly runOrdinal: ProviderAdapterV2TurnInput["runOrdinal"];
+  readonly rootNodeId: ProviderAdapterV2TurnInput["rootNodeId"];
+  readonly attemptId: ProviderAdapterV2TurnInput["attemptId"];
+  readonly providerThreadId: ProviderThreadId;
+  readonly providerTurnId: ProviderTurnId;
+}
+
 interface DeliveryHarness {
   readonly deliveryInvocations: Ref.Ref<ReadonlyArray<DeliveryInvocation>>;
   readonly steerInputs: Ref.Ref<ReadonlyArray<ProviderAdapterV2SteerInput>>;
+  readonly interruptInputs: Ref.Ref<ReadonlyArray<ProviderAdapterV2InterruptInput>>;
+  readonly activeTurns: Ref.Ref<ReadonlyMap<ThreadId, FakeActiveTurn>>;
 }
 
-const makeOrchestrationAdapter = (
-  steerInputs: Ref.Ref<ReadonlyArray<ProviderAdapterV2SteerInput>>,
-): ProviderAdapterV2Shape => ({
+const makeOrchestrationAdapter = (harness: DeliveryHarness): ProviderAdapterV2Shape => ({
   instanceId: modelSelection.instanceId,
   driver,
   getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
@@ -164,11 +182,24 @@ const makeOrchestrationAdapter = (
         startTurn: (input) =>
           Effect.gen(function* () {
             const startedAt = yield* DateTime.now;
+            const providerTurnId = ProviderTurnId.make(`provider-turn:${input.attemptId}`);
+            yield* Ref.update(harness.activeTurns, (existing) =>
+              new Map(existing).set(input.threadId, {
+                events,
+                threadId: input.threadId,
+                runId: input.runId,
+                runOrdinal: input.runOrdinal,
+                rootNodeId: input.rootNodeId,
+                attemptId: input.attemptId,
+                providerThreadId: input.providerThread.id,
+                providerTurnId,
+              }),
+            );
             yield* PubSub.publish(events, {
               type: "provider_turn.updated",
               driver,
               providerTurn: {
-                id: ProviderTurnId.make(`provider-turn:${input.attemptId}`),
+                id: providerTurnId,
                 providerThreadId: input.providerThread.id,
                 nodeId: input.rootNodeId,
                 runAttemptId: input.attemptId,
@@ -184,8 +215,9 @@ const makeOrchestrationAdapter = (
               },
             });
           }),
-        steerTurn: (input) => Ref.update(steerInputs, (existing) => [...existing, input]),
-        interruptTurn: () => Effect.die("interruptTurn is unused by the A2 delivery seam test"),
+        steerTurn: (input) => Ref.update(harness.steerInputs, (existing) => [...existing, input]),
+        interruptTurn: (input) =>
+          Ref.update(harness.interruptInputs, (existing) => [...existing, input]),
         respondToRuntimeRequest: () =>
           Effect.die("respondToRuntimeRequest is unused by the A2 delivery seam test"),
         readThreadSnapshot: () =>
@@ -197,7 +229,7 @@ const makeOrchestrationAdapter = (
 });
 
 const makeTestLayer = (harness: DeliveryHarness) => {
-  const orchestrationAdapter = makeOrchestrationAdapter(harness.steerInputs);
+  const orchestrationAdapter = makeOrchestrationAdapter(harness);
   const providerInstance = {
     instanceId: modelSelection.instanceId,
     driverKind: driver,
@@ -267,6 +299,8 @@ const makeHarness = Effect.gen(function* () {
   return {
     deliveryInvocations: yield* Ref.make<ReadonlyArray<DeliveryInvocation>>([]),
     steerInputs: yield* Ref.make<ReadonlyArray<ProviderAdapterV2SteerInput>>([]),
+    interruptInputs: yield* Ref.make<ReadonlyArray<ProviderAdapterV2InterruptInput>>([]),
+    activeTurns: yield* Ref.make<ReadonlyMap<ThreadId, FakeActiveTurn>>(new Map()),
   } satisfies DeliveryHarness;
 });
 
@@ -389,85 +423,252 @@ it.effect("starts an idle recipient immediately without the implicit auto mode",
   }),
 );
 
-it.effect("steers a busy recipient inside its active turn without queueing a later run", () =>
+/** Runs outbox effects as they become available until the awaited receipt lands. */
+const runWorkerUntil = <A, E>(
+  worker: OrchestrationEffectWorkerV2Shape,
+  receipt: Fiber.Fiber<A, E>,
+) =>
   Effect.gen(function* () {
-    const harness = yield* makeHarness;
-    yield* Effect.gen(function* () {
-      const eventSink = yield* EventSinkV2;
-      const worker = yield* OrchestrationEffectWorkerV2;
-      const threads = yield* ThreadManagementService;
-      const transport = yield* A2ADeliveryTransport;
-      const target = yield* seedTarget("busy");
-      const active = yield* threads.sendToThread({
-        projectId: target.projectId,
-        commandId: CommandId.make("command:j5-a2a-delivery-busy-start"),
-        threadId: target.threadId,
-        messageId: MessageId.make("message:j5-a2a-delivery-busy-start"),
-        text: "Stay active until the peer message arrives.",
-        attachments: [],
-        mode: "auto",
-        createdBy: "user",
-        creationSource: "web",
-      });
-      assert.equal(active.delivery, "started");
+    // Only the wait is raced; a claimed effect always runs to completion so
+    // its lease and provider session are never abandoned mid-flight.
+    while (receipt.pollUnsafe() === undefined) {
+      yield* Effect.raceFirst(Fiber.join(receipt), worker.awaitWork);
+      yield* worker.drain();
+    }
+    return yield* Fiber.join(receipt);
+  });
 
-      const runningEvent = yield* eventSink.stream({ threadId: target.threadId }).pipe(
-        Stream.filter(
-          (stored) =>
-            stored.event.type === "provider-turn.updated" &&
-            stored.event.payload.status === "running",
-        ),
-        Stream.runHead,
-        Effect.forkChild({ startImmediately: true }),
-      );
-      assert.isTrue(yield* worker.runOnce);
-      yield* Fiber.join(runningEvent);
-      const busyProjection = yield* threads.getThreadProjection(target.threadId);
-      assert.equal(latestSteerableRun(busyProjection)?.id, active.run.id);
+/** Emits one fake shell tool call inside the active turn, the way the #73 repro's Bash and sibling calls appear. */
+const publishCommandExecution = (
+  turn: FakeActiveTurn,
+  input: {
+    readonly ordinal: number;
+    readonly command: string;
+    readonly status: "running" | "completed";
+    readonly startedAt: DateTime.Utc;
+    readonly completedAt: DateTime.Utc | null;
+  },
+) =>
+  PubSub.publish(turn.events, {
+    type: "turn_item.updated",
+    driver,
+    turnItem: {
+      id: TurnItemId.make(`turn-item:${turn.threadId}:${turn.runOrdinal}:${input.ordinal}`),
+      threadId: turn.threadId,
+      runId: turn.runId,
+      nodeId: turn.rootNodeId,
+      providerThreadId: turn.providerThreadId,
+      providerTurnId: turn.providerTurnId,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: turn.runOrdinal * 100 + input.ordinal,
+      status: input.status,
+      title: null,
+      startedAt: input.startedAt,
+      completedAt: input.completedAt,
+      updatedAt: input.completedAt ?? input.startedAt,
+      type: "command_execution",
+      input: input.command,
+      ...(input.status === "completed" ? { output: "", exitCode: 0 } : {}),
+    },
+  });
 
-      yield* transport.deliverAgent(target.delivery);
-      yield* transport.deliverAgent(target.delivery);
-      assert.isTrue(yield* worker.runOnce);
+it.effect(
+  "queues behind a busy recipient's active turn and never aborts its running tool batch",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const eventSink = yield* EventSinkV2;
+        const worker = yield* OrchestrationEffectWorkerV2;
+        const threads = yield* ThreadManagementService;
+        const transport = yield* A2ADeliveryTransport;
+        const target = yield* seedTarget("busy");
+        const active = yield* threads.sendToThread({
+          projectId: target.projectId,
+          commandId: CommandId.make("command:j5-a2a-delivery-busy-start"),
+          threadId: target.threadId,
+          messageId: MessageId.make("message:j5-a2a-delivery-busy-start"),
+          text: "Stay active until the peer message arrives.",
+          attachments: [],
+          mode: "auto",
+          createdBy: "user",
+          creationSource: "web",
+        });
+        assert.equal(active.delivery, "started");
 
-      const upstreamMessageId = deliveryMessageId(target.messageId);
-      const projection = yield* threads.getThreadProjection(target.threadId);
-      const deliveredMessages = projection.messages.filter(
-        (candidate) => candidate.id === upstreamMessageId,
-      );
-      assert.lengthOf(deliveredMessages, 1);
-      assert.equal(deliveredMessages[0]?.runId, active.run.id);
-      assert.equal(
-        deliveredMessages[0]?.text,
-        formatPeerEnvelope({
-          senderId: target.senderId,
-          originSquadronId: target.squadronId,
-          exchangeId: target.exchangeId,
-          message: target.message,
-        }),
-      );
-      assert.lengthOf(projection.runs, 1);
-      assert.equal(
-        projection.turnItems.find(
-          (
-            candidate,
-          ): candidate is Extract<OrchestrationV2TurnItem, { readonly type: "user_message" }> =>
-            candidate.type === "user_message" && candidate.messageId === upstreamMessageId,
-        )?.inputIntent,
-        "steer",
-      );
-      assert.deepStrictEqual(
-        (yield* Ref.get(harness.deliveryInvocations))
-          .filter((invocation) => invocation.messageId === upstreamMessageId)
-          .map((invocation) => invocation.mode),
-        ["steer", "steer"],
-      );
-      const steerInputs = yield* Ref.get(harness.steerInputs);
-      assert.lengthOf(steerInputs, 1);
-      assert.equal(steerInputs[0]?.runId, active.run.id);
-      assert.equal(steerInputs[0]?.message.text, deliveredMessages[0]?.text);
-      assert.isFalse(yield* worker.runOnce);
-    }).pipe(Effect.provide(makeTestLayer(harness)));
-  }),
+        const runningEvent = yield* eventSink.stream({ threadId: target.threadId }).pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "provider-turn.updated" &&
+              stored.event.payload.status === "running",
+          ),
+          Stream.runHead,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        assert.isTrue(yield* worker.runOnce);
+        yield* Fiber.join(runningEvent);
+        const busyProjection = yield* threads.getThreadProjection(target.threadId);
+        assert.equal(latestSteerableRun(busyProjection)?.id, active.run.id);
+        const turn = (yield* Ref.get(harness.activeTurns)).get(target.threadId);
+        assert.isDefined(turn);
+
+        // Issue #73's deterministic shape: a long shell call is in flight and its
+        // sibling has not started when the peer message lands mid-turn.
+        const toolStartedAt = yield* DateTime.now;
+        yield* publishCommandExecution(turn!, {
+          ordinal: 1,
+          command: "sleep 20",
+          status: "running",
+          startedAt: toolStartedAt,
+          completedAt: null,
+        });
+
+        yield* transport.deliverAgent(target.delivery);
+        yield* transport.deliverAgent(target.delivery);
+        // Queueing schedules no provider effect: nothing steers or interrupts.
+        assert.isFalse(yield* worker.runOnce);
+
+        const upstreamMessageId = deliveryMessageId(target.messageId);
+        const queuedProjection = yield* threads.getThreadProjection(target.threadId);
+        const deliveredMessages = queuedProjection.messages.filter(
+          (candidate) => candidate.id === upstreamMessageId,
+        );
+        assert.lengthOf(deliveredMessages, 1);
+        assert.equal(
+          deliveredMessages[0]?.text,
+          formatPeerEnvelope({
+            senderId: target.senderId,
+            originSquadronId: target.squadronId,
+            exchangeId: target.exchangeId,
+            message: target.message,
+          }),
+        );
+        assert.lengthOf(queuedProjection.runs, 2);
+        const queuedRun = queuedProjection.runs.find(
+          (candidate) => candidate.userMessageId === upstreamMessageId,
+        );
+        assert.equal(queuedRun?.status, "queued");
+        assert.equal(deliveredMessages[0]?.runId, queuedRun?.id);
+        assert.equal(
+          queuedProjection.runs.find((candidate) => candidate.id === active.run.id)?.status,
+          "running",
+        );
+        assert.isUndefined(
+          queuedProjection.turnItems.find(
+            (candidate) =>
+              candidate.type === "user_message" && candidate.messageId === upstreamMessageId,
+          ),
+        );
+        assert.deepStrictEqual(
+          (yield* Ref.get(harness.deliveryInvocations))
+            .filter((invocation) => invocation.messageId === upstreamMessageId)
+            .map((invocation) => invocation.mode),
+          ["queue", "queue"],
+        );
+        assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
+        assert.lengthOf(yield* Ref.get(harness.interruptInputs), 0);
+
+        // The sibling starts after the incoming message and completes normally,
+        // then the long call and the turn end on their own.
+        const activeCompleted = yield* eventSink.stream({ threadId: target.threadId }).pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "run.updated" &&
+              stored.event.runId === active.run.id &&
+              stored.event.payload.status === "completed",
+          ),
+          Stream.runHead,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const toolCompletedAt = yield* DateTime.now;
+        yield* publishCommandExecution(turn!, {
+          ordinal: 2,
+          command: "echo sibling",
+          status: "completed",
+          startedAt: toolCompletedAt,
+          completedAt: toolCompletedAt,
+        });
+        yield* publishCommandExecution(turn!, {
+          ordinal: 1,
+          command: "sleep 20",
+          status: "completed",
+          startedAt: toolStartedAt,
+          completedAt: toolCompletedAt,
+        });
+        yield* PubSub.publish(turn!.events, {
+          type: "provider_turn.updated",
+          driver,
+          providerTurn: {
+            id: turn!.providerTurnId,
+            providerThreadId: turn!.providerThreadId,
+            nodeId: turn!.rootNodeId,
+            runAttemptId: turn!.attemptId,
+            nativeTurnRef: {
+              driver,
+              nativeId: `native-turn:${turn!.attemptId}`,
+              strength: "strong",
+            },
+            ordinal: turn!.runOrdinal,
+            status: "completed",
+            startedAt: toolStartedAt,
+            completedAt: toolCompletedAt,
+          },
+        });
+        yield* PubSub.publish(turn!.events, {
+          type: "turn.terminal",
+          driver,
+          providerThreadId: turn!.providerThreadId,
+          providerTurnId: turn!.providerTurnId,
+          runOrdinal: turn!.runOrdinal,
+          status: "completed",
+          failure: null,
+          threadDisposition: "reusable",
+        });
+        // Completion lands once the worker captures the run's checkpoint.
+        yield* runWorkerUntil(worker, activeCompleted);
+
+        // The queued delivery becomes the next turn only after the active one ends.
+        const queuedRunning = yield* eventSink.stream({ threadId: target.threadId }).pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "run.updated" &&
+              stored.event.runId === queuedRun?.id &&
+              stored.event.payload.status === "running",
+          ),
+          Stream.runHead,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* runWorkerUntil(worker, queuedRunning);
+
+        const projection = yield* threads.getThreadProjection(target.threadId);
+        assert.equal(
+          projection.runs.find((candidate) => candidate.id === active.run.id)?.status,
+          "completed",
+        );
+        assert.deepStrictEqual(
+          projection.turnItems
+            .filter((candidate) => candidate.type === "command_execution")
+            .map((candidate) => candidate.status),
+          ["completed", "completed"],
+        );
+        assert.equal(
+          projection.runs.find((candidate) => candidate.id === queuedRun?.id)?.status,
+          "running",
+        );
+        assert.equal(
+          projection.turnItems.find(
+            (
+              candidate,
+            ): candidate is Extract<OrchestrationV2TurnItem, { readonly type: "user_message" }> =>
+              candidate.type === "user_message" && candidate.messageId === upstreamMessageId,
+          )?.inputIntent,
+          "queued_turn",
+        );
+        assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
+        assert.lengthOf(yield* Ref.get(harness.interruptInputs), 0);
+      }).pipe(Effect.provide(makeTestLayer(harness)));
+    }),
 );
 
 it.effect("attributes human-origin delivery to the user actor", () =>
