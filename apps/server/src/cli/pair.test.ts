@@ -7,9 +7,9 @@ import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@t3tools/shared/Net";
 import { assert, describe, expect, it } from "@effect/vitest";
+import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as TestConsole from "effect/testing/TestConsole";
 import * as TestClock from "effect/testing/TestClock";
@@ -25,6 +25,7 @@ import {
   DevServerNotProxiableError,
   resolveDirectPairingBaseUrl,
   resolveTailscaleLocalTarget,
+  RuntimeFileActivationDelay,
 } from "./pair.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
@@ -149,15 +150,6 @@ const withWorkingDirectory = <A, E, R>(cwd: string, effect: Effect.Effect<A, E, 
     (previous) => Effect.sync(() => process.chdir(previous)),
   );
 
-const advanceTestClockUntilSettled = Effect.gen(function* () {
-  // The command reaches its activation wait only after filesystem discovery,
-  // so advance in steps rather than racing the first scheduled sleep.
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    yield* TestClock.adjust(Duration.seconds(1));
-    yield* Effect.yieldNow;
-  }
-});
-
 describe("t3 pair", () => {
   it.effect("mints a token and prints a QR pairing URL for a live server", () =>
     withDescriptorServer((origin) =>
@@ -220,12 +212,20 @@ describe("t3 pair", () => {
   it.effect("explains an absent explicit runtime file after waiting for activation", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-none-test-"));
+      const waits: Array<number> = [];
+      const startedAt = yield* Clock.currentTimeMillis;
 
-      const command = yield* provideCliTestLayers(
+      const error = yield* provideCliTestLayers(
         runCli(["pair", "--base-dir", baseDir]).pipe(Effect.flip),
-      ).pipe(Effect.forkChild({ startImmediately: true }));
-      yield* advanceTestClockUntilSettled;
-      const error = yield* Fiber.join(command);
+      ).pipe(
+        Effect.provideService(RuntimeFileActivationDelay, (duration) =>
+          Effect.sync(() => waits.push(Duration.toMillis(duration))).pipe(
+            Effect.andThen(TestClock.adjust(duration)),
+          ),
+        ),
+      );
+      assert.deepEqual(waits, [1_000, 1_000, 1_000]);
+      assert.equal((yield* Clock.currentTimeMillis) - startedAt, 3_000);
 
       const rendered = String(
         typeof error === "object" && error !== null && "cause" in error ? error.cause : error,

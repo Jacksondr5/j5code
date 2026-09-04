@@ -23,6 +23,7 @@ import {
 } from "@t3tools/tailscale";
 import * as Config from "effect/Config";
 import * as Console from "effect/Console";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -68,6 +69,13 @@ const TAILSCALE_PROBE_ATTEMPTS = 5;
 const TAILSCALE_PROBE_RETRY_DELAY = Duration.seconds(1);
 
 export type PairStateVariant = "userdata" | "dev";
+
+/** The activation wait is overridable so callers can test it without wall-clock time. */
+export const RuntimeFileActivationDelay = Context.Reference<
+  (duration: Duration.Duration) => Effect.Effect<void>
+>("t3/cli/RuntimeFileActivationDelay", {
+  defaultValue: () => Effect.sleep,
+});
 
 // deriveServerPaths only checks devUrl for undefined-ness when picking the
 // dev-vs-userdata state directory; the value itself is not used.
@@ -327,13 +335,14 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
 ) {
   if (explicitBaseDir !== undefined && explicitBaseDir.trim().length > 0) {
     const baseDir = yield* resolveBaseDir(explicitBaseDir);
+    const waitForActivation = yield* RuntimeFileActivationDelay;
     let scan = yield* scanPairTargets([baseDir]);
     for (
       let attempt = 1;
       scan.target === undefined && !scan.foundRuntimeFile && attempt < RUNTIME_FILE_RETRY_ATTEMPTS;
       attempt += 1
     ) {
-      yield* Effect.sleep(RUNTIME_FILE_RETRY_DELAY);
+      yield* waitForActivation(RUNTIME_FILE_RETRY_DELAY);
       scan = yield* scanPairTargets([baseDir]);
     }
     if (scan.target !== undefined) {
