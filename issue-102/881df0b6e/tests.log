@@ -1,0 +1,15 @@
+
+ RUN  v4.1.9 /Users/jackson/repos/jacksondr5/j5code-worktrees/issue-102
+
+(node:54276) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:54278) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:54282) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  4 passed (4)
+      Tests  31 passed (31)
+   Start at  17:47:55
+   Duration  2.14s (transform 2.34s, setup 0ms, import 4.08s, tests 1.41s, environment 0ms)
+

@@ -1,0 +1,91 @@
+- link "Go to threads":
+  - /url: /
+  - img "T3"
+  - generic: Code
+- link "Open inbox, 0 open":
+  - /url: /inbox
+- combobox "Search threads"
+- button "New thread":
+- button "Set ambient Squadron scope":
+  - generic: Squadron scope
+- list:
+  - status
+  - button "Issue 102 verification now Snooze thread Settle thread UI Verification Check j5/issue-102-blank-thread":
+    - generic: Issue 102 verification
+    - generic: now
+    - button "Snooze thread":
+    - button "Settle thread":
+      - text: Settle
+    - generic: UI Verification Check
+    - generic: j5/issue-102-blank-thread
+- list:
+  - button "Settings":
+  - button "Pull Requests":
+  - button "Usage":
+- button "Resize Sidebar"
+- main:
+  - button "Toggle thread details panel" [pressed]:
+  - button "Toggle terminal drawer":
+  - button "Toggle right panel":
+  - button "New thread in Issue 102 verification":
+    - generic: Issue 102 verification
+    - generic: issue-102
+  - generic: /
+  - heading "UI Verification Check" [level=2]
+  - paragraph: Send a message to start the conversation.
+  - button "Choose Squadron for this draft" [disabled]:
+    - generic: Issue 102 verification
+  - textbox [active]:
+    - paragraph
+  - generic: Ask for follow-up changes or attach images
+  - button "GPT-5.6-Terra":
+    - generic: GPT-5.6-Terra
+  - separator
+  - button "Medium":
+    - generic: Medium
+  - separator
+  - combobox "Runtime mode":
+    - generic: Full access
+  - textbox: full-access
+  - separator
+  - button "Default mode — click to enter plan mode":
+    - generic: Build
+  - button "Send message" [disabled]:
+  - complementary "Thread details":
+    - region "Workspace":
+      - heading "Workspace" [level=3]
+      - combobox "Workspace":
+        - generic: issue-102
+        - generic: Project folder
+      - textbox: local
+      - group "Open in editor":
+        - button "Open in VS Code":
+          - generic: Open in VS Code
+        - button "Choose editor":
+      - group "Project actions":
+        - button "Project actions":
+          - generic: Actions
+        - button "Choose project action":
+    - region "Version Control":
+      - heading "Version Control" [level=3]
+      - combobox:
+        - generic: j5/issue-102-blank-thread
+      - textbox: j5/issue-102-blank-thread
+      - group "Git actions":
+        - button "Commit, push & PR":
+          - generic: Commit, push & PR
+        - button "Git action options":
+      - button "Changes +5 -2":
+        - generic: Changes
+        - generic: "+5"
+        - generic: "-2"
+- button "Toggle main sidebar" [pressed]:
+  - generic: Toggle Sidebar
+- region "Notifications"
+- region "Notifications":
+  - 'dialog "Updates Available: 2 providers"':
+    - button "Dismiss notification":
+    - 'heading "Updates Available: 2 providers" [level=2]'
+    - paragraph: Install the update now or review provider settings.
+    - button "Settings"
+    - button "Update"
