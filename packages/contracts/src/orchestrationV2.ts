@@ -366,6 +366,7 @@ export type OrchestrationV2AgentPersonaAvailability =
 /** Environment-specific, presentation-safe view of one built-in persona. */
 export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
   personaId: BuiltInAgentPersonaId,
+  definitionVersion: PositiveInt,
   displayName: TrimmedNonEmptyString,
   description: TrimmedNonEmptyString,
   acceptedInput: TrimmedNonEmptyString,
@@ -2367,6 +2368,7 @@ export type OrchestrationV2PublicCommand = typeof OrchestrationV2PublicCommand.T
 
 export const ORCHESTRATION_V2_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
+  getAgentPersonaCatalog: "orchestration.getAgentPersonaCatalog",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
@@ -2662,6 +2664,10 @@ export const OrchestrationV2RpcSchemas = {
   dispatchCommand: {
     input: OrchestrationV2PublicCommand,
     output: OrchestrationV2DispatchCommandResult,
+  },
+  getAgentPersonaCatalog: {
+    input: Schema.Struct({}),
+    output: OrchestrationV2AgentPersonaCatalog,
   },
   getTurnDiff: {
     input: OrchestrationGetTurnDiffInput,
