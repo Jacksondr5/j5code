@@ -203,6 +203,20 @@ export class ProviderAdapterResumeThreadError extends Schema.TaggedErrorClass<Pr
   }
 }
 
+/** Native provider history could not resume and must not be silently replaced. */
+export class ProviderResumeFailedError extends Schema.TaggedErrorClass<ProviderResumeFailedError>()(
+  "ProviderResumeFailedError",
+  {
+    driver: ProviderDriverKind,
+    providerThreadId: ProviderThreadId,
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Native ${this.driver} provider resume failed for ${this.providerThreadId}: ${this.detail}`;
+  }
+}
+
 export class ProviderAdapterEnsureThreadError extends Schema.TaggedErrorClass<ProviderAdapterEnsureThreadError>()(
   "ProviderAdapterEnsureThreadError",
   {
@@ -355,6 +369,7 @@ export const ProviderAdapterV2Error = Schema.Union([
   ProviderAdapterOpenSessionError,
   ProviderAdapterCloseSessionError,
   ProviderAdapterResumeThreadError,
+  ProviderResumeFailedError,
   ProviderAdapterEnsureThreadError,
   ProviderAdapterReadThreadSnapshotError,
   ProviderAdapterRollbackThreadError,

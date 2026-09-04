@@ -21,9 +21,8 @@ import {
   providerMessageWithContextHandoffs,
 } from "./ContextHandoffService.ts";
 import { IdAllocatorV2 } from "./IdAllocator.ts";
-import { findCodexCliVersionUnsupportedError } from "../j5/codex/CodexCliVersionGate.ts";
 import { ProjectionStoreV2 } from "./ProjectionStore.ts";
-import { ProviderAdapterProtocolError } from "./ProviderAdapter.ts";
+import { ProviderResumeFailedError } from "./ProviderAdapter.ts";
 import { makeProviderFailure } from "./ProviderFailure.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import {
@@ -42,6 +41,7 @@ export class ProviderTurnStartError extends Schema.TaggedErrorClass<ProviderTurn
 ) {}
 
 const isProviderTurnStartError = Schema.is(ProviderTurnStartError);
+const isProviderResumeFailedError = Schema.is(ProviderResumeFailedError);
 
 /**
  * Renders the provider resume failure and its cause chain (adapter error →
@@ -123,14 +123,16 @@ export const layer: Layer.Layer<
           transfer.status === "pending" &&
           transfer.resolution === null,
       );
-      const existingResumeFallback = projection.contextTransfers.find(
+      // A pending self-handoff is the code-only marker a future, explicit
+      // fall-back act will create. No resume failure creates this marker.
+      const requestedResumeFallback = projection.contextTransfers.find(
         (transfer) =>
           transfer.type === "provider_handoff" &&
           transfer.sourceThreadId === projection.thread.id &&
           transfer.targetThreadId === projection.thread.id &&
           transfer.targetRunId === run.id &&
-          transfer.status === "resolved_portable" &&
-          transfer.resolution?.strategy === "portable_context",
+          transfer.status === "pending" &&
+          transfer.resolution === null,
       );
       if (
         rootNode === undefined ||
@@ -242,14 +244,18 @@ export const layer: Layer.Layer<
         if (resumed._tag === "Success") {
           return resumed.success;
         }
-        if (findCodexCliVersionUnsupportedError(resumed.failure) !== undefined) {
-          // J5: an unsupported app-server cannot be worked around by a fresh thread.
-          return yield* resumed.failure;
-        }
-
         const resumeFailure = resumeFailureText(resumed.failure);
+        if (requestedResumeFallback === undefined) {
+          // J5: native provider context is not reproducible from the J5 transcript.
+          // A person must explicitly request a portable-context fall-back.
+          return yield* new ProviderResumeFailedError({
+            driver: openedSession.driver,
+            providerThreadId: providerThread.id,
+            detail: resumeFailure,
+          });
+        }
         yield* Effect.logWarning(
-          "orchestration V2 provider resume failed; replacing the native thread with portable context",
+          "orchestration V2 provider resume failed; explicit portable-context fallback requested",
           {
             threadId: projection.thread.id,
             providerThreadId: providerThread.id,
@@ -265,25 +271,7 @@ export const layer: Layer.Layer<
           runtimePolicy: resolvedRuntimePolicy,
           providerSessionId,
         });
-        if (existingResumeFallback !== undefined) {
-          yield* Effect.logWarning(
-            "orchestration V2 provider resume failed again; reusing the existing portable fallback transfer",
-            {
-              threadId: projection.thread.id,
-              providerThreadId: providerThread.id,
-              nativeThreadId: providerThread.nativeThreadRef.nativeId,
-              runId: run.id,
-              transferId: existingResumeFallback.id,
-              error: resumeFailure,
-            },
-          );
-          return replacement;
-        }
-        const transferId = yield* idAllocator.allocate.contextTransfer({
-          sourceThreadId: projection.thread.id,
-          targetThreadId: projection.thread.id,
-          type: "provider_resume_fallback",
-        });
+        const transferId = requestedResumeFallback.id;
         const createdAt = yield* DateTime.now;
         const handoff = yield* contextHandoffService.prepareProviderHandoff({
           threadId: projection.thread.id,
@@ -318,15 +306,7 @@ export const layer: Layer.Layer<
               providerInstanceId: run.providerInstanceId,
               occurredAt: createdAt,
               payload: {
-                id: transferId,
-                type: "provider_handoff",
-                sourceThreadId: projection.thread.id,
-                targetThreadId: projection.thread.id,
-                sourcePoint: { threadId: projection.thread.id },
-                basePoint: null,
-                sourceProviderInstanceId: providerThread.providerInstanceId,
-                targetProviderInstanceId: run.providerInstanceId,
-                targetRunId: run.id,
+                ...requestedResumeFallback,
                 status: "resolved_portable",
                 resolution: { strategy: "portable_context", contextHandoffId: handoff.id },
                 createdBy: "system",
@@ -341,12 +321,13 @@ export const layer: Layer.Layer<
         return replacement;
       });
       const loadResult = yield* Effect.result(loadProviderThread);
-      // J5: an unsupported Codex CLI (see j5/codex/CodexCliVersionGate.ts) is a fatal
-      // start failure. Surface it as a failed run through run execution's existing
-      // failure path instead of letting the effect worker retry it silently.
+      // J5: a native-resume failure is fatal. Surface it through run execution
+      // instead of retrying or replacing the provider thread.
       const fatalStartFailure =
         loadResult._tag === "Failure"
-          ? findCodexCliVersionUnsupportedError(loadResult.failure)
+          ? isProviderResumeFailedError(loadResult.failure)
+            ? loadResult.failure
+            : undefined
           : undefined;
       if (loadResult._tag === "Failure" && fatalStartFailure === undefined) {
         return yield* loadResult.failure;
@@ -358,13 +339,7 @@ export const layer: Layer.Layer<
           ? openedSession
           : {
               ...openedSession,
-              startTurn: () =>
-                Effect.fail(
-                  new ProviderAdapterProtocolError({
-                    driver: openedSession.driver,
-                    detail: fatalStartFailure.message,
-                  }),
-                ),
+              startTurn: () => Effect.fail(fatalStartFailure),
             };
       if (!(yield* isCurrentAttemptInStatus("starting"))) {
         return;
