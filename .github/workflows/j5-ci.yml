@@ -50,3 +50,12 @@ jobs:
 
       - name: Unit tests
         run: pnpm exec vp run -r --log grouped test
+
+      # actions/checkout runs its credential cleanup after all workflow steps.
+      # That cleanup recursively visits this vendored gitlink, but its manifest
+      # belongs to the vendored tree rather than this repository. Remove the
+      # link from the disposable CI index once all work is complete so the
+      # post-job cleanup cannot misclassify it as a root submodule.
+      - name: Exclude vendored gitlink from checkout cleanup
+        if: always()
+        run: git update-index --force-remove -- .repos/alchemy-effect/.vendor/alchemy
