@@ -7,6 +7,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
+import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import {
   formatClosedHumanEnvelope,
@@ -169,12 +170,22 @@ export const formatAgentDeliveryEnvelope = (input: AgentDeliveryInput): string =
 export const live: Layer.Layer<
   A2ADeliveryTransport,
   never,
-  ThreadManagement.ThreadManagementService | OrchestratorV2 | SqlClient.SqlClient
+  ThreadManagement.ThreadManagementService | OrchestratorV2 | EffectOutboxV2 | SqlClient.SqlClient
 > = Layer.effect(
   A2ADeliveryTransport,
   Effect.gen(function* () {
     const threads = yield* ThreadManagement.ThreadManagementService;
     const orchestrator = yield* OrchestratorV2;
+    const outbox = yield* EffectOutboxV2;
+    const awaitSteeringOutcome = Effect.fn(function* (effectId: string) {
+      const outcome = yield* outbox.awaitSettled(effectId);
+      if (outcome.status !== "succeeded") {
+        return yield* new A2ADeliveryTransportError({
+          operation: "await peer steering",
+          cause: outcome.lastError ?? `Steering effect ${outcome.status}.`,
+        });
+      }
+    });
     const sql = yield* SqlClient.SqlClient;
 
     return A2ADeliveryTransport.of({
@@ -201,10 +212,22 @@ export const live: Layer.Layer<
               state: "participant is not an addressable agent thread",
             });
           }
+          // A retry must observe the original steer even if its run has ended.
+          // Re-dispatching the stable command as a queue request cannot prove delivery.
+          const priorEffects = yield* outbox.listByCommandId(deliveryCommandId(input.messageId));
+          const priorSteer = priorEffects.find(
+            (effect) => effect.request.type === "provider-turn.steer",
+          );
+          if (priorSteer !== undefined) return yield* awaitSteeringOutcome(priorSteer.id);
           const target = yield* threads.getThreadProjection(participant.threadId);
           // Astra can receive peer updates during its long turns. Other models
           // and platform notices retain QS1's queue policy (Claude issue #73).
-          const steeringRun = astraPeerSteeringRun(target, input.envelopeChannel);
+          const alreadyAccepted = target.messages.some(
+            (message) => message.id === deliveryMessageId(input.messageId),
+          );
+          const steeringRun = alreadyAccepted
+            ? undefined
+            : astraPeerSteeringRun(target, input.envelopeChannel);
           const envelope = formatAgentDeliveryEnvelope(input);
           const sendInput = {
             projectId: target.thread.projectId,
@@ -243,6 +266,18 @@ export const live: Layer.Layer<
               creationSource: sendInput.creationSource,
               modelSelection: steeringRun.modelSelection,
               dispatchMode: { type: "steer_active", targetRunId: steeringRun.id },
+            });
+          }
+          // Re-read even after queue dispatch: a concurrent attempt may have
+          // committed this same command as a steer before our projection read.
+          const effects = yield* outbox.listByCommandId(sendInput.commandId);
+          const steer = effects.find((effect) => effect.request.type === "provider-turn.steer");
+          if (steer !== undefined) {
+            yield* awaitSteeringOutcome(steer.id);
+          } else if (steeringRun !== undefined) {
+            return yield* new A2ADeliveryTransportError({
+              operation: "await peer steering",
+              cause: "The committed command has no steering effect.",
             });
           }
         }).pipe(

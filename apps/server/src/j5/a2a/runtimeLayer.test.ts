@@ -1,3 +1,4 @@
+import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { assert, it } from "@effect/vitest";
 import * as Context from "effect/Context";
@@ -62,6 +63,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
           Layer.provide(runtime),
           Layer.provide(threadManagement),
           Layer.provide(Layer.mock(OrchestratorV2)({})),
+          Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
           Layer.provide(archiveDependencies),
           Layer.provide(database),
         ),
@@ -120,6 +122,7 @@ it.effect("shares one runtime across the combined HTTP and MCP-style route graph
           Layer.provideMerge(runtime),
           Layer.provide(countedThreadManagement),
           Layer.provide(Layer.mock(OrchestratorV2)({})),
+          Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
           Layer.provide(archiveDependencies),
           Layer.provide(database),
         ),

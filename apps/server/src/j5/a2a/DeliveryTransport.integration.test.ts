@@ -18,6 +18,7 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as TestClock from "effect/testing/TestClock";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
@@ -433,6 +434,23 @@ for (const idleModel of ["gpt-5.4", "gpt-6-astra"]) {
               .map((invocation) => invocation.mode),
             ["queue", "queue"],
           );
+          const worker = yield* OrchestrationEffectWorkerV2;
+          const sink = yield* EventSinkV2;
+          const running = yield* sink.stream({ threadId: target.threadId }).pipe(
+            Stream.filter(
+              (stored) =>
+                stored.event.type === "provider-turn.updated" &&
+                stored.event.payload.status === "running",
+            ),
+            Stream.runHead,
+            Effect.forkChild({ startImmediately: true }),
+          );
+          yield* worker.runOnce;
+          yield* Fiber.join(running);
+          // A queue receipt stays valid after its Astra run becomes steerable.
+          yield* transport.deliverAgent(target.delivery);
+          assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
+          assert.lengthOf((yield* threads.getThreadProjection(target.threadId)).runs, 1);
         }).pipe(Effect.provide(makeTestLayer(harness)));
       }),
   );
@@ -606,16 +624,21 @@ for (const model of ["gpt-6-astra", "astra"]) {
           threadId: target.threadId,
           modelSelection: { ...modelSelection, model: "gpt-5.6-sol" },
         });
-        yield* transport.deliverAgent(target.delivery);
+        const firstDelivery = yield* transport
+          .deliverAgent(target.delivery)
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* runWorkerUntil(worker, firstDelivery);
         yield* transport.deliverAgent(target.delivery);
         const secondId = LedgerMessageId.make(`message:${model}:second`);
-        yield* transport.deliverAgent({
-          ...target.delivery,
-          messageId: secondId,
-          exchangeRole: "reply",
-          message: "The answer to your question.",
-        });
-        yield* worker.drain();
+        const secondDelivery = yield* transport
+          .deliverAgent({
+            ...target.delivery,
+            messageId: secondId,
+            exchangeRole: "reply",
+            message: "The answer to your question.",
+          })
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* runWorkerUntil(worker, secondDelivery);
         const steers = yield* Ref.get(harness.steerInputs);
         assert.lengthOf(steers, 2);
         assert.sameMembers(
@@ -1099,5 +1122,99 @@ it.effect("routes real archive and delete commands through lifecycle closure exa
       assert.instanceOf(retiredSend, A2ASenderRetiredError);
       assert.include(retiredSend.message, "participant.left");
     }).pipe(Effect.provide(makeLifecycleTestLayer(harness)));
+  }),
+);
+
+it.effect("does not acknowledge a committed Astra steer when its turn ends before execution", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const threads = yield* ThreadManagementService;
+      const transport = yield* A2ADeliveryTransport;
+      const worker = yield* OrchestrationEffectWorkerV2;
+      const sink = yield* EventSinkV2;
+      const target = yield* seedTarget("post-commit-race", "gpt-6-astra");
+      const running = yield* sink.stream({ threadId: target.threadId }).pipe(
+        Stream.filter(
+          (stored) =>
+            stored.event.type === "provider-turn.updated" &&
+            stored.event.payload.status === "running",
+        ),
+        Stream.runHead,
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* threads.sendToThread({
+        projectId: target.projectId,
+        threadId: target.threadId,
+        commandId: CommandId.make("command:post-commit-race:start"),
+        messageId: MessageId.make("message:post-commit-race:start"),
+        text: "Inspect until the update arrives.",
+        attachments: [],
+        mode: "queue",
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* worker.runOnce;
+      yield* Fiber.join(running);
+      const projection = yield* threads.getThreadProjection(target.threadId);
+      const turn = (yield* Ref.get(harness.activeTurns)).get(target.threadId)!;
+      const committed = yield* sink.stream({ threadId: target.threadId }).pipe(
+        Stream.filter(
+          (stored) =>
+            stored.event.type === "turn-item.updated" &&
+            stored.event.payload.type === "user_message" &&
+            stored.event.payload.inputIntent === "steer",
+        ),
+        Stream.runHead,
+        Effect.forkChild({ startImmediately: true }),
+      );
+      const delivery = yield* transport
+        .deliverAgent(target.delivery)
+        .pipe(Effect.flip, Effect.forkChild({ startImmediately: true }));
+      yield* Fiber.join(committed);
+      const ended = yield* sink.stream({ threadId: target.threadId }).pipe(
+        Stream.filter(
+          (stored) =>
+            stored.event.type === "provider-turn.updated" &&
+            stored.event.payload.status === "completed",
+        ),
+        Stream.runHead,
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* PubSub.publish(turn.events, {
+        type: "provider_turn.updated",
+        driver,
+        providerTurn: {
+          ...projection.providerTurns[0]!,
+          status: "completed",
+          completedAt: yield* DateTime.now,
+        },
+      });
+      yield* Fiber.join(ended);
+      // Drive the real worker's five attempts with controlled time, never sleeps.
+      for (const delay of [0, 100, 200, 400, 800]) {
+        yield* TestClock.adjust(delay);
+        yield* worker.drain();
+      }
+      const outcome = yield* Fiber.join(delivery);
+      assert.equal(
+        outcome._tag,
+        "A2ADeliveryTransportError",
+        "A2A must fail when no adapter call occurred",
+      );
+      // Once the turn has ended, retries still read the same failed steer receipt.
+      for (let retry = 0; retry < 2; retry++) {
+        const failure = yield* Effect.flip(transport.deliverAgent(target.delivery));
+        assert.equal(failure._tag, "A2ADeliveryTransportError");
+      }
+      const after = yield* threads.getThreadProjection(target.threadId);
+      assert.lengthOf(after.runs, 1);
+      assert.lengthOf(
+        after.messages.filter((message) => message.id === deliveryMessageId(target.messageId)),
+        1,
+      );
+      assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
+      assert.lengthOf(yield* Ref.get(harness.interruptInputs), 0);
+    }).pipe(Effect.provide(makeTestLayer(harness)));
   }),
 );

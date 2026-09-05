@@ -6,4 +6,4 @@ Other models receive peer messages after their current run ends. An idle agent s
 
 This applies to new deliveries. Messages already in the queue stay there unless you explicitly steer them. Your composer still queues by default, and explicit human steering remains available.
 
-Delivery into an active turn does not guarantee the agent has read or acted on the update yet. If the turn ends just as delivery is attempted, the existing delivery retry and alarm behavior applies.
+J5 records active-turn delivery after the provider accepts the steering input. Delivery into an active turn does not guarantee the agent has read or acted on the update yet. If the turn ends just as delivery is attempted, the existing delivery retry and alarm behavior applies.

@@ -1,3 +1,4 @@
+import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -499,6 +500,7 @@ it.effect("delivers to the human through the idempotent inbox-data transport", (
       Layer.provide(database),
       Layer.provide(threadManagement),
       Layer.provide(Layer.mock(OrchestratorV2)({})),
+      Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
     );
     const worker = deliveryWorkerLayerWithHooks(false).pipe(
       Layer.provide(ledger),
@@ -589,6 +591,7 @@ it.effect(
         Layer.provide(database),
         Layer.provide(Layer.mock(ThreadManagementService)({})),
         Layer.provide(Layer.mock(OrchestratorV2)({})),
+        Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
       );
       const worker = deliveryWorkerLayerWithHooks(false).pipe(
         Layer.provide(ledger),
@@ -691,6 +694,7 @@ it.effect("receipts a human lifecycle notice without creating a second actionabl
       Layer.provide(database),
       Layer.provide(Layer.mock(ThreadManagementService)({})),
       Layer.provide(Layer.mock(OrchestratorV2)({})),
+      Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
     );
     const worker = deliveryWorkerLayerWithHooks(false).pipe(
       Layer.provide(ledger),

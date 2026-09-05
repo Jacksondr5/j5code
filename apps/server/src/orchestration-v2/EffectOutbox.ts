@@ -20,6 +20,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -175,6 +176,10 @@ export interface EffectOutboxV2Shape {
   readonly get: (
     effectId: string,
   ) => Effect.Effect<Option.Option<OrchestrationEffectV2>, EffectOutboxError>;
+  /** Wait for a durable terminal outcome, including outcomes committed before subscribing. */
+  readonly awaitSettled: (
+    effectId: string,
+  ) => Effect.Effect<OrchestrationEffectV2, EffectOutboxError>;
   readonly listByCommandId: (
     commandId: CommandId,
   ) => Effect.Effect<ReadonlyArray<OrchestrationEffectV2>, EffectOutboxError>;
@@ -267,6 +272,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
     // authoritative. Retaining a small burst lets multiple worker slots wake
     // for distinct threads without allowing notifications to grow unbounded.
     const available = yield* Queue.dropping<void>(64);
+    const settlements = yield* PubSub.unbounded<string>();
     const cancellationSignals = new Map<string, Deferred.Deferred<void>>();
     const notifyAvailable = (count = 1) =>
       Queue.offerAll(
@@ -370,6 +376,28 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
           }),
           Effect.mapError((cause) => new EffectOutboxError({ operation: "get", effectId, cause })),
         ),
+      awaitSettled: (effectId) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            // Subscribe first: settlement between the read and the wait must wake us.
+            const subscription = yield* PubSub.subscribe(settlements);
+            while (true) {
+              const row = yield* service.get(effectId);
+              if (Option.isNone(row)) {
+                return yield* new EffectOutboxError({
+                  operation: "await-settled",
+                  effectId,
+                  cause: "The requested effect does not exist.",
+                });
+              }
+              if (["succeeded", "failed", "cancelled"].includes(row.value.status)) return row.value;
+              let settledId: string;
+              do {
+                settledId = yield* PubSub.take(subscription);
+              } while (settledId !== effectId);
+            }
+          }),
+        ),
       awaitAvailable: Queue.take(available),
       notifyAvailable,
       listByCommandId: (commandId) =>
@@ -423,7 +451,10 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
           // Cancellation can unblock other pending work on the same thread.
           // This method is deliberately post-commit, so it is also the safe
           // place to wake claimers after the durable status change.
-          if (effectIds.length > 0) yield* notifyAvailable(effectIds.length);
+          if (effectIds.length > 0) {
+            yield* PubSub.publishAll(settlements, effectIds);
+            yield* notifyAvailable(effectIds.length);
+          }
         }),
       awaitCancellation: (effectId) => Deferred.await(cancellationSignal(effectId)),
       clearCancellation: (effectId) =>
@@ -445,6 +476,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
             AND effect_type IN ${sql.in(PROCESS_BOUND_EFFECT_TYPES)}
           RETURNING effect_id
         `;
+        yield* service.signalCancellations(cancelledRows.map((row) => row.effect_id));
         const requeuedRows = yield* sql<{ readonly effect_id: string }>`
           UPDATE orchestration_v2_effect_outbox
           SET
@@ -541,6 +573,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
           `;
           if (rows.length === 1) {
             cancellationSignals.delete(effectId);
+            yield* PubSub.publish(settlements, effectId);
             yield* notifyAvailable();
           }
           return rows.length === 1;
@@ -599,6 +632,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
           `;
           if (rows.length === 1) {
             cancellationSignals.delete(effectId);
+            yield* PubSub.publish(settlements, effectId);
             yield* notifyAvailable();
           }
           return rows.length === 1;
