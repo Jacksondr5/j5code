@@ -658,6 +658,7 @@ export function makeClaudeQueryOptions(input: {
   readonly permissionMode?: PermissionMode;
   readonly canUseTool?: CanUseTool;
   readonly allowDangerouslySkipPermissions?: boolean;
+  readonly agentPersonaInstructions?: string;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
   const extraArgs =
@@ -676,6 +677,12 @@ export function makeClaudeQueryOptions(input: {
       : typeof input.sdkSettings === "object" && input.sdkSettings !== null
         ? ({ ...input.sdkSettings, ...selectionSettings } as ClaudeSdkSettings)
         : selectionSettings;
+  const systemPromptAppend = [
+    input.mcpServers === undefined ? undefined : T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+    input.agentPersonaInstructions,
+  ]
+    .filter((instructions): instructions is string => instructions !== undefined)
+    .join("\n\n");
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
     tools: claudeAgentSdkQueryToolsForSdk(selectedTools),
@@ -700,13 +707,13 @@ export function makeClaudeQueryOptions(input: {
       : {}),
     ...(input.environment === undefined ? {} : { env: input.environment }),
     ...(input.mcpServers === undefined ? {} : { mcpServers: input.mcpServers }),
-    ...(input.mcpServers === undefined
+    ...(systemPromptAppend.length === 0
       ? {}
       : {
           systemPrompt: {
             type: "preset" as const,
             preset: "claude_code" as const,
-            append: T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+            append: systemPromptAppend,
           },
         }),
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
@@ -4304,6 +4311,11 @@ export function makeClaudeAdapterV2(
                       allowDangerouslySkipPermissions: queryPolicy.allowDangerouslySkipPermissions,
                     }),
                 ...(shouldInstallClaudePermissionCallback(queryPolicy) ? { canUseTool } : {}),
+                ...(turnInput.runtimePolicy.agentPersonaInstructions === undefined
+                  ? {}
+                  : {
+                      agentPersonaInstructions: turnInput.runtimePolicy.agentPersonaInstructions,
+                    }),
               }),
             })
             .pipe(

@@ -559,6 +559,20 @@ describe("ClaudeAdapterV2 native protocol logging", () => {
     }
   });
 
+  it("adds persona instructions to Claude's system prompt without requiring MCP", () => {
+    const options = makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "native-builder-instructions",
+      resume: false,
+      cwd: "/workspace",
+      agentPersonaInstructions: "Builder instructions",
+    });
+
+    assert.isObject(options.systemPrompt);
+    const systemPrompt = options.systemPrompt as { readonly append?: string };
+    assert.equal(systemPrompt.append, "Builder instructions");
+  });
+
   it.effect("writes Claude Agent SDK protocol frames to the native provider log", () =>
     Effect.gen(function* () {
       const writes: Array<{

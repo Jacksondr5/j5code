@@ -13,6 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import * as ProjectionProjects from "../persistence/Services/ProjectionProjects.ts";
+import { BUILDER_AGENT_PERSONA_INSTRUCTIONS_V1 } from "../j5/agents/agentPersonaPrompts.ts";
 import { layerFromProjectRepository, RuntimePolicyV2 } from "./RuntimePolicy.ts";
 
 const projectId = ProjectId.make("project:runtime-policy");
@@ -158,6 +159,28 @@ it.layer(TestLayer)("RuntimePolicyV2", (it) => {
         access: { type: "fullAccess" },
         networkAccess: false,
       });
+    }),
+  );
+
+  it.effect("adds the versioned Builder instructions to its runtime policy", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const thread = {
+        ...makeThread({ now, worktreePath: "/project-worktree" }),
+        agentPersonaAssignment: {
+          personaId: "builder",
+          definitionVersion: 1,
+          authorityPolicy: "workspace-write",
+          resolvedRoute: "primary",
+          resolvedDriver: ProviderDriverKind.make("codex"),
+          resolvedModelSelection: modelSelection,
+        },
+      } satisfies OrchestrationV2AppThread;
+
+      const resolved = yield* policy.resolve({ thread, modelSelection });
+
+      assert.equal(resolved.agentPersonaInstructions, BUILDER_AGENT_PERSONA_INSTRUCTIONS_V1);
     }),
   );
 });
