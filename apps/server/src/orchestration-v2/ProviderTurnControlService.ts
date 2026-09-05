@@ -251,7 +251,14 @@ export const layer: Layer.Layer<
       steer: (input) =>
         Effect.gen(function* () {
           const loaded = yield* load({ ...input, operation: "steer" });
-          if (Option.isNone(loaded.session)) return;
+          if (Option.isNone(loaded.session)) {
+            return yield* new ProviderTurnControlError({
+              threadId: input.threadId,
+              operation: "steer",
+              providerTurnId: input.providerTurnId,
+              cause: "The provider turn ended before the steering message was delivered.",
+            });
+          }
           const message = loaded.projection.messages.find(
             (candidate) => candidate.id === input.messageId,
           );

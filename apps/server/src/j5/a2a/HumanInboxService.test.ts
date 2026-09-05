@@ -1,3 +1,5 @@
+import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
+import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -43,6 +45,8 @@ const makeTestLayer = (deliveries: Ref.Ref<ReadonlyArray<AgentDeliveryInput>>) =
   const liveTransport = deliveryTransportLive.pipe(
     Layer.provide(database),
     Layer.provide(Layer.mock(ThreadManagementService)({})),
+    Layer.provide(Layer.mock(OrchestratorV2)({})),
+    Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
   );
   const transport = Layer.effect(
     A2ADeliveryTransport,

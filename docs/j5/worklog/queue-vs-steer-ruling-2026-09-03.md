@@ -2,6 +2,8 @@
 
 Jackson + Product lead, in the Product thread. Origin: issue #73 (agent deliveries steered a mid-turn Claude recipient; the CLI's "now"-priority abort produced fabricated human-refusal text on sibling tool calls) and the two live observations of 2026-09-02 (a composer send interrupting a stalled run and jumping three queued agent messages; five agent messages steered into a live turn and read by the recipient as "queued"). PR #91 implements the ruling; Jackson wanted it right in one PR. Everything below was measured in code before ruling; unmeasured items are marked.
 
+**Current amendment:** QS1 has an Astra-only exception authorized by Jackson on September 4; see the amendment below. The original ruling is retained as history.
+
 ## Definitions as the code has them
 
 - A **run** is the app's unit of work. Status enum: `preparing, queued, starting, running, waiting, completed, interrupted, failed, cancelled, rolled_back` — richer than "queued/running/terminal". A **provider turn** is the CLI's unit ("the model is generating"), tied to a run attempt.
@@ -26,3 +28,18 @@ Jackson + Product lead, in the Product thread. Origin: issue #73 (agent deliveri
 | QS4 | **The steer control says what it does on this provider**: "Steer now" where injection is real (Claude, Codex, OpenCode); "Interrupt and restart with this message" where it is not (Cursor, ACP); Grok measured by the lane. If provider capability proves not client-readable, the PR says so and Jackson decides — the copy is never silently dropped.                                                                                                                                                                                                |
 
 All four ride **PR #91** (one PR, per Jackson). Not in #91 but recorded as consequence: #64's queued/starting-run-age fact is now v0-important. The `send_message` description is unchanged — "the reply arrives later as an incoming message" is literally true under QS1.
+
+## September 4 amendment — Astra peer updates
+
+Jackson authorized an Astra-only experiment after Fleet A spent a 36-minute run unable to consume queued peer updates. He authorized the coordinator to implement it directly, without peer staffing. This amends QS1; QS2–QS4 and other providers' defaults remain unchanged.
+
+- Peer-channel deliveries to an already-running Codex `gpt-6-astra` turn use native active steering. The existing `astra` alias resolves through the shared model normalizer. This includes peer replies and human replies delivered through the messaging system.
+- Eligibility uses the active run's model and provider thread, with a live steerable turn and a session advertising active steering. It never matches arbitrary model names containing “astra.”
+- Idle recipients still start normally. Preparing, starting, waiting, and finalizing recipients queue when no eligible turn exists. Other models/providers and platform silence/lifecycle notices retain queue delivery. Existing backlog is not promoted automatically.
+- The message includes platform guidance to incorporate relevant information while preserving the unfinished user task. A peer update does not replace the user's objective or confer authority to change it.
+- Dispatch pins the checked run ID and its model selection. Changing the picker for a future run must not switch models or trigger interrupt-and-restart. No `auto` or restart fallback is used.
+- A turn that ends between the eligibility read and dispatch is rejected by the existing serialized command policy. The same stable command/message IDs are retained on retries; this follows the existing retry/alarm path rather than risking duplicate injection or steering a replacement run.
+
+This changes message admission, not model attention: the provider decides when accepted input reaches the model. Adapter acceptance does not prove the model read it or preserved its original task. Model behavior still needs dogfood evaluation.
+
+Implementation and verification are recorded in [the Astra delivery worklog](./astra-peer-delivery-2026-09-04.md).
