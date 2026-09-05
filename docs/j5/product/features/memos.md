@@ -17,7 +17,7 @@ A **Memo** is a small self-addressed message an agent stores via a platform tool
 
 ## Behavior
 
-- **No per-turn injection.** Re-injecting the list every turn would trade one failure (forgotten notes) for another (context rot) — the back-burner is a feature. The platform's leverage is Principle 5-shaped: the tool's existence makes usage likely; the UI makes lapses visible.
+- **No per-turn injection.** Re-injecting the list every turn would trade one failure (forgotten notes) for another (context rot) — the back-burner is a feature. The platform's leverage is shaped like _build tools that make agents better, never systems that make them perfect_: the tool's existence makes usage likely; the UI makes lapses visible.
 - **All Memos are visible to the user — no private Memos.** The user only enters this view with attention to spare, and steering an agent requires seeing everything it intends to do.
 - **`resurface_after`** — the one platform-initiated re-injection: "page me after this time." Before the time, the Memo truly rests; after it, it returns stamped with measured time facts (R25). This field is what distinguishes a _deferral_ from a backlog item.
 - **Promotion is deliberate.** When a deferred thing becomes a _now_ thing, the agent opens a real Exchange. Never automatic.

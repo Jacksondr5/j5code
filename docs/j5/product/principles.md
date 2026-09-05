@@ -19,7 +19,7 @@ The falsifiable claims the product stands on.
 
 Lenses are tools that we use to refine our designs. They provide stress tests and different ways to think about the feature.
 
-## 1. The human-contact spectrum
+## The human-contact spectrum
 
 In a fleet, all agents sit somewhere on the spectrum. This spectrum is measured by how frequently an agent communicates with the user directly through the chat interface.
 
@@ -33,7 +33,7 @@ Background agents are almost never seen by the user, so they need a way to send 
 
 This lens classifies which surface serves whom, sets communication norms, and predicts where an agent's value lives: Background agents' value is in their definitions and durable artifacts (making them cheap to respawn); Foreground agents accumulate irreplaceable conversational context.
 
-## 2. Mechanical vs. judgment
+## Mechanical vs. judgment
 
 Split any "agents don't notice / don't do X" problem into two halves: the mechanical half (a measurable fact nobody delivered — the platform can fix this) and the judgment half (a call that can't be reliably decided by code — route it to a mind, agent or human, carrying the facts).
 
@@ -49,7 +49,7 @@ Each part lends itself to different solution. We can solve a mechanical problem 
 
 A feature can have parts that are mechanical and parts that are judgment. What counts as mechanics and judgment can change over time as the product and AI capabilities evolve.
 
-## 3. Use cases
+## Use cases
 
 J5 Code has multiple use cases, defined in [use-cases.md](use-cases.md). These are concrete use cases that the product is aiming to serve. Run your features through them to see how they serve those use cases.
 
@@ -61,7 +61,7 @@ The principles in this document are what guide us when designing, architecting, 
 
 Each principle states its rule, what it stands on (beliefs and lenses above), its jurisdiction — the kind of question it decides — and the cases it has already decided. R-numbers point into the [design-review register](./design-review-2026-08-21.md). A principle you cannot cite to kill or reshape a proposal is not pulling its weight.
 
-## 1. The hierarchy carries decisions, never messages
+## The hierarchy carries decisions, never messages
 
 **Rule:** any agent may message any agent directly; the org tree exists for tie-breaks, priorities, and resource calls — never as a communication path.
 
@@ -71,7 +71,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Cases:** any-to-any messaging is a platform invariant and Captains are never routers (R22); "you command what you brief" — placement = spawner, and spawning-and-briefing a Crew for someone else is proxy management (R21); lateral-coordination norms are Role content, never permission checks.
 
-## 2. Prompting problems are not platform problems
+## Prompting problems are not platform problems
 
 **Rule:** behavior is fixed by Role definitions, prompting, and right-sized work; platform machinery only ever fixes mechanics.
 
@@ -81,7 +81,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Cases:** reply completeness is judged by the sender, taught by envelope text, never checked by code (R3); communication-routing norms and human-contact posture live in Role definitions (R23); group cohesion, verbosity, and register are content, not tooling.
 
-## 3. Build tools that make agents better, never systems that make them perfect
+## Build tools that make agents better, never systems that make them perfect
 
 **Rule:** raise the odds of good behavior, surface the misses, cheapen the recovery — never attempt to guarantee what an agent will do.
 
@@ -91,7 +91,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Cases:** Memos are a tool plus visibility (badges, archive warnings, the backlog pane), not forced context injection (R31); Exchange semantics are envelope-taught, not schema-coerced; recovery is cheap by design — respawn a Crew from its definition (R14), reopen an Exchange with `regarding` (R10), nudge from a pane.
 
-## 4. The platform delivers facts, never judgment
+## The platform delivers facts, never judgment
 
 **Rule:** measurements ship as features in J5 Code; verdicts route to an agent or human, carrying the facts.
 
@@ -101,7 +101,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Cases:** silence notices inform and never auto-close Exchanges; notices carry fact bundles while labels are projection policy (R4); Playbook advancement is agent-declared, never platform-judged (R27); "Crew done" vs "Crew waiting" is structurally the Captain's or human's call, not a gap to engineer away.
 
-## 5. Status is read, never asked
+## Status is read, never asked
 
 **Rule:** if the user must ask an agent for a fact, the platform is missing a surface.
 
@@ -111,7 +111,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Cases:** the observability dashboard and PR pane exist so "how's it going" is a read; cost rolls up per Squadron on a surface (R7); chattiness is a measured metric, not a vibe (R23).
 
-## 6. Never guess — a plausible fake is worse than a visible gap
+## Never guess — a plausible fake is worse than a visible gap
 
 **Rule:** unknowns render as unknowns, degraded data wears a staleness clock, and nothing may ever look green because data was missing.
 
@@ -121,7 +121,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Cases:** `mergeable: UNKNOWN` renders as "?", never as mergeable; a broken poller goes quiet with a staleness clock, never loud-wrong; PR↔agent association is conservative — ambiguity shows unassociated rather than guessed (PR pane v1).
 
-## 7. State changes are loud; nothing vanishes silently
+## State changes are loud; nothing vanishes silently
 
 **Rule:** every lifecycle transition and failure leaves a visible, evented trace, delivered to whoever it affects.
 
@@ -131,7 +131,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Cases:** archiving a participant or Squadron terminates its obligations with notices to every waiter (R1, R2); an undelivered message is a visible alarm, never a silent loss (A2A M2); membership changes are lifecycle events; archiving an agent with open Memos warns first (R31).
 
-## 8. Simple tools at the frontier
+## Simple tools at the frontier
 
 **Rule:** build the smallest thing that solves the observed problem; machinery earns its place through observed need, don't anticipate something we haven't seen.
 
