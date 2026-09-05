@@ -41,6 +41,14 @@ describe("T3 orchestration provider instructions", () => {
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "bindToCurrentThread=false");
   });
 
+  it("routes generated planning documents into artifacts", () => {
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "planning documents");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "project workspace's shared");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`artifacts/`");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "every agent in the project");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Artifacts panel");
+  });
+
   it("injects prompt fallback only for an MCP-enabled first run", () => {
     const prompt = "Inspect the repository.";
     const injected = t3OrchestrationPromptForFirstRun({

@@ -14,6 +14,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PairRouteImport } from './routes/pair'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as ConnectRouteImport } from './routes/connect'
+import { Route as ArtifactsRouteImport } from './routes/artifacts'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
@@ -55,6 +56,11 @@ const InboxRoute = InboxRouteImport.update({
 const ConnectRoute = ConnectRouteImport.update({
   id: '/connect',
   path: '/connect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ArtifactsRoute = ArtifactsRouteImport.update({
+  id: '/artifacts',
+  path: '/artifacts',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChatRoute = ChatRouteImport.update({
@@ -145,6 +151,7 @@ const ChatEnvironmentIdThreadIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
+  '/artifacts': typeof ArtifactsRoute
   '/connect': typeof ConnectRoute
   '/inbox': typeof InboxRoute
   '/pair': typeof PairRoute
@@ -167,6 +174,7 @@ export interface FileRoutesByFullPath {
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
 }
 export interface FileRoutesByTo {
+  '/artifacts': typeof ArtifactsRoute
   '/connect': typeof ConnectRoute
   '/inbox': typeof InboxRoute
   '/pair': typeof PairRoute
@@ -192,6 +200,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_chat': typeof ChatRouteWithChildren
+  '/artifacts': typeof ArtifactsRoute
   '/connect': typeof ConnectRoute
   '/inbox': typeof InboxRoute
   '/pair': typeof PairRoute
@@ -218,6 +227,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/artifacts'
     | '/connect'
     | '/inbox'
     | '/pair'
@@ -240,6 +250,7 @@ export interface FileRouteTypes {
     | '/draft/$draftId'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/artifacts'
     | '/connect'
     | '/inbox'
     | '/pair'
@@ -264,6 +275,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/_chat'
+    | '/artifacts'
     | '/connect'
     | '/inbox'
     | '/pair'
@@ -289,6 +301,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   ChatRoute: typeof ChatRouteWithChildren
+  ArtifactsRoute: typeof ArtifactsRoute
   ConnectRoute: typeof ConnectRoute
   InboxRoute: typeof InboxRoute
   PairRoute: typeof PairRoute
@@ -333,6 +346,13 @@ declare module '@tanstack/react-router' {
       path: '/connect'
       fullPath: '/connect'
       preLoaderRoute: typeof ConnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/artifacts': {
+      id: '/artifacts'
+      path: '/artifacts'
+      fullPath: '/artifacts'
+      preLoaderRoute: typeof ArtifactsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_chat': {
@@ -505,6 +525,7 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRouteWithChildren,
+  ArtifactsRoute: ArtifactsRoute,
   ConnectRoute: ConnectRoute,
   InboxRoute: InboxRoute,
   PairRoute: PairRoute,

@@ -21,6 +21,7 @@ import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { ScheduledTaskService } from "../../scheduledTasks/ScheduledTaskService.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
+import { VcsProcess } from "../../vcs/VcsProcess.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { layer as outboxLayer } from "../../orchestration-v2/EffectOutbox.ts";
 import { A2ADeliveryTransport, live as deliveryTransportLayer } from "./DeliveryTransport.ts";
@@ -178,6 +179,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
                 Layer.mock(ScheduledTaskService)({}),
                 Layer.mock(GitWorkflowService)({}),
                 Layer.mock(VcsStatusBroadcaster)({}),
+                Layer.mock(VcsProcess)({}),
                 ServerSettingsService.layerTest(),
               ),
             ),
