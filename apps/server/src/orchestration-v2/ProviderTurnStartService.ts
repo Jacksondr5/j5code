@@ -38,6 +38,7 @@ import {
   selectInheritedBackgroundTurnItems,
 } from "./RunExecutionService.ts";
 import { RuntimePolicyV2 } from "./RuntimePolicy.ts";
+import { QueuedRunWatchdog } from "../j5/run-observability/QueuedRunWatchdog.ts";
 
 export class ProviderTurnStartError extends Schema.TaggedErrorClass<ProviderTurnStartError>()(
   "ProviderTurnStartError",
@@ -93,6 +94,7 @@ export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
     const eventSink = yield* EventSinkV2;
+    const queuedRunWatchdog = yield* QueuedRunWatchdog;
     const contextHandoffService = yield* ContextHandoffServiceV2;
     const idAllocator = yield* IdAllocatorV2;
     const fileSystem = yield* FileSystem.FileSystem;
@@ -756,6 +758,14 @@ export const layer: Layer.Layer<
             isProviderTurnStartError(cause)
               ? cause
               : new ProviderTurnStartError({ runId: input.runId, cause }),
+          ),
+          Effect.tapError((cause) =>
+            queuedRunWatchdog.recordVcsFailure({
+              threadId: input.threadId,
+              runId: input.runId,
+              phase: "start",
+              cause,
+            }),
           ),
         ),
     });

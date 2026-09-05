@@ -46,6 +46,10 @@ import { layer as threadLifecycleServiceLayer } from "./ThreadLifecycleService.t
 import { layer as threadForkServiceLayer } from "./ThreadForkService.ts";
 import { layer as turnItemPositionStoreLayer } from "./TurnItemPositionStore.ts";
 import { layer as scheduledTaskServiceLayer } from "../scheduledTasks/ScheduledTaskService.ts";
+import {
+  live as queuedRunWatchdogLayer,
+  workerLive as queuedRunWatchdogWorkerLive,
+} from "../j5/run-observability/QueuedRunWatchdog.ts";
 
 const runtimePolicyProvided = runtimePolicyLayerFromProjectRepository.pipe(
   Layer.provide(ProjectionProjectRepositoryLive),
@@ -69,6 +73,9 @@ const storesLayer = Layer.mergeAll(
 
 export const OrchestrationV2EventSinkLayerLive = eventSinkLayer.pipe(Layer.provide(storesLayer));
 const eventSinkProvided = OrchestrationV2EventSinkLayerLive;
+const queuedRunWatchdogProvided = queuedRunWatchdogLayer.pipe(
+  Layer.provide(Layer.mergeAll(eventSinkProvided, idAllocatorLayer, projectionStoreLayer)),
+);
 const projectionMaintenanceProvided = projectionMaintenanceLayer.pipe(Layer.provide(storesLayer));
 const legacyV1ThreadImporterProvided = legacyV1ThreadImporterLayer.pipe(
   Layer.provide(Layer.mergeAll(eventSinkProvided, eventStoreProvided)),
@@ -138,6 +145,7 @@ const providerTurnStartServiceProvided = providerTurnStartServiceLayer.pipe(
       providerAuthServiceProvided,
       runExecutionServiceProvided,
       runtimePolicyProvided,
+      queuedRunWatchdogProvided,
     ),
   ),
 );
@@ -171,7 +179,13 @@ const checkpointCaptureServiceProvided = checkpointCaptureServiceLayer.pipe(
   ),
 );
 const runFinalizationServiceProvided = runFinalizationServiceLayer.pipe(
-  Layer.provide(Layer.merge(checkpointCaptureServiceProvided, projectionStoreLayer)),
+  Layer.provide(
+    Layer.mergeAll(
+      checkpointCaptureServiceProvided,
+      projectionStoreLayer,
+      queuedRunWatchdogProvided,
+    ),
+  ),
 );
 
 const orchestratorProvided = orchestratorLayer.pipe(
@@ -225,6 +239,9 @@ const providerContinuationWorkerProvided = providerContinuationWorkerLive.pipe(
   Layer.provide(
     Layer.mergeAll(providerContinuationRequestsLayer, threadManagementProvided, idAllocatorLayer),
   ),
+);
+const queuedRunWatchdogWorkerProvided = queuedRunWatchdogWorkerLive.pipe(
+  Layer.provide(queuedRunWatchdogProvided),
 );
 const threadTitleRegenerationProvided = threadTitleRegenerationServiceLayer.pipe(
   Layer.provide(
@@ -280,4 +297,5 @@ export const OrchestrationV2ProductionLayerLive = Layer.mergeAll(
   threadLifecycleProvided,
   scheduledTaskProvided,
   providerContinuationWorkerProvided,
+  queuedRunWatchdogWorkerProvided,
 );

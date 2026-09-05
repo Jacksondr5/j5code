@@ -7,6 +7,7 @@ import * as Schema from "effect/Schema";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../workspace/WorkspaceEntries.ts";
+import { QueuedRunWatchdog } from "../j5/run-observability/QueuedRunWatchdog.ts";
 import * as CheckpointCapture from "./CheckpointCaptureService.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 
@@ -52,6 +53,7 @@ export const make = Effect.gen(function* () {
   const checkpointCapture = yield* CheckpointCapture.CheckpointCaptureServiceV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const observer = yield* RunFinalizationObserver;
+  const queuedRunWatchdog = yield* QueuedRunWatchdog;
 
   const finalize: RunFinalizationService["Service"]["finalize"] = Effect.fn(
     "RunFinalizationService.finalize",
@@ -82,7 +84,19 @@ export const make = Effect.gen(function* () {
         );
     }
   });
-  return RunFinalizationService.of({ finalize });
+  return RunFinalizationService.of({
+    finalize: (input) =>
+      finalize(input).pipe(
+        Effect.tapError((cause) =>
+          queuedRunWatchdog.recordVcsFailure({
+            threadId: input.threadId,
+            runId: input.runId,
+            phase: "finalization",
+            cause,
+          }),
+        ),
+      ),
+  });
 });
 
 export const layer = Layer.effect(RunFinalizationService, make);

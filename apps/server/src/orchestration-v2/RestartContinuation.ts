@@ -11,6 +11,12 @@ import * as Effect from "effect/Effect";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { ThreadManagementService } from "./ThreadManagementService.ts";
 
+function hasInterruptRequest(projection: OrchestrationV2ThreadProjection, runId: RunId): boolean {
+  return projection.turnItems.some(
+    (item) => item.runId === runId && item.type === "run_interrupt_request",
+  );
+}
+
 export function restartContinuationRun(
   projection: OrchestrationV2ThreadProjection,
 ): OrchestrationV2Run | undefined {
@@ -20,6 +26,8 @@ export function restartContinuationRun(
     undefined,
   );
   if (!run) return;
+  // A committed stop wins even if the provider has not acknowledged it yet.
+  if (hasInterruptRequest(projection, run.id)) return;
   const preparedContinuation =
     run.status === "starting" && run.restartContinuationOfRunId !== undefined;
   if (run.status !== "running" && !preparedContinuation) return;
@@ -78,6 +86,8 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
     if (projection.messages.some((message) => message.id === messageId)) return;
     const source = projection.runs.find((run) => run.id === input.sourceRunId);
     if (!source || source.status !== "cancelled") return;
+    // Shutdown may have recorded continuation intent before the stop request.
+    if (hasInterruptRequest(projection, source.id)) return;
     // A user submission after reconciliation takes precedence over an automatic prompt.
     if (projection.runs.some((run) => run.ordinal > source.ordinal)) return;
     if (projection.thread.providerInstanceId !== source.providerInstanceId) return;
