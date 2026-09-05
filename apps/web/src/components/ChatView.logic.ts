@@ -13,7 +13,6 @@ import {
   ProviderDriverKind,
   type ProviderInstanceId,
   type ServerProvider,
-  type ScopedProjectRef,
   type ScopedThreadRef,
   type ThreadId,
   type RunId,
@@ -148,6 +147,20 @@ export function codexArtifactTemplatePromptToAppend(
     ? null
     : codexArtifactTemplateUsePrompt(template);
 }
+/** Ambient presentation context never substitutes for a first-send Squadron carrier. */
+export const resolveFirstSendSquadronCarrier = (input: {
+  readonly durableSquadronId: string | null;
+  readonly draftSquadronId: string | null;
+  readonly ambientSquadronId: string | null;
+}) => {
+  if (input.durableSquadronId !== null) {
+    return { kind: "durable-home", squadronId: input.durableSquadronId } as const;
+  }
+  if (input.draftSquadronId !== null) {
+    return { kind: "draft", squadronId: input.draftSquadronId } as const;
+  }
+  return { kind: "missing-explicit-squadron" } as const;
+};
 
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
 
@@ -260,16 +273,6 @@ export function hasEnvironmentReconnectWarningGraceElapsed(
   elapsedEnvironmentId: EnvironmentId | null,
 ): boolean {
   return activeEnvironmentId !== null && activeEnvironmentId === elapsedEnvironmentId;
-}
-
-export function startNewThreadForProject(
-  projectRef: ScopedProjectRef | null,
-  handleNewThread: (projectRef: ScopedProjectRef) => Promise<unknown>,
-): boolean {
-  if (projectRef === null) return false;
-  void handleNewThread(projectRef);
-
-  return true;
 }
 
 export function resolveThreadMetadataUpdateForNextTurn(input: {

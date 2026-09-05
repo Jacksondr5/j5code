@@ -7,6 +7,7 @@ import {
   buildBulkTitleRegenerationContextMenuItem,
   buildBulkUnpinContextMenuItem,
   buildMultiSelectThreadContextMenuItems,
+  createCleanBatchArchiveConfirmation,
   createThreadJumpHintVisibilityController,
   filterSidebarProjectScopeItems,
   filterSidebarV2VisibleThreads,
@@ -27,6 +28,7 @@ import {
   reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
   resolveProjectStatusIndicator,
+  resolveSidebarEmptyState,
   resolveSidebarStageBadgeLabel,
   resolveSidebarThreadStatus,
   resolveSidebarV2TopStatus,
@@ -34,6 +36,7 @@ import {
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
+  selectionKeysToRemoveAfterArchive,
   searchSidebarThreadsByTitle,
   shouldClearThreadSelectionOnMouseDown,
   shouldNavigateAfterProjectRemoval,
@@ -185,6 +188,44 @@ describe("archiveSelectedThreadEntries", () => {
       followupFailures: [failure],
     });
   });
+
+  it("leaves a cancelled entry selected and continues to the next entry", async () => {
+    const archive = vi.fn(async (entry: (typeof entries)[number], onArchived: () => void) => {
+      if (entry.threadKey === "two") return undefined;
+      onArchived();
+      return success;
+    });
+    const outcome = await archiveSelectedThreadEntries({ entries, archive });
+
+    expect(archive).toHaveBeenCalledTimes(3);
+    expect(outcome).toEqual({
+      archivedThreadKeys: ["one", "three"],
+      mutationFailure: null,
+      followupFailures: [],
+    });
+  });
+});
+
+describe("archive selection cleanup", () => {
+  it("caches a cancelled clean-batch confirmation", async () => {
+    const confirm = vi.fn(async () => false);
+    const confirmCleanArchive = createCleanBatchArchiveConfirmation({ confirm });
+
+    await expect(confirmCleanArchive()).resolves.toBe(false);
+    await expect(confirmCleanArchive()).resolves.toBe(false);
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears an unresolvable selected row while keeping a cancelled resolved row", () => {
+    expect(
+      selectionKeysToRemoveAfterArchive({
+        selectedThreadKeys: ["archived", "cancelled", "missing"],
+        entries: [{ threadKey: "archived" }, { threadKey: "cancelled" }],
+        archivedThreadKeys: ["archived"],
+      }),
+    ).toEqual(["missing", "archived"]);
+  });
 });
 
 describe("buildBulkUnpinContextMenuItem", () => {
@@ -285,6 +326,47 @@ describe("resolveSidebarStageBadgeLabel", () => {
         fallbackStageLabel: "Alpha",
       }),
     ).toBe("Alpha");
+  });
+});
+
+describe("resolveSidebarEmptyState", () => {
+  it("keeps the loading state distinct from ready-with-zero Squadrons", () => {
+    const loading = resolveSidebarEmptyState({
+      directoryStatus: "loading",
+      squadronCount: 0,
+      squadronScopeName: null,
+    });
+    const readyWithZero = resolveSidebarEmptyState({
+      directoryStatus: "ready",
+      squadronCount: 0,
+      squadronScopeName: null,
+    });
+
+    expect(loading).toEqual({ kind: "loading", message: "Loading Squadrons…" });
+    expect(readyWithZero).toEqual({ kind: "no-squadrons", message: "No Squadrons yet" });
+    expect(loading).not.toEqual(readyWithZero);
+  });
+
+  it("names a selected Squadron's unreadable homes instead of calling it empty", () => {
+    const failedRead = resolveSidebarEmptyState({
+      directoryStatus: "ready",
+      squadronCount: 1,
+      squadronScopeName: "Alpha",
+      scopeReadFailed: true,
+    });
+    const emptyScope = resolveSidebarEmptyState({
+      directoryStatus: "ready",
+      squadronCount: 1,
+      squadronScopeName: "Alpha",
+      scopeReadFailed: false,
+    });
+
+    expect(failedRead).toEqual({
+      kind: "scope-read-failed",
+      message: "Couldn’t read thread homes",
+    });
+    expect(emptyScope).toEqual({ kind: "scoped", message: "No threads in Alpha yet" });
+    expect(failedRead).not.toEqual(emptyScope);
   });
 });
 

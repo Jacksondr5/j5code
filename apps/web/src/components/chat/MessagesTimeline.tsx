@@ -80,6 +80,12 @@ import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
 import { T3Wordmark } from "../T3Wordmark";
 import {
+  participantIdsForThreadA2ADelivery,
+  renderThreadA2ADelivery,
+  renderThreadA2AOutboundTool,
+} from "../../j5/a2a/ThreadA2ARenderer";
+import { useParticipantLabels } from "../../j5/a2a/ParticipantIdentitiesClient";
+import {
   BotIcon,
   BrainIcon,
   CheckIcon,
@@ -212,6 +218,7 @@ interface TimelineRowSharedState {
   /** Projection runs, for recovering handoff models on legacy items. */
   runs: ReadonlyArray<HandoffTimelineRun>;
   activeThreadEnvironmentId: EnvironmentId;
+  participantLabels: ReadonlyMap<string, string>;
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
@@ -430,6 +437,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
+  const participantIds = useMemo(
+    () =>
+      timelineEntries.flatMap((entry) =>
+        entry.kind === "message" ? participantIdsForThreadA2ADelivery(entry.message) : [],
+      ),
+    [timelineEntries],
+  );
+  const participantLabels = useParticipantLabels(activeThreadEnvironmentId, participantIds);
   const disclosureAnchorKeyRef = useRef<string | null>(null);
   const disclosureSettleFrameRef = useRef<number | null>(null);
   const disclosureSettleSecondFrameRef = useRef<number | null>(null);
@@ -738,6 +753,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       providerStatuses,
       runs,
       activeThreadEnvironmentId,
+      participantLabels,
       onRevertUserMessage,
       onImageExpand,
       onFileOpen,
@@ -766,6 +782,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       providerStatuses,
       runs,
       activeThreadEnvironmentId,
+      participantLabels,
       onRevertUserMessage,
       onImageExpand,
       onFileOpen,
@@ -1264,6 +1281,15 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
   const isExpandedToolGroup = row.kind === "work" && row.isExpandedToolGroup;
   const isExpandedToolGroupHeader =
     (row.kind === "work-toggle" && row.expanded) || (row.kind === "work-live" && row.expanded);
+  const ctx = use(TimelineRowCtx);
+  const a2aDelivery =
+    row.kind === "message" && row.message.role === "user"
+      ? renderThreadA2ADelivery({
+          message: row.message,
+          timestampLabel: formatDayAwareTimestamp(row.message.createdAt, ctx.timestampFormat),
+          participantLabels: ctx.participantLabels,
+        })
+      : null;
 
   return (
     <div
@@ -1307,12 +1333,17 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
           displayLabel={row.displayLabel}
         />
       ) : null}
-      {row.kind === "work-live" ? <LiveWorkEntryTimelineRow row={row} /> : null}
+      {row.kind === "work-live"
+        ? (renderThreadA2AOutboundTool(row.entry) ?? <LiveWorkEntryTimelineRow row={row} />)
+        : null}
       {row.kind === "work-toggle" ? <WorkGroupToggleTimelineRow row={row} /> : null}
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
       {row.kind === "attempt-fold" ? <AttemptFoldTimelineRow row={row} /> : null}
       {row.kind === "context-compaction" ? <ContextCompactionTimelineRow row={row} /> : null}
-      {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
+      {a2aDelivery}
+      {row.kind === "message" && row.message.role === "user" && a2aDelivery === null ? (
+        <UserTimelineRow row={row} />
+      ) : null}
       {row.kind === "message" && row.message.role === "assistant" ? (
         <AssistantTimelineRow row={row} />
       ) : null}
@@ -3705,6 +3736,9 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
         },
       }
     : {};
+
+  const a2aOutbound = renderThreadA2AOutboundTool(workEntry);
+  if (a2aOutbound !== null) return a2aOutbound;
 
   return (
     <div

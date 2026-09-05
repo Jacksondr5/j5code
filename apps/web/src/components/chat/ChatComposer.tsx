@@ -1,3 +1,4 @@
+import type { SteerState } from "@t3tools/client-runtime/j5/steer-state";
 import type {
   AssistantCitation,
   ChatAttachment as ContractChatAttachment,
@@ -810,6 +811,9 @@ import type {
   PendingUserInput,
 } from "../../session-logic";
 import { resolveComposerDispatchMode, type ComposerDispatchMode } from "./composerDispatch";
+import { SteerUnavailableNotice } from "../../j5/composer/SteerUnavailableNotice";
+import { useJ5SteerState } from "../../j5/composer/useJ5SteerState";
+import { shouldRefuseComposerSteer } from "../../j5/composer/submitGuard";
 import type { ContextWindowSnapshot } from "../../lib/contextWindow";
 import {
   formatProviderSkillDisplayName,
@@ -1041,6 +1045,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 });
 
 const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(props: {
+  steerState: SteerState;
   compact: boolean;
   activeContextWindow: ContextWindowSnapshot | null;
   activeThreadModelDisplayName: string | null;
@@ -1082,6 +1087,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         />
       ) : null}
       <ComposerPrimaryActions
+        steerState={props.steerState}
         compact={props.compact}
         pendingAction={props.pendingAction}
         isRunning={props.isRunning}
@@ -1329,7 +1335,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadId,
     activeThreadEnvironmentId: _activeThreadEnvironmentId,
     activeThread,
-    isServerThread: _isServerThread,
+    isServerThread,
     isLocalDraftThread: _isLocalDraftThread,
     forceExpandedOnMobile,
     projectSelectionRequired,
@@ -1403,6 +1409,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     editingQueuedAttachments,
     onRemoveEditingQueuedAttachment,
   } = props;
+  const j5SteerState = useJ5SteerState(environmentId, isServerThread ? activeThreadId : null);
+  const [j5SteerNoticeRequested, setJ5SteerNoticeRequested] = useState(false);
   const activeTasksProgress = props.threadSyncPhase === null ? props.activeTasksProgress : null;
   const activeTaskSteps = props.threadSyncPhase === null ? props.activeTaskSteps : null;
   // Non-null while a queued message is loaded for editing. The primary action
@@ -2855,6 +2863,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         event?.preventDefault();
         return;
       }
+      const resolvedDispatchMode =
+        dispatchMode ?? resolveComposerDispatchMode({ phase, queueModifier: false });
+      if (
+        shouldRefuseComposerSteer({
+          dispatchMode: resolvedDispatchMode,
+          steerState: j5SteerState,
+          isEditingQueuedMessage,
+          isAnsweringQuestion: activePendingProgress !== null,
+        })
+      ) {
+        event?.preventDefault();
+        setJ5SteerNoticeRequested(true);
+        return;
+      }
       // A send while a pasted image is still compressing would strand that
       // image: the turn snapshot wouldn't include it, and it would surface
       // in the *next* draft instead. Only oversized images hit this — small
@@ -2876,10 +2898,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           // ChatView reports its final composed-input preflight through the
           // composer handle before its first asynchronous send step.
           providerInputRejectedRef.current = false;
-          onSend(
-            sendEvent,
-            dispatchMode ?? resolveComposerDispatchMode({ phase, queueModifier: false }),
-          );
+          onSend(sendEvent, resolvedDispatchMode);
           return !providerInputRejectedRef.current;
         },
       });
@@ -2893,6 +2912,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       activeThreadId,
       activePendingProgress,
       blurMobileComposerAfterSend,
+      isEditingQueuedMessage,
+      j5SteerState,
       isSendDisabled,
       noProviderAvailable,
       onSend,
@@ -4878,6 +4899,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           ) : null}
                           {activePendingProgress?.activeQuestion?.multiSelect ? (
                             <ComposerPrimaryActions
+                              steerState={j5SteerState}
                               compact
                               pendingAction={pendingPrimaryAction}
                               isRunning={false}
@@ -5465,7 +5487,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         : showPlanFollowUpPrompt && activeProposedPlan
                           ? "Add feedback to refine the plan, or leave this blank to implement it"
                           : projectSelectionRequired
-                            ? "Choose a project above to start a thread"
+                            ? "Choose a Squadron above to start a thread"
                             : noProviderAvailable
                               ? "Enable a provider in Settings to send a message"
                               : phase === "disconnected"
@@ -5486,6 +5508,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     className="absolute bottom-0 right-0 flex items-center justify-end gap-1"
                   >
                     <ComposerPrimaryActions
+                      steerState={j5SteerState}
                       compact
                       pendingAction={pendingPrimaryAction}
                       isRunning={false}
@@ -5513,6 +5536,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
             <ComposerPromptLengthValidation
               message={providerInputSubmissionError ?? composerSubmissionError}
+            />
+
+            <SteerUnavailableNotice
+              requested={j5SteerNoticeRequested}
+              state={j5SteerState}
+              onInterrupt={handleInterruptPrimaryAction}
+              onQueueInstead={() => submitComposer(undefined, "queue")}
+              onDismiss={() => setJ5SteerNoticeRequested(false)}
             />
 
             {/* Bottom toolbar */}
@@ -5584,6 +5615,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     </>
                   ) : null}
                   <ComposerFooterPrimaryActions
+                    steerState={j5SteerState}
                     compact={isComposerResting || isComposerPrimaryActionsCompact}
                     activeContextWindow={
                       settings.contextWindowMeterEnabled ? activeContextWindow : null

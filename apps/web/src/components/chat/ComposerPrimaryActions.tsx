@@ -1,3 +1,8 @@
+import {
+  notSteerableStateText,
+  steerActLabel,
+  type SteerState,
+} from "@t3tools/client-runtime/j5/steer-state";
 import { memo, type MouseEventHandler, type PointerEventHandler } from "react";
 import {
   CheckIcon,
@@ -28,6 +33,7 @@ interface ComposerPrimaryActionsProps {
   compact: boolean;
   pendingAction: PendingActionState | null;
   isRunning: boolean;
+  steerState?: SteerState;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
   isSendBusy: boolean;
@@ -70,6 +76,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compact,
   pendingAction,
   isRunning,
+  steerState,
   showPlanFollowUpPrompt,
   promptHasText,
   isSendBusy,
@@ -244,7 +251,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     : isQueuing
       ? "Queue message"
       : isRunning
-        ? "Steer message"
+        ? steerState?.kind === "steerable"
+          ? steerActLabel(steerState.act)
+          : steerState?.kind === "not-steerable"
+            ? "Show steer options"
+            : "Steer message"
         : "Submit message";
   const submitStatus = isEnvironmentUnavailable
     ? "Environment disconnected"
@@ -260,7 +271,13 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             : null));
   const submitTooltip =
     submitStatus ??
-    (isRunning && !isEditingQueuedMessage ? "Enter to steer, Mod+Enter to queue" : submitLabel);
+    (isRunning && !isEditingQueuedMessage
+      ? steerState?.kind === "not-steerable"
+        ? `${notSteerableStateText(steerState.phase)}. Mod+Enter to queue`
+        : steerState?.kind === "steerable" && steerState.act === "interrupt-restart"
+          ? "Enter to interrupt and restart with this message, Mod+Enter to queue"
+          : "Enter to steer, Mod+Enter to queue"
+      : submitLabel);
 
   const sendButton = (
     <button

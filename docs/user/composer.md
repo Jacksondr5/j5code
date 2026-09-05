@@ -89,6 +89,11 @@ the active turn, or press `Enter` on desktop. Hold `Cmd` on macOS or `Ctrl` on W
 switch the button to a queue icon. Click while holding that key, or press `Cmd+Enter` or
 `Ctrl+Enter` on desktop, to queue the message for after the active turn.
 
+When a provider handles steering by interrupting and restarting its turn, the control says
+**Interrupt and restart with this message**. While the agent is preparing, starting, waiting on
+the provider, or finishing its checkpoint, a steer cannot be sent. The composer keeps your draft
+and offers **Queue instead** or **Interrupt**.
+
 Queued messages appear above the composer. Rows show a thumbnail of any attached image alongside
 the text. Drag a row by its handle to reorder it, use the handle's arrow keys, promote the message
 to a steer, or remove it.

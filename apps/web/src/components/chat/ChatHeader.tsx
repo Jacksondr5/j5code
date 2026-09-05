@@ -9,6 +9,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
   activeThreadTitle: string;
+  newThreadSquadronName: string | null;
   activeProjectName: string | undefined;
   activeProjectCwd: string | null;
   activeProjectFaviconPath: string | null;
@@ -21,6 +22,7 @@ interface ChatHeaderProps {
 export const ChatHeader = memo(function ChatHeader({
   activeThreadEnvironmentId,
   activeThreadTitle,
+  newThreadSquadronName,
   activeProjectName,
   activeProjectCwd,
   activeProjectFaviconPath,
@@ -54,33 +56,47 @@ export const ChatHeader = memo(function ChatHeader({
       )}
     >
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
-        {/* The project always leads the header: knowing which project a
-            thread lives in is priority zero, and the thread title alone
-            doesn't answer it. */}
-        {activeProjectName ? (
+        {activeProjectName || newThreadSquadronName ? (
           <span className="inline-flex shrink-0 items-center gap-2">
             <Tooltip>
               <TooltipTrigger
                 render={
                   <button
                     type="button"
-                    aria-label={`New thread in ${activeProjectName}`}
+                    aria-label={
+                      newThreadSquadronName
+                        ? `New thread in ${newThreadSquadronName}`
+                        : "Choose Squadron for a new thread"
+                    }
                     onClick={onNewThreadInProject}
                     className="inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 }
               >
-                <ProjectFavicon
-                  environmentId={activeThreadEnvironmentId}
-                  cwd={activeProjectCwd ?? ""}
-                  faviconPath={activeProjectFaviconPath}
-                  projectIcon={activeProjectIcon}
-                  projectName={activeProjectName}
-                  className="size-3.5"
-                />
-                <span className="max-w-40 truncate text-sm font-medium">{activeProjectName}</span>
+                {activeProjectName ? (
+                  <ProjectFavicon
+                    environmentId={activeThreadEnvironmentId}
+                    cwd={activeProjectCwd ?? ""}
+                    faviconPath={activeProjectFaviconPath}
+                    projectIcon={activeProjectIcon}
+                    projectName={activeProjectName}
+                    className="size-3.5"
+                  />
+                ) : null}
+                <span className="max-w-40 truncate text-sm font-medium">
+                  {newThreadSquadronName ?? "Choose Squadron"}
+                </span>
+                {activeProjectName ? (
+                  <span className="max-w-32 truncate text-xs text-muted-foreground/70">
+                    {activeProjectName}
+                  </span>
+                ) : null}
               </TooltipTrigger>
-              <TooltipPopup side="top">New thread in {activeProjectName}</TooltipPopup>
+              <TooltipPopup side="top">
+                {newThreadSquadronName
+                  ? `New thread in ${newThreadSquadronName}`
+                  : "Choose Squadron for a new thread"}
+              </TooltipPopup>
             </Tooltip>
             <span aria-hidden className="text-muted-foreground/40">
               /
