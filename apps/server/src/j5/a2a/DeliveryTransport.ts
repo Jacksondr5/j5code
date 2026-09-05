@@ -178,7 +178,9 @@ export const live: Layer.Layer<
     const orchestrator = yield* OrchestratorV2;
     const outbox = yield* EffectOutboxV2;
     const awaitSteeringOutcome = Effect.fn(function* (effectId: string) {
-      const outcome = yield* outbox.awaitSettled(effectId);
+      // Only bound the observer. The provider effect may still acknowledge later;
+      // retries must inspect that same durable effect, never inject a new one.
+      const outcome = yield* outbox.awaitSettled(effectId).pipe(Effect.timeout("30 seconds"));
       if (outcome.status !== "succeeded") {
         return yield* new A2ADeliveryTransportError({
           operation: "await peer steering",

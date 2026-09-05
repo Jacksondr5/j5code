@@ -26,7 +26,7 @@ Those trials establish useful mid-turn delivery and task continuity, not precise
 
 ## Receipt boundary
 
-`EffectOutbox.awaitSettled` subscribes before checking the durable row, then waits on settlement notifications instead of polling. Success, terminal failure, archive cancellation and process-loss cancellation all wake subscribers; already-settled rows return immediately. J5 shares the worker's outbox instance. A retry never re-injects a different command after an ambiguous outcome.
+`EffectOutbox.awaitSettled` subscribes before checking the durable row, then waits on settlement notifications instead of polling. Success, terminal failure, archive cancellation and process-loss cancellation all wake subscribers; already-settled rows return immediately. J5 shares the worker's outbox instance. Each A2A attempt bounds its receipt wait at 30 seconds so a missing provider acknowledgment cannot hold the delivery drain indefinitely. Timeout fails the attempt without cancelling or recreating the native effect; a retry can recognize a later successful receipt. A retry never re-injects a different command after an ambiguous outcome.
 
 The post-commit regression first reproduced false success with zero adapter calls. It now requires a typed delivery error after the real worker exhausts its five attempts using controlled time, then retries the same A2A ID twice and verifies no extra message or run. Existing effect-worker settlement/recovery tests remain part of the focused verification.
 

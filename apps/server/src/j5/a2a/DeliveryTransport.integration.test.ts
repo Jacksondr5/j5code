@@ -1,3 +1,4 @@
+import * as Cause from "effect/Cause";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -1217,4 +1218,71 @@ it.effect("does not acknowledge a committed Astra steer when its turn ends befor
       assert.lengthOf(yield* Ref.get(harness.interruptInputs), 0);
     }).pipe(Effect.provide(makeTestLayer(harness)));
   }),
+);
+
+it.effect(
+  "bounds a missing steer acknowledgment and recognizes a later success without reinjection",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const threads = yield* ThreadManagementService;
+        const transport = yield* A2ADeliveryTransport;
+        const worker = yield* OrchestrationEffectWorkerV2;
+        const sink = yield* EventSinkV2;
+        const target = yield* seedTarget("receipt-timeout", "gpt-6-astra");
+        const running = yield* sink.stream({ threadId: target.threadId }).pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "provider-turn.updated" &&
+              stored.event.payload.status === "running",
+          ),
+          Stream.runHead,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* threads.sendToThread({
+          projectId: target.projectId,
+          threadId: target.threadId,
+          commandId: CommandId.make("command:receipt-timeout:start"),
+          messageId: MessageId.make("message:receipt-timeout:start"),
+          text: "Inspect until the update arrives.",
+          attachments: [],
+          mode: "queue",
+          createdBy: "user",
+          creationSource: "web",
+        });
+        yield* worker.runOnce;
+        yield* Fiber.join(running);
+        const committed = yield* sink.stream({ threadId: target.threadId }).pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "turn-item.updated" &&
+              stored.event.payload.type === "user_message" &&
+              stored.event.payload.inputIntent === "steer",
+          ),
+          Stream.runHead,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const delivery = yield* transport
+          .deliverAgent(target.delivery)
+          .pipe(Effect.flip, Effect.forkChild({ startImmediately: true }));
+        yield* Fiber.join(committed);
+        // Leave the native effect pending: no provider receipt is available.
+        yield* TestClock.adjust("30 seconds");
+        const failure = yield* Fiber.join(delivery);
+        assert.equal(failure._tag, "A2ADeliveryTransportError");
+        assert.isTrue(Cause.isTimeoutError(failure.cause));
+        assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
+        // Timing out only detaches the observer. The original effect can settle.
+        yield* worker.drain();
+        yield* transport.deliverAgent(target.delivery);
+        assert.lengthOf(yield* Ref.get(harness.steerInputs), 1);
+        const after = yield* threads.getThreadProjection(target.threadId);
+        assert.lengthOf(after.runs, 1);
+        assert.lengthOf(
+          after.messages.filter((message) => message.id === deliveryMessageId(target.messageId)),
+          1,
+        );
+      }).pipe(Effect.provide(makeTestLayer(harness)));
+    }),
 );
