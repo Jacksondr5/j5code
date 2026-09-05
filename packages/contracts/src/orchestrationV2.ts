@@ -355,7 +355,10 @@ export const OrchestrationV2AgentPersonaAvailability = Schema.Union([
     resolvedDriver: ProviderDriverKind,
     resolvedModelSelection: ModelSelection,
   }),
-  Schema.Struct({ status: Schema.Literal("unavailable") }),
+  Schema.Struct({
+    status: Schema.Literal("unavailable"),
+    reason: Schema.Literals(["routes-unavailable", "authority-not-enforceable"]),
+  }),
 ]);
 export type OrchestrationV2AgentPersonaAvailability =
   typeof OrchestrationV2AgentPersonaAvailability.Type;
