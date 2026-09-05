@@ -2355,6 +2355,16 @@ export const OrchestrationV2Command = Schema.Union([
 ]);
 export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
 
+/** Public clients may request a persona launch, but only the server may resolve its assignment. */
+export const OrchestrationV2PublicCommand = OrchestrationV2Command.check(
+  Schema.makeFilter((command) =>
+    command.type === "thread.create" && command.agentPersonaAssignment !== undefined
+      ? "Resolved agent persona assignments are server-owned."
+      : undefined,
+  ),
+);
+export type OrchestrationV2PublicCommand = typeof OrchestrationV2PublicCommand.Type;
+
 export const ORCHESTRATION_V2_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
   getTurnDiff: "orchestration.getTurnDiff",
@@ -2650,7 +2660,7 @@ export class OrchestrationGetWorkflowScriptError extends Schema.TaggedErrorClass
 
 export const OrchestrationV2RpcSchemas = {
   dispatchCommand: {
-    input: OrchestrationV2Command,
+    input: OrchestrationV2PublicCommand,
     output: OrchestrationV2DispatchCommandResult,
   },
   getTurnDiff: {

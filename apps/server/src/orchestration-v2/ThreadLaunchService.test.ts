@@ -365,7 +365,7 @@ it.effect("keeps a proposed-plan child of a no-home legacy parent native", () =>
     assert.equal(launched.threadId, ThreadId.make("thread:launch:legacy-plan"));
   }).pipe(Effect.provide(harness.layer));
 });
-it.effect("resolves and persists a built-in agent persona assignment", () =>
+it.effect("launches one persona directly without requiring workflow sequencing", () =>
   Effect.gen(function* () {
     const harness = makeHarness({
       providers: [
@@ -390,7 +390,10 @@ it.effect("resolves and persists a built-in agent persona assignment", () =>
                     id: "reasoningEffort",
                     label: "Reasoning",
                     type: "select",
-                    options: [{ id: "high", label: "High" }],
+                    options: [
+                      { id: "medium", label: "Medium" },
+                      { id: "high", label: "High" },
+                    ],
                   },
                 ],
               },
@@ -433,6 +436,91 @@ it.effect("resolves and persists a built-in agent persona assignment", () =>
       assert.deepEqual(
         (yield* threads.getThreadShell(launched.threadId))?.agentPersonaAssignment,
         expectedAssignment,
+      );
+
+      const switchError = yield* threads
+        .dispatch({
+          type: "thread.model-selection.set",
+          commandId: CommandId.make("command:launch:agent-persona:switch"),
+          threadId: launched.threadId,
+          modelSelection,
+        })
+        .pipe(Effect.flip);
+      assert.equal(
+        switchError.cause,
+        `Agent persona thread ${launched.threadId} has an immutable model route.`,
+      );
+
+      const messageOverrideError = yield* threads
+        .dispatch({
+          type: "message.dispatch",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make("command:launch:agent-persona:model-override"),
+          threadId: launched.threadId,
+          messageId: MessageId.make("message:launch:agent-persona:model-override"),
+          text: "Use another model",
+          attachments: [],
+          modelSelection,
+          dispatchMode: { type: "start_immediately" },
+        })
+        .pipe(Effect.flip);
+      assert.equal(
+        messageOverrideError.cause,
+        `Agent persona thread ${launched.threadId} has an immutable model route.`,
+      );
+
+      const publisherError = yield* launches
+        .launch({
+          ...launchInput({
+            command: "command:launch:publisher-blocked",
+            thread: "thread:launch:publisher-blocked",
+          }),
+          agentPersona: { personaId: "publisher" },
+        })
+        .pipe(Effect.flip);
+      assert.equal(
+        publisherError.message,
+        "Agent persona publisher is blocked because neither route can enforce its authority policy.",
+      );
+
+      const invalidAuthorityError = yield* launches
+        .launch({
+          ...launchInput({
+            command: "command:launch:persona-invalid-authority",
+            thread: "thread:launch:persona-invalid-authority",
+          }),
+          agentPersona: { personaId: "scout", authorityPolicy: "publish-only" },
+        })
+        .pipe(Effect.flip);
+      assert.equal(
+        invalidAuthorityError.message,
+        "Authority policy publish-only is not allowed for scout.",
+      );
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+it.effect("blocks a direct persona launch when both declared model routes are unavailable", () =>
+  Effect.gen(function* () {
+    const harness = makeHarness({ providers: [] });
+
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const error = yield* launches
+        .launch({
+          ...launchInput({
+            command: "command:launch:blocked-agent-persona",
+            thread: "thread:launch:blocked-agent-persona",
+          }),
+          agentPersona: { personaId: "scout" },
+        })
+        .pipe(Effect.flip);
+
+      assert.instanceOf(error, ThreadLaunch.ThreadLaunchError);
+      assert.equal(error.operation, "resolve-agent-persona");
+      assert.equal(
+        error.message,
+        "Agent persona scout is blocked because its primary and fallback models are unavailable.",
       );
     }).pipe(Effect.provide(harness.layer));
   }),
