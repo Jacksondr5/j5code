@@ -7,6 +7,8 @@ import { HttpRouter, HttpServer } from "effect/unstable/http";
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
+import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
+import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import { ClientReadsService } from "./ClientReadsService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import {
@@ -330,6 +332,8 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
     Layer.provide(Layer.mock(A2ALedger)({})),
     Layer.provide(Layer.mock(SquadronProjectReferences)({})),
     Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+    Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
+    Layer.provide(Layer.mock(VcsProcess.VcsProcess)({})),
     Layer.provide(NodeSqliteClient.layerMemory()),
     Layer.provideMerge(auth),
     Layer.provide(HttpServer.layerServices),

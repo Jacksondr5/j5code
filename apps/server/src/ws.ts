@@ -12,6 +12,7 @@ import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
+  ArtifactWatchError,
   AuthAccessStreamError,
   type AuthAccessStreamEvent,
   type ApplicationStoredEvent,
@@ -135,6 +136,7 @@ import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as ArtifactWorkspace from "./j5/artifacts/ArtifactWorkspace.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
@@ -391,6 +393,7 @@ function toAuthAccessStreamEvent(
 const makeWsRpcLayer = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
+  artifactWorkspace: ArtifactWorkspace.ArtifactWorkspace["Service"],
 ) =>
   ServerWsRpcGroup.toLayer(
     Effect.gen(function* () {
@@ -2023,6 +2026,56 @@ const makeWsRpcLayer = (
           observeRpcStream(WS_METHODS.subscribePreviewEvents, previewManager.events, {
             "rpc.aggregate": "preview",
           }),
+        [WS_METHODS.subscribeArtifactChanges]: (input) =>
+          observeRpcStreamEffect(
+            WS_METHODS.subscribeArtifactChanges,
+            projectService.getById(input.projectId).pipe(
+              Effect.flatMap(
+                Option.match({
+                  onNone: () =>
+                    Effect.fail(
+                      new ArtifactWatchError({
+                        projectId: input.projectId,
+                        detail: `Project ${input.projectId} does not have an available workspace.`,
+                      }),
+                    ),
+                  onSome: (project) =>
+                    Effect.succeed(
+                      Stream.merge(
+                        Stream.make({ projectId: input.projectId, revision: 0 }),
+                        artifactWorkspace.watch(project.workspaceRoot).pipe(
+                          Stream.mapError(
+                            (cause) =>
+                              new ArtifactWatchError({
+                                projectId: input.projectId,
+                                detail: cause.message,
+                              }),
+                          ),
+                          Stream.mapAccum(
+                            () => 0,
+                            (revision) => {
+                              const nextRevision = revision + 1;
+                              return [
+                                nextRevision,
+                                [{ projectId: input.projectId, revision: nextRevision }],
+                              ] as const;
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                }),
+              ),
+              Effect.mapError(
+                (cause) =>
+                  new ArtifactWatchError({
+                    projectId: input.projectId,
+                    detail: cause.message,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "artifacts" },
+          ),
         [WS_METHODS.subscribeDiscoveredLocalServers]: (input) =>
           observeRpcStream(
             WS_METHODS.subscribeDiscoveredLocalServers,
@@ -2179,6 +2232,7 @@ const makeWsRpcLayer = (
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+    const artifactWorkspace = yield* ArtifactWorkspace.ArtifactWorkspace;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
     return HttpRouter.add(
@@ -2200,7 +2254,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           disableTracing: true,
         }).pipe(
           Effect.provide(
-            makeWsRpcLayer(session, previewAutomationBroker).pipe(
+            makeWsRpcLayer(session, previewAutomationBroker, artifactWorkspace).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),
@@ -2244,4 +2298,4 @@ export const websocketRpcRouteLayer = Layer.unwrap(
       ),
     );
   }),
-);
+).pipe(Layer.provide(ArtifactWorkspace.layer));

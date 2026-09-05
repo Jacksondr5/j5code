@@ -77,6 +77,9 @@ import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { j5AuthenticatedRoutesLayer } from "./j5/a2a/J5AuthenticatedRoutes.ts";
 import { J5A2AAuxiliaryLayer, J5SquadronCreationLayer } from "./j5/a2a/runtimeLayer.ts";
+import { layer as J5ArtifactRunFinalizationObserverLive } from "./j5/artifacts/ArtifactRunFinalizationObserver.ts";
+import { layer as J5ArtifactProviderTurnStartObserverLive } from "./j5/artifacts/ArtifactProviderTurnStartObserver.ts";
+import { layer as J5ArtifactWorkspaceLive } from "./j5/artifacts/ArtifactWorkspace.ts";
 import {
   connectHttpApiLayer,
   pendingServiceUpdateExists,
@@ -101,10 +104,10 @@ import * as UsageService from "./usage/UsageService.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   OrchestrationV2ProductionLayerLive,
+  ProjectServiceLayerLive,
   ProjectSetupScriptRunnerLayerLive,
 } from "./orchestration-v2/runtimeLayer.ts";
 import * as ResourceCleanupService from "./orchestration-v2/ResourceCleanupService.ts";
-import * as RunFinalizationService from "./orchestration-v2/RunFinalizationService.ts";
 import {
   clearPersistedServerRuntimeState,
   makePersistedServerRuntimeState,
@@ -338,7 +341,18 @@ const OrchestrationV2RuntimeLayerLive = OrchestrationV2ProductionLayerLive.pipe(
   Layer.provideMerge(J5SquadronCreationLayer),
   Layer.provide(CheckpointStoreLayerLive),
   Layer.provide(ResourceCleanupService.live),
-  Layer.provide(RunFinalizationService.observerLive),
+  Layer.provide(
+    J5ArtifactRunFinalizationObserverLive.pipe(
+      Layer.provide(J5ArtifactWorkspaceLive),
+      Layer.provide(ProjectServiceLayerLive),
+    ),
+  ),
+  Layer.provide(
+    J5ArtifactProviderTurnStartObserverLive.pipe(
+      Layer.provide(J5ArtifactWorkspaceLive),
+      Layer.provide(ProjectServiceLayerLive),
+    ),
+  ),
 );
 
 const OrchestrationApplicationLayerLive = CheckpointDiffQuery.layer.pipe(

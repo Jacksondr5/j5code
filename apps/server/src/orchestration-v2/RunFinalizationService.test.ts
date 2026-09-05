@@ -1,6 +1,7 @@
 import { assert, it, vi } from "@effect/vitest";
 import {
   CheckpointScopeId,
+  ProjectId,
   RunId,
   ThreadId,
   type OrchestrationV2ThreadProjection,
@@ -15,11 +16,14 @@ import * as RunFinalization from "./RunFinalizationService.ts";
 it.effect("captures the root checkpoint and refreshes workspace state", () => {
   const threadId = ThreadId.make("thread_finalize");
   const runId = RunId.make("run_finalize");
+  const projectId = ProjectId.make("project_finalize");
   const scopeId = CheckpointScopeId.make("scope_finalize");
   const capture = vi.fn(() => Effect.void);
   const refresh = vi.fn(() => Effect.void);
   const projection = {
+    thread: { projectId },
     checkpointScopes: [{ id: scopeId, cwd: "/repo" }],
+    plans: [{ kind: "proposed_plan", runId, markdown: "# Final plan" }],
   } as unknown as OrchestrationV2ThreadProjection;
   const layer = RunFinalization.layer.pipe(
     Layer.provide(
@@ -36,6 +40,8 @@ it.effect("captures the root checkpoint and refreshes workspace state", () => {
     const service = yield* RunFinalization.RunFinalizationService;
     yield* service.finalize({ threadId, runId, scopeId });
     assert.equal(capture.mock.calls.length, 1);
-    assert.deepEqual(refresh.mock.calls[0], ["/repo"]);
+    assert.deepEqual(refresh.mock.calls[0], [
+      { cwd: "/repo", projectId, threadId, runId, planMarkdown: "# Final plan" },
+    ]);
   }).pipe(Effect.provide(layer));
 });
