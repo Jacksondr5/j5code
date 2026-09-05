@@ -127,6 +127,38 @@ function threadCreatedEvent(input: {
 }
 
 it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
+  it.effect("preserves an agent persona assignment through projection rebuild", () =>
+    Effect.gen(function* () {
+      const eventSink = yield* EventSinkV2;
+      const projectionStore = yield* ProjectionStoreV2;
+      const maintenance = yield* ProjectionMaintenanceV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread:foundation-agent-persona");
+      const assignment = {
+        personaId: "builder",
+        definitionVersion: 1,
+        authorityPolicy: "workspace-write",
+        resolvedRoute: "primary",
+        resolvedDriver: providerDriver,
+        resolvedModelSelection: modelSelection,
+      } as const;
+      const thread = { ...makeThread(threadId, now), agentPersonaAssignment: assignment };
+
+      yield* eventSink.write({
+        events: [threadCreatedEvent({ id: "event:foundation-agent-persona", thread, now })],
+      });
+      assert.deepEqual(
+        (yield* projectionStore.getThreadProjection(threadId)).thread.agentPersonaAssignment,
+        assignment,
+      );
+      assert.isTrue((yield* maintenance.rebuild).valid);
+      assert.deepEqual(
+        (yield* projectionStore.getThreadProjection(threadId)).thread.agentPersonaAssignment,
+        assignment,
+      );
+    }),
+  );
+
   it.effect("paginates catch-up beyond the event-store read limit", () =>
     Effect.gen(function* () {
       const eventSink = yield* EventSinkV2;
