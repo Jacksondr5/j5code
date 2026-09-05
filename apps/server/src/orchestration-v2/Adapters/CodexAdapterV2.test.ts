@@ -35,8 +35,10 @@ import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import { ChildProcess } from "effect/unstable/process";
 
+import { findCodexCliVersionUnsupportedError } from "../../j5/codex/CodexCliVersionGate.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import type { EventNdjsonLogger } from "../../provider/Layers/EventNdjsonLogger.ts";
+import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../provider/T3OrchestrationInstructions.ts";
 import { layer as idAllocatorLayer, IdAllocatorV2 } from "../IdAllocator.ts";
 import {
   ProviderAdapterOpenSessionError,
@@ -46,6 +48,7 @@ import {
 } from "../ProviderAdapter.ts";
 import type { ProviderContinuationRequest } from "../ProviderContinuationRequests.ts";
 import {
+  approvalDecisionToLegacyReviewDecision,
   buildCodexTurnStartParams,
   CODEX_DEFAULT_INSTANCE_ID,
   CODEX_DRIVER_KIND,
@@ -437,7 +440,7 @@ describe("CodexAdapterV2 runtime policy", () => {
       assert.equal(params.collaborationMode?.mode, "default");
       assert.include(
         params.collaborationMode?.settings.developer_instructions ?? "",
-        "use `delegate_task`",
+        T3_CODE_ORCHESTRATION_INSTRUCTIONS,
       );
       assert.include(
         params.collaborationMode?.settings.developer_instructions ?? "",
@@ -1147,7 +1150,7 @@ function codexReplayPreamble(input: {
       frame: {
         id: 1,
         result: {
-          userAgent: "t3code_desktop/0.144.0",
+          userAgent: "t3code_desktop/0.152.1",
           codexHome: "/tmp/codex-home",
           platformFamily: "unix",
           platformOs: "macos",
@@ -1170,6 +1173,7 @@ function codexReplayPreamble(input: {
             id: input.nativeThreadId,
             sessionId: input.nativeThreadId,
             forkedFromId: null,
+            projectId: null,
             preview: "",
             ephemeral: false,
             modelProvider: "openai",
@@ -1178,7 +1182,7 @@ function codexReplayPreamble(input: {
             status: { type: "idle" },
             path: `/tmp/${input.nativeThreadId}.jsonl`,
             cwd: "/workspace",
-            cliVersion: "0.144.0",
+            cliVersion: "0.152.1",
             source: "vscode",
             threadSource: null,
             agentNickname: null,
@@ -1245,7 +1249,7 @@ function makeCodexReplayTranscript(input: {
   return {
     provider: "codex",
     protocol: "codex.app-server",
-    version: "0.144.0",
+    version: "0.152.1",
     scenario: input.scenario,
     entries: input.entries,
   };
@@ -1364,6 +1368,43 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       (event): event is Extract<ProviderAdapterV2Event, { type: "message.updated" }> =>
         event.type === "message.updated" && event.message.role === "assistant",
     );
+
+  for (const userAgent of ["t3code_desktop/0.150.0", "codex-app-server"]) {
+    it.effect(`refuses ${userAgent} during initialize before any thread request`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const initialize = codexReplayPreamble({
+            nativeThreadId: "unsupported-cli-thread",
+            nativeTurnId: "unsupported-cli-turn",
+            prompt: "Must not reach a thread request",
+          })[0]!;
+          const transcript = makeCodexReplayTranscript({
+            scenario: "unsupported-codex-initialize",
+            entries: [
+              initialize,
+              {
+                type: "emit_inbound",
+                label: "initialize",
+                frame: {
+                  id: 1,
+                  result: {
+                    userAgent,
+                    codexHome: "/tmp/codex-home",
+                    platformFamily: "unix",
+                    platformOs: "macos",
+                  },
+                },
+              },
+            ],
+          });
+          const error = yield* makeCodexReplayHarness(transcript).pipe(Effect.flip);
+          const versionError = findCodexCliVersionUnsupportedError(error);
+          assert.isDefined(versionError);
+          assert.include(versionError!.message, "J5 requires Codex CLI ≥ 0.151.0");
+        }),
+      ).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, idAllocatorLayer))),
+    );
+  }
 
   it.effect("keeps an asynchronous Codex question actionable after the turn completes", () =>
     Effect.scoped(
@@ -4404,4 +4445,20 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       }).pipe(Effect.provide(Layer.merge(idAllocatorLayer, NodeServices.layer))),
     ),
   );
+});
+
+describe("CodexAdapterV2 approval decisions", () => {
+  it("maps a decline to Codex's structured denial with truthful J5 wording", () => {
+    // J5 cannot tell a human decline from a policy one at this seam, so the
+    // rejection never claims the user did it.
+    assert.deepEqual(approvalDecisionToLegacyReviewDecision("decline"), {
+      denied: { rejection: "J5 did not approve this request." },
+    });
+    assert.strictEqual(approvalDecisionToLegacyReviewDecision("accept"), "approved");
+    assert.strictEqual(
+      approvalDecisionToLegacyReviewDecision("acceptForSession"),
+      "approved_for_session",
+    );
+    assert.strictEqual(approvalDecisionToLegacyReviewDecision("cancel"), "abort");
+  });
 });

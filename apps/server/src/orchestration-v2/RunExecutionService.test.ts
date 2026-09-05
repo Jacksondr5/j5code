@@ -43,6 +43,7 @@ import {
   ProviderAdapterEventStreamError,
   ProviderAdapterTurnStartError,
   type ProviderAdapterV2Error,
+  ProviderResumeFailedError,
   type ProviderAdapterV2Event,
   type ProviderAdapterV2SessionRuntime,
 } from "./ProviderAdapter.ts";
@@ -661,6 +662,116 @@ it.effect("refreshes MCP credential liveness before calling the provider", () =>
 
     assert.deepEqual(yield* Ref.get(order), [`touch:${threadId}`, "start-turn"]);
   }).pipe(Effect.provide(RunExecutionTestLayer)),
+);
+
+it.effect("terminalizes the run when native provider resume fails before its first turn", () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread:run-execution-start-failure");
+    const runId = RunId.make("run:run-execution-start-failure");
+    const attemptId = RunAttemptId.make("attempt:run-execution-start-failure");
+    const providerThreadId = ProviderThreadId.make("provider-thread:run-execution-start-failure");
+    const providerInstanceId = ProviderInstanceId.make("codex");
+    const written = yield* Ref.make<ReadonlyArray<ReadonlyArray<OrchestrationV2DomainEvent>>>([]);
+    const layer = runExecutionServiceLayer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(CheckpointServiceV2)({ captureBaseline: () => Effect.void }),
+          Layer.mock(EventSinkV2)({
+            writeWithEffects: (input) =>
+              Ref.update(written, (current) => [...current, input.events]).pipe(Effect.as([])),
+          }),
+          idAllocatorLayer,
+          Layer.mock(ProviderEventIngestorV2)({ ingestNormalized: () => Effect.succeed([]) }),
+          ServerSettingsService.layerTest(),
+        ),
+      ),
+    );
+
+    yield* Effect.gen(function* () {
+      const runExecution = yield* RunExecutionServiceV2;
+      yield* runExecution.startRootRun({
+        commandId: CommandId.make("command:run-execution-start-failure"),
+        appThread: { id: threadId } as OrchestrationV2AppThread,
+        providerSessionId: ProviderSessionId.make("session:run-execution-start-failure"),
+        session: {
+          events: Stream.never,
+          startTurn: () =>
+            Effect.fail(
+              new ProviderResumeFailedError({
+                driver,
+                providerThreadId,
+                detail: "recorded native resume cause",
+              }),
+            ),
+        } as unknown as ProviderAdapterV2SessionRuntime,
+        run: {
+          id: runId,
+          threadId,
+          ordinal: 1,
+          providerInstanceId,
+        } as OrchestrationV2Run,
+        rootNode: {
+          id: NodeId.make("node:run-execution-start-failure"),
+        } as OrchestrationV2ExecutionNode,
+        checkpointScope: {
+          id: CheckpointScopeId.make("checkpoint-scope:run-execution-start-failure"),
+        } as OrchestrationV2CheckpointScope,
+        providerThread: {
+          id: providerThreadId,
+          driver,
+        } as OrchestrationV2ProviderThread,
+        attempt: {
+          id: attemptId,
+          providerTurnId: null,
+        } as OrchestrationV2RunAttempt,
+        attemptId,
+        providerTurnOrdinal: 1,
+        message: {
+          messageId: MessageId.make("message:run-execution-start-failure"),
+          text: "Fail before the provider starts.",
+          attachments: [],
+          createdBy: "user",
+          creationSource: "web",
+        },
+        modelSelection: { instanceId: providerInstanceId, model: "gpt-5.4" },
+        runtimePolicy: {
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: process.cwd(),
+          approvalPolicy: "never",
+          sandboxPolicy: {
+            type: "readOnly",
+            access: { type: "fullAccess" },
+            networkAccess: false,
+          },
+        },
+      });
+    }).pipe(Effect.provide(layer));
+
+    const events = (yield* Ref.get(written)).flat();
+    assert.isTrue(
+      events.some((event) => event.type === "run.updated" && event.payload.status === "failed"),
+    );
+    assert.isTrue(
+      events.some(
+        (event) => event.type === "run-attempt.updated" && event.payload.status === "failed",
+      ),
+    );
+    assert.isTrue(
+      events.some((event) => event.type === "node.updated" && event.payload.status === "failed"),
+    );
+    assert.isTrue(
+      events.some(
+        (event) => event.type === "turn-item.updated" && event.payload.status === "failed",
+      ),
+    );
+    const failureItem = events.find(
+      (event) => event.type === "turn-item.updated" && "failure" in event.payload,
+    );
+    assert.isDefined(failureItem);
+    if (failureItem === undefined || !("failure" in failureItem.payload)) return;
+    assert.include(failureItem.payload.failure.message, "recorded native resume cause");
+  }),
 );
 
 it.effect("keeps ingesting owned child events after the root turn terminalizes", () =>

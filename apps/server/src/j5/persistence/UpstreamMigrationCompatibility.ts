@@ -79,7 +79,9 @@ const verifyLegacySchema = Effect.fn("J5.verifyLegacyUpstreamSchema")(function* 
     tbl_name,
     definition?.replace(/\s+/g, " ").trim() ?? null,
   ]);
-  const encoded = yield* encodeSignature(signature);
+  const encoded = yield* encodeSignature(signature).pipe(
+    Effect.mapError(() => badState("invalid schema signature")),
+  );
   const digest = NodeCrypto.createHash("sha256").update(encoded).digest("hex");
   if (digest !== legacy.schema.sha256) {
     return yield* badState("legacy history does not match the reviewed schema");
@@ -133,8 +135,16 @@ export const runJ5CompatibleUpstreamMigrations = Effect.fn("J5.runCompatibleUpst
         }
 
         const missing = migrationEntries.filter(([id]) => id >= 41 && id <= 47);
-        for (const [, , migration] of missing) {
-          yield* migration;
+        for (const [id, name, migration] of missing) {
+          yield* Effect.mapError(
+            migration,
+            (cause) =>
+              new Migrator.MigrationError({
+                kind: "Failed",
+                message: `Migration "${id}_${name}" failed`,
+                cause,
+              }),
+          );
         }
 
         yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= 41`;

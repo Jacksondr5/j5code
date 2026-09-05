@@ -319,6 +319,33 @@ describe("Codex MCP elicitation approvals", () => {
     });
   });
 
+  it("preserves JSON-valued elicitation defaults", () => {
+    const defaultRequest = {
+      ...request,
+      requestedSchema: {
+        type: "object",
+        properties: {
+          attempts: { type: "number", default: 0 },
+          enabled: { type: "boolean", default: false },
+          scopes: {
+            type: "array",
+            items: { type: "string", enum: ["read", "write"] },
+            default: ["read"],
+          },
+        },
+        required: ["attempts", "enabled", "scopes"],
+      },
+    } satisfies EffectCodexSchema.McpServerElicitationRequestParams;
+    NodeAssert.deepStrictEqual(toMcpElicitationResponse(defaultRequest, "accept"), {
+      action: "accept",
+      content: {
+        attempts: 0,
+        enabled: false,
+        scopes: ["read"],
+      },
+    });
+  });
+
   it("returns rejection without form content", () => {
     NodeAssert.deepStrictEqual(toMcpElicitationResponse(request, "decline"), {
       action: "decline",
@@ -579,6 +606,7 @@ function makeThreadStartedNotification(
         id: threadId,
         modelProvider: "openai",
         preview: "",
+        projectId: null,
         sessionId: threadId,
         source,
         status: { type: "idle" as const },
