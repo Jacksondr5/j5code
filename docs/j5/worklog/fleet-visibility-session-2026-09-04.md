@@ -26,6 +26,20 @@ Jackson + Product lead, in the Product thread; commissioned through the "Priorit
 
 Jackson's answers: F1/F3/F4/F5/F6/F10 agree; F2 concern → revised to drop notices, agreed; F7 amended to single-Squadron, agreed; F8 amended to sidebar-unchanged, agreed; F9 explained in plain words (A5 = the dashboard data feed with replay/subscriptions; A10 = the silence-notice storage rework), agreed.
 
+## Second round (same day) — Design and Architecture clarifications
+
+Design's plan and Architecture's brief raised five product choices; Jackson ruled in the Product thread:
+
+| ID   | Ruling                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FV5a | **Badge is global** across every Squadron in the primary environment (Design's point upheld: the user must know something is broken somewhere, and the badge is the only place). The scoped-page tension is resolved by FV7a. The inbox rail is not used for platform problems — that rail is where _agents_ tell you something is wrong.                                                                                                                       |
+| FV7a | **On the Fleet page the sidebar is replaced by a Squadron list** with per-Squadron problem counts; the roster shows the Squadron selected there. Selection is page-local (no sync with the ambient sidebar scope — "changing one view would alter another"); leaving the page restores the sidebar unchanged. Default (Product's): open on the ambient Squadron when scoped, else on the list unselected.                                                       |
+| FV1a | **Agents only** on the roster; humans are never rows. An agent's ask out to the human surfaces in its asks list like any other counterparty.                                                                                                                                                                                                                                                                                                                    |
+| FV2a | **Status vocabulary corrected**: runtime facts only (Working / Waiting / Approval / Input / Failed; watchdog "Waiting to start" precedence while starting; "Idle since" only when nothing active or background remains). Measured: the sidebar's runtime resolver yields working/waiting/approval/input/idle; Woke/Done derive from wake and unread state — read/snooze bookkeeping, omitted deliberately. Ruled by recommendation (no objection from Jackson). |
+| FV11 | **Delivery alarms**: permanent facts, never inferred repaired; attributed to the sender; chip persists; **badge counts only while the alarm's exchange is open**; plain-message failures chip-only; silence-notice and lifecycle-notice delivery failures excluded. Jackson: agree.                                                                                                                                                                             |
+
+Batch confirmations (ruled by recommendation): every retired ancestor on the path is preserved as a placeholder with not-applicable cells; no population cap; the no-home footer count is primary-wide, unarchived, excluding provider-native Subagents; last activity is run start/end only; FV9 becomes two reads (per-Squadron roster; fleet-wide problem counts).
+
 ## Acceptance scenarios (for Design, Architecture, builders, verification)
 
 1. Squadron "J5 Code" selected: the Director row; Relay & Staffing (spawned by the Director) with its lanes indented beneath it; every row shows status, owes/awaiting, last activity; clicking a lane opens its thread.
@@ -35,9 +49,10 @@ Jackson's answers: F1/F3/F4/F5/F6/F10 agree; F2 concern → revised to drop noti
 5. The placement query fails for one row: placement `?` with the reason on hover; the row still renders; the badge is unchanged.
 6. A run fails and the same agent has a delivery alarm: the badge counts the agent once; the row lists both facts.
 7. A silence notice exists for an agent: nothing on the page changes — status stays whatever upstream says; the owed-ask age is the visible fact.
-8. Sidebar scope is "All Squadrons": the Fleet page shows a Squadron picker, not a merged list.
+8. The rail badge shows 2; opening the Fleet page replaces the sidebar with the Squadron list, on which "J5 Code" shows 2 and "Production Monitoring" shows 0; choosing "J5 Code" shows the roster with both failing agents chipped; leaving the page restores the normal sidebar with its scope unchanged.
 9. Header reads "Fleet · ⟨environment⟩ · as of 14:02:31"; a saved remote environment's Squadrons do not appear and the page does not claim they do.
 10. Three native threads without a Squadron home exist: the footer line states the count; none appear as rows.
+11. An agent's ask to the Director failed to deliver: its row chips "Delivery failed · to Director · 14:02 · ⟨reason⟩" and the badge counts it; the agent clears its ask; the chip remains, the badge no longer counts it.
 
 ## Not decided here (for the coordinator / Architecture)
 
