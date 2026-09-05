@@ -5,6 +5,7 @@ import {
   type OrchestrationV2ProviderThread,
   type OrchestrationV2Run,
   type OrchestrationV2RunAttempt,
+  ProjectId,
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -70,6 +71,16 @@ export class ProviderTurnStartServiceV2 extends Context.Service<
   ProviderTurnStartServiceV2Shape
 >()("t3/orchestration-v2/ProviderTurnStartService/ProviderTurnStartServiceV2") {}
 
+export class ProviderTurnStartObserver extends Context.Reference<{
+  readonly prepare: (input: {
+    readonly projectId: ProjectId;
+    readonly threadId: ThreadId;
+    readonly runId: RunId;
+  }) => Effect.Effect<void>;
+}>("t3/orchestration-v2/ProviderTurnStartObserver", {
+  defaultValue: () => ({ prepare: () => Effect.void }),
+}) {}
+
 export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   never,
@@ -87,6 +98,7 @@ export const layer: Layer.Layer<
     const contextHandoffService = yield* ContextHandoffServiceV2;
     const idAllocator = yield* IdAllocatorV2;
     const projectionStore = yield* ProjectionStoreV2;
+    const observer = yield* ProviderTurnStartObserver;
     const providerSessions = yield* ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicyV2;
@@ -163,6 +175,11 @@ export const layer: Layer.Layer<
       const inheritedBackgroundTurnItems = yield* projectionStore
         .getThreadProjection(projection.thread.id)
         .pipe(Effect.map(selectInheritedBackgroundItems));
+      yield* observer.prepare({
+        projectId: projection.thread.projectId,
+        threadId: projection.thread.id,
+        runId,
+      });
       const providerSessionId = providerThread.providerSessionId;
       const isCurrentAttemptInStatus = (
         expectedStatus: OrchestrationV2Run["status"],

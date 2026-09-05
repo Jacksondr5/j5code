@@ -1,4 +1,4 @@
-import { CheckpointScopeId, RunId, ThreadId } from "@t3tools/contracts";
+import { CheckpointScopeId, ProjectId, RunId, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -27,7 +27,13 @@ export class RunFinalizationRefreshError extends Schema.TaggedErrorClass<RunFina
 ) {}
 
 export class RunFinalizationObserver extends Context.Reference<{
-  readonly refresh: (cwd: string) => Effect.Effect<void, RunFinalizationRefreshError>;
+  readonly refresh: (input: {
+    readonly cwd: string;
+    readonly projectId: ProjectId;
+    readonly threadId: ThreadId;
+    readonly runId: RunId;
+    readonly planMarkdown: string | null;
+  }) => Effect.Effect<void, RunFinalizationRefreshError>;
 }>("t3/orchestration-v2/RunFinalizationObserver", {
   defaultValue: () => ({ refresh: () => Effect.void }),
 }) {}
@@ -68,8 +74,17 @@ export const make = Effect.gen(function* () {
       );
     const cwd = projection.checkpointScopes.find((scope) => scope.id === input.scopeId)?.cwd;
     if (cwd !== undefined) {
+      const plan = projection.plans.findLast(
+        (candidate) => candidate.kind === "proposed_plan" && candidate.runId === input.runId,
+      );
       yield* observer
-        .refresh(cwd)
+        .refresh({
+          cwd,
+          projectId: projection.thread.projectId,
+          threadId: input.threadId,
+          runId: input.runId,
+          planMarkdown: plan?.kind === "proposed_plan" ? plan.markdown : null,
+        })
         .pipe(
           Effect.mapError(
             (cause) =>
@@ -101,11 +116,13 @@ export const observerLive = Layer.effect(
     const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
     const vcsStatus = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
     return {
-      refresh: (cwd: string) =>
-        Effect.all([workspaceEntries.refresh(cwd), vcsStatus.refreshStatus(cwd)], {
+      refresh: (input) =>
+        Effect.all([workspaceEntries.refresh(input.cwd), vcsStatus.refreshStatus(input.cwd)], {
           discard: true,
           concurrency: "unbounded",
-        }).pipe(Effect.mapError((cause) => new RunFinalizationRefreshError({ cwd, cause }))),
+        }).pipe(
+          Effect.mapError((cause) => new RunFinalizationRefreshError({ cwd: input.cwd, cause })),
+        ),
     };
   }),
 );

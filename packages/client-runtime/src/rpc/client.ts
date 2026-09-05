@@ -49,6 +49,7 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.subscribeTerminalEvents
   | typeof WS_METHODS.subscribeTerminalMetadata
   | typeof WS_METHODS.subscribePreviewEvents
+  | typeof WS_METHODS.subscribeArtifactChanges
   | typeof WS_METHODS.subscribeDiscoveredLocalServers
   | typeof WS_METHODS.subscribeResourceTelemetry
   | typeof WS_METHODS.previewAutomationConnect
