@@ -40,6 +40,9 @@ const codexCaps: ModelCapabilities = createModelCapabilities({
 });
 
 describe("model slug normalization", () => {
+  it.each(["astra", "gpt-6", "6"])("resolves %s to the Astra execution model", (alias) => {
+    expect(normalizeModelSlug(alias, ProviderDriverKind.make("codex"))).toBe("gpt-6-astra");
+  });
   it("preserves exact custom slugs instead of expanding provider aliases", () => {
     // Claude aliases now resolve through the model catalog (#9084), so the
     // provider alias table passes unknown slugs through unchanged.

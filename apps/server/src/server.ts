@@ -89,6 +89,8 @@ import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import { j5AuthenticatedRoutesLayer } from "./j5/a2a/J5AuthenticatedRoutes.ts";
+import { J5A2AAuxiliaryLayer, J5SquadronCreationLayer } from "./j5/a2a/runtimeLayer.ts";
 import {
   connectHttpApiLayer,
   pendingServiceUpdateExists,
@@ -390,6 +392,7 @@ const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
 
 const OrchestrationV2RuntimeLayerLive = OrchestrationV2ProductionLayerLive.pipe(
   Layer.provide(ProviderEventIngestor.analyticsLive),
+  Layer.provideMerge(J5SquadronCreationLayer),
   Layer.provide(CheckpointStoreLayerLive),
   Layer.provide(GitWorkflowLayerLive),
   Layer.provide(ResourceCleanupService.live),
@@ -545,11 +548,13 @@ export const makeRoutesLayer = Layer.mergeAll(
     attachmentUploadRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
+    j5AuthenticatedRoutesLayer,
   ),
   // The MCP session registry is provided globally (shared with V2 provider
   // sessions) rather than inline here.
   McpHttpServer.layer,
 ).pipe(
+  Layer.provide(J5A2AAuxiliaryLayer),
   // Both transports consume the same service instance, so caches single-flight across clients
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.
   Layer.provide(PullRequestServiceLive),
