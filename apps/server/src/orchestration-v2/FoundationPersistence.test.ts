@@ -2132,6 +2132,7 @@ it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
         const attemptId = RunAttemptId.make("attempt:shutdown-prepare");
         const projection = {
           thread: makeThread(threadId, now),
+          turnItems: [],
           runs: [
             {
               id: runId,
