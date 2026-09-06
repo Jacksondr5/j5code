@@ -1,0 +1,97 @@
+{
+  "base": "993407dd9e57f1edf2f5681d70140bfefeca93cc",
+  "candidate": "b9fa1399cfbacf23f35ba9201af8aebe3f41e807",
+  "status": "reviewed_bridge_required",
+  "changes": [
+    {
+      "kind": "renumbered",
+      "name": "OrchestrationV2",
+      "oldId": 41,
+      "newId": 48
+    },
+    {
+      "kind": "renumbered",
+      "name": "OrchestrationV2Subagents",
+      "oldId": 42,
+      "newId": 49
+    },
+    {
+      "kind": "renumbered",
+      "name": "OrchestrationV2Foundation",
+      "oldId": 43,
+      "newId": 50
+    },
+    {
+      "kind": "renumbered",
+      "name": "OrchestrationV2ProviderSessionBindings",
+      "oldId": 44,
+      "newId": 51
+    },
+    {
+      "kind": "renumbered",
+      "name": "OrchestrationV2ThreadLaunchWorkflows",
+      "oldId": 45,
+      "newId": 52
+    },
+    {
+      "kind": "renumbered",
+      "name": "ApplicationEventSource",
+      "oldId": 46,
+      "newId": 53
+    },
+    {
+      "kind": "renumbered",
+      "name": "OrchestrationV2EffectCancellation",
+      "oldId": 47,
+      "newId": 54
+    },
+    {
+      "kind": "renumbered",
+      "name": "ScheduledTasks",
+      "oldId": 48,
+      "newId": 55
+    },
+    {
+      "kind": "renumbered",
+      "name": "LegacyV1ImportState",
+      "oldId": 49,
+      "newId": 56
+    },
+    {
+      "kind": "inserted_below_high_water",
+      "name": "AuthSessionClientConnection",
+      "newId": 41
+    },
+    {
+      "kind": "inserted_below_high_water",
+      "name": "ProjectionThreadLinkedPullRequest",
+      "newId": 42
+    },
+    {
+      "kind": "inserted_below_high_water",
+      "name": "ProjectionThreadsUnsettledAt",
+      "newId": 43
+    },
+    {
+      "kind": "inserted_below_high_water",
+      "name": "ClearAutomaticProjectModelDefaults",
+      "newId": 44
+    },
+    {
+      "kind": "inserted_below_high_water",
+      "name": "ProjectionProjectsAutoPull",
+      "newId": 45
+    },
+    {
+      "kind": "inserted_below_high_water",
+      "name": "RepairAutomaticSettlementTimestamps",
+      "newId": 46
+    },
+    {
+      "kind": "inserted_below_high_water",
+      "name": "ProjectionProjectIcon",
+      "newId": 47
+    }
+  ],
+  "databaseUpgradeProofRequired": true
+}
