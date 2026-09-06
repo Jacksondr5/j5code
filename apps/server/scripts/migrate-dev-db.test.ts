@@ -192,4 +192,40 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
       assert.equal(error._tag, "MigrateDevDbSharedHomeError");
     }),
   );
+
+  it.effect("refuses to rebuild either installed T3 or J5 home", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-homes-" });
+      const originalHome = process.env.HOME;
+      const originalUserProfile = process.env.USERPROFILE;
+      try {
+        process.env.HOME = home;
+        process.env.USERPROFILE = home;
+        for (const name of [".t3", ".j5code"]) {
+          const baseDir = path.join(home, name);
+          const source = yield* createFixtureSource(baseDir);
+          const error = yield* runMigrateDevDb({
+            baseDir,
+            source,
+            projects: 5,
+            threadsPerProject: 10,
+          }).pipe(Effect.flip);
+          assert.equal(error._tag, "MigrateDevDbSharedHomeError");
+        }
+      } finally {
+        if (originalHome === undefined) {
+          delete process.env.HOME;
+        } else {
+          process.env.HOME = originalHome;
+        }
+        if (originalUserProfile === undefined) {
+          delete process.env.USERPROFILE;
+        } else {
+          process.env.USERPROFILE = originalUserProfile;
+        }
+      }
+    }),
+  );
 });

@@ -13,6 +13,7 @@ export default defineConfig({
     exclude: [
       "**/.repos/**",
       "**/.t3/**",
+      "**/.j5code/**",
       "**/node_modules/**",
       "**/dist/**",
       "**/dist-electron/**",

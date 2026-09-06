@@ -5,7 +5,7 @@
  * ~/.t3 database, then run this checkout's migrations against it.
  *
  * `vp run migrate-dev-db` from a worktree:
- *   1. Nukes `<worktree>/.t3/userdata/state.sqlite`.
+ *   1. Nukes `<worktree>/.j5code/userdata/state.sqlite`.
  *   2. Snapshots the real db (read-only VACUUM INTO) and prunes it to the
  *      most recently updated projects and, per project, the most recent
  *      threads that have fully stopped. Working, settled, and monitored
@@ -45,7 +45,7 @@ export class MigrateDevDbNotInWorktreeError extends Schema.TaggedErrorClass<Migr
   {},
 ) {
   override get message(): string {
-    return "Not inside a linked git worktree. Pass --base-dir to target an isolated .t3 directory.";
+    return "Not inside a linked git worktree. Pass --base-dir to target an isolated .j5code directory.";
   }
 }
 
@@ -54,7 +54,7 @@ export class MigrateDevDbSharedHomeError extends Schema.TaggedErrorClass<Migrate
   {},
 ) {
   override get message(): string {
-    return "Refusing to rebuild the shared ~/.t3 database. Use an isolated --base-dir.";
+    return "Refusing to rebuild the shared ~/.t3 or ~/.j5code database. Use an isolated --base-dir.";
   }
 }
 
@@ -141,7 +141,7 @@ export class MigrateDevDbPhaseError extends Schema.TaggedErrorClass<MigrateDevDb
 }
 
 export interface RunMigrateDevDbInput {
-  /** Isolated .t3 directory. Defaults to `<worktree>/.t3` of the cwd. */
+  /** Isolated .j5code directory. Defaults to `<worktree>/.j5code` of the cwd. */
   readonly baseDir?: string | undefined;
   /** Source database. Defaults to `~/.t3/userdata/state.sqlite`. */
   readonly source?: string | undefined;
@@ -150,7 +150,7 @@ export interface RunMigrateDevDbInput {
 }
 
 export interface RunMigrateDevDbOptions {
-  /** Overridable for tests; the directory writes must never target. */
+  /** Additional shared home to protect and default copy source; canonical ~/.t3 and ~/.j5code are always protected. */
   readonly sharedHome?: string | undefined;
 }
 
@@ -360,9 +360,16 @@ export const runMigrateDevDb = Effect.fn("runMigrateDevDb")(function* (
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
-  const sharedHome = path.resolve(options.sharedHome ?? path.join(NodeOS.homedir(), ".t3"));
+  const configuredSharedHome = path.resolve(
+    options.sharedHome ?? path.join(NodeOS.homedir(), ".t3"),
+  );
+  const sharedHomes = [
+    configuredSharedHome,
+    path.resolve(NodeOS.homedir(), ".t3"),
+    path.resolve(NodeOS.homedir(), ".j5code"),
+  ];
   const sourcePath = path.resolve(
-    input.source ?? path.join(sharedHome, "userdata", "state.sqlite"),
+    input.source ?? path.join(configuredSharedHome, "userdata", "state.sqlite"),
   );
 
   const baseDir =
@@ -379,11 +386,13 @@ export const runMigrateDevDb = Effect.fn("runMigrateDevDb")(function* (
   if (!(yield* fs.exists(sourcePath))) {
     return yield* new MigrateDevDbSourceMissingError({ sourcePath });
   }
-  const [canonicalBaseDir, canonicalSharedHome] = yield* Effect.all([
-    fs.realPath(baseDir).pipe(Effect.orElseSucceed(() => baseDir)),
-    fs.realPath(sharedHome).pipe(Effect.orElseSucceed(() => sharedHome)),
-  ]);
-  if (canonicalBaseDir === canonicalSharedHome) {
+  const canonicalBaseDir = yield* fs.realPath(baseDir).pipe(Effect.orElseSucceed(() => baseDir));
+  const canonicalSharedHomes = yield* Effect.all(
+    [...new Set(sharedHomes)].map((sharedHome) =>
+      fs.realPath(sharedHome).pipe(Effect.orElseSucceed(() => sharedHome)),
+    ),
+  );
+  if (canonicalSharedHomes.some((sharedHome) => canonicalBaseDir === sharedHome)) {
     return yield* new MigrateDevDbSharedHomeError();
   }
   // The destination db and snapshot both get deleted below; a --source that
@@ -516,7 +525,9 @@ export const migrateDevDbCommand = Command.make(
     ),
     baseDir: Flag.string("base-dir").pipe(
       Flag.optional,
-      Flag.withDescription("Isolated .t3 directory. Defaults to the current worktree's .t3."),
+      Flag.withDescription(
+        "Isolated .j5code directory. Defaults to the current worktree's .j5code.",
+      ),
     ),
     source: Flag.string("source").pipe(
       Flag.optional,

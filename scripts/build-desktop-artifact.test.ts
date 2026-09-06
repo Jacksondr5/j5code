@@ -17,6 +17,7 @@ import {
   BuildCommandFailedError,
   buildWslRuntimeArchiveArgs,
   parseWslRuntimeArchiveMembers,
+  ConflictingDesktopSigningModesError,
   DesktopDmgBackgroundSourceMissingError,
   createStageWorkspaceConfig,
   createStagePatchedDependencies,
@@ -260,9 +261,31 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it("switches desktop packaging product names to nightly for nightly builds", () => {
-    assert.equal(resolveDesktopProductName("0.0.17"), "T3 Code (Alpha)");
-    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "T3 Code (Nightly)");
+    assert.equal(resolveDesktopProductName("0.0.17"), "J5 Code");
+    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "J5 Code (Nightly)");
   });
+
+  it.effect("configures explicit ad-hoc signing for personal macOS builds", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        true,
+      );
+      const mac = config.mac as Record<string, unknown>;
+
+      assert.equal(mac.identity, "-");
+      assert.equal(mac.hardenedRuntime, false);
+      assert.notProperty(config, "publish");
+    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
 
   it("switches desktop packaging icons to the nightly artwork for nightly versions", () => {
     assert.deepStrictEqual(resolveDesktopBuildIconAssets("0.0.17"), {
@@ -658,7 +681,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         "**/node_modules/.bin/**",
       ]);
       assert.deepStrictEqual(mac.dmg, {
-        title: "T3 Code (Alpha) 1.2.3 Installer",
+        title: "J5 Code 1.2.3 Installer",
         background: "dmg/dmg-background-latest.png",
         window: { width: 540, height: 412 },
         contents: [
@@ -671,7 +694,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       // Linux must register the renderer schemes so the generated .desktop
       // entry advertises MimeType=x-scheme-handler/t3code; for OAuth deep links.
       assert.deepStrictEqual((linux.linux as Record<string, unknown>).protocols, [
-        { name: "T3 Code", schemes: ["t3code", "t3code-dev"] },
+        { name: "J5 Code", schemes: ["j5code", "j5code-dev"] },
       ]);
       assert.deepStrictEqual(mac.files, [...DESKTOP_FILE_EXCLUSIONS, ...MAC_FILE_EXCLUSIONS]);
       assert.notProperty(mac.mac as Record<string, unknown>, "sign");
@@ -1587,7 +1610,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
 
     assert.deepStrictEqual(configuration, {
-      appId: "com.t3tools.t3code",
+      appId: "codes.jackson.j5code",
       teamId: "ABC1234567",
       rpDomains: ["example.clerk.accounts.dev"],
       provisioningProfilePath: "/tmp/t3code.provisionprofile",
@@ -1607,7 +1630,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "clerk.example.com",
       "example.clerk.accounts.dev",
     ]);
-    assert.include(entitlements, "<string>ABC1234567.com.t3tools.t3code</string>");
+    assert.include(entitlements, "<string>ABC1234567.codes.jackson.j5code</string>");
     assert.include(entitlements, "<string>webcredentials:clerk.example.com</string>");
     assert.include(entitlements, "<string>webcredentials:example.clerk.accounts.dev</string>");
     assert.include(entitlements, "<key>com.apple.security.cs.allow-jit</key>");
@@ -1702,12 +1725,12 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       });
 
       const mac = config.mac as Record<string, unknown>;
-      assert.equal(config.appId, "com.t3tools.t3code");
+      assert.equal(config.appId, "codes.jackson.j5code");
       assert.equal(mac.entitlements, "/tmp/entitlements.mac.plist");
       assert.equal(mac.provisioningProfile, "/tmp/t3code.provisionprofile");
       assert.match(String(mac.sign), /[\\/]scripts[\\/]sign-macos\.ts$/);
       assert.deepStrictEqual(mac.protocols, [
-        { name: "T3 Code", schemes: ["t3code", "t3code-dev"] },
+        { name: "J5 Code", schemes: ["j5code", "j5code-dev"] },
       ]);
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
@@ -2073,6 +2096,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         skipBuild: Option.none(),
         keepStage: Option.none(),
         signed: Option.none(),
+        adHocSign: Option.none(),
         verbose: Option.none(),
         mockUpdates: Option.none(),
         mockUpdateServerPort: Option.none(),
@@ -2113,6 +2137,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
             skipBuild: Option.none(),
             keepStage: Option.none(),
             signed: Option.none(),
+            adHocSign: Option.none(),
             verbose: Option.none(),
             mockUpdates: Option.none(),
             mockUpdateServerPort: Option.none(),
@@ -2137,6 +2162,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         skipBuild: Option.some(false),
         keepStage: Option.some(false),
         signed: Option.some(false),
+        adHocSign: Option.some(false),
         verbose: Option.some(false),
         mockUpdates: Option.some(false),
         mockUpdateServerPort: Option.none(),
@@ -2149,6 +2175,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
                 T3CODE_DESKTOP_SKIP_BUILD: "true",
                 T3CODE_DESKTOP_KEEP_STAGE: "true",
                 T3CODE_DESKTOP_SIGNED: "true",
+                T3CODE_DESKTOP_ADHOC_SIGN: "true",
                 T3CODE_DESKTOP_VERBOSE: "true",
                 T3CODE_DESKTOP_MOCK_UPDATES: "true",
               },
@@ -2160,8 +2187,31 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.equal(resolved.skipBuild, false);
       assert.equal(resolved.keepStage, false);
       assert.equal(resolved.signed, false);
+      assert.equal(resolved.adHocSign, false);
       assert.equal(resolved.verbose, false);
       assert.equal(resolved.mockUpdates, false);
+    }),
+  );
+
+  it.effect("rejects certificate and ad-hoc signing together", () =>
+    Effect.gen(function* () {
+      const error = yield* resolveBuildOptions({
+        platform: Option.some("mac"),
+        target: Option.some("dmg"),
+        arch: Option.some("arm64"),
+        buildVersion: Option.none(),
+        outputDir: Option.some("release-test"),
+        skipBuild: Option.some(true),
+        keepStage: Option.some(false),
+        signed: Option.some(true),
+        adHocSign: Option.some(true),
+        verbose: Option.some(false),
+        mockUpdates: Option.some(false),
+        mockUpdateServerPort: Option.none(),
+        wslPrebuild: Option.none(),
+      }).pipe(Effect.flip);
+
+      assert.instanceOf(error, ConflictingDesktopSigningModesError);
     }),
   );
 });

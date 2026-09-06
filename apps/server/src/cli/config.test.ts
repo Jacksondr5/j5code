@@ -18,7 +18,9 @@ import {
 import * as NetService from "@t3tools/shared/Net";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { deriveServerPaths } from "../config.ts";
+import { resolveBaseDir } from "../os-jank.ts";
 import { resolveServerConfig } from "./config.ts";
+import { createDevRunnerEnv } from "../../../../scripts/dev-runner.ts";
 
 const deriveExplicitServerPaths = (baseDir: string, devUrl: URL | undefined) =>
   deriveServerPaths(baseDir, devUrl, { baseDirIsExplicit: true });
@@ -73,6 +75,67 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     );
   });
 
+  it.effect("opens the explicit disposable home carried by the dev runner", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "j5-dev-server-home-" });
+      const baseDir = path.join(root, "candidate");
+      const upstreamHome = path.join(root, "upstream");
+      const env = yield* createDevRunnerEnv({
+        mode: "dev",
+        baseEnv: { T3CODE_HOME: upstreamHome },
+        serverOffset: 0,
+        webOffset: 0,
+        t3Home: baseDir,
+        browser: false,
+        autoBootstrapProjectFromCwd: false,
+        logWebSocketEvents: undefined,
+        host: "127.0.0.1",
+        port: 14622,
+        devUrl: undefined,
+      });
+      const resolved = yield* resolveServerConfig(
+        {
+          mode: Option.none(),
+          port: Option.none(),
+          host: Option.none(),
+          baseDir: Option.none(),
+          cwd: Option.none(),
+          devUrl: Option.none(),
+          noBrowser: Option.none(),
+          bootstrapFd: Option.none(),
+          autoBootstrapProjectFromCwd: Option.none(),
+          logWebSocketEvents: Option.none(),
+          tailscaleServeEnabled: Option.none(),
+          tailscaleServePort: Option.none(),
+        },
+        Option.none(),
+        { startupPresentation: "headless" },
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(
+              ConfigProvider.fromEnv({
+                env: Object.fromEntries(
+                  Object.entries(env).flatMap(([key, value]) =>
+                    value === undefined ? [] : [[key, value]],
+                  ),
+                ),
+              }),
+            ),
+            NetService.layer,
+          ),
+        ),
+      );
+
+      assert.equal(resolved.baseDir, baseDir);
+      assert.equal(resolved.stateDir, path.join(baseDir, "userdata"));
+      assert.equal(resolved.dbPath, path.join(baseDir, "userdata", "state.sqlite"));
+      assert.isFalse(yield* fs.exists(upstreamHome));
+    }),
+  );
+
   it.effect("falls back to effect/config values when flags are omitted", () =>
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
@@ -107,7 +170,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
                   T3CODE_MODE: "desktop",
                   T3CODE_PORT: "4001",
                   T3CODE_HOST: "0.0.0.0",
-                  T3CODE_HOME: baseDir,
+                  J5CODE_HOME: baseDir,
                   VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
                   T3CODE_DEV_ALLOWED_ORIGINS:
                     "https://host.example.ts.net, https://phone.example.ts.net ",
@@ -146,6 +209,128 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     }),
   );
 
+  it.effect("uses ~/.j5code for a bare server without touching ~/.t3", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-config-default-home-" });
+      const originalHome = process.env.HOME;
+      const originalUserProfile = process.env.USERPROFILE;
+
+      try {
+        process.env.HOME = home;
+        process.env.USERPROFILE = home;
+        const resolved = yield* resolveServerConfig(
+          {
+            mode: Option.none(),
+            port: Option.none(),
+            host: Option.none(),
+            baseDir: Option.none(),
+            cwd: Option.none(),
+            devUrl: Option.none(),
+            noBrowser: Option.none(),
+            bootstrapFd: Option.none(),
+            autoBootstrapProjectFromCwd: Option.none(),
+            logWebSocketEvents: Option.none(),
+            tailscaleServeEnabled: Option.none(),
+            tailscaleServePort: Option.none(),
+          },
+          Option.none(),
+          { startupPresentation: "headless" },
+        ).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+              NetService.layer,
+            ),
+          ),
+        );
+
+        assert.equal(resolved.baseDir, path.join(home, ".j5code"));
+        assert.equal(resolved.stateDir, path.join(home, ".j5code", "userdata"));
+        assert.equal(yield* fs.exists(path.join(home, ".j5code")), true);
+        assert.equal(yield* fs.exists(path.join(home, ".t3")), false);
+        assert.equal(yield* resolveBaseDir(undefined), path.join(home, ".j5code"));
+      } finally {
+        if (originalHome === undefined) {
+          delete process.env.HOME;
+        } else {
+          process.env.HOME = originalHome;
+        }
+        if (originalUserProfile === undefined) {
+          delete process.env.USERPROFILE;
+        } else {
+          process.env.USERPROFILE = originalUserProfile;
+        }
+      }
+    }),
+  );
+
+  it.effect("ignores an ambient T3CODE_HOME so an installed T3 Code never leaks in", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-config-upstream-home-" });
+      const upstreamHome = path.join(home, "upstream-t3");
+      const originalHome = process.env.HOME;
+      const originalUserProfile = process.env.USERPROFILE;
+      const originalUpstreamHome = process.env.T3CODE_HOME;
+
+      try {
+        process.env.HOME = home;
+        process.env.USERPROFILE = home;
+        // Set on both the process and the config provider so a fallback read
+        // through either path would be caught.
+        process.env.T3CODE_HOME = upstreamHome;
+        const resolved = yield* resolveServerConfig(
+          {
+            mode: Option.none(),
+            port: Option.none(),
+            host: Option.none(),
+            baseDir: Option.none(),
+            cwd: Option.none(),
+            devUrl: Option.none(),
+            noBrowser: Option.none(),
+            bootstrapFd: Option.none(),
+            autoBootstrapProjectFromCwd: Option.none(),
+            logWebSocketEvents: Option.none(),
+            tailscaleServeEnabled: Option.none(),
+            tailscaleServePort: Option.none(),
+          },
+          Option.none(),
+          { startupPresentation: "headless" },
+        ).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              ConfigProvider.layer(ConfigProvider.fromEnv({ env: { T3CODE_HOME: upstreamHome } })),
+              NetService.layer,
+            ),
+          ),
+        );
+
+        assert.equal(resolved.baseDir, path.join(home, ".j5code"));
+        assert.equal(resolved.stateDir, path.join(home, ".j5code", "userdata"));
+        assert.equal(yield* fs.exists(upstreamHome), false);
+      } finally {
+        if (originalHome === undefined) {
+          delete process.env.HOME;
+        } else {
+          process.env.HOME = originalHome;
+        }
+        if (originalUserProfile === undefined) {
+          delete process.env.USERPROFILE;
+        } else {
+          process.env.USERPROFILE = originalUserProfile;
+        }
+        if (originalUpstreamHome === undefined) {
+          delete process.env.T3CODE_HOME;
+        } else {
+          process.env.T3CODE_HOME = originalUpstreamHome;
+        }
+      }
+    }),
+  );
+
   it.effect("uses CLI flags when provided", () =>
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
@@ -180,7 +365,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
                   T3CODE_MODE: "desktop",
                   T3CODE_PORT: "4001",
                   T3CODE_HOST: "0.0.0.0",
-                  T3CODE_HOME: join(NodeOS.tmpdir(), "ignored-base"),
+                  J5CODE_HOME: join(NodeOS.tmpdir(), "ignored-base"),
                   VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
                   T3CODE_NO_BROWSER: "false",
                   T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
@@ -285,6 +470,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
       });
+      assert.equal(resolved.baseDir, baseDir);
+      assert.isTrue(resolved.baseDir !== "/tmp/t3-bootstrap-home");
     }),
   );
 
@@ -465,7 +652,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
                 env: {
                   T3CODE_MODE: "web",
                   T3CODE_BOOTSTRAP_FD: String(fd),
-                  T3CODE_HOME: baseDir,
+                  J5CODE_HOME: baseDir,
                   T3CODE_NO_BROWSER: "true",
                   T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
                   T3CODE_LOG_WS_EVENTS: "true",
