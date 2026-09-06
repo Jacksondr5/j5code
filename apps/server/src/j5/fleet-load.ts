@@ -12,6 +12,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as NodeFS from "node:fs";
@@ -20,6 +21,8 @@ import * as NodePath from "node:path";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import { ServerConfig } from "../config.ts";
+import { GitWorkflowService } from "../git/GitWorkflowService.ts";
+import { ProjectService } from "../project/ProjectService.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../mcp/McpSessionRegistry.testkit.ts";
 import {
   OrchestrationV2EventSinkLayerLive,
@@ -95,6 +98,8 @@ const SqlitePersistenceLive = makeSqlitePersistenceLive(dbPath).pipe(
 );
 
 const HarnessLayer = Layer.merge(OrchestrationV2LayerLive, OrchestrationV2EventSinkLayerLive).pipe(
+  Layer.provide(Layer.mock(GitWorkflowService)({})),
+  Layer.provide(Layer.mock(ProjectService)({ getById: () => Effect.succeed(Option.none()) })),
   Layer.provide(mcpSessionRegistryTestLayer),
   Layer.provideMerge(SqlitePersistenceLive),
   Layer.provide(CheckpointStoreTestLayer),

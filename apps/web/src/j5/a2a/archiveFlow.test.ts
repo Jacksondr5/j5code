@@ -123,7 +123,7 @@ describe("archive flow", () => {
     const markup = renderToStaticMarkup(warning.content);
     expect(warning.message).not.toContain(unknownParticipantId);
     expect(markup).toContain("Unnamed participant");
-    expect(markup).toContain(`title="${unknownParticipantId}"`);
+    expect(markup).not.toContain(unknownParticipantId);
   });
 
   it("marks a resolved human counterparty as an inbox recipient", () => {

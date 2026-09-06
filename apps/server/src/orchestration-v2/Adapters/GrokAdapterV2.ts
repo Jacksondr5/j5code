@@ -1,4 +1,4 @@
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import {
   defaultInstanceIdForDriver,
   GrokSettings,
@@ -21,6 +21,7 @@ import {
   resolveGrokAcpBaseModelId,
 } from "../../provider/acp/GrokAcpSupport.ts";
 import {
+  extractGrokPlanMarkdownFromToolCallData,
   extractXAiAcpBackgroundToolMutation,
   extractXAiAcpSubagentEndNotice,
   extractXAiAcpSubagentUpdate,
@@ -30,11 +31,14 @@ import {
   extractXAiKilledBackgroundTasks,
   extractXAiMonitorTaskId,
   isXAiPersistentMonitor,
+  extractXAiExitPlanMarkdown,
   makeXAiAskUserQuestionCancelledResponse,
   makeXAiAskUserQuestionResponse,
+  makeXAiExitPlanModeCapturedResponse,
   normalizeXAiAcpToolCallState,
   registerXAiBackgroundTaskTracking,
   XAiAskUserQuestionRequest,
+  XAiExitPlanModeRequest,
 } from "../../provider/acp/XAiAcpExtension.ts";
 import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
 import * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
@@ -93,6 +97,7 @@ export interface GrokAdapterV2Options {
   readonly instanceId: Parameters<typeof makeAcpAdapterV2>[0]["instanceId"];
   readonly settings: GrokSettings;
   readonly environment: NodeJS.ProcessEnv;
+  readonly hostPlatform: NodeJS.Platform;
   readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly crypto: Crypto.Crypto;
   readonly fileSystem: FileSystem.FileSystem;
@@ -114,9 +119,48 @@ export const registerGrokAcpExtensions: NonNullable<AcpAdapterV2Flavor["register
   runtime,
   requestUserInput,
   applyBackgroundTaskMutation,
+  captureProposedPlan,
+  lastProposedPlanMarkdown,
 }) =>
   registerXAiBackgroundTaskTracking(runtime, applyBackgroundTaskMutation).pipe(
     Effect.andThen(registerGrokAskUserQuestionExtensions({ runtime, requestUserInput })),
+    Effect.andThen(
+      registerGrokExitPlanModeExtensions({
+        runtime,
+        captureProposedPlan,
+        lastProposedPlanMarkdown,
+      }),
+    ),
+  );
+
+/**
+ * Grok intercepts exit_plan_mode and reverse-requests client approval. Capture
+ * the plan into T3's proposed-plan card and abandon the native gate so the
+ * turn does not hang (#8358; mirrors the Claude ExitPlanMode pattern). Plan
+ * content preference: the request payload, then the plan.md contents sniffed
+ * from tool calls this turn, then the empty-state placeholder.
+ */
+const registerGrokExitPlanModeExtensions = ({
+  runtime,
+  captureProposedPlan,
+  lastProposedPlanMarkdown,
+}: Pick<
+  AcpAdapterV2ExtensionContext,
+  "runtime" | "captureProposedPlan" | "lastProposedPlanMarkdown"
+>) =>
+  Effect.forEach(
+    ["x.ai/exit_plan_mode", "_x.ai/exit_plan_mode"] as const,
+    (method) =>
+      runtime.handleExtRequest(method, XAiExitPlanModeRequest, (params) =>
+        Effect.gen(function* () {
+          const fallback = yield* lastProposedPlanMarkdown;
+          yield* captureProposedPlan({
+            planMarkdown: extractXAiExitPlanMarkdown(params, fallback),
+          });
+          return makeXAiExitPlanModeCapturedResponse();
+        }),
+      ),
+    { discard: true },
   );
 
 const registerGrokAskUserQuestionExtensions = ({
@@ -156,6 +200,7 @@ const registerGrokAskUserQuestionExtensions = ({
 export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdapterV2Flavor {
   return {
     driver: GROK_PROVIDER,
+    runtimeHarness: "Grok",
     capabilities: GrokProviderCapabilitiesV2,
     // Idle settle over-settled preamble-before-tools turns and cancelled the
     // prompt while Grok continued, freezing T3 projection mid-turn.
@@ -178,6 +223,7 @@ export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdap
     // Grok ACP initialize reports promptCapabilities.image:false but the agent
     // still accepts image content blocks (verified with real screenshots).
     supportsImagePrompts: true,
+    supportsCompaction: true,
     resolveModelId: (selection) => resolveGrokAcpBaseModelId(selection.model),
     makeRuntime:
       options.makeRuntime ??
@@ -193,6 +239,13 @@ export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdap
     extractSubagentUpdate: extractXAiAcpSubagentUpdate,
     extractSubagentEndNotice: extractXAiAcpSubagentEndNotice,
     normalizeToolCall: normalizeXAiAcpToolCallState,
+    // Show the plan while Grok is still writing it: plan.md writes under the
+    // Grok session dir surface as the proposed-plan card before exit (#8358).
+    extractProposedPlanMarkdown: (toolCall) =>
+      extractGrokPlanMarkdownFromToolCallData(toolCall.data, {
+        platform: options.hostPlatform,
+        environment: options.environment,
+      }),
     extractBackgroundTaskId: extractXAiMonitorTaskId,
     extractBackgroundToolMutation: extractXAiAcpBackgroundToolMutation,
     extractBackgroundTaskCompletion: (toolCall) => [
@@ -237,6 +290,7 @@ export const GrokAdapterV2Driver: ProviderAdapterDriver<GrokSettings, GrokAdapte
   create: Effect.fn("GrokAdapterV2Driver.create")(
     function* (input: ProviderAdapterDriverCreateInput<GrokSettings>) {
       const hostEnvironment = yield* HostProcessEnvironment;
+      const hostPlatform = yield* HostProcessPlatform;
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const crypto = yield* Crypto.Crypto;
       const fileSystem = yield* FileSystem.FileSystem;
@@ -249,6 +303,7 @@ export const GrokAdapterV2Driver: ProviderAdapterDriver<GrokSettings, GrokAdapte
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
         environment: mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
+        hostPlatform,
         childProcessSpawner,
         crypto,
         fileSystem,
@@ -291,6 +346,7 @@ export const layer: Layer.Layer<
   ProviderAdapterV2,
   Effect.gen(function* () {
     const hostEnvironment = yield* HostProcessEnvironment;
+    const hostPlatform = yield* HostProcessPlatform;
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const crypto = yield* Crypto.Crypto;
     const fileSystem = yield* FileSystem.FileSystem;
@@ -303,6 +359,7 @@ export const layer: Layer.Layer<
       instanceId: GROK_DEFAULT_INSTANCE_ID,
       settings: DEFAULT_GROK_SETTINGS,
       environment: hostEnvironment,
+      hostPlatform,
       childProcessSpawner,
       crypto,
       fileSystem,

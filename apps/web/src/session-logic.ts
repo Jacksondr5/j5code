@@ -1,4 +1,5 @@
 import {
+  type AssetResource,
   ProviderDriverKind,
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2PlanArtifact,
@@ -9,7 +10,11 @@ import {
   type PlanId,
   type RunId,
   type ThreadId,
+  type ToolActivitySurface,
+  type ToolActivityIcon,
+  type ToolActivitySource,
 } from "@t3tools/contracts";
+import { extractToolActivityPresentation } from "@t3tools/client-runtime/work-log/tool-presentation";
 import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
 import type {
   ThreadPendingApproval,
@@ -18,8 +23,19 @@ import type {
 import type { ThreadRunSummary, ThreadRuntimeSummary } from "@t3tools/client-runtime/state/shell";
 import { turnItemIsWorkspacePreparation } from "@t3tools/client-runtime/state/turn-item-presentation";
 
-import type { ChatMessage, ProposedPlan, SessionPhase, TurnDiffSummary } from "./types";
+import {
+  isImageAttachment,
+  type ChatAttachment,
+  type ChatMessage,
+  type ProposedPlan,
+  type SessionPhase,
+  type TurnDiffSummary,
+} from "./types";
 import * as DateTime from "effect/DateTime";
+import * as Equal from "effect/Equal";
+import { shallow } from "zustand/vanilla/shallow";
+
+export { formatDuration, formatElapsed } from "@t3tools/shared/orchestrationTiming";
 
 export type ProviderPickerKind = ProviderDriverKind;
 
@@ -44,9 +60,16 @@ export const PROVIDER_OPTIONS: Array<{
     pickerSidebarBadge: "new",
   },
   { value: ProviderDriverKind.make("grok"), label: "Grok", available: true },
+  {
+    value: ProviderDriverKind.make("antigravity"),
+    label: "Antigravity",
+    available: true,
+    pickerSidebarBadge: "new",
+  },
 ];
 
 export type WorkLogToolLifecycleStatus =
+  | "idle"
   | "inProgress"
   | "completed"
   | "failed"
@@ -64,6 +87,14 @@ export interface WorkLogEntry {
   readonly changedFiles?: ReadonlyArray<string>;
   readonly tone: "thinking" | "tool" | "info" | "error";
   readonly toolTitle?: string;
+  readonly toolCallId?: string;
+  readonly viewedImagePath?: string;
+  readonly toolSurface?: ToolActivitySurface;
+  readonly toolIcon?: ToolActivityIcon;
+  readonly toolSource?: ToolActivitySource;
+  readonly sourceActivityKind?: string;
+  readonly taskId?: string;
+  readonly agentRole?: string;
   readonly toolData?: unknown;
   readonly requestKind?: string;
   readonly itemType?: OrchestrationV2TurnItem["type"];
@@ -141,16 +172,113 @@ export function workLogEntryIsToolLike(entry: WorkLogEntry): boolean {
   );
 }
 
+/** Heuristic: providers often emit successful item status while error text lives in `detail` / `command`. */
+function toolDetailTextLooksLikeFailure(text: string): boolean {
+  const t = text.toLowerCase();
+  if (t.includes("file not found")) {
+    return true;
+  }
+  if (t.includes("no files found")) {
+    return true;
+  }
+  if (
+    t.includes("enoent") ||
+    t.includes("no such file or directory") ||
+    t.includes("no such file")
+  ) {
+    return true;
+  }
+  if (t.includes("cannot find path") && t.includes("because it does not exist")) {
+    return true;
+  }
+  if (t.includes("commandnotfoundexception")) {
+    return true;
+  }
+  if (t.includes("is not recognized as the name of a cmdlet")) {
+    return true;
+  }
+  if (t.includes("is not recognized") && t.includes("the term '")) {
+    return true;
+  }
+  if (t.includes("a parameter cannot be found that matches parameter name")) {
+    return true;
+  }
+  if (t.includes("command not found")) {
+    return true;
+  }
+  if (/<exited with exit code\s+[1-9]\d*\s*>/i.test(text)) {
+    return true;
+  }
+  if (/exit(?:ed)? with exit code\s+[1-9]\d*/i.test(text)) {
+    return true;
+  }
+  if (/exit code\s*[:\s]\s*[1-9]\d*\b/i.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+function workEntryIndicatesToolFailureFromOutput(
+  entry: WorkLogEntry,
+  includeCommand: boolean,
+): boolean {
+  if (entry.tone === "error") {
+    return true;
+  }
+  const ls = entry.toolLifecycleStatus;
+  if (ls === "failed" || ls === "declined") {
+    return true;
+  }
+  if (!workLogEntryIsToolLike(entry)) {
+    return false;
+  }
+  const parts: string[] = [];
+  if (entry.detail) {
+    parts.push(entry.detail);
+  }
+  if (includeCommand && entry.command) {
+    parts.push(entry.command);
+  }
+  const blob = parts.join("\n");
+  if (blob.length === 0) {
+    return false;
+  }
+  return toolDetailTextLooksLikeFailure(blob);
+}
+
+/** True when a tool failed, including providers that put error output in `command`. */
 export function workEntryIndicatesToolFailure(entry: WorkLogEntry): boolean {
-  return (
-    entry.tone === "error" ||
-    entry.toolLifecycleStatus === "failed" ||
-    entry.toolLifecycleStatus === "declined"
-  );
+  return workEntryIndicatesToolFailureFromOutput(entry, true);
+}
+
+/** True when the rendered result indicates failure. The command itself is user intent, not output. */
+export function workEntryDisplayIndicatesToolFailure(entry: WorkLogEntry): boolean {
+  return workEntryIndicatesToolFailureFromOutput(entry, false);
+}
+
+/** Severe failures keep the red treatment ordinary tool failures lost: provider
+ *  runtime errors mean the turn or a core side effect broke, not that a
+ *  command exited nonzero. */
+export function workEntrySignalsSevereFailure(entry: WorkLogEntry): boolean {
+  return entry.itemType === "error";
 }
 
 export function workEntryIndicatesToolSuccess(entry: WorkLogEntry): boolean {
-  return workLogEntryIsToolLike(entry) && entry.toolLifecycleStatus === "completed";
+  if (
+    !workLogEntryIsToolLike(entry) ||
+    workEntryIndicatesToolFailure(entry) ||
+    entry.tone === "thinking"
+  ) {
+    return false;
+  }
+  const status = entry.toolLifecycleStatus;
+  return (
+    status !== "failed" &&
+    status !== "declined" &&
+    status !== "inProgress" &&
+    status !== "stopped" &&
+    status !== "idle"
+  );
 }
 
 export function workEntryIndicatesToolNeutralStatus(entry: WorkLogEntry): boolean {
@@ -159,29 +287,6 @@ export function workEntryIndicatesToolNeutralStatus(entry: WorkLogEntry): boolea
     !workEntryIndicatesToolFailure(entry) &&
     !workEntryIndicatesToolSuccess(entry)
   );
-}
-
-export function formatDuration(durationMs: number): string {
-  if (!Number.isFinite(durationMs) || durationMs < 0) return "0ms";
-  if (durationMs < 1_000) return `${Math.max(1, Math.round(durationMs))}ms`;
-  if (durationMs < 10_000) {
-    const tenths = Math.round(durationMs / 100) / 10;
-    return tenths >= 10 ? "10s" : `${tenths.toFixed(1)}s`;
-  }
-  if (durationMs < 60_000) return `${Math.round(durationMs / 1_000)}s`;
-  const minutes = Math.floor(durationMs / 60_000);
-  const seconds = Math.round((durationMs % 60_000) / 1_000);
-  if (seconds === 0) return `${minutes}m`;
-  if (seconds === 60) return `${minutes + 1}m`;
-  return `${minutes}m ${seconds}s`;
-}
-
-export function formatElapsed(startIso: string, endIso: string | undefined): string | null {
-  if (!endIso) return null;
-  const startedAt = Date.parse(startIso);
-  const endedAt = Date.parse(endIso);
-  if (Number.isNaN(startedAt) || Number.isNaN(endedAt) || endedAt < startedAt) return null;
-  return formatDuration(endedAt - startedAt);
 }
 
 export function isLatestRunSettled(
@@ -321,8 +426,6 @@ export function hasActionableProposedPlan(plan: LatestProposedPlanState | null):
 
 const STANDALONE_V2_ITEM_TYPES = new Set<OrchestrationV2ProjectedTurnItem["item"]["type"]>([
   "approval_request",
-  "compaction",
-  "error",
   "fork",
   "handoff",
   "run_interrupt_request",
@@ -358,6 +461,8 @@ function projectedWorkEntryStatus(
       return "inProgress";
     case "completed":
       return "completed";
+    case "idle":
+      return "idle";
     case "failed":
       return "failed";
     case "cancelled":
@@ -367,7 +472,7 @@ function projectedWorkEntryStatus(
 }
 
 function projectedWorkEntryTone(item: OrchestrationV2TurnItem): WorkLogEntry["tone"] {
-  if (item.status === "failed") return "error";
+  if (item.type === "error") return "info";
   if (item.type === "reasoning") return "thinking";
   switch (item.type) {
     case "command_execution":
@@ -427,9 +532,17 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
     toolLifecycleStatus: projectedWorkEntryStatus(item),
     structuredPayload: item,
     projectedItem: row,
+    ...extractToolActivityPresentation(item),
   } as const;
 
   switch (item.type) {
+    case "compaction":
+      return {
+        ...common,
+        label: item.status === "running" ? "Compacting context" : "Context compacted",
+        sourceActivityKind: "context-compaction",
+        ...(item.summary ? { detail: item.summary } : {}),
+      };
     case "reasoning":
       return {
         ...common,
@@ -480,20 +593,18 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
         changedFiles: item.files.map((file) => file.path),
         toolData: item,
       };
+    case "system_notice":
+      return {
+        ...common,
+        label: item.message,
+        sourceActivityKind: "runtime.warning",
+      };
     case "error": {
       const presentation = providerErrorPresentation(item);
       return {
         ...common,
         ...presentation,
-        toolData: item,
-      };
-    }
-    case "todo_list": {
-      const completed = item.steps.filter((step) => step.status === "completed").length;
-      return {
-        ...common,
-        label: title ?? "Updated tasks",
-        detail: `${completed}/${item.steps.length} completed`,
+        ...(item.retry === undefined ? { sourceActivityKind: "runtime.error" } : {}),
         toolData: item,
       };
     }
@@ -517,16 +628,27 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
  * Builds the web timeline in the exact order committed by `visibleTurnItems`.
  * Committed rows are presented directly from their projected item. Queued
  * input is absent by construction until dispatch creates its user turn item.
- * Optimistic messages are the only client-owned entries appended afterward.
+ * Persistent client-owned messages are inserted by timestamp without sorting
+ * the canonical sequence. True optimistic sends remain appended afterward.
  */
-export function deriveTimelineEntriesFromVisibleTurnItems(input: {
+export interface TimelineEntriesInput {
   readonly visibleTurnItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem>;
   readonly optimisticMessages: ReadonlyArray<ChatMessage>;
+  readonly anchoredMessages?: ReadonlyArray<ChatMessage>;
   readonly attachmentUrlById?: ReadonlyMap<string, string>;
   readonly attempts?: ReadonlyArray<OrchestrationV2RunAttempt>;
   readonly nodes?: ReadonlyArray<OrchestrationV2ExecutionNode>;
   readonly plans?: ReadonlyArray<OrchestrationV2PlanArtifact>;
-}): TimelineEntry[] {
+}
+
+export interface TimelineEntriesProjection {
+  readonly input: TimelineEntriesInput;
+  readonly entries: TimelineEntry[];
+}
+
+export function deriveTimelineEntriesFromVisibleTurnItems(
+  input: TimelineEntriesInput,
+): TimelineEntry[] {
   const committedMessageIds = new Set<string>();
   const entries: TimelineEntry[] = [];
   const attemptByRootNodeId = new Map(
@@ -555,6 +677,8 @@ export function deriveTimelineEntriesFromVisibleTurnItems(input: {
   for (const row of input.visibleTurnItems) {
     const { item } = row;
     if (turnItemIsWorkspacePreparation(item)) continue;
+    // Task progress belongs in the composer, not between conversation entries.
+    if (item.type === "todo_list") continue;
     const createdAt = projectedItemCreatedAt(row);
     const attempt = resolveAttempt(item);
     const attemptMetadata = attempt === undefined ? {} : { attempt };
@@ -563,9 +687,9 @@ export function deriveTimelineEntriesFromVisibleTurnItems(input: {
         id: item.messageId,
         role: item.type === "user_message" ? "user" : "assistant",
         text: item.text,
-        ...(item.type === "user_message" && item.attachments.length > 0
+        ...((item.attachments?.length ?? 0) > 0
           ? {
-              attachments: item.attachments.map((attachment) => {
+              attachments: (item.attachments ?? []).map((attachment) => {
                 const previewUrl = input.attachmentUrlById?.get(attachment.id);
                 return previewUrl ? { ...attachment, previewUrl } : attachment;
               }),
@@ -632,8 +756,29 @@ export function deriveTimelineEntriesFromVisibleTurnItems(input: {
     });
   }
 
+  const retainedMessageIds = new Set(committedMessageIds);
+  for (const message of input.anchoredMessages ?? []) {
+    if (retainedMessageIds.has(message.id)) continue;
+    retainedMessageIds.add(message.id);
+    const entry: TimelineEntry = {
+      id: message.id,
+      kind: "message",
+      createdAt: message.createdAt,
+      message,
+    };
+    const insertionIndex = entries.findIndex(
+      (candidate) => candidate.createdAt > message.createdAt,
+    );
+    if (insertionIndex === -1) {
+      entries.push(entry);
+    } else {
+      entries.splice(insertionIndex, 0, entry);
+    }
+  }
+
   for (const message of input.optimisticMessages) {
-    if (message.inputIntent !== "queued_turn" && !committedMessageIds.has(message.id)) {
+    if (message.inputIntent !== "queued_turn" && !retainedMessageIds.has(message.id)) {
+      retainedMessageIds.add(message.id);
       entries.push({
         id: message.id,
         kind: "message",
@@ -644,6 +789,222 @@ export function deriveTimelineEntriesFromVisibleTurnItems(input: {
   }
 
   return entries;
+}
+
+type AttachmentResource = Extract<AssetResource, { readonly _tag: "attachment" }>;
+const EMPTY_IMAGE_RESOURCES = Object.freeze<ReadonlyArray<AttachmentResource>>([]);
+
+/** A mounted row requests its stored images. Local previews keep their existing URLs. */
+export function selectMessageImageResources(
+  attachments: ChatMessage["attachments"],
+): ReadonlyArray<AttachmentResource> {
+  const attachmentIds = new Set<string>();
+  for (const attachment of attachments ?? []) {
+    if (!isImageAttachment(attachment)) continue;
+    const previewUrl = attachment.previewUrl;
+    if (previewUrl?.startsWith("blob:") || previewUrl?.startsWith("data:")) continue;
+    attachmentIds.add(attachment.id);
+  }
+  return attachmentIds.size === 0
+    ? EMPTY_IMAGE_RESOURCES
+    : Array.from(attachmentIds, (attachmentId) => ({ _tag: "attachment", attachmentId }));
+}
+
+/** Handoffs need server URLs even while their message rows are unmounted. */
+export function selectHandoffImageResources(
+  messages: ReadonlyArray<Pick<ChatMessage, "id" | "role" | "attachments">> | undefined,
+  handoffs: Readonly<Record<string, ReadonlyArray<string>>>,
+): ReadonlyArray<AttachmentResource> {
+  if (Object.keys(handoffs).length === 0) return EMPTY_IMAGE_RESOURCES;
+  const attachmentIds = new Set<string>();
+  for (const message of messages ?? []) {
+    if (message.role !== "user" || !handoffs[message.id]?.length) continue;
+    for (const attachment of message.attachments ?? []) {
+      if (isImageAttachment(attachment)) attachmentIds.add(attachment.id);
+    }
+  }
+  return attachmentIds.size === 0
+    ? EMPTY_IMAGE_RESOURCES
+    : Array.from(attachmentIds, (attachmentId) => ({ _tag: "attachment", attachmentId }));
+}
+
+/** Own one mapper per preview stage. Immutable messages retain unchanged preview objects. */
+export function createMessageAttachmentPreviewProjector() {
+  const attachmentsBySource = new WeakMap<
+    ReadonlyArray<ChatAttachment>,
+    ReadonlyArray<ChatAttachment>
+  >();
+  const messagesBySource = new WeakMap<ChatMessage, ChatMessage>();
+  return (
+    message: ChatMessage,
+    previewUrlFor: (attachment: ChatAttachment) => string | undefined,
+  ): ChatMessage => {
+    const source = message.attachments;
+    if (!source || source.length === 0) return message;
+    const previous = attachmentsBySource.get(source) ?? source;
+    let changed: ChatAttachment[] | undefined;
+    let hasOverrides = false;
+    for (const [index, attachment] of source.entries()) {
+      const previewUrl = previewUrlFor(attachment);
+      const sourceUrl = "previewUrl" in attachment ? attachment.previewUrl : undefined;
+      const previousAttachment = previous[index]!;
+      const previousUrl =
+        "previewUrl" in previousAttachment ? previousAttachment.previewUrl : undefined;
+      const next =
+        !previewUrl || previewUrl === sourceUrl
+          ? attachment
+          : previewUrl === previousUrl
+            ? previousAttachment
+            : { ...attachment, previewUrl };
+      hasOverrides ||= next !== attachment;
+      if (next !== previousAttachment) {
+        changed ??= previous.slice();
+        changed[index] = next;
+      }
+    }
+    const attachments = hasOverrides ? (changed ?? previous) : source;
+    attachmentsBySource.set(source, attachments);
+    if (attachments === source) {
+      messagesBySource.delete(message);
+      return message;
+    }
+    const previousMessage = messagesBySource.get(message);
+    if (previousMessage?.attachments === attachments) return previousMessage;
+    const result = { ...message, attachments };
+    messagesBySource.set(message, result);
+    return result;
+  };
+}
+
+/** Text and update time do not change a streaming assistant message's row structure. */
+export function isStreamingMessageTextUpdate(previous: ChatMessage, next: ChatMessage): boolean {
+  if (
+    previous.role !== "assistant" ||
+    next.role !== "assistant" ||
+    !previous.streaming ||
+    !next.streaming
+  ) {
+    return false;
+  }
+  const { text: _previousText, updatedAt: _previousUpdatedAt, ...previousMetadata } = previous;
+  const { text: _nextText, updatedAt: _nextUpdatedAt, ...nextMetadata } = next;
+  return shallow(previousMetadata, nextMetadata);
+}
+
+/** Keep provenance and execution metadata in the rebuild boundary, including inspector data. */
+export function isStreamingTurnItemTextUpdate(
+  previous: OrchestrationV2ProjectedTurnItem,
+  next: OrchestrationV2ProjectedTurnItem,
+): boolean {
+  const { item: previousItem, ...previousSource } = previous;
+  const { item: nextItem, ...nextSource } = next;
+  if (
+    previousItem.type !== "assistant_message" ||
+    nextItem.type !== "assistant_message" ||
+    !previousItem.streaming ||
+    !nextItem.streaming ||
+    !shallow(previousSource, nextSource) ||
+    projectedItemCreatedAt(previous) !== projectedItemCreatedAt(next)
+  ) {
+    return false;
+  }
+  const { text: _previousText, updatedAt: _previousUpdatedAt, ...previousMetadata } = previousItem;
+  const { text: _nextText, updatedAt: _nextUpdatedAt, ...nextMetadata } = nextItem;
+  // Wire decoding can recreate timestamps and attachments on each update.
+  // Compare only the changed item's metadata, never the entire transcript.
+  return Equal.equals(previousMetadata, nextMetadata);
+}
+
+function reuseTimelineEntries(
+  input: TimelineEntriesInput,
+  previous: TimelineEntriesProjection,
+): TimelineEntry[] | null {
+  const before = previous.input;
+  if (
+    input.visibleTurnItems.length < before.visibleTurnItems.length ||
+    !shallow(input.optimisticMessages, before.optimisticMessages) ||
+    !shallow(input.anchoredMessages, before.anchoredMessages) ||
+    !shallow(input.attachmentUrlById, before.attachmentUrlById) ||
+    !shallow(input.attempts, before.attempts) ||
+    !shallow(input.nodes, before.nodes) ||
+    !shallow(input.plans, before.plans)
+  ) {
+    return null;
+  }
+  const appended = input.visibleTurnItems.length > before.visibleTurnItems.length;
+  // Anchored and optimistic messages need to be interleaved/deduplicated when
+  // committed items arrive. Keep the full projection for that transition.
+  if (
+    appended &&
+    (input.optimisticMessages.length > 0 || (input.anchoredMessages?.length ?? 0) > 0)
+  ) {
+    return null;
+  }
+  const replacements = new Map<
+    OrchestrationV2ProjectedTurnItem,
+    OrchestrationV2ProjectedTurnItem
+  >();
+  for (const [index, previousItem] of before.visibleTurnItems.entries()) {
+    const item = input.visibleTurnItems[index]!;
+    if (item === previousItem) continue;
+    if (!isStreamingTurnItemTextUpdate(previousItem, item)) return null;
+    replacements.set(previousItem, item);
+  }
+  if (replacements.size === 0 && !appended) return previous.entries;
+  const entries = previous.entries.map((entry): TimelineEntry => {
+    const row =
+      entry.kind === "message" && entry.projectedItem !== undefined
+        ? replacements.get(entry.projectedItem)
+        : undefined;
+    if (entry.kind !== "message" || row?.item.type !== "assistant_message") return entry;
+    return {
+      ...entry,
+      projectedItem: row,
+      message: {
+        ...entry.message,
+        text: row.item.text,
+        updatedAt: DateTime.formatIso(row.item.updatedAt),
+      },
+    };
+  });
+  if (appended) {
+    entries.push(
+      ...deriveTimelineEntriesFromVisibleTurnItems({
+        ...input,
+        visibleTurnItems: input.visibleTurnItems.slice(before.visibleTurnItems.length),
+      }),
+    );
+  }
+  return entries;
+}
+
+/** Reuse immutable entries during streaming without reordering the canonical v2 sequence. */
+export function deriveTimelineEntriesFromVisibleTurnItemsWithState(
+  input: TimelineEntriesInput,
+  previous: TimelineEntriesProjection | null = null,
+): TimelineEntriesProjection {
+  const reused = previous === null ? null : reuseTimelineEntries(input, previous);
+  if (reused !== null) return { input, entries: reused };
+  const entries = deriveTimelineEntriesFromVisibleTurnItems(input);
+  if (previous === null || !shallow(input.attachmentUrlById, previous.input.attachmentUrlById)) {
+    return { input, entries };
+  }
+  // Tool output and lifecycle changes rebuild grouping, but unchanged message
+  // objects and previews still let memoized history rows stay mounted.
+  const previousMessages = new Map(
+    previous.entries.flatMap((entry) =>
+      entry.kind === "message" ? [[entry.id, entry] as const] : [],
+    ),
+  );
+  return {
+    input,
+    entries: entries.map((entry) => {
+      if (entry.kind !== "message" || entry.projectedItem === undefined) return entry;
+      const before = previousMessages.get(entry.id);
+      if (before?.projectedItem !== entry.projectedItem) return entry;
+      return before.attempt === entry.attempt ? before : { ...entry, message: before.message };
+    }),
+  };
 }
 
 export function inferCheckpointTurnCountByRunId(

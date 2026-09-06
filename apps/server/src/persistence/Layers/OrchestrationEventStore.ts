@@ -23,8 +23,11 @@ import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+
+import { replayAndBufferProjectedLiveEvents } from "../../orchestration/LiveStreamBudget.ts";
 
 import {
   toPersistenceDecodeError,
@@ -68,6 +71,13 @@ const OrchestrationEventPersistedRowSchema = Schema.Struct({
   correlationId: Schema.NullOr(CommandId),
   payload: UnknownFromJsonString,
   metadata: EventMetadataFromJsonString,
+});
+
+const HasEventAfterRequestSchema = Schema.Struct({
+  aggregateKind: Schema.String,
+  aggregateId: Schema.String,
+  type: Schema.optional(Schema.String),
+  sequenceExclusive: NonNegativeInt,
 });
 
 const ReadFromSequenceRequestSchema = Schema.Struct({
@@ -383,14 +393,25 @@ const makeEventStore = Effect.gen(function* () {
         causation_event_id,
         correlation_id
       FROM orchestration_events
+      ${
+        input.onlyAgentEvents === true
+          ? sql``
+          : sql`INDEXED BY idx_orchestration_events_application_high_water`
+      }
       WHERE sequence > ${input.afterSequence}
         AND sequence <= ${input.throughSequence ?? Number.MAX_SAFE_INTEGER}
         AND (
-          (${input.onlyAgentEvents === true ? 1 : 0} = 0 AND aggregate_kind = 'project')
-          OR (application_event_version = 2 AND aggregate_kind = 'thread')
+          ${
+            input.onlyAgentEvents === true
+              ? sql`application_event_version = 2 AND aggregate_kind = 'thread'`
+              : sql`aggregate_kind = 'project'
+                    OR (application_event_version = 2 AND aggregate_kind = 'thread')`
+          }
         )
-        AND (${input.threadId ?? null} IS NULL OR stream_id = ${input.threadId ?? null})
-        AND (${input.commandId ?? null} IS NULL OR command_id = ${input.commandId ?? null})
+        AND ${sql.and([
+          ...(input.threadId === undefined ? [] : [sql`stream_id = ${input.threadId}`]),
+          ...(input.commandId === undefined ? [] : [sql`command_id = ${input.commandId}`]),
+        ])}
       ORDER BY sequence ASC
       LIMIT ${input.limit}
     `;
@@ -480,21 +501,57 @@ const makeEventStore = Effect.gen(function* () {
       ),
     );
 
+  const getAgentReplayStats: OrchestrationEventStoreShape["getAgentReplayStats"] = (input) =>
+    sql<{
+      readonly eventCount: number;
+      readonly payloadBytes: number;
+      readonly hasCreateEvent: number;
+    }>`
+      SELECT
+        COUNT(*) AS "eventCount",
+        COALESCE(SUM(octet_length(payload_json)), 0) AS "payloadBytes",
+        COALESCE(MAX(event_type = 'thread.created'), 0) AS "hasCreateEvent"
+      FROM (
+        SELECT payload_json, event_type
+        FROM orchestration_events
+        WHERE aggregate_kind = 'thread'
+          AND stream_id = ${input.threadId}
+          AND application_event_version = 2
+          AND sequence > ${input.afterSequence}
+          AND sequence <= ${input.throughSequence}
+        ORDER BY sequence ASC
+        LIMIT ${Math.max(0, Math.floor(input.maxEvents)) + 1}
+      )
+    `.pipe(
+      Effect.mapError(toPersistenceSqlError("OrchestrationEventStore.getAgentReplayStats:query")),
+      Effect.map((rows) => ({
+        eventCount: rows[0]?.eventCount ?? 0,
+        payloadBytes: rows[0]?.payloadBytes ?? 0,
+        hasCreateEvent: (rows[0]?.hasCreateEvent ?? 0) !== 0,
+      })),
+    );
+
   const latestAgentSequence: OrchestrationEventStoreShape["latestAgentSequence"] = (threadId) =>
     sql<{ readonly sequence: number | null }>`
       SELECT MAX(sequence) AS sequence
       FROM orchestration_events
+      ${
+        threadId === undefined
+          ? sql``
+          : sql`INDEXED BY idx_orchestration_events_agent_stream_sequence`
+      }
       WHERE application_event_version = 2
         AND aggregate_kind = 'thread'
-        AND (${threadId ?? null} IS NULL OR stream_id = ${threadId ?? null})
+        ${threadId === undefined ? sql`` : sql`AND stream_id = ${threadId}`}
     `.pipe(
       Effect.map((rows) => rows[0]?.sequence ?? 0),
       Effect.mapError(toPersistenceSqlError("OrchestrationEventStore.latestAgentSequence:query")),
     );
 
+  // The OR planner otherwise scans every V2 event instead of seeking the final sequence.
   const latestApplicationSequence = sql<{ readonly sequence: number | null }>`
     SELECT MAX(sequence) AS sequence
-    FROM orchestration_events
+    FROM orchestration_events INDEXED BY idx_orchestration_events_application_high_water
     WHERE aggregate_kind = 'project'
       OR (application_event_version = 2 AND aggregate_kind = 'thread')
   `.pipe(
@@ -554,23 +611,55 @@ const makeEventStore = Effect.gen(function* () {
     return loop(input.afterSequence);
   };
 
+  const streamProjectedApplicationEvents: OrchestrationEventStoreShape["streamProjectedApplicationEvents"] =
+    (input) =>
+      replayAndBufferProjectedLiveEvents({
+        subscribe: PubSub.subscribe(committedEvents),
+        latestSequence: latestApplicationSequence,
+        afterSequence: input.afterSequence ?? 0,
+        project: input.project,
+        replay: (throughSequence) =>
+          catchUpApplicationEvents({
+            afterSequence: input?.afterSequence ?? 0,
+            throughSequence,
+          }),
+      }).pipe(
+        Stream.catchTag("LiveStreamBufferError", (cause) =>
+          Stream.fail(
+            toPersistenceSqlError("OrchestrationEventStore.streamApplicationEvents:buffer")(cause),
+          ),
+        ),
+      );
+
   const streamApplicationEvents: OrchestrationEventStoreShape["streamApplicationEvents"] = (
     input,
-  ) =>
-    Stream.unwrap(
-      Effect.gen(function* () {
-        const subscription = yield* PubSub.subscribe(committedEvents);
-        const highWater = yield* latestApplicationSequence;
-        const afterSequence = input?.afterSequence ?? 0;
-        const replay = catchUpApplicationEvents({
-          afterSequence,
-          throughSequence: highWater,
-        });
-        const live = Stream.fromSubscription(subscription).pipe(
-          Stream.filter((event) => event.sequence > Math.max(highWater, afterSequence)),
-        );
-        return Stream.concat(replay, live);
-      }),
+  ) => streamProjectedApplicationEvents({ ...input, project: (event) => event });
+
+  const findEventAfter = SqlSchema.findOneOption({
+    Request: HasEventAfterRequestSchema,
+    Result: Schema.Struct({ sequence: Schema.Number }),
+    execute: (request) => sql`
+          SELECT sequence
+          FROM orchestration_events
+          WHERE aggregate_kind = ${request.aggregateKind}
+            AND stream_id = ${request.aggregateId}
+            AND ${sql.and([
+              sql`sequence > ${request.sequenceExclusive}`,
+              ...(request.type === undefined ? [] : [sql`event_type = ${request.type}`]),
+            ])}
+          LIMIT 1
+        `,
+  });
+
+  const hasEventAfter: OrchestrationEventStoreShape["hasEventAfter"] = (input) =>
+    findEventAfter(input).pipe(
+      Effect.map(Option.isSome),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "OrchestrationEventStore.hasEventAfter:query",
+          "OrchestrationEventStore.hasEventAfter:decodeRow",
+        ),
+      ),
     );
 
   return {
@@ -579,11 +668,14 @@ const makeEventStore = Effect.gen(function* () {
     readAll: () => readFromSequence(0, Number.MAX_SAFE_INTEGER),
     appendAgentEvents,
     readAgentEvents,
+    getAgentReplayStats,
     latestAgentSequence,
     latestApplicationSequence,
     readApplicationEvents: catchUpApplicationEvents,
     publishCommitted: (events) => PubSub.publishAll(committedEvents, events).pipe(Effect.asVoid),
     streamApplicationEvents,
+    streamProjectedApplicationEvents,
+    hasEventAfter,
   } satisfies OrchestrationEventStoreShape;
 });
 

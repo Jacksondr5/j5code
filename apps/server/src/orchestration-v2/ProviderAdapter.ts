@@ -406,6 +406,7 @@ export interface ProviderAdapterV2TurnInput {
   readonly runId: RunId;
   readonly runOrdinal: number;
   readonly providerTurnOrdinal: number;
+  readonly restartContinuationOfRunId?: RunId;
   readonly attemptId: RunAttemptId;
   readonly rootNodeId: NodeId;
   readonly providerThread: OrchestrationV2ProviderThread;
@@ -521,6 +522,9 @@ export interface ProviderAdapterV2SessionRuntime {
   readonly startTurn: (
     input: ProviderAdapterV2TurnInput,
   ) => Effect.Effect<void, ProviderAdapterV2Error>;
+  readonly compactThread?: (
+    input: ProviderAdapterV2TurnInput,
+  ) => Effect.Effect<void, ProviderAdapterV2Error>;
   readonly steerTurn: (
     input: ProviderAdapterV2SteerInput,
   ) => Effect.Effect<void, ProviderAdapterV2Error>;
@@ -533,6 +537,14 @@ export interface ProviderAdapterV2SessionRuntime {
   readonly readThreadSnapshot: (
     input: ProviderAdapterV2ReadThreadSnapshotInput,
   ) => Effect.Effect<ProviderAdapterV2ThreadSnapshot, ProviderAdapterV2Error>;
+  /**
+   * Providers that accept product feedback for a thread (#7949, Codex → OpenAI)
+   * expose it here; absent means the driver has no feedback channel.
+   */
+  readonly uploadFeedback?: (input: {
+    readonly providerThread: OrchestrationV2ProviderThread;
+    readonly reason?: string;
+  }) => Effect.Effect<{ readonly feedbackId: string }, ProviderAdapterV2Error>;
   readonly rollbackThread: (
     input: ProviderAdapterV2RollbackThreadInput,
   ) => Effect.Effect<ProviderAdapterV2ThreadSnapshot, ProviderAdapterV2Error>;

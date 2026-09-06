@@ -78,12 +78,12 @@ describe("archive warning confirmation content", () => {
     expect(markup).toContain("From");
     expect(markup).toContain("To");
     expect(markup).toContain("Unnamed participant");
-    expect(markup).toContain('title="agent:unknown-counterparty"');
+    expect(markup).not.toContain("agent:unknown-counterparty");
     expect(markup).toContain("Jackson (inbox)");
     expect(markup).toContain("open 4h");
     expect(markup).toContain("open 15m");
     expect(markup).toContain("line-clamp-3");
-    expect(markup).toContain('title="Resolve the migration order before archiving this agent."');
+    expect(markup).toContain("Resolve the migration order before archiving this agent.");
     expect(markup).toContain(
       "Worktrees, branches, and pull requests remain. Cleanup is a separate action.",
     );

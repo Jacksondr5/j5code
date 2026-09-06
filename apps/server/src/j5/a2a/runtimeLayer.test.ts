@@ -6,9 +6,28 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { NodeHttpServer } from "@effect/platform-node";
+import { EnvironmentId } from "@t3tools/contracts";
+import { HttpRouter } from "effect/unstable/http";
+import * as McpHttpServer from "../../mcp/McpHttpServer.ts";
+import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
+import * as PreviewAutomationBroker from "../../mcp/PreviewAutomationBroker.ts";
+import { EnvironmentAuth } from "../../auth/EnvironmentAuth.ts";
+import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
+import { ProjectService } from "../../project/ProjectService.ts";
+import { ProjectSetupScriptRunner } from "../../project/ProjectSetupScriptRunner.ts";
+import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { ScheduledTaskService } from "../../scheduledTasks/ScheduledTaskService.ts";
+import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
+import { layer as outboxLayer } from "../../orchestration-v2/EffectOutbox.ts";
+import { A2ADeliveryTransport, live as deliveryTransportLayer } from "./DeliveryTransport.ts";
+import { j5AuthenticatedRoutesLayer } from "./J5AuthenticatedRoutes.ts";
 
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
-import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { runMigrations } from "../../persistence/Migrations.ts";
 import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
@@ -45,9 +64,9 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
         discard: true,
       }).pipe(Effect.provide(database));
 
-      let ledgerBuilds = 0;
+      const ledgers = new Set<A2ALedger["Service"]>();
       const countedLedger = ledgerLayer.pipe(
-        Layer.tap(() => Effect.sync(() => (ledgerBuilds += 1))),
+        Layer.tap((context) => Effect.sync(() => ledgers.add(Context.get(context, A2ALedger)))),
       );
       const threadManagement = Layer.mock(ThreadManagementService)({
         streamStoredEventsFrom: () => Stream.never,
@@ -57,8 +76,8 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
       const mcpConsumer = Layer.effectDiscard(A2ASilenceDetector.pipe(Effect.asVoid));
       yield* Layer.build(
         Layer.mergeAll(
-          nested === "http" ? httpConsumer.pipe(Layer.provide(runtime)) : httpConsumer,
-          nested === "mcp" ? mcpConsumer.pipe(Layer.provide(runtime)) : mcpConsumer,
+          nested === "http" ? httpConsumer.pipe(Layer.provide(Layer.fresh(runtime))) : httpConsumer,
+          nested === "mcp" ? mcpConsumer.pipe(Layer.provide(Layer.fresh(runtime))) : mcpConsumer,
         ).pipe(
           Layer.provide(runtime),
           Layer.provide(threadManagement),
@@ -68,11 +87,11 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
           Layer.provide(database),
         ),
       );
-      return ledgerBuilds;
+      return ledgers.size;
     }),
   );
 
-it.effect("shares one runtime across the combined HTTP and MCP-style route graph", () =>
+it.effect("shares one runtime and outbox across the production HTTP and MCP registrations", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const databaseContext = yield* Layer.build(NodeSqliteClient.layerMemory());
@@ -85,10 +104,12 @@ it.effect("shares one runtime across the combined HTTP and MCP-style route graph
         discard: true,
       }).pipe(Effect.provide(database));
 
-      let ledgerBuilds = 0;
+      const ledgers = new Set<A2ALedger["Service"]>();
       let threadManagementBuilds = 0;
+      const transports = new Set<A2ADeliveryTransport["Service"]>();
+      const outboxes = new Set<EffectOutboxV2["Service"]>();
       const countedLedger = ledgerLayer.pipe(
-        Layer.tap(() => Effect.sync(() => (ledgerBuilds += 1))),
+        Layer.tap((context) => Effect.sync(() => ledgers.add(Context.get(context, A2ALedger)))),
       );
       const countedThreadManagement = Layer.mock(ThreadManagementService)({
         streamStoredEventsFrom: () => Stream.never,
@@ -106,30 +127,75 @@ it.effect("shares one runtime across the combined HTTP and MCP-style route graph
       const spawnCompositionConsumer = Layer.effectDiscard(
         SpawnCompositionService.pipe(Effect.asVoid),
       );
-      const runtime = makeJ5A2ARuntimeLayer({ ledger: countedLedger });
+      const runtime = makeJ5A2ARuntimeLayer({
+        ledger: countedLedger,
+        deliveryTransport: deliveryTransportLayer.pipe(
+          Layer.tap((context) =>
+            Effect.sync(() => transports.add(Context.get(context, A2ADeliveryTransport))),
+          ),
+        ),
+      });
       yield* Layer.build(
-        Layer.mergeAll(
-          ledgerConsumer,
-          secondThreadConsumer,
-          placementConsumer,
-          silenceConsumer,
-          lifecycleConsumer,
-          archiveFactsConsumer,
-          archiveAgentConsumer,
-          threadHomesConsumer,
-          spawnCompositionConsumer,
+        HttpRouter.serve(
+          Layer.mergeAll(
+            j5AuthenticatedRoutesLayer,
+            McpHttpServer.layer,
+            ledgerConsumer,
+            secondThreadConsumer,
+            placementConsumer,
+            silenceConsumer,
+            lifecycleConsumer,
+            archiveFactsConsumer,
+            archiveAgentConsumer,
+            threadHomesConsumer,
+            spawnCompositionConsumer,
+          ).pipe(
+            Layer.provideMerge(runtime),
+            Layer.provide(countedThreadManagement),
+            Layer.provide(Layer.mock(OrchestratorV2)({})),
+            Layer.provide(
+              outboxLayer.pipe(
+                Layer.tap((context) =>
+                  Effect.sync(() => outboxes.add(Context.get(context, EffectOutboxV2))),
+                ),
+              ),
+            ),
+            Layer.provide(McpSessionRegistry.layer),
+            Layer.provide(PreviewAutomationBroker.layer),
+            Layer.provide(
+              Layer.mock(ServerEnvironment)({
+                getEnvironmentId: Effect.succeed(
+                  EnvironmentId.make("environment:runtime-composition"),
+                ),
+              }),
+            ),
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.mock(EnvironmentAuth)({}),
+                Layer.mock(ProjectService)({}),
+                Layer.mock(ProjectSetupScriptRunner)({}),
+                Layer.mock(ProviderRegistry)({}),
+                Layer.mock(ScheduledTaskService)({}),
+                Layer.mock(GitWorkflowService)({}),
+                Layer.mock(VcsStatusBroadcaster)({}),
+                ServerSettingsService.layerTest(),
+              ),
+            ),
+            Layer.provide(archiveDependencies),
+            Layer.provide(database),
+          ),
+          { disableListenLog: true, disableLogger: true },
         ).pipe(
-          Layer.provideMerge(runtime),
-          Layer.provide(countedThreadManagement),
-          Layer.provide(Layer.mock(OrchestratorV2)({})),
-          Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
-          Layer.provide(archiveDependencies),
-          Layer.provide(database),
+          Layer.provide(Layer.mock(EnvironmentAuth)({})),
+          Layer.provide(NodeHttpServer.layerTest),
+          Layer.provide(NodeServices.layer),
         ),
       );
 
-      assert.equal(ledgerBuilds, 1);
+      assert.equal(ledgers.size, 1);
       assert.equal(threadManagementBuilds, 1);
+      assert.equal(transports.size, 1);
+      assert.equal(outboxes.size, 1);
       const sql = Context.get(databaseContext, SqlClient.SqlClient);
       const people = yield* sql<{
         readonly is_local_operator: number;
@@ -156,7 +222,7 @@ it.effect("shares one runtime across the combined HTTP and MCP-style route graph
   ),
 );
 
-it.effect("exposes either nested route provider as a second runtime build", () =>
+it.effect("detects a fresh nested HTTP or MCP runtime as a distinct ledger instance", () =>
   Effect.gen(function* () {
     assert.equal(yield* measureNestedRuntimeBuilds("http"), 2);
     assert.equal(yield* measureNestedRuntimeBuilds("mcp"), 2);

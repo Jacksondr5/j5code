@@ -15,6 +15,8 @@ import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
+import { restartContinuationRun } from "./RestartContinuation.ts";
 
 export class ProviderRuntimeRecoveryError extends Schema.TaggedErrorClass<ProviderRuntimeRecoveryError>()(
   "ProviderRuntimeRecoveryError",
@@ -52,6 +54,7 @@ export class ProviderRuntimeRecoveryService extends Context.Service<
     readonly reconcile: (
       trigger: "startup" | "shutdown",
     ) => Effect.Effect<ProviderRuntimeReconciliationSummary, ProviderRuntimeRecoveryError>;
+    readonly prepareForShutdown: Effect.Effect<void, ProviderRuntimeRecoveryError>;
     readonly recover: Effect.Effect<ProviderRuntimeRecoverySummary, ProviderRuntimeRecoveryError>;
   }
 >()("t3/orchestration-v2/ProviderRuntimeRecoveryService") {}
@@ -122,13 +125,18 @@ function resolveStaleBackgroundItemProviderInstanceId(
 }
 
 export const make = Effect.gen(function* () {
+  const settings = yield* ServerSettingsService;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const eventSink = yield* EventSink.EventSinkV2;
   const ids = yield* IdAllocator.IdAllocatorV2;
   const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
   const outbox = yield* EffectOutbox.EffectOutboxV2;
   const reconcileProjection = Effect.fn("ProviderRuntimeRecoveryService.reconcileProjection")(
-    function* (projection: OrchestrationV2ThreadProjection, trigger: "startup" | "shutdown") {
+    function* (
+      projection: OrchestrationV2ThreadProjection,
+      trigger: "startup" | "shutdown",
+      continueAfterRestart: boolean,
+    ) {
       const now = yield* DateTime.now;
       const runs = [] as Array<OrchestrationV2ThreadProjection["runs"][number]>;
       for (const run of nonterminalRuns(projection)) {
@@ -155,7 +163,17 @@ export const make = Effect.gen(function* () {
         }
         runs.push(run);
       }
-      const requests = projection.runtimeRequests.filter((request) => request.status === "pending");
+      const messageRequestNodeIds = new Set(
+        projection.runtimeRequests
+          .filter(
+            (request) =>
+              request.status === "pending" && request.responseCapability.type === "message",
+          )
+          .map((request) => request.nodeId),
+      );
+      const requests = projection.runtimeRequests.filter(
+        (request) => request.status === "pending" && request.responseCapability.type !== "message",
+      );
       const detail = `Cancelled because the server ${trigger === "startup" ? "restarted" : "shut down"} before the provider work completed.`;
       const commandId = CommandId.make(
         `command:runtime-reconcile:${trigger}:${projection.thread.id}:${DateTime.formatIso(now)}`,
@@ -171,6 +189,20 @@ export const make = Effect.gen(function* () {
               }),
           ),
         );
+      const continuationRun =
+        continueAfterRestart && trigger === "startup"
+          ? restartContinuationRun(projection)
+          : undefined;
+      const effects: Array<EffectOutbox.PendingOrchestrationEffectV2> = continuationRun
+        ? [
+            {
+              id: `effect:restart-continuation:${continuationRun.id}`,
+              commandId,
+              threadId: projection.thread.id,
+              request: { type: "provider-runtime.continue", sourceRunId: continuationRun.id },
+            },
+          ]
+        : [];
       const events: Array<OrchestrationV2DomainEvent> = [];
       for (const request of requests) {
         events.push({
@@ -219,6 +251,7 @@ export const make = Effect.gen(function* () {
         for (const node of projection.nodes.filter(
           (candidate) =>
             candidate.runId === run.id &&
+            !messageRequestNodeIds.has(candidate.id) &&
             (candidate.status === "pending" ||
               candidate.status === "running" ||
               candidate.status === "waiting"),
@@ -289,6 +322,7 @@ export const make = Effect.gen(function* () {
         for (const item of projection.turnItems.filter(
           (candidate) =>
             candidate.runId === run.id &&
+            (candidate.nodeId === null || !messageRequestNodeIds.has(candidate.nodeId)) &&
             (candidate.status === "pending" ||
               candidate.status === "running" ||
               candidate.status === "waiting"),
@@ -310,6 +344,7 @@ export const make = Effect.gen(function* () {
       // cancelled above for recovered nonterminal runs to avoid duplicate
       // cancellation events.
       const recoveredNonterminalRunIds = new Set(runs.map((run) => run.id));
+      const cancelledStaleNodeIds = new Set<string>();
       for (const item of projection.turnItems ?? []) {
         if (item.runId !== null && recoveredNonterminalRunIds.has(item.runId)) {
           continue;
@@ -331,13 +366,32 @@ export const make = Effect.gen(function* () {
           occurredAt: now,
           payload: { ...item, status: "cancelled", completedAt: now, updatedAt: now },
         });
+        if (item.nodeId !== null && item.nodeId !== undefined) {
+          const staleItemNode = projection.nodes.find(
+            (candidate) =>
+              candidate.id === item.nodeId && isNonterminalNodeStatus(candidate.status),
+          );
+          if (staleItemNode !== undefined && !cancelledStaleNodeIds.has(staleItemNode.id)) {
+            cancelledStaleNodeIds.add(staleItemNode.id);
+            events.push({
+              id: yield* allocateEventId(),
+              type: "node.updated",
+              threadId: projection.thread.id,
+              ...(item.runId === null ? {} : { runId: item.runId }),
+              nodeId: staleItemNode.id,
+              providerInstanceId,
+              occurredAt: now,
+              payload: { ...staleItemNode, status: "cancelled", completedAt: now },
+            });
+          }
+        }
         if (item.type !== "subagent") {
           continue;
         }
         // Cancelling only the turn item would leave the linked subagent entity
-        // and its execution node non-terminal forever, since the dead provider
-        // process can no longer emit their terminal events. Match the exact
-        // linked ids so a subagent that already finished is never overwritten.
+        // non-terminal forever, since the dead provider process can no longer
+        // emit its terminal event. Match the exact linked id so a subagent
+        // that already finished is never overwritten.
         const staleSubagent = projection.subagents.find(
           (candidate) =>
             candidate.id === item.subagentId && isNonterminalSubagentStatus(candidate.status),
@@ -359,7 +413,8 @@ export const make = Effect.gen(function* () {
           (candidate) =>
             candidate.id === item.subagentId && isNonterminalNodeStatus(candidate.status),
         );
-        if (staleSubagentNode !== undefined) {
+        if (staleSubagentNode !== undefined && !cancelledStaleNodeIds.has(staleSubagentNode.id)) {
+          cancelledStaleNodeIds.add(staleSubagentNode.id);
           events.push({
             id: yield* allocateEventId(),
             type: "node.updated",
@@ -440,7 +495,7 @@ export const make = Effect.gen(function* () {
             commandType: "provider-runtime.reconcile",
             acceptedAt: now,
             events,
-            effects: [],
+            effects,
             cancelUnsettledEffects: {
               effectTypes: EffectOutbox.PROCESS_BOUND_EFFECT_TYPES,
               reason: detail,
@@ -469,8 +524,12 @@ export const make = Effect.gen(function* () {
 
   const reconcile = (trigger: "startup" | "shutdown") =>
     Effect.gen(function* () {
-      const shell = yield* projections
-        .getShellSnapshot()
+      const continueAfterRestart = yield* settings.getSettings.pipe(
+        Effect.map((value) => value.continueThreadsAfterServerUpdate),
+        Effect.orElseSucceed(() => false),
+      );
+      const threadIds = yield* projections
+        .getRecoveryThreadIds("runtime")
         .pipe(
           Effect.mapError(
             (cause) => new ProviderRuntimeRecoveryError({ operation: "read-projections", cause }),
@@ -480,18 +539,18 @@ export const make = Effect.gen(function* () {
       let stoppedSessions = 0;
       let closedRequests = 0;
       let retiredEffects = 0;
-      for (const thread of [...shell.threads, ...shell.archivedThreads]) {
-        const projection = yield* projections.getThreadProjection(thread.id).pipe(
+      for (const threadId of threadIds) {
+        const projection = yield* projections.getThreadProjection(threadId).pipe(
           Effect.mapError(
             (cause) =>
               new ProviderRuntimeRecoveryError({
                 operation: "read-projections",
-                threadId: thread.id,
+                threadId,
                 cause,
               }),
           ),
         );
-        const result = yield* reconcileProjection(projection, trigger);
+        const result = yield* reconcileProjection(projection, trigger, continueAfterRestart);
         terminalizedRuns += result.terminalizedRuns;
         stoppedSessions += result.stoppedSessions;
         closedRequests += result.closedRequests;
@@ -511,11 +570,43 @@ export const make = Effect.gen(function* () {
       } satisfies ProviderRuntimeReconciliationSummary;
     });
 
+  // Snapshot intent only while providers are live. A provider may finish while
+  // this commits; reconciliation reads fresh state after shutdown, and delivery
+  // rejects any source run that actually completed.
+  const prepareForShutdown = Effect.gen(function* () {
+    const enabled = yield* settings.getSettings.pipe(
+      Effect.map((value) => value.continueThreadsAfterServerUpdate),
+      Effect.orElseSucceed(() => false),
+    );
+    if (!enabled) return;
+    const threadIds = yield* projections.getRecoveryThreadIds("runtime");
+    for (const threadId of threadIds) {
+      const projection = yield* projections.getThreadProjection(threadId);
+      const run = restartContinuationRun(projection);
+      if (!run) continue;
+      const commandId = CommandId.make(`command:restart-prepare:${run.id}`);
+      yield* eventSink.writeWithEffects({
+        commandId,
+        events: [],
+        effects: [
+          {
+            id: `effect:restart-continuation:${run.id}`,
+            commandId,
+            threadId,
+            request: { type: "provider-runtime.continue", sourceRunId: run.id },
+          },
+        ],
+      });
+    }
+  }).pipe(
+    Effect.mapError((cause) => new ProviderRuntimeRecoveryError({ operation: "reconcile", cause })),
+  );
+
   const recover = Effect.gen(function* () {
     const reconciliation = yield* reconcile("startup");
     let executedEffects = 0;
     while (
-      yield* worker.runOnce.pipe(
+      yield* worker.runRecoveryOnce.pipe(
         Effect.mapError(
           (cause) => new ProviderRuntimeRecoveryError({ operation: "drain-outbox", cause }),
         ),
@@ -526,7 +617,7 @@ export const make = Effect.gen(function* () {
     return { ...reconciliation, executedEffects } satisfies ProviderRuntimeRecoverySummary;
   });
 
-  return ProviderRuntimeRecoveryService.of({ reconcile, recover });
+  return ProviderRuntimeRecoveryService.of({ reconcile, prepareForShutdown, recover });
 });
 
 export const layer = Layer.effect(ProviderRuntimeRecoveryService, make);

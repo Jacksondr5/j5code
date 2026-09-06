@@ -1,5 +1,6 @@
 import { type EnvironmentId } from "@t3tools/contracts";
 import { memo } from "react";
+import { readLocalApi } from "~/localApi";
 
 import { cn } from "~/lib/utils";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -11,8 +12,11 @@ interface ChatHeaderProps {
   newThreadSquadronName: string | null;
   activeProjectName: string | undefined;
   activeProjectCwd: string | null;
+  activeProjectFaviconPath: string | null;
+  activeProjectIcon: import("@t3tools/contracts").ProjectIconOverride | null;
   rightPanelOpen: boolean;
   onNewThreadInProject: () => void;
+  onOpenProjectSettings?: (() => void) | undefined;
 }
 
 export const ChatHeader = memo(function ChatHeader({
@@ -21,11 +25,31 @@ export const ChatHeader = memo(function ChatHeader({
   newThreadSquadronName,
   activeProjectName,
   activeProjectCwd,
+  activeProjectFaviconPath,
+  activeProjectIcon,
   rightPanelOpen,
   onNewThreadInProject,
+  onOpenProjectSettings,
 }: ChatHeaderProps) {
   return (
     <div
+      onContextMenu={
+        onOpenProjectSettings === undefined
+          ? undefined
+          : (event) => {
+              event.preventDefault();
+              const api = readLocalApi();
+              if (!api) return;
+              void api.contextMenu
+                .show([{ id: "project-settings", label: "Project settings", icon: "settings" }], {
+                  x: event.clientX,
+                  y: event.clientY,
+                })
+                .then((action) => {
+                  if (action === "project-settings") onOpenProjectSettings();
+                });
+            }
+      }
       className={cn(
         "flex min-w-0 flex-1 items-center gap-2 sm:gap-3",
         rightPanelOpen ? "pr-10" : "pr-24",
@@ -53,6 +77,9 @@ export const ChatHeader = memo(function ChatHeader({
                   <ProjectFavicon
                     environmentId={activeThreadEnvironmentId}
                     cwd={activeProjectCwd ?? ""}
+                    faviconPath={activeProjectFaviconPath}
+                    projectIcon={activeProjectIcon}
+                    projectName={activeProjectName}
                     className="size-3.5"
                   />
                 ) : null}

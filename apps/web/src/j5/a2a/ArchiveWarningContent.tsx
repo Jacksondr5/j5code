@@ -1,3 +1,4 @@
+import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import { InboxIcon, SendIcon } from "lucide-react";
 
 import { formatElapsedDurationLabel } from "../../timestampFormat";
@@ -46,15 +47,15 @@ function ArchiveWarningParticipantName({
 }: {
   readonly participant: ArchiveWarningParticipant;
 }) {
-  return (
-    <span
-      className={
-        participant.tooltipParticipantId === null ? "font-medium text-foreground" : "italic"
-      }
-      title={participant.tooltipParticipantId ?? undefined}
-    >
-      {participant.displayName}
-    </span>
+  return participant.tooltipParticipantId === null ? (
+    <span className="font-medium text-foreground">{participant.displayName}</span>
+  ) : (
+    <Tooltip>
+      <TooltipTrigger render={<span className="italic" />}>
+        {participant.displayName}
+      </TooltipTrigger>
+      <TooltipPopup>{participant.tooltipParticipantId}</TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -77,12 +78,16 @@ function ArchiveWarningRowView({ row }: { readonly row: ArchiveWarningRow }) {
           open {openAgeLabel(row.openedAt)}
         </time>
       </div>
-      <p
-        className="mt-1 line-clamp-3 break-words text-sm leading-snug text-foreground"
-        title={row.intent}
-      >
-        {row.intent}
-      </p>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <p className="mt-1 line-clamp-3 break-words text-sm leading-snug text-foreground" />
+          }
+        >
+          {row.intent}
+        </TooltipTrigger>
+        <TooltipPopup className="max-w-96 break-words">{row.intent}</TooltipPopup>
+      </Tooltip>
     </li>
   );
 }

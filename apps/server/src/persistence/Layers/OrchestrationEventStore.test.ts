@@ -1,24 +1,106 @@
-import { CommandId, EventId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  CommandId,
+  EventId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  TurnItemId,
+  type OrchestrationV2DomainEvent,
+} from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Statement from "effect/unstable/sql/Statement";
 
+import {
+  LIVE_STREAM_MAX_ITEMS,
+  LiveStreamBufferError,
+} from "../../orchestration/LiveStreamBudget.ts";
 import { PersistenceDecodeError } from "../Errors.ts";
+import { toShellApplicationEvent } from "../../orchestration-v2/ShellStream.ts";
 import { OrchestrationEventStore } from "../Services/OrchestrationEventStore.ts";
 import { OrchestrationEventStoreLive } from "./OrchestrationEventStore.ts";
 import { SqlitePersistenceMemory } from "./Sqlite.ts";
 const isPersistenceDecodeError = Schema.is(PersistenceDecodeError);
+const isLiveStreamBufferError = Schema.is(LiveStreamBufferError);
 
-const layer = it.layer(
-  OrchestrationEventStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
-);
+const TestLayer = OrchestrationEventStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory));
+const layer = it.layer(TestLayer);
 
 layer("OrchestrationEventStore", (it) => {
-  it.effect("stores json columns as strings and replays decoded events", () =>
+  it.effect("retains only shell metadata from oversized replay and live application events", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const store = yield* OrchestrationEventStore;
+        const afterSequence = yield* store.latestApplicationSequence;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make("thread:large-shell-body");
+        const input = "x".repeat(9 * 1024 * 1024);
+        const event: OrchestrationV2DomainEvent = {
+          id: EventId.make("event:large-shell-body:replay"),
+          type: "turn-item.updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            id: TurnItemId.make("tool:large-shell-body"),
+            type: "command_execution",
+            threadId,
+            runId: null,
+            nodeId: null,
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: 1,
+            status: "running",
+            title: "Large command",
+            input,
+            startedAt: now,
+            completedAt: null,
+            updatedAt: now,
+          },
+        };
+        const [replayed] = yield* store.appendAgentEvents({ events: [event] });
+        const pull = yield* Stream.toPull(
+          store.streamProjectedApplicationEvents({
+            afterSequence,
+            project: toShellApplicationEvent,
+          }),
+        );
+        assert.deepEqual(yield* pull, [{ sequence: replayed!.sequence, event: { threadId } }]);
+        const [live] = yield* store.appendAgentEvents({
+          events: [
+            {
+              ...event,
+              id: EventId.make("event:large-shell-body:live"),
+              payload: { ...event.payload, status: "completed", completedAt: now },
+            },
+          ],
+        });
+        yield* store.publishCommitted([live!]);
+        assert.deepEqual(yield* pull, [{ sequence: live!.sequence, event: { threadId } }]);
+        const durable = yield* store
+          .readAgentEvents({ threadId, afterSequence })
+          .pipe(Stream.runCollect);
+        assert.lengthOf(durable, 2);
+        for (const stored of durable) {
+          assert.equal(stored.event.type, "turn-item.updated");
+          if (stored.event.type !== "turn-item.updated") return;
+          assert.equal(stored.event.payload.type, "command_execution");
+          if (stored.event.payload.type !== "command_execution") return;
+          assert.equal(stored.event.payload.input, input);
+        }
+      }),
+    ),
+  );
+
+  it.effect("stores json columns as strings and replays CLI-origin events", () =>
     Effect.gen(function* () {
       const eventStore = yield* OrchestrationEventStore;
       const sql = yield* SqlClient.SqlClient;
@@ -35,6 +117,9 @@ layer("OrchestrationEventStore", (it) => {
         correlationId: CommandId.make("cmd-store-roundtrip"),
         metadata: {
           adapterKey: "codex",
+          origin: {
+            surface: "cli",
+          },
         },
         payload: {
           projectId: ProjectId.make("project-roundtrip"),
@@ -67,6 +152,7 @@ layer("OrchestrationEventStore", (it) => {
       assert.equal(replayed.length, 1);
       assert.equal(replayed[0]?.type, "project.created");
       assert.equal(replayed[0]?.metadata.adapterKey, "codex");
+      assert.deepEqual(replayed[0]?.metadata.origin, { surface: "cli" });
     }),
   );
 
@@ -230,4 +316,141 @@ layer("OrchestrationEventStore", (it) => {
       );
     }),
   );
+  it.effect("measures only a bounded thread replay before decoding its payloads", () =>
+    Effect.gen(function* () {
+      const store = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("measured-replay-thread");
+      const baseline = yield* store.latestApplicationSequence;
+      const unicodePayload = '{"text":"🦊"}';
+      const oversizedPayload = "{" + "x".repeat(1_048_576);
+      let streamVersion = 0;
+      const insert = Effect.fn(function* (input: {
+        readonly id: string;
+        readonly payload: string;
+        readonly type?: string;
+        readonly threadId?: string;
+        readonly version?: number;
+      }) {
+        const rows = yield* sql<{ readonly sequence: number }>`
+          INSERT INTO orchestration_events (
+            event_id, aggregate_kind, stream_id, stream_version, event_type,
+            occurred_at, actor_kind, payload_json, metadata_json, application_event_version
+          ) VALUES (
+            ${input.id}, 'thread', ${input.threadId ?? threadId},
+            ${streamVersion++}, ${input.type ?? "thread.metadata-updated"},
+            '2026-09-04T00:00:00.000Z', 'server', ${input.payload}, '{}', ${input.version ?? 2}
+          ) RETURNING sequence
+        `;
+        return rows[0]!.sequence;
+      });
+      const first = yield* insert({
+        id: "measured-replay-1",
+        payload: unicodePayload,
+        type: "thread.created",
+      });
+      yield* insert({
+        id: "measured-unrelated",
+        threadId: "other-replay-thread",
+        payload: oversizedPayload,
+      });
+      yield* insert({ id: "measured-legacy", payload: oversizedPayload, version: 1 });
+      const head = yield* insert({ id: "measured-replay-02", payload: oversizedPayload });
+      const later = yield* insert({ id: "measured-replay-003", payload: "{}" });
+      const range = { threadId, afterSequence: baseline, throughSequence: head, maxEvents: 128 };
+      assert.deepEqual(yield* store.getAgentReplayStats(range), {
+        eventCount: 2,
+        payloadBytes: Buffer.byteLength(unicodePayload) + Buffer.byteLength(oversizedPayload),
+        hasCreateEvent: true,
+      });
+      assert.deepEqual(yield* store.getAgentReplayStats({ ...range, afterSequence: first }), {
+        eventCount: 1,
+        payloadBytes: Buffer.byteLength(oversizedPayload),
+        hasCreateEvent: false,
+      });
+      assert.equal(
+        (yield* store.getAgentReplayStats({ ...range, throughSequence: later, maxEvents: 1 }))
+          .eventCount,
+        2,
+      );
+      assert.deepEqual(yield* store.getAgentReplayStats({ ...range, afterSequence: later }), {
+        eventCount: 0,
+        payloadBytes: 0,
+        hasCreateEvent: false,
+      });
+    }),
+  );
 });
+
+for (const phase of ["high-water", "replay"] as const) {
+  it.effect(`bounds application live events while the ${phase} query is blocked`, () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const store = yield* OrchestrationEventStore;
+        const now = "2026-01-03T00:00:00.000Z";
+        const projectId = ProjectId.make(`project:blocked-${phase}`);
+        const projectEvent = yield* store.append({
+          type: "project.created",
+          eventId: EventId.make(`event:blocked-${phase}:created`),
+          aggregateKind: "project",
+          aggregateId: projectId,
+          occurredAt: now,
+          commandId: CommandId.make(`command:blocked-${phase}`),
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          payload: {
+            projectId,
+            title: "Blocked stream",
+            workspaceRoot: "/tmp/blocked-stream",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        if (projectEvent.type !== "project.created")
+          return yield* Effect.die("Expected project.created");
+        const readStarted = yield* Deferred.make<void>();
+        const readClosed = yield* Deferred.make<void>();
+        const blockRead: Statement.Transformer = (statement) => {
+          const [query] = statement.compile();
+          if (
+            query.includes("FROM orchestration_events") &&
+            query.includes("MAX(sequence)") === (phase === "high-water")
+          ) {
+            return Deferred.succeed(readStarted, undefined).pipe(
+              Effect.andThen(Effect.never),
+              Effect.ensuring(Deferred.succeed(readClosed, undefined)),
+              Effect.as(statement),
+            );
+          }
+          return Effect.succeed(statement);
+        };
+        const reader = yield* store
+          .streamApplicationEvents({ afterSequence: projectEvent.sequence })
+          .pipe(
+            Stream.provideService(Statement.CurrentTransformer, blockRead),
+            Stream.runDrain,
+            Effect.result,
+            Effect.forkScoped,
+          );
+        yield* Deferred.await(readStarted);
+        yield* store.publishCommitted(
+          Array.from({ length: LIVE_STREAM_MAX_ITEMS + 1 }, (_, index) => ({
+            ...projectEvent,
+            eventId: EventId.make(`event:blocked-${phase}:${index}`),
+            sequence: projectEvent.sequence + index + 1,
+          })),
+        );
+        yield* Deferred.await(readClosed);
+        const result = yield* Fiber.join(reader);
+        assert.equal(result._tag, "Failure");
+        if (result._tag === "Failure") {
+          assert.equal(result.failure._tag, "PersistenceSqlError");
+          assert.isTrue(isLiveStreamBufferError(result.failure.cause));
+        }
+      }),
+    ).pipe(Effect.provide(Layer.fresh(TestLayer))),
+  );
+}

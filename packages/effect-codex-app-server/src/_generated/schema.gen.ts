@@ -2100,11 +2100,6 @@ export const ServerNotification__HookPromptFragment = Schema.Struct({
   text: Schema.String,
 }).annotate({ identifier: "ServerNotification__HookPromptFragment" });
 
-export type ServerNotification__AgentMessageDelivery = "async";
-export const ServerNotification__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "ServerNotification__AgentMessageDelivery",
-});
-
 export type ServerNotification__MemoryCitationEntry = {
   readonly lineEnd: number;
   readonly lineStart: number;
@@ -4862,7 +4857,10 @@ export const V2ConfigWriteResponse__WriteStatus = Schema.Literals(["ok", "okOver
 });
 
 export type V2ConsumeAccountRateLimitResetCreditResponse__ConsumeAccountRateLimitResetCreditOutcome =
-  "reset" | "nothingToReset" | "noCredit" | "alreadyRedeemed";
+  | "reset"
+  | "nothingToReset"
+  | "noCredit"
+  | "alreadyRedeemed";
 export const V2ConsumeAccountRateLimitResetCreditResponse__ConsumeAccountRateLimitResetCreditOutcome =
   Schema.Union(
     [
@@ -5002,16 +5000,16 @@ export const V2ExternalAgentConfigDetectResponse__ExternalAgentConfigMigrationIt
   });
 
 export type V2ExternalAgentConfigImportCompletedNotification__ExternalAgentConfigMigrationItemType =
-    | "AGENTS_MD"
-    | "CONFIG"
-    | "SKILLS"
-    | "PLUGINS"
-    | "MCP_SERVER_CONFIG"
-    | "SUBAGENTS"
-    | "HOOKS"
-    | "COMMANDS"
-    | "MEMORY"
-    | "SESSIONS";
+  | "AGENTS_MD"
+  | "CONFIG"
+  | "SKILLS"
+  | "PLUGINS"
+  | "MCP_SERVER_CONFIG"
+  | "SUBAGENTS"
+  | "HOOKS"
+  | "COMMANDS"
+  | "MEMORY"
+  | "SESSIONS";
 export const V2ExternalAgentConfigImportCompletedNotification__ExternalAgentConfigMigrationItemType =
   Schema.Literals([
     "AGENTS_MD",
@@ -5038,16 +5036,16 @@ export const V2ExternalAgentConfigImportHistoriesReadResponse__ExternalAgentImpo
   });
 
 export type V2ExternalAgentConfigImportHistoriesReadResponse__ExternalAgentConfigMigrationItemType =
-    | "AGENTS_MD"
-    | "CONFIG"
-    | "SKILLS"
-    | "PLUGINS"
-    | "MCP_SERVER_CONFIG"
-    | "SUBAGENTS"
-    | "HOOKS"
-    | "COMMANDS"
-    | "MEMORY"
-    | "SESSIONS";
+  | "AGENTS_MD"
+  | "CONFIG"
+  | "SKILLS"
+  | "PLUGINS"
+  | "MCP_SERVER_CONFIG"
+  | "SUBAGENTS"
+  | "HOOKS"
+  | "COMMANDS"
+  | "MEMORY"
+  | "SESSIONS";
 export const V2ExternalAgentConfigImportHistoriesReadResponse__ExternalAgentConfigMigrationItemType =
   Schema.Literals([
     "AGENTS_MD",
@@ -5929,11 +5927,6 @@ export const V2ItemCompletedNotification__HookPromptFragment = Schema.Struct({
   text: Schema.String,
 }).annotate({ identifier: "V2ItemCompletedNotification__HookPromptFragment" });
 
-export type V2ItemCompletedNotification__AgentMessageDelivery = "async";
-export const V2ItemCompletedNotification__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2ItemCompletedNotification__AgentMessageDelivery",
-});
-
 export type V2ItemCompletedNotification__MemoryCitationEntry = {
   readonly lineEnd: number;
   readonly lineStart: number;
@@ -6460,11 +6453,6 @@ export const V2ItemStartedNotification__HookPromptFragment = Schema.Struct({
   hookRunId: Schema.String,
   text: Schema.String,
 }).annotate({ identifier: "V2ItemStartedNotification__HookPromptFragment" });
-
-export type V2ItemStartedNotification__AgentMessageDelivery = "async";
-export const V2ItemStartedNotification__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2ItemStartedNotification__AgentMessageDelivery",
-});
 
 export type V2ItemStartedNotification__MemoryCitationEntry = {
   readonly lineEnd: number;
@@ -8039,11 +8027,6 @@ export const V2ReviewStartResponse__HookPromptFragment = Schema.Struct({
   text: Schema.String,
 }).annotate({ identifier: "V2ReviewStartResponse__HookPromptFragment" });
 
-export type V2ReviewStartResponse__AgentMessageDelivery = "async";
-export const V2ReviewStartResponse__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2ReviewStartResponse__AgentMessageDelivery",
-});
-
 export type V2ReviewStartResponse__MemoryCitationEntry = {
   readonly lineEnd: number;
   readonly lineStart: number;
@@ -8676,11 +8659,6 @@ export const V2ThreadForkResponse__HookPromptFragment = Schema.Struct({
   text: Schema.String,
 }).annotate({ identifier: "V2ThreadForkResponse__HookPromptFragment" });
 
-export type V2ThreadForkResponse__AgentMessageDelivery = "async";
-export const V2ThreadForkResponse__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2ThreadForkResponse__AgentMessageDelivery",
-});
-
 export type V2ThreadForkResponse__MemoryCitationEntry = {
   readonly lineEnd: number;
   readonly lineStart: number;
@@ -9098,11 +9076,6 @@ export const V2ThreadItemsListResponse__HookPromptFragment = Schema.Struct({
   hookRunId: Schema.String,
   text: Schema.String,
 }).annotate({ identifier: "V2ThreadItemsListResponse__HookPromptFragment" });
-
-export type V2ThreadItemsListResponse__AgentMessageDelivery = "async";
-export const V2ThreadItemsListResponse__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2ThreadItemsListResponse__AgentMessageDelivery",
-});
 
 export type V2ThreadItemsListResponse__MemoryCitationEntry = {
   readonly lineEnd: number;
@@ -9563,11 +9536,6 @@ export const V2ThreadListResponse__HookPromptFragment = Schema.Struct({
   hookRunId: Schema.String,
   text: Schema.String,
 }).annotate({ identifier: "V2ThreadListResponse__HookPromptFragment" });
-
-export type V2ThreadListResponse__AgentMessageDelivery = "async";
-export const V2ThreadListResponse__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2ThreadListResponse__AgentMessageDelivery",
-});
 
 export type V2ThreadListResponse__MemoryCitationEntry = {
   readonly lineEnd: number;
@@ -10041,11 +10009,6 @@ export const V2ThreadMetadataUpdateResponse__HookPromptFragment = Schema.Struct(
   text: Schema.String,
 }).annotate({ identifier: "V2ThreadMetadataUpdateResponse__HookPromptFragment" });
 
-export type V2ThreadMetadataUpdateResponse__AgentMessageDelivery = "async";
-export const V2ThreadMetadataUpdateResponse__AgentMessageDelivery = Schema.Literal(
-  "async",
-).annotate({ identifier: "V2ThreadMetadataUpdateResponse__AgentMessageDelivery" });
-
 export type V2ThreadMetadataUpdateResponse__MemoryCitationEntry = {
   readonly lineEnd: number;
   readonly lineStart: number;
@@ -10483,11 +10446,6 @@ export const V2ThreadReadResponse__HookPromptFragment = Schema.Struct({
   hookRunId: Schema.String,
   text: Schema.String,
 }).annotate({ identifier: "V2ThreadReadResponse__HookPromptFragment" });
-
-export type V2ThreadReadResponse__AgentMessageDelivery = "async";
-export const V2ThreadReadResponse__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2ThreadReadResponse__AgentMessageDelivery",
-});
 
 export type V2ThreadReadResponse__MemoryCitationEntry = {
   readonly lineEnd: number;
@@ -11393,11 +11351,6 @@ export const V2ThreadResumeResponse__HookPromptFragment = Schema.Struct({
   text: Schema.String,
 }).annotate({ identifier: "V2ThreadResumeResponse__HookPromptFragment" });
 
-export type V2ThreadResumeResponse__AgentMessageDelivery = "async";
-export const V2ThreadResumeResponse__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2ThreadResumeResponse__AgentMessageDelivery",
-});
-
 export type V2ThreadResumeResponse__MemoryCitationEntry = {
   readonly lineEnd: number;
   readonly lineStart: number;
@@ -11814,11 +11767,6 @@ export const V2ThreadRevertResponse__HookPromptFragment = Schema.Struct({
   hookRunId: Schema.String,
   text: Schema.String,
 }).annotate({ identifier: "V2ThreadRevertResponse__HookPromptFragment" });
-
-export type V2ThreadRevertResponse__AgentMessageDelivery = "async";
-export const V2ThreadRevertResponse__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2ThreadRevertResponse__AgentMessageDelivery",
-});
 
 export type V2ThreadRevertResponse__MemoryCitationEntry = {
   readonly lineEnd: number;
@@ -12251,11 +12199,6 @@ export const V2ThreadRollbackResponse__HookPromptFragment = Schema.Struct({
   hookRunId: Schema.String,
   text: Schema.String,
 }).annotate({ identifier: "V2ThreadRollbackResponse__HookPromptFragment" });
-
-export type V2ThreadRollbackResponse__AgentMessageDelivery = "async";
-export const V2ThreadRollbackResponse__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2ThreadRollbackResponse__AgentMessageDelivery",
-});
 
 export type V2ThreadRollbackResponse__MemoryCitationEntry = {
   readonly lineEnd: number;
@@ -12873,11 +12816,6 @@ export const V2ThreadStartedNotification__HookPromptFragment = Schema.Struct({
   text: Schema.String,
 }).annotate({ identifier: "V2ThreadStartedNotification__HookPromptFragment" });
 
-export type V2ThreadStartedNotification__AgentMessageDelivery = "async";
-export const V2ThreadStartedNotification__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2ThreadStartedNotification__AgentMessageDelivery",
-});
-
 export type V2ThreadStartedNotification__MemoryCitationEntry = {
   readonly lineEnd: number;
   readonly lineStart: number;
@@ -13493,11 +13431,6 @@ export const V2ThreadStartResponse__HookPromptFragment = Schema.Struct({
   text: Schema.String,
 }).annotate({ identifier: "V2ThreadStartResponse__HookPromptFragment" });
 
-export type V2ThreadStartResponse__AgentMessageDelivery = "async";
-export const V2ThreadStartResponse__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2ThreadStartResponse__AgentMessageDelivery",
-});
-
 export type V2ThreadStartResponse__MemoryCitationEntry = {
   readonly lineEnd: number;
   readonly lineStart: number;
@@ -13918,11 +13851,6 @@ export const V2ThreadTurnsListResponse__HookPromptFragment = Schema.Struct({
   hookRunId: Schema.String,
   text: Schema.String,
 }).annotate({ identifier: "V2ThreadTurnsListResponse__HookPromptFragment" });
-
-export type V2ThreadTurnsListResponse__AgentMessageDelivery = "async";
-export const V2ThreadTurnsListResponse__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2ThreadTurnsListResponse__AgentMessageDelivery",
-});
 
 export type V2ThreadTurnsListResponse__MemoryCitationEntry = {
   readonly lineEnd: number;
@@ -14368,11 +14296,6 @@ export const V2ThreadUnarchiveResponse__HookPromptFragment = Schema.Struct({
   text: Schema.String,
 }).annotate({ identifier: "V2ThreadUnarchiveResponse__HookPromptFragment" });
 
-export type V2ThreadUnarchiveResponse__AgentMessageDelivery = "async";
-export const V2ThreadUnarchiveResponse__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2ThreadUnarchiveResponse__AgentMessageDelivery",
-});
-
 export type V2ThreadUnarchiveResponse__MemoryCitationEntry = {
   readonly lineEnd: number;
   readonly lineStart: number;
@@ -14763,11 +14686,6 @@ export const V2TurnCompletedNotification__HookPromptFragment = Schema.Struct({
   hookRunId: Schema.String,
   text: Schema.String,
 }).annotate({ identifier: "V2TurnCompletedNotification__HookPromptFragment" });
-
-export type V2TurnCompletedNotification__AgentMessageDelivery = "async";
-export const V2TurnCompletedNotification__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2TurnCompletedNotification__AgentMessageDelivery",
-});
 
 export type V2TurnCompletedNotification__MemoryCitationEntry = {
   readonly lineEnd: number;
@@ -15163,11 +15081,6 @@ export const V2TurnStartedNotification__HookPromptFragment = Schema.Struct({
   hookRunId: Schema.String,
   text: Schema.String,
 }).annotate({ identifier: "V2TurnStartedNotification__HookPromptFragment" });
-
-export type V2TurnStartedNotification__AgentMessageDelivery = "async";
-export const V2TurnStartedNotification__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2TurnStartedNotification__AgentMessageDelivery",
-});
 
 export type V2TurnStartedNotification__MemoryCitationEntry = {
   readonly lineEnd: number;
@@ -15674,11 +15587,6 @@ export const V2TurnStartResponse__HookPromptFragment = Schema.Struct({
   hookRunId: Schema.String,
   text: Schema.String,
 }).annotate({ identifier: "V2TurnStartResponse__HookPromptFragment" });
-
-export type V2TurnStartResponse__AgentMessageDelivery = "async";
-export const V2TurnStartResponse__AgentMessageDelivery = Schema.Literal("async").annotate({
-  identifier: "V2TurnStartResponse__AgentMessageDelivery",
-});
 
 export type V2TurnStartResponse__MemoryCitationEntry = {
   readonly lineEnd: number;
@@ -32576,12 +32484,16 @@ export type ServerNotification__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: ServerNotification__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: ServerNotification__MemoryCitation | null;
       readonly phase?: ServerNotification__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -32703,9 +32615,7 @@ export const ServerNotification__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([ServerNotification__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([ServerNotification__MemoryCitation, Schema.Null]),
@@ -32713,6 +32623,17 @@ export const ServerNotification__ThreadItem = Schema.Union(
       phase: Schema.optionalKey(Schema.Union([ServerNotification__MessagePhase, Schema.Null])),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -33171,12 +33092,16 @@ export type V2ItemCompletedNotification__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2ItemCompletedNotification__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2ItemCompletedNotification__MemoryCitation | null;
       readonly phase?: V2ItemCompletedNotification__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -33300,9 +33225,7 @@ export const V2ItemCompletedNotification__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2ItemCompletedNotification__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2ItemCompletedNotification__MemoryCitation, Schema.Null]),
@@ -33312,6 +33235,17 @@ export const V2ItemCompletedNotification__ThreadItem = Schema.Union(
       ),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -33643,12 +33577,16 @@ export type V2ItemStartedNotification__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2ItemStartedNotification__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2ItemStartedNotification__MemoryCitation | null;
       readonly phase?: V2ItemStartedNotification__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -33770,9 +33708,7 @@ export const V2ItemStartedNotification__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2ItemStartedNotification__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2ItemStartedNotification__MemoryCitation, Schema.Null]),
@@ -33782,6 +33718,17 @@ export const V2ItemStartedNotification__ThreadItem = Schema.Union(
       ),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -34834,12 +34781,16 @@ export type V2ReviewStartResponse__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2ReviewStartResponse__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2ReviewStartResponse__MemoryCitation | null;
       readonly phase?: V2ReviewStartResponse__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -34961,9 +34912,7 @@ export const V2ReviewStartResponse__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2ReviewStartResponse__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2ReviewStartResponse__MemoryCitation, Schema.Null]),
@@ -34971,6 +34920,17 @@ export const V2ReviewStartResponse__ThreadItem = Schema.Union(
       phase: Schema.optionalKey(Schema.Union([V2ReviewStartResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -35288,12 +35248,16 @@ export type V2ThreadForkResponse__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2ThreadForkResponse__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2ThreadForkResponse__MemoryCitation | null;
       readonly phase?: V2ThreadForkResponse__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -35415,9 +35379,7 @@ export const V2ThreadForkResponse__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2ThreadForkResponse__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2ThreadForkResponse__MemoryCitation, Schema.Null]),
@@ -35425,6 +35387,17 @@ export const V2ThreadForkResponse__ThreadItem = Schema.Union(
       phase: Schema.optionalKey(Schema.Union([V2ThreadForkResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -35731,12 +35704,16 @@ export type V2ThreadItemsListResponse__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2ThreadItemsListResponse__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2ThreadItemsListResponse__MemoryCitation | null;
       readonly phase?: V2ThreadItemsListResponse__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -35858,9 +35835,7 @@ export const V2ThreadItemsListResponse__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2ThreadItemsListResponse__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2ThreadItemsListResponse__MemoryCitation, Schema.Null]),
@@ -35870,6 +35845,17 @@ export const V2ThreadItemsListResponse__ThreadItem = Schema.Union(
       ),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -36177,12 +36163,16 @@ export type V2ThreadListResponse__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2ThreadListResponse__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2ThreadListResponse__MemoryCitation | null;
       readonly phase?: V2ThreadListResponse__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -36304,9 +36294,7 @@ export const V2ThreadListResponse__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2ThreadListResponse__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2ThreadListResponse__MemoryCitation, Schema.Null]),
@@ -36314,6 +36302,17 @@ export const V2ThreadListResponse__ThreadItem = Schema.Union(
       phase: Schema.optionalKey(Schema.Union([V2ThreadListResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -36620,12 +36619,16 @@ export type V2ThreadMetadataUpdateResponse__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2ThreadMetadataUpdateResponse__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2ThreadMetadataUpdateResponse__MemoryCitation | null;
       readonly phase?: V2ThreadMetadataUpdateResponse__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -36749,9 +36752,7 @@ export const V2ThreadMetadataUpdateResponse__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2ThreadMetadataUpdateResponse__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2ThreadMetadataUpdateResponse__MemoryCitation, Schema.Null]),
@@ -36761,6 +36762,17 @@ export const V2ThreadMetadataUpdateResponse__ThreadItem = Schema.Union(
       ),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -37068,12 +37080,16 @@ export type V2ThreadReadResponse__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2ThreadReadResponse__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2ThreadReadResponse__MemoryCitation | null;
       readonly phase?: V2ThreadReadResponse__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -37195,9 +37211,7 @@ export const V2ThreadReadResponse__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2ThreadReadResponse__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2ThreadReadResponse__MemoryCitation, Schema.Null]),
@@ -37205,6 +37219,17 @@ export const V2ThreadReadResponse__ThreadItem = Schema.Union(
       phase: Schema.optionalKey(Schema.Union([V2ThreadReadResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -37511,12 +37536,16 @@ export type V2ThreadResumeResponse__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2ThreadResumeResponse__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2ThreadResumeResponse__MemoryCitation | null;
       readonly phase?: V2ThreadResumeResponse__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -37638,9 +37667,7 @@ export const V2ThreadResumeResponse__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2ThreadResumeResponse__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2ThreadResumeResponse__MemoryCitation, Schema.Null]),
@@ -37648,6 +37675,17 @@ export const V2ThreadResumeResponse__ThreadItem = Schema.Union(
       phase: Schema.optionalKey(Schema.Union([V2ThreadResumeResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -37954,12 +37992,16 @@ export type V2ThreadRevertResponse__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2ThreadRevertResponse__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2ThreadRevertResponse__MemoryCitation | null;
       readonly phase?: V2ThreadRevertResponse__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -38081,9 +38123,7 @@ export const V2ThreadRevertResponse__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2ThreadRevertResponse__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2ThreadRevertResponse__MemoryCitation, Schema.Null]),
@@ -38091,6 +38131,17 @@ export const V2ThreadRevertResponse__ThreadItem = Schema.Union(
       phase: Schema.optionalKey(Schema.Union([V2ThreadRevertResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -38397,12 +38448,16 @@ export type V2ThreadRollbackResponse__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2ThreadRollbackResponse__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2ThreadRollbackResponse__MemoryCitation | null;
       readonly phase?: V2ThreadRollbackResponse__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -38524,9 +38579,7 @@ export const V2ThreadRollbackResponse__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2ThreadRollbackResponse__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2ThreadRollbackResponse__MemoryCitation, Schema.Null]),
@@ -38536,6 +38589,17 @@ export const V2ThreadRollbackResponse__ThreadItem = Schema.Union(
       ),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -38880,12 +38944,16 @@ export type V2ThreadStartedNotification__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2ThreadStartedNotification__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2ThreadStartedNotification__MemoryCitation | null;
       readonly phase?: V2ThreadStartedNotification__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -39009,9 +39077,7 @@ export const V2ThreadStartedNotification__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2ThreadStartedNotification__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2ThreadStartedNotification__MemoryCitation, Schema.Null]),
@@ -39021,6 +39087,17 @@ export const V2ThreadStartedNotification__ThreadItem = Schema.Union(
       ),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -39328,12 +39405,16 @@ export type V2ThreadStartResponse__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2ThreadStartResponse__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2ThreadStartResponse__MemoryCitation | null;
       readonly phase?: V2ThreadStartResponse__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -39455,9 +39536,7 @@ export const V2ThreadStartResponse__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2ThreadStartResponse__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2ThreadStartResponse__MemoryCitation, Schema.Null]),
@@ -39465,6 +39544,17 @@ export const V2ThreadStartResponse__ThreadItem = Schema.Union(
       phase: Schema.optionalKey(Schema.Union([V2ThreadStartResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -39771,12 +39861,16 @@ export type V2ThreadTurnsListResponse__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2ThreadTurnsListResponse__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2ThreadTurnsListResponse__MemoryCitation | null;
       readonly phase?: V2ThreadTurnsListResponse__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -39898,9 +39992,7 @@ export const V2ThreadTurnsListResponse__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2ThreadTurnsListResponse__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2ThreadTurnsListResponse__MemoryCitation, Schema.Null]),
@@ -39910,6 +40002,17 @@ export const V2ThreadTurnsListResponse__ThreadItem = Schema.Union(
       ),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -40217,12 +40320,16 @@ export type V2ThreadUnarchiveResponse__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2ThreadUnarchiveResponse__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2ThreadUnarchiveResponse__MemoryCitation | null;
       readonly phase?: V2ThreadUnarchiveResponse__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -40344,9 +40451,7 @@ export const V2ThreadUnarchiveResponse__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2ThreadUnarchiveResponse__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2ThreadUnarchiveResponse__MemoryCitation, Schema.Null]),
@@ -40356,6 +40461,17 @@ export const V2ThreadUnarchiveResponse__ThreadItem = Schema.Union(
       ),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -40663,12 +40779,16 @@ export type V2TurnCompletedNotification__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2TurnCompletedNotification__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2TurnCompletedNotification__MemoryCitation | null;
       readonly phase?: V2TurnCompletedNotification__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -40792,9 +40912,7 @@ export const V2TurnCompletedNotification__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2TurnCompletedNotification__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2TurnCompletedNotification__MemoryCitation, Schema.Null]),
@@ -40804,6 +40922,17 @@ export const V2TurnCompletedNotification__ThreadItem = Schema.Union(
       ),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -41111,12 +41240,16 @@ export type V2TurnStartedNotification__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2TurnStartedNotification__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2TurnStartedNotification__MemoryCitation | null;
       readonly phase?: V2TurnStartedNotification__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -41238,9 +41371,7 @@ export const V2TurnStartedNotification__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2TurnStartedNotification__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2TurnStartedNotification__MemoryCitation, Schema.Null]),
@@ -41250,6 +41381,17 @@ export const V2TurnStartedNotification__ThreadItem = Schema.Union(
       ),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -41568,12 +41710,16 @@ export type V2TurnStartResponse__ThreadItem =
       readonly type: "hookPrompt";
     }
   | {
-      readonly delivery?: V2TurnStartResponse__AgentMessageDelivery | null;
+      readonly delivery?: "async" | null;
       readonly id: string;
       readonly memoryCitation?: V2TurnStartResponse__MemoryCitation | null;
       readonly phase?: V2TurnStartResponse__MessagePhase | null;
       readonly text: string;
       readonly type: "agentMessage";
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
     }
   | {
       readonly id: string;
@@ -41695,9 +41841,7 @@ export const V2TurnStartResponse__ThreadItem = Schema.Union(
       type: Schema.Literal("hookPrompt").annotate({ title: "HookPromptThreadItemType" }),
     }).annotate({ title: "HookPromptThreadItem" }),
     Schema.Struct({
-      delivery: Schema.optionalKey(
-        Schema.Union([V2TurnStartResponse__AgentMessageDelivery, Schema.Null]),
-      ),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
       id: Schema.String,
       memoryCitation: Schema.optionalKey(
         Schema.Union([V2TurnStartResponse__MemoryCitation, Schema.Null]),
@@ -41705,6 +41849,17 @@ export const V2TurnStartResponse__ThreadItem = Schema.Union(
       phase: Schema.optionalKey(Schema.Union([V2TurnStartResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -50491,6 +50646,9 @@ export const ServerNotification = Schema.Union(
   { mode: "oneOf" },
 );
 
+export type ServerNotification__AgentMessageDelivery = "async";
+export const ServerNotification__AgentMessageDelivery = Schema.Literal("async");
+
 export type ServerNotification__MultiAgentMode =
   | "explicitRequestOnly"
   | "proactive"
@@ -52405,6 +52563,9 @@ export const V2ItemCompletedNotification = Schema.Struct({
   turnId: Schema.String,
 }).annotate({ title: "ItemCompletedNotification" });
 
+export type V2ItemCompletedNotification__AgentMessageDelivery = "async";
+export const V2ItemCompletedNotification__AgentMessageDelivery = Schema.Literal("async");
+
 export type V2ItemGuardianApprovalReviewCompletedNotification = {
   readonly action: V2ItemGuardianApprovalReviewCompletedNotification__GuardianApprovalReviewAction;
   readonly completedAtMs: number;
@@ -52495,6 +52656,9 @@ export const V2ItemStartedNotification = Schema.Struct({
   threadId: Schema.String,
   turnId: Schema.String,
 }).annotate({ title: "ItemStartedNotification" });
+
+export type V2ItemStartedNotification__AgentMessageDelivery = "async";
+export const V2ItemStartedNotification__AgentMessageDelivery = Schema.Literal("async");
 
 export type V2ListMcpServerStatusParams = {
   readonly cursor?: string | null;
@@ -53032,8 +53196,7 @@ export const V2ModelVerificationNotification = Schema.Struct({
   verifications: Schema.Array(V2ModelVerificationNotification__ModelVerification),
 }).annotate({ title: "ModelVerificationNotification" });
 
-export type V2NullableGetAccountTokenUsageParams =
-  V2NullableGetAccountTokenUsageParams__GetAccountTokenUsageParams | null;
+export type V2NullableGetAccountTokenUsageParams = V2NullableGetAccountTokenUsageParams__GetAccountTokenUsageParams | null;
 export const V2NullableGetAccountTokenUsageParams = Schema.Union([
   V2NullableGetAccountTokenUsageParams__GetAccountTokenUsageParams,
   Schema.Null,
@@ -53556,6 +53719,9 @@ export const V2ReviewStartResponse = Schema.Struct({
   turn: V2ReviewStartResponse__Turn,
 }).annotate({ title: "ReviewStartResponse" });
 
+export type V2ReviewStartResponse__AgentMessageDelivery = "async";
+export const V2ReviewStartResponse__AgentMessageDelivery = Schema.Literal("async");
+
 export type V2SendAddCreditsNudgeEmailParams = {
   readonly creditType: V2SendAddCreditsNudgeEmailParams__AddCreditsNudgeCreditType;
 };
@@ -53876,6 +54042,9 @@ export const V2ThreadForkResponse__ActivePermissionProfile = Schema.Struct({
   }),
 });
 
+export type V2ThreadForkResponse__AgentMessageDelivery = "async";
+export const V2ThreadForkResponse__AgentMessageDelivery = Schema.Literal("async");
+
 export type V2ThreadForkResponse__MultiAgentMode =
   | "explicitRequestOnly"
   | "proactive"
@@ -54047,6 +54216,9 @@ export const V2ThreadItemsListResponse = Schema.Struct({
   ),
 }).annotate({ title: "ThreadItemsListResponse" });
 
+export type V2ThreadItemsListResponse__AgentMessageDelivery = "async";
+export const V2ThreadItemsListResponse__AgentMessageDelivery = Schema.Literal("async");
+
 export type V2ThreadListParams = {
   readonly archived?: boolean | null;
   readonly cursor?: string | null;
@@ -54179,6 +54351,9 @@ export const V2ThreadListResponse = Schema.Struct({
   ),
 }).annotate({ title: "ThreadListResponse" });
 
+export type V2ThreadListResponse__AgentMessageDelivery = "async";
+export const V2ThreadListResponse__AgentMessageDelivery = Schema.Literal("async");
+
 export type V2ThreadListResponse__ThreadExtra = {};
 export const V2ThreadListResponse__ThreadExtra = Schema.Struct({}).annotate({
   description: "Extra app-server data for a thread.",
@@ -54257,6 +54432,9 @@ export const V2ThreadMetadataUpdateResponse = Schema.Struct({
   thread: V2ThreadMetadataUpdateResponse__Thread,
 }).annotate({ title: "ThreadMetadataUpdateResponse" });
 
+export type V2ThreadMetadataUpdateResponse__AgentMessageDelivery = "async";
+export const V2ThreadMetadataUpdateResponse__AgentMessageDelivery = Schema.Literal("async");
+
 export type V2ThreadMetadataUpdateResponse__ThreadExtra = {};
 export const V2ThreadMetadataUpdateResponse__ThreadExtra = Schema.Struct({}).annotate({
   description: "Extra app-server data for a thread.",
@@ -54300,6 +54478,9 @@ export type V2ThreadReadResponse = { readonly thread: V2ThreadReadResponse__Thre
 export const V2ThreadReadResponse = Schema.Struct({
   thread: V2ThreadReadResponse__Thread,
 }).annotate({ title: "ThreadReadResponse" });
+
+export type V2ThreadReadResponse__AgentMessageDelivery = "async";
+export const V2ThreadReadResponse__AgentMessageDelivery = Schema.Literal("async");
 
 export type V2ThreadReadResponse__ThreadExtra = {};
 export const V2ThreadReadResponse__ThreadExtra = Schema.Struct({}).annotate({
@@ -54929,6 +55110,9 @@ export const V2ThreadResumeResponse__ActivePermissionProfile = Schema.Struct({
   }),
 });
 
+export type V2ThreadResumeResponse__AgentMessageDelivery = "async";
+export const V2ThreadResumeResponse__AgentMessageDelivery = Schema.Literal("async");
+
 export type V2ThreadResumeResponse__MultiAgentMode =
   | "explicitRequestOnly"
   | "proactive"
@@ -55009,6 +55193,9 @@ export const V2ThreadRevertResponse = Schema.Struct({
   ),
 }).annotate({ title: "ThreadRevertResponse" });
 
+export type V2ThreadRevertResponse__AgentMessageDelivery = "async";
+export const V2ThreadRevertResponse__AgentMessageDelivery = Schema.Literal("async");
+
 export type V2ThreadRevertResponse__ThreadExtra = {};
 export const V2ThreadRevertResponse__ThreadExtra = Schema.Struct({}).annotate({
   description: "Extra app-server data for a thread.",
@@ -55040,6 +55227,9 @@ export const V2ThreadRollbackResponse = Schema.Struct({
       "The updated thread after applying the rollback, with `turns` populated.\n\nThe ThreadItems stored in each Turn are lossy since we explicitly do not persist all agent interactions, such as command executions. This is the same behavior as `thread/resume`.",
   }),
 }).annotate({ title: "ThreadRollbackResponse" });
+
+export type V2ThreadRollbackResponse__AgentMessageDelivery = "async";
+export const V2ThreadRollbackResponse__AgentMessageDelivery = Schema.Literal("async");
 
 export type V2ThreadRollbackResponse__ThreadExtra = {};
 export const V2ThreadRollbackResponse__ThreadExtra = Schema.Struct({}).annotate({
@@ -55269,6 +55459,9 @@ export const V2ThreadStartedNotification = Schema.Struct({
   thread: V2ThreadStartedNotification__Thread,
 }).annotate({ title: "ThreadStartedNotification" });
 
+export type V2ThreadStartedNotification__AgentMessageDelivery = "async";
+export const V2ThreadStartedNotification__AgentMessageDelivery = Schema.Literal("async");
+
 export type V2ThreadStartedNotification__ThreadExtra = {};
 export const V2ThreadStartedNotification__ThreadExtra = Schema.Struct({}).annotate({
   description: "Extra app-server data for a thread.",
@@ -55479,6 +55672,9 @@ export const V2ThreadStartResponse__ActivePermissionProfile = Schema.Struct({
   }),
 });
 
+export type V2ThreadStartResponse__AgentMessageDelivery = "async";
+export const V2ThreadStartResponse__AgentMessageDelivery = Schema.Literal("async");
+
 export type V2ThreadStartResponse__MultiAgentMode =
   | "explicitRequestOnly"
   | "proactive"
@@ -55587,6 +55783,9 @@ export const V2ThreadTurnsListResponse = Schema.Struct({
   ),
 }).annotate({ title: "ThreadTurnsListResponse" });
 
+export type V2ThreadTurnsListResponse__AgentMessageDelivery = "async";
+export const V2ThreadTurnsListResponse__AgentMessageDelivery = Schema.Literal("async");
+
 export type V2ThreadUnarchivedNotification = { readonly threadId: string };
 export const V2ThreadUnarchivedNotification = Schema.Struct({ threadId: Schema.String }).annotate({
   title: "ThreadUnarchivedNotification",
@@ -55601,6 +55800,9 @@ export type V2ThreadUnarchiveResponse = { readonly thread: V2ThreadUnarchiveResp
 export const V2ThreadUnarchiveResponse = Schema.Struct({
   thread: V2ThreadUnarchiveResponse__Thread,
 }).annotate({ title: "ThreadUnarchiveResponse" });
+
+export type V2ThreadUnarchiveResponse__AgentMessageDelivery = "async";
+export const V2ThreadUnarchiveResponse__AgentMessageDelivery = Schema.Literal("async");
 
 export type V2ThreadUnarchiveResponse__ThreadExtra = {};
 export const V2ThreadUnarchiveResponse__ThreadExtra = Schema.Struct({}).annotate({
@@ -55627,6 +55829,9 @@ export const V2TurnCompletedNotification = Schema.Struct({
   threadId: Schema.String,
   turn: V2TurnCompletedNotification__Turn,
 }).annotate({ title: "TurnCompletedNotification" });
+
+export type V2TurnCompletedNotification__AgentMessageDelivery = "async";
+export const V2TurnCompletedNotification__AgentMessageDelivery = Schema.Literal("async");
 
 export type V2TurnDiffUpdatedNotification = {
   readonly diff: string;
@@ -55686,6 +55891,9 @@ export const V2TurnStartedNotification = Schema.Struct({
   threadId: Schema.String,
   turn: V2TurnStartedNotification__Turn,
 }).annotate({ title: "TurnStartedNotification" });
+
+export type V2TurnStartedNotification__AgentMessageDelivery = "async";
+export const V2TurnStartedNotification__AgentMessageDelivery = Schema.Literal("async");
 
 export type V2TurnStartParams = {
   readonly approvalPolicy?: V2TurnStartParams__AskForApproval | null;
@@ -55857,6 +56065,9 @@ export type V2TurnStartResponse = { readonly turn: V2TurnStartResponse__Turn };
 export const V2TurnStartResponse = Schema.Struct({ turn: V2TurnStartResponse__Turn }).annotate({
   title: "TurnStartResponse",
 });
+
+export type V2TurnStartResponse__AgentMessageDelivery = "async";
+export const V2TurnStartResponse__AgentMessageDelivery = Schema.Literal("async");
 
 export type V2TurnSteerParams = {
   readonly clientUserMessageId?: string | null;

@@ -118,6 +118,7 @@ for (const phase of ["checkpoint", "refresh"] as const) {
                 execute: () => (isCaptureError(wrapped) ? Effect.fail(wrapped) : Effect.void),
               }),
               Layer.succeed(RunFinalization.RunFinalizationObserver, {
+                refreshAfterTurn: Effect.void,
                 refresh: () => (isRefreshError(wrapped) ? Effect.fail(wrapped) : Effect.void),
               }),
             ),

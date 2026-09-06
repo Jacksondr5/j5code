@@ -15,6 +15,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
@@ -23,7 +24,9 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
+import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
 import * as McpProviderSession from "../mcp/McpProviderSession.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import { EventSinkV2 } from "./EventSink.ts";
 import { IdAllocatorV2 } from "./IdAllocator.ts";
@@ -123,6 +126,7 @@ export class ProviderSessionActivityError extends Schema.TaggedErrorClass<Provid
 
 export const ProviderSessionManagerV2Error = Schema.Union([
   ProviderSessionOpenError,
+  ProviderWorkspaceMissingError,
   ProviderSessionLookupError,
   ProviderSessionCloseError,
   ProviderSessionReleaseError,
@@ -254,6 +258,7 @@ export const layerWithOptions = (
   ProviderSessionManagerV2,
   never,
   | EventSinkV2
+  | FileSystem.FileSystem
   | IdAllocatorV2
   | McpSessionRegistry.McpSessionRegistry
   | ProjectionStoreV2
@@ -263,7 +268,30 @@ export const layerWithOptions = (
     ProviderSessionManagerV2,
     Effect.gen(function* () {
       const registry = yield* ProviderAdapterRegistryV2;
+      const fileSystem = yield* FileSystem.FileSystem;
       const mcpSessionRegistry = yield* McpSessionRegistry.McpSessionRegistry;
+      /**
+       * Optional so the many focused tests that assemble this layer by hand do
+       * not each need a settings stub; the production composition always
+       * provides it. When present, an unreadable settings file withholds
+       * browser access rather than granting it — an explicit "off" silently
+       * becoming "on" would violate the user's stated choice, whereas the
+       * reverse costs an agent one toolset and is visible immediately (#7083).
+       */
+      const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
+      const agentBrowserAccessEnabled = Option.match(serverSettings, {
+        onNone: () => Effect.succeed(true),
+        onSome: (settings) =>
+          settings.getSettings.pipe(
+            Effect.map((resolved) => resolved.enableAgentBrowserAccess),
+            Effect.catch((cause) =>
+              Effect.logWarning(
+                "Could not read server settings; withholding agent browser access for this session.",
+                { cause },
+              ).pipe(Effect.as(false)),
+            ),
+          ),
+      });
       const eventSink = yield* EventSinkV2;
       const idAllocator = yield* IdAllocatorV2;
       const projectionStore = yield* ProjectionStoreV2;
@@ -330,6 +358,7 @@ export const layerWithOptions = (
                 // the credential it started with, so a thread that detaches and
                 // re-attaches across a workspace handoff must come back to the
                 // same token or the process's tool calls fail auth.
+                const browserToolsAvailable = yield* agentBrowserAccessEnabled;
                 const existing = McpProviderSession.readMcpProviderSession(threadId);
                 if (existing !== undefined) {
                   // Reserve before the async resolve so a release cannot
@@ -340,7 +369,10 @@ export const layerWithOptions = (
                   if (
                     resolved !== undefined &&
                     resolved.threadId === threadId &&
-                    resolved.providerInstanceId === providerInstanceId
+                    resolved.providerInstanceId === providerInstanceId &&
+                    // A flipped browser-access setting must not survive through
+                    // credential reuse: rotate so the new scope reflects it.
+                    resolved.capabilities.has("preview") === browserToolsAvailable
                   ) {
                     return { mcpCredentialId: existing.providerSessionId, issued: false };
                   }
@@ -350,6 +382,7 @@ export const layerWithOptions = (
                 const credential = yield* mcpSessionRegistry.issue({
                   threadId,
                   providerInstanceId,
+                  browserToolsAvailable,
                 });
                 McpProviderSession.setMcpProviderSession(credential.config);
                 reserveMcpCredential(threadId, credential.config.providerSessionId);
@@ -1367,6 +1400,19 @@ export const layerWithOptions = (
           sessionOpen.withLock(
             input.providerSessionId,
             Effect.gen(function* () {
+              const cwd = input.runtimePolicy.cwd;
+              if (cwd !== null) {
+                const workspaceIsDirectory = yield* fileSystem.stat(cwd).pipe(
+                  Effect.map((stat) => stat.type === "Directory"),
+                  Effect.catch((error) => Effect.succeed(error.reason._tag !== "NotFound")),
+                );
+                if (!workspaceIsDirectory) {
+                  return yield* new ProviderWorkspaceMissingError({
+                    threadId: input.threadId,
+                    cwd,
+                  });
+                }
+              }
               const key = sessionKey(input.providerSessionId);
               const existing = (yield* Ref.get(sessions)).get(key);
               if (existing !== undefined) {

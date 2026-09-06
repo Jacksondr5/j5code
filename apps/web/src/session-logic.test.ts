@@ -17,14 +17,22 @@ import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  deriveActivePlanState,
   deriveTimelineEntriesFromVisibleTurnItems,
+  deriveTimelineEntriesFromVisibleTurnItemsWithState,
   deriveRevertTurnCountByUserMessageId,
   findLatestProposedPlan,
   isLatestRunSettled,
+  selectHandoffImageResources,
+  selectMessageImageResources,
+  createMessageAttachmentPreviewProjector,
   providerErrorPresentation,
   type TimelineEntry,
+  workEntryIndicatesToolFailure,
+  workEntryDisplayIndicatesToolFailure,
+  workEntryIndicatesToolSuccess,
 } from "./session-logic";
-import { makeThreadProjectionFixture } from "./test-fixtures";
+import { makeStreamingTimelineFixture, makeThreadProjectionFixture } from "./test-fixtures";
 import type { ChatMessage } from "./types";
 
 describe("V2 session presentation", () => {
@@ -192,14 +200,12 @@ describe("V2 session presentation", () => {
         updatedAt: "2026-06-20T00:00:02.000Z",
       },
     ];
-    const timelineEntries: TimelineEntry[] = messages.map(
-      (message): TimelineEntry => ({
-        id: message.id,
-        kind: "message",
-        createdAt: message.createdAt,
-        message,
-      }),
-    );
+    const timelineEntries: TimelineEntry[] = messages.map((message): TimelineEntry => ({
+      id: message.id,
+      kind: "message",
+      createdAt: message.createdAt,
+      message,
+    }));
 
     const targets = deriveRevertTurnCountByUserMessageId({
       timelineEntries,
@@ -220,7 +226,7 @@ describe("V2 session presentation", () => {
     expect(targets.has(steerMessageId)).toBe(false);
   });
 
-  it("uses visible turn item order and keeps lifecycle resource entries standalone", () => {
+  it("uses visible turn item order and keeps provider errors in the work log", () => {
     const now = DateTime.makeUnsafe("2026-06-20T00:00:00.000Z");
     const threadId = ThreadId.make("thread-visible");
     const runId = RunId.make("run-visible");
@@ -332,8 +338,7 @@ describe("V2 session presentation", () => {
       ["event", requestItem.id],
       ["work", commandItem.id],
       ["event", resultItem.id],
-      ["work", todoItem.id],
-      ["event", errorItem.id],
+      ["work", errorItem.id],
       ["event", threadCreatedItem.id],
     ]);
     const commandEntry = entries[2];
@@ -350,25 +355,132 @@ describe("V2 session presentation", () => {
       expect(commandEntry.entry.projectedItem).toBe(visibleTurnItems[2]);
       expect(commandEntry.entry.structuredPayload).toBe(commandItem);
     }
-    const todoEntry = entries[4];
-    expect(todoEntry?.kind).toBe("work");
-    if (todoEntry?.kind === "work") {
-      expect(todoEntry.entry.label).toBe("Updated tasks");
-      expect(todoEntry.entry.detail).toBe("1/2 completed");
+    const errorEntry = entries[4];
+    expect(errorEntry?.kind).toBe("work");
+    if (errorEntry?.kind === "work") {
+      expect(errorEntry.entry.projectedItem).toBe(visibleTurnItems[5]);
+      expect(errorEntry.entry.label).toBe("Provider error");
+      expect(errorEntry.entry.detail).toBe("Invalid reasoning effort.");
+      expect(errorEntry.entry.tone).toBe("info");
+      expect(errorEntry.entry.toolLifecycleStatus).toBe("failed");
     }
-    const errorEntry = entries[5];
-    expect(errorEntry?.kind).toBe("event");
-    if (errorEntry?.kind === "event") {
-      expect(errorEntry.projectedItem).toBe(visibleTurnItems[5]);
-      expect(errorEntry.projectedItem.item.type).toBe("error");
-      if (errorEntry.projectedItem.item.type === "error") {
-        expect(errorEntry.projectedItem.item.failure.message).toBe("Invalid reasoning effort.");
-      }
-    }
-    const threadCreatedEntry = entries[6];
+    const threadCreatedEntry = entries[5];
     expect(threadCreatedEntry?.kind).toBe("event");
     if (threadCreatedEntry?.kind === "event") {
       expect(threadCreatedEntry.projectedItem.item.type).toBe("thread_created");
+    }
+  });
+
+  it.each(["pending", "running", "completed"] as const)(
+    "keeps %s task progress available to the composer and out of the timeline",
+    (stepStatus) => {
+      const projection = makeThreadProjectionFixture();
+      const now = DateTime.makeUnsafe("2026-09-04T00:00:00.000Z");
+      const runId = RunId.make("run-tasks");
+      const nodeId = NodeId.make("node-tasks");
+      const planId = PlanId.make("plan-tasks");
+      const steps = [{ id: "step-1", text: "Verify the change", status: stepStatus }];
+      const item = {
+        id: TurnItemId.make("item-tasks"),
+        threadId: projection.thread.id,
+        runId,
+        nodeId,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: 0,
+        status: "completed" as const,
+        title: null,
+        startedAt: now,
+        completedAt: now,
+        updatedAt: now,
+        type: "todo_list" as const,
+        planId,
+        steps,
+      } satisfies OrchestrationV2TurnItem;
+      const plans = [
+        {
+          id: planId,
+          threadId: projection.thread.id,
+          runId,
+          nodeId,
+          kind: "todo_list" as const,
+          status: "active" as const,
+          steps,
+        },
+      ];
+
+      expect(
+        deriveTimelineEntriesFromVisibleTurnItems({
+          visibleTurnItems: [
+            {
+              position: 0,
+              visibility: "local",
+              sourceThreadId: projection.thread.id,
+              sourceItemId: item.id,
+              item,
+            },
+          ],
+          optimisticMessages: [],
+          plans,
+        }),
+      ).toEqual([]);
+      expect(
+        deriveActivePlanState({ ...projection, plans, turnItems: [item] }, runId),
+      ).toMatchObject({
+        runId,
+        steps: [
+          {
+            step: "Verify the change",
+            status: stepStatus === "running" ? "inProgress" : stepStatus,
+          },
+        ],
+      });
+    },
+  );
+
+  it("keeps failed tool items tool-toned so groups still summarize", () => {
+    const failedCommand = {
+      id: TurnItemId.make("item-failed-command"),
+      threadId: ThreadId.make("thread-1"),
+      runId: RunId.make("run-1"),
+      nodeId: null,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: 0,
+      status: "failed" as const,
+      title: null,
+      startedAt: null,
+      completedAt: null,
+      updatedAt: DateTime.nowUnsafe(),
+      type: "command_execution" as const,
+      input: "ssh host true",
+      output: "connection refused",
+      exitCode: 255,
+    } satisfies OrchestrationV2TurnItem;
+    const entries = deriveTimelineEntriesFromVisibleTurnItems({
+      visibleTurnItems: [
+        {
+          position: 0,
+          visibility: "local" as const,
+          sourceThreadId: ThreadId.make("thread-1"),
+          sourceItemId: failedCommand.id,
+          item: failedCommand,
+        } as never,
+      ],
+      optimisticMessages: [],
+    });
+    const entry = entries[0];
+    expect(entry?.kind).toBe("work");
+    if (entry?.kind === "work") {
+      // An exit-code failure is still an ordinary tool row: the failed
+      // lifecycle status carries the marker, and an "error" tone here would
+      // knock the whole group out of the "Ran N commands" summary.
+      expect(entry.entry.tone).toBe("tool");
+      expect(entry.entry.toolLifecycleStatus).toBe("failed");
     }
   });
 
@@ -437,6 +549,109 @@ describe("V2 session presentation", () => {
     }
   });
 
+  it("anchors feedback before later committed turns without reordering canonical history", () => {
+    const threadId = ThreadId.make("thread-feedback-order");
+    const messageItem = (input: {
+      readonly id: string;
+      readonly role: "user" | "assistant";
+      readonly createdAt: string;
+      readonly ordinal: number;
+    }): OrchestrationV2TurnItem => {
+      const timestamp = DateTime.makeUnsafe(input.createdAt);
+      const common = {
+        id: TurnItemId.make(`item-${input.id}`),
+        threadId,
+        runId: RunId.make(`run-${input.ordinal}`),
+        nodeId: null,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: input.ordinal,
+        status: "completed" as const,
+        title: null,
+        startedAt: timestamp,
+        completedAt: timestamp,
+        updatedAt: timestamp,
+        messageId: MessageId.make(input.id),
+        text: input.id,
+      };
+      return input.role === "user"
+        ? {
+            ...common,
+            type: "user_message",
+            inputIntent: "turn_start",
+            attachments: [],
+            createdBy: "user",
+            creationSource: "web",
+          }
+        : { ...common, type: "assistant_message", streaming: false };
+    };
+    const canonicalItems = [
+      messageItem({ id: "old-user", role: "user", createdAt: "2026-08-29T00:00:01Z", ordinal: 1 }),
+      messageItem({
+        id: "old-assistant",
+        role: "assistant",
+        createdAt: "2026-08-29T00:00:02Z",
+        ordinal: 2,
+      }),
+      messageItem({
+        id: "later-user",
+        role: "user",
+        createdAt: "2026-08-29T00:00:05Z",
+        ordinal: 3,
+      }),
+      messageItem({
+        id: "later-assistant",
+        role: "assistant",
+        createdAt: "2026-08-29T00:00:04Z",
+        ordinal: 4,
+      }),
+    ];
+    const visibleTurnItems = canonicalItems.map((item, position) => ({
+      position,
+      visibility: "local" as const,
+      sourceThreadId: threadId,
+      sourceItemId: item.id,
+      item,
+    }));
+    const feedback = (id: string, role: "user" | "assistant"): ChatMessage => ({
+      id: MessageId.make(id),
+      role,
+      text: id,
+      runId: null,
+      streaming: false,
+      createdAt: "2026-08-29T00:00:03Z",
+      updatedAt: "2026-08-29T00:00:03Z",
+    });
+    const entries = deriveTimelineEntriesFromVisibleTurnItems({
+      visibleTurnItems,
+      anchoredMessages: [
+        feedback("feedback-user", "user"),
+        feedback("feedback-assistant", "assistant"),
+        feedback("later-user", "user"),
+      ],
+      optimisticMessages: [
+        { ...feedback("optimistic-user", "user"), createdAt: "2026-08-29T00:00:00Z" },
+      ],
+    });
+
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "old-user",
+      "old-assistant",
+      "feedback-user",
+      "feedback-assistant",
+      "later-user",
+      "later-assistant",
+      "optimistic-user",
+    ]);
+    expect(
+      entries
+        .filter((entry) => entry.id.startsWith("feedback-"))
+        .every((entry) => entry.kind === "message" && entry.projectedItem === undefined),
+    ).toBe(true);
+  });
+
   it("uses projected plan status and file contents in timeline entries", () => {
     const now = DateTime.makeUnsafe("2026-06-20T00:00:00.000Z");
     const threadId = ThreadId.make("thread-timeline-artifacts");
@@ -495,8 +710,9 @@ describe("V2 session presentation", () => {
           runId,
           nodeId,
           kind: "proposed_plan",
-          markdown: planItem.markdown,
+          markdown: "",
           status: "completed",
+          detailInTurnItem: true,
         },
       ],
     });
@@ -504,6 +720,7 @@ describe("V2 session presentation", () => {
     expect(entries[0]?.kind).toBe("proposed-plan");
     if (entries[0]?.kind === "proposed-plan") {
       expect(entries[0].proposedPlan.status).toBe("completed");
+      expect(entries[0].proposedPlan.planMarkdown).toBe("Finished plan");
     }
     expect(entries[1]?.kind).toBe("work");
     if (entries[1]?.kind === "work") {
@@ -633,5 +850,514 @@ describe("V2 session presentation", () => {
       [supersededAttemptId, "superseded"],
       [activeAttemptId, "running"],
     ]);
+    const input = { visibleTurnItems, optimisticMessages: [], attempts, nodes };
+    const previous = deriveTimelineEntriesFromVisibleTurnItemsWithState(input);
+    const nextInput = {
+      ...input,
+      attempts: attempts.map((attempt) =>
+        attempt.id === activeAttemptId ? { ...attempt, status: "superseded" as const } : attempt,
+      ),
+    };
+    const next = deriveTimelineEntriesFromVisibleTurnItemsWithState(nextInput, previous);
+    expect(next.entries).toEqual(deriveTimelineEntriesFromVisibleTurnItems(nextInput));
+    expect(next.entries.at(-1)?.attempt?.status).toBe("superseded");
+    expect(previous.entries.at(-1)?.attempt?.status).toBe("running");
+  });
+});
+
+describe("native provider presentation in the v2 timeline", () => {
+  const timestamp = DateTime.makeUnsafe("2026-09-04T12:00:00.000Z");
+  const base = {
+    id: TurnItemId.make("native-item"),
+    threadId: ThreadId.make("native-thread"),
+    runId: RunId.make("native-run"),
+    nodeId: null,
+    providerThreadId: null,
+    providerTurnId: null,
+    nativeItemRef: null,
+    parentItemId: null,
+    ordinal: 0,
+    status: "completed" as const,
+    title: null,
+    startedAt: timestamp,
+    completedAt: timestamp,
+    updatedAt: timestamp,
+  };
+  const visible = (item: OrchestrationV2TurnItem): OrchestrationV2ProjectedTurnItem => ({
+    position: 0,
+    visibility: "local",
+    sourceThreadId: item.threadId,
+    sourceItemId: item.id,
+    item,
+  });
+
+  it("keeps browser identity and its source on a completed tool row", () => {
+    const item = {
+      ...base,
+      type: "dynamic_tool" as const,
+      toolName: "browser_snapshot",
+      input: {},
+      output: {},
+      toolSurface: "browser" as const,
+      toolIcon: { _tag: "website" as const, pageUrl: "https://example.com/checkout" },
+      toolSource: { key: "browser-use:browser", name: "Chrome", kind: "browser" as const },
+    } satisfies OrchestrationV2TurnItem;
+    const [entry] = deriveTimelineEntriesFromVisibleTurnItems({
+      visibleTurnItems: [visible(item)],
+      optimisticMessages: [],
+    });
+    expect(entry).toMatchObject({
+      kind: "work",
+      entry: {
+        toolSurface: "browser",
+        toolIcon: item.toolIcon,
+        toolSource: item.toolSource,
+        toolLifecycleStatus: "completed",
+      },
+    });
+  });
+
+  it("shows provider-returned images on an assistant message using the environment asset URL", () => {
+    const attachment = {
+      type: "image" as const,
+      id: "assistant-image",
+      name: "screenshot.png",
+      mimeType: "image/png",
+      sizeBytes: 512,
+    };
+    const item = {
+      ...base,
+      type: "assistant_message" as const,
+      messageId: MessageId.make("assistant-native-image"),
+      text: "Here is the screenshot.",
+      streaming: false,
+      attachments: [attachment],
+    } satisfies OrchestrationV2TurnItem;
+    const [entry] = deriveTimelineEntriesFromVisibleTurnItems({
+      visibleTurnItems: [visible(item)],
+      optimisticMessages: [],
+      attachmentUrlById: new Map([[attachment.id, "https://remote.example/api/assets/screenshot"]]),
+    });
+    expect(entry).toMatchObject({
+      kind: "message",
+      message: {
+        role: "assistant",
+        attachments: [
+          { ...attachment, previewUrl: "https://remote.example/api/assets/screenshot" },
+        ],
+      },
+    });
+  });
+
+  it("keeps an idle provider task neutral without a completion mark", () => {
+    const entry = {
+      id: "idle-tool",
+      createdAt: DateTime.formatIso(timestamp),
+      label: "Waiting for the next task",
+      tone: "tool" as const,
+      toolLifecycleStatus: "idle" as const,
+    };
+    expect(workEntryIndicatesToolSuccess(entry)).toBe(false);
+    expect(workEntryDisplayIndicatesToolFailure(entry)).toBe(false);
+  });
+});
+
+describe("work-log failure policy (#7999/#7893)", () => {
+  const toolEntry = (overrides: Record<string, unknown>) =>
+    ({
+      id: "entry-1",
+      createdAt: "2026-08-27T00:00:00.000Z",
+      label: "Ran command",
+      tone: "tool",
+      ...overrides,
+    }) as never;
+
+  it("flags success-status rows whose output text reports a failure", () => {
+    expect(
+      workEntryIndicatesToolFailure(
+        toolEntry({ toolLifecycleStatus: "completed", detail: "bash: foo: command not found" }),
+      ),
+    ).toBe(true);
+    expect(
+      workEntryIndicatesToolFailure(
+        toolEntry({ toolLifecycleStatus: "completed", detail: "<exited with exit code 2>" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps the rendered row calm when only the command mentions failure text", () => {
+    const entry = toolEntry({
+      toolLifecycleStatus: "completed",
+      command: "rg 'command not found' src/",
+    });
+    expect(workEntryIndicatesToolFailure(entry)).toBe(true);
+    expect(workEntryDisplayIndicatesToolFailure(entry)).toBe(false);
+  });
+
+  it("does not call a clean completed row failed", () => {
+    const entry = toolEntry({ toolLifecycleStatus: "completed", detail: "3 files changed" });
+    expect(workEntryIndicatesToolFailure(entry)).toBe(false);
+    expect(workEntryIndicatesToolSuccess(entry)).toBe(true);
+  });
+
+  it("recovered failure text no longer counts as success", () => {
+    const entry = toolEntry({ toolLifecycleStatus: "completed", detail: "ENOENT: no such file" });
+    expect(workEntryIndicatesToolSuccess(entry)).toBe(false);
+  });
+});
+
+describe("incremental v2 timeline entries", () => {
+  it("retains history and attachment previews through decoded streaming updates", () => {
+    const fixture = makeStreamingTimelineFixture("Partial");
+    const attachment = {
+      type: "image" as const,
+      id: "stream-image",
+      name: "image.png",
+      mimeType: "image/png",
+      sizeBytes: 42,
+    };
+    const visibleTurnItems = fixture.visibleTurnItems.map((row) =>
+      row.item.type === "assistant_message"
+        ? { ...row, item: { ...row.item, attachments: [attachment] } }
+        : row,
+    );
+    const input = {
+      visibleTurnItems,
+      optimisticMessages: [],
+      attachmentUrlById: new Map([[attachment.id, "https://server.test/image"]]),
+    };
+    const previous = deriveTimelineEntriesFromVisibleTurnItemsWithState(input);
+    Object.freeze(previous.entries);
+    for (const entry of previous.entries) Object.freeze(entry);
+    const last = visibleTurnItems.at(-1)!;
+    if (last.item.type !== "assistant_message") throw new Error("Expected assistant fixture");
+    const nextItem = {
+      ...last,
+      item: {
+        ...last.item,
+        text: "Next token",
+        attachments: [{ ...attachment }],
+        startedAt: DateTime.makeUnsafe(fixture.time(7)),
+        updatedAt: DateTime.makeUnsafe(fixture.time(8)),
+      },
+    };
+    const nextInput = {
+      ...input,
+      visibleTurnItems: [...visibleTurnItems.slice(0, -1), nextItem],
+      attachmentUrlById: new Map(input.attachmentUrlById),
+    };
+    const next = deriveTimelineEntriesFromVisibleTurnItemsWithState(nextInput, previous);
+    expect(next.entries).toEqual(deriveTimelineEntriesFromVisibleTurnItems(nextInput));
+    for (const [index, entry] of previous.entries.slice(0, -1).entries()) {
+      expect(next.entries[index]).toBe(entry);
+    }
+    const beforeMessage = previous.entries.at(-1)!;
+    const nextMessage = next.entries.at(-1)!;
+    if (beforeMessage.kind !== "message" || nextMessage.kind !== "message") {
+      throw new Error("Expected assistant entries");
+    }
+    expect(nextMessage.message.attachments).toBe(beforeMessage.message.attachments);
+    expect(nextMessage.projectedItem).toBe(nextItem);
+    expect(nextMessage.message.text).toBe("Next token");
+    expect(beforeMessage.message.text).toBe("Partial");
+
+    const renewedInput = {
+      ...nextInput,
+      attachmentUrlById: new Map([[attachment.id, "https://renewed.test/image"]]),
+    };
+    const renewed = deriveTimelineEntriesFromVisibleTurnItemsWithState(renewedInput, next);
+    expect(renewed.entries).toEqual(deriveTimelineEntriesFromVisibleTurnItems(renewedInput));
+    expect(renewed.entries.at(-1)).toMatchObject({
+      message: { attachments: [{ previewUrl: "https://renewed.test/image" }] },
+    });
+    expect(nextMessage.message.attachments?.[0]).toMatchObject({
+      previewUrl: "https://server.test/image",
+    });
+    const restoredInput = { ...renewedInput, attachmentUrlById: new Map<string, string>() };
+    const restored = deriveTimelineEntriesFromVisibleTurnItemsWithState(restoredInput, renewed);
+    expect(restored.entries.at(-1)).toMatchObject({ message: { attachments: [attachment] } });
+    const restoredMessage = restored.entries.at(-1)!;
+    if (restoredMessage.kind !== "message") throw new Error("Expected assistant entry");
+    expect(restoredMessage.message.attachments?.[0]).not.toHaveProperty("previewUrl");
+  });
+
+  it("appends committed items in canonical order even when their timestamps go backwards", () => {
+    const fixture = makeStreamingTimelineFixture("Partial");
+    const input = { visibleTurnItems: fixture.visibleTurnItems, optimisticMessages: [] };
+    const previous = deriveTimelineEntriesFromVisibleTurnItemsWithState(input);
+    const last = fixture.visibleTurnItems.at(-1)!;
+    const appended = {
+      ...last,
+      position: last.position + 1,
+      sourceItemId: TurnItemId.make("late-item"),
+      item: {
+        ...last.item,
+        id: TurnItemId.make("late-item"),
+        messageId: MessageId.make("late-message"),
+        startedAt: DateTime.makeUnsafe(fixture.time(0)),
+      },
+    };
+    const nextInput = { ...input, visibleTurnItems: [...input.visibleTurnItems, appended] };
+    const next = deriveTimelineEntriesFromVisibleTurnItemsWithState(nextInput, previous);
+    expect(next.entries).toEqual(deriveTimelineEntriesFromVisibleTurnItems(nextInput));
+    expect(next.entries.at(-1)).toMatchObject({ id: "late-message" });
+    for (const [index, entry] of previous.entries.entries())
+      expect(next.entries[index]).toBe(entry);
+  });
+
+  it.each(["completion", "provenance", "ordering", "attachment", "run"] as const)(
+    "rebuilds entries for a %s change instead of retaining stale v2 metadata",
+    (change) => {
+      const fixture = makeStreamingTimelineFixture("Partial");
+      const input = { visibleTurnItems: fixture.visibleTurnItems, optimisticMessages: [] };
+      const previous = deriveTimelineEntriesFromVisibleTurnItemsWithState(input);
+      const last = fixture.visibleTurnItems.at(-1)!;
+      if (last.item.type !== "assistant_message") throw new Error("Expected assistant fixture");
+      const changed =
+        change === "provenance"
+          ? { ...last, sourceThreadId: ThreadId.make("inherited-thread") }
+          : {
+              ...last,
+              item:
+                change === "completion"
+                  ? { ...last.item, streaming: false, status: "completed" as const }
+                  : change === "ordering"
+                    ? { ...last.item, startedAt: DateTime.makeUnsafe(fixture.time(0)) }
+                    : change === "run"
+                      ? { ...last.item, runId: fixture.historyRunId }
+                      : {
+                          ...last.item,
+                          attachments: [
+                            {
+                              type: "image",
+                              id: "new-image",
+                              name: "new.png",
+                              mimeType: "image/png",
+                              sizeBytes: 42,
+                            },
+                          ],
+                        },
+            };
+      const nextInput = {
+        ...input,
+        visibleTurnItems: [...input.visibleTurnItems.slice(0, -1), changed],
+      };
+      const next = deriveTimelineEntriesFromVisibleTurnItemsWithState(nextInput, previous);
+      expect(next.entries).toEqual(deriveTimelineEntriesFromVisibleTurnItems(nextInput));
+      expect(next.entries.at(-1)).not.toBe(previous.entries.at(-1));
+    },
+  );
+
+  it("updates fallback timestamps when the provider has not supplied a message start time", () => {
+    const fixture = makeStreamingTimelineFixture("Partial");
+    const visibleTurnItems = fixture.visibleTurnItems.map((row) =>
+      row.item.type === "assistant_message" && row.item.streaming
+        ? { ...row, item: { ...row.item, startedAt: null } }
+        : row,
+    );
+    const input = { visibleTurnItems, optimisticMessages: [] };
+    const previous = deriveTimelineEntriesFromVisibleTurnItemsWithState(input);
+    const nextInput = {
+      ...input,
+      visibleTurnItems: visibleTurnItems.map((row) =>
+        row.item.type === "assistant_message" && row.item.streaming
+          ? {
+              ...row,
+              item: {
+                ...row.item,
+                text: "Next token",
+                updatedAt: DateTime.makeUnsafe(fixture.time(8)),
+              },
+            }
+          : row,
+      ),
+    };
+    const next = deriveTimelineEntriesFromVisibleTurnItemsWithState(nextInput, previous);
+    expect(next.entries).toEqual(deriveTimelineEntriesFromVisibleTurnItems(nextInput));
+    expect(next.entries.at(-1)?.createdAt).toBe(fixture.time(8));
+  });
+
+  it("keeps unchanged message previews while tool output rebuilds the work log", () => {
+    const fixture = makeStreamingTimelineFixture("Partial");
+    const input = { visibleTurnItems: fixture.visibleTurnItems, optimisticMessages: [] };
+    const previous = deriveTimelineEntriesFromVisibleTurnItemsWithState(input);
+    const nextInput = {
+      ...input,
+      visibleTurnItems: input.visibleTurnItems.map((row) =>
+        row.item.type === "command_execution"
+          ? { ...row, item: { ...row.item, output: "Additional output" } }
+          : row,
+      ),
+    };
+    const next = deriveTimelineEntriesFromVisibleTurnItemsWithState(nextInput, previous);
+    expect(next.entries).toEqual(deriveTimelineEntriesFromVisibleTurnItems(nextInput));
+    for (const [index, entry] of previous.entries.entries()) {
+      if (entry.kind === "message") expect(next.entries[index]).toBe(entry);
+    }
+  });
+
+  it("deduplicates optimistic sends when committed items arrive and retains anchored ordering", () => {
+    const fixture = makeStreamingTimelineFixture();
+    const input = {
+      visibleTurnItems: fixture.visibleTurnItems.slice(0, 3),
+      optimisticMessages: [
+        {
+          id: MessageId.make("live-user"),
+          runId: null,
+          role: "user" as const,
+          text: "Continue",
+          streaming: false,
+          createdAt: fixture.time(5),
+          updatedAt: fixture.time(5),
+        },
+      ],
+      anchoredMessages: [
+        {
+          id: MessageId.make("feedback"),
+          runId: null,
+          role: "assistant" as const,
+          text: "Feedback received",
+          streaming: false,
+          createdAt: fixture.time(4),
+          updatedAt: fixture.time(4),
+        },
+      ],
+    };
+    const previous = deriveTimelineEntriesFromVisibleTurnItemsWithState(input);
+    const nextInput = { ...input, visibleTurnItems: fixture.visibleTurnItems };
+    const next = deriveTimelineEntriesFromVisibleTurnItemsWithState(nextInput, previous);
+    expect(next.entries).toEqual(deriveTimelineEntriesFromVisibleTurnItems(nextInput));
+    expect(next.entries.filter((entry) => entry.id === "live-user")).toHaveLength(1);
+    expect(next.entries.map((entry) => entry.id)).toEqual([
+      "history-user",
+      "history-work",
+      "history-assistant",
+      "feedback",
+      "live-user",
+      "live-work",
+      "live-assistant",
+    ]);
+  });
+});
+
+describe("image asset requests", () => {
+  const image = {
+    type: "image" as const,
+    id: "image",
+    name: "image.png",
+    mimeType: "image/png",
+    sizeBytes: 42,
+  };
+  const message = {
+    id: MessageId.make("image-message"),
+    role: "user" as const,
+    text: "Inspect these images",
+    runId: null,
+    createdAt: "2026-09-04T00:00:00.000Z",
+    updatedAt: "2026-09-04T00:00:00.000Z",
+    streaming: false,
+    attachments: [image],
+  };
+
+  it("requests the whole row's gallery and crops without signing local preview IDs", () => {
+    const attachments = Object.freeze([
+      image,
+      { ...image, id: "second" },
+      { ...image, id: "crop", name: "preview-annotation-1.png" },
+      { ...image, id: "local", previewUrl: "blob:local" },
+      { ...image, id: "inline", previewUrl: "data:image/png;base64,AA==" },
+      { ...image, id: "provided", previewUrl: "https://preview.test/image" },
+      { ...image, type: "file" as const, id: "file", mimeType: "application/pdf" },
+      { ...image, type: "future", id: "unknown" },
+      image,
+    ]);
+
+    expect(selectMessageImageResources(attachments)).toEqual([
+      { _tag: "attachment", attachmentId: "image" },
+      { _tag: "attachment", attachmentId: "second" },
+      { _tag: "attachment", attachmentId: "crop" },
+      { _tag: "attachment", attachmentId: "provided" },
+    ]);
+  });
+
+  it("requests offscreen handoffs without signing the rest of the loaded history", () => {
+    const history = {
+      ...message,
+      id: MessageId.make("history"),
+      attachments: [{ ...image, id: "history-image" }],
+    };
+    const offscreen = {
+      ...message,
+      id: MessageId.make("offscreen"),
+      attachments: [image, { ...image, id: "crop", name: "preview-annotation-1.png" }],
+    };
+    const empty = {
+      ...message,
+      id: MessageId.make("empty"),
+      attachments: [{ ...image, id: "empty" }],
+    };
+    const assistant = {
+      ...message,
+      id: MessageId.make("assistant"),
+      role: "assistant" as const,
+      attachments: [{ ...image, id: "assistant-image" }],
+    };
+    expect(
+      selectHandoffImageResources([history, message, offscreen, empty, assistant], {
+        [message.id]: ["blob:message"],
+        [offscreen.id]: ["blob:offscreen", "blob:crop"],
+        [empty.id]: [],
+        [assistant.id]: ["blob:unused"],
+      }),
+    ).toEqual([
+      { _tag: "attachment", attachmentId: "image" },
+      { _tag: "attachment", attachmentId: "crop" },
+    ]);
+  });
+
+  it("does not scan history when no handoff is pending", () => {
+    let reads = 0;
+    const messages = new Proxy([message], {
+      get(target, property, receiver) {
+        if (property === "0") reads += 1;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const empty = selectHandoffImageResources(messages, {});
+    expect(reads).toBe(0);
+    expect(empty).toHaveLength(0);
+    expect(selectHandoffImageResources(undefined, { missing: ["blob:missing"] })).toBe(empty);
+    expect(selectMessageImageResources(undefined)).toBe(empty);
+  });
+
+  it("hands signed URLs to a mounted row only after the local preview is released", () => {
+    const server = createMessageAttachmentPreviewProjector();
+    const handoff = createMessageAttachmentPreviewProjector();
+    const row = createMessageAttachmentPreviewProjector();
+    const pending = handoff(
+      server(message, () => undefined),
+      () => "blob:pending",
+    );
+    expect(selectMessageImageResources(pending.attachments)).toEqual([]);
+    expect(selectHandoffImageResources([message], { [message.id]: ["blob:pending"] })).toEqual([
+      { _tag: "attachment", attachmentId: image.id },
+    ]);
+
+    const ready = server(message, () => "https://server.test/image");
+    expect(selectMessageImageResources(handoff(ready, () => "blob:pending").attachments)).toEqual(
+      [],
+    );
+    const released = server(message, () => undefined);
+    expect(selectMessageImageResources(released.attachments)).toEqual([
+      { _tag: "attachment", attachmentId: image.id },
+    ]);
+    const displayed = row(released, () => "https://server.test/image");
+    expect(displayed).toEqual(ready);
+    expect(pending.attachments?.[0]).toMatchObject({ previewUrl: "blob:pending" });
+    expect(row(released, () => "https://server.test/renewed").attachments?.[0]).toMatchObject({
+      previewUrl: "https://server.test/renewed",
+    });
+    expect(displayed.attachments?.[0]).toMatchObject({ previewUrl: "https://server.test/image" });
+    expect(row(released, () => undefined)).toBe(message);
   });
 });

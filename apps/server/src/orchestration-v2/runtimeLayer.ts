@@ -5,6 +5,7 @@ import {
 } from "../orchestration/runtimeLayer.ts";
 import { ProjectionProjectRepositoryLive } from "../persistence/Layers/ProjectionProjects.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import { ProviderAuthServiceLive } from "../provider/Layers/ProviderAuthService.ts";
 import { layer as projectServiceLayer } from "../project/ProjectService.ts";
 import { layer as projectSetupScriptRunnerLayer } from "../project/ProjectSetupScriptRunner.ts";
 import { layer as checkpointCaptureServiceLayer } from "./CheckpointCaptureService.ts";
@@ -50,9 +51,6 @@ import {
   workerLive as queuedRunWatchdogWorkerLive,
 } from "../j5/run-observability/QueuedRunWatchdog.ts";
 
-export const ProjectServiceLayerLive = projectServiceLayer.pipe(
-  Layer.provide(Layer.merge(ProjectionProjectRepositoryLive, OrchestrationLayerLive)),
-);
 const runtimePolicyProvided = runtimePolicyLayerFromProjectRepository.pipe(
   Layer.provide(ProjectionProjectRepositoryLive),
 );
@@ -83,8 +81,21 @@ const legacyV1ThreadImporterProvided = legacyV1ThreadImporterLayer.pipe(
   Layer.provide(Layer.mergeAll(eventSinkProvided, eventStoreProvided)),
 );
 
+export const ProjectServiceLayerLive = projectServiceLayer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      ProjectionProjectRepositoryLive,
+      OrchestrationLayerLive,
+      projectionStoreLayer,
+      eventSinkProvided,
+      idAllocatorLayer,
+      legacyV1ThreadImporterProvided,
+    ),
+  ),
+);
+
 const providerEventIngestorProvided = providerEventIngestorLayer.pipe(
-  Layer.provide(Layer.mergeAll(eventSinkProvided, idAllocatorLayer)),
+  Layer.provide(Layer.mergeAll(eventSinkProvided, idAllocatorLayer, projectionStoreLayer)),
 );
 
 const checkpointServiceProvided = checkpointServiceLayer.pipe(Layer.provide(idAllocatorLayer));
@@ -108,6 +119,10 @@ const providerSessionManagerProvided = providerSessionManagerLayer.pipe(
   ),
 );
 
+const providerAuthServiceProvided = ProviderAuthServiceLive.pipe(
+  Layer.provide(Layer.merge(projectionStoreLayer, providerSessionManagerProvided)),
+);
+
 const runExecutionServiceProvided = runExecutionServiceLayer.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -127,6 +142,7 @@ const providerTurnStartServiceProvided = providerTurnStartServiceLayer.pipe(
       idAllocatorLayer,
       projectionStoreLayer,
       providerSessionManagerProvided,
+      providerAuthServiceProvided,
       runExecutionServiceProvided,
       runtimePolicyProvided,
       queuedRunWatchdogProvided,
@@ -242,6 +258,7 @@ const effectExecutorProvided = effectExecutorLayer.pipe(
       providerTurnStartServiceProvided,
       runtimeRequestServiceProvided,
       threadTitleRegenerationProvided,
+      threadManagementProvided,
     ),
   ),
 );
@@ -266,6 +283,7 @@ export const OrchestrationV2LayerLive = Layer.mergeAll(
   threadManagementProvided,
   effectWorkerProvided,
   providerSessionManagerProvided,
+  providerAuthServiceProvided,
   providerRuntimeRecoveryProvided,
   projectionMaintenanceProvided,
   legacyV1ThreadImporterProvided,
@@ -273,7 +291,7 @@ export const OrchestrationV2LayerLive = Layer.mergeAll(
 
 export const OrchestrationV2ProductionLayerLive = Layer.mergeAll(
   OrchestrationLayerLive,
-  OrchestrationV2LayerLive,
+  OrchestrationV2LayerLive.pipe(Layer.provide(ProjectServiceLayerLive)),
   ProjectServiceLayerLive,
   threadLaunchProvided,
   threadLifecycleProvided,

@@ -22,8 +22,14 @@ Fork-owned values live in `scripts/lib/j5-branding.ts`:
 The macOS development launcher adds a checkout-derived suffix to the development bundle ID so
 multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5code`.
 
-## Rebase audit sites
+## Pin-advance audit sites
 
+- Home resolution: `apps/server/src/cli/config.ts`, `pair.ts`, `theme.ts`, `triage.ts`,
+  `cloud/bootService.ts`, `serviceLauncher.ts`, `packages/shared/src/devHome.ts`, and
+  `scripts/dev-runner.ts`. Explicit CLI home outranks worktree isolation; worktree dev
+  state outranks an ambient home. Pairing must target the same resolved state.
+- SSH runner homes: `packages/ssh/src/tunnel.ts` keeps upstream npm runners on `~/.t3`
+  and J5 node-script runners on `~/.j5code`.
 - Desktop runtime identity and state: `DesktopEnvironment.ts`, `DesktopStatePaths.ts`,
   `DesktopEarlyElectronStartup.ts`, and `DesktopAppIdentity.ts`.
 - Desktop OS integration: `electron-launcher.mjs`, `ElectronProtocol.ts`,
@@ -37,7 +43,7 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 
 ## Deliberately unchanged upstream internals
 
-- The `T3CODE_*` environment variables other than the base-directory override, which is `J5CODE_HOME`. An ambient `T3CODE_HOME` is ignored, and a linked worktree's dev state lives in `<worktree>/.j5code`, so J5 never shares state with an installed T3 Code (FORK.md case 24).
+- The `T3CODE_*` environment variables other than the base-directory override, which is `J5CODE_HOME`. An ambient `T3CODE_HOME` is ignored, and a linked worktree's dev state lives in `<worktree>/.j5code`, so J5 never shares state with an installed T3 Code (FORK.md case 25).
 - Internal workspace/package names such as `@t3tools/*`, `t3`, and upstream lint rule names.
 - Database schema names, persisted mobile storage keys, internal CLI flags, and code identifiers.
 - General upstream product copy and documentation outside the identity sites above.
@@ -50,6 +56,12 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - The mobile manifest contains no hard-coded Expo project, owner, Apple team, Clerk domain, relay,
   or telemetry endpoint. Optional values continue to use the upstream `T3CODE_*` / `EXPO_PUBLIC_*`
   configuration names.
+
+## 2026-09-06 verification boundary
+
+The current pin advance rechecked identity/configuration with focused tests and exercised
+web/server home isolation in disposable state. Desktop and mobile applications were not
+launched or built in that verification; the older native check below is historical evidence.
 
 ## 2026-08-15 empirical isolation check
 

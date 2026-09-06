@@ -5,17 +5,22 @@ import {
   type OrchestrationV2ProviderThread,
   type OrchestrationV2Run,
   type OrchestrationV2RunAttempt,
+  type OrchestrationV2TurnItem,
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
-import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import { QueuedRunWatchdog } from "../j5/run-observability/QueuedRunWatchdog.ts";
+import { GitWorkflowService } from "../git/GitWorkflowService.ts";
+import { ProjectService } from "../project/ProjectService.ts";
+import { ProviderAuthService } from "../provider/Services/ProviderAuthService.ts";
 import { EventSinkV2 } from "./EventSink.ts";
 import {
   ContextHandoffServiceV2,
@@ -25,14 +30,15 @@ import { IdAllocatorV2 } from "./IdAllocator.ts";
 import { findCodexCliVersionUnsupportedError } from "../j5/codex/CodexCliVersionGate.ts";
 import { ProjectionStoreV2 } from "./ProjectionStore.ts";
 import { ProviderAdapterProtocolError, ProviderResumeFailedError } from "./ProviderAdapter.ts";
-import { makeProviderFailure } from "./ProviderFailure.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
+import { makeProviderFailure } from "./ProviderFailure.ts";
 import {
   canRouteRelatedSubagent,
   RunExecutionServiceV2,
   selectInheritedBackgroundTurnItems,
 } from "./RunExecutionService.ts";
 import { RuntimePolicyV2 } from "./RuntimePolicy.ts";
+import { QueuedRunWatchdog } from "../j5/run-observability/QueuedRunWatchdog.ts";
 
 export class ProviderTurnStartError extends Schema.TaggedErrorClass<ProviderTurnStartError>()(
   "ProviderTurnStartError",
@@ -76,6 +82,10 @@ export const layer: Layer.Layer<
   | EventSinkV2
   | ContextHandoffServiceV2
   | IdAllocatorV2
+  | FileSystem.FileSystem
+  | GitWorkflowService
+  | ProjectService
+  | ProviderAuthService
   | ProjectionStoreV2
   | ProviderSessionManagerV2
   | RunExecutionServiceV2
@@ -84,13 +94,17 @@ export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
     const eventSink = yield* EventSinkV2;
+    const queuedRunWatchdog = yield* QueuedRunWatchdog;
     const contextHandoffService = yield* ContextHandoffServiceV2;
     const idAllocator = yield* IdAllocatorV2;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const gitWorkflow = yield* GitWorkflowService;
+    const projects = yield* ProjectService;
+    const providerAuth = yield* ProviderAuthService;
     const projectionStore = yield* ProjectionStoreV2;
     const providerSessions = yield* ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicyV2;
-    const queuedRunWatchdog = yield* QueuedRunWatchdog;
 
     const start = Effect.fn("orchestrationV2.providerTurnStart.start")(function* (input: {
       readonly threadId: ThreadId;
@@ -149,6 +163,185 @@ export const layer: Layer.Layer<
           runId,
           cause: `Run ${runId} is missing its execution projection state.`,
         });
+      }
+      if (message.attachments.length === 0 && message.text.trimStart().startsWith("/")) {
+        const isEmptyCompaction =
+          message.text.trim().toLowerCase() === "/compact" &&
+          !projection.messages.some(
+            (candidate) =>
+              candidate.role === "user" &&
+              (candidate.text.trim().toLowerCase() !== "/compact" ||
+                candidate.attachments.length > 0),
+          );
+        // Preparing a run may already point the thread at a newly selected
+        // provider. Account commands still belong to its last native session.
+        const nativeThreads = new Map(
+          projection.providerThreads
+            .filter(
+              (candidate) => candidate.ownerNodeId === null && candidate.nativeThreadRef !== null,
+            )
+            .map((candidate) => [candidate.id, candidate]),
+        );
+        const previousNativeRun = projection.runs.reduce<OrchestrationV2Run | undefined>(
+          (previous, candidate) =>
+            candidate.ordinal < run.ordinal &&
+            candidate.providerThreadId !== null &&
+            nativeThreads.has(candidate.providerThreadId) &&
+            (previous === undefined || candidate.ordinal > previous.ordinal)
+              ? candidate
+              : previous,
+          undefined,
+        );
+        const nativeThread = nativeThreads.get(
+          previousNativeRun?.providerThreadId ??
+            projection.thread.activeProviderThreadId ??
+            providerThread.id,
+        );
+        const authInstanceId = nativeThread?.providerInstanceId ?? run.providerInstanceId;
+        const authResult = isEmptyCompaction
+          ? null
+          : yield* Effect.result(
+              providerAuth.tryHandlePromptCommand({
+                instanceId: authInstanceId,
+                text: message.text,
+                hasAttachments: false,
+              }),
+            );
+        if (isEmptyCompaction || authResult?._tag === "Failure" || authResult?.success) {
+          const now = yield* DateTime.now;
+          const failure = isEmptyCompaction
+            ? makeProviderFailure({
+                class: "validation_error",
+                message: "Start a conversation before compacting this thread.",
+              })
+            : authResult?._tag === "Failure"
+              ? makeProviderFailure({
+                  class: "permission_error",
+                  message: authResult.failure.detail,
+                })
+              : undefined;
+          const status = failure === undefined ? "completed" : "failed";
+          const itemBase = {
+            id: idAllocator.derive.runSignalTurnItem({
+              runId,
+              signal: isEmptyCompaction ? "empty-compaction" : "provider-sign-out",
+            }),
+            threadId: projection.thread.id,
+            runId,
+            nodeId: rootNode.id,
+            providerThreadId: nativeThread?.id ?? providerThread.id,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal:
+              Math.max(
+                0,
+                ...projection.turnItems
+                  .filter((item) => item.runId === runId)
+                  .map((item) => item.ordinal),
+              ) + 1,
+            status,
+            startedAt: now,
+            completedAt: now,
+            updatedAt: now,
+          } as const;
+          const item: OrchestrationV2TurnItem =
+            failure !== undefined
+              ? {
+                  ...itemBase,
+                  type: "error",
+                  title: isEmptyCompaction
+                    ? "Cannot compact an empty thread"
+                    : "Provider sign-out failed",
+                  failure,
+                }
+              : {
+                  ...itemBase,
+                  type: "command_execution",
+                  title: "Provider signed out",
+                  input: message.text.trim(),
+                  output: "Provider signed out",
+                  exitCode: 0,
+                };
+          const eventPayloads = [
+            { type: "turn-item.updated", payload: item },
+            { type: "run.updated", payload: { ...run, status, startedAt: now, completedAt: now } },
+            {
+              type: "run-attempt.updated",
+              payload: { ...attempt, status, startedAt: now, completedAt: now },
+            },
+            {
+              type: "node.updated",
+              payload: { ...rootNode, status, startedAt: now, completedAt: now },
+            },
+            {
+              type: "provider-thread.updated",
+              payload: {
+                ...providerThread,
+                status: providerThread.nativeThreadRef === null ? "not_loaded" : "idle",
+                updatedAt: now,
+              },
+            },
+          ] as const;
+          const events = yield* Effect.forEach(eventPayloads, (event) =>
+            Effect.gen(function* () {
+              return {
+                ...event,
+                id: yield* idAllocator.allocate.event({ threadId: projection.thread.id }),
+                threadId: projection.thread.id,
+                runId,
+                nodeId: rootNode.id,
+                providerInstanceId: authInstanceId,
+                occurredAt: now,
+              } satisfies OrchestrationV2DomainEvent;
+            }),
+          );
+          yield* eventSink.writeIfRunCurrent({
+            threadId: projection.thread.id,
+            runId,
+            activeAttemptId: attempt.id,
+            expectedStatus: "starting",
+            events,
+          });
+          return;
+        }
+      }
+      const { worktreePath, branch } = projection.thread;
+      if (worktreePath !== null && branch !== null) {
+        const exists = yield* fileSystem
+          .exists(worktreePath)
+          .pipe(Effect.orElseSucceed(() => true));
+        if (!exists) {
+          const project = yield* projects.getById(projection.thread.projectId).pipe(
+            Effect.map(Option.getOrUndefined),
+            Effect.orElseSucceed(() => undefined),
+          );
+          if (project !== undefined) {
+            yield* Effect.logWarning("provider turn start recreating missing worktree", {
+              threadId: projection.thread.id,
+              worktreePath,
+              branch,
+            });
+            yield* gitWorkflow.pruneWorktrees({ cwd: project.workspaceRoot }).pipe(
+              Effect.andThen(
+                gitWorkflow.createWorktree({
+                  cwd: project.workspaceRoot,
+                  refName: branch,
+                  path: worktreePath,
+                }),
+              ),
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.failCause(cause)
+                  : Effect.logWarning("provider turn start failed to recreate worktree", {
+                      threadId: projection.thread.id,
+                      worktreePath,
+                      cause: Cause.pretty(cause),
+                    }),
+              ),
+            );
+          }
+        }
       }
       const selectInheritedBackgroundItems = (
         current: typeof projection,
@@ -338,20 +531,22 @@ export const layer: Layer.Layer<
       }
       const loadedProviderThread =
         loadResult._tag === "Success" ? loadResult.success : providerThread;
-      const session =
+      const fatalTurnError =
         fatalStartFailure === undefined
+          ? undefined
+          : isProviderResumeFailedError(fatalStartFailure)
+            ? fatalStartFailure
+            : new ProviderAdapterProtocolError({
+                driver: openedSession.driver,
+                detail: fatalStartFailure.message,
+              });
+      const session =
+        fatalTurnError === undefined
           ? openedSession
           : {
               ...openedSession,
-              startTurn: () =>
-                isProviderResumeFailedError(fatalStartFailure)
-                  ? Effect.fail(fatalStartFailure)
-                  : Effect.fail(
-                      new ProviderAdapterProtocolError({
-                        driver: openedSession.driver,
-                        detail: fatalStartFailure.message,
-                      }),
-                    ),
+              startTurn: () => Effect.fail(fatalTurnError),
+              compactThread: () => Effect.fail(fatalTurnError),
             };
       if (!(yield* isCurrentAttemptInStatus("starting"))) {
         return;

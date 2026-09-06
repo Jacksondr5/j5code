@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 
 import {
   ApprovalRequestId,
+  ClientSurface,
   CommandId,
   EventId,
   IsoDateTime,
@@ -13,7 +14,19 @@ import {
 import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import type { OrchestrationV2StoredEvent } from "./orchestrationV2.ts";
-import { ProjectScript } from "./project.ts";
+import { ProjectIconOverride, ProjectScript } from "./project.ts";
+
+/**
+ * Which client dispatched the command that produced this event (#7774).
+ * Stamped by the orchestration engine on client-dispatched commands; absent on
+ * provider/server-originated events and on commands from clients too old to
+ * report it.
+ */
+export const OrchestrationClientOrigin = Schema.Struct({
+  surface: Schema.optional(ClientSurface),
+  appVersion: Schema.optional(TrimmedNonEmptyString),
+});
+export type OrchestrationClientOrigin = typeof OrchestrationClientOrigin.Type;
 
 /** Metadata retained by the shared application event source. */
 export const ApplicationEventMetadata = Schema.Struct({
@@ -22,6 +35,7 @@ export const ApplicationEventMetadata = Schema.Struct({
   adapterKey: Schema.optional(TrimmedNonEmptyString),
   requestId: Schema.optional(ApprovalRequestId),
   ingestedAt: Schema.optional(IsoDateTime),
+  origin: Schema.optional(OrchestrationClientOrigin),
 });
 export type ApplicationEventMetadata = typeof ApplicationEventMetadata.Type;
 
@@ -36,6 +50,7 @@ export const ApplicationProjectCreatedPayload = Schema.Struct({
   defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
   // Optional so persisted events from older servers still decode.
   faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -50,7 +65,9 @@ export const ApplicationProjectMetaUpdatedPayload = Schema.Struct({
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   // Absent = leave unchanged; null = clear the override.
   defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
+  autoPull: Schema.optional(Schema.Boolean),
   faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   updatedAt: IsoDateTime,
 });

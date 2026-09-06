@@ -1,9 +1,9 @@
 import type {
+  ThreadLinkedPullRequest,
   EnvironmentId,
   MessageId,
   OrchestrationProjectShell,
   OrchestrationV2RunStatus,
-  OrchestrationV2ShellSnapshot,
   OrchestrationV2ThreadProjection,
   OrchestrationV2ThreadShell,
   PlanId,
@@ -102,6 +102,12 @@ export interface EnvironmentThreadShell {
   /** Slot in the user-arranged pinned order; null for keyless (legacy) pins. */
   readonly pinOrderKey: string | null;
   /**
+   * Pull request the user linked to the thread (#8160). The v2 server does not
+   * project this yet, so it stays undefined on v2 environments; UI treats
+   * undefined and null alike.
+   */
+  readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
+  /**
    * Server-tracked visited watermark. `undefined` means the environment's
    * server predates visited tracking and clients should fall back to any
    * local visited state they keep.
@@ -189,6 +195,7 @@ export function presentThreadShell(
     interactionMode: thread.interactionMode,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    linkedPullRequest: thread.linkedPullRequest ?? null,
     lineage: thread.lineage,
     forkedFrom: thread.forkedFrom,
     activeProviderThreadId: thread.activeProviderThreadId,
@@ -229,12 +236,3 @@ export function presentThreadShell(
 }
 
 export const scopeThreadShell = presentThreadShell;
-
-export function selectEnvironmentThreadShell(
-  snapshot: OrchestrationV2ShellSnapshot | null,
-  environmentId: EnvironmentId,
-  threadId: ThreadId,
-): EnvironmentThreadShell | null {
-  const thread = snapshot?.threads.find((candidate) => candidate.id === threadId) ?? null;
-  return thread ? presentThreadShell(environmentId, thread) : null;
-}

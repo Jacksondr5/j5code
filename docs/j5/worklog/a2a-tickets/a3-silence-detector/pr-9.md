@@ -6,8 +6,10 @@ status: 1
 
 # PR #9 — A3 silence detector
 
-PR: https://github.com/Jacksondr5/j5code/pull/9  
-Base: `j5/main`  
+PR: https://github.com/Jacksondr5/j5code/pull/9
+
+Base: `j5/main`
+
 Head: `55e4cdf50d167854b0ae9a6d9e9b7cc2ab2aa31d`
 
 ## Certification boundary

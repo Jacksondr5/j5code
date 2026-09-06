@@ -22,17 +22,20 @@
  * @module provider/ProviderDriver
  */
 import type {
+  ProviderConsumeResetCreditOutcome,
   ProviderDriverKind,
   ProviderInstanceEnvironment,
   ProviderInstanceId,
+  ServerProvider,
 } from "@t3tools/contracts";
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 
-import type { TextGenerationShape } from "../textGeneration/TextGeneration.ts";
+import type { TextGeneration } from "../textGeneration/TextGeneration.ts";
 import type { ProviderAdapterV2Shape } from "../orchestration-v2/ProviderAdapter.ts";
 import type { ProviderDriverError } from "./Errors.ts";
+import type { ProviderAuthController } from "./Services/ProviderAuthService.ts";
 import type { ServerProviderShape } from "./Services/ServerProvider.ts";
 
 /**
@@ -69,8 +72,20 @@ export interface ProviderInstance {
   readonly accentColor?: string | undefined;
   readonly enabled: boolean;
   readonly snapshot: ServerProviderShape;
+  readonly snapshotForCwd?: (cwd: string) => Effect.Effect<ServerProvider, ProviderDriverError>;
+  readonly refreshModels?: () => Effect.Effect<void, ProviderDriverError>;
+  /**
+   * Redeem one banked rate-limit reset credit on the signed-in account, then
+   * re-probe so the snapshot reflects the cleared windows. Account-level,
+   * not thread-level, which is why it lives here rather than on the adapter.
+   */
+  readonly consumeResetCredit?: () => Effect.Effect<
+    ProviderConsumeResetCreditOutcome,
+    ProviderDriverError
+  >;
   readonly orchestrationAdapter: ProviderAdapterV2Shape;
-  readonly textGeneration: TextGenerationShape;
+  readonly textGeneration: TextGeneration["Service"];
+  readonly auth?: ProviderAuthController;
 }
 
 export interface ProviderContinuationIdentity {

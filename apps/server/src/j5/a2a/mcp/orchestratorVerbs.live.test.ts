@@ -1,3 +1,8 @@
+import { AntigravityInstallation } from "../../../provider/AntigravityInstallation.ts";
+import * as ModelManifest from "../../../provider/ModelManifest.ts";
+import * as CodexResetCredit from "../../../provider/Layers/codexResetCredit.ts";
+import * as GitWorkflow from "../../../git/GitWorkflowService.ts";
+import * as ProjectService from "../../../project/ProjectService.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -101,11 +106,17 @@ const providerInstanceRegistryLayer = ProviderInstanceRegistryHydrationLive.pipe
     Layer.mergeAll(
       serverConfigLayer.pipe(Layer.provide(NodeServices.layer)),
       serverSettingsLayer,
-      NodeServices.layer,
       FetchHttpClient.layer,
+      AntigravityInstallation.layer.pipe(
+        Layer.provide(serverConfigLayer),
+        Layer.provide(FetchHttpClient.layer),
+        Layer.provide(NodeServices.layer),
+      ),
+      ModelManifest.layerTest,
+      CodexResetCredit.layer,
       OpenCodeRuntimeLive.pipe(Layer.provide(NodeServices.layer)),
       Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers),
-    ),
+    ).pipe(Layer.provideMerge(NodeServices.layer)),
   ),
 );
 const providerRegistryLayer = ProviderRegistryLive.pipe(
@@ -138,6 +149,12 @@ const liveLayer = Layer.mergeAll(
   j5Layer,
   handlersLayer,
 ).pipe(
+  Layer.provide(Layer.mock(GitWorkflow.GitWorkflowService)({})),
+  Layer.provide(
+    Layer.mock(ProjectService.ProjectService)({
+      getById: () => Effect.succeed(Option.none()),
+    }),
+  ),
   Layer.provide(mcpSessionRegistryTestLayer),
   Layer.provide(SqlitePersistenceMemory),
   Layer.provide(checkpointStoreLayer),
