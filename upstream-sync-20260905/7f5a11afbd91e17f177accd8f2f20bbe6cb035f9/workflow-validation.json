@@ -1,0 +1,34 @@
+{
+  "ci.yml": {
+    "uniqueKeys": true,
+    "jobs": [
+      "check",
+      "test",
+      "test_server",
+      "rust",
+      "mobile_native_changes",
+      "mobile_native_static_analysis",
+      "release_smoke"
+    ],
+    "allJobsKeepForkGuard": true,
+    "existingMobileConditionPreserved": true
+  },
+  "j5-ci.yml": {
+    "uniqueKeys": true,
+    "jobs": [
+      "quality"
+    ]
+  },
+  "j5-weekly.yml": {
+    "uniqueKeys": true,
+    "jobs": [
+      "full-build"
+    ]
+  },
+  "mobile-fingerprint-check.yml": {
+    "uniqueKeys": true,
+    "jobs": [
+      "fingerprint"
+    ]
+  }
+}

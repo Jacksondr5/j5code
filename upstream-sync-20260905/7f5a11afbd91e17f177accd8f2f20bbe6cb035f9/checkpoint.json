@@ -1,0 +1,20 @@
+{
+  "merge": "7f5a11afbd91e17f177accd8f2f20bbe6cb035f9",
+  "tree": "809ec1e85259b8bde757cccf4dace9c6f7e1cd4f",
+  "parents": [
+    "51ee0fd64a2597d6ac4204b2096f164da240dbb3",
+    "4fe94afde048e823d5bde9f167b4685189437767"
+  ],
+  "selectedUpstream": "b9fa1399cfbacf23f35ba9201af8aebe3f41e807",
+  "sourceCheckpoint": "4fe94afde048e823d5bde9f167b4685189437767",
+  "testedRuntimeCheckpoint": "08072116b129360b58ad794c7e11f690bfc6a543",
+  "sourceTreeEqualsMergeTree": true,
+  "forkAndSelectedUpstreamAreAncestors": true,
+  "clean": true,
+  "branch": "j5/upstream-sync-20260905",
+  "publication": "not performed",
+  "exactHeadCI": "not run; awaits publication authorization",
+  "ref": "refs/j5-sync/20260905/m6-final",
+  "previousLocalCandidate": "4954c613f7402112d9e3f5cd503f18da521151be",
+  "workflowPreflight": "actionlint passes with declared upstream Blacksmith labels; duplicate mapping key corrected"
+}
