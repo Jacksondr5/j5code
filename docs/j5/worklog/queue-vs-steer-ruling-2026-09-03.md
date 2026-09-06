@@ -1,0 +1,49 @@
+# Queue vs steer — ruling record (2026-09-03)
+
+Jackson + Product lead, in the Product thread. Origin: issue #73 (agent deliveries steered a mid-turn Claude recipient; the CLI's "now"-priority abort produced fabricated human-refusal text on sibling tool calls) and the two live observations of 2026-09-02 (a composer send interrupting a stalled run and jumping three queued agent messages; five agent messages steered into a live turn and read by the recipient as "queued"). PR #91 implements the ruling; Jackson wanted it right in one PR. Everything below was measured in code before ruling; unmeasured items are marked.
+
+**Current amendment:** QS1 has an Astra-only exception authorized by Jackson on September 4; see the amendment below. The original ruling is retained as history.
+
+## Definitions as the code has them
+
+- A **run** is the app's unit of work. Status enum: `preparing, queued, starting, running, waiting, completed, interrupted, failed, cancelled, rolled_back` — richer than "queued/running/terminal". A **provider turn** is the CLI's unit ("the model is generating"), tied to a run attempt.
+- **Steerable** = run `running` + active attempt + a provider turn with status `running`. Steer = inject into that turn now; queue = start a new run when the active one ends.
+- **Steer is not one behavior.** Adapter capabilities: Claude — active steering (priority "now"; the CLI aborts in-flight sibling calls and re-delivers — the #73 text); Codex, OpenCode — active steering, interrupt-restart fallback; Cursor, ACP — no active steering, **interrupt-and-restart** (the turn is killed and restarted with the message); Grok — unmeasured.
+
+## Q1 — "Running run with no live provider turn": legitimate or bug?
+
+**Legitimate in three designed windows; the bug is that one of them is unbounded and none is named.** (1) Before the turn: `preparing` (workspace preparation, a real turn item with no provider turn) → `starting` → the hand-off, where the run flips to `running` in the same event batch that activates the provider session while the provider-turn row appears only when the adapter reports the turn began. (2) After the turn: provider `end_turn` fires but the run stays `running` through finalization — checkpoint capture, measured at 42–72 s on the shared clone (#64). (3) `waiting` — exists, counts as blocking; trigger unmeasured. A start that _errors_ is handled (RunExecutionService catches, logs "provider turn start failed", terminalizes the run). A start that _hangs_ is caught by nothing: no start deadline exists anywhere. The 46-minute stall (#64) was therefore a designed transient with no upper bound, rendered as plain "running"; which exact status it sat in is unmeasured (needs the row). Consequence for this ruling: queue-by-default removes the _accidental_ dam-breaker (composer `auto` → start-immediately → interrupt of the stuck run), so the human's explicit steer/interrupt must work truthfully in that state and #64's named-state fact ("starting · 46m") becomes v0-important.
+
+## Q2 — Is upstream going to ship the configurable default?
+
+**No evidence on any timeline; the grain runs J5's way.** The seam (`activeTurnDefault ?? "steer"`, "one policy seam for the future configurable active-turn default action") exists only in the orchestration-v2 lineage; upstream `main` has no such symbol and nothing wires a setting to it. Upstream PR #4245 (queue by default during active turns, explicit Steer) was closed unmerged 2026-07-30 "in favor of #2829 … the behavior already landed there natively … reopen if it's still missing — happy to take it"; issue #231 asked for a Settings-configurable default and the community replies want explicit Queue/Steer "as close to Codex-native as possible". Maintainers open, users asking, nobody built it. Using their seam keeps the divergence to "default value = queue"; if they ship the setting, it collapses.
+
+## Rulings
+
+| ID  | Ruling                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| QS1 | **Steering is a controller's act; in J5 the only controller of a turn is the human.** Agent-to-agent delivery **always queues** — a peer owns nothing about the recipient's turn, and a peer steer is an unrequested interruption that fabricates a human refusal on Claude and destroys the turn on Cursor. With the grain of upstream's own controller logic (their agent `auto` steers because it models delegation, which J5 excludes — ST5); consistent with R21, "you command what you brief". Recorded as a scoped principle in `principles.md`. |
+| QS2 | **The composer queues by default while a turn runs; ⌘↵ and the queued row's Steer are the explicit human steer.** Jackson on muscle memory: breaking it "in a slightly inconvenient but safer way — they can always click the button to do what they expect." The divergence lives in upstream's seam parameter, never in upstream's function.                                                                                                                                                                                                          |
+| QS3 | **An explicit steer with nothing steerable is truthful, never a fall-through.** On a thread that is preparing/starting/finalizing, ⌘↵ and the Steer button render the run's actual state ("not generating yet" / "finishing up — checkpointing") and offer **Interrupt** as a named explicit act; they never silently degrade into interrupt-and-start. The accidental dam-breaker becomes a deliberate one.                                                                                                                                            |
+| QS4 | **The steer control says what it does on this provider**: "Steer now" where injection is real (Claude, Codex, OpenCode); "Interrupt and restart with this message" where it is not (Cursor, ACP); Grok measured by the lane. If provider capability proves not client-readable, the PR says so and Jackson decides — the copy is never silently dropped.                                                                                                                                                                                                |
+
+All four ride **PR #91** (one PR, per Jackson). Not in #91 but recorded as consequence: #64's queued/starting-run-age fact is now v0-important. The `send_message` description is unchanged — "the reply arrives later as an incoming message" is literally true under QS1.
+
+## September 4 amendment — Astra peer updates
+
+Jackson authorized an Astra-only experiment after Fleet A spent a 36-minute run unable to consume queued peer updates. He authorized the coordinator to implement it directly, without peer staffing. This amends QS1; QS2–QS4 and other providers' defaults remain unchanged.
+
+- Peer-channel deliveries to an already-running Codex `gpt-6-astra` turn use native active steering. The existing `astra` alias resolves through the shared model normalizer. This includes peer replies and human replies delivered through the messaging system.
+- Eligibility uses the active run's model and provider thread, with a live steerable turn and a session advertising active steering. It never matches arbitrary model names containing “astra.”
+- Idle recipients still start normally. Preparing, starting, waiting, and finalizing recipients queue when no eligible turn exists. Other models/providers and platform silence/lifecycle notices retain queue delivery. Existing backlog is not promoted automatically.
+- The message includes platform guidance to incorporate relevant information while preserving the unfinished user task. A peer update does not replace the user's objective or confer authority to change it.
+- Dispatch pins the checked run ID and its model selection. Changing the picker for a future run must not switch models or trigger interrupt-and-restart. No `auto` or restart fallback is used.
+- A turn that ends between the eligibility read and dispatch is rejected by the existing serialized command policy. The same stable command/message IDs are retained on retries; this follows the existing retry/alarm path rather than risking duplicate injection or steering a replacement run.
+
+This changes message admission, not model attention: the provider decides when accepted input reaches the model. Adapter acceptance does not prove the model read it or preserved its original task. Model behavior still needs dogfood evaluation.
+
+Implementation and verification are recorded in [the Astra delivery worklog](./astra-peer-delivery-2026-09-04.md).
+
+## September 5 integration decision
+
+The human queue-default flip in this historical ruling is superseded: the reviewed upstream integration retains upstream web Send/Enter steering and its explicit queue shortcut. Truthful steer guards and the separately ratified active-Astra peer-update policy remain required; see FORK.md cases 26–29.
