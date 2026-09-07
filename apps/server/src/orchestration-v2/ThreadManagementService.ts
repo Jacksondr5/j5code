@@ -274,7 +274,9 @@ export interface ThreadManagementServiceShape {
   readonly getThreadProjection: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2ThreadProjection, OrchestratorV2Error>;
+  readonly getCheckpointContext: OrchestratorV2["Service"]["getCheckpointContext"];
   readonly getThreadSnapshot: OrchestratorV2["Service"]["getThreadSnapshot"];
+  readonly getThreadSnapshotWindow: OrchestratorV2["Service"]["getThreadSnapshotWindow"];
   readonly getProjectThread: (input: {
     readonly projectId: ProjectId;
     readonly threadId: ThreadId;
@@ -409,9 +411,21 @@ const make = Effect.gen(function* () {
       Effect.andThen(orchestrator.getThreadProjection(threadId)),
     );
 
+  const getCheckpointContext: ThreadManagementServiceShape["getCheckpointContext"] = (threadId) =>
+    ensureProjectionTranscript(threadId).pipe(
+      Effect.andThen(orchestrator.getCheckpointContext(threadId)),
+    );
+
   const getThreadSnapshot: ThreadManagementServiceShape["getThreadSnapshot"] = (threadId) =>
     ensureProjectionTranscript(threadId).pipe(
       Effect.andThen(orchestrator.getThreadSnapshot(threadId)),
+    );
+  const getThreadSnapshotWindow: ThreadManagementServiceShape["getThreadSnapshotWindow"] = (
+    threadId,
+    options,
+  ) =>
+    ensureProjectionTranscript(threadId).pipe(
+      Effect.andThen(orchestrator.getThreadSnapshotWindow(threadId, options)),
     );
 
   const dispatch: ThreadManagementServiceShape["dispatch"] = (command) =>
@@ -646,7 +660,9 @@ const make = Effect.gen(function* () {
     ensureLegacyTranscript,
     dispatch,
     getThreadProjection,
+    getCheckpointContext,
     getThreadSnapshot,
+    getThreadSnapshotWindow,
     getProjectThread,
     getShellSnapshot: orchestrator.getShellSnapshot,
     getThreadShell: orchestrator.getThreadShell,

@@ -1,3 +1,5 @@
+import * as GitWorkflow from "../../../git/GitWorkflowService.ts";
+import * as ProjectService from "../../../project/ProjectService.ts";
 /**
  * Dev-only disposable A2A delivery seed support.
  *
@@ -301,6 +303,12 @@ const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
     OrchestrationV2LayerLive,
     OrchestrationV2EventSinkLayerLive,
   ).pipe(
+    Layer.provide(Layer.mock(GitWorkflow.GitWorkflowService)({})),
+    Layer.provide(
+      Layer.mock(ProjectService.ProjectService)({
+        getById: () => Effect.succeed(Option.none()),
+      }),
+    ),
     Layer.provide(mcpSessionRegistryTestLayer),
     Layer.provide(checkpoint),
     Layer.provide(config),

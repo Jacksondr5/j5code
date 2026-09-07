@@ -16,14 +16,21 @@ import type {
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import * as Option from "effect/Option";
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import {
+  type MouseEvent,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { flushSync } from "react-dom";
 import {
   CheckIcon,
   ChevronDownIcon,
   CloudDownloadIcon,
   CloudUploadIcon,
-  ExternalLinkIcon,
   FileDiffIcon,
   GitBranchPlusIcon,
   GitCommitIcon,
@@ -35,8 +42,9 @@ import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from "~/components/Icons";
 import { RadioGroup } from "~/components/ui/radio-group";
 import { Spinner } from "~/components/ui/spinner";
+import { toggleVariants } from "~/components/ui/toggle";
 import { cn } from "~/lib/utils";
-import { openPullRequestLink } from "~/lib/openPullRequestLink";
+import { useOpenPrLink } from "~/lib/openPullRequestLink";
 import {
   buildMenuItems,
   formatGitActionElapsed,
@@ -56,6 +64,7 @@ import {
   resolveThreadBranchUpdate,
 } from "./GitActionsControl.logic";
 import { AnimatedHeight } from "./AnimatedHeight";
+import { StartTruncatedPath } from "./StartTruncatedPath";
 import { Button } from "~/components/ui/button";
 import { Checkbox } from "~/components/ui/checkbox";
 import {
@@ -93,7 +102,6 @@ import { vcsActionManager, vcsEnvironment } from "~/state/vcs";
 import { randomUUID } from "~/lib/utils";
 import { resolvePathLinkTarget } from "~/terminal-links";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
-import { readLocalApi } from "~/localApi";
 import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
   THREAD_DETAILS_PANEL_ICON_CLASS,
@@ -105,6 +113,7 @@ import {
   THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
 } from "./chat/threadDetailsPanelStyles";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
+import { useOpenLink } from "~/browser/useOpenLink";
 
 interface GitActionsControlProps {
   gitCwd: string | null;
@@ -434,12 +443,18 @@ function GitActionProgressButtonContent({
         )}
       >
         <div className="min-h-0 overflow-hidden">
-          <p
-            className="truncate pt-0.5 text-left text-[11px] font-normal text-muted-foreground"
-            title={progress.output ?? undefined}
-          >
-            {progress.output}
-          </p>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <p className="truncate pt-0.5 text-left text-[11px] font-normal text-muted-foreground" />
+              }
+            >
+              {progress.output}
+            </TooltipTrigger>
+            <TooltipPopup side="bottom" className="max-w-96 break-words">
+              {progress.output}
+            </TooltipPopup>
+          </Tooltip>
         </div>
       </div>
     </div>
@@ -464,12 +479,18 @@ function GitActionSuccessButtonContent({ success }: { success: InlineGitActionSu
         )}
       >
         <div className="min-h-0 overflow-hidden">
-          <p
-            className="truncate pt-0.5 text-left text-[11px] font-normal text-muted-foreground"
-            title={success.description ?? undefined}
-          >
-            {success.description}
-          </p>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <p className="truncate pt-0.5 text-left text-[11px] font-normal text-muted-foreground" />
+              }
+            >
+              {success.description}
+            </TooltipTrigger>
+            <TooltipPopup side="bottom" className="max-w-96 break-words">
+              {success.description}
+            </TooltipPopup>
+          </Tooltip>
         </div>
       </div>
     </div>
@@ -480,10 +501,13 @@ interface PublishRepositoryDialogProps {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly environmentId: ScopedThreadRef["environmentId"] | null;
+  /** Thread the dialog was opened from, so the new repository can open beside it. */
+  readonly threadRef: ScopedThreadRef | null;
   readonly gitCwd: string;
 }
 
 function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
+  const openLink = useOpenLink(props.threadRef);
   const navigate = useNavigate();
   const sourceControlDiscovery = useEnvironmentQuery(
     props.environmentId === null
@@ -925,32 +949,29 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                           Protocol
                         </span>
                         <RadioGroup
+                          className="w-fit flex-row gap-0.5 rounded-lg bg-input/40 p-0.5"
                           value={publishProtocol}
-                          onValueChange={(value) =>
-                            setPublishProtocol(value as SourceControlCloneProtocol)
-                          }
+                          onValueChange={(protocol) => {
+                            if (protocol === "ssh" || protocol === "https") {
+                              setPublishProtocol(protocol);
+                            }
+                          }}
                           aria-labelledby="publish-protocol-label"
                           disabled={publishRepositoryAction.isPending}
-                          className="grid grid-cols-2 gap-2"
                         >
-                          {(["ssh", "https"] as const).map((value) => {
-                            const isSelected = publishProtocol === value;
-                            return (
-                              <RadioPrimitive.Root
-                                key={value}
-                                value={value}
-                                className={cn(
-                                  "rounded-md border px-3 py-1.5 text-center text-sm font-medium outline-none transition",
-                                  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
-                                  isSelected
-                                    ? "border-primary bg-background ring-2 ring-primary/35 text-foreground dark:border-transparent dark:bg-primary/10 dark:ring-1 dark:ring-primary/30"
-                                    : "border-border bg-background text-muted-foreground hover:border-foreground/20 hover:text-foreground dark:border-transparent dark:bg-white/[0.035]",
-                                )}
-                              >
-                                {value === "ssh" ? "SSH" : "HTTPS"}
-                              </RadioPrimitive.Root>
-                            );
-                          })}
+                          {(["ssh", "https"] as const).map((protocol) => (
+                            <RadioPrimitive.Root
+                              key={protocol}
+                              value={protocol}
+                              data-pressed={publishProtocol === protocol ? "" : undefined}
+                              className={toggleVariants({
+                                variant: "segmented",
+                                size: "segmented",
+                              })}
+                            >
+                              {protocol.toUpperCase()}
+                            </RadioPrimitive.Root>
+                          ))}
                         </RadioGroup>
                       </div>
                     </div>
@@ -1007,12 +1028,9 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                       size="sm"
                       className="w-full"
                       onClick={() => {
-                        const api = readLocalApi();
-                        if (!api) return;
-                        void api.shell.openExternal(publishResult.repository.url);
+                        void openLink(publishResult.repository.url).catch(() => undefined);
                       }}
                     >
-                      <ExternalLinkIcon className="size-3.5" aria-hidden />
                       Open on {publishProviderLabel}
                     </Button>
                   </>
@@ -1083,7 +1101,6 @@ export default function GitActionsControl({
   gitCwd,
   activeThreadRef,
   draftId,
-  onOpenPullRequest,
   displayMode = "toolbar",
   onOpenChanges,
 }: GitActionsControlProps) {
@@ -1106,6 +1123,7 @@ export default function GitActionsControl({
     [activeThreadRef],
   );
   const activeServerThread = useThreadShell(activeThreadRef);
+  const openPrLink = useOpenPrLink(activeThreadRef ?? undefined);
   const activeDraftThread = useComposerDraftStore((store) =>
     draftId
       ? store.getDraftSession(draftId)
@@ -1313,45 +1331,6 @@ export default function GitActionsControl({
     };
   }, [activeEnvironmentId, gitCwd, refreshVcsStatus]);
 
-  const openExistingPr = useCallback(async () => {
-    const openPr = gitStatusForActions?.pr?.state === "open" ? gitStatusForActions.pr : null;
-    // Beside the thread where it was made, the way the browser opens beside it. Checked before
-    // the shell, which opening in the app does not need.
-    if (openPr && onOpenPullRequest) {
-      onOpenPullRequest(openPr.number);
-      return;
-    }
-    const api = readLocalApi();
-    if (!api) {
-      toastManager.add({
-        type: "error",
-        title: "Link opening is unavailable.",
-        data: threadToastData,
-      });
-      return;
-    }
-    const prUrl = openPr?.url ?? null;
-    if (!prUrl) {
-      toastManager.add({
-        type: "error",
-        title: "No open pull request found.",
-        data: threadToastData,
-      });
-      return;
-    }
-    void openPullRequestLink(api.shell, prUrl).catch((err: unknown) => {
-      console.error(err);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Unable to open pull request link",
-          description: err instanceof Error ? err.message : "An error occurred.",
-          ...(threadToastData !== undefined ? { data: threadToastData } : {}),
-        }),
-      );
-    });
-  }, [gitStatusForActions, onOpenPullRequest, threadToastData]);
-
   runGitActionWithToast = useEffectEvent(
     async ({
       action,
@@ -1446,7 +1425,7 @@ export default function GitActionsControl({
       const toastCta = actionResult.toast.cta;
       let toastActionProps: {
         children: string;
-        onClick: () => void;
+        onClick: (event: MouseEvent<HTMLButtonElement>) => void;
       } | null = null;
       if (toastCta.kind === "run_action") {
         toastActionProps = {
@@ -1461,11 +1440,9 @@ export default function GitActionsControl({
       } else if (toastCta.kind === "open_pr") {
         toastActionProps = {
           children: toastCta.label,
-          onClick: () => {
-            const api = readLocalApi();
-            if (!api) return;
+          onClick: (event) => {
             closeResultToast();
-            void api.shell.openExternal(toastCta.url);
+            openPrLink(event, toastCta.url);
           },
         };
       }
@@ -2046,14 +2023,13 @@ export default function GitActionsControl({
                               )}
                               <button
                                 type="button"
-                                className="flex flex-1 items-center justify-between gap-3 text-left truncate"
+                                className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
                                 onClick={() => openChangedFileInEditor(file.path)}
                               >
-                                <span
-                                  className={`truncate${isExcluded ? " text-muted-foreground" : ""}`}
-                                >
-                                  {file.path}
-                                </span>
+                                <StartTruncatedPath
+                                  path={file.path}
+                                  className={`flex-1${isExcluded ? " text-muted-foreground" : ""}`}
+                                />
                                 <span className="shrink-0">
                                   {isExcluded ? (
                                     <span className="text-muted-foreground">Excluded</span>
@@ -2126,6 +2102,7 @@ export default function GitActionsControl({
         open={isPublishDialogOpen}
         onOpenChange={setIsPublishDialogOpen}
         environmentId={activeEnvironmentId}
+        threadRef={activeThreadRef}
         gitCwd={gitCwd}
       />
 

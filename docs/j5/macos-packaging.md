@@ -29,23 +29,29 @@ forwarded to this script as a positional argument instead of being removed.
 
 ## Verify
 
-Mount the DMG and check its identity and signature:
+Set `dmg_path` to the exact DMG produced by the build, replacing `<version>`, then mount it
+read-only at a temporary path and check its identity and signature:
 
 ```sh
-hdiutil attach release-j5/J5-Code-*-arm64.dmg -nobrowse
-plutil -extract CFBundleDisplayName raw "/Volumes/J5 Code 0.0.33 Installer/J5 Code.app/Contents/Info.plist"
-plutil -extract CFBundleIdentifier raw "/Volumes/J5 Code 0.0.33 Installer/J5 Code.app/Contents/Info.plist"
-codesign --verify --deep --strict --verbose=2 "/Volumes/J5 Code 0.0.33 Installer/J5 Code.app"
-codesign -dv --verbose=4 "/Volumes/J5 Code 0.0.33 Installer/J5 Code.app" 2>&1 | grep 'Signature=adhoc'
+dmg_path="release-j5/J5-Code-<version>-arm64.dmg"
+mount_dir="$(mktemp -d "${TMPDIR:-/tmp}/j5-dmg.XXXXXX")"
+hdiutil attach "$dmg_path" -mountpoint "$mount_dir" -nobrowse -readonly
+app_path="$mount_dir/J5 Code.app"
+plutil -extract CFBundleDisplayName raw "$app_path/Contents/Info.plist"
+plutil -extract CFBundleIdentifier raw "$app_path/Contents/Info.plist"
+codesign --verify --deep --strict --verbose=2 "$app_path"
+codesign -dv --verbose=4 "$app_path" 2>&1 | grep -F 'Signature=adhoc'
+hdiutil detach "$mount_dir"
+rmdir "$mount_dir"
 ```
 
 The expected display name is `J5 Code`, the bundle ID is `codes.jackson.j5code`, and the signature
-line is `Signature=adhoc`. Adjust the mounted volume's version if the desktop package version has
-advanced.
+line is `Signature=adhoc`. These checks inspect the package; they do not launch the application
+or verify its interactive behavior.
 
 ## Install and first launch
 
-1. Drag **J5 Code** to `/Applications` from the mounted DMG.
+1. Open the verified DMG in Finder and drag **J5 Code** to `/Applications`.
 2. In Finder, Control-click **J5 Code**, choose **Open**, then confirm **Open**. This records a
    one-time local Gatekeeper approval for the unnotarized build.
 3. If macOS still blocks it, open **System Settings → Privacy & Security**, find the J5 Code notice,

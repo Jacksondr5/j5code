@@ -1,3 +1,4 @@
+import * as CodexResetCredit from "./codexResetCredit.ts";
 /**
  * Multi-instance validation slices for `ProviderInstanceRegistryLive`.
  *
@@ -24,6 +25,7 @@
  */
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Path from "effect/Path";
 import {
   type ClaudeSettings,
   type CodexSettings,
@@ -41,14 +43,16 @@ import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
+import type { BuiltInDriversEnv } from "../builtInDrivers.ts";
+import { AntigravityInstallation } from "../AntigravityInstallation.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import type { BuiltInDriversEnv } from "../builtInDrivers.ts";
 import { ClaudeDriver } from "../Drivers/ClaudeDriver.ts";
 import { CodexDriver, type CodexDriverEnv } from "../Drivers/CodexDriver.ts";
 import { CursorDriver } from "../Drivers/CursorDriver.ts";
 import { GrokDriver } from "../Drivers/GrokDriver.ts";
 import { OpenCodeDriver } from "../Drivers/OpenCodeDriver.ts";
+import * as ModelManifest from "../ModelManifest.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { makeProviderInstanceRegistry } from "./ProviderInstanceRegistryLive.ts";
@@ -108,6 +112,7 @@ const makeClaudeConfig = (overrides: Partial<ClaudeSettings>): ClaudeSettings =>
   homePath: "",
   customModels: [],
   launchArgs: "",
+  autoCompactWindow: "",
   ...overrides,
 });
 
@@ -148,6 +153,8 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
     Layer.provideMerge(TestHttpClientLive),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+    Layer.provideMerge(ModelManifest.layerTest),
+    Layer.provideMerge(CodexResetCredit.layerTest),
   );
   const testLayer = ProviderOrchestrationAdapterInfrastructureLive.pipe(
     Layer.provideMerge(baseLayer),
@@ -211,19 +218,49 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
       expect(personalSnapshot.instanceId).toBe(personalId);
       expect(personalSnapshot.driver).toBe(codexDriverKind);
       expect(personalSnapshot.enabled).toBe(false);
+      // The layout resolves the configured home through the host Path.
+      const path = yield* Path.Path;
       expect(personalSnapshot.continuation?.groupKey).toBe(
-        "codex:home:/home/julius/.codex_personal",
+        `codex:home:${path.resolve("/home/julius/.codex_personal")}`,
       );
 
       const workSnapshot = yield* work!.snapshot.getSnapshot;
       expect(workSnapshot.instanceId).toBe(workId);
       expect(workSnapshot.driver).toBe(codexDriverKind);
       expect(workSnapshot.enabled).toBe(false);
-      expect(workSnapshot.continuation?.groupKey).toBe("codex:home:/home/julius/.codex");
+      expect(workSnapshot.continuation?.groupKey).toBe(
+        `codex:home:${path.resolve("/home/julius/.codex")}`,
+      );
 
       // Nothing goes to the unavailable bucket — both drivers are registered.
       const unavailable = yield* registry.listUnavailable;
       expect(unavailable).toEqual([]);
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.live("treats an explicit in-config enabled:false as disabling despite the envelope", () =>
+    Effect.gen(function* () {
+      // Old settings files can carry both flags with conflicting values.
+      // The explicit false must win so a user's disable is never undone.
+      const staleId = ProviderInstanceId.make("codex_stale");
+      const configMap: ProviderInstanceConfigMap = {
+        [staleId]: {
+          driver: ProviderDriverKind.make("codex"),
+          enabled: true,
+          config: makeCodexConfig({ enabled: false }),
+        },
+      };
+
+      const { registry } = yield* makeProviderInstanceRegistry({
+        drivers: [CodexDriver],
+        configMap,
+      });
+
+      const instance = yield* registry.getInstance(staleId);
+      expect(instance).toBeDefined();
+      expect(instance!.enabled).toBe(false);
+      const snapshot = yield* instance!.snapshot.getSnapshot;
+      expect(snapshot.enabled).toBe(false);
     }).pipe(Effect.provide(testLayer)),
   );
 
@@ -282,15 +319,20 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
   // surfaced; that merged layer then provides `ServerConfig.layerTest`'s
   // `FileSystem` dep while keeping everything else surfaced to the test.
   const infraLayer = OpenCodeRuntimeLive.pipe(Layer.provideMerge(NodeServices.layer));
-  const baseLayer = ServerConfig.layerTest(process.cwd(), {
-    prefix: "provider-instance-registry-all-drivers-test",
-  }).pipe(
+  const baseLayer = AntigravityInstallation.layer.pipe(
+    Layer.provideMerge(
+      ServerConfig.layerTest(process.cwd(), {
+        prefix: "provider-instance-registry-all-drivers-test",
+      }),
+    ),
     Layer.provideMerge(infraLayer),
     Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(TestHttpClientLive),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+    Layer.provideMerge(ModelManifest.layerTest),
+    Layer.provideMerge(CodexResetCredit.layerTest),
   );
   const testLayer = ProviderOrchestrationAdapterInfrastructureLive.pipe(
     Layer.provideMerge(baseLayer),
@@ -421,13 +463,17 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       expect(codexSnapshot.instanceId).toBe(codexId);
       expect(codexSnapshot.driver).toBe(codexDriverKind);
       expect(codexSnapshot.enabled).toBe(false);
-      expect(codexSnapshot.continuation?.groupKey).toBe("codex:home:/home/julius/.codex");
+      expect(codexSnapshot.continuation?.groupKey).toBe(
+        `codex:home:${(yield* Path.Path).resolve("/home/julius/.codex")}`,
+      );
 
       const claudeSnapshot = yield* claude!.snapshot.getSnapshot;
       expect(claudeSnapshot.instanceId).toBe(claudeId);
       expect(claudeSnapshot.driver).toBe(claudeDriverKind);
       expect(claudeSnapshot.enabled).toBe(false);
-      expect(claudeSnapshot.continuation?.groupKey).toBe("claude:home:/home/julius/.claude-work");
+      expect(claudeSnapshot.continuation?.groupKey).toBe(
+        `claude:home:${(yield* Path.Path).resolve("/home/julius/.claude-work")}`,
+      );
 
       const cursorSnapshot = yield* cursor!.snapshot.getSnapshot;
       expect(cursorSnapshot.instanceId).toBe(cursorId);

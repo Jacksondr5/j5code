@@ -1,10 +1,12 @@
 import {
-  type CommandId,
+  CommandId,
   ModelSelection,
   ProjectId,
   type Project,
+  type ProjectIconOverride,
   type ProjectScript,
   type ProjectSnapshot,
+  type ThreadEnvMode,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -14,6 +16,15 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { EventSinkV2 } from "../orchestration-v2/EventSink.ts";
+import { IdAllocatorV2 } from "../orchestration-v2/IdAllocator.ts";
+import { LegacyV1ThreadImporter } from "../orchestration-v2/LegacyV1ThreadImporter.ts";
+import { ProjectionStoreV2 } from "../orchestration-v2/ProjectionStore.ts";
+import {
+  ThreadCommandExecutor,
+  layer as threadCommandExecutorLayer,
+} from "../orchestration-v2/ThreadCommandExecutor.ts";
+import { planThreadDeletion } from "../orchestration-v2/ThreadDeletion.ts";
 import * as ProjectionProjects from "../persistence/Services/ProjectionProjects.ts";
 import { ProjectEnrichmentService, type ProjectEnrichment } from "./ProjectEnrichmentService.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
@@ -34,6 +45,10 @@ export interface ProjectUpdateInput {
   readonly title?: string;
   readonly workspaceRoot?: string;
   readonly defaultModelSelection?: ModelSelection | null;
+  readonly autoPull?: boolean;
+  readonly projectIcon?: ProjectIconOverride | null;
+  readonly faviconPath?: string | null;
+  readonly defaultThreadEnvMode?: ThreadEnvMode | null;
   readonly scripts?: ReadonlyArray<ProjectScript>;
 }
 
@@ -42,6 +57,7 @@ export interface ProjectBootstrapInput extends ProjectCreateInput {}
 export interface ProjectDeleteInput {
   readonly commandId: CommandId;
   readonly projectId: ProjectId;
+  readonly force?: boolean;
 }
 
 export class ProjectNotFoundError extends Schema.TaggedErrorClass<ProjectNotFoundError>()(
@@ -66,6 +82,15 @@ export class ProjectConflictError extends Schema.TaggedErrorClass<ProjectConflic
   }
 }
 
+export class ProjectNotEmptyError extends Schema.TaggedErrorClass<ProjectNotEmptyError>()(
+  "ProjectNotEmptyError",
+  { projectId: ProjectId },
+) {
+  override get message(): string {
+    return `Project ${this.projectId} is not empty.`;
+  }
+}
+
 export class ProjectOperationError extends Schema.TaggedErrorClass<ProjectOperationError>()(
   "ProjectOperationError",
   {
@@ -73,6 +98,8 @@ export class ProjectOperationError extends Schema.TaggedErrorClass<ProjectOperat
       "normalize-workspace",
       "read-project",
       "list-projects",
+      "list-threads",
+      "delete-thread",
       "dispatch-project-command",
     ]),
     projectId: Schema.optional(ProjectId),
@@ -88,6 +115,7 @@ export class ProjectOperationError extends Schema.TaggedErrorClass<ProjectOperat
 export type ProjectServiceError =
   | ProjectNotFoundError
   | ProjectConflictError
+  | ProjectNotEmptyError
   | ProjectOperationError;
 
 export class ProjectService extends Context.Service<
@@ -119,6 +147,11 @@ export const make = Effect.gen(function* () {
   const projects = yield* ProjectionProjects.ProjectionProjectRepository;
   const projectEnrichment = yield* ProjectEnrichmentService;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
+  const threadProjections = yield* ProjectionStoreV2;
+  const threadEvents = yield* EventSinkV2;
+  const idAllocator = yield* IdAllocatorV2;
+  const legacyImporter = yield* LegacyV1ThreadImporter;
+  const threadCommands = yield* ThreadCommandExecutor;
 
   const toProject = (
     row: ProjectionProjects.ProjectionProject,
@@ -128,8 +161,11 @@ export const make = Effect.gen(function* () {
     title: row.title,
     workspaceRoot: row.workspaceRoot,
     repositoryIdentity: enrichment?.repositoryIdentity ?? null,
-    faviconPath: enrichment?.faviconPath ?? null,
+    faviconPath: row.faviconPath ?? enrichment?.faviconPath ?? null,
     defaultModelSelection: row.defaultModelSelection,
+    defaultThreadEnvMode: row.defaultThreadEnvMode,
+    autoPull: row.autoPull,
+    projectIcon: row.projectIcon,
     scripts: row.scripts,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -327,6 +363,12 @@ export const make = Effect.gen(function* () {
           ...(input.defaultModelSelection === undefined
             ? {}
             : { defaultModelSelection: input.defaultModelSelection }),
+          ...(input.autoPull === undefined ? {} : { autoPull: input.autoPull }),
+          ...(input.projectIcon === undefined ? {} : { projectIcon: input.projectIcon }),
+          ...(input.faviconPath === undefined ? {} : { faviconPath: input.faviconPath }),
+          ...(input.defaultThreadEnvMode === undefined
+            ? {}
+            : { defaultThreadEnvMode: input.defaultThreadEnvMode }),
           ...(input.scripts === undefined ? {} : { scripts: [...input.scripts] }),
         },
         (workspaceRoot === existing.value.workspaceRoot
@@ -358,12 +400,83 @@ export const make = Effect.gen(function* () {
       if (Option.isNone(existing) || existing.value.deletedAt !== null) {
         return yield* new ProjectNotFoundError({ projectId });
       }
+
+      const snapshot = yield* threadProjections
+        .getShellSnapshot()
+        .pipe(
+          Effect.mapError(
+            (cause) => new ProjectOperationError({ operation: "list-threads", projectId, cause }),
+          ),
+        );
+      const projectThreads = [...snapshot.threads, ...snapshot.archivedThreads].filter(
+        (thread) => thread.projectId === projectId,
+      );
+      if (projectThreads.length > 0 && input.force !== true) {
+        return yield* new ProjectNotEmptyError({ projectId });
+      }
+
+      // Delete children durably before the project. Stable command IDs let a retry
+      // finish a partially completed cascade without repeating cleanup effects.
+      yield* Effect.forEach(
+        projectThreads,
+        (thread) =>
+          threadCommands
+            .withLock(
+              thread.id,
+              Effect.gen(function* () {
+                yield* legacyImporter.ensureTranscript(thread.id);
+                const projection = yield* threadProjections.getThreadProjection(thread.id);
+                if (
+                  projection.thread.deletedAt !== null ||
+                  projection.thread.projectId !== projectId
+                ) {
+                  return;
+                }
+                const command = {
+                  type: "thread.delete" as const,
+                  commandId: CommandId.make(`${input.commandId}:delete-thread:${thread.id}`),
+                  threadId: thread.id,
+                };
+                const now = yield* DateTime.now;
+                const plan = yield* planThreadDeletion({ command, projection, now, idAllocator });
+                const committed = yield* threadEvents.commitCommand({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                  threadId: command.threadId,
+                  acceptedAt: now,
+                  events: plan.events,
+                  effects: plan.effects,
+                });
+                if (
+                  committed.receipt.threadId !== command.threadId ||
+                  committed.receipt.commandType !== command.type
+                ) {
+                  return yield* Effect.fail(
+                    "The thread deletion command ID belongs to a different command.",
+                  );
+                }
+                if (committed.receipt.status === "rejected") {
+                  return yield* Effect.fail(
+                    committed.receipt.error ?? "Thread deletion was previously rejected.",
+                  );
+                }
+              }),
+            )
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProjectOperationError({ operation: "delete-thread", projectId, cause }),
+              ),
+            ),
+        { concurrency: 1, discard: true },
+      );
       return yield* dispatch(
         projectId,
         {
           type: "project.delete",
           commandId: input.commandId,
           projectId,
+          ...(input.force === undefined ? {} : { force: input.force }),
         },
         invalidateEnrichment(existing.value.workspaceRoot).pipe(
           Effect.andThen(readCommitted(projectId)),
@@ -392,4 +505,6 @@ export const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(ProjectService, make);
+export const layer = Layer.effect(ProjectService, make).pipe(
+  Layer.provide(threadCommandExecutorLayer),
+);

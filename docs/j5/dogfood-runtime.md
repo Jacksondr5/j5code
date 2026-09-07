@@ -5,6 +5,12 @@ source-built J5 Code server on a Linux box, reached over Tailscale, with the bro
 This document is self-contained on purpose — dogfood agents have no access to the design sessions
 that produced it. Decisions and their load-bearing reasons are recorded inline.
 
+Pin-advance note (2026-09-06): restart and Codex-version guidance below reflects the selected
+upstream integration. This advance did not execute these Linux deployment procedures or verify
+second-machine/relay/tunnel behavior; the deployment instructions retain their earlier environment
+assumptions. See [FORK.md](../../FORK.md#verification-and-review-at-the-recorded-source) for the
+exact source and verification limits.
+
 ## Shape and rationale
 
 - **One server, one Squadron.** A Squadron lives entirely on one server by design, so the dogfood
@@ -26,13 +32,14 @@ that produced it. Decisions and their load-bearing reasons are recorded inline.
   forward-only with no downgrade guard — an older server binary starts silently against a
   newer-migrated database and fails later at query time. The only reliable rollback is
   previous-commit + restored snapshot, so the snapshot is not optional.
-- **Restarts are survivable but not gentle.** On shutdown the server terminates provider
-  subprocesses; on boot, recovery cancels every nonterminal run with the visible detail "Cancelled
-  because the server restarted before the provider work completed." Nothing resumes. But nothing is
-  lost either: checkpoint captures replay, and A2A delivery is a durable SQL queue drained at boot
-  with idempotent retries. **A restart costs in-flight turns, never ledger messages or
-  obligations.** Operating discipline: prefer updating when the fleet is quiet; restarting under
-  load is acceptable when needed.
+- **Restarts interrupt active turns.** Automatic continuation is off by default. With
+  **Continue threads after restarts** enabled for the environment, upstream recovery may dispatch
+  “Continue where you left off.” for eligible interrupted work after an update, crash or machine
+  restart. J5's temporary adaptation prevents a committed Stop from being revived, including a
+  Stop arriving after continuation was prepared. This does not guarantee every interrupted task
+  will resume or complete. A2A deliveries remain in their durable queue and resume delivery on
+  boot with idempotent retries. Prefer updating when the fleet is quiet. At the next upstream
+  merge, favor upstream's revised continuation/Stop handling as recorded in FORK.md.
 - **Native provider history is never silently replaced.** If a provider thread with a native
   reference cannot resume, its turn fails with the recorded cause; only a future explicit
   fall-back act may request a digest re-prime.
@@ -70,9 +77,11 @@ As `j5dev` (Ansible reconciles all of this):
    version in the checkout's `.nvmrc` (currently 24.14.0). Install the pnpm version from the repo's
    `packageManager` field under that
    Node; the server's Node distribution has no Corepack executable. Rust is **not** required —
-   it is only used for desktop packaging. Codex CLI **≥ 0.151.0** is the protocol floor; use the
-   tested **0.153.3** for GPT-6 Astra. The server refuses an older app-server with a named turn
-   failure instead of decoding its responses. The C/C++ toolchain and Python
+   it is only used for desktop packaging. Codex CLI **≥ 0.151.0** is the configured minimum;
+   real 0.151.0 wire compatibility is not established by the fixtures normalized to the generated
+   0.152.1 protocol. The earlier dogfood guidance used tested **0.153.3** for GPT-6 Astra; that
+   evidence does not prove the lower bound. The server refuses an app-server below the configured
+   minimum with a named turn failure before thread requests. The C/C++ toolchain and Python
    support native dependency builds; `gh` supports repository and pull-request work.
 2. **Checkout and first build.**
 
@@ -279,9 +288,10 @@ restart, so downtime is the restart itself. Readiness gets 30 probes, each with 
 connection timeout and two-second total request timeout, separated by one-second delays. The
 check fails after about 90 seconds at most, rather than hanging on a stalled response.
 
-What everyone sees at restart: in-flight agent turns end as "Cancelled because the server
-restarted before the provider work completed"; queued A2A deliveries drain on boot; nothing else
-changes. Agents mid-task should simply be re-prompted to continue.
+What happens after restart depends on the environment's **Continue threads after restarts**
+setting. With its default off, interrupted tasks need an explicit continuation prompt. With it
+on, eligible work can receive the automatic continuation described above; check whether recovery
+already started a turn before sending another prompt. Queued A2A deliveries drain on boot.
 
 ## Rollback
 

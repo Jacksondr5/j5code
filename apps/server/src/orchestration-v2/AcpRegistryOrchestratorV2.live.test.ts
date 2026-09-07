@@ -12,6 +12,7 @@ import {
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as CodexResetCredit from "../provider/Layers/codexResetCredit.ts";
 import { FetchHttpClient } from "effect/unstable/http";
 import { describe } from "vite-plus/test";
 
@@ -20,6 +21,8 @@ import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as HostPowerMonitor from "../background/HostPowerMonitor.ts";
 import { ServerConfig } from "../config.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import { AntigravityInstallation } from "../provider/AntigravityInstallation.ts";
+import * as ModelManifest from "../provider/ModelManifest.ts";
 import { ProviderInstanceRegistryHydrationLive } from "../provider/Layers/ProviderInstanceRegistryHydration.ts";
 import {
   NoOpProviderEventLoggers,
@@ -30,6 +33,7 @@ import { ServerSettingsService } from "../serverSettings.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import { OrchestratorV2 } from "./Orchestrator.ts";
+import { worktreeRepairDependenciesTestLayer } from "./ProviderTurnStartService.testkit.ts";
 import { OrchestrationV2LayerLive } from "./runtimeLayer.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../mcp/McpSessionRegistry.testkit.ts";
 
@@ -79,6 +83,12 @@ const providerInstanceRegistryLayer = ProviderInstanceRegistryHydrationLive.pipe
       FetchHttpClient.layer,
       OpenCodeRuntimeLive.pipe(Layer.provide(NodeServices.layer)),
       Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers),
+      ModelManifest.layerTest,
+      AntigravityInstallation.layer.pipe(
+        Layer.provide(serverConfigLayer.pipe(Layer.provide(NodeServices.layer))),
+        Layer.provide(FetchHttpClient.layer),
+        Layer.provide(NodeServices.layer),
+      ),
     ),
   ),
 );
@@ -90,7 +100,9 @@ const liveLayer = OrchestrationV2LayerLive.pipe(
   Layer.provide(serverConfigLayer),
   Layer.provide(serverSettingsLayer),
   Layer.provide(providerInstanceRegistryLayer),
+  Layer.provide(CodexResetCredit.layer),
   Layer.provide(backgroundPolicyLayer),
+  Layer.provide(worktreeRepairDependenciesTestLayer),
   Layer.provide(NodeServices.layer),
 );
 

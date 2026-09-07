@@ -38,3 +38,22 @@ describe("ambient Squadron scope selection", () => {
     expect(onChange).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("draft environment retarget", () => {
+  it("carries explicit and frozen home state across environments without copying ambient scope", async () => {
+    const {
+      copyDraftSquadronScope,
+      selectDraftSquadron,
+      freezeDraftSquadronAtFirstSend,
+      setAmbientSquadronId,
+    } = await import("./SquadronDraftState");
+    selectDraftSquadron("local:reserved-retarget", "squadron:chosen");
+    freezeDraftSquadronAtFirstSend("local:reserved-retarget");
+    copyDraftSquadronScope("local:reserved-retarget", "remote:reserved-retarget");
+    selectDraftSquadron("remote:reserved-retarget", "squadron:wrong");
+    expect(freezeDraftSquadronAtFirstSend("remote:reserved-retarget")).toBe("squadron:chosen");
+    setAmbientSquadronId("squadron:ambient");
+    copyDraftSquadronScope("local:unselected-retarget", "remote:unselected-retarget");
+    expect(freezeDraftSquadronAtFirstSend("remote:unselected-retarget")).toBeNull();
+  });
+});

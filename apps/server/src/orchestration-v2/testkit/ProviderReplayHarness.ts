@@ -13,6 +13,7 @@ import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { ThreadManagementService } from "../ThreadManagementService.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../../mcp/McpSessionRegistry.testkit.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
@@ -35,11 +36,13 @@ import { layer as orchestratorLayer } from "../Orchestrator.ts";
 import { layer as projectionStoreLayer } from "../ProjectionStore.ts";
 import { OrchestratorV2, type OrchestratorV2Error } from "../Orchestrator.ts";
 import { ProviderAdapterRegistryV2 } from "../ProviderAdapterRegistry.ts";
+import { ProviderAuthService } from "../../provider/Services/ProviderAuthService.ts";
 import { layer as providerEventIngestorLayer } from "../ProviderEventIngestor.ts";
 import { layerWithOptions as providerSessionManagerLayerWithOptions } from "../ProviderSessionManager.ts";
 import { layer as providerSwitchServiceLayer } from "../ProviderSwitchService.ts";
 import { layer as providerTurnControlServiceLayer } from "../ProviderTurnControlService.ts";
 import { layer as providerTurnStartServiceLayer } from "../ProviderTurnStartService.ts";
+import { worktreeRepairDependenciesTestLayer } from "../ProviderTurnStartService.testkit.ts";
 import { layer as runExecutionServiceLayer } from "../RunExecutionService.ts";
 import { layer as runFinalizationServiceLayer } from "../RunFinalizationService.ts";
 import { ThreadTitleRegenerationService } from "../ThreadTitleRegenerationService.ts";
@@ -78,6 +81,7 @@ export function makeReplayServerConfig(
     const providerLogsDir = path.join(logsDir, "provider");
     const terminalLogsDir = path.join(logsDir, "terminals");
     const attachmentsDir = path.join(stateDir, "attachments");
+    const environmentThemesDir = path.join(stateDir, "themes");
     const worktreesDir = path.join(baseDir, "worktrees");
     const providerStatusCacheDir = path.join(baseDir, "caches");
 
@@ -87,6 +91,7 @@ export function makeReplayServerConfig(
       providerLogsDir,
       terminalLogsDir,
       attachmentsDir,
+      environmentThemesDir,
       worktreesDir,
       providerStatusCacheDir,
     ]) {
@@ -126,6 +131,7 @@ export function makeReplayServerConfig(
       providerStatusCacheDir,
       worktreesDir,
       attachmentsDir,
+      environmentThemesDir,
       logsDir,
       serverLogPath: path.join(logsDir, "server.log"),
       serverTracePath: path.join(logsDir, "server.trace.ndjson"),
@@ -320,6 +326,7 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
         idAllocatorLayer,
         storesLayer,
         providerSessionManagerProvided,
+        Layer.mock(ProviderAuthService)({ tryHandlePromptCommand: () => Effect.succeed(false) }),
         runExecutionServiceProvided,
         runtimeLayer,
       ),
@@ -365,6 +372,8 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
         providerTurnStartServiceProvided,
         runtimeRequestServiceProvided,
         threadTitleRegenerationTestLayer,
+        serverSettingsLayer,
+        Layer.mock(ThreadManagementService)({}),
       ),
     ),
   );
@@ -387,13 +396,16 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
       ),
     ),
   );
-  const replayRuntime = Layer.merge(orchestratorProvided, effectWorkerProvided);
+  const replayRuntime = Layer.merge(orchestratorProvided, effectWorkerProvided).pipe(
+    Layer.provide(worktreeRepairDependenciesTestLayer),
+    Layer.provide(NodeServices.layer),
+  );
 
   // Build the daemon from the exact worker instance exposed alongside the
   // orchestrator. Keeping this acquisition in the replay layer makes the
   // outbox lifecycle explicit and prevents test-only command-side draining.
   if (options.runEffectWorker === false) {
-    return orchestratorProvided;
+    return orchestratorProvided.pipe(Layer.provide(NodeServices.layer));
   }
   return Layer.effect(
     OrchestratorV2,

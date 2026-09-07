@@ -13,7 +13,7 @@ import {
   AcpRegistryAdapterV2Driver,
   type AcpRegistryAdapterV2DriverEnv,
 } from "../../orchestration-v2/Adapters/AcpRegistryAdapterV2.ts";
-import type { TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
+import type { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 import {
@@ -25,7 +25,7 @@ import {
 const DRIVER_KIND = ProviderDriverKind.make("acpRegistry");
 const decodeSettings = Schema.decodeSync(AcpRegistrySettings);
 
-const makeUnsupportedTextGeneration = (): TextGenerationShape => {
+const makeUnsupportedTextGeneration = (): TextGeneration["Service"] => {
   const unsupported = (operation: string) =>
     Effect.fail(
       new TextGenerationError({
@@ -129,12 +129,17 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
         accentColor,
         enabled,
         snapshot: {
-          maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-            provider: DRIVER_KIND,
-            packageName: null,
-          }),
+          resolveMaintenance: () =>
+            Effect.succeed(
+              makeManualOnlyProviderMaintenanceCapabilities({
+                provider: DRIVER_KIND,
+                packageName: null,
+              }),
+            ),
           getSnapshot: Effect.sync(currentSnapshot),
           refresh: Effect.sync(currentSnapshot),
+          // Registry agents report no subscription usage.
+          applyUsageLimits: () => Effect.void,
           streamChanges: Stream.empty,
         },
         orchestrationAdapter,

@@ -24,7 +24,6 @@ const subscribe = (listener: () => void) => {
   listeners.add(listener);
   return () => listeners.delete(listener);
 };
-const getSnapshot = () => snapshot;
 
 const draftStateFor = (draftKey: string) => {
   const current = snapshot.draftStates[draftKey];
@@ -54,6 +53,14 @@ export const selectDraftSquadron = (draftKey: string, squadronId: string) => {
   const next = selectSquadronForDraft(current, squadronId);
   if (next === current) return;
   snapshot = { ...snapshot, draftStates: { ...snapshot.draftStates, [draftKey]: next } };
+  notify();
+};
+
+/** Keep the explicit carrier when upstream retargets the same reserved draft to another environment. */
+export const copyDraftSquadronScope = (sourceKey: string, destinationKey: string) => {
+  const current = snapshot.draftStates[sourceKey];
+  if (current === undefined || current.squadronId === null || sourceKey === destinationKey) return;
+  snapshot = { ...snapshot, draftStates: { ...snapshot.draftStates, [destinationKey]: current } };
   notify();
 };
 

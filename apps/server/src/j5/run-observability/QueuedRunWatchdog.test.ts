@@ -10,6 +10,12 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { expect, it } from "vite-plus/test";
+import { it as effectIt } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
+import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
+import * as TestClock from "effect/testing/TestClock";
+import { ServerActivation } from "../../serverActivation.ts";
 
 import * as EventSink from "../../orchestration-v2/EventSink.ts";
 import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
@@ -20,6 +26,8 @@ import {
   QueuedRunWatchdog,
   QUEUED_RUN_WATCHDOG_DELAY_MS,
   QUEUED_RUN_WATCHDOG_MAX_CANDIDATES,
+  QUEUED_RUN_WATCHDOG_POLL_MS,
+  workerLive,
 } from "./QueuedRunWatchdog.ts";
 
 it("records one durable waiting fact for a promoted run that has not dispatched", async () =>
@@ -297,3 +305,36 @@ it("records one sanitized VCS observation fact without changing the run", async 
     expect(event.payload.failure.message).toContain("secret=[REDACTED]");
     expect(event.payload.failure.message).not.toContain("should-not-reach-the-timeline");
   }).pipe(Effect.runPromise));
+
+effectIt.effect("parks one shared watchdog worker until server activation", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const activation = yield* Deferred.make<void>();
+      const scans = yield* Ref.make(0);
+      const receipts = yield* Queue.unbounded<number>();
+      const watchdog = Layer.succeed(QueuedRunWatchdog, {
+        scan: () =>
+          Ref.updateAndGet(scans, (count) => count + 1).pipe(
+            Effect.flatMap((count) => Queue.offer(receipts, count)),
+            Effect.asVoid,
+          ),
+        recordVcsFailure: () => Effect.void,
+      });
+      yield* Layer.build(
+        Layer.mergeAll(workerLive, workerLive).pipe(
+          Layer.provide(watchdog),
+          Layer.provide(Layer.succeed(ServerActivation, Deferred.await(activation))),
+        ),
+      );
+      yield* TestClock.adjust(QUEUED_RUN_WATCHDOG_POLL_MS * 3);
+      expect(yield* Ref.get(scans)).toBe(0);
+      yield* Deferred.succeed(activation, undefined);
+      yield* TestClock.adjust(QUEUED_RUN_WATCHDOG_POLL_MS);
+      expect(yield* Queue.take(receipts)).toBe(1);
+      expect(yield* Ref.get(scans)).toBe(1);
+      yield* TestClock.adjust(QUEUED_RUN_WATCHDOG_POLL_MS);
+      expect(yield* Queue.take(receipts)).toBe(2);
+      expect(yield* Ref.get(scans)).toBe(2);
+    }),
+  ),
+);

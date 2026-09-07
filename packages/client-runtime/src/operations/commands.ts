@@ -1,4 +1,5 @@
 import {
+  type ThreadLinkedPullRequest,
   CommandId,
   ORCHESTRATION_V2_WS_METHODS,
   OrchestrationV2CheckpointUnavailableError,
@@ -10,6 +11,7 @@ import {
   type OrchestrationV2CreationSource,
   type PlanId,
   type ProjectId,
+  type ProjectIconOverride,
   type ProjectScript,
   type ProviderApprovalDecision,
   type ProviderInteractionMode,
@@ -18,6 +20,7 @@ import {
   type RuntimeMode,
   type RuntimeRequestId,
   type ThreadId,
+  type ThreadEnvMode,
   type UploadChatAttachment,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
@@ -46,6 +49,10 @@ export interface UpdateProjectInput extends CommandMetadata {
   readonly title?: string;
   readonly workspaceRoot?: string;
   readonly defaultModelSelection?: ModelSelection | null;
+  readonly autoPull?: boolean;
+  readonly projectIcon?: ProjectIconOverride | null;
+  readonly faviconPath?: string | null;
+  readonly defaultThreadEnvMode?: ThreadEnvMode | null;
   readonly scripts?: ReadonlyArray<ProjectScript>;
 }
 
@@ -111,6 +118,8 @@ export interface UpdateThreadMetadataInput extends ThreadCommandInput {
   readonly worktreePath?: string | null;
   /** Kick off an async title regeneration for the thread. */
   readonly regenerateTitle?: boolean;
+  /** Link (object) or unlink (null) a pull request (#8160). */
+  readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
 }
 
 export interface SetThreadRuntimeModeInput extends ThreadCommandInput {
@@ -221,6 +230,16 @@ export interface CancelQueuedRunInput extends ThreadCommandInput {
 export interface EditQueuedRunInput extends ThreadCommandInput {
   readonly runId: RunId;
   readonly text: string;
+  /**
+   * Full replacement attachment list for the queued message. Omitted =
+   * text-only edit that leaves attachments untouched. `dataUrl` entries are
+   * persisted against `messageId` (the queued run's user message) before
+   * dispatch, so `messageId` is required whenever attachments are present.
+   */
+  readonly edit?: {
+    readonly messageId: MessageId;
+    readonly attachments: ReadonlyArray<ChatAttachment | UploadChatAttachment>;
+  };
 }
 
 const allocateCommandId = Effect.fn("EnvironmentCommands.allocateCommandId")(function* (
@@ -327,6 +346,12 @@ export const updateProject = Effect.fn("EnvironmentCommands.updateProject")(func
     ...(input.defaultModelSelection === undefined
       ? {}
       : { defaultModelSelection: input.defaultModelSelection }),
+    ...(input.autoPull === undefined ? {} : { autoPull: input.autoPull }),
+    ...(input.projectIcon === undefined ? {} : { projectIcon: input.projectIcon }),
+    ...(input.faviconPath === undefined ? {} : { faviconPath: input.faviconPath }),
+    ...(input.defaultThreadEnvMode === undefined
+      ? {}
+      : { defaultThreadEnvMode: input.defaultThreadEnvMode }),
     ...(input.scripts === undefined ? {} : { scripts: input.scripts }),
   });
 });
@@ -492,7 +517,8 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
       input.title !== undefined ||
       input.branch !== undefined ||
       input.worktreePath !== undefined ||
-      input.regenerateTitle !== undefined
+      input.regenerateTitle !== undefined ||
+      input.linkedPullRequest !== undefined
     ) {
       result = yield* dispatch({
         type: "thread.metadata.update",
@@ -502,6 +528,9 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
         ...(input.branch === undefined ? {} : { branch: input.branch }),
         ...(input.worktreePath === undefined ? {} : { worktreePath: input.worktreePath }),
         ...(input.regenerateTitle === undefined ? {} : { regenerateTitle: input.regenerateTitle }),
+        ...(input.linkedPullRequest === undefined
+          ? {}
+          : { linkedPullRequest: input.linkedPullRequest }),
       });
     }
     if (input.modelSelection !== undefined) {
@@ -848,11 +877,16 @@ export const cancelQueuedRun = Effect.fn("EnvironmentCommands.cancelQueuedRun")(
 export const editQueuedRun = Effect.fn("EnvironmentCommands.editQueuedRun")(function* (
   input: EditQueuedRunInput,
 ) {
+  const attachments =
+    input.edit === undefined
+      ? undefined
+      : yield* persistAttachments(input.threadId, input.edit.messageId, input.edit.attachments);
   return yield* dispatch({
     type: "queued-run.edit",
     commandId: yield* allocateCommandId(input),
     threadId: input.threadId,
     runId: input.runId,
     text: input.text,
+    ...(attachments === undefined ? {} : { attachments }),
   });
 });

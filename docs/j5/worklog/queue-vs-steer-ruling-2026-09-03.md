@@ -43,3 +43,7 @@ Jackson authorized an Astra-only experiment after Fleet A spent a 36-minute run 
 This changes message admission, not model attention: the provider decides when accepted input reaches the model. Adapter acceptance does not prove the model read it or preserved its original task. Model behavior still needs dogfood evaluation.
 
 Implementation and verification are recorded in [the Astra delivery worklog](./astra-peer-delivery-2026-09-04.md).
+
+## September 5 integration decision
+
+The human queue-default flip in this historical ruling is superseded: the reviewed upstream integration retains upstream web Send/Enter steering and its explicit queue shortcut. Truthful steer guards and the separately ratified active-Astra peer-update policy remain required; see FORK.md cases 26–29.

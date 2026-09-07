@@ -1,5 +1,8 @@
 import type {
   OrchestrationV2ThreadProjection,
+  OrchestrationV2RuntimeRequest,
+  OrchestrationV2UserInputQuestion,
+  ProviderApprovalOption,
   ProviderRequestKind,
   RuntimeRequestId,
 } from "@t3tools/contracts";
@@ -10,17 +13,17 @@ export interface ThreadPendingApproval {
   readonly requestKind: ProviderRequestKind;
   readonly createdAt: string;
   readonly detail?: string;
+  /** App requesting access for mcp-elicitation approvals (#8058). */
+  readonly appName?: string;
+  /** Approval choices advertised by the provider (#8058); defaults apply when absent. */
+  readonly options?: ReadonlyArray<ProviderApprovalOption>;
   readonly responseCapability: "live" | "not_resumable";
 }
 
-export interface ThreadUserInputQuestion {
-  readonly id: string;
-  readonly header: string;
-  readonly question: string;
-  readonly options: ReadonlyArray<{
-    readonly label: string;
-    readonly description: string;
-  }>;
+export interface ThreadUserInputQuestion extends Omit<
+  OrchestrationV2UserInputQuestion,
+  "multiSelect"
+> {
   readonly multiSelect: boolean;
 }
 
@@ -28,7 +31,8 @@ export interface ThreadPendingUserInput {
   readonly requestId: RuntimeRequestId;
   readonly createdAt: string;
   readonly questions: ReadonlyArray<ThreadUserInputQuestion>;
-  readonly responseCapability: "live" | "not_resumable";
+  readonly responseCapability: OrchestrationV2RuntimeRequest["responseCapability"]["type"];
+  readonly responseMode?: "message";
 }
 
 export interface PendingThreadRequests {
@@ -55,8 +59,14 @@ export function derivePendingThreadRequests(
       userInputs.push({
         requestId: request.id,
         createdAt: DateTime.formatIso(request.createdAt),
-        questions: item.questions.map((question) => ({ ...question, multiSelect: false })),
+        questions: item.questions.map((question) => ({
+          ...question,
+          multiSelect: question.multiSelect ?? false,
+        })),
         responseCapability,
+        ...(item.responseMode === "message" || responseCapability === "message"
+          ? { responseMode: "message" as const }
+          : {}),
       });
       continue;
     }
@@ -70,7 +80,11 @@ export function derivePendingThreadRequests(
       requestKind: request.kind,
       createdAt: DateTime.formatIso(request.createdAt),
       ...(item?.type === "approval_request" && item.prompt ? { detail: item.prompt } : {}),
-      responseCapability,
+      ...(item?.type === "approval_request" && item.appName ? { appName: item.appName } : {}),
+      ...(item?.type === "approval_request" && item.options !== undefined
+        ? { options: item.options }
+        : {}),
+      responseCapability: responseCapability === "live" ? "live" : "not_resumable",
     });
   }
 

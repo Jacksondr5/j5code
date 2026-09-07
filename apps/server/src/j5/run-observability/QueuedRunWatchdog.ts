@@ -19,6 +19,7 @@ import {
   layer as candidateLayer,
 } from "./QueuedRunCandidates.ts";
 import { makeProviderFailure } from "../../orchestration-v2/ProviderFailure.ts";
+import { forkParked } from "../../serverActivation.ts";
 
 export const QUEUED_RUN_WATCHDOG_DELAY_MS = 5 * 60 * 1000;
 export const QUEUED_RUN_WATCHDOG_POLL_MS = 60 * 1000;
@@ -233,6 +234,6 @@ export const workerLive = Layer.effectDiscard(
           Effect.logWarning("Queued run watchdog scan failed", { cause }),
         ),
       ),
-    ).pipe(Effect.forkScoped);
+    ).pipe(forkParked);
   }),
 );

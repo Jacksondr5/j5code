@@ -1,11 +1,24 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  activeThreadAnchorTimestampMs,
   planPinnedMove,
+  resolveSettledThreadTimestamp,
   sortPinnedThreadsByOrderKey,
   sortThreads,
   type ThreadSortInput,
 } from "./threadSort.ts";
+
+describe("activeThreadAnchorTimestampMs", () => {
+  it("uses the later unsettle time when an old thread re-enters the active list", () => {
+    expect(
+      activeThreadAnchorTimestampMs({
+        createdAt: "2026-01-01T00:00:00.000Z",
+        unsettledAt: "2026-08-01T00:00:00.000Z",
+      }),
+    ).toBe(Date.parse("2026-08-01T00:00:00.000Z"));
+  });
+});
 
 type TestThread = { readonly id: string } & ThreadSortInput;
 
@@ -19,6 +32,38 @@ function makeThread(overrides: Partial<TestThread> = {}): TestThread {
     ...overrides,
   };
 }
+
+describe("resolveSettledThreadTimestamp", () => {
+  it("prefers the persisted settlement stamp over later activity", () => {
+    expect(
+      resolveSettledThreadTimestamp({
+        settledAt: "2026-03-09T10:00:00.000Z",
+        latestUserMessageAt: "2026-03-09T11:00:00.000Z",
+        latestRun: null,
+        updatedAt: "2026-03-09T12:00:00.000Z",
+      }),
+    ).toBe("2026-03-09T10:00:00.000Z");
+  });
+
+  it("falls back to the latest activity when the stamp is missing or malformed", () => {
+    expect(
+      resolveSettledThreadTimestamp({
+        settledAt: "invalid",
+        latestUserMessageAt: "2026-03-09T11:00:00.000Z",
+        latestRun: null,
+        updatedAt: "2026-03-09T12:00:00.000Z",
+      }),
+    ).toBe("2026-03-09T11:00:00.000Z");
+    expect(
+      resolveSettledThreadTimestamp({
+        settledAt: null,
+        latestUserMessageAt: null,
+        latestRun: null,
+        updatedAt: "2026-03-09T12:00:00.000Z",
+      }),
+    ).toBe("2026-03-09T12:00:00.000Z");
+  });
+});
 
 describe("sortThreads", () => {
   it("falls back to updatedAt and createdAt when latestUserMessageAt is invalid and there are no messages", () => {

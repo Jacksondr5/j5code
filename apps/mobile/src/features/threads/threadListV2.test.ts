@@ -38,6 +38,13 @@ function makeThread(
 
 const NOW = "2026-06-02T00:00:00.000Z";
 
+const linkedPullRequest = {
+  projectId: ProjectId.make("project-1"),
+  repository: "pingdotgg/t3code",
+  number: 42,
+  url: "https://github.com/pingdotgg/t3code/pull/42",
+};
+
 describe("resolveThreadListV2SnoozeMenuSelection", () => {
   it("accepts a displayed evening preset while its wake time is still future", () => {
     const menuOpenedAt = new Date(2026, 4, 8, 16, 59, 30);
@@ -265,80 +272,94 @@ describe("sortThreadsForListV2", () => {
 });
 
 describe("buildThreadListV2Items", () => {
-  it("excludes subagent child threads from top-level rows and counts", () => {
-    const rootThreadId = ThreadId.make("root");
-    const activeChildId = ThreadId.make("active-child");
-    const forkId = ThreadId.make("fork");
-    const settledChildId = ThreadId.make("settled-child");
-    const snoozedChildId = ThreadId.make("snoozed-child");
+  it("places a persisted settled thread in the settled shelf", () => {
+    const thread = makeThread({
+      id: ThreadId.make("linked-merged"),
+      title: "Linked merged pull request",
+      linkedPullRequest,
+      settledOverride: "settled",
+      settledAt: NOW,
+    });
+    const layout = buildThreadListV2Items({
+      threads: [thread],
+      environmentId: null,
+      searchQuery: "",
+      now: NOW,
+    });
+
+    expect(layout.settledCount).toBe(1);
+    expect(layout.items[0]?.variant).toBe("slim");
+  });
+
+  it("hides snoozed threads and counts them — visibility parity with web", () => {
     const layout = buildThreadListV2Items({
       threads: [
-        makeThread({ id: rootThreadId, title: "Root" }),
+        makeThread({ id: ThreadId.make("active"), title: "Active" }),
         makeThread({
-          id: forkId,
-          title: "Fork",
-          lineage: {
-            rootThreadId,
-            parentThreadId: rootThreadId,
-            relationshipToParent: "fork",
-          },
-        }),
-        makeThread({
-          id: activeChildId,
-          title: "Active child",
-          lineage: {
-            rootThreadId,
-            parentThreadId: rootThreadId,
-            relationshipToParent: "subagent",
-          },
-        }),
-        makeThread({
-          id: settledChildId,
-          title: "Settled child",
-          lineage: {
-            rootThreadId,
-            parentThreadId: rootThreadId,
-            relationshipToParent: "subagent",
-          },
-          settledOverride: "settled",
-          settledAt: "2026-06-01T12:00:00.000Z",
-        }),
-        makeThread({
-          id: snoozedChildId,
-          title: "Snoozed child",
-          lineage: {
-            rootThreadId,
-            parentThreadId: rootThreadId,
-            relationshipToParent: "subagent",
-          },
+          id: ThreadId.make("snoozed"),
+          title: "Snoozed",
           snoozedUntil: "2026-06-03T09:00:00.000Z",
+          snoozedAt: "2026-06-01T12:00:00.000Z",
+        }),
+        makeThread({
+          id: ThreadId.make("woken"),
+          title: "Woken",
+          // Wake time already passed: back in the active list.
+          snoozedUntil: "2026-06-01T18:00:00.000Z",
           snoozedAt: "2026-06-01T12:00:00.000Z",
         }),
       ],
       environmentId: null,
       searchQuery: "",
       now: NOW,
-      settledLimit: 0,
     });
 
-    expect(layout.items.map((item) => item.thread.id)).toEqual([forkId, rootThreadId]);
-    expect(layout.hiddenSettledCount).toBe(0);
-    expect(layout.snoozedCount).toBe(0);
-    expect(layout.nextSnoozeWakeAt).toBeNull();
+    // Same createdAt → static sort tiebreaks by id; the point is the woken
+    // thread is BACK in the card block and the snoozed one is gone.
+    expect(layout.items.map((item) => item.thread.id)).toEqual(["active", "woken"]);
+    expect(layout.snoozedCount).toBe(1);
   });
 
-  it("keeps a merged thread active when auto-settle on merge is off", () => {
-    const merged = makeThread({ id: ThreadId.make("merged"), title: "Merged" });
+  it("places settled pinned threads in the settled shelf", () => {
     const layout = buildThreadListV2Items({
-      threads: [merged],
+      threads: [
+        makeThread({ id: ThreadId.make("active"), title: "Active" }),
+        makeThread({
+          id: ThreadId.make("pinned-settled"),
+          title: "Pinned while settled",
+          pinnedAt: "2026-06-01T12:00:00.000Z",
+          settledOverride: "settled",
+          settledAt: "2026-06-01T12:00:00.000Z",
+        }),
+      ],
       environmentId: null,
       searchQuery: "",
-      changeRequestStateByKey: new Map([[`${environmentId}:${merged.id}`, "merged"]]),
-      autoSettleOnMerge: false,
       now: NOW,
     });
 
-    expect(layout.items.map((item) => item.thread.id)).toEqual(["merged"]);
+    expect(layout.items.map((item) => item.thread.id)).toEqual(["active", "pinned-settled"]);
+    expect(layout.items.map((item) => item.pinned)).toEqual([false, false]);
+    expect(layout.settledCount).toBe(1);
+  });
+
+  it("keeps active pinned threads in the pinned block", () => {
+    const pinned = makeThread({
+      id: ThreadId.make("pinned"),
+      title: "Pinned thread",
+      pinnedAt: "2026-06-01T12:00:00.000Z",
+    });
+    const layout = buildThreadListV2Items({
+      threads: [pinned],
+      environmentId: null,
+      searchQuery: "",
+      now: NOW,
+    });
+
+    expect(layout.items[0]).toMatchObject({
+      thread: { id: "pinned" },
+      variant: "card",
+      pinned: true,
+    });
     expect(layout.settledCount).toBe(0);
   });
 
@@ -371,7 +392,7 @@ describe("buildThreadListV2Items", () => {
     expect(layout.snoozedCount).toBe(1);
   });
 
-  it("renders pinned threads first and exempts them from auto-settle — parity with web", () => {
+  it("moves a settled pinned thread into the settled shelf — parity with web (#7969)", () => {
     const layout = buildThreadListV2Items({
       threads: [
         makeThread({ id: ThreadId.make("active"), title: "Active" }),
@@ -389,9 +410,11 @@ describe("buildThreadListV2Items", () => {
       now: NOW,
     });
 
-    expect(layout.items.map((item) => item.thread.id)).toEqual(["pinned-settled", "active"]);
-    expect(layout.items.map((item) => item.pinned)).toEqual([true, false]);
-    expect(layout.settledCount).toBe(0);
+    // Since #7969 a settled thread leaves the active block even while pinned;
+    // the pin re-applies when the thread is un-settled.
+    expect(layout.items.map((item) => item.thread.id)).toEqual(["active", "pinned-settled"]);
+    expect(layout.items.map((item) => item.pinned)).toEqual([false, false]);
+    expect(layout.settledCount).toBe(1);
   });
 
   it("snooze hides a pinned thread and wake restores it to the pinned block", () => {
@@ -442,9 +465,7 @@ describe("buildThreadListV2Items", () => {
       ],
       environmentId: null,
       searchQuery: "",
-      // Minute-floored partition clock vs precise snooze clock.
-      now: "2026-06-02T00:01:00.000Z",
-      snoozeNow: "2026-06-02T00:01:07.500Z",
+      now: "2026-06-02T00:01:07.500Z",
     });
 
     expect(layout.items.map((item) => item.thread.id)).toEqual(["just-woke"]);
@@ -664,6 +685,32 @@ describe("buildThreadListV2Items", () => {
     expect(items.map((item) => item.thread.id)).toEqual(["newer-created", "older-created"]);
   });
 
+  it("sorts settled threads by their persisted settlement timestamp", () => {
+    const { items } = buildThreadListV2Items({
+      threads: [
+        makeThread({
+          id: ThreadId.make("settled-newer"),
+          title: "Settled newer",
+          settledOverride: "settled",
+          settledAt: "2026-06-01T12:00:00.000Z",
+          latestUserMessageAt: "2026-06-01T08:00:00.000Z",
+        }),
+        makeThread({
+          id: ThreadId.make("settled-older"),
+          title: "Settled older",
+          settledOverride: "settled",
+          settledAt: "2026-06-01T10:00:00.000Z",
+          latestUserMessageAt: "2026-06-01T09:00:00.000Z",
+        }),
+      ],
+      environmentId: null,
+      searchQuery: "",
+      now: NOW,
+    });
+
+    expect(items.map((item) => item.thread.id)).toEqual(["settled-newer", "settled-older"]);
+  });
+
   it("keeps settled threads in the tail and filters by search query", () => {
     const { items } = buildThreadListV2Items({
       threads: [
@@ -764,7 +811,7 @@ describe("buildThreadListV2Items settled paging", () => {
           id: ThreadId.make(`settled-${index}`),
           title: `Settled ${index}`,
           settledOverride: "settled",
-          settledAt: NOW,
+          settledAt: `2026-06-01T0${index}:10:00.000Z`,
           latestUserMessageAt: `2026-06-01T0${index}:00:00.000Z`,
           // A turn adopted the message (same requestedAt): without it the
           // thread reads as a queued turn start, which never settles.

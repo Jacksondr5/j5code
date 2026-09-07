@@ -84,15 +84,11 @@ export const layer: Layer.Layer<
       readonly providerThreadId: ProviderThreadId;
       readonly providerTurnId: ProviderTurnId;
       readonly operation: "interrupt" | "restart" | "steer";
+      readonly messageId?: MessageId;
     }) =>
       Effect.gen(function* () {
-        const projection = yield* projections.getThreadProjection(input.threadId);
-        const providerThread = projection.providerThreads.find(
-          (candidate) => candidate.id === input.providerThreadId,
-        );
-        const providerTurn = projection.providerTurns.find(
-          (candidate) => candidate.id === input.providerTurnId,
-        );
+        const context = yield* projections.getProviderControlContext(input.threadId, input);
+        const { providerThread, providerTurn } = context;
         const targetsRecordedSession =
           providerThread?.providerSessionId === input.providerSessionId;
         const targetsCommittedReplacement =
@@ -121,7 +117,7 @@ export const layer: Layer.Layer<
           : { ...providerThread, providerSessionId: input.providerSessionId };
         if (providerTurn.status !== "running") {
           return {
-            projection,
+            context,
             providerThread: interruptProviderThread,
             providerTurn,
             session: Option.none(),
@@ -145,7 +141,7 @@ export const layer: Layer.Layer<
               },
             );
             return {
-              projection,
+              context,
               providerThread: interruptProviderThread,
               providerTurn,
               session: Option.none(),
@@ -158,7 +154,7 @@ export const layer: Layer.Layer<
             cause: `Provider session ${input.providerSessionId} is not active.`,
           });
         }
-        return { projection, providerThread: interruptProviderThread, providerTurn, session };
+        return { context, providerThread: interruptProviderThread, providerTurn, session };
       });
 
     return ProviderTurnControlServiceV2.of({
@@ -209,12 +205,13 @@ export const layer: Layer.Layer<
           });
 
           for (let remaining = 1_000; remaining > 0; remaining -= 1) {
-            const projection = yield* projections.getThreadProjection(input.threadId);
-            const providerTurn = projection.providerTurns.find(
-              (candidate) => candidate.id === input.providerTurnId,
-            );
-            const attempt = projection.attempts.find(
-              (candidate) => candidate.id === input.interruptedAttemptId,
+            const { providerTurn, attempt } = yield* projections.getProviderControlContext(
+              input.threadId,
+              {
+                providerThreadId: input.providerThreadId,
+                providerTurnId: input.providerTurnId,
+                attemptId: input.interruptedAttemptId,
+              },
             );
             if (
               providerTurn !== undefined &&
@@ -259,12 +256,7 @@ export const layer: Layer.Layer<
               cause: "The provider turn ended before the steering message was delivered.",
             });
           }
-          const message = loaded.projection.messages.find(
-            (candidate) => candidate.id === input.messageId,
-          );
-          const run = loaded.projection.runs.find(
-            (candidate) => candidate.activeAttemptId === loaded.providerTurn.runAttemptId,
-          );
+          const { message, run } = loaded.context;
           if (message === undefined || run === undefined) {
             return yield* new ProviderTurnControlError({
               threadId: input.threadId,

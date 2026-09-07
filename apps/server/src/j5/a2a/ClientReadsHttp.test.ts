@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
-import * as NodeSqliteClient from "../../persistence/NodeSqliteClient.ts";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as ProjectService from "../../project/ProjectService.ts";
 import { ClientReadsService } from "./ClientReadsService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";

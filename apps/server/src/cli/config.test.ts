@@ -20,6 +20,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { deriveServerPaths } from "../config.ts";
 import { resolveBaseDir } from "../os-jank.ts";
 import { resolveServerConfig } from "./config.ts";
+import { createDevRunnerEnv } from "../../../../scripts/dev-runner.ts";
 
 const deriveExplicitServerPaths = (baseDir: string, devUrl: URL | undefined) =>
   deriveServerPaths(baseDir, devUrl, { baseDirIsExplicit: true });
@@ -61,9 +62,79 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     yield* fs.writeFileString(filePath, `${encoded}\n`);
     return yield* Effect.acquireRelease(
       Effect.sync(() => NodeFS.openSync(filePath, "r")),
-      (fd) => Effect.sync(() => NodeFS.closeSync(fd)),
+      // Without a /proc or /dev/fd path to reopen, the reader consumes the fd
+      // itself (autoClose), so on Windows it is already closed here.
+      (fd) =>
+        Effect.sync(() => {
+          try {
+            NodeFS.closeSync(fd);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "EBADF") throw error;
+          }
+        }),
     );
   });
+
+  it.effect("opens the explicit disposable home carried by the dev runner", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "j5-dev-server-home-" });
+      const baseDir = path.join(root, "candidate");
+      const upstreamHome = path.join(root, "upstream");
+      const env = yield* createDevRunnerEnv({
+        mode: "dev",
+        baseEnv: { T3CODE_HOME: upstreamHome },
+        serverOffset: 0,
+        webOffset: 0,
+        t3Home: baseDir,
+        browser: false,
+        autoBootstrapProjectFromCwd: false,
+        logWebSocketEvents: undefined,
+        host: "127.0.0.1",
+        port: 14622,
+        devUrl: undefined,
+      });
+      const resolved = yield* resolveServerConfig(
+        {
+          mode: Option.none(),
+          port: Option.none(),
+          host: Option.none(),
+          baseDir: Option.none(),
+          cwd: Option.none(),
+          devUrl: Option.none(),
+          noBrowser: Option.none(),
+          bootstrapFd: Option.none(),
+          autoBootstrapProjectFromCwd: Option.none(),
+          logWebSocketEvents: Option.none(),
+          tailscaleServeEnabled: Option.none(),
+          tailscaleServePort: Option.none(),
+        },
+        Option.none(),
+        { startupPresentation: "headless" },
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(
+              ConfigProvider.fromEnv({
+                env: Object.fromEntries(
+                  Object.entries(env).flatMap(([key, value]) =>
+                    value === undefined ? [] : [[key, value]],
+                  ),
+                ),
+              }),
+            ),
+            NetService.layer,
+          ),
+        ),
+      );
+
+      assert.equal(resolved.baseDir, baseDir);
+      assert.equal(resolved.stateDir, path.join(baseDir, "userdata"));
+      assert.equal(resolved.dbPath, path.join(baseDir, "userdata", "state.sqlite"));
+      assert.isFalse(yield* fs.exists(upstreamHome));
+    }),
+  );
 
   it.effect("falls back to effect/config values when flags are omitted", () =>
     Effect.gen(function* () {
@@ -406,13 +477,15 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
   it.effect("uses bootstrap envelope values as fallbacks when flags and env are absent", () =>
     Effect.gen(function* () {
-      const { join } = yield* Path.Path;
-      const baseDir = "/tmp/t3-bootstrap-home";
+      const { join, resolve } = yield* Path.Path;
+      // The resolver absolutises the configured home, so the expectation must
+      // carry the host's drive on Windows.
+      const baseDir = resolve("/tmp/t3-bootstrap-home");
       const fd = yield* openBootstrapFd(
         makeDesktopBootstrap({
           port: 4888,
           host: "127.0.0.2",
-          t3Home: baseDir,
+          t3Home: "/tmp/t3-bootstrap-home",
           noBrowser: true,
           desktopBootstrapToken: "desktop-token",
           desktopTelemetryFd: 4,

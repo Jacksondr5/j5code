@@ -4,9 +4,9 @@ kind: ticket
 status: 0
 ---
 
-# A7 — Planned upstream rebase
+# A7 — Planned upstream base advance
 
-**Governing artifacts:** `FORK.md` in the repo (pin log + rebase runbook), `../../product/a2a/plan.md` §Base. **Trigger: upstream PR pingdotgg/t3code#2829 merges to main** — this ticket is scheduled work waiting on that event, not a surprise to absorb mid-build.
+**Governing artifacts:** `FORK.md` in the repo (pin log + integration runbook), `../../product/a2a/plan.md` §Base. **Trigger: upstream PR pingdotgg/t3code#2829 merges to main** — this ticket is scheduled work waiting on that event, not a surprise to absorb mid-build.
 
 ## Goal
 
@@ -15,8 +15,9 @@ Move the fork's base from the v2 branch pin onto upstream main post-merge, with 
 ## Scope
 
 - Detect the merge (whoever notices first — builder, sitter, or Director — flips this ticket to in-progress and tells the Director; pausing mid-flight A2A PRs is the Director's call).
-- Follow FORK.md's runbook: review the delta (the merge may be a squash — never assume our base commits exist in main's history), advance the pin onto the upstream release tag or merge commit, cherry-pick/rebase all J5 commits (they are new-file-only by discipline, so this should be mechanical — any conflict in an upstream file is a discipline violation to flag, not to quietly resolve).
-- Re-run the full baseline suite; diff against `../fork-setup-plan/baseline.md`; re-verify the BRANDING.md rename inventory and the A2 clientRequestId dedup gate on the new base.
+- The September 2026 reviewed integration selects V2 `b9fa1399cfbacf23f35ba9201af8aebe3f41e807`; this does not assert that #2829 has merged. Follow FORK.md's controlled-merge runbook for the later move to main. Freeze inputs, construct the new tree from upstream, reapply the reviewed J5 delta and preserve published J5 ancestry with a genuine merge. Conflicts are expected at documented integration cases and require review; they are not automatically a discipline violation.
+- Compare migration IDs, names and implementation hashes before every advance. Refuse unrecognized history changes until an explicit mapping and disposable upgrade proof exist. Preserve independent J5 migration lanes.
+- Obtain the full baseline suite through exact-head CI; diff against `../fork-setup-plan/baseline.md`; re-verify the BRANDING.md rename inventory and the A2 clientRequestId dedup gate on the new base.
 - Update FORK.md's pin log + the plan artifacts' base SHA references.
 
 ## Out of scope

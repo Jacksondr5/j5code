@@ -24,8 +24,17 @@ import {
   AuthWebSocketTicketResult,
   ServerAuthSessionMethod,
 } from "./auth.ts";
-import { AuthSessionId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
-import { ExecutionEnvironmentDescriptor } from "./environment.ts";
+import {
+  ExecutionEnvironmentDescriptor,
+  ORCHESTRATION_PROTOCOL_HEADER,
+  ORCHESTRATION_PROTOCOL_VERSION_TEXT,
+} from "./environment.ts";
+import {
+  DpopFailureReason,
+  AuthSessionId,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas.ts";
 import {
   OrchestrationV2ShellSnapshot,
   OrchestrationV2ThreadBoundedSnapshot,
@@ -52,6 +61,12 @@ import {
 const OptionalBearerHeaders = Schema.Struct({
   authorization: Schema.optionalKey(Schema.String),
   dpop: Schema.optionalKey(Schema.String),
+});
+
+const OrchestrationProtocolHeaders = Schema.Struct({
+  authorization: Schema.optionalKey(Schema.String),
+  dpop: Schema.optionalKey(Schema.String),
+  [ORCHESTRATION_PROTOCOL_HEADER]: Schema.Literal(ORCHESTRATION_PROTOCOL_VERSION_TEXT),
 });
 
 const OptionalDpopProofHeaders = Schema.Struct({
@@ -121,6 +136,8 @@ export class EnvironmentAuthInvalidError extends Schema.TaggedErrorClass<Environ
   {
     code: Schema.Literal("auth_invalid"),
     reason: EnvironmentAuthInvalidReason,
+    // Older servers do not send a DPoP failure category.
+    dpopFailureReason: Schema.optionalKey(DpopFailureReason),
     traceId: TrimmedNonEmptyString,
   },
   { httpApiStatus: 401 },
@@ -509,14 +526,14 @@ const EnvironmentOrchestrationThreadHistoryErrors = [
 export class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make("orchestration")
   .add(
     HttpApiEndpoint.get("shellSnapshot", "/api/orchestration/shell", {
-      headers: OptionalBearerHeaders,
+      headers: OrchestrationProtocolHeaders,
       success: OrchestrationV2ShellSnapshot,
       error: EnvironmentOrchestrationSnapshotErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(
     HttpApiEndpoint.get("threadSnapshot", "/api/orchestration/threads/:threadId", {
-      headers: OptionalBearerHeaders,
+      headers: OrchestrationProtocolHeaders,
       params: EnvironmentOrchestrationThreadSnapshotParams,
       success: OrchestrationV2ThreadDetailSnapshot,
       error: EnvironmentOrchestrationThreadSnapshotErrors,
@@ -524,7 +541,7 @@ export class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make("orchestr
   )
   .add(
     HttpApiEndpoint.get("threadBoundedSnapshot", "/api/orchestration/threads/:threadId/bounded", {
-      headers: OptionalBearerHeaders,
+      headers: OrchestrationProtocolHeaders,
       params: EnvironmentOrchestrationThreadSnapshotParams,
       success: OrchestrationV2ThreadBoundedSnapshot,
       error: EnvironmentOrchestrationThreadSnapshotErrors,
@@ -532,7 +549,7 @@ export class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make("orchestr
   )
   .add(
     HttpApiEndpoint.get("threadHistoryPage", "/api/orchestration/threads/:threadId/history", {
-      headers: OptionalBearerHeaders,
+      headers: OrchestrationProtocolHeaders,
       params: EnvironmentOrchestrationThreadSnapshotParams,
       query: EnvironmentOrchestrationThreadHistoryQuery,
       success: OrchestrationV2ThreadHistoryPage,

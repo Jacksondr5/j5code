@@ -24,26 +24,22 @@ import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderRuntimeRecovery from "./ProviderRuntimeRecoveryService.ts";
+import * as ServerSettings from "../serverSettings.ts";
 
 it.effect("drains durable effects before reporting recovery complete", () =>
   Effect.gen(function* () {
     const runs = yield* Ref.make(0);
     const layer = ProviderRuntimeRecovery.layer.pipe(
+      Layer.provide(ServerSettings.layerTest()),
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
-            getShellSnapshot: () =>
-              Effect.succeed({
-                schemaVersion: 2,
-                snapshotSequence: 0,
-                threads: [],
-                archivedThreads: [],
-              }),
+            getRecoveryThreadIds: () => Effect.succeed([]),
           }),
           Layer.mock(EventSink.EventSinkV2)({}),
           IdAllocator.layer,
           Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({
-            runOnce: Ref.getAndUpdate(runs, (count) => count + 1).pipe(
+            runRecoveryOnce: Ref.getAndUpdate(runs, (count) => count + 1).pipe(
               Effect.map((count) => count < 2),
             ),
           }),
@@ -94,21 +90,18 @@ it.effect("expires orphaned runtime requests before command readiness", () => {
     nodes: [],
   } as unknown as OrchestrationV2ThreadProjection;
   const layer = ProviderRuntimeRecovery.layer.pipe(
+    Layer.provide(ServerSettings.layerTest()),
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getShellSnapshot: () =>
-            Effect.succeed({
-              schemaVersion: 2,
-              snapshotSequence: 0,
-              threads: [{ id: threadId }],
-              archivedThreads: [],
-            } as never),
+          getRecoveryThreadIds: () => Effect.succeed([threadId]),
           getThreadProjection: () => Effect.succeed(projection),
         }),
         Layer.mock(EventSink.EventSinkV2)({ commitCommand: committed }),
         IdAllocator.layer,
-        Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({ runOnce: Effect.succeed(false) }),
+        Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({
+          runRecoveryOnce: Effect.succeed(false),
+        }),
         Layer.mock(EffectOutbox.EffectOutboxV2)({
           reconcileAfterProcessLoss: Effect.succeed({ requeued: 0, cancelled: 0 }),
         }),
@@ -125,6 +118,55 @@ it.effect("expires orphaned runtime requests before command readiness", () => {
       assert.equal(command.events[0].payload.status, "expired");
       assert.equal(command.events[0].payload.responseCapability.type, "not_resumable");
     }
+  }).pipe(Effect.provide(layer));
+});
+
+it.effect("preserves async questions across startup and shutdown", () => {
+  const threadId = ThreadId.make("async-recovery-thread");
+  const nodeId = NodeId.make("async-recovery-node");
+  const projection = {
+    thread: { id: threadId },
+    runtimeRequests: [
+      {
+        id: RuntimeRequestId.make("async-recovery-request"),
+        nodeId,
+        status: "pending",
+        responseCapability: { type: "message" },
+      },
+    ],
+    providerSessions: [],
+    providerThreads: [],
+    runs: [],
+    nodes: [],
+    turnItems: [],
+  } as unknown as OrchestrationV2ThreadProjection;
+  const commitCommand = vi.fn(() => Effect.die("an async question needs no process-loss write"));
+  const layer = ProviderRuntimeRecovery.layer.pipe(
+    Layer.provide(ServerSettings.layerTest()),
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getRecoveryThreadIds: () => Effect.succeed([threadId]),
+          getThreadProjection: () => Effect.succeed(projection),
+        }),
+        Layer.mock(EventSink.EventSinkV2)({ commitCommand }),
+        IdAllocator.layer,
+        Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({
+          runRecoveryOnce: Effect.succeed(false),
+        }),
+        Layer.mock(EffectOutbox.EffectOutboxV2)({
+          reconcileAfterProcessLoss: Effect.succeed({ requeued: 0, cancelled: 0 }),
+          cancelUnsettled: () => Effect.succeed([]),
+          signalCancellations: () => Effect.void,
+        }),
+      ),
+    ),
+  );
+  return Effect.gen(function* () {
+    const recovery = yield* ProviderRuntimeRecovery.ProviderRuntimeRecoveryService;
+    assert.equal((yield* recovery.reconcile("startup")).closedRequests, 0);
+    assert.equal((yield* recovery.reconcile("startup")).closedRequests, 0);
+    assert.isFalse(commitCommand.mock.calls.length > 0);
   }).pipe(Effect.provide(layer));
 });
 
@@ -148,16 +190,11 @@ it.effect("uses the same reconciliation path to cancel runtime requests during s
     nodes: [],
   } as unknown as OrchestrationV2ThreadProjection;
   const layer = ProviderRuntimeRecovery.layer.pipe(
+    Layer.provide(ServerSettings.layerTest()),
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getShellSnapshot: () =>
-            Effect.succeed({
-              schemaVersion: 2,
-              snapshotSequence: 0,
-              threads: [{ id: threadId }],
-              archivedThreads: [],
-            } as never),
+          getRecoveryThreadIds: () => Effect.succeed([threadId]),
           getThreadProjection: () => Effect.succeed(projection),
         }),
         Layer.mock(EventSink.EventSinkV2)({
@@ -167,7 +204,9 @@ it.effect("uses the same reconciliation path to cancel runtime requests during s
           },
         }),
         IdAllocator.layer,
-        Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({ runOnce: Effect.succeed(false) }),
+        Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({
+          runRecoveryOnce: Effect.succeed(false),
+        }),
         Layer.mock(EffectOutbox.EffectOutboxV2)({
           reconcileAfterProcessLoss: Effect.succeed({ requeued: 0, cancelled: 0 }),
         }),
@@ -234,16 +273,11 @@ it.effect(
       ],
     } as unknown as OrchestrationV2ThreadProjection;
     const layer = ProviderRuntimeRecovery.layer.pipe(
+      Layer.provide(ServerSettings.layerTest()),
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
-            getShellSnapshot: () =>
-              Effect.succeed({
-                schemaVersion: 2,
-                snapshotSequence: 0,
-                threads: [{ id: threadId }],
-                archivedThreads: [],
-              } as never),
+            getRecoveryThreadIds: () => Effect.succeed([threadId]),
             getThreadProjection: () => Effect.succeed(projection),
           }),
           Layer.mock(EventSink.EventSinkV2)({
@@ -256,7 +290,9 @@ it.effect(
             },
           }),
           IdAllocator.layer,
-          Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({ runOnce: Effect.succeed(false) }),
+          Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({
+            runRecoveryOnce: Effect.succeed(false),
+          }),
           Layer.mock(EffectOutbox.EffectOutboxV2)({
             listByCommandId: () =>
               Effect.succeed([
@@ -326,16 +362,11 @@ it.effect("cancels a stale waiting run when no checkpoint capture can finish it"
     turnItems: [],
   } as unknown as OrchestrationV2ThreadProjection;
   const layer = ProviderRuntimeRecovery.layer.pipe(
+    Layer.provide(ServerSettings.layerTest()),
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getShellSnapshot: () =>
-            Effect.succeed({
-              schemaVersion: 2,
-              snapshotSequence: 0,
-              threads: [{ id: threadId }],
-              archivedThreads: [],
-            } as never),
+          getRecoveryThreadIds: () => Effect.succeed([threadId]),
           getThreadProjection: () => Effect.succeed(projection),
         }),
         Layer.mock(EventSink.EventSinkV2)({
@@ -345,7 +376,9 @@ it.effect("cancels a stale waiting run when no checkpoint capture can finish it"
           },
         }),
         IdAllocator.layer,
-        Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({ runOnce: Effect.succeed(false) }),
+        Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({
+          runRecoveryOnce: Effect.succeed(false),
+        }),
         Layer.mock(EffectOutbox.EffectOutboxV2)({
           listByCommandId: () => Effect.succeed([]),
           reconcileAfterProcessLoss: Effect.succeed({ requeued: 0, cancelled: 0 }),
@@ -404,16 +437,11 @@ it.effect("cancels accepted queued work instead of replaying it after restart", 
     turnItems: [],
   } as unknown as OrchestrationV2ThreadProjection;
   const layer = ProviderRuntimeRecovery.layer.pipe(
+    Layer.provide(ServerSettings.layerTest()),
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getShellSnapshot: () =>
-            Effect.succeed({
-              schemaVersion: 2,
-              snapshotSequence: 0,
-              threads: [{ id: threadId }],
-              archivedThreads: [],
-            } as never),
+          getRecoveryThreadIds: () => Effect.succeed([threadId]),
           getThreadProjection: () => Effect.succeed(projection),
         }),
         Layer.mock(EventSink.EventSinkV2)({
@@ -423,7 +451,9 @@ it.effect("cancels accepted queued work instead of replaying it after restart", 
           },
         }),
         IdAllocator.layer,
-        Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({ runOnce: Effect.succeed(false) }),
+        Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({
+          runRecoveryOnce: Effect.succeed(false),
+        }),
         Layer.mock(EffectOutbox.EffectOutboxV2)({
           reconcileAfterProcessLoss: Effect.succeed({ requeued: 0, cancelled: 0 }),
         }),
@@ -519,16 +549,11 @@ it.effect(
       ],
     } as unknown as OrchestrationV2ThreadProjection;
     const layer = ProviderRuntimeRecovery.layer.pipe(
+      Layer.provide(ServerSettings.layerTest()),
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
-            getShellSnapshot: () =>
-              Effect.succeed({
-                schemaVersion: 2,
-                snapshotSequence: 0,
-                threads: [{ id: threadId }],
-                archivedThreads: [],
-              } as never),
+            getRecoveryThreadIds: () => Effect.succeed([threadId]),
             getThreadProjection: () => Effect.succeed(projection),
           }),
           Layer.mock(EventSink.EventSinkV2)({
@@ -538,7 +563,9 @@ it.effect(
             },
           }),
           IdAllocator.layer,
-          Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({ runOnce: Effect.succeed(false) }),
+          Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({
+            runRecoveryOnce: Effect.succeed(false),
+          }),
           Layer.mock(EffectOutbox.EffectOutboxV2)({
             reconcileAfterProcessLoss: Effect.succeed({ requeued: 0, cancelled: 0 }),
           }),
@@ -707,16 +734,11 @@ it.effect(
       ],
     } as unknown as OrchestrationV2ThreadProjection;
     const layer = ProviderRuntimeRecovery.layer.pipe(
+      Layer.provide(ServerSettings.layerTest()),
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
-            getShellSnapshot: () =>
-              Effect.succeed({
-                schemaVersion: 2,
-                snapshotSequence: 0,
-                threads: [{ id: threadId }],
-                archivedThreads: [],
-              } as never),
+            getRecoveryThreadIds: () => Effect.succeed([threadId]),
             getThreadProjection: () => Effect.succeed(projection),
           }),
           Layer.mock(EventSink.EventSinkV2)({
@@ -726,7 +748,9 @@ it.effect(
             },
           }),
           IdAllocator.layer,
-          Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({ runOnce: Effect.succeed(false) }),
+          Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({
+            runRecoveryOnce: Effect.succeed(false),
+          }),
           Layer.mock(EffectOutbox.EffectOutboxV2)({
             listByCommandId: () => Effect.succeed([]),
             reconcileAfterProcessLoss: Effect.succeed({ requeued: 0, cancelled: 0 }),
@@ -790,6 +814,131 @@ it.effect(
           ? activeThreadEvent.payload.status
           : null,
         "idle",
+      );
+    }).pipe(Effect.provide(layer));
+  },
+);
+
+it.effect(
+  "terminalizes a leftover nonpersistent dynamic_tool on a settled run after process loss",
+  () => {
+    const threadId = ThreadId.make("thread_recovery_orphan_wait");
+    const settledRunId = RunId.make("run_recovery_orphan_wait_settled");
+    const providerThreadId = ProviderThreadId.make("provider_thread_recovery_orphan_wait");
+    const orphanWaitItemId = TurnItemId.make(
+      "turn-item:provider:codex:native-item:exec-4669f3bb-78c9-4af1-b44e-daa340d2c538",
+    );
+    const persistentMonitorItemId = TurnItemId.make(
+      "turn-item:provider:codex:native-item:exec-persistent-monitor",
+    );
+    const orphanWaitNodeId = NodeId.make("node_recovery_orphan_wait");
+    const persistentMonitorNodeId = NodeId.make("node_recovery_persistent_monitor");
+    const codexInstanceId = ProviderInstanceId.make("codex");
+    let committedInput: Parameters<EventSink.EventSinkV2["Service"]["commitCommand"]>[0] | null =
+      null;
+    const projection = {
+      thread: { id: threadId, providerInstanceId: codexInstanceId },
+      runtimeRequests: [],
+      providerSessions: [],
+      providerThreads: [
+        {
+          id: providerThreadId,
+          driver: ProviderDriverKind.make("codex"),
+          providerInstanceId: codexInstanceId,
+          status: "idle",
+          pendingBackgroundTasks: [],
+        },
+      ],
+      providerTurns: [],
+      runs: [{ id: settledRunId, status: "completed", providerInstanceId: codexInstanceId }],
+      attempts: [],
+      nodes: [
+        { id: orphanWaitNodeId, runId: settledRunId, status: "running", kind: "tool_call" },
+        {
+          id: persistentMonitorNodeId,
+          runId: settledRunId,
+          status: "running",
+          kind: "tool_call",
+        },
+      ],
+      subagents: [],
+      messages: [],
+      turnItems: [
+        {
+          id: orphanWaitItemId,
+          runId: settledRunId,
+          nodeId: orphanWaitNodeId,
+          providerThreadId,
+          type: "dynamic_tool",
+          status: "running",
+          toolName: "t3-code.t3_thread_wait",
+          input: {
+            threadId:
+              "thread:delegated-task:command%3Amcp%3Aaafffab1-e811-458a-ae83-558e542c61ff%3Adelegate-task%3Areview-mobile-reconnect-opus-20260815",
+            timeoutMs: 30000,
+          },
+        },
+        {
+          id: persistentMonitorItemId,
+          runId: settledRunId,
+          nodeId: persistentMonitorNodeId,
+          providerThreadId,
+          type: "dynamic_tool",
+          status: "running",
+          toolName: "grok.monitor",
+          input: { persistent: true, command: "tail -f" },
+        },
+      ],
+    } as unknown as OrchestrationV2ThreadProjection;
+    const layer = ProviderRuntimeRecovery.layer.pipe(
+      Layer.provide(ServerSettings.layerTest()),
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(ProjectionStore.ProjectionStoreV2)({
+            getRecoveryThreadIds: () => Effect.succeed([threadId]),
+            getThreadProjection: () => Effect.succeed(projection),
+          }),
+          Layer.mock(EventSink.EventSinkV2)({
+            commitCommand: (input) => {
+              committedInput = input;
+              return Effect.succeed({ committed: true, cancelledEffectCount: 0 } as never);
+            },
+          }),
+          IdAllocator.layer,
+          Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({
+            runRecoveryOnce: Effect.succeed(false),
+          }),
+          Layer.mock(EffectOutbox.EffectOutboxV2)({
+            listByCommandId: () => Effect.succeed([]),
+            reconcileAfterProcessLoss: Effect.succeed({ requeued: 0, cancelled: 0 }),
+          }),
+        ),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const summary =
+        yield* (yield* ProviderRuntimeRecovery.ProviderRuntimeRecoveryService).reconcile("startup");
+      assert.equal(summary.terminalizedRuns, 0);
+      const turnItemCancels = (committedInput?.events ?? []).filter(
+        (event) => event.type === "turn-item.updated" && event.payload.status === "cancelled",
+      );
+      // Process loss means the provider is gone, so even a persistent monitor
+      // cannot still be alive. The leftover wait and the monitor both close.
+      assert.equal(turnItemCancels.length, 2);
+      assert.deepEqual(
+        turnItemCancels
+          .map((event) => event.type === "turn-item.updated" && event.payload.id)
+          .sort(),
+        [orphanWaitItemId, persistentMonitorItemId].sort(),
+      );
+      const nodeCancels = (committedInput?.events ?? []).filter(
+        (event) => event.type === "node.updated" && event.payload.status === "cancelled",
+      );
+      assert.equal(nodeCancels.length, 2);
+      assert.deepEqual(
+        nodeCancels.map((event) => event.type === "node.updated" && event.payload.id).sort(),
+        [orphanWaitNodeId, persistentMonitorNodeId].sort(),
       );
     }).pipe(Effect.provide(layer));
   },
@@ -872,16 +1021,11 @@ it.effect(
       ],
     } as unknown as OrchestrationV2ThreadProjection;
     const layer = ProviderRuntimeRecovery.layer.pipe(
+      Layer.provide(ServerSettings.layerTest()),
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
-            getShellSnapshot: () =>
-              Effect.succeed({
-                schemaVersion: 2,
-                snapshotSequence: 0,
-                threads: [{ id: threadId }],
-                archivedThreads: [],
-              } as never),
+            getRecoveryThreadIds: () => Effect.succeed([threadId]),
             getThreadProjection: () => Effect.succeed(projection),
           }),
           Layer.mock(EventSink.EventSinkV2)({
@@ -891,7 +1035,9 @@ it.effect(
             },
           }),
           IdAllocator.layer,
-          Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({ runOnce: Effect.succeed(false) }),
+          Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({
+            runRecoveryOnce: Effect.succeed(false),
+          }),
           Layer.mock(EffectOutbox.EffectOutboxV2)({
             listByCommandId: () => Effect.succeed([]),
             reconcileAfterProcessLoss: Effect.succeed({ requeued: 0, cancelled: 0 }),

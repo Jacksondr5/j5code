@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 const state = vi.hoisted(() => ({
   projection: null as unknown,
   workflow: null as unknown,
-  participantLabels: new Map<string, string>(),
 }));
 
 vi.mock("@t3tools/client-runtime/environment", () => ({
@@ -22,7 +21,6 @@ vi.mock("../../state/entities", () => ({
 vi.mock("../../state/threads", () => ({
   threadEnvironment: {
     cancelQueuedRun: Symbol("cancelQueuedRun"),
-    editQueuedRun: Symbol("editQueuedRun"),
     promoteQueuedRun: Symbol("promoteQueuedRun"),
     reorderQueuedRun: Symbol("reorderQueuedRun"),
   },
@@ -32,8 +30,9 @@ vi.mock("../../state/use-atom-command", () => ({
   useAtomCommand: () => async () => undefined,
 }));
 
-vi.mock("../../j5/a2a/ParticipantIdentitiesClient", () => ({
-  useParticipantLabels: () => state.participantLabels,
+vi.mock("../../assets/assetUrls", () => ({
+  useAssetUrls: (_environmentId: never, resources: ReadonlyArray<{ attachmentId: string }>) =>
+    resources.map((resource) => `https://assets.test/${resource.attachmentId}`),
 }));
 
 import { QueuedRunsControl } from "./QueuedRunsControl";
@@ -66,71 +65,107 @@ describe("QueuedRunsControl automatic completion delivery", () => {
         environmentId={"environment:test" as never}
         optimisticMessages={[]}
         threadId={"thread:test" as never}
+        editingRunId={null}
+        onEditQueuedRun={() => undefined}
+        onCancelEdit={() => undefined}
       />,
     );
 
     expect(html).toBe("");
   });
+});
 
-  it("renders queued peer delivery sender and first line through the shared timeline formatter", () => {
-    state.projection = { projection: {} };
-    state.workflow = {
-      activeRun: null,
-      canPromoteToSteer: false,
-      canReorder: false,
-      queuedRuns: [
-        {
-          run: { id: "run:queued", userMessageId: "message:queued" },
-          text: [
-            "[Cross-agent message from agent:delivery-sender in squadron squadron:alpha]",
-            "",
-            "First line of the queued delivery.",
-            "Second line is not the strip label.",
-            "",
-            "No reply is required. Use send_message without exchange_id only if a new message is needed.",
-          ].join("\n"),
-        },
-      ],
-    };
-    state.participantLabels = new Map([["agent:delivery-sender", "Alice"]]);
+describe("QueuedRunsControl attachments and edit mode", () => {
+  const workflowWithAttachment = () => ({
+    activeRun: { id: "run:active" },
+    canPromoteToSteer: true,
+    canReorder: true,
+    queuedRuns: [
+      {
+        run: { id: "run:queued", userMessageId: "message:queued" },
+        text: "Queued with a screenshot",
+        attachments: [
+          {
+            type: "image",
+            id: "attachment-1",
+            name: "screenshot.png",
+            mimeType: "image/png",
+            sizeBytes: 128,
+          },
+        ],
+      },
+    ],
+  });
+
+  it("renders an attachment thumbnail on the queued row", () => {
+    state.projection = { projection: { messages: [] } };
+    state.workflow = workflowWithAttachment();
 
     const html = renderToStaticMarkup(
       <QueuedRunsControl
         environmentId={"environment:test" as never}
         optimisticMessages={[]}
         threadId={"thread:test" as never}
+        editingRunId={null}
+        onEditQueuedRun={() => undefined}
+        onCancelEdit={() => undefined}
       />,
     );
 
-    expect(html).toContain("From Alice — First line of the queued delivery.");
-    expect(html).not.toContain("Second line is not the strip label.");
+    expect(html).toContain("https://assets.test/attachment-1");
+    expect(html).toContain("Queued with a screenshot");
+    expect(html).toContain("Edit queued message");
+    expect(html).toContain("Reorder queued message");
+    expect(html).not.toContain("Move queued message up");
   });
 
-  it("keeps an unknown queued sender unnamed and exposes its durable id only in the tooltip", () => {
-    state.participantLabels = new Map();
+  it("drops the optimistic pending row once the projection holds its message", () => {
+    state.projection = {
+      projection: { messages: [{ id: "message:acknowledged", text: "hello" }] },
+    };
+    state.workflow = {
+      activeRun: { id: "run:active" },
+      canPromoteToSteer: true,
+      canReorder: true,
+      queuedRuns: [],
+    };
+
     const html = renderToStaticMarkup(
       <QueuedRunsControl
         environmentId={"environment:test" as never}
-        optimisticMessages={
-          [
-            {
-              id: "message:unknown",
-              inputIntent: "queued_turn",
-              text: [
-                "[Cross-agent message from agent:unknown in squadron squadron:alpha]",
-                "",
-                "Queue fallback body.",
-                "",
-                "No reply is required. Use send_message without exchange_id only if a new message is needed.",
-              ].join("\n"),
-            },
-          ] as never
-        }
+        optimisticMessages={[
+          {
+            id: "message:acknowledged" as never,
+            inputIntent: "queued_turn",
+            text: "hello",
+            attachments: [],
+          },
+        ]}
         threadId={"thread:test" as never}
+        editingRunId={null}
+        onEditQueuedRun={() => undefined}
+        onCancelEdit={() => undefined}
       />,
     );
 
-    expect(html).toContain("From Unnamed participant — Queue fallback body.");
-    expect(html).toContain('title="agent:unknown"');
+    expect(html).toBe("");
+  });
+
+  it("keeps the original queued message visible while editing", () => {
+    state.projection = { projection: { messages: [] } };
+    state.workflow = workflowWithAttachment();
+
+    const html = renderToStaticMarkup(
+      <QueuedRunsControl
+        environmentId={"environment:test" as never}
+        optimisticMessages={[]}
+        threadId={"thread:test" as never}
+        editingRunId={"run:queued" as never}
+        onEditQueuedRun={() => undefined}
+        onCancelEdit={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Queued with a screenshot");
   });
 });

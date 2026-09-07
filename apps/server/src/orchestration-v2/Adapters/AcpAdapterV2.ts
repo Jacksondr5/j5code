@@ -19,6 +19,7 @@ import {
   type OrchestrationV2TurnItem,
   type OrchestrationV2UserInputQuestion,
   type ProviderApprovalDecision,
+  type ProviderApprovalOption,
   type ProviderInstanceId,
   type ProviderDriverKind,
   type ProviderRequestKind,
@@ -61,10 +62,15 @@ import type {
 } from "../../provider/acp/AcpSessionRuntime.ts";
 import * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
 import { t3OrchestrationPromptForFirstRun } from "../../provider/T3OrchestrationInstructions.ts";
+import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
 import { IdAllocatorV2, type IdAllocatorV2Shape } from "../IdAllocator.ts";
 import { type ProviderContinuationRequest } from "../ProviderContinuationRequests.ts";
 import { makeProviderFailure } from "../ProviderFailure.ts";
 import { acpSelectionTransition } from "../ProviderSelectionTransition.ts";
+import {
+  isProviderNativeImageAttachment,
+  providerMessageTextWithAttachmentPaths,
+} from "../AttachmentPrompt.ts";
 import {
   makeSubagentChildThread,
   makeSubagentConversationArtifacts,
@@ -141,6 +147,10 @@ export interface AcpAdapterV2ExtensionContext {
     },
     EffectAcpErrors.AcpError
   >;
+  /** Surfaces plan markdown as this turn's proposed-plan card (#8358). */
+  readonly captureProposedPlan: (input: { readonly planMarkdown: string }) => Effect.Effect<void>;
+  /** Last markdown captured for the active turn, as the exit-gate fallback. */
+  readonly lastProposedPlanMarkdown: Effect.Effect<string | undefined>;
 }
 
 export interface AcpRootTurnIdleSnapshot {
@@ -202,6 +212,47 @@ export interface AcpAdapterV2Flavor {
     Crypto.Crypto | Scope.Scope
   >;
   readonly resolveModelId?: (selection: ModelSelection) => string | undefined;
+  /**
+   * Replaces the default model application on session setup. Returns the model
+   * the session now runs on. Antigravity resolves its provider-default alias
+   * against the account's catalog instead of sending it to the agent.
+   */
+  readonly applyModelSelection?: (input: {
+    readonly runtime: AcpSessionRuntime.AcpSessionRuntime["Service"];
+    readonly startResult: AcpSessionRuntimeStartResult;
+    readonly modelSelection: ModelSelection;
+  }) => Effect.Effect<string | undefined, EffectAcpErrors.AcpError>;
+  /** Native session mode to select for a runtime policy (e.g. Antigravity `yolo`). */
+  readonly sessionModeForPolicy?: (policy: ProviderAdapterV2RuntimePolicy) => string | undefined;
+  /**
+   * Permission requests that are really questions (Antigravity `interaction_*`
+   * tool calls). Returns the question and a response builder; undefined routes
+   * the request through the normal approval card.
+   */
+  readonly extractPermissionQuestion?: (request: EffectAcpSchema.RequestPermissionRequest) =>
+    | {
+        readonly question: OrchestrationV2UserInputQuestion;
+        readonly respond: (
+          answers: ProviderUserInputAnswers,
+        ) => EffectAcpSchema.RequestPermissionResponse | undefined;
+      }
+    | undefined;
+  /** Approval choices to advertise on the approval card for a permission request. */
+  readonly approvalOptions?: (
+    request: EffectAcpSchema.RequestPermissionRequest,
+  ) => ReadonlyArray<ProviderApprovalOption>;
+  /**
+   * Activate saved sessions with `session/resume` before `session/load` when
+   * the agent supports both. Antigravity's load replays history slowly.
+   */
+  readonly preferResumeSession?: boolean;
+  readonly onSessionEvent?: (
+    event: AcpSessionRuntime.AcpSessionRuntimeEvent,
+  ) => Effect.Effect<void>;
+  /** Batch launches without child completion signals become idle when the root turn ends. */
+  readonly subagentsIdleOnTurnCompletion?: boolean;
+  readonly supportsCompaction?: boolean;
+  readonly runtimeHarness?: string;
   readonly registerExtensions?: (
     context: AcpAdapterV2ExtensionContext,
   ) => Effect.Effect<void, EffectAcpErrors.AcpError>;
@@ -213,6 +264,12 @@ export interface AcpAdapterV2Flavor {
    * ACKs in the running state until stream end).
    */
   readonly normalizeToolCall?: (toolCall: AcpToolCallState) => AcpToolCallState;
+  /**
+   * Optional plan-file sniffing (#8358): providers that write their proposed
+   * plan to a file mid-turn (Grok plan.md) return its markdown from a tool
+   * call so T3 can show the proposed-plan card while plan mode is active.
+   */
+  readonly extractProposedPlanMarkdown?: (toolCall: AcpToolCallState) => string | undefined;
   /**
    * Optional mapping from a long-lived background tool start ACK to a task id
    * (e.g. monitor task uuid) so later synthetic text events can update it.
@@ -327,7 +384,14 @@ export interface AcpAdapterV2SubagentUpdate {
   readonly prompt: string;
   readonly title: string | null;
   readonly model: string | null;
-  readonly status: "pending" | "running" | "completed" | "failed" | "interrupted" | "cancelled";
+  readonly status:
+    | "pending"
+    | "running"
+    | "idle"
+    | "completed"
+    | "failed"
+    | "interrupted"
+    | "cancelled";
   readonly childSessionId: string | null;
   readonly result: string | null;
   /**
@@ -613,22 +677,25 @@ export function acpNativeUserInputRequestMatches(
   ) {
     return false;
   }
-  if (
-    transport.method !== "x.ai/ask_user_question" &&
-    transport.method !== "_x.ai/ask_user_question"
-  ) {
-    return false;
-  }
   if (transport.method !== request.nativeMethod) {
     return false;
   }
   const payloadRecord = unknownRecord(transport.payload);
   const paramsRecord = unknownRecord(payloadRecord?.params) ?? payloadRecord;
+  // Antigravity asks questions through `session/request_permission`, keyed by
+  // the tool call; xAI uses a dedicated extension method with a flat payload.
+  const toolCallId =
+    transport.method === "session/request_permission"
+      ? unknownRecord(paramsRecord?.toolCall)?.toolCallId
+      : transport.method === "x.ai/ask_user_question" ||
+          transport.method === "_x.ai/ask_user_question"
+        ? paramsRecord?.toolCallId
+        : undefined;
   return (
-    paramsRecord?.toolCallId !== undefined &&
-    String(paramsRecord.toolCallId).trim().length > 0 &&
-    String(paramsRecord.toolCallId) === request.nativeRequestId &&
-    paramsRecord.sessionId !== undefined &&
+    toolCallId !== undefined &&
+    String(toolCallId).trim().length > 0 &&
+    String(toolCallId) === request.nativeRequestId &&
+    paramsRecord?.sessionId !== undefined &&
     String(paramsRecord.sessionId).trim().length > 0 &&
     String(paramsRecord.sessionId) === request.nativeSessionId
   );
@@ -1268,7 +1335,8 @@ function acpSubagentStatusIsTerminal(status: OrchestrationV2Subagent["status"]):
     status === "completed" ||
     status === "failed" ||
     status === "interrupted" ||
-    status === "cancelled"
+    status === "cancelled" ||
+    status === "idle"
   );
 }
 
@@ -1853,6 +1921,119 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
             return updated;
           });
           return ordinal;
+        });
+
+        const lastCapturedProposedPlan = yield* Ref.make<{
+          readonly nativeTurnId: string;
+          readonly markdown: string;
+          readonly planId: OrchestrationV2PlanArtifact["id"];
+        } | null>(null);
+        /**
+         * Emits a completed proposed-plan artifact for the active turn. Same
+         * plan id per turn so repeated captures (plan.md rewrites, the exit
+         * gate) update one card; identical markdown within a turn is a no-op.
+         */
+        const captureProposedPlan = Effect.fnUntraced(function* (input: {
+          readonly planMarkdown: string;
+        }) {
+          const context = yield* Ref.get(activeTurn);
+          if (context === null) return;
+          const markdown = input.planMarkdown.trim();
+          if (markdown.length === 0) return;
+          const previous = yield* Ref.get(lastCapturedProposedPlan);
+          if (
+            previous !== null &&
+            previous.nativeTurnId === context.nativeTurnId &&
+            previous.markdown === markdown
+          ) {
+            return;
+          }
+          const nativeItemId = `${context.nativeTurnId}:proposed-plan`;
+          const planId =
+            previous !== null && previous.nativeTurnId === context.nativeTurnId
+              ? previous.planId
+              : yield* idAllocator.allocate
+                  .plan({
+                    threadId: context.input.threadId,
+                    runId: context.input.runId,
+                    driver,
+                  })
+                  .pipe(Effect.orDie);
+          yield* Ref.set(lastCapturedProposedPlan, {
+            nativeTurnId: context.nativeTurnId,
+            markdown,
+            planId,
+          });
+          const now = yield* DateTime.now;
+          const nodeId = idAllocator.derive.nodeFromProviderItem({ driver, nativeItemId });
+          const turnItemId = idAllocator.derive.turnItemFromProviderItem({ driver, nativeItemId });
+          const ordinal = yield* resolveItemOrdinal(context, nativeItemId);
+          const nativeItemRef = { driver, nativeId: nativeItemId, strength: "weak" as const };
+          yield* emitProviderEvent({
+            type: "node.updated",
+            driver,
+            node: {
+              id: nodeId,
+              threadId: context.input.threadId,
+              runId: context.input.runId,
+              parentNodeId: context.input.rootNodeId,
+              rootNodeId: context.input.rootNodeId,
+              kind: "plan",
+              status: "completed",
+              countsForRun: false,
+              providerThreadId: context.input.providerThread.id,
+              providerTurnId: context.providerTurnId,
+              nativeItemRef,
+              runtimeRequestId: null,
+              checkpointScopeId: null,
+              startedAt: context.startedAt,
+              completedAt: now,
+            },
+          });
+          yield* emitProviderEvent({
+            type: "plan.updated",
+            driver,
+            plan: {
+              id: planId,
+              threadId: context.input.threadId,
+              runId: context.input.runId,
+              nodeId,
+              kind: "proposed_plan",
+              status: "completed",
+              markdown,
+            },
+          });
+          yield* emitProviderEvent({
+            type: "turn_item.updated",
+            driver,
+            turnItem: {
+              id: turnItemId,
+              threadId: context.input.threadId,
+              runId: context.input.runId,
+              nodeId,
+              providerThreadId: context.input.providerThread.id,
+              providerTurnId: context.providerTurnId,
+              nativeItemRef,
+              parentItemId: null,
+              ordinal,
+              status: "completed",
+              title: null,
+              startedAt: context.startedAt,
+              completedAt: now,
+              updatedAt: now,
+              type: "proposed_plan",
+              planId,
+              markdown,
+              streaming: false,
+            },
+          });
+        });
+        const lastProposedPlanMarkdown = Effect.gen(function* () {
+          const context = yield* Ref.get(activeTurn);
+          const previous = yield* Ref.get(lastCapturedProposedPlan);
+          return context !== null && previous?.nativeTurnId === context.nativeTurnId
+            ? previous.markdown
+            : undefined;
         });
 
         const rememberSnapshotMessage = (message: OrchestrationV2ConversationMessage) =>
@@ -3113,6 +3294,10 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
             for (const event of parseSessionUpdateEvent(notification).events) {
               if (event._tag !== "ToolCallUpdated") continue;
               const toolCall = flavor.normalizeToolCall?.(event.toolCall) ?? event.toolCall;
+              const proposedPlanMarkdown = flavor.extractProposedPlanMarkdown?.(toolCall);
+              if (proposedPlanMarkdown !== undefined && proposedPlanMarkdown.length > 0) {
+                yield* captureProposedPlan({ planMarkdown: proposedPlanMarkdown });
+              }
               const toolTaskId = flavor.extractBackgroundTaskId?.(toolCall);
               if (
                 toolTaskId !== undefined &&
@@ -3596,6 +3781,7 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
         ) {
           yield* closeTextStreams(context);
           const parsed = parsePermissionRequest(params);
+          const approvalOptions = flavor.approvalOptions?.(params);
           const nativeRequestId = params.toolCall.toolCallId;
           const requestId = yield* idAllocator.allocate.runtimeRequest({
             driver,
@@ -3670,6 +3856,7 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
             requestId,
             requestKind,
             ...(parsed.detail === undefined ? {} : { prompt: parsed.detail }),
+            ...(approvalOptions === undefined ? {} : { options: approvalOptions }),
           };
           yield* Ref.update(pendingRuntimeRequests, (current) => {
             const updated = new Map(current);
@@ -4253,6 +4440,18 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
 
         const wireAcpRuntimeHandlers = Effect.fnUntraced(function* () {
           const handlerGeneration = yield* Ref.get(runtimeCallbackGeneration);
+          yield* runtime.getEvents().pipe(
+            Stream.runForEach((event) => {
+              if (event._tag === "EventStreamBarrier") {
+                return Deferred.succeed(event.acknowledge, undefined).pipe(Effect.asVoid);
+              }
+              return runRuntimeCallbackAtGeneration(
+                handlerGeneration,
+                flavor.onSessionEvent?.(event) ?? Effect.void,
+              ).pipe(Effect.asVoid);
+            }),
+            Effect.forkIn(runtimeScope ?? sessionScope),
+          );
           const requestUserInput = (request: AcpAdapterV2UserInputRequest) =>
             Effect.gen(function* () {
               const transportRequestId = yield* claimNativeTransportRequest(
@@ -4313,6 +4512,26 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
               );
               if (Option.isNone(correlated)) return yield* Effect.never;
               const correlatedTransportRequestId = correlated.value;
+              const permissionQuestion = flavor.extractPermissionQuestion?.(params);
+              if (permissionQuestion !== undefined) {
+                const userInput = yield* requestUserInputWithAdmission(
+                  handlerGeneration,
+                  Effect.succeed({
+                    nativeItemId: `${params.sessionId}:question:${params.toolCall.toolCallId}`,
+                    nativeMethod: "session/request_permission",
+                    nativeRequestId: params.toolCall.toolCallId,
+                    nativeSessionId: params.sessionId,
+                    questions: [permissionQuestion.question],
+                  }),
+                  correlatedTransportRequestId,
+                );
+                const response =
+                  userInput.answers === null
+                    ? undefined
+                    : permissionQuestion.respond(userInput.answers);
+                yield* userInput.acknowledgeNativeResponse;
+                return response ?? ({ outcome: { outcome: "cancelled" } } as const);
+              }
               const admitted = yield* runRuntimeCallbackAtGeneration(
                 handlerGeneration,
                 Effect.gen(function* () {
@@ -4526,6 +4745,8 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
             yield* flavor.registerExtensions({
               runtime,
               requestUserInput,
+              captureProposedPlan,
+              lastProposedPlanMarkdown,
               applyBackgroundTaskMutation: (mutation) =>
                 Effect.gen(function* () {
                   // Direct Stop quarantine: drop residual task lifecycle from
@@ -4580,6 +4801,9 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
           threadId: ThreadId | null,
         ) {
           const activationOptions = { mcpServers: acpMcpServers(threadId) };
+          if (canResumeSession && flavor.preferResumeSession === true) {
+            return yield* runtime.resumeSession(sessionId, activationOptions);
+          }
           if (canLoadSession) {
             return yield* runtime.loadSession(sessionId, activationOptions);
           }
@@ -4598,7 +4822,9 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
           runtimePolicy: ProviderAdapterV2RuntimePolicy,
         ) {
           const requestedModel = flavor.resolveModelId?.(modelSelection) ?? modelSelection.model;
-          if (
+          if (flavor.applyModelSelection !== undefined) {
+            yield* flavor.applyModelSelection({ runtime, startResult, modelSelection });
+          } else if (
             requestedModel.length > 0 &&
             requestedModel !== "auto" &&
             requestedModel !== "default"
@@ -4629,6 +4855,10 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
           }
           for (const selection of modelSelection.options ?? []) {
             yield* runtime.setConfigOption(selection.id, selection.value);
+          }
+          const policyMode = flavor.sessionModeForPolicy?.(runtimePolicy);
+          if (policyMode !== undefined) {
+            yield* runtime.setMode(policyMode);
           }
           const modeState = yield* runtime.getModeState;
           if (runtimePolicy.interactionMode === "plan" && modeState !== undefined) {
@@ -4749,6 +4979,20 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
             yield* drainTrailingRootTurnChunks();
           }
           const directStopQuarantine = yield* Ref.get(stoppedRunQuarantine);
+          if (flavor.subagentsIdleOnTurnCompletion === true) {
+            for (const subagent of context.subagents.values()) {
+              if (!acpSubagentStatusBlocksTurnSettlement(subagent.task.status)) continue;
+              yield* emitSubagent(context, {
+                nativeTaskId: subagent.task.nativeTaskRef?.nativeId ?? subagent.task.id,
+                prompt: subagent.task.prompt,
+                title: subagent.task.title,
+                model: subagent.task.model,
+                status: settledStatus === "completed" ? "idle" : settledStatus,
+                childSessionId: subagent.childSessionId,
+                result: null,
+              });
+            }
+          }
           if (settledStatus === "completed") {
             yield* terminalizeOpenForegroundTools(context);
           } else if (settledStatus === "interrupted") {
@@ -4760,6 +5004,36 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
           }
           yield* closeTextStreams(context);
           const now = yield* DateTime.now;
+          if (
+            flavor.supportsCompaction === true &&
+            context.input.message.text.trim() === "/compact" &&
+            context.input.message.attachments.length === 0 &&
+            settledStatus === "completed"
+          ) {
+            const nativeItemId = `${context.nativeTurnId}:compaction`;
+            yield* emitProviderEvent({
+              type: "turn_item.updated",
+              driver,
+              turnItem: {
+                id: idAllocator.derive.turnItemFromProviderItem({ driver, nativeItemId }),
+                threadId: context.input.threadId,
+                runId: context.input.runId,
+                nodeId: context.input.rootNodeId,
+                providerThreadId: context.input.providerThread.id,
+                providerTurnId: context.providerTurnId,
+                nativeItemRef: { driver, nativeId: nativeItemId, strength: "weak" },
+                parentItemId: null,
+                ordinal: yield* resolveItemOrdinal(context, nativeItemId),
+                type: "compaction",
+                driver,
+                status: "completed",
+                title: "Context compacted",
+                startedAt: context.startedAt,
+                completedAt: now,
+                updatedAt: now,
+              },
+            });
+          }
           const turn = providerTurnPayload(context, settledStatus, now);
           yield* Ref.update(providerTurns, (current) => {
             const updated = new Map(current);
@@ -4951,20 +5225,33 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
         ) {
           const prompt: Array<EffectAcpSchema.ContentBlock> = [];
           const text = t3OrchestrationPromptForFirstRun({
-            prompt: turnInput.message.text,
+            prompt: providerMessageTextWithAttachmentPaths({
+              text: turnInput.message.text,
+              attachments: turnInput.message.attachments,
+              attachmentsDir: serverConfig.attachmentsDir,
+            }),
             runOrdinal: turnInput.runOrdinal,
-            hasT3Mcp: acpMcpServers(turnInput.threadId).length > 0,
+            hasT3Mcp:
+              acpMcpServers(turnInput.threadId).length > 0 &&
+              !(
+                flavor.supportsCompaction === true &&
+                turnInput.message.text.trim() === "/compact" &&
+                turnInput.message.attachments.length === 0
+              ),
           });
           if (text.length > 0) {
             prompt.push({ type: "text", text });
           }
-          if (turnInput.message.attachments.length > 0 && !supportsImagePrompts) {
+          const imageAttachments = turnInput.message.attachments.filter(
+            isProviderNativeImageAttachment,
+          );
+          if (imageAttachments.length > 0 && !supportsImagePrompts) {
             return yield* new ProviderAdapterProtocolError({
               driver,
               detail: "ACP driver did not negotiate image prompt support",
             });
           }
-          for (const attachment of turnInput.message.attachments) {
+          for (const attachment of imageAttachments) {
             const path = resolveAttachmentPath({
               attachmentsDir: serverConfig.attachmentsDir,
               attachment: attachment as ChatAttachment,
@@ -4997,6 +5284,13 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
               detail: "ACP turn requires non-empty text or attachments",
             });
           }
+          prompt.push({
+            type: "text",
+            text: buildRuntimeInstructions({
+              harness: flavor.runtimeHarness ?? driver,
+              model: turnInput.modelSelection.model,
+            }),
+          });
           return prompt;
         });
 
@@ -5520,6 +5814,15 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
               ),
           ),
           startTurn,
+          ...(flavor.supportsCompaction === true
+            ? {
+                compactThread: (turnInput: ProviderAdapterV2TurnInput) =>
+                  startTurn({
+                    ...turnInput,
+                    message: { ...turnInput.message, text: "/compact" },
+                  }),
+              }
+            : {}),
           steerTurn: (turnInput) =>
             Effect.fail(
               new ProviderAdapterSteerRunUnsupportedError({

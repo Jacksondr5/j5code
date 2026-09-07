@@ -131,7 +131,7 @@ describe("ThreadA2ADeliveryRenderer", () => {
     expect(parsed).toMatchObject({ senderTooltipParticipantId: "agent:delivery-sender" });
     expect(
       renderToStaticMarkup(<ThreadA2ADeliveryRenderer message={message({ text: peerRaw })} />),
-    ).toContain('title="agent:delivery-sender"');
+    ).not.toContain("agent:delivery-sender");
   });
 
   it("formats queued peer deliveries with the timeline identity formatter", () => {

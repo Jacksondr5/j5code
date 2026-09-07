@@ -216,8 +216,30 @@ it.effect(
           apply: () => Effect.void,
           getShellSnapshot: () => Effect.die("unused getShellSnapshot"),
           getThreadShell: () => Effect.die("unused getThreadShell"),
-          getThreadProjection: () => Ref.get(projection),
+          getThread: () => Ref.get(projection).pipe(Effect.map((state) => state.thread)),
+          getSettlementCandidates: () => Effect.die("unused getSettlementCandidates"),
+          getThreadProjection: () => Effect.die("control effects must not load transcript"),
+          getRuntimeRequest: () => Effect.die("unused getRuntimeRequest"),
+          getPendingNativeUserInputs: () => Effect.die("unused getPendingNativeUserInputs"),
+          getProviderControlContext: (_threadId, target) =>
+            Ref.get(projection).pipe(
+              Effect.map((current) => ({
+                providerThread: current.providerThreads.find(
+                  (thread) => thread.id === target.providerThreadId,
+                ),
+                providerTurn: current.providerTurns.find(
+                  (turn) => turn.id === target.providerTurnId,
+                ),
+                attempt: current.attempts.find((attempt) => attempt.id === target.attemptId),
+                message: undefined,
+                run: undefined,
+              })),
+            ),
+          getCheckpointContext: () => Effect.die("not used"),
+          getRecoveryThreadIds: () => Effect.die("unused getRecoveryThreadIds"),
+          getUnreadableThreadIds: () => Effect.die("unused getUnreadableThreadIds"),
           getThreadSnapshot: () => Effect.die("unused getThreadSnapshot"),
+          getThreadSnapshotWindow: () => Effect.die("unused getThreadSnapshotWindow"),
         }),
       );
       const sessionManagerLayer = Layer.succeed(

@@ -12,7 +12,7 @@
  *
  * @module provider/Drivers/OpenCodeDriver
  */
-import { OpenCodeSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import { OpenCodeSettings, ProviderDriverKind } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -33,18 +33,21 @@ import { ProviderDriverError } from "../Errors.ts";
 import {
   checkOpenCodeProviderStatus,
   makePendingOpenCodeProvider,
+  openCodeSkillsToServerProviderSkills,
 } from "../Layers/OpenCodeProvider.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import { OpenCodeRuntime } from "../opencodeRuntime.ts";
+import * as OpenCodeServerOwner from "../OpenCodeServerOwner.ts";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
   type ProviderInstance,
 } from "../ProviderDriver.ts";
-import type { ServerProviderDraft } from "../providerSnapshot.ts";
+import { withInstanceIdentity } from "./instanceIdentity.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
+  makeCachedProviderMaintenanceResolution,
   makePackageManagedProviderMaintenanceResolver,
   normalizeCommandPath,
   resolveProviderMaintenanceCapabilitiesEffect,
@@ -69,11 +72,8 @@ function isOpenCodeNativeCommandPath(commandPath: string): boolean {
 const UPDATE = makePackageManagedProviderMaintenanceResolver({
   provider: DRIVER_KIND,
   npmPackageName: "opencode-ai",
-  homebrewFormula: "anomalyco/tap/opencode",
   nativeUpdate: {
-    executable: "opencode",
     args: ["upgrade"],
-    lockKey: "opencode-native",
     isCommandPath: isOpenCodeNativeCommandPath,
   },
 });
@@ -90,22 +90,6 @@ export type OpenCodeDriverEnv =
   | ServerConfig
   | ServerSettingsService;
 
-const withInstanceIdentity =
-  (input: {
-    readonly instanceId: ProviderInstance["instanceId"];
-    readonly displayName: string | undefined;
-    readonly accentColor: string | undefined;
-    readonly continuationGroupKey: string;
-  }) =>
-  (snapshot: ServerProviderDraft): ServerProvider => ({
-    ...snapshot,
-    instanceId: input.instanceId,
-    driver: DRIVER_KIND,
-    ...(input.displayName ? { displayName: input.displayName } : {}),
-    ...(input.accentColor ? { accentColor: input.accentColor } : {}),
-    continuation: { groupKey: input.continuationGroupKey },
-  });
-
 export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv> = {
   driverKind: DRIVER_KIND,
   metadata: {
@@ -116,6 +100,9 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
   defaultConfig: (): OpenCodeSettings => decodeOpenCodeSettings({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const pathService = yield* Path.Path;
       const openCodeRuntime = yield* OpenCodeRuntime;
       const serverConfig = yield* ServerConfig;
       const httpClient = yield* HttpClient.HttpClient;
@@ -127,15 +114,22 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       });
       const stampIdentity = withInstanceIdentity({
         instanceId,
+        driverKind: DRIVER_KIND,
         displayName,
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       const effectiveConfig = { ...config, enabled } satisfies OpenCodeSettings;
-      const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
-        binaryPath: effectiveConfig.binaryPath,
-        env: processEnv,
-      });
+      const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
+        resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
+          binaryPath: effectiveConfig.binaryPath,
+          env: processEnv,
+        }).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, pathService),
+        ),
+      );
 
       const orchestrationAdapter = yield* OpenCodeAdapterV2Driver.create({
         instanceId,
@@ -155,28 +149,89 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
             }),
         ),
       );
-      const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, processEnv);
+      const serverOwner = yield* OpenCodeServerOwner.make({
+        binaryPath: effectiveConfig.binaryPath,
+        directory: serverConfig.cwd,
+        ...(effectiveConfig.serverPassword
+          ? { serverPassword: effectiveConfig.serverPassword }
+          : {}),
+        environment: processEnv,
+      });
+      const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig).pipe(
+        Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
+      );
 
       const checkProvider = checkOpenCodeProviderStatus(
         effectiveConfig,
         serverConfig.cwd,
         processEnv,
-      ).pipe(Effect.map(stampIdentity), Effect.provideService(OpenCodeRuntime, openCodeRuntime));
+      ).pipe(
+        Effect.map(stampIdentity),
+        Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
+        Effect.provideService(OpenCodeRuntime, openCodeRuntime),
+      );
+      // NOTE: the local branch intentionally uses the shared SDK server
+      // instead of `opencode debug skill` (loadSkillsFromCli). The CLI writes
+      // its full JSON inventory to stdout, but the Bun-compiled binary does
+      // not flush more than one 64KB pipe buffer to a non-TTY stdout, so the
+      // piped output arrives truncated and unparseable — which degrades to an
+      // empty skill list and poisons the workspace snapshot the `$` picker
+      // reads. The SDK `app.skills` endpoint honors the per-request directory
+      // and returns complete results regardless of size.
+      const loadSkillsForCwd = (cwd: string) =>
+        effectiveConfig.serverUrl.trim().length > 0
+          ? Effect.scoped(
+              Effect.gen(function* () {
+                const server = yield* openCodeRuntime.connectToOpenCodeServer({
+                  binaryPath: effectiveConfig.binaryPath,
+                  directory: cwd,
+                  serverUrl: effectiveConfig.serverUrl,
+                  ...(effectiveConfig.serverPassword
+                    ? { serverPassword: effectiveConfig.serverPassword }
+                    : {}),
+                  environment: processEnv,
+                });
+                const client = openCodeRuntime.createOpenCodeSdkClient({
+                  baseUrl: server.url,
+                  directory: cwd,
+                  ...(effectiveConfig.serverPassword
+                    ? { serverPassword: effectiveConfig.serverPassword }
+                    : {}),
+                });
+                return yield* openCodeRuntime.loadOpenCodeSkills(client);
+              }),
+            )
+          : serverOwner.withServer((server) =>
+              openCodeRuntime.loadOpenCodeSkills(
+                openCodeRuntime.createOpenCodeSdkClient({
+                  baseUrl: server.url,
+                  directory: cwd,
+                  ...(server.serverPassword !== undefined
+                    ? { serverPassword: server.serverPassword }
+                    : {}),
+                }),
+              ),
+            );
 
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<OpenCodeSettings>>(
         {
-          maintenanceCapabilities,
+          resolveMaintenance,
           getSettings: snapshotSettings.getSettings,
           streamSettings: snapshotSettings.streamSettings,
           haveSettingsChanged: haveProviderSnapshotSettingsChanged,
+          checkProviderOnSettingsChange: () => false,
+          refreshOnInterval: false,
           initialSnapshot: (settings) =>
             makePendingOpenCodeProvider(settings.provider).pipe(Effect.map(stampIdentity)),
           checkProvider,
           enrichSnapshot: ({ settings, snapshot, publishSnapshot }) =>
-            enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities, {
-              enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
-            }).pipe(
+            resolveMaintenance().pipe(
+              Effect.flatMap((maintenanceCapabilities) =>
+                enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities, {
+                  enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
+                }),
+              ),
               Effect.provideService(HttpClient.HttpClient, httpClient),
               Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
             ),
@@ -201,6 +256,27 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         accentColor,
         enabled,
         snapshot,
+        snapshotForCwd: (cwd) =>
+          !effectiveConfig.enabled
+            ? snapshot.getSnapshot
+            : Effect.all([
+                snapshot.getSnapshot,
+                loadSkillsForCwd(cwd).pipe(Effect.timeout("20 seconds")),
+              ]).pipe(
+                Effect.map(([machineSnapshot, skills]) => ({
+                  ...machineSnapshot,
+                  skills: openCodeSkillsToServerProviderSkills(skills),
+                })),
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderDriverError({
+                      driver: DRIVER_KIND,
+                      instanceId,
+                      detail: `Failed to probe OpenCode skills for '${cwd}'`,
+                      cause,
+                    }),
+                ),
+              ),
         orchestrationAdapter,
         textGeneration,
       } satisfies ProviderInstance;

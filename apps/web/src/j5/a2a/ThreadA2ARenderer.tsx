@@ -1,3 +1,4 @@
+import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import type { ChatMessage } from "~/types";
 import { useNowMinute } from "~/hooks/useNowMinute";
 import { InboxIcon, SendIcon } from "lucide-react";
@@ -408,12 +409,16 @@ function PeerDeliveryCard({
           <InboxIcon className="size-3.5 shrink-0" aria-hidden />
           From
         </span>
-        <span
-          className="font-medium text-foreground"
-          title={senderTooltipParticipantId ?? undefined}
-        >
-          {senderLabel}
-        </span>
+        {senderTooltipParticipantId === null ? (
+          <span className="font-medium text-foreground">{senderLabel}</span>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger render={<span className="font-medium text-foreground" />}>
+              {senderLabel}
+            </TooltipTrigger>
+            <TooltipPopup>{senderTooltipParticipantId}</TooltipPopup>
+          </Tooltip>
+        )}
         {isOpen ? (
           <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
             Expects reply
@@ -542,13 +547,19 @@ function SentMessageCard({
             {badge.label}
           </span>
         ) : null}
-        <time
-          className="ml-auto tabular-nums text-muted-foreground"
-          dateTime={presentation.sentAt}
-          title={presentation.sentAt}
-        >
-          {formatTimeSinceSent(presentation.sentAt, currentNow)}
-        </time>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <time
+                className="ml-auto tabular-nums text-muted-foreground"
+                dateTime={presentation.sentAt}
+              />
+            }
+          >
+            {formatTimeSinceSent(presentation.sentAt, currentNow)}
+          </TooltipTrigger>
+          <TooltipPopup>{presentation.sentAt}</TooltipPopup>
+        </Tooltip>
       </div>
       <A2ABodyClamp body={presentation.body} />
     </section>

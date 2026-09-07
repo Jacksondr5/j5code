@@ -1,5 +1,6 @@
 import type { ProjectId } from "@t3tools/contracts";
 import type {
+  OrchestrationClientOrigin,
   OrchestrationEvent,
   OrchestrationReadModel,
   ProjectOrchestrationCommand,
@@ -31,6 +32,7 @@ import { toPersistenceSqlError } from "../../persistence/Errors.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepository } from "../../persistence/Services/OrchestrationCommandReceipts.ts";
 import {
+  isOrchestrationCommandRejection,
   OrchestrationCommandIdConflictError,
   OrchestrationCommandInvariantError,
   OrchestrationCommandPreviouslyRejectedError,
@@ -41,6 +43,7 @@ import { decideOrchestrationCommand } from "../decider.ts";
 import { createEmptyReadModel, projectEvent } from "../projector.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -49,10 +52,10 @@ const isOrchestrationCommandPreviouslyRejectedError = Schema.is(
   OrchestrationCommandPreviouslyRejectedError,
 );
 const isOrchestrationCommandIdConflictError = Schema.is(OrchestrationCommandIdConflictError);
-const isOrchestrationCommandInvariantError = Schema.is(OrchestrationCommandInvariantError);
 
 interface CommandEnvelope {
   command: ProjectOrchestrationCommand;
+  origin: OrchestrationClientOrigin | undefined;
   result: Deferred.Deferred<{ sequence: number }, OrchestrationDispatchError>;
   startedAtMs: number;
 }
@@ -70,6 +73,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository;
   const projectionPipeline = yield* OrchestrationProjectionPipeline;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const crypto = yield* Crypto.Crypto;
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -168,7 +172,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         }).pipe(
           Effect.provideService(Crypto.Crypto, crypto),
           Effect.mapError((cause) =>
-            isOrchestrationCommandInvariantError(cause)
+            isOrchestrationCommandRejection(cause)
               ? cause
               : new OrchestrationCommandInvariantError({
                   commandType: envelope.command.type,
@@ -177,17 +181,28 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 }),
           ),
         );
-        const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase];
+        const plannedEvents = Array.isArray(eventBase) ? eventBase : [eventBase];
+        // Stamp the dispatching client's origin onto every event the command
+        // produced. The decider stays pure; attribution is an engine concern.
+        const eventBases =
+          envelope.origin === undefined
+            ? plannedEvents
+            : plannedEvents.map((planned) => ({
+                ...planned,
+                metadata: { ...planned.metadata, origin: envelope.origin },
+              }));
         const committedCommand = yield* sql
           .withTransaction(
             Effect.gen(function* () {
               const committedEvents: OrchestrationEvent[] = [];
+              const attachmentCleanups: Effect.Effect<void>[] = [];
               let nextCommandReadModel = commandReadModel;
 
               for (const nextEvent of eventBases) {
                 const savedEvent = yield* eventStore.append(nextEvent);
                 nextCommandReadModel = yield* projectEvent(nextCommandReadModel, savedEvent);
-                yield* projectionPipeline.projectEvent(savedEvent);
+                const cleanup = yield* projectionPipeline.projectEventDeferred(savedEvent);
+                attachmentCleanups.push(cleanup);
                 committedEvents.push(savedEvent);
               }
 
@@ -212,6 +227,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
               return {
                 committedEvents,
+                attachmentCleanups,
                 lastSequence: lastSavedEvent.sequence,
                 nextCommandReadModel,
               } as const;
@@ -226,6 +242,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           );
 
         commandReadModel = committedCommand.nextCommandReadModel;
+        for (const cleanup of committedCommand.attachmentCleanups) {
+          yield* cleanup;
+        }
         yield* eventStore.publishCommitted(
           committedCommand.committedEvents.filter(
             (event) =>
@@ -300,7 +319,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               ),
             );
 
-            if (isOrchestrationCommandInvariantError(error)) {
+            if (isOrchestrationCommandRejection(error)) {
               yield* commandReceiptRepository
                 .upsert({
                   commandId: envelope.command.commandId,
@@ -334,11 +353,12 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const readEvents: OrchestrationEngineShape["readEvents"] = (fromSequenceExclusive, limit) =>
     eventStore.readFromSequence(fromSequenceExclusive, limit);
 
-  const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
+  const dispatch: OrchestrationEngineShape["dispatch"] = (command, options) =>
     Effect.gen(function* () {
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
       yield* Queue.offer(commandQueue, {
         command,
+        origin: options?.origin,
         result,
         startedAtMs: yield* Clock.currentTimeMillis,
       });
@@ -348,6 +368,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   return {
     readEvents,
     dispatch,
+    subscribeDomainEvents: PubSub.subscribe(eventPubSub).pipe(Effect.map(Stream.fromSubscription)),
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)
     // each independently receive all domain events.

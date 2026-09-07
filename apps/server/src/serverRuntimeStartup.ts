@@ -3,12 +3,13 @@ import {
   DEFAULT_MODEL,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type ModelSelection,
+  type Project,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
-import * as Console from "effect/Console";
 import * as Cause from "effect/Cause";
+import * as Console from "effect/Console";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -34,6 +35,8 @@ import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManag
 import * as ThreadLaunch from "./orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "./project/ProjectService.ts";
+import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
+import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
@@ -176,7 +179,7 @@ export const launchStartupHeartbeat = recordStartupHeartbeat.pipe(
   Effect.asVoid,
 );
 
-export const getAutoBootstrapDefaultModelSelection = (): ModelSelection => ({
+export const getAutoBootstrapThreadModelSelection = (): ModelSelection => ({
   instanceId: ProviderInstanceId.make("codex"),
   model: DEFAULT_MODEL,
 });
@@ -185,6 +188,65 @@ interface AutoBootstrapWelcomeTargets {
   readonly bootstrapProjectId?: ProjectId;
   readonly bootstrapThreadId?: ThreadId;
 }
+
+export const autoPullProjects = Effect.fn("autoPullProjects")(function* (
+  projects: ReadonlyArray<Pick<Project, "workspaceRoot" | "autoPull">>,
+) {
+  const git = yield* GitVcsDriver.GitVcsDriver;
+  const workspaceRoots = [
+    ...new Set(
+      projects
+        .filter((project) => project.autoPull === true)
+        .map((project) => project.workspaceRoot),
+    ),
+  ];
+
+  yield* Effect.forEach(
+    workspaceRoots,
+    (cwd) =>
+      Effect.gen(function* () {
+        const status = yield* git.statusDetails(cwd);
+        if (
+          !status.isRepo ||
+          !status.isDefaultBranch ||
+          !status.hasUpstream ||
+          status.hasWorkingTreeChanges ||
+          status.aheadCount > 0
+        ) {
+          yield* Effect.logDebug("Skipped automatic project pull", {
+            cwd,
+            reason: !status.isRepo
+              ? "not-a-repository"
+              : !status.isDefaultBranch
+                ? "not-on-default-branch"
+                : !status.hasUpstream
+                  ? "no-upstream"
+                  : status.hasWorkingTreeChanges
+                    ? "working-tree-changes"
+                    : "local-commits",
+          });
+          return;
+        }
+
+        if (status.behindCount <= 0) return;
+
+        const result = yield* git.pullCurrentBranch(cwd);
+        yield* Effect.logDebug("Automatic project pull completed", {
+          cwd,
+          status: result.status,
+          refName: result.refName,
+        });
+      }).pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("Automatic project pull failed", {
+            cwd,
+            cause,
+          }),
+        ),
+      ),
+    { concurrency: 4, discard: true },
+  );
+});
 
 export const resolveWelcomeBase = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig.ServerConfig;
@@ -210,13 +272,14 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
   let bootstrapThreadId: ThreadId | undefined;
 
   if (serverConfig.autoBootstrapProjectFromCwd) {
-    const defaultModelSelection = getAutoBootstrapDefaultModelSelection();
+    // Project creation has no user model choice; only the bootstrap thread
+    // gets an automatic selection, and an explicit project default wins.
+    const threadModelSelection = getAutoBootstrapThreadModelSelection();
     const { project } = yield* projects.bootstrap({
       commandId: CommandId.make(yield* randomUUID),
       projectId: ProjectId.make(yield* randomUUID),
       title: path.basename(serverConfig.cwd) || "project",
       workspaceRoot: serverConfig.cwd,
-      defaultModelSelection,
     });
     const shell = yield* threads.getShellSnapshot();
     const existingThread = shell.threads.find(
@@ -228,7 +291,7 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
         commandId: CommandId.make(yield* randomUUID),
         projectId: project.id,
         title: "New thread",
-        modelSelection: project.defaultModelSelection ?? defaultModelSelection,
+        modelSelection: project.defaultModelSelection ?? threadModelSelection,
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "full-access",
         workspaceStrategy: { type: "root" },
@@ -396,7 +459,9 @@ export const make = (options?: StartupOptions) =>
         if (workerFiber !== null) {
           yield* Fiber.interrupt(workerFiber).pipe(Effect.ignore);
         }
-        yield* providerSessions.shutdown;
+        yield* providerRuntimeRecovery.prepareForShutdown.pipe(
+          Effect.ensuring(providerSessions.shutdown),
+        );
         const reconciliation = yield* providerRuntimeRecovery.reconcile("shutdown");
         yield* Effect.logInfo("V2 orchestration shutdown reconciliation completed", reconciliation);
       }).pipe(
@@ -505,6 +570,14 @@ export const make = (options?: StartupOptions) =>
         ).pipe(Effect.map((targets): AutoBootstrapWelcomeTargets => targets)),
       });
       yield* Effect.logInfo("V2 orchestration recovery completed", recovery);
+      yield* runStartupPhase(
+        "projects.auto-pull",
+        Effect.gen(function* () {
+          const snapshots = yield* ProjectionSnapshotQuery;
+          const projects = yield* snapshots.getProjectShellsWithoutEnrichment();
+          yield* autoPullProjects(projects);
+        }),
+      );
 
       const importPendingTranscripts = legacyV1ThreadImporter.importPendingTranscripts.pipe(
         Effect.tap((summary) =>

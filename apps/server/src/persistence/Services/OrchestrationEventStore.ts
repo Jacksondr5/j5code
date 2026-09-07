@@ -76,6 +76,21 @@ export interface OrchestrationEventStoreShape {
     readonly limit?: number;
   }) => Stream.Stream<OrchestrationV2StoredEvent, OrchestrationEventStoreError>;
 
+  /** Measure one thread's bounded replay without loading or decoding its payloads. */
+  readonly getAgentReplayStats: (input: {
+    readonly threadId: ThreadId;
+    readonly afterSequence: number;
+    readonly throughSequence: number;
+    readonly maxEvents: number;
+  }) => Effect.Effect<
+    {
+      readonly eventCount: number;
+      readonly payloadBytes: number;
+      readonly hasCreateEvent: boolean;
+    },
+    OrchestrationEventStoreError
+  >;
+
   readonly latestAgentSequence: (
     threadId?: ThreadId,
   ) => Effect.Effect<number, OrchestrationEventStoreError>;
@@ -95,6 +110,24 @@ export interface OrchestrationEventStoreShape {
   readonly streamApplicationEvents: (input?: {
     readonly afterSequence?: number;
   }) => Stream.Stream<ApplicationStoredEvent, OrchestrationEventStoreError>;
+  /** Project transport events before bounding replay and the live tail. */
+  readonly streamProjectedApplicationEvents: <A extends { readonly sequence: number }>(input: {
+    readonly afterSequence?: number;
+    readonly project: (event: ApplicationStoredEvent) => A;
+  }) => Stream.Stream<A, OrchestrationEventStoreError>;
+  /**
+   * Check whether an aggregate has an event after a sequence, optionally
+   * restricted to one event type.
+   *
+   * Used during replay to tell whether a later event supersedes the one being
+   * applied, without streaming the rest of the log.
+   */
+  readonly hasEventAfter: (input: {
+    readonly aggregateKind: OrchestrationEvent["aggregateKind"];
+    readonly aggregateId: string;
+    readonly type?: OrchestrationEvent["type"];
+    readonly sequenceExclusive: number;
+  }) => Effect.Effect<boolean, OrchestrationEventStoreError>;
 }
 
 /**

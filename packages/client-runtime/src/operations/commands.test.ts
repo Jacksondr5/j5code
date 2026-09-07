@@ -38,6 +38,7 @@ import { v2Now, v2Projection, v2ThreadId } from "../state/orchestrationV2TestFix
 import {
   archiveThread,
   createProject,
+  updateProject,
   interruptThreadTurn,
   forkThreadFromRun,
   mergeThreadBack,
@@ -118,6 +119,7 @@ const makeSupervisor = Effect.fn("TestEnvironmentCommands.makeSupervisor")(funct
   const session: RpcSession.RpcSession = {
     client,
     initialConfig: Effect.never,
+    subscribeServerConfig: (input) => client.subscribeServerConfig(input),
     ready: Effect.void,
     probe: Effect.void,
     closed: Effect.never,
@@ -154,6 +156,50 @@ describe("V2 environment commands", () => {
           title: "Project",
           workspaceRoot: "/workspace/project",
           createWorkspaceRootIfMissing: true,
+        },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("persists and clears project presentation and environment settings", () =>
+    Effect.gen(function* () {
+      const projects: ProjectMutation[] = [];
+      const supervisor = yield* makeSupervisor({ commands: [], projects });
+      const projectId = ProjectId.make("project-1");
+      const projectIcon = { kind: "emoji", emoji: "🌲" } as const;
+      yield* updateProject({
+        projectId,
+        autoPull: true,
+        projectIcon,
+        faviconPath: "/workspace/project/icon.png",
+        defaultThreadEnvMode: "worktree",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+      yield* updateProject({
+        projectId,
+        autoPull: false,
+        projectIcon: null,
+        faviconPath: null,
+        defaultThreadEnvMode: null,
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(projects).toEqual([
+        {
+          type: "project.update",
+          commandId: "00000000-0000-4000-8000-000000000000",
+          projectId,
+          autoPull: true,
+          projectIcon,
+          faviconPath: "/workspace/project/icon.png",
+          defaultThreadEnvMode: "worktree",
+        },
+        {
+          type: "project.update",
+          commandId: "00000000-0000-4000-8000-000000000000",
+          projectId,
+          autoPull: false,
+          projectIcon: null,
+          faviconPath: null,
+          defaultThreadEnvMode: null,
         },
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
@@ -491,6 +537,24 @@ describe("V2 environment commands", () => {
           runId: RunId.make("run-3"),
           text: "updated queued text",
         }).pipe(provide);
+        yield* editQueuedRun({
+          commandId: CommandId.make("edit-attachments"),
+          threadId: v2ThreadId,
+          runId: RunId.make("run-3"),
+          text: "updated queued text with attachments",
+          edit: {
+            messageId: MessageId.make("message-3"),
+            attachments: [
+              {
+                type: "image",
+                id: "attachment-kept",
+                name: "kept.png",
+                mimeType: "image/png",
+                sizeBytes: 64,
+              },
+            ],
+          },
+        }).pipe(provide);
 
         expect(commands).toMatchObject([
           { type: "thread.fork", sourcePoint: { type: "run", runId: "run-1" } },
@@ -503,7 +567,15 @@ describe("V2 environment commands", () => {
           },
           { type: "queued-run.cancel", runId: "run-3" },
           { type: "queued-run.edit", runId: "run-3", text: "updated queued text" },
+          {
+            type: "queued-run.edit",
+            runId: "run-3",
+            text: "updated queued text with attachments",
+            attachments: [{ id: "attachment-kept" }],
+          },
         ]);
+        // A text-only edit must not send an attachments replacement list.
+        expect(commands[5]).not.toHaveProperty("attachments");
       }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );
 
