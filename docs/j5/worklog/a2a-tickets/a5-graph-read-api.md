@@ -13,7 +13,7 @@ status: 0
 > 3. **`regarding` linkage (R10):** where an Exchange carries the nullable `regarding` field (ships with A8), expose it as edge metadata for survives-from chains. Optional — degrade gracefully, no dependency on A8.
 > 4. Base SHA is whatever `j5/main` resolves to at staffing. Staffing is opportunistic per the Dogfood v0 plan (`../dogfood-v0.md`).
 
-**Governing artifacts:** `../../product/a2a/plan.md` (§Graph projection + read API), `../../product/a2a/plan.md` (D1, D8; grounding §Projections). Base: historical, see amendment.
+**Governing artifacts:** `../../plans/a2a.md` (§Graph projection + read API), `../../plans/a2a.md` (D1, D8; grounding §Projections). Base: historical, see amendment.
 
 ## Goal
 

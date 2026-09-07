@@ -23,6 +23,8 @@ A Squadron **targets folders** rather than living in one: the Squadron is create
 
 The Squadron is **the unit of user choice**. Every surface where a person chooses a working context offers Squadrons; upstream's "project" is implementation substrate that a Squadron references, never a noun the user picks. Agent creation takes its Squadron from where the person already is — the sidebar's Squadron scope — and shows it in the composer, changeable until send and immutable after. Agents never see any of this: a spawned Peer Agent inherits its spawner's Squadron.
 
+Within a Squadron, agents are organized in a **placement tree**. An agent's **placement** is where it sits in that tree: under its spawner, unless a person moves it. Whoever briefs an agent commands it, so the tree shows who is running what. An agent's **provenance** is the recorded fact of how it came to exist — created by a person, spawned by a named agent, forked from another, or unrecorded — written once and never changed. Neither placement nor provenance restricts who may message whom; the tree carries decisions, never messages.
+
 End of life is archive; its details arrive with the container's growth.
 
 ## Acceptance criteria
@@ -38,6 +40,8 @@ End of life is archive; its details arrive with the container's growth.
 9. Agents never see a Squadron picker; a spawned Peer Agent inherits its spawner's Squadron.
 10. The placement tree lives entirely within one Squadron.
 11. Membership is recorded in the ledger as lifecycle events only — joined at creation, left at archive — and neither is agent-invocable.
+12. An agent's placement equals its spawner at creation and changes only by a person's action; an agent is never placed outside its Squadron.
+13. An agent's provenance is recorded at creation and never changes.
 
 ## Scenarios
 
@@ -57,4 +61,5 @@ The current build ([dogfood v0](../dogfood-v0.md)) narrows this definition in th
 - 2026-08-24 — creation and agent-creation experience; former SC1–SC4 ([record](../../worklog/squadron-creation-session-2026-08-24.md)).
 - 2026-08-29 — sidebar scope replaces Squadron grouping in the sidebar; former SB3 ([record](../../worklog/sidebar-roster-session-2026-08-29.md)).
 - 2026-08-31 — the Squadron is the unit of user choice; former E7 ([record](../../worklog/picker-and-self-messaging-rulings-2026-08-31.md)).
+- 2026-09-07 — placement and provenance moved here from the A2A definition (former D10 and R21): they are organization, not communication.
 - 2026-09-05 — rewritten into the definition shape. Two changes of substance: a Squadron targets one or more folders, so a folder is required at creation (the name-only Squadron is no longer planned — it would complicate upstream integration) and the folder-required v0 override becomes end-state truth; messages to people are no longer listed as Squadron contents (they belong to the inbox, which is person-scoped, not Squadron-scoped). Former identifiers: E1 → AC1; E2 → AC2; E3 → Definition; E4 → AC3; E5 → AC10; E6 → Definition; E7 → AC7; SC1 → AC5, AC6; SC2 → AC3, AC4; SC3 → AC8, AC9; SC4 → Scope; the A2 `join_epic` consequences → AC2, AC11.

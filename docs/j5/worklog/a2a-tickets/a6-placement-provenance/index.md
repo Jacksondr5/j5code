@@ -6,7 +6,7 @@ status: 0
 
 # A6 — Spawn placement + provenance
 
-**Governing artifacts:** `../../../product/a2a/index.md` D10 (the three-relationship decoupling — read its full cell), `../../../product/a2a/plan.md` (§Agent tool surface, last paragraph). Base: `j5/main` @ `e7597dac8`.
+**Governing artifacts:** `../../../product/a2a/index.md` D10 (the three-relationship decoupling — read its full cell), `../../../plans/a2a.md` (§Agent tool surface, last paragraph). Base: `j5/main` @ `e7597dac8`.
 
 ## Goal
 
