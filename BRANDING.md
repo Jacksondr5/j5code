@@ -24,7 +24,7 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 
 ## Pin-advance audit sites
 
-- Home resolution: `apps/server/src/cli/config.ts`, `pair.ts`, `theme.ts`, `triage.ts`,
+- Home resolution: `apps/server/src/cli/config.ts`, `app.ts`, `pair.ts`, `theme.ts`, `triage.ts`,
   `cloud/bootService.ts`, `serviceLauncher.ts`, `packages/shared/src/devHome.ts`, and
   `scripts/dev-runner.ts`. Explicit CLI home outranks worktree isolation; worktree dev
   state outranks an ambient home. Pairing must target the same resolved state.
@@ -59,9 +59,14 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 
 ## 2026-09-06 verification boundary
 
-The current pin advance rechecked identity/configuration with focused tests and exercised
-web/server home isolation in disposable state. Desktop and mobile applications were not
-launched or built in that verification; the older native check below is historical evidence.
+The pin advance rechecked identity/configuration with focused tests and exercised web/server
+home isolation in disposable state. Subsequently, the [weekly full build](https://github.com/Jacksondr5/j5code/actions/runs/34064485547)
+at source `f8ba1a653f986835d3e5d0584648cc686f16ceb6` built the Apple Silicon desktop
+artifact, mounted its DMG read-only, and verified `J5 Code`, `codes.jackson.j5code`, and its
+strict ad-hoc signature. That proves packaged identity and signing at that source, not desktop
+interaction or packaged-app execution. Mobile native builds/interaction and second-machine,
+relay or tunnel acceptance were not performed in this advance. The older native check below
+is historical evidence.
 
 ## 2026-08-15 empirical isolation check
 
