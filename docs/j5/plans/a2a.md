@@ -1,11 +1,12 @@
 ---
-title: "A2A v1 — builder-facing plan"
-kind: spec
+title: "A2A v1 — builder plan"
+kind: plan
+status: active
 ---
 
 # A2A v1 plan
 
-Drafted 2026-08-16 from the settled decision register (`./index.md` — D1–D10, all closed). This document tells a builder _what to build and why it has this shape_; the register holds the decisions and rationale; the grounding section there explains the four-layer model. Read both before starting. Product definition: `../communication-graph.md`.
+A plan: it sequences the A2A build and is history once executed. The definition it builds is [`../product/a2a/index.md`](../product/a2a/index.md); where this plan and the definition disagree, the definition wins. Milestones are named "A2A M1" through "A2A M5". Drafted 2026-08-16; M1–M4 shipped by 2026-09-01; M5 (graph read API) is open as issue #31.
 
 ## Base (updated 2026-09-06)
 
@@ -17,7 +18,7 @@ Drafted 2026-08-16 from the settled decision register (`./index.md` — D1–D10
 
 ## What v1 is NOT (scope fences)
 
-No graph UI or attention panes (item 4). No roles/teams objects (item 3 — placement ≠ team membership). No cross-machine delivery (deferred; nothing may _assume_ single-host, but nothing implements multi-host). No deferred silence states (`waiting-on-external-gate`, `silent-tool-degradation`, PTY-quiet). No message kind tags (cut). No agent-initiated re-parenting (human-only, UI). No squadron _container_ features beyond the minimal entity below — terminals, artifacts, folders, worktree binding all stay out (future backlog items).
+No graph UI or attention panes (item 4). No Roles or Crews (item 3 — placement is not Crew membership). No cross-machine delivery (deferred; nothing may _assume_ single-host, but nothing implements multi-host). No deferred silence states (`waiting-on-external-gate`, `silent-tool-degradation`, PTY-quiet). No message kind tags (cut). No agent-initiated re-parenting (human-only, UI). No squadron _container_ features beyond the minimal entity below — terminals, artifacts, folders, worktree binding all stay out (future backlog items).
 
 ## Architecture
 
@@ -84,11 +85,28 @@ The inbox is necessarily a **cross-ledger projection**: global person-scoped hum
 
 ### Graph projection + read API (M5)
 
-Edge = exchange (never message), state open/stalled(reason,trust)/answered/dropped, plus delegation edges from v2 delegations (D1). Read API: per-squadron cursor subscription — strictly ascending, exactly-once, gap-free relative to the cursor, with the documented caveat that _snapshot end is a batching fact, not caught-up-to-now_ — plus a full-state reconciliation query (events + snapshot, never events alone). Cross-squadron edges render in each squadron as external stubs joined by `correlation_id`. Rebuilding any projection from the ledger must be byte-equivalent — this is a test, not an aspiration.
+Edge = exchange (never message), state open/stalled(reason,trust)/answered/dropped. (Delegation edges were dropped when `delegate_task` left the product surface, 2026-08-24.) Read API: per-squadron cursor subscription — strictly ascending, exactly-once, gap-free relative to the cursor, with the documented caveat that _snapshot end is a batching fact, not caught-up-to-now_ — plus a full-state reconciliation query (events + snapshot, never events alone). Cross-squadron edges render in each squadron as external stubs joined by `correlation_id`. Rebuilding any projection from the ledger must be byte-equivalent — this is a test, not an aspiration.
 
 ### Agent tool surface
 
-Minimal, one send verb (Traycer's shape): `send_message(to, message, expect_reply?, exchange_id?, intent?, urgency?)` — reply = send carrying `exchange_id`. Plus `list_participants` with per-row capability booleans (tell callers what they may do, never let them discover by failing). Errors must name the actual state and the next command (toolsmith rule). Placement (D10): agent/thread creation tools gain a `placement` parameter (default = spawner; sibling/other-parent/root allowed); provenance recorded separately and immutably; cascade operations follow placement.
+The verbs and their contracts are defined in [`../product/a2a/agent-tools.md`](../product/a2a/agent-tools.md). Errors must name the actual state and the next command (toolsmith rule). Placement equals the spawner and is never a spawn-time parameter (the parameter this plan originally specified was removed on 2026-08-21); provenance is recorded separately and immutably.
+
+## Build status against the definition (2026-09-05)
+
+The definition's acceptance criteria ([`../product/a2a/index.md`](../product/a2a/index.md)) and where the build stands:
+
+| Criteria                                 | Status                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AC1–AC3 (ledger)                         | Built (A2A M1, M2)                                                                                                                                                                                                                                                                                             |
+| AC4 (projection rebuild)                 | Built for the inbox and thread projections; the communication-graph projection is A2A M5 (issue #31)                                                                                                                                                                                                           |
+| AC5, AC6, AC9, AC10, AC11 (Exchanges)    | Built                                                                                                                                                                                                                                                                                                          |
+| AC7, AC8 (several open asks to a person) | **Not built** — the shipped behavior refuses a second ask to a person while one is open; reversed by ruling on 2026-09-05, issue #111                                                                                                                                                                          |
+| AC12–AC15 (delivery)                     | Built, including the Codex Astra exception (#108)                                                                                                                                                                                                                                                              |
+| AC16–AC19 (the person)                   | Built                                                                                                                                                                                                                                                                                                          |
+| AC20, AC21 (silence)                     | Built with a known gap: notices are stored with a label chosen when written rather than as the pure fact bundle the definition describes, so a notice with several open asks records only its first match — the fact-bundle rework is issue #30; no surface shows the stored label as current status meanwhile |
+| AC22, AC23 (envelopes)                   | Built except measured time facts in every channel (A2A M2 envelope true-up, issue #29)                                                                                                                                                                                                                         |
+
+Never: message kind tags; an Exchange called a thread; delivery that infers repair; a person as a per-Squadron participant.
 
 ## Milestones (each independently verifiable; formal ticket breakdown is a separate pass)
 

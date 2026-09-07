@@ -25,14 +25,17 @@ The kinds differ most in how long they stay true. A **definition** is the only k
 
 A definition says what the product is. It is written in the present tense, as if the feature exists at its end state, and it is **rewritten, never appended**: when the product changes, the sentence that was true changes, and the History section gains one line saying when and why. Narrative of who proposed what, PR numbers, and build status never appear in the body.
 
+A definition is the longest-lived kind, so it **never depends on a shorter-lived one**: it cites other definitions and the glossary, and its History lines link records; it never references a plan, and it never references research as a source. If a definition needs something a plan or a research document says, that thing is defined in the definition.
+
+The Definition section stays at the level of concepts: what the thing is and how it is part of the solution to a problem or goal. Behavior in detail — what refuses what, what is recorded when, what a surface shows — belongs in the acceptance criteria, where it can be checked.
+
 Every feature definition has the same sections, in this order:
 
 1. **Problem** — one paragraph linking the problem or goal in `problems.md` it serves.
 2. **Definition** — what it is, and what it is not.
-3. **Acceptance criteria** — a numbered list. Each criterion is one testable sentence about observable behavior. These are the only numbered items in the docs, and the only things that get referenced by number (see IDs below).
+3. **Acceptance criteria** — one numbered list, grouped under short sub-headings that follow the order of the Definition (for example _Sending_, _Delivery_, _Silence_); the numbering runs through the groups without restarting, so a criterion's number stays unique within the feature. Each criterion is one testable sentence about observable behavior. These are the only numbered items in the docs, and the only things that get referenced by number (see IDs below).
 4. **Scenarios** — concrete situations written as user stories or worked examples, each naming the criteria it exercises.
-5. **Scope** — what the current build includes and what waits, by criterion number, linking the plan that sequences it. Scope cuts are stated here and in the plan, nowhere else.
-6. **History** — one line per amendment: date, what changed, and a link to the record.
+5. **History** — one line per amendment: date, what changed, and a link to the record.
 
 Scenarios use one shared example fleet so a reader recognizes it from doc to doc, and never a real project: Squadrons **Billing Migration**, **Website Redesign**, and **L2 Support Rotation** (a non-development Squadron); repositories **the app repository** and **the infrastructure repository**; the person is simply **the user**.
 
@@ -58,7 +61,7 @@ The letter registers used before 2026-09-05 (D, E, X, R, SC, ST, SB, IB, TA, AR,
 
 ## Plans
 
-A plan sequences work. It names milestones ("Fleet observability M1", "Crews M2"), links the GitHub issues that carry each one, states scope cuts by feature and criterion, and carries `status: active | done` in its frontmatter. A plan never restates acceptance criteria and never defines anything; when a plan and a definition disagree, the definition wins and the plan is wrong.
+A plan sequences work. It names milestones ("Fleet observability M1", "Crews M2"), links the GitHub issues that carry each one, and carries `status: active | done` in its frontmatter. **Build status lives only in plans**: which criteria of a definition the current build meets, narrows, or defers is stated in the plan, by feature and criterion number — never in the definition, which describes the end state. A plan never restates acceptance criteria and never defines anything; when a plan and a definition disagree, the definition wins and the plan is wrong.
 
 ## Research
 

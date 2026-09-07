@@ -8,7 +8,7 @@ status: 1
 
 <user_quoted_section>PR #7 MERGED 2026-08-19 as 6e577f15 (Builder-executed under Jackson's one-off delegation; exact-head squash guard, containment clean). Ships: pipeline, exchanges, exactly-once delivery, cross-squadron double-entry, envelopes (Jackson's wording), send_message/list_participants toolkit — membership provisioning intentionally absent per the E1–E5 boundary below. Remaining for status 2: the A2-owned registrar service in the coordinated follow-up slice + live re-proof. Next in sequence: squadron mechanical-rename PR, then registrar.</user_quoted_section>
 
-**Governing artifacts:** `../../../product/a2a/plan.md` (§Exchanges, §Message pipeline, §Envelopes, §Agent tool surface), `../../../product/a2a/index.md` (esp. D4, D5, D8, D9). Base: `j5/main` @ `e7597dac8`.
+**Governing artifacts:** `../../../plans/a2a.md` (§Exchanges, §Message pipeline, §Envelopes, §Agent tool surface), `../../../product/a2a/index.md` (esp. D4, D5, D8, D9). Base: `j5/main` @ `e7597dac8`.
 
 ## Squadron rename PR-group note
 

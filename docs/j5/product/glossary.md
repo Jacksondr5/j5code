@@ -15,20 +15,20 @@ The J5 vocabulary, in one place, so that a name used anywhere in these docs reso
 
 ## Organization
 
-| Term                | Gloss                                                                                              | Owner                                                                                     |
-| ------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| fleet               | All of a user's agents across every connected server — the totality, never a sub-grouping          | [cross-device.md](cross-device.md)                                                        |
-| **Squadron**        | The user-created grouping of agents and their work that everything else is organized under         | [features/squadron.md](features/squadron.md)                                              |
-| **Squadron home**   | The one Squadron an agent belongs to, recorded when it is created                                  | [features/squadron.md](features/squadron.md)                                              |
-| **Registrar**       | The part of the platform that records an agent's Squadron home when the agent is created           | [features/squadron.md](features/squadron.md)                                              |
-| **Crew**            | A group of agents that work one task as a unit                                                     | [features/crews.md](features/crews.md)                                                    |
-| **Captain**         | Any agent with Crews placed under it                                                               | [features/crews.md](features/crews.md)                                                    |
-| **Role**            | A reusable, user-authored definition of a kind of agent                                            | [features/roles.md](features/roles.md)                                                    |
-| **Manifest**        | The artifact form of a Crew definition — implementation vocabulary, not a separate concept         | [features/crews.md](features/crews.md)                                                    |
-| **Playbook**        | User-authored step content that a Role or Crew follows                                             | [features/playbooks.md](features/playbooks.md)                                            |
-| placement           | Where an agent sits in the display tree                                                            | [a2a/substrate.md](a2a/substrate.md) _(moves to the A2A definition when it is rewritten)_ |
-| provenance          | The recorded fact of how an agent came to exist — spawned by whom, forked from what, or unrecorded | [a2a/substrate.md](a2a/substrate.md) _(moves to the A2A definition when it is rewritten)_ |
-| **Shared Squadron** | Several people sharing one Squadron on one server                                                  | [features/shared-squadrons.md](features/shared-squadrons.md)                              |
+| Term                | Gloss                                                                                              | Owner                                                        |
+| ------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| fleet               | All of a user's agents across every connected server — the totality, never a sub-grouping          | [cross-device.md](cross-device.md)                           |
+| **Squadron**        | The user-created grouping of agents and their work that everything else is organized under         | [features/squadron.md](features/squadron.md)                 |
+| **Squadron home**   | The one Squadron an agent belongs to, recorded when it is created                                  | [features/squadron.md](features/squadron.md)                 |
+| **Registrar**       | The part of the platform that records an agent's Squadron home when the agent is created           | [features/squadron.md](features/squadron.md)                 |
+| **Crew**            | A group of agents that work one task as a unit                                                     | [features/crews.md](features/crews.md)                       |
+| **Captain**         | Any agent with Crews placed under it                                                               | [features/crews.md](features/crews.md)                       |
+| **Role**            | A reusable, user-authored definition of a kind of agent                                            | [features/roles.md](features/roles.md)                       |
+| **Manifest**        | The artifact form of a Crew definition — implementation vocabulary, not a separate concept         | [features/crews.md](features/crews.md)                       |
+| **Playbook**        | User-authored step content that a Role or Crew follows                                             | [features/playbooks.md](features/playbooks.md)               |
+| placement           | Where an agent sits in the display tree                                                            | [features/squadron.md](features/squadron.md)                 |
+| provenance          | The recorded fact of how an agent came to exist — spawned by whom, forked from what, or unrecorded | [features/squadron.md](features/squadron.md)                 |
+| **Shared Squadron** | Several people sharing one Squadron on one server                                                  | [features/shared-squadrons.md](features/shared-squadrons.md) |
 
 ## Agents
 
@@ -48,20 +48,20 @@ These entries are the distinctions the whole team must share; the glossary owns 
 
 | Term                         | Gloss                                                                                                                                                         | Owner                                                                            |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| message                      | One durable send from a participant to a participant                                                                                                          | [a2a/agent-tools.md](a2a/agent-tools.md) _(A2A definition when rewritten)_       |
-| ask                          | A message that opens an Exchange — the receiver owes a reply                                                                                                  | [a2a/agent-tools.md](a2a/agent-tools.md)                                         |
-| reply                        | The message that closes an Exchange                                                                                                                           | [a2a/agent-tools.md](a2a/agent-tools.md)                                         |
+| message                      | One durable send from a participant to a participant                                                                                                          | [a2a/index.md](a2a/index.md)                                                     |
+| ask                          | A message that opens an Exchange — the receiver owes a reply                                                                                                  | [a2a/index.md](a2a/index.md)                                                     |
+| reply                        | The message that closes an Exchange                                                                                                                           | [a2a/index.md](a2a/index.md)                                                     |
 | plain message                | A message that opens no Exchange; agents may send one to agents, never to a person                                                                            | [a2a/agent-tools.md](a2a/agent-tools.md), [features/inbox.md](features/inbox.md) |
-| **Exchange**                 | The reply obligation an ask creates between one sender and one receiver. Never called a "thread"                                                              | [a2a/agent-tools.md](a2a/agent-tools.md) _(A2A definition when rewritten)_       |
-| intent                       | The one-line summary an ask carries, shown wherever the Exchange is listed                                                                                    | [a2a/agent-tools.md](a2a/agent-tools.md)                                         |
+| **Exchange**                 | The reply obligation an ask creates between one sender and one receiver. Never called a "thread"                                                              | [a2a/index.md](a2a/index.md)                                                     |
+| intent                       | The one-line summary an ask carries, shown wherever the Exchange is listed                                                                                    | [a2a/index.md](a2a/index.md)                                                     |
 | urgency                      | How soon a person's answer is needed, set only on asks to a person                                                                                            | [features/inbox.md](features/inbox.md)                                           |
 | obligation                   | What an open Exchange is to its receiver: a reply owed                                                                                                        | [features/inbox.md](features/inbox.md)                                           |
-| envelope                     | The platform's wrapper around a delivered message that tells the receiving agent who sent it and what it owes                                                 | [a2a/agent-tools.md](a2a/agent-tools.md) _(A2A definition when rewritten)_       |
-| communication ledger, ledger | The per-Squadron append-only record of every message, delivery, Exchange and notice — the source of truth for all A2A state                                   | [a2a/substrate.md](a2a/substrate.md) _(A2A definition when rewritten)_           |
-| delivery receipt             | The recorded fact that a message reached its receiver's thread                                                                                                | [a2a/substrate.md](a2a/substrate.md)                                             |
+| envelope                     | The platform's wrapper around a delivered message that tells the receiving agent who sent it and what it owes                                                 | [a2a/index.md](a2a/index.md)                                                     |
+| communication ledger, ledger | The per-Squadron append-only record of every message, delivery, Exchange and notice — the source of truth for all A2A state                                   | [a2a/index.md](a2a/index.md)                                                     |
+| delivery receipt             | The recorded fact that a message reached its receiver's thread                                                                                                | [a2a/index.md](a2a/index.md)                                                     |
 | delivery alarm               | The recorded fact that a delivery failed                                                                                                                      | [features/sidebar-and-roster.md](features/sidebar-and-roster.md)                 |
-| silence notice               | A platform-authored fact appended when an agent's turn ends without a reply it owed                                                                           | [a2a/substrate.md](a2a/substrate.md) _(A2A definition when rewritten)_           |
-| queue, steer                 | The two ways a message reaches an agent mid-turn: queued behind the active turn, or steered into it. Agent deliveries queue; only a person steers, explicitly | [a2a/substrate.md](a2a/substrate.md)                                             |
+| silence notice               | A platform-authored fact appended when an agent's turn ends without a reply it owed                                                                           | [a2a/index.md](a2a/index.md)                                                     |
+| queue, steer                 | The two ways a message reaches an agent mid-turn: queued behind the active turn, or steered into it. Agent deliveries queue; only a person steers, explicitly | [a2a/index.md](a2a/index.md)                                                     |
 | human node                   | A person as a participant in the communication graph, keyed by person id                                                                                      | [features/inbox.md](features/inbox.md)                                           |
 
 ## Humans and attention
@@ -97,4 +97,4 @@ These entries are the distinctions the whole team must share; the glossary owns 
 
 ## Terms still waiting for an owner
 
-These are glossed above with a provisional owner. The doc-by-doc pass gives them a home: placement, provenance, message/ask/reply/plain message, envelope, ledger, silence notice and queue/steer move into the rewritten A2A definition; Fleet page, Squadron scope, orphan and delivery alarm into the Fleet page definition when the current contract lands.
+Fleet page, Squadron scope, orphan and delivery alarm are glossed above with a provisional owner; they move into the Fleet page definition when its contract lands.
