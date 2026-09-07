@@ -21,6 +21,8 @@ export const J5_BRANDING = {
   },
   mobile: {
     slug: "j5-code",
+    expoOwner: "jacksondr5",
+    easProjectId: "bcb6f6ad-b327-449e-a419-e6455595504c",
     development: {
       appName: "J5 Code Dev",
       scheme: "j5code-dev",

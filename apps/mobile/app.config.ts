@@ -170,6 +170,7 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
 const config: ExpoConfig = {
   name: variant.appName,
   slug: J5_BRANDING.mobile.slug,
+  owner: J5_BRANDING.mobile.expoOwner,
   platforms: ["ios", "android"],
   scheme: variant.scheme,
   version: "1.0.4",
@@ -352,6 +353,9 @@ const config: ExpoConfig = {
     ...(isIosPersonalTeamBuild ? ["./plugins/withoutIosPersonalTeamCapabilities.cjs"] : []),
   ],
   extra: {
+    eas: {
+      projectId: J5_BRANDING.mobile.easProjectId,
+    },
     appVariant: APP_VARIANT,
     iosPersonalTeamBuild: isIosPersonalTeamBuild,
     relay: {

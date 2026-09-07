@@ -5,6 +5,12 @@
     "promptToConfigurePushNotifications": false
   },
   "build": {
+    "j5-testflight": {
+      "extends": "production",
+      "node": "24.14.0",
+      "pnpm": "11.10.0",
+      "distribution": "store"
+    },
     "development": {
       "corepack": true,
       "env": {
@@ -52,9 +58,13 @@
     }
   },
   "submit": {
+    "j5-testflight": {
+      "extends": "production"
+    },
     "production": {
       "ios": {
-        "ascAppId": "6787819824"
+        "appleTeamId": "46A73QH3S8",
+        "ascAppId": "6809314460"
       },
       "android": {
         "track": "internal"
