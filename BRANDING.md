@@ -53,9 +53,12 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - Desktop publishing is configured only when `T3CODE_DESKTOP_UPDATE_REPOSITORY` or
   `GITHUB_REPOSITORY` is supplied; the fork does not hard-code an upstream update repository.
 - Mobile Expo updates are disabled until Jackson configures J5-owned update infrastructure.
-- The mobile manifest contains no hard-coded Expo project, owner, Apple team, Clerk domain, relay,
-  or telemetry endpoint. Optional values continue to use the upstream `T3CODE_*` / `EXPO_PUBLIC_*`
-  configuration names.
+- Mobile builds use the J5-owned Expo project `@jacksondr5/j5-code`, defined in
+  `scripts/lib/j5-branding.ts`. `apps/mobile/eas.json` targets Apple team `46A73QH3S8`
+  and App Store Connect app `6809314460`; preserve these fork destinations during pin advances.
+  See [iOS distribution](docs/operations/j5-mobile-distribution.md).
+- Clerk, relay, and telemetry remain optional and use the upstream `T3CODE_*` / `EXPO_PUBLIC_*`
+  configuration names. No J5 service endpoints are provisioned by the build setup.
 
 ## 2026-09-06 verification boundary
 
