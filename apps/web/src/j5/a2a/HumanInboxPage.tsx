@@ -24,6 +24,9 @@ import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { answerHumanExchange, listHumanInbox, type HumanInboxItem } from "./humanInboxClient";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
+import type { WorkflowEntry } from "@j5/workflow-contracts/sidebar";
+import { listWorkflowEntries } from "../workflow/client";
+import { phaseLabel, statusPresentation } from "../workflow/presentation";
 
 interface HumanInboxAnswerAttempt {
   readonly message: string;
@@ -275,6 +278,8 @@ export function HumanInboxPage() {
   const [personId, setPersonId] = useState<string | null>(null);
   const [items, setItems] = useState<ReadonlyArray<HumanInboxItem>>([]);
   const [answeredItems, setAnsweredItems] = useState<ReadonlyArray<HumanInboxItem>>([]);
+  const [workflowItems, setWorkflowItems] = useState<ReadonlyArray<WorkflowEntry>>([]);
+  const [workflowCount, setWorkflowCount] = useState(0);
   const [answers, setAnswers] = useState<HumanInboxAnswers>({});
   const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -285,13 +290,18 @@ export function HumanInboxPage() {
     setLoading(true);
     setError(null);
     try {
-      const [openResponse, answeredResponse] = await Promise.all([
+      const [openResponse, answeredResponse, workflows] = await Promise.all([
         listHumanInbox(requestedPersonId, "open"),
         listHumanInbox(requestedPersonId, "answered"),
+        listWorkflowEntries("", "", 0, 100),
       ]);
+      if (workflows.waitingApprovalCount === null)
+        throw new Error("Workflow approval count is temporarily unavailable.");
       setPersonId(openResponse.personId);
       setItems(openResponse.items);
       setAnsweredItems(answeredResponse.items);
+      setWorkflowItems(workflows.runs.filter((run) => run.status === "waiting_approval"));
+      setWorkflowCount(workflows.waitingApprovalCount);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load the inbox.");
       throw cause;
@@ -302,6 +312,9 @@ export function HumanInboxPage() {
 
   useEffect(() => {
     void refresh().catch(() => undefined);
+    const changed = () => void refresh().catch(() => undefined);
+    window.addEventListener("j5-workflows-changed", changed);
+    return () => window.removeEventListener("j5-workflows-changed", changed);
   }, [refresh]);
 
   const answer = async (item: HumanInboxItem) => {
@@ -361,7 +374,7 @@ export function HumanInboxPage() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   {loading && personId === null
                     ? "Loading questions waiting on you…"
-                    : `${items.length} open ${items.length === 1 ? "question" : "questions"}`}
+                    : `${items.length + workflowCount} open ${items.length + workflowCount === 1 ? "item" : "items"}`}
                 </p>
               </div>
               <Button
@@ -394,31 +407,74 @@ export function HumanInboxPage() {
               </div>
             ) : null}
 
-            {!loading && error === null && items.length === 0 ? (
+            {!loading && error === null && items.length === 0 && workflowCount === 0 ? (
               <div className="flex min-h-56 flex-col items-center justify-center px-6 py-12 text-center">
                 <span className="flex size-10 items-center justify-center rounded-full bg-success/10 text-success">
                   <InboxIcon aria-hidden className="size-5" />
                 </span>
                 <h2 className="mt-4 text-base font-medium">Nothing is waiting on you</h2>
                 <p className="mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">
-                  New questions from agents will arrive here in urgency order.
+                  New questions and workflow approvals will arrive here.
                 </p>
               </div>
             ) : (
-              <ol className="divide-y divide-border/70">
-                {items.map((item) => (
-                  <OpenInboxItem
-                    answer={answer}
-                    answerText={answers[item.exchangeId] ?? ""}
-                    environmentAvailable={primaryEnvironmentId !== null}
-                    item={item}
-                    key={item.exchangeId}
-                    onOpenThread={openThread}
-                    pendingExchangeId={pendingExchangeId}
-                    setAnswers={setAnswers}
-                  />
-                ))}
-              </ol>
+              <div className="space-y-6">
+                {workflowItems.length > 0 && (
+                  <section aria-labelledby="workflow-approvals-heading">
+                    <h2 className="text-sm font-semibold" id="workflow-approvals-heading">
+                      Workflow approvals
+                    </h2>
+                    <ol className="mt-2 divide-y divide-border/70 rounded-md border px-3">
+                      {workflowItems.map((item) => (
+                        <li className="flex items-center justify-between gap-3 py-3" key={item.id}>
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{item.title}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {statusPresentation[item.status].label} · {phaseLabel(item.phase)}
+                            </p>
+                          </div>
+                          <Button
+                            render={
+                              <a
+                                href={`/runs?runId=${encodeURIComponent(item.id)}&squadronId=${encodeURIComponent(item.squadronId)}#workflow-approval`}
+                              />
+                            }
+                            size="sm"
+                            variant="outline"
+                          >
+                            Review evidence
+                          </Button>
+                        </li>
+                      ))}
+                    </ol>
+                    {workflowCount > workflowItems.length && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Showing {workflowItems.length} of {workflowCount} workflow approvals. Open
+                        Workflows for the complete list.
+                      </p>
+                    )}
+                  </section>
+                )}
+                <section aria-labelledby="agent-questions-heading">
+                  <h2 className="text-sm font-semibold" id="agent-questions-heading">
+                    Agent questions
+                  </h2>
+                  <ol className="mt-2 divide-y divide-border/70">
+                    {items.map((item) => (
+                      <OpenInboxItem
+                        answer={answer}
+                        answerText={answers[item.exchangeId] ?? ""}
+                        environmentAvailable={primaryEnvironmentId !== null}
+                        item={item}
+                        key={item.exchangeId}
+                        onOpenThread={openThread}
+                        pendingExchangeId={pendingExchangeId}
+                        setAnswers={setAnswers}
+                      />
+                    ))}
+                  </ol>
+                </section>
+              </div>
             )}
 
             <AnsweredShelf

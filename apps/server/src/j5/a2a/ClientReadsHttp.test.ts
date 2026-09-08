@@ -19,7 +19,8 @@ import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { A2AHumanPersonIdError } from "./HumanInboxService.ts";
 import { A2AHumanInbox } from "./HumanInboxService.ts";
 import { A2ALocalOperatorNotFoundError } from "./HumanPersonRegistry.ts";
-import { j5AuthenticatedRoutesLayer } from "./J5AuthenticatedRoutes.ts";
+import { WorkflowService } from "../workflow-definitions/Service.ts";
+import { j5AuthenticatedRouteRegistration as j5AuthenticatedRoutesLayer } from "./J5AuthenticatedRoutes.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { A2AParticipantNotFoundError } from "./SendService.ts";
 import { SquadronProjectReferences } from "./SquadronProjectReferences.ts";
@@ -310,6 +311,7 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
     },
   });
   const routes = j5AuthenticatedRoutesLayer.pipe(
+    Layer.provide(Layer.mock(WorkflowService)({ definitions: [] })),
     Layer.provide(clientReads),
     Layer.provide(
       Layer.mock(A2AArchiveFacts)({

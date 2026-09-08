@@ -6,6 +6,7 @@ import { useSidebar } from "../../components/ui/sidebar";
 import { cn } from "../../lib/utils";
 import { readOpenInboxCount } from "./humanInboxCountClient";
 import { HUMAN_INBOX_REFRESH_EVENT } from "./humanInboxRefresh";
+import { listWorkflowEntries } from "../workflow/client";
 
 export const COUNT_POLL_INTERVAL_MS = 7_500;
 
@@ -27,9 +28,11 @@ export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean })
         return;
       }
       inFlight = true;
-      void readOpenInboxCount()
-        .then((response) => {
-          if (active) setCount(response.count);
+      void Promise.all([readOpenInboxCount(), listWorkflowEntries("", "", 0, 1)])
+        .then(([response, workflows]) => {
+          if (workflows.waitingApprovalCount === null)
+            throw new Error("Workflow count unavailable");
+          if (active) setCount(response.count + workflows.waitingApprovalCount);
         })
         .catch(() => {
           if (active) setCount(null);
@@ -57,12 +60,14 @@ export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean })
     syncInterval();
     window.addEventListener("focus", refreshVisibleWindow);
     window.addEventListener(HUMAN_INBOX_REFRESH_EVENT, refresh);
+    window.addEventListener("j5-workflows-changed", refresh);
     document.addEventListener("visibilitychange", refreshVisibleWindow);
     return () => {
       active = false;
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshVisibleWindow);
       window.removeEventListener(HUMAN_INBOX_REFRESH_EVENT, refresh);
+      window.removeEventListener("j5-workflows-changed", refresh);
       document.removeEventListener("visibilitychange", refreshVisibleWindow);
     };
   }, []);

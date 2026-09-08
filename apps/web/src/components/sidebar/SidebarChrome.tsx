@@ -81,6 +81,14 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       <div className="relative z-10 -me-1 ms-auto flex size-8 shrink-0 items-center justify-center md:me-[var(--sidebar-content-inset)]">
         <HumanInboxBell onBackdrop={backdropVariant !== null} />
       </div>
+      <Link
+        to="/runs"
+        search={{ runId: undefined, squadronId: undefined, newWorkflow: undefined }}
+        className="relative z-10 px-2 text-xs"
+        aria-label="Workflows"
+      >
+        Workflows
+      </Link>
     </SidebarHeader>
   );
 });

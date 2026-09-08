@@ -24,6 +24,34 @@ git switch j5/main
 
 ## Add, don't modify
 
+### Deterministic workflow integration
+
+The local workflow implementation adds `packages/j5-workflow-contracts`, the generic
+`apps/server/src/j5/workflow` engine, FH definitions and composition under
+`apps/server/src/j5/workflow-definitions`, and the web Runs surface under
+`apps/web/src/j5/workflow`. Workflow definitions and command receipts pin execution;
+workflow functions are never replayed to reconstruct side effects.
+The modern and legacy sidebars register a J5 workflow list and omit primary-environment
+workflow agent threads from ordinary thread rows. A bounded authenticated presentation
+read supplies titles and gate status without loading artifact bodies; review documents
+render the immutable artifacts through the existing Markdown renderer. These presentation
+changes do not change the pinned execution definition.
+
+The appended integration points are the independent `j5_workflow_migrations` lane in
+`persistence/Layers/Sqlite.ts`, the existing J5 authenticated route aggregate,
+the `/runs` file route and generated route registration, the sidebar Runs link,
+and server/web package dependencies. `.node-version` pins the requested local
+Node 24.14.1 baseline. The existing J5 HTTP fixture compositions supply a workflow
+service mock while retaining the production route registrations.
+`apps/server/package.json` checks the J5 source manifest before bundling;
+`scripts/j5-workflow-manifest.mjs` records the reviewed source identity so source
+and Electron builds pin the same workflow definition. Regenerate it after reviewed
+workflow changes with `node scripts/j5-workflow-manifest.mjs`.
+
+Workflow publication uses a dedicated GitHub adapter because the generic creation
+contract does not support draft selection. Commit, push, and draft creation reconcile
+separately; the workflow never force-pushes or merges.
+
 J5-specific code belongs in new files or new packages. Keep commits narrow and organized so they can be cherry-picked onto a new upstream base.
 
 The only sanctioned edits to upstream-owned files are small appended integration cases, such as a new switch case or registry entry that makes a new J5-owned module reachable. Do not refactor surrounding upstream code while adding a case.

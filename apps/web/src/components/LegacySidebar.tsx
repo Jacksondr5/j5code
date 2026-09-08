@@ -1,3 +1,5 @@
+import { WorkflowSidebar } from "../j5/workflow/WorkflowSidebar";
+import { useWorkflowVisibleThreads } from "../j5/workflow/useWorkflowVisibleThreads";
 import {
   ArchiveIcon,
   ArrowUpDownIcon,
@@ -1226,7 +1228,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     },
   });
   const openPrLink = useOpenPrLink();
-  const sidebarThreads = useThreadShellsForProjectRefs(project.memberProjectRefs);
+  const sidebarThreads = useWorkflowVisibleThreads(
+    useThreadShellsForProjectRefs(project.memberProjectRefs),
+  );
   const sidebarThreadByKey = useMemo(
     () =>
       new Map(
@@ -3015,6 +3019,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
         </SidebarGroup>
       ) : null}
       <LocalSecondaryStatus />
+      <WorkflowSidebar />
       <SidebarGroup className="px-2 py-2">
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
           <span className="text-xs font-medium text-sidebar-muted-foreground/80">Projects</span>
@@ -3132,7 +3137,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 
 export default function LegacySidebar() {
   const projects = useProjects();
-  const sidebarThreads = useThreadShells();
+  const sidebarThreads = useWorkflowVisibleThreads(useThreadShells());
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);

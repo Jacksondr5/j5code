@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "files": [
+    "apps/server/src/j5/workflow/Definition.ts",
+    "apps/server/src/j5/workflow/Worker.ts",
+    "apps/server/src/j5/workflow/AgentAdapter.ts",
+    "apps/server/src/j5/workflow/Store.ts",
+    "apps/server/src/j5/workflow-definitions/Service.ts",
+    "apps/server/src/j5/workflow-definitions/manifest.ts",
+    "packages/j5-workflow-contracts/src/index.ts",
+    "apps/server/src/j5/workflow/decider.ts",
+    "apps/server/src/j5/workflow-definitions/fh/development.ts",
+    "apps/server/src/j5/workflow-definitions/fh/CodeAdapters.ts",
+    "apps/server/src/j5/workflow-definitions/fh/GitWorkspace.ts",
+    "apps/server/src/j5/workflow-definitions/fh/Publication.ts",
+    "packages/j5-workflow-contracts/src/fh.ts"
+  ],
+  "hash": "2620621820fa0826fc523fa3f86870fa2f9ad2eb5af2a8281b92360c3a706ebc"
+}

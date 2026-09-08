@@ -1,3 +1,5 @@
+import { WorkflowSidebar } from "../j5/workflow/WorkflowSidebar";
+import { isWorkflowThread } from "@j5/workflow-contracts/sidebar";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
@@ -2170,7 +2172,9 @@ export default function Sidebar() {
     // Subagent child threads live in the parent's Agents surface, not the
     // sidebar roster (v2 models them as real threads with lineage).
     const visible = filterThreadsForSquadronScope(
-      filterSidebarV2VisibleThreads(threads, null),
+      filterSidebarV2VisibleThreads(threads, null).filter(
+        (thread) => thread.environmentId !== primaryEnvironmentId || !isWorkflowThread(thread.id),
+      ),
       squadronScope,
       threadHomes,
     );
@@ -2222,7 +2226,15 @@ export default function Sidebar() {
       settledThreads: sortSettledThreadsForSidebar(settled),
       snoozeNow: preciseNow,
     };
-  }, [nowMinute, squadronScope, serverConfigs, snoozeWakeTick, threadHomes, threads]);
+  }, [
+    nowMinute,
+    squadronScope,
+    serverConfigs,
+    snoozeWakeTick,
+    threadHomes,
+    threads,
+    primaryEnvironmentId,
+  ]);
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
@@ -3659,6 +3671,7 @@ export default function Sidebar() {
           </SidebarGroup>
         }
       >
+        <WorkflowSidebar query={threadSearchQuery} />
         <SidebarGroup className="ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pb-1 pt-0">
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
