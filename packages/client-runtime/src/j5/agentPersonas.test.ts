@@ -291,11 +291,11 @@ it("uses the selected environment's advertised models and reasoning options with
     available: true,
     label: "Codex · team-model",
     target: { driver: "codex", model: "team-model", reasoningEffort: "high" },
-    efforts: ["medium", "high"],
+    efforts: ["xhigh", "high", "medium", "minimal", "max"],
   });
 });
 
-it("retains unadvertised models without offering unsupported reasoning levels", () => {
+it("retains unadvertised models and their configured reasoning levels", () => {
   const current = [
     { driver: "codex", model: "legacy-model", reasoningEffort: "xhigh" },
     { driver: "claudeAgent", model: "custom-model", reasoningEffort: "low" },
@@ -303,13 +303,13 @@ it("retains unadvertised models without offering unsupported reasoning levels", 
   const choices = agentPersonaModelChoices([], current);
   expect(choices.find(({ target }) => target.model === "legacy-model")).toMatchObject({
     target: current[0],
-    efforts: [],
+    efforts: ["xhigh"],
   });
   expect(choices.find(({ target }) => target.model === "custom-model")?.efforts).toEqual(["low"]);
   expect(current[0].reasoningEffort).toBe("xhigh");
 });
 
-it("merges allowed levels for a shared unadvertised model without restoring a legacy level", () => {
+it("merges all configured reasoning levels for a shared unadvertised model", () => {
   const choices = agentPersonaModelChoices(
     [],
     [
@@ -320,8 +320,8 @@ it("merges allowed levels for a shared unadvertised model without restoring a le
   );
   expect(choices).toHaveLength(1);
   expect(choices[0]).toMatchObject({
-    target: { driver: "codex", model: "custom-model", reasoningEffort: "high" },
-    efforts: ["low", "high"],
+    target: { driver: "codex", model: "custom-model", reasoningEffort: "xhigh" },
+    efforts: ["low", "high", "xhigh"],
   });
 });
 
