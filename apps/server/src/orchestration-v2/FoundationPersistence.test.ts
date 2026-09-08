@@ -471,8 +471,10 @@ it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
       const now = yield* DateTime.now;
       const threadId = ThreadId.make("thread:foundation-agent-persona");
       const assignment = {
-        personaId: "builder",
-        definitionVersion: 1,
+        personaId: "team-builder",
+        definitionVersion: 3,
+        definitionDigest: "a".repeat(64),
+        displayName: "Original Team Builder",
         authorityPolicy: "workspace-write",
         resolvedRoute: "primary",
         resolvedDriver: providerDriver,
