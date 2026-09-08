@@ -39,7 +39,8 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
-import { validateBuiltInAgentPersonaAssignment } from "../j5/agents/agentPersonaAssignment.ts";
+import { makeAgentPersonaLibrary } from "../j5/agents/agentPersonaLibrary.ts";
+import { validateAgentPersonaAssignment } from "../j5/agents/agentPersonaAssignment.ts";
 import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import { CommandPolicyV2 } from "./CommandPolicy.ts";
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
@@ -539,6 +540,7 @@ function rootProviderThreadsForProvider(
 }
 
 const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(function* () {
+  const personaLibrary = yield* makeAgentPersonaLibrary;
   const checkpointService = yield* CheckpointServiceV2;
   const commandPolicy = yield* CommandPolicyV2;
   const contextHandoffService = yield* ContextHandoffServiceV2;
@@ -1346,7 +1348,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const assignmentError =
       command.agentPersonaAssignment === undefined
         ? undefined
-        : validateBuiltInAgentPersonaAssignment(command.agentPersonaAssignment);
+        : yield* personaLibrary.readSnapshot(command.agentPersonaAssignment).pipe(
+            Effect.map((definition) =>
+              validateAgentPersonaAssignment(command.agentPersonaAssignment!, definition),
+            ),
+            Effect.mapError(
+              (cause) =>
+                new OrchestratorDispatchError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                  cause,
+                }),
+            ),
+          );
     if (assignmentError !== undefined) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,

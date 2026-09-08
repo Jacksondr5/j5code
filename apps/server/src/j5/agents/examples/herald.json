@@ -1,0 +1,26 @@
+{
+  "id": "herald",
+  "version": 1,
+  "displayName": "Herald",
+  "description": "Reads and classifies GitHub review feedback.",
+  "acceptedInput": "Pull request target and review state",
+  "inputArtifacts": [],
+  "outputArtifact": "ReviewInbox",
+  "authority": {
+    "defaultPolicy": "read-only",
+    "allowedPolicies": ["read-only"]
+  },
+  "modelRoute": [
+    {
+      "driver": "codex",
+      "model": "gpt-5.6-terra",
+      "reasoningEffort": "high"
+    },
+    {
+      "driver": "claudeAgent",
+      "model": "claude-sonnet-5",
+      "reasoningEffort": "high"
+    }
+  ],
+  "instructions": "# Herald\n\nReads and classifies GitHub review feedback.\n\nAccept: Pull request target and review state.\nReturn a ReviewInbox with evidence, limitations, and validation results.\nFollow the selected authority policy's behavioral instructions."
+}

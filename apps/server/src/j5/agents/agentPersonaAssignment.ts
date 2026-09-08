@@ -6,11 +6,12 @@ import {
   getBuiltInAgentPersona,
   type AgentAuthorityPolicyId,
   type AgentPersonaId,
+  type AgentPersonaDefinition,
 } from "./agentPersonas.ts";
 
 type AvailableAgentPersonaRoute = Extract<AgentPersonaRouteResolution, { status: "available" }>;
 
-export type BuiltInAgentPersonaAssignmentResult =
+export type AgentPersonaAssignmentResult =
   | {
       readonly status: "assigned";
       readonly assignment: OrchestrationV2AgentPersonaAssignment;
@@ -28,11 +29,12 @@ export type BuiltInAgentPersonaAssignmentResult =
       readonly driver: AvailableAgentPersonaRoute["driver"];
     };
 
-export function buildBuiltInAgentPersonaAssignment(input: {
+export function buildAgentPersonaAssignment(input: {
   readonly resolution: AvailableAgentPersonaRoute;
+  readonly definition?: AgentPersonaDefinition;
   readonly authorityPolicy?: AgentAuthorityPolicyId;
-}): BuiltInAgentPersonaAssignmentResult {
-  const definition = getBuiltInAgentPersona(input.resolution.personaId);
+}): AgentPersonaAssignmentResult {
+  const definition = input.definition ?? getBuiltInAgentPersona(input.resolution.personaId);
   const authorityPolicy = input.authorityPolicy ?? definition.authority.defaultPolicy;
   if (!definition.authority.allowedPolicies.some((policy) => policy === authorityPolicy)) {
     return {
@@ -64,10 +66,10 @@ export function buildBuiltInAgentPersonaAssignment(input: {
   };
 }
 
-export function validateBuiltInAgentPersonaAssignment(
+export function validateAgentPersonaAssignment(
   assignment: OrchestrationV2AgentPersonaAssignment,
+  definition: AgentPersonaDefinition = getBuiltInAgentPersona(assignment.personaId),
 ): string | undefined {
-  const definition = getBuiltInAgentPersona(assignment.personaId);
   const target = definition.modelRoute[assignment.resolvedRoute === "primary" ? 0 : 1];
   const optionId = target.driver === "codex" ? "reasoningEffort" : "effort";
   const selectedEffort = assignment.resolvedModelSelection.options?.find(
