@@ -10,6 +10,7 @@
 - [Source control](./user/source-control.md)
 - [Project settings](./user/project-settings.md)
 - [Appearance and themes](./user/appearance.md)
+- [Agents and subagent activity](./user/agents.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Import browser sessions](./user/browser-import.md)
 - [Usage and limits](./user/usage.md)
@@ -49,6 +50,7 @@ source alone does not explain. Most code changes do not need an internal documen
 
 ### Runbooks
 
+- [Configure a persona library](./operations/persona-library.md)
 - [Development and local builds](./operations/development.md)
 - [T3 Connect setup](./operations/connect-setup.md)
 - [Release](./operations/release.md)
