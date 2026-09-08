@@ -1,0 +1,67 @@
+# Configure an environment's persona library
+
+Persona files live on the server environment, including when clients connect remotely. Use that environment's active state directory; never point a development server at an installed application's live state.
+
+## Import from a client
+
+Settings → Agents provides one **Import** menu with **Agent file** and **Folder** options on web, desktop, iOS, and Android. Folder selection includes `.json`, `.yaml`, and `.yml` files recursively; a single-file selection imports only that definition. The client uploads selected definition contents to the chosen environment using authenticated orchestration-operate RPCs. Paths are diagnostic labels, never server write destinations.
+
+Imports are copies, stored as one atomically replaced `<stateDir>/imported-agent-personas.json` collection. Imported IDs take precedence over the source library below. The UI first imports with `replaceExisting: false`. Existing IDs produce a typed `AgentPersonaImportConflictError` before any writes, carrying names, IDs, and definition digests. Cancel rejects the entire selection. Each conflict has a replacement toggle. Import selected retries the same files with `replaceExisting: true`, the approved `confirmedConflicts`, and `skippedPersonaIds` for toggled-off agents; the server checks those digests under the mutation permit and requests fresh confirmation for new or changed conflicts. Skipped IDs are excluded before conflict checks and writes, even if their definitions were removed while the dialog was open. They stay skipped across retries. New agents are imported alongside approved replacements; an entirely skipped selection succeeds without writing. Acceptance overwrites local edits only for approved replacements while preserving enabled state and saved task snapshots. The RPC retains explicit replacement without `confirmedConflicts` for existing clients; duplicate IDs within a batch are always rejected. All files are validated before writing. Batches are limited to 50 files and 64 KiB of UTF-8 per file. Other file extensions are ignored; unrelated or malformed JSON/YAML fails the entire selection.
+
+Each imported record has an optional `enabled` flag in the stored collection; absent means enabled for compatibility. Settings exposes this as **On/Off**. Disabled IDs remain in the catalog with unavailable reason `disabled` and are rejected at new persona launch preparation. Replacing a definition preserves its enabled state. The flag is environment metadata and is excluded from definition snapshots and digests. Toggle, import, and removal writes share the same process-wide permit and atomic file replacement.
+
+The destructive trash action uses the authenticated `removeAgentPersona` RPC for every library entry. It records the ID in `<stateDir>/removed-source-agent-personas.json` before deleting any imported copy and its enabled flag. This order prevents a removed override from exposing its source definition. The original source files and task snapshots are untouched. Imported copies take precedence over exclusions, so importing the original definition explicitly restores an entry. Include both library state files in environment backups. Removal shares the mutation permit with imports and toggles. Legacy import-only and source-only removal RPCs remain for existing clients; the current UI uses complete library removal.
+
+The pencil editor saves name, description, runtime policy, and the primary/fallback model targets through `editImportedAgentPersona` with orchestration-operate authorization. The catalog includes editable model targets and a content digest for imported entries only, never raw instructions. A stale digest or missing imported ID rejects the save. Successful edits increment the definition version, validate the complete definition and 64 KiB limit, preserve its enabled flag and unedited fields, and atomically replace only the imported collection. Changing the runtime policy replaces the allowed-policy list with that policy; leaving it unchanged preserves the existing list. Source files and saved task snapshots are untouched.
+
+## Read server folders directly
+
+By default, the server reads immediate `.json`, `.yaml`, and `.yml` files in `<stateDir>/personas`. If neither that folder nor explicit configuration exists, it offers the bundled examples. An existing empty folder is an intentionally empty library.
+
+To select other folders, create `<stateDir>/agent-personas.json`:
+
+```json
+{
+  "folders": ["personas", "/absolute/path/to/team-personas"]
+}
+```
+
+Relative paths resolve from the state directory. Explicit configuration replaces the default/example catalog. An empty `folders` list disables source definitions; client imports remain available. The server never clones a repository or performs git operations; maintain the folders using an editor and git as desired.
+
+Each immediate JSON or YAML file contains one definition. Both formats use the same schema. YAML uses version 1.2; duplicate keys, multiple documents, custom tags, and aliases are rejected. Internal imports, configuration, and snapshots remain JSON. For example, `agent.yaml`:
+
+```yaml
+id: team-researcher
+version: 1
+displayName: Team Researcher
+description: Collects evidence for the team.
+acceptedInput: A question and relevant repository evidence
+inputArtifacts: []
+outputArtifact: ContextBrief
+authority:
+  defaultPolicy: read-only
+  allowedPolicies: [read-only]
+modelRoute:
+  - driver: codex
+    model: gpt-5.6-terra
+    reasoningEffort: high
+  - driver: claudeAgent
+    model: claude-opus-5
+    reasoningEffort: high
+instructions: |-
+  # Identity
+  You collect evidence for the team.
+
+  # Operating principles
+  Cite sources and distinguish observations from inference.
+```
+
+Choose exact models and reasoning values advertised by the environment. The server supports Codex and Claude persona policies; other adapters remain unavailable for activation in this revision. `diagnostic` and `publish-only` are blocked pending the required operation boundaries.
+
+Copy and customize the starter files in `apps/server/src/j5/agents/examples/` when working from the repository. Source folders may be shared through git. The source format is identical for starter and custom personas. The file limit is 64 KiB, with 32,768 characters available for instructions. Declare custom handoff names in an optional `artifacts` array before referencing them in `inputArtifacts` or `outputArtifact`.
+
+Reopen Settings → Agents to read the updated catalog, or launch a new persona through the existing orchestrator contract. The server reads files on each catalog request and new activation; a restart is unnecessary. Empty libraries display an empty state. Missing configured folders, malformed files, undefined artifact references, or duplicate ids fail the library read and prevent new persona launches. Fix the indicated source and retry.
+
+Changing the configuration or a source file does not modify running tasks. Every new assignment records a content digest and has an immutable definition snapshot under `<stateDir>/agent-persona-snapshots`. Back up and restore that directory alongside the event database. A missing or corrupt snapshot blocks reuse rather than silently substituting current instructions. Do not prune snapshots while tasks or their forks may reference them. Ordinary non-persona tasks are unaffected by library errors.
+
+In-app editing, direct human persona selection, and library git controls are follow-up work.
