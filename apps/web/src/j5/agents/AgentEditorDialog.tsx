@@ -1,12 +1,14 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   AGENT_PERSONA_POLICY_OPTIONS,
+  AGENT_PERSONA_HARNESSES,
   agentPersonaModelChoices,
   agentPersonaModelChoiceId,
 } from "@t3tools/client-runtime/state/agent-personas";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { AgentPersonaEditInput, EnvironmentId } from "@t3tools/contracts";
 import { useState } from "react";
+import { ChevronDownIcon } from "lucide-react";
 
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -27,6 +29,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
+import {
+  Menu,
+  MenuTrigger,
+  MenuPopup,
+  MenuSub,
+  MenuSubTrigger,
+  MenuSubPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+} from "../../components/ui/menu";
 import { orchestrationEnvironment } from "../../state/orchestration";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -150,36 +162,71 @@ export function AgentEditorDialog(props: {
               return (
                 <div key={label} className="grid gap-2 rounded-lg border p-3">
                   <span className="text-sm font-medium">{label}</span>
-                  <Select
-                    value={agentPersonaModelChoiceId(target)}
-                    disabled={saving}
-                    onValueChange={(value) => {
-                      const choice = choices.find(({ id }) => id === value);
-                      if (choice)
-                        updateTarget({
-                          ...choice.target,
-                          reasoningEffort: choice.efforts.includes(target.reasoningEffort)
-                            ? target.reasoningEffort
-                            : choice.target.reasoningEffort,
-                        });
-                    }}
-                  >
-                    <SelectTrigger aria-label={label}>
-                      <SelectValue>{selected?.label}</SelectValue>
-                    </SelectTrigger>
-                    <SelectPopup>
-                      {choices.map(({ id, label }) => (
-                        <SelectItem key={id} value={id}>
-                          {label}
-                        </SelectItem>
-                      ))}
-                    </SelectPopup>
-                  </Select>
+                  <Menu>
+                    <MenuTrigger
+                      disabled={saving}
+                      aria-label={label}
+                      render={
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-full justify-between"
+                        />
+                      }
+                    >
+                      <span className="truncate">{selected?.label}</span>
+                      <ChevronDownIcon className="size-4 shrink-0" />
+                    </MenuTrigger>
+                    <MenuPopup align="start">
+                      {AGENT_PERSONA_HARNESSES.map((harness) => {
+                        const models = choices.filter(
+                          ({ target }) => target.driver === harness.driver,
+                        );
+                        return (
+                          <MenuSub key={harness.driver}>
+                            <MenuSubTrigger
+                              disabled={!models.some(({ efforts }) => efforts.length > 0)}
+                            >
+                              {harness.label}
+                            </MenuSubTrigger>
+                            <MenuSubPopup>
+                              <MenuRadioGroup
+                                value={agentPersonaModelChoiceId(target)}
+                                onValueChange={(value) => {
+                                  const choice = models.find(({ id }) => id === value);
+                                  if (choice && choice.efforts.length > 0)
+                                    updateTarget({
+                                      ...choice.target,
+                                      reasoningEffort: choice.efforts.includes(
+                                        target.reasoningEffort,
+                                      )
+                                        ? target.reasoningEffort
+                                        : choice.target.reasoningEffort,
+                                    });
+                                }}
+                              >
+                                {models.map(({ id, modelLabel, efforts }) => (
+                                  <MenuRadioItem
+                                    key={id}
+                                    value={id}
+                                    disabled={efforts.length === 0}
+                                  >
+                                    {modelLabel}
+                                  </MenuRadioItem>
+                                ))}
+                              </MenuRadioGroup>
+                            </MenuSubPopup>
+                          </MenuSub>
+                        );
+                      })}
+                    </MenuPopup>
+                  </Menu>
                   <Select
                     value={target.reasoningEffort}
-                    disabled={saving}
+                    disabled={saving || !selected?.efforts.length}
                     onValueChange={(value) => {
-                      if (value) updateTarget({ ...target, reasoningEffort: value });
+                      if (value && selected?.efforts.includes(value))
+                        updateTarget({ ...target, reasoningEffort: value });
                     }}
                   >
                     <SelectTrigger aria-label={`${label} reasoning`}>

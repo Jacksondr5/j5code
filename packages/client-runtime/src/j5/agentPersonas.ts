@@ -155,7 +155,14 @@ export const AGENT_PERSONA_POLICY_OPTIONS = [
 export const agentPersonaModelChoiceId = (target: AgentPersonaModelTarget) =>
   JSON.stringify([target.driver, target.model]);
 
-/** Keep configured models selectable even when they are absent from the environment's current catalog. */
+export const AGENT_PERSONA_HARNESSES = [
+  { driver: "codex", label: "Codex" },
+  { driver: "claudeAgent", label: "Claude" },
+] as const;
+
+const AGENT_PERSONA_REASONING_LEVELS = ["low", "medium", "high"];
+
+/** Retain configured models while limiting new selections to supported reasoning levels. */
 export function agentPersonaModelChoices(
   providers: ReadonlyArray<ServerProvider>,
   current: ReadonlyArray<AgentPersonaModelTarget>,
@@ -165,6 +172,7 @@ export function agentPersonaModelChoices(
     {
       id: string;
       label: string;
+      modelLabel: string;
       target: AgentPersonaModelTarget;
       efforts: string[];
     }
@@ -177,7 +185,10 @@ export function agentPersonaModelChoices(
         ({ id }) => id === (driver === "codex" ? "reasoningEffort" : "effort"),
       );
       if (descriptor?.type !== "select" || descriptor.options.length === 0) continue;
-      const efforts = descriptor.options.map(({ id }) => id);
+      const efforts = AGENT_PERSONA_REASONING_LEVELS.filter((effort) =>
+        descriptor.options.some(({ id }) => id === effort),
+      );
+      if (efforts.length === 0) continue;
       const target = {
         driver,
         model: model.slug,
@@ -188,23 +199,29 @@ export function agentPersonaModelChoices(
       choices.set(id, {
         id,
         label: `${driver === "codex" ? "Codex" : "Claude"} · ${model.slug}`,
+        modelLabel: model.slug,
         target,
-        efforts: [...new Set([...(previous?.efforts ?? []), ...efforts])],
+        efforts: AGENT_PERSONA_REASONING_LEVELS.filter(
+          (effort) => previous?.efforts.includes(effort) || efforts.includes(effort),
+        ),
       });
     }
   }
+  const advertisedIds = new Set(choices.keys());
   for (const target of current) {
     const id = agentPersonaModelChoiceId(target);
-    const choice = choices.get(id);
-    if (!choice)
-      choices.set(id, {
-        id,
-        label: `${target.driver === "codex" ? "Codex" : "Claude"} · ${target.model} (not advertised)`,
-        target,
-        efforts: [target.reasoningEffort],
-      });
-    else if (!choice.efforts.includes(target.reasoningEffort))
-      choice.efforts.push(target.reasoningEffort);
+    if (advertisedIds.has(id)) continue;
+    const previous = choices.get(id);
+    const efforts = AGENT_PERSONA_REASONING_LEVELS.filter(
+      (effort) => previous?.efforts.includes(effort) || effort === target.reasoningEffort,
+    );
+    choices.set(id, {
+      id,
+      label: `${target.driver === "codex" ? "Codex" : "Claude"} · ${target.model} (not advertised)`,
+      modelLabel: `${target.model} (not advertised)`,
+      target: efforts.length > 0 ? { ...target, reasoningEffort: efforts.at(-1)! } : target,
+      efforts,
+    });
   }
   return [...choices.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
