@@ -310,6 +310,11 @@ export const BUILT_IN_AGENT_PERSONA_IDS = [
   "herald",
 ] as const;
 
+export const AgentPersonaId = TrimmedNonEmptyString.check(
+  Schema.isPattern(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/),
+);
+export type AgentPersonaId = typeof AgentPersonaId.Type;
+
 export const BuiltInAgentPersonaId = Schema.Literals(BUILT_IN_AGENT_PERSONA_IDS);
 export type BuiltInAgentPersonaId = typeof BuiltInAgentPersonaId.Type;
 
@@ -339,15 +344,17 @@ export const BuiltInAgentArtifactId = Schema.Literals(BUILT_IN_AGENT_ARTIFACT_ID
 export type BuiltInAgentArtifactId = typeof BuiltInAgentArtifactId.Type;
 
 export const OrchestrationV2AgentPersonaRequest = Schema.Struct({
-  personaId: BuiltInAgentPersonaId,
+  personaId: AgentPersonaId,
   authorityPolicy: Schema.optional(AgentPersonaAuthorityPolicy),
 });
 export type OrchestrationV2AgentPersonaRequest = typeof OrchestrationV2AgentPersonaRequest.Type;
 
-/** Immutable launch-time provenance for a thread assigned to a built-in persona. */
+/** Immutable launch-time provenance; definitionDigest references an environment-owned snapshot. */
 export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
-  personaId: BuiltInAgentPersonaId,
+  personaId: AgentPersonaId,
   definitionVersion: PositiveInt,
+  definitionDigest: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
+  displayName: Schema.optional(TrimmedNonEmptyString),
   authorityPolicy: AgentPersonaAuthorityPolicy,
   resolvedRoute: Schema.Literals(["primary", "fallback"]),
   resolvedDriver: ProviderDriverKind,
@@ -365,20 +372,42 @@ export const OrchestrationV2AgentPersonaAvailability = Schema.Union([
   }),
   Schema.Struct({
     status: Schema.Literal("unavailable"),
-    reason: Schema.Literals(["routes-unavailable", "authority-not-enforceable"]),
+    reason: Schema.Literals(["routes-unavailable", "authority-not-enforceable", "disabled"]),
   }),
 ]);
 export type OrchestrationV2AgentPersonaAvailability =
   typeof OrchestrationV2AgentPersonaAvailability.Type;
 
-/** Environment-specific, presentation-safe view of one built-in persona. */
+export const AgentPersonaModelTarget = Schema.Struct({
+  driver: Schema.Literals(["codex", "claudeAgent"]),
+  model: TrimmedNonEmptyString,
+  reasoningEffort: TrimmedNonEmptyString,
+});
+export type AgentPersonaModelTarget = typeof AgentPersonaModelTarget.Type;
+export const AgentPersonaEditableDetails = Schema.Struct({
+  definitionDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+  modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+});
+export const AgentPersonaEditInput = Schema.Struct({
+  personaId: AgentPersonaId,
+  expectedDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+  displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
+  description: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
+  authorityPolicy: AgentPersonaAuthorityPolicy,
+  modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+});
+export type AgentPersonaEditInput = typeof AgentPersonaEditInput.Type;
+
+/** Environment-specific, presentation-safe view of one library persona. */
 export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
-  personaId: BuiltInAgentPersonaId,
+  personaId: AgentPersonaId,
+  imported: Schema.optional(Schema.Boolean),
+  editable: Schema.optional(AgentPersonaEditableDetails),
   definitionVersion: PositiveInt,
   displayName: TrimmedNonEmptyString,
   description: TrimmedNonEmptyString,
   acceptedInput: TrimmedNonEmptyString,
-  outputArtifact: BuiltInAgentArtifactId,
+  outputArtifact: TrimmedNonEmptyString,
   defaultAuthorityPolicy: AgentPersonaAuthorityPolicy,
   allowedAuthorityPolicies: Schema.Array(AgentPersonaAuthorityPolicy),
   availability: OrchestrationV2AgentPersonaAvailability,
@@ -386,10 +415,50 @@ export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
 export type OrchestrationV2AgentPersonaCatalogEntry =
   typeof OrchestrationV2AgentPersonaCatalogEntry.Type;
 
+export class AgentPersonaCatalogError extends Schema.TaggedErrorClass<AgentPersonaCatalogError>()(
+  "AgentPersonaCatalogError",
+  { message: Schema.String },
+) {}
+
 export const OrchestrationV2AgentPersonaCatalog = Schema.Struct({
   personas: Schema.Array(OrchestrationV2AgentPersonaCatalogEntry),
 });
 export type OrchestrationV2AgentPersonaCatalog = typeof OrchestrationV2AgentPersonaCatalog.Type;
+
+export const isAgentPersonaDefinitionFile = (name: string): boolean =>
+  /\.(json|ya?ml)$/i.test(name);
+
+export const AGENT_PERSONA_IMPORT_MAX_FILES = 50;
+export const AGENT_PERSONA_IMPORT_MAX_BYTES = 65536;
+export const AgentPersonaImportConflict = Schema.Struct({
+  personaId: AgentPersonaId,
+  displayName: TrimmedNonEmptyString,
+  definitionDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+});
+export type AgentPersonaImportConflict = typeof AgentPersonaImportConflict.Type;
+export class AgentPersonaImportConflictError extends Schema.TaggedErrorClass<AgentPersonaImportConflictError>()(
+  "AgentPersonaImportConflictError",
+  { message: Schema.String, conflicts: Schema.Array(AgentPersonaImportConflict) },
+) {}
+
+export const AgentPersonaImportInput = Schema.Struct({
+  files: Schema.Array(
+    Schema.Struct({
+      name: TrimmedNonEmptyString.check(Schema.isMaxLength(1024)),
+      content: Schema.String.check(Schema.isMaxLength(AGENT_PERSONA_IMPORT_MAX_BYTES)),
+    }),
+  ).check(Schema.isMinLength(1), Schema.isMaxLength(AGENT_PERSONA_IMPORT_MAX_FILES)),
+  replaceExisting: Schema.Boolean,
+  skippedPersonaIds: Schema.optional(
+    Schema.Array(AgentPersonaId).check(Schema.isMaxLength(AGENT_PERSONA_IMPORT_MAX_FILES)),
+  ),
+  confirmedConflicts: Schema.optional(
+    Schema.Array(AgentPersonaImportConflict).check(
+      Schema.isMaxLength(AGENT_PERSONA_IMPORT_MAX_FILES),
+    ),
+  ),
+});
+export type AgentPersonaImportInput = typeof AgentPersonaImportInput.Type;
 
 export const OrchestrationV2AppThread = Schema.Struct({
   ...OrchestrationV2CreationFields,
@@ -2460,6 +2529,12 @@ export type OrchestrationV2PublicCommand = typeof OrchestrationV2PublicCommand.T
 export const ORCHESTRATION_V2_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
   getAgentPersonaCatalog: "orchestration.getAgentPersonaCatalog",
+  importAgentPersonas: "orchestration.importAgentPersonas",
+  editImportedAgentPersona: "orchestration.editImportedAgentPersona",
+  removeImportedAgentPersona: "orchestration.removeImportedAgentPersona",
+  removeSourceAgentPersona: "orchestration.removeSourceAgentPersona",
+  removeAgentPersona: "orchestration.removeAgentPersona",
+  setImportedAgentPersonaEnabled: "orchestration.setImportedAgentPersonaEnabled",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
@@ -2757,6 +2832,30 @@ export const OrchestrationV2RpcSchemas = {
   dispatchCommand: {
     input: OrchestrationV2PublicCommand,
     output: OrchestrationV2DispatchCommandResult,
+  },
+  editImportedAgentPersona: {
+    input: AgentPersonaEditInput,
+    output: Schema.Void,
+  },
+  importAgentPersonas: {
+    input: AgentPersonaImportInput,
+    output: Schema.Struct({ importedIds: Schema.Array(AgentPersonaId) }),
+  },
+  setImportedAgentPersonaEnabled: {
+    input: Schema.Struct({ personaId: AgentPersonaId, enabled: Schema.Boolean }),
+    output: Schema.Void,
+  },
+  removeImportedAgentPersona: {
+    input: Schema.Struct({ personaId: AgentPersonaId }),
+    output: Schema.Void,
+  },
+  removeSourceAgentPersona: {
+    input: Schema.Struct({ personaId: AgentPersonaId }),
+    output: Schema.Void,
+  },
+  removeAgentPersona: {
+    input: Schema.Struct({ personaId: AgentPersonaId }),
+    output: Schema.Void,
   },
   getAgentPersonaCatalog: {
     input: Schema.Struct({}),
