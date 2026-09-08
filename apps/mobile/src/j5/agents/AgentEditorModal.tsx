@@ -31,6 +31,12 @@ export function AgentEditorModal(props: {
     ...props.initial.modelRoute,
     ...draft.modelRoute,
   ]);
+  const modelGroups = AGENT_PERSONA_HARNESSES.map((harness) => ({
+    ...harness,
+    models: choices.filter(
+      ({ target, available }) => available && target.driver === harness.driver,
+    ),
+  })).filter(({ models }) => models.length > 0);
   const save = useAtomCommand(orchestrationEnvironment.v2.editImportedAgentPersona, {
     reportFailure: false,
   });
@@ -128,55 +134,61 @@ export function AgentEditorModal(props: {
                 });
               return (
                 <View key={label} className="gap-3 rounded-xl border border-border p-3">
-                  <View className="gap-2">
-                    <Text className="text-sm font-t3-medium">{label}</Text>
-                    <ControlPillMenu
-                      actions={AGENT_PERSONA_HARNESSES.map((harness) => {
-                        const models = choices.filter(
-                          ({ target }) => target.driver === harness.driver,
-                        );
-                        return {
-                          id: harness.driver,
-                          title: harness.label,
-                          attributes: {
-                            disabled: saving || !models.some(({ efforts }) => efforts.length > 0),
-                          },
-                          subactions: models.map(({ id, modelLabel, efforts }) => ({
-                            id,
-                            title: modelLabel,
-                            state: id === agentPersonaModelChoiceId(target) ? "on" : "off",
-                            attributes: { disabled: saving || efforts.length === 0 },
-                          })),
-                        };
-                      })}
-                      onPressAction={({ nativeEvent }) => {
-                        const choice = choices.find(({ id }) => id === nativeEvent.event);
-                        if (!saving && choice && choice.efforts.length > 0)
-                          updateTarget({
-                            ...choice.target,
-                            reasoningEffort: choice.efforts.includes(target.reasoningEffort)
-                              ? target.reasoningEffort
-                              : choice.target.reasoningEffort,
-                          });
-                      }}
-                    >
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={label}
-                        disabled={saving}
-                        className="rounded-xl border border-border px-3 py-3"
+                  <View className="flex-row items-start gap-2">
+                    <View className="min-w-0 flex-1 gap-2">
+                      <Text className="text-sm font-t3-medium">{label}</Text>
+                      <ControlPillMenu
+                        actions={modelGroups.map((harness) => {
+                          const { models } = harness;
+                          return {
+                            id: harness.driver,
+                            title: harness.label,
+                            attributes: {
+                              disabled: saving || !models.some(({ efforts }) => efforts.length > 0),
+                            },
+                            subactions: models.map(({ id, modelLabel, efforts }) => ({
+                              id,
+                              title: modelLabel,
+                              state: id === agentPersonaModelChoiceId(target) ? "on" : "off",
+                              attributes: { disabled: saving || efforts.length === 0 },
+                            })),
+                          };
+                        })}
+                        onPressAction={({ nativeEvent }) => {
+                          const choice = choices.find(({ id }) => id === nativeEvent.event);
+                          if (!saving && choice?.available && choice.efforts.length > 0)
+                            updateTarget({
+                              ...choice.target,
+                              reasoningEffort: choice.efforts.includes(target.reasoningEffort)
+                                ? target.reasoningEffort
+                                : choice.target.reasoningEffort,
+                            });
+                        }}
                       >
-                        <Text>{selected?.label}</Text>
-                      </Pressable>
-                    </ControlPillMenu>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={label}
+                          disabled={saving}
+                          className="rounded-xl border border-border px-3 py-3"
+                        >
+                          <Text numberOfLines={1}>{selected?.label}</Text>
+                        </Pressable>
+                      </ControlPillMenu>
+                    </View>
+                    <View className="w-28">
+                      <EditorChoice
+                        label="Reasoning"
+                        accessibilityLabel={`${label} reasoning`}
+                        value={target.reasoningEffort}
+                        disabled={saving || !selected?.efforts.length}
+                        choices={(selected?.efforts ?? []).map((value) => ({
+                          value,
+                          label: value,
+                        }))}
+                        onChange={(reasoningEffort) => updateTarget({ ...target, reasoningEffort })}
+                      />
+                    </View>
                   </View>
-                  <EditorChoice
-                    label={`${label} reasoning`}
-                    value={target.reasoningEffort}
-                    disabled={saving || !selected?.efforts.length}
-                    choices={(selected?.efforts ?? []).map((value) => ({ value, label: value }))}
-                    onChange={(reasoningEffort) => updateTarget({ ...target, reasoningEffort })}
-                  />
                 </View>
               );
             })}
@@ -207,6 +219,7 @@ export function AgentEditorModal(props: {
 
 function EditorChoice(props: {
   label: string;
+  accessibilityLabel?: string;
   value: string;
   disabled: boolean;
   choices: ReadonlyArray<{ value: string; label: string }>;
@@ -218,7 +231,7 @@ function EditorChoice(props: {
       <Text className="text-sm font-t3-medium">{props.label}</Text>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={props.label}
+        accessibilityLabel={props.accessibilityLabel ?? props.label}
         accessibilityState={{ expanded, disabled: props.disabled }}
         disabled={props.disabled}
         className="rounded-xl border border-border px-3 py-3"
