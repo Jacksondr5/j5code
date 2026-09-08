@@ -173,11 +173,14 @@ export function agentPersonaModelChoices(
       id: string;
       label: string;
       modelLabel: string;
+      available: boolean;
       target: AgentPersonaModelTarget;
       efforts: string[];
     }
   >();
   for (const provider of providers) {
+    if (!provider.enabled || !provider.installed || provider.auth.status !== "authenticated")
+      continue;
     if (provider.driver !== "codex" && provider.driver !== "claudeAgent") continue;
     const driver = provider.driver === "codex" ? "codex" : "claudeAgent";
     for (const model of provider.models) {
@@ -200,6 +203,7 @@ export function agentPersonaModelChoices(
         id,
         label: `${driver === "codex" ? "Codex" : "Claude"} · ${model.slug}`,
         modelLabel: model.slug,
+        available: true,
         target,
         efforts: AGENT_PERSONA_REASONING_LEVELS.filter(
           (effort) => previous?.efforts.includes(effort) || efforts.includes(effort),
@@ -219,6 +223,7 @@ export function agentPersonaModelChoices(
       id,
       label: `${target.driver === "codex" ? "Codex" : "Claude"} · ${target.model} (not advertised)`,
       modelLabel: `${target.model} (not advertised)`,
+      available: false,
       target: efforts.length > 0 ? { ...target, reasoningEffort: efforts.at(-1)! } : target,
       efforts,
     });
