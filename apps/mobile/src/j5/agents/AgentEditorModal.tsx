@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   AGENT_PERSONA_POLICY_OPTIONS,
+  AGENT_PERSONA_HARNESSES,
   agentPersonaModelChoices,
   agentPersonaModelChoiceId,
 } from "@t3tools/client-runtime/state/agent-personas";
@@ -11,6 +12,7 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View } fr
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
+import { ControlPillMenu } from "../../components/ControlPill";
 import { orchestrationEnvironment } from "../../state/orchestration";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -126,26 +128,52 @@ export function AgentEditorModal(props: {
                 });
               return (
                 <View key={label} className="gap-3 rounded-xl border border-border p-3">
-                  <EditorChoice
-                    label={label}
-                    value={agentPersonaModelChoiceId(target)}
-                    disabled={saving}
-                    choices={choices.map(({ id, label }) => ({ value: id, label }))}
-                    onChange={(value) => {
-                      const choice = choices.find(({ id }) => id === value);
-                      if (choice)
-                        updateTarget({
-                          ...choice.target,
-                          reasoningEffort: choice.efforts.includes(target.reasoningEffort)
-                            ? target.reasoningEffort
-                            : choice.target.reasoningEffort,
-                        });
-                    }}
-                  />
+                  <View className="gap-2">
+                    <Text className="text-sm font-t3-medium">{label}</Text>
+                    <ControlPillMenu
+                      actions={AGENT_PERSONA_HARNESSES.map((harness) => {
+                        const models = choices.filter(
+                          ({ target }) => target.driver === harness.driver,
+                        );
+                        return {
+                          id: harness.driver,
+                          title: harness.label,
+                          attributes: {
+                            disabled: saving || !models.some(({ efforts }) => efforts.length > 0),
+                          },
+                          subactions: models.map(({ id, modelLabel, efforts }) => ({
+                            id,
+                            title: modelLabel,
+                            state: id === agentPersonaModelChoiceId(target) ? "on" : "off",
+                            attributes: { disabled: saving || efforts.length === 0 },
+                          })),
+                        };
+                      })}
+                      onPressAction={({ nativeEvent }) => {
+                        const choice = choices.find(({ id }) => id === nativeEvent.event);
+                        if (!saving && choice && choice.efforts.length > 0)
+                          updateTarget({
+                            ...choice.target,
+                            reasoningEffort: choice.efforts.includes(target.reasoningEffort)
+                              ? target.reasoningEffort
+                              : choice.target.reasoningEffort,
+                          });
+                      }}
+                    >
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={label}
+                        disabled={saving}
+                        className="rounded-xl border border-border px-3 py-3"
+                      >
+                        <Text>{selected?.label}</Text>
+                      </Pressable>
+                    </ControlPillMenu>
+                  </View>
                   <EditorChoice
                     label={`${label} reasoning`}
                     value={target.reasoningEffort}
-                    disabled={saving}
+                    disabled={saving || !selected?.efforts.length}
                     choices={(selected?.efforts ?? []).map((value) => ({ value, label: value }))}
                     onChange={(reasoningEffort) => updateTarget({ ...target, reasoningEffort })}
                   />

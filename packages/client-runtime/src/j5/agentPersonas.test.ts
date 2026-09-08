@@ -257,8 +257,11 @@ it("uses the selected environment's advertised models and reasoning options with
               label: "Reasoning",
               type: "select",
               options: [
-                { id: "medium", label: "Medium" },
+                { id: "xhigh", label: "Extra high" },
                 { id: "high", label: "High" },
+                { id: "medium", label: "Medium" },
+                { id: "minimal", label: "Minimal" },
+                { id: "max", label: "Max" },
               ],
             },
           ],
@@ -268,13 +271,43 @@ it("uses the selected environment's advertised models and reasoning options with
   };
   const choices = agentPersonaModelChoices(
     [provider, { ...provider, instanceId: ProviderInstanceId.make("second-codex") }],
-    [],
+    [{ driver: "codex", model: "team-model", reasoningEffort: "xhigh" }],
   );
   expect(choices).toHaveLength(1);
   expect(choices[0]).toMatchObject({
     label: "Codex · team-model",
     target: { driver: "codex", model: "team-model", reasoningEffort: "high" },
     efforts: ["medium", "high"],
+  });
+});
+
+it("retains unadvertised models without offering unsupported reasoning levels", () => {
+  const current = [
+    { driver: "codex", model: "legacy-model", reasoningEffort: "xhigh" },
+    { driver: "claudeAgent", model: "custom-model", reasoningEffort: "low" },
+  ] as const;
+  const choices = agentPersonaModelChoices([], current);
+  expect(choices.find(({ target }) => target.model === "legacy-model")).toMatchObject({
+    target: current[0],
+    efforts: [],
+  });
+  expect(choices.find(({ target }) => target.model === "custom-model")?.efforts).toEqual(["low"]);
+  expect(current[0].reasoningEffort).toBe("xhigh");
+});
+
+it("merges allowed levels for a shared unadvertised model without restoring a legacy level", () => {
+  const choices = agentPersonaModelChoices(
+    [],
+    [
+      { driver: "codex", model: "custom-model", reasoningEffort: "low" },
+      { driver: "codex", model: "custom-model", reasoningEffort: "high" },
+      { driver: "codex", model: "custom-model", reasoningEffort: "xhigh" },
+    ],
+  );
+  expect(choices).toHaveLength(1);
+  expect(choices[0]).toMatchObject({
+    target: { driver: "codex", model: "custom-model", reasoningEffort: "high" },
+    efforts: ["low", "high"],
   });
 });
 
