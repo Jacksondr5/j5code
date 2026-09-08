@@ -1,3 +1,11 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as ServerConfig from "../config.ts";
+import { BUILT_IN_AGENT_PERSONAS } from "../j5/agents/agentPersonas.ts";
+import { makeAgentPersonaLibrary } from "../j5/agents/agentPersonaLibrary.ts";
+import { resolveAgentPersonaRuntime } from "../j5/agents/agentPersonaRuntime.ts";
+
 import { assert, it, vi } from "@effect/vitest";
 import {
   CommandId,
@@ -1599,3 +1607,122 @@ it.effect("does not depend on the legacy launch workflow table", () => {
     assert.equal(launched.projection.messages[0]?.text, "No private workflow state");
   }).pipe(Effect.provide(harness.layer));
 });
+
+const jsonPersonaFixture = (value: unknown) => JSON.stringify(value);
+
+it.effect(
+  "launches an imported persona and replays its receipt after the source is removed",
+  () => {
+    const definition = {
+      ...BUILT_IN_AGENT_PERSONAS.scout,
+      id: "team-researcher",
+      displayName: "Team Researcher",
+      version: 2,
+    };
+    const harness = makeHarness({
+      providers: [
+        {
+          instanceId: ProviderInstanceId.make("codex"),
+          driver: ProviderDriverKind.make("codex"),
+          enabled: true,
+          installed: true,
+          version: null,
+          status: "ready",
+          auth: { status: "authenticated" },
+          checkedAt: "2026-09-08T00:00:00.000Z",
+          availability: "available",
+          slashCommands: [],
+          skills: [],
+          models: [
+            {
+              slug: definition.modelRoute[0].model,
+              name: "Research model",
+              isCustom: false,
+              capabilities: {
+                optionDescriptors: [
+                  {
+                    id: "reasoningEffort",
+                    label: "Reasoning",
+                    type: "select",
+                    options: [{ id: "high", label: "High" }],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const environment = ServerConfig.layerTest("/repo", { prefix: "j5-persona-launch-" });
+    return Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const folder = path.join(config.stateDir, "personas");
+      yield* fs.makeDirectory(folder, { recursive: true });
+      yield* fs.writeFileString(path.join(folder, "team.json"), jsonPersonaFixture(definition));
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const input = {
+        ...launchInput({ command: "command:imported-persona", thread: "thread:imported-persona" }),
+        agentPersona: { personaId: definition.id },
+      };
+      const launched = yield* launches.launch(input);
+      const projection = yield* threads.getThreadProjection(launched.threadId);
+      assert.equal(projection.thread.agentPersonaAssignment?.displayName, definition.displayName);
+      assert.match(
+        projection.thread.agentPersonaAssignment?.definitionDigest ?? "",
+        /^[a-f0-9]{64}$/,
+      );
+      const library = yield* makeAgentPersonaLibrary;
+      yield* library.importFiles({
+        files: [{ name: "agent.json", content: jsonPersonaFixture(definition) }],
+        replaceExisting: true,
+      });
+      yield* library.setImportedEnabled(definition.id, false);
+      const disabledError = yield* launches
+        .launch({
+          ...input,
+          commandId: CommandId.make("command:imported-persona:disabled"),
+          threadId: ThreadId.make("thread:imported-persona:disabled"),
+        })
+        .pipe(Effect.flip);
+      assert.equal(disabledError.operation, "resolve-agent-persona");
+      assert.include(disabledError.message, "disabled");
+      assert.equal((yield* launches.launch(input)).threadId, launched.threadId);
+      yield* library.setImportedEnabled(definition.id, true);
+      const reenabled = yield* launches.launch({
+        ...input,
+        commandId: CommandId.make("command:imported-persona:enabled"),
+        threadId: ThreadId.make("thread:imported-persona:enabled"),
+      });
+      assert.equal(
+        reenabled.projection.thread.agentPersonaAssignment?.definitionDigest,
+        projection.thread.agentPersonaAssignment?.definitionDigest,
+      );
+      yield* library.removeImported(definition.id);
+      yield* fs.remove(folder, { recursive: true });
+      const replay = yield* launches.launch(input);
+      assert.equal(replay.threadId, launched.threadId);
+      const policy = yield* resolveAgentPersonaRuntime(projection.thread, library);
+      assert.include(
+        "agentPersonaInstructions" in policy ? policy.agentPersonaInstructions : "",
+        definition.instructions,
+      );
+      const error = yield* launches
+        .launch({
+          ...input,
+          commandId: CommandId.make("command:imported-persona:missing"),
+          threadId: ThreadId.make("thread:imported-persona:missing"),
+        })
+        .pipe(Effect.flip);
+      assert.equal(error.operation, "resolve-agent-persona");
+      assert.include(error.message, "Unknown agent persona");
+    }).pipe(
+      Effect.provide(
+        harness.layer.pipe(Layer.provideMerge(environment), Layer.provideMerge(NodeServices.layer)),
+      ),
+      Effect.scoped,
+    );
+  },
+);

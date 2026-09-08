@@ -1,3 +1,4 @@
+import { AgentPersonaId, OrchestrationV2AgentPersonaAssignment } from "./j5/agentPersona.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
@@ -801,4 +802,31 @@ describe("orchestration V2 contracts", () => {
 
     expect(shell.pendingBackgroundTasks).toEqual([]);
   });
+});
+
+const decodePersonaId = Schema.decodeUnknownSync(AgentPersonaId);
+const decodePersonaAssignment = Schema.decodeUnknownSync(OrchestrationV2AgentPersonaAssignment);
+
+it("accepts custom persona ids and validates snapshot references without requiring them on legacy assignments", () => {
+  expect(decodePersonaId("team-researcher")).toBe("team-researcher");
+  expect(() => decodePersonaId("../escape")).toThrow();
+  const assignment = {
+    personaId: "team-researcher",
+    definitionVersion: 4,
+    displayName: "Team Researcher",
+    definitionDigest: "a".repeat(64),
+    authorityPolicy: "read-only",
+    resolvedRoute: "primary",
+    resolvedDriver: "codex",
+    resolvedModelSelection: { instanceId: "codex", model: "research-model" },
+  };
+  expect(decodePersonaAssignment(assignment)).toEqual(assignment);
+  expect(() =>
+    decodePersonaAssignment({
+      ...assignment,
+      definitionDigest: "../escape",
+    }),
+  ).toThrow();
+  const { definitionDigest: _digest, displayName: _name, ...legacy } = assignment;
+  expect(decodePersonaAssignment(legacy).definitionDigest).toBeUndefined();
 });

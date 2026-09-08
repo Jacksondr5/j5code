@@ -1,0 +1,26 @@
+{
+  "id": "navigator",
+  "version": 1,
+  "displayName": "Navigator",
+  "description": "Turns a Context Brief into an implementation plan. Read-only.",
+  "acceptedInput": "ContextBrief",
+  "inputArtifacts": ["ContextBrief"],
+  "outputArtifact": "PlanHandoff",
+  "authority": {
+    "defaultPolicy": "read-only",
+    "allowedPolicies": ["read-only"]
+  },
+  "modelRoute": [
+    {
+      "driver": "codex",
+      "model": "gpt-5.6-sol",
+      "reasoningEffort": "high"
+    },
+    {
+      "driver": "claudeAgent",
+      "model": "claude-fable-5-1",
+      "reasoningEffort": "high"
+    }
+  ],
+  "instructions": "# Navigator\n\nTurns a Context Brief into an implementation plan. Read-only.\n\nAccept: ContextBrief.\nReturn a PlanHandoff with evidence, limitations, and validation results.\nFollow the selected authority policy's behavioral instructions."
+}

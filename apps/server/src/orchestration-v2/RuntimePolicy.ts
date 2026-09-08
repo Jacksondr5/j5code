@@ -11,8 +11,11 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as ProjectionProjects from "../persistence/Services/ProjectionProjects.ts";
-import { getBuiltInAgentPersonaInstructions } from "../j5/agents/agentPersonaPrompts.ts";
-import { translateAgentPersonaProviderPolicy } from "../j5/agents/agentPersonaProviderPolicy.ts";
+import {
+  makeAgentPersonaLibrary,
+  type createAgentPersonaLibrary,
+} from "../j5/agents/agentPersonaLibrary.ts";
+import { resolveAgentPersonaRuntime } from "../j5/agents/agentPersonaRuntime.ts";
 import {
   ProviderAdapterV2RuntimePolicy,
   type ProviderAdapterV2RuntimePolicy as ProviderAdapterV2RuntimePolicyType,
@@ -59,43 +62,41 @@ export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePol
   "t3/orchestration-v2/RuntimePolicy/RuntimePolicyV2",
 ) {}
 
-function runtimePolicyForThread(input: {
-  readonly thread: OrchestrationV2AppThread;
-  readonly cwd: string | null;
-}): ProviderAdapterV2RuntimePolicyType {
-  const assignment = input.thread.agentPersonaAssignment;
-  const authorityPolicy = assignment?.authorityPolicy;
-  const providerPolicy =
-    authorityPolicy === undefined
-      ? { runtimeMode: input.thread.runtimeMode }
-      : translateAgentPersonaProviderPolicy(
-          authorityPolicy,
-          input.thread.agentPersonaAssignment!.resolvedDriver,
-        );
-  const agentPersonaInstructions =
-    assignment === undefined
-      ? undefined
-      : getBuiltInAgentPersonaInstructions({
-          personaId: assignment.personaId,
-          definitionVersion: assignment.definitionVersion,
-        });
-  return ProviderAdapterV2RuntimePolicy.make({
-    ...providerPolicy,
-    interactionMode: input.thread.interactionMode,
-    cwd: input.cwd,
-    ...(agentPersonaInstructions === undefined ? {} : { agentPersonaInstructions }),
-  });
-}
+const runtimePolicyForThread = (
+  input: { readonly thread: OrchestrationV2AppThread; readonly cwd: string | null },
+  library: ReturnType<typeof createAgentPersonaLibrary>,
+) =>
+  resolveAgentPersonaRuntime(input.thread, library).pipe(
+    Effect.map((policy) =>
+      ProviderAdapterV2RuntimePolicy.make({
+        ...policy,
+        interactionMode: input.thread.interactionMode,
+        cwd: input.cwd,
+      }),
+    ),
+    Effect.mapError(
+      (cause) =>
+        new RuntimePolicyResolveError({
+          projectId: input.thread.projectId,
+          providerInstanceId: input.thread.providerInstanceId,
+          cause,
+        }),
+    ),
+  );
 
 /**
  * IMPLEMENTATIONS
  */
-export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2, {
-  resolve: (input) =>
-    Effect.succeed(
-      runtimePolicyForThread({ thread: input.thread, cwd: input.thread.worktreePath }),
-    ),
-});
+export const layer: Layer.Layer<RuntimePolicyV2> = Layer.effect(
+  RuntimePolicyV2,
+  Effect.gen(function* () {
+    const library = yield* makeAgentPersonaLibrary;
+    return RuntimePolicyV2.of({
+      resolve: (input) =>
+        runtimePolicyForThread({ thread: input.thread, cwd: input.thread.worktreePath }, library),
+    });
+  }),
+);
 
 export const layerFromProjectRepository: Layer.Layer<
   RuntimePolicyV2,
@@ -105,6 +106,7 @@ export const layerFromProjectRepository: Layer.Layer<
   RuntimePolicyV2,
   Effect.gen(function* () {
     const projects = yield* ProjectionProjects.ProjectionProjectRepository;
+    const library = yield* makeAgentPersonaLibrary;
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
         const cwd =
@@ -132,7 +134,7 @@ export const layerFromProjectRepository: Layer.Layer<
               }),
             ),
           ));
-        return runtimePolicyForThread({ thread: input.thread, cwd });
+        return yield* runtimePolicyForThread({ thread: input.thread, cwd }, library);
       }),
     });
   }),

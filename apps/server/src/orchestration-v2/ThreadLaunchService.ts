@@ -36,12 +36,8 @@ import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.t
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
-import { buildBuiltInAgentPersonaAssignment } from "../j5/agents/agentPersonaAssignment.ts";
-import { getBuiltInAgentPersona } from "../j5/agents/agentPersonas.ts";
-import {
-  resolveBuiltInAgentPersonaRoute,
-  unavailableAgentPersonaReason,
-} from "../j5/agents/agentPersonaRouting.ts";
+import { prepareAgentPersonaLaunch } from "../j5/agents/agentPersonaLaunch.ts";
+import { makeAgentPersonaLibrary } from "../j5/agents/agentPersonaLibrary.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 import { makeProviderFailure } from "./ProviderFailure.ts";
@@ -149,6 +145,7 @@ function failureDetail(error: unknown): string {
 }
 
 export const make = Effect.gen(function* () {
+  const personaLibrary = yield* makeAgentPersonaLibrary;
   const projects = yield* ProjectService.ProjectService;
   const git = yield* GitWorkflow.GitWorkflowService;
   const setupScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
@@ -488,63 +485,12 @@ export const make = Effect.gen(function* () {
       let launchModelSelection = input.modelSelection;
       let agentPersonaAssignment: OrchestrationV2AgentPersonaAssignment | undefined;
       if (input.agentPersona !== undefined && Option.isNone(launchReceipt)) {
-        const definition = getBuiltInAgentPersona(input.agentPersona.personaId);
-        const requestedAuthorityPolicy = input.agentPersona.authorityPolicy;
-        if (
-          requestedAuthorityPolicy !== undefined &&
-          !definition.authority.allowedPolicies.some(
-            (policy) => policy === requestedAuthorityPolicy,
-          )
-        ) {
-          return yield* mapError(
-            input,
-            "resolve-agent-persona",
-          )(
-            `Authority policy ${requestedAuthorityPolicy} is not allowed for ${input.agentPersona.personaId}.`,
-          );
-        }
-        const resolution = resolveBuiltInAgentPersonaRoute({
-          personaId: input.agentPersona.personaId,
-          providers: yield* providerRegistry.getProviders,
-          ...(input.agentPersona.authorityPolicy === undefined
-            ? {}
-            : { authorityPolicy: input.agentPersona.authorityPolicy }),
-        });
-        if (resolution.status === "unavailable") {
-          const reason = unavailableAgentPersonaReason(resolution);
-          return yield* mapError(
-            input,
-            "resolve-agent-persona",
-          )(
-            reason === "authority-not-enforceable"
-              ? `Agent persona ${input.agentPersona.personaId} is blocked because neither route can enforce its authority policy.`
-              : `Agent persona ${input.agentPersona.personaId} is blocked because its primary and fallback models are unavailable.`,
-          );
-        }
-        const assignment = buildBuiltInAgentPersonaAssignment({
-          resolution,
-          ...(input.agentPersona.authorityPolicy === undefined
-            ? {}
-            : { authorityPolicy: input.agentPersona.authorityPolicy }),
-        });
-        if (assignment.status === "invalid-authority-policy") {
-          return yield* mapError(
-            input,
-            "resolve-agent-persona",
-          )(
-            `Authority policy ${assignment.requestedPolicy} is not allowed for ${assignment.personaId}.`,
-          );
-        }
-        if (assignment.status === "authority-not-enforceable") {
-          return yield* mapError(
-            input,
-            "resolve-agent-persona",
-          )(
-            `Agent persona ${assignment.personaId} is blocked because ${assignment.driver} cannot enforce ${assignment.requestedPolicy} authority.`,
-          );
-        }
-        agentPersonaAssignment = assignment.assignment;
-        launchModelSelection = assignment.assignment.resolvedModelSelection;
+        agentPersonaAssignment = yield* prepareAgentPersonaLaunch(
+          input.agentPersona,
+          yield* providerRegistry.getProviders,
+          personaLibrary,
+        ).pipe(Effect.mapError(mapError(input, "resolve-agent-persona")));
+        launchModelSelection = agentPersonaAssignment.resolvedModelSelection;
       }
       return yield* Effect.gen(function* () {
         const candidateThreadId =

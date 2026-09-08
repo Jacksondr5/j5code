@@ -6,10 +6,7 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 
-import {
-  buildBuiltInAgentPersonaCatalog,
-  resolveBuiltInAgentPersonaRoute,
-} from "./agentPersonaRouting.ts";
+import { buildAgentPersonaCatalog, resolveAgentPersonaRoute } from "./agentPersonaRouting.ts";
 import { providerCanEnforceAgentPersonaAuthority } from "./agentPersonaProviderPolicy.ts";
 import { listBuiltInAgentPersonas, type AgentModelTarget } from "./agentPersonas.ts";
 
@@ -81,7 +78,7 @@ describe("agent persona routing", () => {
   it("uses every enforceable persona's declared primary route when it is available", () => {
     for (const definition of listBuiltInAgentPersonas()) {
       const [primary, fallback] = definition.modelRoute;
-      const resolution = resolveBuiltInAgentPersonaRoute({
+      const resolution = resolveAgentPersonaRoute({
         personaId: definition.id,
         providers: [providerForTarget(fallback), providerForTarget(primary)],
       });
@@ -101,7 +98,7 @@ describe("agent persona routing", () => {
   it("uses only an enforceable declared fallback after its primary is unavailable", () => {
     for (const definition of listBuiltInAgentPersonas()) {
       const [primary, fallback] = definition.modelRoute;
-      const resolution = resolveBuiltInAgentPersonaRoute({
+      const resolution = resolveAgentPersonaRoute({
         personaId: definition.id,
         providers: [providerForTarget(primary, { enabled: false }), providerForTarget(fallback)],
       });
@@ -125,7 +122,7 @@ describe("agent persona routing", () => {
   it("skips Claude and uses the Codex fallback for Critic Fix Mode", () => {
     const definition = listBuiltInAgentPersonas().find(({ id }) => id === "critic")!;
     const [primary, fallback] = definition.modelRoute;
-    const resolution = resolveBuiltInAgentPersonaRoute({
+    const resolution = resolveAgentPersonaRoute({
       personaId: "critic",
       authorityPolicy: "critic-fix",
       providers: [providerForTarget(primary), providerForTarget(fallback)],
@@ -149,7 +146,7 @@ describe("agent persona routing", () => {
         personaId === "builder"
           ? [providerForTarget(primary, { enabled: false }), providerForTarget(fallback)]
           : [providerForTarget(primary), providerForTarget(fallback)];
-      const resolution = resolveBuiltInAgentPersonaRoute({ personaId, providers });
+      const resolution = resolveAgentPersonaRoute({ personaId, providers });
 
       assert.equal(resolution.status, "unavailable", personaId);
       if (resolution.status === "available") continue;
@@ -164,7 +161,7 @@ describe("agent persona routing", () => {
 
   it("blocks every persona when both declared routes are unavailable", () => {
     for (const definition of listBuiltInAgentPersonas()) {
-      const resolution = resolveBuiltInAgentPersonaRoute({
+      const resolution = resolveAgentPersonaRoute({
         personaId: definition.id,
         providers: [],
       });
@@ -187,7 +184,7 @@ describe("agent persona routing", () => {
   });
 
   it("selects the primary provider, exact model, and provider-specific effort option", () => {
-    const resolution = resolveBuiltInAgentPersonaRoute({
+    const resolution = resolveAgentPersonaRoute({
       personaId: "scout",
       providers: [
         provider({
@@ -214,7 +211,7 @@ describe("agent persona routing", () => {
   });
 
   it("uses fallback only after recording why the primary is ineligible", () => {
-    const resolution = resolveBuiltInAgentPersonaRoute({
+    const resolution = resolveAgentPersonaRoute({
       personaId: "skeptic",
       providers: [
         provider({
@@ -255,7 +252,7 @@ describe("agent persona routing", () => {
 
   it("prefers the default instance before configured custom instances", () => {
     const terra = model("gpt-5.6-terra", "reasoningEffort");
-    const resolution = resolveBuiltInAgentPersonaRoute({
+    const resolution = resolveAgentPersonaRoute({
       personaId: "scout",
       providers: [
         provider({ instanceId: "codex_work", driver: "codex", models: [terra] }),
@@ -269,7 +266,7 @@ describe("agent persona routing", () => {
   });
 
   it("fails closed when neither target advertises the exact model and effort", () => {
-    const resolution = resolveBuiltInAgentPersonaRoute({
+    const resolution = resolveAgentPersonaRoute({
       personaId: "skeptic",
       providers: [
         provider({
@@ -294,7 +291,7 @@ describe("agent persona routing", () => {
   });
 
   it("builds the ordered presentation catalog with environment-specific availability", () => {
-    const catalog = buildBuiltInAgentPersonaCatalog([
+    const catalog = buildAgentPersonaCatalog([
       provider({
         instanceId: "codex",
         driver: "codex",
@@ -326,4 +323,21 @@ describe("agent persona routing", () => {
       { status: "unavailable", reason: "authority-not-enforceable" },
     );
   });
+});
+
+it("presents imported definitions without transmitting their instruction bodies", () => {
+  const definition = {
+    ...listBuiltInAgentPersonas()[0]!,
+    id: "team-researcher",
+    displayName: "Team Researcher",
+  };
+  const catalog = buildAgentPersonaCatalog(
+    [providerForTarget(definition.modelRoute[0])],
+    [definition],
+  );
+  assert.lengthOf(catalog.personas, 1);
+  assert.equal(catalog.personas[0]?.personaId, "team-researcher");
+  assert.equal(catalog.personas[0]?.availability.status, "available");
+  assert.notProperty(catalog.personas[0], "instructions");
+  assert.deepEqual(buildAgentPersonaCatalog([], []), { personas: [] });
 });

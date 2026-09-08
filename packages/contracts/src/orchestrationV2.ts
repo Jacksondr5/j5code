@@ -36,7 +36,11 @@ import {
 } from "./checkpointDiff.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import {
+  AgentPersonaEditInput,
+  AgentPersonaId,
+  AgentPersonaImportInput,
   OrchestrationV2AgentPersonaAssignment,
+  OrchestrationV2AgentPersonaCatalog,
   OrchestrationV2AgentPersonaRequest,
 } from "./j5/agentPersona.ts";
 import { ThreadLinkedPullRequest } from "./orchestration.ts";
@@ -2369,6 +2373,12 @@ export type OrchestrationV2PublicCommand = typeof OrchestrationV2PublicCommand.T
 export const ORCHESTRATION_V2_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
   getAgentPersonaCatalog: "orchestration.getAgentPersonaCatalog",
+  importAgentPersonas: "orchestration.importAgentPersonas",
+  editImportedAgentPersona: "orchestration.editImportedAgentPersona",
+  removeImportedAgentPersona: "orchestration.removeImportedAgentPersona",
+  removeSourceAgentPersona: "orchestration.removeSourceAgentPersona",
+  removeAgentPersona: "orchestration.removeAgentPersona",
+  setImportedAgentPersonaEnabled: "orchestration.setImportedAgentPersonaEnabled",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
@@ -2666,6 +2676,30 @@ export const OrchestrationV2RpcSchemas = {
   dispatchCommand: {
     input: OrchestrationV2PublicCommand,
     output: OrchestrationV2DispatchCommandResult,
+  },
+  editImportedAgentPersona: {
+    input: AgentPersonaEditInput,
+    output: Schema.Void,
+  },
+  importAgentPersonas: {
+    input: AgentPersonaImportInput,
+    output: Schema.Struct({ importedIds: Schema.Array(AgentPersonaId) }),
+  },
+  setImportedAgentPersonaEnabled: {
+    input: Schema.Struct({ personaId: AgentPersonaId, enabled: Schema.Boolean }),
+    output: Schema.Void,
+  },
+  removeImportedAgentPersona: {
+    input: Schema.Struct({ personaId: AgentPersonaId }),
+    output: Schema.Void,
+  },
+  removeSourceAgentPersona: {
+    input: Schema.Struct({ personaId: AgentPersonaId }),
+    output: Schema.Void,
+  },
+  removeAgentPersona: {
+    input: Schema.Struct({ personaId: AgentPersonaId }),
+    output: Schema.Void,
   },
   getAgentPersonaCatalog: {
     input: Schema.Struct({}),
