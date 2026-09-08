@@ -36,6 +36,7 @@ import {
   MenuSub,
   MenuSubTrigger,
   MenuSubPopup,
+  MenuItem,
   MenuRadioGroup,
   MenuRadioItem,
 } from "../../components/ui/menu";
@@ -57,6 +58,12 @@ export function AgentEditorDialog(props: {
     ...props.initial.modelRoute,
     ...draft.modelRoute,
   ]);
+  const modelGroups = AGENT_PERSONA_HARNESSES.map((harness) => ({
+    ...harness,
+    models: choices.filter(
+      ({ target, available }) => available && target.driver === harness.driver,
+    ),
+  })).filter(({ models }) => models.length > 0);
   const save = useAtomCommand(orchestrationEnvironment.v2.editImportedAgentPersona, {
     reportFailure: false,
   });
@@ -162,84 +169,87 @@ export function AgentEditorDialog(props: {
               return (
                 <div key={label} className="grid gap-2 rounded-lg border p-3">
                   <span className="text-sm font-medium">{label}</span>
-                  <Menu>
-                    <MenuTrigger
-                      disabled={saving}
-                      aria-label={label}
-                      render={
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="w-full justify-between"
-                        />
-                      }
-                    >
-                      <span className="truncate">{selected?.label}</span>
-                      <ChevronDownIcon className="size-4 shrink-0" />
-                    </MenuTrigger>
-                    <MenuPopup align="start">
-                      {AGENT_PERSONA_HARNESSES.map((harness) => {
-                        const models = choices.filter(
-                          ({ target }) => target.driver === harness.driver,
-                        );
-                        return (
-                          <MenuSub key={harness.driver}>
-                            <MenuSubTrigger
-                              disabled={!models.some(({ efforts }) => efforts.length > 0)}
-                            >
-                              {harness.label}
-                            </MenuSubTrigger>
-                            <MenuSubPopup>
-                              <MenuRadioGroup
-                                value={agentPersonaModelChoiceId(target)}
-                                onValueChange={(value) => {
-                                  const choice = models.find(({ id }) => id === value);
-                                  if (choice && choice.efforts.length > 0)
-                                    updateTarget({
-                                      ...choice.target,
-                                      reasoningEffort: choice.efforts.includes(
-                                        target.reasoningEffort,
-                                      )
-                                        ? target.reasoningEffort
-                                        : choice.target.reasoningEffort,
-                                    });
-                                }}
+                  <div className="grid grid-cols-[minmax(0,1fr)_7rem] items-center gap-2">
+                    <Menu>
+                      <MenuTrigger
+                        disabled={saving}
+                        aria-label={label}
+                        render={
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="w-full justify-between"
+                          />
+                        }
+                      >
+                        <span className="truncate">{selected?.label}</span>
+                        <ChevronDownIcon className="size-4 shrink-0" />
+                      </MenuTrigger>
+                      <MenuPopup align="start">
+                        {modelGroups.length === 0 ? (
+                          <MenuItem disabled>No signed-in providers available</MenuItem>
+                        ) : null}
+                        {modelGroups.map((harness) => {
+                          const { models } = harness;
+                          return (
+                            <MenuSub key={harness.driver}>
+                              <MenuSubTrigger
+                                disabled={!models.some(({ efforts }) => efforts.length > 0)}
                               >
-                                {models.map(({ id, modelLabel, efforts }) => (
-                                  <MenuRadioItem
-                                    key={id}
-                                    value={id}
-                                    disabled={efforts.length === 0}
-                                  >
-                                    {modelLabel}
-                                  </MenuRadioItem>
-                                ))}
-                              </MenuRadioGroup>
-                            </MenuSubPopup>
-                          </MenuSub>
-                        );
-                      })}
-                    </MenuPopup>
-                  </Menu>
-                  <Select
-                    value={target.reasoningEffort}
-                    disabled={saving || !selected?.efforts.length}
-                    onValueChange={(value) => {
-                      if (value && selected?.efforts.includes(value))
-                        updateTarget({ ...target, reasoningEffort: value });
-                    }}
-                  >
-                    <SelectTrigger aria-label={`${label} reasoning`}>
-                      <SelectValue>{target.reasoningEffort}</SelectValue>
-                    </SelectTrigger>
-                    <SelectPopup>
-                      {selected?.efforts.map((effort) => (
-                        <SelectItem key={effort} value={effort}>
-                          {effort}
-                        </SelectItem>
-                      ))}
-                    </SelectPopup>
-                  </Select>
+                                {harness.label}
+                              </MenuSubTrigger>
+                              <MenuSubPopup>
+                                <MenuRadioGroup
+                                  value={agentPersonaModelChoiceId(target)}
+                                  onValueChange={(value) => {
+                                    const choice = models.find(({ id }) => id === value);
+                                    if (choice && choice.efforts.length > 0)
+                                      updateTarget({
+                                        ...choice.target,
+                                        reasoningEffort: choice.efforts.includes(
+                                          target.reasoningEffort,
+                                        )
+                                          ? target.reasoningEffort
+                                          : choice.target.reasoningEffort,
+                                      });
+                                  }}
+                                >
+                                  {models.map(({ id, modelLabel, efforts }) => (
+                                    <MenuRadioItem
+                                      key={id}
+                                      value={id}
+                                      disabled={efforts.length === 0}
+                                    >
+                                      {modelLabel}
+                                    </MenuRadioItem>
+                                  ))}
+                                </MenuRadioGroup>
+                              </MenuSubPopup>
+                            </MenuSub>
+                          );
+                        })}
+                      </MenuPopup>
+                    </Menu>
+                    <Select
+                      value={target.reasoningEffort}
+                      disabled={saving || !selected?.efforts.length}
+                      onValueChange={(value) => {
+                        if (value && selected?.efforts.includes(value))
+                          updateTarget({ ...target, reasoningEffort: value });
+                      }}
+                    >
+                      <SelectTrigger className="min-w-0 w-full" aria-label={`${label} reasoning`}>
+                        <SelectValue>{target.reasoningEffort}</SelectValue>
+                      </SelectTrigger>
+                      <SelectPopup>
+                        {selected?.efforts.map((effort) => (
+                          <SelectItem key={effort} value={effort}>
+                            {effort}
+                          </SelectItem>
+                        ))}
+                      </SelectPopup>
+                    </Select>
+                  </div>
                 </div>
               );
             })}

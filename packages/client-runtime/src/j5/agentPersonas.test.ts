@@ -275,8 +275,20 @@ it("uses the selected environment's advertised models and reasoning options with
     [provider, { ...provider, instanceId: ProviderInstanceId.make("second-codex") }],
     [{ driver: "codex", model: "team-model", reasoningEffort: "xhigh" }],
   );
+  for (const unavailable of [
+    { ...provider, auth: { status: "unauthenticated" as const } },
+    { ...provider, auth: { status: "unknown" as const } },
+    { ...provider, enabled: false },
+    { ...provider, installed: false },
+  ]) {
+    expect(agentPersonaModelChoices([unavailable], [])).toEqual([]);
+    const configured = agentPersonaModelChoices([unavailable], [choices[0]!.target]);
+    expect(configured).toHaveLength(1);
+    expect(configured[0]?.available).toBe(false);
+  }
   expect(choices).toHaveLength(1);
   expect(choices[0]).toMatchObject({
+    available: true,
     label: "Codex · team-model",
     target: { driver: "codex", model: "team-model", reasoningEffort: "high" },
     efforts: ["medium", "high"],
