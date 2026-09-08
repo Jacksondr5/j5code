@@ -6,21 +6,50 @@ status: 1
 
 # Agent persona definition contract
 
-Phase 1 contract settled 2026-09-02 from the FH Code agent-persona chart. This document defines the individual application-level agents only. Orchestrator flows, loops, gates, team composition, and lifecycle automation are explicitly out of scope.
+Revised 2026-09-08 following [Jacksondr5's PR #75 review](https://github.com/Jacksondr5/j5code/pull/75) and Bryant's approval of folder loading first. A **persona** is the current implementation of a user-authored [Role](../features/roles.md), not a second product concept. The eleven definitions below are starter examples, not a closed platform registry or a prescribed workflow.
 
-## Contract boundary
+## Delivery boundary
 
-An agent persona is a reusable application definition with five independent concerns:
+PR #75 defines the contract. Runtime delivery belongs to the dependent PRs; neither this document nor the backlog claims that the stack is merged or that every planned Role capability is complete.
 
-1. **Identity** — stable id, display name, and description.
-2. **Artifact contract** — accepted inputs and required output.
-3. **Model route** — an ordered primary and secondary model selection.
-4. **Authority policy** — what the agent may read, change, publish, or merge.
-5. **Activation mode** — an explicit mode when one persona supports materially different authority, as Critic does.
+This revision delivers folder discovery, definition validation, configurable definitions and instructions, environment-specific routing, immutable launch snapshots, and Settings folder/single-agent import across web, desktop, and mobile. Existing orchestrators remain responsible for activation. Instruction editing, direct human selection in the new-task composer, Role-library git controls, skill allowlists, posture controls, and drift indicators are follow-up work. The Roles feature document retains that long-term direction and labels these delivery limits explicitly.
 
-The definition is not a running agent, provider session, thread, or orchestrator. Later delivery phases resolve a definition against one environment and snapshot the result onto a launched thread.
+Crew composition, Playbook steps, workflow gates, and lifecycle automation remain separate features. A persona file describes the agent; the per-task brief still supplies the work.
 
-## Stable persona registry
+## User-authored library
+
+- Settings → Agents offers one **Import** menu with **Agent file** (one JSON or YAML definition) and **Folder** (all JSON and YAML definitions, including subfolders). The selected files are copied into the selected environment, so the same flow works remotely. Up to 50 files of 64 KiB each are validated as one atomic batch.
+- Imported agents can be edited in Settings: name, description, runtime policy, and primary/fallback models with reasoning settings. Changes apply only to the imported copy and future launches, preserve enabled state, and reject stale concurrent edits.
+- Imported agents have an environment-local **On/Off** setting. New imports start enabled; disabling prevents new launches and keeps the entry visible. Replacement imports preserve the setting; removing an import clears it. Running tasks retain their snapshots.
+- UI imports show a confirmation for existing IDs: each conflicting agent has a replacement toggle. Cancel imports nothing; Import selected imports new agents and overwrites only the selected existing definitions, including local edits, while preserving enabled state and saved tasks. Toggled-off agents are skipped throughout the import. New or changed conflicts require fresh confirmation. Duplicate IDs within a selection fail the batch. The trash action removes the imported copy and excludes any underlying source definition, without altering running tasks. Source edits require reimporting unless the server reads that folder directly through configuration.
+- A library combines imported copies with optional source folders on the selected environment's filesystem. Definitions are plain JSON or YAML files with markdown instruction content, editable and shareable through ordinary editors and git. Git is optional. Loading never clones, pulls, pushes, or executes a file.
+- For directly configured source folders, each immediate `.json`, `.yaml`, or `.yml` file holds one definition. Nested directories and other file types are ignored. Configuration selects folders explicitly; order is preserved and filenames are sorted. Duplicate ids fail the library read rather than silently choosing a winner.
+- The default library folder is `personas` below the environment's state directory. If that folder and explicit configuration are absent, the application offers the bundled examples. An existing empty folder or explicit empty folder list yields no source definitions; imports remain available. Explicit configuration replaces the examples; it never implicitly merges or overrides them.
+- `<stateDir>/agent-personas.json` accepts `{ "folders": ["personas", "/absolute/team-library"] }`. Relative paths resolve from that environment's state directory. Configuration and source files are re-read at catalog requests and new activations; no restart or continuous watcher is required. Reopening Settings reads the library again.
+- Missing configured folders, malformed configuration or definitions, undefined structured artifacts, and duplicate ids produce an actionable library error. A launch fails before thread creation. No invalid source silently falls back to the examples.
+- The same parser validates bundled and imported definitions. Examples live in `apps/server/src/j5/agents/examples/`; copying them into a source folder makes them ordinary editable definitions.
+
+## Definition format
+
+Each definition has:
+
+| Field                                                  | Meaning                                                                                                                                                  |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                   | Stable lowercase slug, such as `team-researcher`. Custom ids require no code changes.                                                                    |
+| `version`                                              | Positive integer chosen by the author. Changing it communicates a revision; content is also fingerprinted, so same-version edits are detected at launch. |
+| `displayName`, `description`                           | Human-facing identity and a concise purpose.                                                                                                             |
+| `instructions`                                         | Nonempty markdown identity and operating principles, at most 32,768 characters. The spawner supplies the task brief separately.                          |
+| `acceptedInput`                                        | Human-readable input summary; ordinary prompts and supporting evidence are allowed.                                                                      |
+| `inputArtifacts`, `outputArtifact`                     | Explicit structured handoff names. Every reference must name a standard artifact below or one declared by this definition.                               |
+| `artifacts`                                            | Optional names for user-defined artifacts. These declare references, not executable validators.                                                          |
+| `authority.defaultPolicy`, `authority.allowedPolicies` | A default and allowed selection from the runtime-policy vocabulary below. The default must be allowed.                                                   |
+| `modelRoute`                                           | Ordered primary and fallback targets. Each names `driver`, exact `model`, and `reasoningEffort`.                                                         |
+
+Files are limited to 64 KiB. This slice retains exactly two route targets and supports routing to Codex and Claude. Other providers are unavailable for persona activation until their adapter policies are supported. Broader ordered model allowlists belong to a later Role-library revision; none of these limits fixes the persona's name or model choices to the starter examples.
+
+## Starter examples
+
+These examples are user-editable content. Their operating instructions describe intended behavior, including no-commit or no-merge expectations; those words do not themselves enforce permissions.
 
 | ID             | Display name | Description                                                         | Accepted input                                            | Required output       | Authority                       | Primary route            | Secondary route           |
 | -------------- | ------------ | ------------------------------------------------------------------- | --------------------------------------------------------- | --------------------- | ------------------------------- | ------------------------ | ------------------------- |
@@ -36,27 +65,18 @@ The definition is not a running agent, provider session, thread, or orchestrator
 | `prosecutor`   | Prosecutor   | Challenges a diagnosis, its evidence, and proposed repair.          | `DiagnosisHandoff` plus available evidence                | `DiagnosisCritique`   | `read-only`                     | `claude-opus-5`, high    | `gpt-5.6-terra`, high     |
 | `herald`       | Herald       | Reads and classifies GitHub review feedback.                        | Pull request target and review state                      | `ReviewInbox`         | `read-only`                     | `gpt-5.6-terra`, high    | `claude-sonnet-5`, high   |
 
-Persona ids are lowercase and immutable after release. Display names and descriptions may evolve under a new definition version, but an existing thread keeps the version it launched with.
+## Model routing
 
-## Model-route contract
+1. Evaluate primary, then fallback, against the selected environment's current provider snapshots. No project-default or third route is inferred.
+2. Require supported runtime permissions before selecting a target. For matching instances, prefer the canonical default instance, then configured order.
+3. Require an available driver, enabled and installed instance, no error/disabled state, no unauthenticated state, and the exact advertised model and reasoning option.
+4. Return a canonical environment-local `ModelSelection`, with the provider-specific reasoning option, or typed rejection reasons.
 
-Each model route is an ordered pair:
-
-1. Use the primary only when a matching provider instance is enabled, available, exposes the named model and reasoning level, and can enforce the persona authority.
-2. Otherwise evaluate the secondary by the same rules.
-3. If neither route is eligible, the persona is unavailable.
-
-There is no implicit project-default or application-default third fallback. This preserves the chart's deliberate separation between authoring and reviewing model families. Once a thread starts, its resolved route is sticky; a later failover must be explicit rather than silently changing the active model.
-
-Provider instance ids remain environment-local. These definitions name logical model targets; a later phase binds each target to a configured instance in the selected environment.
-
-### Skeptic model-name resolution
-
-The chart's `gpt-5-6-terra` spelling is normalized to the canonical `gpt-5.6-terra`, matching every other Terra route. The hyphenated spelling is not an accepted alias and should fail definition validation if it reappears.
+No model spelling is silently rewritten. Persona threads keep their selected provider/model; later provider/model mutations are rejected. Importing a definition does not copy credentials or environment-local provider ids.
 
 ## Artifact contracts
 
-Artifacts are structured handoffs, not implementation storage or workflow engines. Phase 1 fixes their names and minimum contents; later phases may choose the wire representation.
+The following names describe minimum handoff contents. They are not workflow engines or evidence that runtime output validation exists. Only `inputArtifacts` and `outputArtifact` are structured references; `acceptedInput`, ordinary prompts, evidence, and prose counterpart references are not parsed as artifacts.
 
 ### `ContextBrief`
 
@@ -137,9 +157,9 @@ Artifacts are structured handoffs, not implementation storage or workflow engine
 - Duplicate, superseded, resolved, or still-open state.
 - Ambiguities requiring human clarification.
 
-## Authority policies
+## Behavioral instructions and runtime permissions
 
-Prompt wording is not authorization. A later runtime phase must compile these policies into the strongest controls each provider supports and fail closed when a required boundary cannot be enforced.
+A Role guides behavior. Its text does not grant permissions or guarantee compliance. The following matrix records the intended behavior of the supplied policy vocabulary; action restrictions such as no commit, no push, targeted edits only, or no merge are operating instructions unless a concrete runtime control is identified below.
 
 | Policy            | Workspace                                              | Commands and tests                                                            | Git                             | Pull requests                     | External systems                       |
 | ----------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------- | ------------------------------- | --------------------------------- | -------------------------------------- |
@@ -150,122 +170,37 @@ Prompt wording is not authorization. A later runtime phase must compile these po
 | `diagnostic`      | Product source must be unchanged at handoff            | May reproduce, build, test, debug, and create disposable diagnostic artifacts | Inspect only; no commit or push | Read only                         | Read only                              |
 | `publish-only`    | May read completed work; may not implement or refactor | Publication checks only                                                       | May commit and push             | May open or update; may not merge | Writes limited to publication actions  |
 
-No persona defined here may merge a pull request.
+No supplied persona is instructed to merge a pull request. The application appends the selected policy's behavioral instructions to the snapshotted definition when composing new persona sessions. This does not create an action-level enforcement guarantee.
 
-## Investigator diagnostic-write boundary
+| Runtime policy                  | Supported provider | Enforced control / activation status                                                                                              |
+| ------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `read-only`, `critic-review`    | Codex              | Non-interactive read-only sandbox; network disabled.                                                                              |
+| `read-only`, `critic-review`    | Claude             | Restricted read-only tool list with non-interactive permissions.                                                                  |
+| `workspace-write`, `critic-fix` | Codex              | Workspace-write sandbox, network disabled, no approval-based escalation. No-commit and targeted-fix behavior remain instructions. |
+| `workspace-write`, `critic-fix` | Others             | Activation unavailable.                                                                                                           |
+| `diagnostic`                    | None yet           | Unavailable pending a completion mechanism for the clean-product-source requirement.                                              |
+| `publish-only`                  | None yet           | Unavailable pending restricted publication operations. Never translated into unrestricted access.                                 |
 
-Investigator receives the `diagnostic` policy:
+Routing and launch reject unsupported runtime policies. Resume also rejects unsupported policies on new snapshotted assignments. Historical assignments without snapshots retain the prior conservative read-only fallback where applicable. Ordinary threads without personas keep their existing runtime-mode behavior.
 
-- It may execute builds, tests, debuggers, local services, and reproduction commands.
-- It may create temporary or ignored diagnostic artifacts.
-- If temporary instrumentation in tracked product source is unavoidable, it must be isolated and fully reverted before the handoff.
-- It may not leave tracked product-source changes, implement the proposed fix, commit, push, or mutate a pull request.
-- Its handoff must distinguish observed evidence from the minimal fix sketch.
+Critic's example defaults to `critic-review`; `critic-fix` must be explicitly requested and allowed by the definition. Investigator's clean-source handoff and Publisher's publication-only scope are retained requirements for their eventual supported operations, not claims that a generic shell enforces them.
 
-The acceptance condition is a clean product-source diff attributable to Investigator when it finishes. Diagnostic logs or intentionally retained fixtures require explicit authorization outside this persona contract.
+## Durable assignment and replay
 
-## Critic activation modes
+A launch reads and validates the definition once, resolves the route, and atomically writes a content-addressed definition snapshot before issuing the existing `thread.create` command. The `thread.created` event records id, author version, display name, SHA-256 definition digest, authority selection, and resolved provider/model route. The snapshot stores the full instructions in the environment's `agent-persona-snapshots` directory; shell projections and WebSocket catalog responses carry references rather than copying prompts into every row.
 
-Critic has two explicit modes because applying fixes materially changes its authority.
+The ordinary command receipt remains the replay boundary. A replay reuses its stored launch result rather than reading changed source. Forks inherit the assignment; provider-native children do not. Direct creation validates the referenced snapshot and route. Runtime instruction composition reads the same immutable snapshot, including after an environment restart. Source edits, removal, or source reconfiguration affect new launches only. Missing or modified snapshots cause an explicit failure, never adoption of a newer definition.
 
-### Review Mode
+Backups and environment migration must preserve snapshots together with the event database. Projection rebuild preserves the assignment references without reading source folders. Pre-library built-in assignments without a digest remain readable through the version-1 compatibility path. This compatibility path does not accept arbitrary custom definitions.
 
-- Canonical mode id: `critic-review`.
-- Default for every Critic activation.
-- Read-only review and focused validation.
-- Produces a `ReviewHandoff` without changing product source.
+## Clients and activation
 
-### Fix Mode
+Settings → Agents displays the selected environment's persona library, including empty, error, available, and blocked states. Web and mobile use shared presentation logic; desktop inherits web. Clients neither load server-local files nor resolve models. Local, remote, relay, and tunnel clients use the same authenticated catalog RPC.
 
-- Canonical mode id: `critic-fix`.
-- Must be selected explicitly by the user or supplied in an authorized activation request.
-- May change only the files needed to resolve identified review findings.
-- Must report each applied fix and its validation in `ReviewHandoff`.
-- Still may not commit, push, open or update a pull request, or merge.
+Activation continues through the existing orchestrator launch contract. No direct persona picker or editor is added in this slice. A launched task shows its snapshotted display name and fixed route. The Agents right panel remains the separate runtime-activity view for launched provider children and workflows.
 
-Fix Mode is not inferred from phrases such as "review and fix anything you find" unless the application records the activation as `critic-fix`.
+## Verification and remaining work
 
-## Definition validation
+Focused verification covers imported ids and custom artifacts, malformed and missing sources, duplicates, route eligibility, unsupported policies, snapshot integrity, source edits/removal, launch receipts, compatibility with old assignments, and shared client presentation. Server, contracts, and affected client typechecks accompany the focused tests. Browser and simulator verification require an explicit request.
 
-A persona catalog is valid only when:
-
-- Every id is unique and uses the stable id above.
-- Every input and output references a defined artifact name.
-- Every model route has exactly one primary and one secondary target.
-- Model ids and reasoning values match their canonical spellings.
-- Every persona references a defined authority policy.
-- Critic has exactly the two modes defined above and defaults to Review Mode.
-- Publisher outputs `PublicationReceipt` and carries no merge authority.
-- Investigator uses `diagnostic` and cannot finish with product-source changes.
-- No implicit fallback target is introduced.
-
-## Phase 1 completion boundary
-
-Phase 1 ends with this definition contract. It does not add contracts to `packages/contracts`, runtime services, provider resolution, persistence, UI, launch behavior, provider adapters, or enforcement code. Those are separate delivery phases governed by this document.
-
-## Phase 2: application catalog
-
-Phase 2 materializes this contract as the built-in application catalog at `apps/server/src/j5/agentPersonas.ts`.
-
-- The catalog is server-owned and has no persistence or environment-specific state.
-- Each definition has a stable id, version, description, accepted-input summary, typed input and output artifacts, authority choices, and an ordered two-target model route.
-- A model target identifies the provider driver, exact model, and reasoning effort. Provider-instance binding remains environment-local and is deferred.
-- Critic exposes `critic-review` as its default and permits only the explicit `critic-fix` alternative.
-- The catalog exposes deterministic list and lookup operations for later application services.
-
-Phase 2 does not add provider-instance resolution, fallback execution, prompt composition, thread snapshots, persistence, wire contracts, UI, or authority enforcement. No client can select or launch these personas yet.
-
-## Phase 3: routing and availability
-
-Phase 3 resolves a built-in persona route against one environment's ordered live provider snapshots.
-
-1. Evaluate the primary target, then the fallback target. There is no third or project-default route.
-2. For each target, prefer the driver's canonical default instance, then preserve configured snapshot order for custom instances.
-3. An instance is eligible only when its driver is available, it is enabled and installed, it is not in an error or disabled state, it is not unauthenticated, and it advertises the exact model and reasoning effort.
-4. Return the first eligible environment-local instance as a canonical `ModelSelection` with the provider-specific reasoning option.
-5. If a target is ineligible, retain typed failure reasons. If both targets fail, report the persona as unavailable.
-
-Resolution happens before launch. The selected route is intended to be snapshotted onto the new thread; Phase 3 does not silently switch providers or models during an active thread or turn.
-
-Phase 3 adds no implicit aliases. In particular, an unavailable model spelling remains unavailable rather than being rewritten to a nearby model. Provider refresh, launch integration, authority compilation, persistence, wire contracts, and UI remain deferred.
-
-## Phase 4: durable agent assignment
-
-Phase 4 makes a resolved persona assignment durable at thread creation.
-
-- A launch request names the built-in persona and may explicitly request one of that persona's allowed authority policies.
-- The server resolves Phase 3 routing from current environment provider snapshots. The resolved model selection replaces any generic launch default.
-- The `thread.created` event atomically snapshots persona id, definition version, authority policy, primary-or-fallback route, provider driver, and resolved model selection.
-- Thread detail and shell projections retain the assignment, and projection rebuild reproduces it from the event store.
-- The assignment field is optional so existing events, projections, and ordinary threads remain compatible.
-- Forks inherit the source thread's assignment. Provider-created subagent threads do not inherit it because they are not activations of the application persona.
-
-The assignment is immutable launch-time provenance. An explicit later provider/model switch may change the thread's active model selection but does not rewrite which persona definition and route launched the thread.
-
-Phase 4 assigns only newly created threads; attaching or replacing a persona on an existing thread is not supported. Prompt composition, authority enforcement, UI selection, artifact validation, and orchestrator behavior remain deferred.
-
-## Phase 5: provider policy translation
-
-Phase 5 translates the durable application authority policy into the canonical runtime policy already consumed by provider adapters. Translation occurs whenever the application resolves runtime policy for session open, resume, fork, or turn start, so the durable persona policy takes precedence over the thread's generic runtime-mode setting.
-
-| Application authority                         | Canonical runtime policy                                            | Codex effective policy                               | Claude effective policy                         |
-| --------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------- |
-| `read-only`, `critic-review`                  | Non-interactive read-only sandbox; network disabled                 | `never` approvals with `readOnly` sandbox            | `dontAsk` with the built-in read-only tool list |
-| `workspace-write`, `critic-fix`, `diagnostic` | Workspace-write sandbox; network disabled; normal command approvals | `on-request` approvals with `workspaceWrite` sandbox | `acceptEdits`                                   |
-| `publish-only`                                | Unrestricted runtime with no approval prompts                       | `never` approvals with `dangerFullAccess` sandbox    | `bypassPermissions`                             |
-
-Ordinary threads without an agent assignment continue to use their selected runtime mode. The same application policy is translated after a supported provider switch; it is not tied to the provider route that originally launched the thread.
-
-This phase enforces only the coarse permissions providers can express. A workspace-write sandbox cannot prove that Builder or Critic avoided commits, `diagnostic` still needs a clean-product-source handoff check, and unrestricted Publisher access cannot distinguish push or pull-request updates from merge. Prompt composition and action-level authority guards remain deferred.
-
-## Phase 6: top-level UX
-
-Phase 6 makes built-in personas discoverable across web, desktop, and mobile without making them directly selectable by users.
-
-- Settings includes an **Agents** destination that explains every built-in persona's purpose, accepted input, output artifact, default authority, and environment-resolved provider/model route.
-- A server read endpoint projects this presentation-safe catalog together with availability resolved from the selected environment's live provider snapshots. Clients do not duplicate persona definitions or routing rules.
-- Agent activation remains an application/orchestrator operation. New-task composers retain their existing model, reasoning, runtime, and interaction controls and do not offer a persona selector.
-- Critic Review versus Fix remains an explicit activation-policy choice for an orchestrator, not an end-user composer control.
-- After an orchestrator launches a persona, the durable assignment is shown as a fixed label on the thread. It cannot be attached, removed, or replaced from the client.
-
-Desktop inherits the web settings surface. Prompt composition, skill-orchestrator invocation, artifact validation, and action-level authority guards remain deferred.
+Follow-up work: in-app authoring and git controls, direct human selection, skill and model allowlists beyond this slice, posture and drift visibility, richer artifact schemas and output validation, and supported diagnostic/publication operations. None is marked complete by this contract.
