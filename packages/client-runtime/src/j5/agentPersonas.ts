@@ -160,8 +160,6 @@ export const AGENT_PERSONA_HARNESSES = [
   { driver: "claudeAgent", label: "Claude" },
 ] as const;
 
-const AGENT_PERSONA_REASONING_LEVELS = ["low", "medium", "high"];
-
 /** Retain configured models while limiting new selections to supported reasoning levels. */
 export function agentPersonaModelChoices(
   providers: ReadonlyArray<ServerProvider>,
@@ -188,10 +186,7 @@ export function agentPersonaModelChoices(
         ({ id }) => id === (driver === "codex" ? "reasoningEffort" : "effort"),
       );
       if (descriptor?.type !== "select" || descriptor.options.length === 0) continue;
-      const efforts = AGENT_PERSONA_REASONING_LEVELS.filter((effort) =>
-        descriptor.options.some(({ id }) => id === effort),
-      );
-      if (efforts.length === 0) continue;
+      const efforts = descriptor.options.map(({ id }) => id);
       const target = {
         driver,
         model: model.slug,
@@ -205,9 +200,7 @@ export function agentPersonaModelChoices(
         modelLabel: model.slug,
         available: true,
         target,
-        efforts: AGENT_PERSONA_REASONING_LEVELS.filter(
-          (effort) => previous?.efforts.includes(effort) || efforts.includes(effort),
-        ),
+        efforts: [...new Set([...(previous?.efforts ?? []), ...efforts])],
       });
     }
   }
@@ -216,15 +209,13 @@ export function agentPersonaModelChoices(
     const id = agentPersonaModelChoiceId(target);
     if (advertisedIds.has(id)) continue;
     const previous = choices.get(id);
-    const efforts = AGENT_PERSONA_REASONING_LEVELS.filter(
-      (effort) => previous?.efforts.includes(effort) || effort === target.reasoningEffort,
-    );
+    const efforts = [...new Set([...(previous?.efforts ?? []), target.reasoningEffort])];
     choices.set(id, {
       id,
       label: `${target.driver === "codex" ? "Codex" : "Claude"} · ${target.model} (not advertised)`,
       modelLabel: `${target.model} (not advertised)`,
       available: false,
-      target: efforts.length > 0 ? { ...target, reasoningEffort: efforts.at(-1)! } : target,
+      target,
       efforts,
     });
   }
