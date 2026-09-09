@@ -1,35 +1,57 @@
 ---
-title: "Memos — the agent backlog primitive"
-kind: spec
+title: "Memos"
+kind: definition
 ---
 
 # Memos
 
-Feature definition of record, extracted from the problems/goals doc 2026-08-22 (rulings R26, R31–R35 in `../design-review-2026-08-21.md`). The problems it answers (`../problems.md`): coordinators drop things they were supposed to raise later; "let's talk about that later" gets pushed out of context and lost; context is bad memory.
+## Problem
 
-## Why the inbox can't do this
+An agent in a coordinating role is told "let's talk about that later," and the later never comes: the item is pushed out of its context by everything that happens next and is lost completely. Agents rely on their context as memory when they should be writing things down; a person steering many agents cannot see what each one still intends to do ([problems](../problems.md): "later" gets lost; context as bad memory; human attention).
 
-The inbox is an **obligation queue** — every item blocks a sender, demands a reply, and naturally scales with the number of working agents. A backlog is a **non-blocking store** — nothing waits on it, which is exactly why it can grow without hurting anyone. Routing deferred items through the inbox converts non-blocking items into blocking ones and makes the attention problem worse: an inbox with 100 items hurts. Hence a separate primitive.
+The inbox cannot hold this. The inbox is an obligation queue — every item blocks a sender and demands an answer, and it scales with the number of working agents. A backlog is the opposite: a non-blocking store that nothing waits on, which is exactly why it can grow without hurting anyone. Routing deferred items through the inbox turns non-blocking items into blocking ones and makes the attention problem worse.
 
-## The Memo
+## Definition
 
-A **Memo** is a small self-addressed message an agent stores via a platform tool — smaller than a ticket, not expected to be worked immediately. Its context is then free to drop the item safely: the durable store remembers, not the context window.
+A **Memo** is a small self-addressed note an agent keeps through the platform — smaller than a ticket, not expected to be worked immediately. Once written, the agent's context is free to drop the item safely: the durable store remembers, not the context window.
 
-## Behavior
+Every Memo is **visible to the person** — there are no private Memos. The person enters the backlog view with attention to spare, and steering an agent requires seeing everything it intends to do.
 
-- **No per-turn injection.** Re-injecting the list every turn would trade one failure (forgotten notes) for another (context rot) — the back-burner is a feature. The platform's leverage is shaped like _build tools that make agents better, never systems that make them perfect_: the tool's existence makes usage likely; the UI makes lapses visible.
-- **All Memos are visible to the user — no private Memos.** The user only enters this view with attention to spare, and steering an agent requires seeing everything it intends to do.
-- **`resurface_after`** — the one platform-initiated re-injection: "page me after this time." Before the time, the Memo truly rests; after it, it returns stamped with measured time facts (R25). This field is what distinguishes a _deferral_ from a backlog item.
-- **Promotion is deliberate.** When a deferred thing becomes a _now_ thing, the agent opens a real Exchange. Never automatic.
-- Per-agent ownership; the owning agent resolves or drops its own Memos; evented like everything else.
+A Memo may carry a **resurface time** — "page me after this time." That is the one platform-initiated re-injection: before the time the Memo truly rests; after it, it returns to the agent stamped with the measured time. This is what distinguishes a deferral from a backlog item.
 
-## UI surfacing
+**Promotion is deliberate.** When a deferred thing becomes a now thing, the agent opens a real Exchange. The platform never promotes a Memo on its own.
 
-- A **backlog pane** on the dashboard: the pull-based view of all agents' Memos across the fleet — third sibling to the inbox and the observability views (shared UI allowed, shared data model never).
-- A badge or status icon on agents whose backlog needs going through.
-- A warning when the user is about to archive an agent with open Memos.
-- A drawer in the chat for picking the next topic to discuss with that agent.
+Memos are **per-agent**: the owning agent resolves or drops its own Memos, and every change is recorded. The person sees them all and nudges through ordinary messages.
 
-## Scope position
+The person's surfaces: a **backlog pane** — the pull-based view of all agents' Memos across the fleet, a sibling of the inbox and the Fleet page that may share their look but never their data model; an indicator on agents whose backlog needs going through; a warning when archiving an agent with open Memos; and a drawer in an agent's chat for picking the next topic to discuss with it.
 
-Memos are the **v1 agent data primitive** — shaped, with clear access patterns (append, list-open, resolve, defer), per the platform boundary. A generic agent-provisionable store stays parked with its named trigger (R30/R34): revisit when cross-machine sync or repeated setup pain makes hand-rolled stores hurt. Backlog candidate, not yet prioritized.
+Memos are the shaped **first agent data primitive** — append, list what is open, resolve, defer — and earn their place through those clear access patterns. A generic store that agents can provision for themselves is not part of this; it waits until cross-machine sync or repeated setup pain makes hand-rolled stores actually hurt.
+
+## Acceptance criteria
+
+### The Memo
+
+1. An agent can write a Memo, list its open Memos, resolve one, and set a resurface time on one, through platform tools.
+2. A Memo is never delivered to its agent on a turn unless its resurface time has passed.
+3. A Memo whose resurface time has passed is delivered to its agent once, stamped with the measured time.
+4. Only the owning agent can resolve or drop a Memo, and every change is recorded in the ledger.
+5. No Memo is ever promoted to an Exchange by the platform.
+
+### The person
+
+6. The backlog pane shows every agent's open Memos across the fleet, and no other kind of item.
+7. Every Memo is visible to the person; there is no private Memo.
+8. An agent with open Memos shows an indicator.
+9. Archiving an agent with open Memos shows them in the archive dialog.
+10. An agent's chat offers a drawer listing its open Memos as topics to discuss.
+
+## Scenarios
+
+- **"Later."** During an incident, the user tells the Captain in Support Rotation "let's talk about the logging improvements later." The Captain writes a Memo; the incident consumes its context; the Memo is untouched. That evening the user opens the Captain's chat drawer, sees "logging improvements", and picks it up. (AC1, AC2, AC7, AC10)
+- **Page me.** An agent defers a check with a resurface time of two days; nothing happens for two days; then the Memo returns to the agent with the elapsed time stated, and the agent opens an ask to the user about it. (AC3, AC5)
+- **Archiving with a backlog.** The user archives an agent that holds three open Memos; the dialog lists them before confirmation. (AC9)
+
+## History
+
+- 2026-08-22 — the concept, extracted from the problems and goals; former R26 and R31–R35 ([record](../design-review-2026-08-21.md)).
+- 2026-09-08 — rewritten into the definition shape. Former identifiers: R26 → Problem (why not the inbox); R31 → Definition (no per-turn injection), AC2; R32 → AC3; R33 → AC7; R34 → Definition (the first data primitive); R35 → AC4. The parked generic agent store (former R30) is recorded in the last Definition paragraph as not part of Memos.
