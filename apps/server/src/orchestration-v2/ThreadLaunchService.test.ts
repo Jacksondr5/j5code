@@ -22,6 +22,7 @@ import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import { stringify as yamlStringify } from "yaml";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -1608,7 +1609,7 @@ it.effect("does not depend on the legacy launch workflow table", () => {
   }).pipe(Effect.provide(harness.layer));
 });
 
-const jsonPersonaFixture = (value: unknown) => JSON.stringify(value);
+const yamlPersonaFixture = (value: unknown) => yamlStringify(value);
 
 it.effect(
   "launches an imported persona and replays its receipt after the source is removed",
@@ -1660,7 +1661,7 @@ it.effect(
       const path = yield* Path.Path;
       const folder = path.join(config.stateDir, "personas");
       yield* fs.makeDirectory(folder, { recursive: true });
-      yield* fs.writeFileString(path.join(folder, "team.json"), jsonPersonaFixture(definition));
+      yield* fs.writeFileString(path.join(folder, "team.yaml"), yamlPersonaFixture(definition));
       const launches = yield* ThreadLaunch.ThreadLaunchService;
       const threads = yield* ThreadManagement.ThreadManagementService;
       const input = {
@@ -1676,7 +1677,7 @@ it.effect(
       );
       const library = yield* makeAgentPersonaLibrary;
       yield* library.importFiles({
-        files: [{ name: "agent.json", content: jsonPersonaFixture(definition) }],
+        files: [{ name: "agent.yaml", content: yamlPersonaFixture(definition) }],
         replaceExisting: true,
       });
       yield* library.setImportedEnabled(definition.id, false);

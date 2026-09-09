@@ -34,18 +34,21 @@ export class AgentPersonaLibraryError extends Schema.TaggedErrorClass<AgentPerso
 const decodeDefinitionJson = Schema.decodeUnknownEffect(
   Schema.fromJsonString(AgentPersonaDefinition),
 );
+/** Launch snapshots are server-written JSON, never user files. */
+const decodeSnapshot = Effect.fn("AgentPersonaLibrary.decodeSnapshot")(function* (text: string) {
+  const definition = yield* decodeDefinitionJson(text);
+  return yield* Effect.try(() => decodeAgentPersonaDefinition(definition));
+});
+/** User-authored definitions (source folders and imports) are YAML documents. */
 const decodeDefinition = Effect.fn("AgentPersonaLibrary.decodeDefinition")(function* (
   text: string,
-  name = "agent.json",
 ) {
-  const definition = /\.ya?ml$/i.test(name)
-    ? yield* Effect.try((): unknown => {
-        const document = parseDocument(text, { version: "1.2", uniqueKeys: true });
-        const issue = document.errors[0] ?? document.warnings[0];
-        if (issue) throw issue;
-        return document.toJS({ maxAliasCount: 0 });
-      })
-    : yield* decodeDefinitionJson(text);
+  const definition = yield* Effect.try((): unknown => {
+    const document = parseDocument(text, { version: "1.2", uniqueKeys: true });
+    const issue = document.errors[0] ?? document.warnings[0];
+    if (issue) throw issue;
+    return document.toJS({ maxAliasCount: 0 });
+  });
   return yield* Effect.try(() => decodeAgentPersonaDefinition(definition));
 });
 const ImportedDefinition = Schema.Struct({
@@ -110,7 +113,7 @@ export function createAgentPersonaLibrary(storage?: {
             message: `Persona file exceeds 64 KiB: ${file}`,
           });
         const text = yield* fs.readFileString(file);
-        const definition = yield* decodeDefinition(text, name).pipe(
+        const definition = yield* decodeDefinition(text).pipe(
           Effect.mapError(
             (cause) =>
               new AgentPersonaLibraryError({ message: `Invalid persona file ${file}`, cause }),
@@ -202,7 +205,7 @@ export function createAgentPersonaLibrary(storage?: {
   ) {
     if (input.files.length === 0 || input.files.length > AGENT_PERSONA_IMPORT_MAX_FILES)
       return yield* new AgentPersonaLibraryError({
-        message: `Select between 1 and ${AGENT_PERSONA_IMPORT_MAX_FILES} JSON or YAML files.`,
+        message: `Select between 1 and ${AGENT_PERSONA_IMPORT_MAX_FILES} YAML files.`,
       });
     const incoming = new Map<string, AgentPersonaDefinition>();
     for (const file of input.files) {
@@ -212,7 +215,7 @@ export function createAgentPersonaLibrary(storage?: {
         });
       if (new TextEncoder().encode(file.content).byteLength > AGENT_PERSONA_IMPORT_MAX_BYTES)
         return yield* new AgentPersonaLibraryError({ message: `${file.name} exceeds 64 KiB.` });
-      const definition = yield* decodeDefinition(file.content, file.name).pipe(
+      const definition = yield* decodeDefinition(file.content).pipe(
         Effect.mapError(
           (cause) =>
             new AgentPersonaLibraryError({
@@ -404,7 +407,7 @@ export function createAgentPersonaLibrary(storage?: {
     const text = yield* storage.fs.readFileString(
       storage.path.join(storage.stateDir, "agent-persona-snapshots", `${digest}.json`),
     );
-    const definition = yield* decodeDefinition(text);
+    const definition = yield* decodeSnapshot(text);
     if (
       definitionDigest(definition) !== digest ||
       definition.id !== assignment.personaId ||

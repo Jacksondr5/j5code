@@ -140,40 +140,42 @@ describe("persona import selection", () => {
     size,
     text: async () => content,
   });
-  it("includes nested JSON and YAML definitions and ignores accompanying documentation", async () => {
+  it("includes nested YAML definitions and skips JSON files and documentation unread", async () => {
+    const unread = (name: string) => ({
+      name,
+      size: 1,
+      text: async () => {
+        throw new Error("Must not read");
+      },
+    });
     expect(
       await prepareAgentPersonaImport([
-        file("team/one/agent.json", "one"),
-        file("team/two/agent.JSON", "two"),
-        file("team/three/agent.yaml", "three"),
+        file("team/one/agent.yaml", "one"),
+        file("team/two/agent.YAML", "two"),
+        file("team/three/agent.yml", "three"),
         file("team/four/agent.YML", "four"),
-        {
-          name: "team/README.md",
-          size: 1,
-          text: async () => {
-            throw new Error("Must not read");
-          },
-        },
+        unread("team/legacy/agent.json"),
+        unread("team/README.md"),
       ]),
     ).toEqual([
-      { name: "team/one/agent.json", content: "one" },
-      { name: "team/two/agent.JSON", content: "two" },
-      { name: "team/three/agent.yaml", content: "three" },
+      { name: "team/one/agent.yaml", content: "one" },
+      { name: "team/two/agent.YAML", content: "two" },
+      { name: "team/three/agent.yml", content: "three" },
       { name: "team/four/agent.YML", content: "four" },
     ]);
   });
   it("imports only the selected individual definition", async () => {
-    expect(await prepareAgentPersonaImport([file("agent.json", "selected")])).toEqual([
-      { name: "agent.json", content: "selected" },
+    expect(await prepareAgentPersonaImport([file("agent.yaml", "selected")])).toEqual([
+      { name: "agent.yaml", content: "selected" },
     ]);
   });
   it("reports empty folders and file limits before reading oversized selections", async () => {
-    await expect(prepareAgentPersonaImport([file("README.md")])).rejects.toThrow("No JSON");
-    await expect(prepareAgentPersonaImport([file("big.json", "", 65537)])).rejects.toThrow(
+    await expect(prepareAgentPersonaImport([file("README.md")])).rejects.toThrow("No YAML");
+    await expect(prepareAgentPersonaImport([file("big.yaml", "", 65537)])).rejects.toThrow(
       "64 KiB",
     );
     await expect(
-      prepareAgentPersonaImport(Array.from({ length: 51 }, () => file("agent.json"))),
+      prepareAgentPersonaImport(Array.from({ length: 51 }, () => file("agent.yaml"))),
     ).rejects.toThrow("at most 50");
   });
   it("identifies removable imports while treating older catalog entries as source definitions", () => {
@@ -279,7 +281,7 @@ it("uses the selected environment's advertised models and reasoning options with
 });
 
 describe("import replacement confirmation", () => {
-  const files = [{ name: "agent.json", content: "selected content" }];
+  const files = [{ name: "agent.yaml", content: "selected content" }];
   const conflict = new AgentPersonaImportConflictError({
     message: "Already exists",
     conflicts: [{ personaId: "scout", displayName: "Scout", definitionDigest: "a".repeat(64) }],
@@ -371,7 +373,7 @@ describe("import replacement confirmation", () => {
 });
 
 it("retains skipped agents through fresh confirmation and accepts an empty replacement selection", async () => {
-  const files = [{ name: "folder/agent.json", content: "selected content" }];
+  const files = [{ name: "folder/agent.yaml", content: "selected content" }];
   const first = new AgentPersonaImportConflictError({
     message: "Already exists",
     conflicts: [
