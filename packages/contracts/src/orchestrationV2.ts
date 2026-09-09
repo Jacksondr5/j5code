@@ -2303,6 +2303,7 @@ export const OrchestrationV2Command = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("delegated_task.request"),
+    agentPersonaAssignment: Schema.optional(OrchestrationV2AgentPersonaAssignment),
     ...OrchestrationV2CreationFields,
     commandId: CommandId,
     parentThreadId: ThreadId,
@@ -2359,7 +2360,8 @@ export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
 /** Public clients may request a persona launch, but only the server may resolve its assignment. */
 export const OrchestrationV2PublicCommand = OrchestrationV2Command.check(
   Schema.makeFilter((command) =>
-    command.type === "thread.create" && command.agentPersonaAssignment !== undefined
+    (command.type === "thread.create" || command.type === "delegated_task.request") &&
+    command.agentPersonaAssignment !== undefined
       ? "Resolved agent persona assignments are server-owned."
       : undefined,
   ),

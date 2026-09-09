@@ -1,3 +1,4 @@
+import { InvokeAgentTool } from "../../agents/agentInvocation.ts";
 import {
   OrchestratorMcpFailure,
   OrchestratorMcpThreadReadInput,
@@ -123,6 +124,7 @@ export const J5ThreadWaitTool = Tool.make("t3_thread_wait", {
   .annotate(Tool.Idempotent, true);
 
 export const J5OrchestratorSurface = Toolkit.make(
+  InvokeAgentTool,
   J5OrchestratorCapabilitiesTool,
   ScheduleTaskTool,
   ListScheduledTasksTool,
