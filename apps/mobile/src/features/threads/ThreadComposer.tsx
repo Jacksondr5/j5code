@@ -1,4 +1,4 @@
-import { presentAgentPersonaAssignment } from "@t3tools/client-runtime/state/agent-personas";
+import { AgentPersonaAssignmentControls } from "../../j5/agents/AgentPersonaAssignmentControls";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { useAtomValue } from "@effect/atom-react";
 import type {
@@ -486,9 +486,6 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         option.selection.model === currentModelSelection.model,
     ) ?? null;
   const agentPersonaAssignment = props.selectedThread.agentPersonaAssignment;
-  const agentPersonaPresentation = agentPersonaAssignment
-    ? presentAgentPersonaAssignment(agentPersonaAssignment)
-    : null;
   const providerOptionDescriptors = useMemo(
     () =>
       resolveProviderOptionDescriptors({
@@ -796,23 +793,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                       onPickFiles={props.onPickDraftFiles}
                     />
                     <View className="min-w-0 shrink" style={{ maxWidth: 152 }}>
-                      {agentPersonaPresentation ? (
-                        <>
-                          <ComposerInlineControl
-                            accessibilityLabel={`Agent persona: ${agentPersonaPresentation.personaLabel}`}
-                            emphasized
-                            icon="person.crop.circle"
-                            label={agentPersonaPresentation.personaLabel}
-                            maxWidth={152}
-                            static
-                          />
-                          <ComposerInlineControl
-                            accessibilityLabel={`Assigned model: ${agentPersonaPresentation.routeLabel}`}
-                            label={agentPersonaPresentation.routeLabel}
-                            maxWidth={200}
-                            static
-                          />
-                        </>
+                      {agentPersonaAssignment ? (
+                        <AgentPersonaAssignmentControls assignment={agentPersonaAssignment} />
                       ) : (
                         <ComposerInlineControl
                           accessibilityLabel="Model and reasoning settings"
