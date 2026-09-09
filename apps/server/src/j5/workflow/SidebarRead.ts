@@ -10,6 +10,27 @@ const selectColumns = `SELECT id, squadron_id AS squadronId, substr(title, 1, 24
   FROM j5_workflow_runs`;
 const order = `ORDER BY status_priority, activity_at DESC, creation_sequence DESC`;
 
+export function makeRunFilter(squadronId: string, query: string, status: string) {
+  const clauses: string[] = [];
+  const parameters: Array<string> = [];
+  if (squadronId.length > 0) {
+    clauses.push("squadron_id=?");
+    parameters.push(squadronId);
+  }
+  if (status.length > 0) {
+    clauses.push("status=?");
+    parameters.push(status);
+  }
+  if (query.length > 0) {
+    clauses.push("instr(lower(title), ?)>0");
+    parameters.push(query.toLocaleLowerCase());
+  }
+  return {
+    sql: clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`,
+    parameters,
+  };
+}
+
 export const readWorkflowEntries = Effect.fn("Workflow.readEntries")(function* (
   squadronId: string,
   query: string,
@@ -19,85 +40,18 @@ export const readWorkflowEntries = Effect.fn("Workflow.readEntries")(function* (
 ) {
   const sql = yield* SqlClient.SqlClient;
   const boundedLimit = Math.min(100, Math.max(1, limit));
-  const search = query.toLocaleLowerCase();
-  const scoped = squadronId.length > 0;
-  const searched = search.length > 0;
-  const filtered = status.length > 0;
-  const countRows = scoped
-    ? searched
-      ? filtered
-        ? yield* sql<{ total: number; waitingApprovalCount: number }>`SELECT count(*) AS total,
-            sum(CASE WHEN status='waiting_approval' THEN 1 ELSE 0 END) AS waitingApprovalCount
-            FROM j5_workflow_runs WHERE squadron_id=${squadronId} AND status=${status}
-              AND instr(lower(title), ${search})>0`
-        : yield* sql<{ total: number; waitingApprovalCount: number }>`SELECT count(*) AS total,
-            sum(CASE WHEN status='waiting_approval' THEN 1 ELSE 0 END) AS waitingApprovalCount
-            FROM j5_workflow_runs WHERE squadron_id=${squadronId}
-              AND instr(lower(title), ${search})>0`
-      : filtered
-        ? yield* sql<{ total: number; waitingApprovalCount: number }>`SELECT count(*) AS total,
-            sum(CASE WHEN status='waiting_approval' THEN 1 ELSE 0 END) AS waitingApprovalCount
-            FROM j5_workflow_runs WHERE squadron_id=${squadronId} AND status=${status}`
-        : yield* sql<{ total: number; waitingApprovalCount: number }>`SELECT count(*) AS total,
-            sum(CASE WHEN status='waiting_approval' THEN 1 ELSE 0 END) AS waitingApprovalCount
-            FROM j5_workflow_runs WHERE squadron_id=${squadronId}`
-    : searched
-      ? filtered
-        ? yield* sql<{ total: number; waitingApprovalCount: number }>`SELECT count(*) AS total,
-            sum(CASE WHEN status='waiting_approval' THEN 1 ELSE 0 END) AS waitingApprovalCount
-            FROM j5_workflow_runs WHERE status=${status} AND instr(lower(title), ${search})>0`
-        : yield* sql<{ total: number; waitingApprovalCount: number }>`SELECT count(*) AS total,
-            sum(CASE WHEN status='waiting_approval' THEN 1 ELSE 0 END) AS waitingApprovalCount
-            FROM j5_workflow_runs WHERE instr(lower(title), ${search})>0`
-      : filtered
-        ? yield* sql<{ total: number; waitingApprovalCount: number }>`SELECT count(*) AS total,
-            sum(CASE WHEN status='waiting_approval' THEN 1 ELSE 0 END) AS waitingApprovalCount
-            FROM j5_workflow_runs WHERE status=${status}`
-        : yield* sql<{ total: number; waitingApprovalCount: number }>`SELECT count(*) AS total,
-            sum(CASE WHEN status='waiting_approval' THEN 1 ELSE 0 END) AS waitingApprovalCount
-            FROM j5_workflow_runs`;
-  const suffix = ` ${order} LIMIT ? OFFSET ?`;
-  const rows = scoped
-    ? searched
-      ? filtered
-        ? yield* sql.unsafe(
-            `${selectColumns} WHERE squadron_id=? AND status=? AND instr(lower(title), ?)>0${suffix}`,
-            [squadronId, status, search, boundedLimit + 1, offset],
-          )
-        : yield* sql.unsafe(
-            `${selectColumns} WHERE squadron_id=? AND instr(lower(title), ?)>0${suffix}`,
-            [squadronId, search, boundedLimit + 1, offset],
-          )
-      : filtered
-        ? yield* sql.unsafe(`${selectColumns} WHERE squadron_id=? AND status=?${suffix}`, [
-            squadronId,
-            status,
-            boundedLimit + 1,
-            offset,
-          ])
-        : yield* sql.unsafe(`${selectColumns} WHERE squadron_id=?${suffix}`, [
-            squadronId,
-            boundedLimit + 1,
-            offset,
-          ])
-    : searched
-      ? filtered
-        ? yield* sql.unsafe(
-            `${selectColumns} WHERE status=? AND instr(lower(title), ?)>0${suffix}`,
-            [status, search, boundedLimit + 1, offset],
-          )
-        : yield* sql.unsafe(`${selectColumns} WHERE instr(lower(title), ?)>0${suffix}`, [
-            search,
-            boundedLimit + 1,
-            offset,
-          ])
-      : filtered
-        ? yield* sql.unsafe(`${selectColumns} WHERE status=?${suffix}`, [
-            status,
-            boundedLimit + 1,
-            offset,
-          ])
-        : yield* sql.unsafe(`${selectColumns}${suffix}`, [boundedLimit + 1, offset]);
+  const filter = makeRunFilter(squadronId, query, status);
+  const countRows = yield* sql.unsafe<{ total: number; waitingApprovalCount: number }>(
+    `SELECT count(*) AS total,
+      sum(CASE WHEN status='waiting_approval' THEN 1 ELSE 0 END) AS waitingApprovalCount
+      FROM j5_workflow_runs${filter.sql}`,
+    filter.parameters,
+  );
+  const rows = yield* sql.unsafe(`${selectColumns}${filter.sql} ${order} LIMIT ? OFFSET ?`, [
+    ...filter.parameters,
+    boundedLimit + 1,
+    offset,
+  ]);
   return {
     runs: yield* decodeEntries(rows.slice(0, boundedLimit)),
     hasMore: rows.length > boundedLimit,

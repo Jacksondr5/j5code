@@ -102,12 +102,177 @@ const optimized = Effect.gen(function* () {
     ON j5_workflow_artifacts(run_id, id)`;
 });
 
+const observations = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`CREATE TABLE j5_workflow_observations (
+    run_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    source TEXT NOT NULL CHECK(source IN ('trigger', 'receipt', 'history')),
+    recorded_at INTEGER,
+    event_type TEXT,
+    event_action_id TEXT,
+    event_gate_revision INTEGER,
+    event_artifact_hash TEXT,
+    decision TEXT,
+    actor TEXT,
+    event_cause TEXT,
+    phase TEXT,
+    status TEXT,
+    visit INTEGER,
+    gate_revision INTEGER,
+    gate_artifact_hash TEXT,
+    failure_category TEXT,
+    relevant_action_id TEXT,
+    recovery TEXT,
+    state_cause TEXT,
+    approvals_count INTEGER,
+    event_action_status TEXT,
+    event_result_artifact_id TEXT,
+    event_action_identity TEXT,
+    PRIMARY KEY(run_id, revision)
+  )`;
+
+  yield* sql`INSERT INTO j5_workflow_observations(
+      run_id, revision, source, recorded_at,
+      event_type, event_action_id, event_gate_revision, event_artifact_hash,
+      decision, actor, event_cause,
+      phase, status, visit, gate_revision, gate_artifact_hash,
+      failure_category, relevant_action_id, recovery, state_cause, approvals_count,
+      event_action_status, event_result_artifact_id, event_action_identity
+    )
+    SELECT
+      h.run_id,
+      h.revision,
+      CASE WHEN r.command_id IS NOT NULL
+        AND json_extract(r.payload, '$.id') = h.run_id
+        AND json_extract(r.payload, '$.revision') = h.revision
+        THEN 'receipt' ELSE 'history' END,
+      CASE WHEN r.command_id IS NOT NULL
+        AND json_extract(r.payload, '$.id') = h.run_id
+        AND json_extract(r.payload, '$.revision') = h.revision
+        AND json_type(r.payload, '$.updatedAt') = 'text'
+        AND strftime('%s', json_extract(r.payload, '$.updatedAt')) IS NOT NULL
+        THEN CAST(strftime('%s', json_extract(r.payload, '$.updatedAt')) AS INTEGER) * 1000
+          + CAST(substr(strftime('%f', json_extract(r.payload, '$.updatedAt')), 4, 3) AS INTEGER)
+        ELSE NULL END,
+      json_extract(h.payload, '$.type'),
+      json_extract(h.payload, '$.actionId'),
+      coalesce(json_extract(h.payload, '$.gateRevision'), json_extract(h.payload, '$.decision.gateRevision')),
+      coalesce(json_extract(h.payload, '$.artifactHash'), json_extract(h.payload, '$.decision.artifactHash')),
+      json_extract(h.payload, '$.decision.decision'),
+      coalesce(json_extract(h.payload, '$.actor'), json_extract(h.payload, '$.decision.actor')),
+      json_extract(h.payload, '$.cause'),
+      CASE WHEN r.command_id IS NOT NULL
+        AND json_extract(r.payload, '$.id') = h.run_id
+        AND json_extract(r.payload, '$.revision') = h.revision
+        THEN json_extract(r.payload, '$.phase') END,
+      CASE WHEN r.command_id IS NOT NULL
+        AND json_extract(r.payload, '$.id') = h.run_id
+        AND json_extract(r.payload, '$.revision') = h.revision
+        THEN json_extract(r.payload, '$.status') END,
+      CASE WHEN r.command_id IS NOT NULL
+        AND json_extract(r.payload, '$.id') = h.run_id
+        AND json_extract(r.payload, '$.revision') = h.revision
+        THEN (SELECT CAST(v.value AS INTEGER) FROM json_each(r.payload, '$.visits') AS v
+          WHERE v.key = json_extract(r.payload, '$.phase') LIMIT 1) END,
+      CASE WHEN r.command_id IS NOT NULL
+        AND json_extract(r.payload, '$.id') = h.run_id
+        AND json_extract(r.payload, '$.revision') = h.revision
+        THEN json_extract(r.payload, '$.gate.revision') END,
+      CASE WHEN r.command_id IS NOT NULL
+        AND json_extract(r.payload, '$.id') = h.run_id
+        AND json_extract(r.payload, '$.revision') = h.revision
+        THEN json_extract(r.payload, '$.gate.artifactHash') END,
+      CASE WHEN r.command_id IS NOT NULL
+        AND json_extract(r.payload, '$.id') = h.run_id
+        AND json_extract(r.payload, '$.revision') = h.revision
+        THEN json_extract(r.payload, '$.failureCategory') END,
+      CASE WHEN r.command_id IS NOT NULL
+        AND json_extract(r.payload, '$.id') = h.run_id
+        AND json_extract(r.payload, '$.revision') = h.revision
+        THEN json_extract(r.payload, '$.relevantActionId') END,
+      CASE WHEN r.command_id IS NOT NULL
+        AND json_extract(r.payload, '$.id') = h.run_id
+        AND json_extract(r.payload, '$.revision') = h.revision
+        THEN json_extract(r.payload, '$.recovery') END,
+      CASE WHEN r.command_id IS NOT NULL
+        AND json_extract(r.payload, '$.id') = h.run_id
+        AND json_extract(r.payload, '$.revision') = h.revision
+        THEN json_extract(r.payload, '$.cause') END,
+      CASE WHEN r.command_id IS NOT NULL
+        AND json_extract(r.payload, '$.id') = h.run_id
+        AND json_extract(r.payload, '$.revision') = h.revision
+        THEN json_array_length(json_extract(r.payload, '$.approvals')) END,
+      CASE WHEN r.command_id IS NOT NULL
+        AND json_extract(r.payload, '$.id') = h.run_id
+        AND json_extract(r.payload, '$.revision') = h.revision
+        THEN (SELECT json_extract(a.value, '$.status') FROM json_each(r.payload, '$.actions') AS a
+          WHERE json_extract(a.value, '$.id') = json_extract(h.payload, '$.actionId') LIMIT 1) END,
+      CASE WHEN r.command_id IS NOT NULL
+        AND json_extract(r.payload, '$.id') = h.run_id
+        AND json_extract(r.payload, '$.revision') = h.revision
+        THEN (SELECT json_extract(a.value, '$.resultArtifactId') FROM json_each(r.payload, '$.actions') AS a
+          WHERE json_extract(a.value, '$.id') = json_extract(h.payload, '$.actionId') LIMIT 1) END,
+      CASE WHEN r.command_id IS NOT NULL
+        AND json_extract(r.payload, '$.id') = h.run_id
+        AND json_extract(r.payload, '$.revision') = h.revision
+        THEN (SELECT json_extract(a.value, '$.externalIdentity') FROM json_each(r.payload, '$.actions') AS a
+          WHERE json_extract(a.value, '$.id') = json_extract(h.payload, '$.actionId') LIMIT 1) END
+    FROM j5_workflow_history AS h
+    LEFT JOIN j5_workflow_receipts AS r
+      ON r.command_id = h.command_id AND r.run_id = h.run_id`;
+
+  // Store writes actions and the resulting run before history, then writes the receipt.
+  // Capturing history here freezes the applied state while keeping history and observation atomic.
+  yield* sql`CREATE TRIGGER j5_workflow_history_observation
+    AFTER INSERT ON j5_workflow_history
+    BEGIN
+      SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM j5_workflow_runs WHERE id=NEW.run_id AND revision=NEW.revision
+      ) THEN RAISE(ABORT, 'workflow observation requires the matching resulting run') END;
+      INSERT INTO j5_workflow_observations(
+        run_id, revision, source, recorded_at,
+        event_type, event_action_id, event_gate_revision, event_artifact_hash,
+        decision, actor, event_cause,
+        phase, status, visit, gate_revision, gate_artifact_hash,
+        failure_category, relevant_action_id, recovery, state_cause, approvals_count,
+        event_action_status, event_result_artifact_id, event_action_identity
+      )
+      SELECT
+        NEW.run_id, NEW.revision, 'trigger', r.activity_at,
+        json_extract(NEW.payload, '$.type'),
+        json_extract(NEW.payload, '$.actionId'),
+        coalesce(json_extract(NEW.payload, '$.gateRevision'), json_extract(NEW.payload, '$.decision.gateRevision')),
+        coalesce(json_extract(NEW.payload, '$.artifactHash'), json_extract(NEW.payload, '$.decision.artifactHash')),
+        json_extract(NEW.payload, '$.decision.decision'),
+        coalesce(json_extract(NEW.payload, '$.actor'), json_extract(NEW.payload, '$.decision.actor')),
+        json_extract(NEW.payload, '$.cause'),
+        r.phase, r.status,
+        (SELECT CAST(v.value AS INTEGER) FROM json_each(r.payload, '$.visits') AS v
+          WHERE v.key = r.phase LIMIT 1),
+        r.gate_revision,
+        json_extract(r.payload, '$.gate.artifactHash'),
+        json_extract(r.payload, '$.failureCategory'),
+        json_extract(r.payload, '$.relevantActionId'),
+        json_extract(r.payload, '$.recovery'),
+        json_extract(r.payload, '$.cause'),
+        json_array_length(json_extract(r.payload, '$.approvals')),
+        a.status, a.result_artifact_id, a.identity
+      FROM j5_workflow_runs AS r
+      LEFT JOIN j5_workflow_actions AS a
+        ON a.run_id=NEW.run_id AND a.id=json_extract(NEW.payload, '$.actionId')
+      WHERE r.id=NEW.run_id AND r.revision=NEW.revision;
+    END`;
+});
+
 const migrate = Migrator.make({});
+export const workflowMigrations = {
+  "1_PersistedPhases": initial,
+  "2_OptimizedWorkflowState": optimized,
+  "3_WorkflowObservations": observations,
+};
 export const runWorkflowMigrations = () =>
   migrate({
     table: "j5_workflow_migrations",
-    loader: Migrator.fromRecord({
-      "1_PersistedPhases": initial,
-      "2_OptimizedWorkflowState": optimized,
-    }),
+    loader: Migrator.fromRecord(workflowMigrations),
   });

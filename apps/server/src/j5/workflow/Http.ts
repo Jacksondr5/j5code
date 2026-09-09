@@ -4,6 +4,7 @@ import {
   readWorkflowEntries,
   readWorkflowThreadParent,
 } from "./SidebarRead.ts";
+import { readBoard, readTimeline } from "./Observations.ts";
 import {
   GateRequest,
   MetadataRequest,
@@ -37,6 +38,36 @@ const decodeRestartPhaseRequestEffect = Schema.decodeUnknownEffect(RestartPhaseR
 const decodeStartRequestEffect = Schema.decodeUnknownEffect(StartRequest);
 const isRunStatus = Schema.is(RunStatus);
 
+const safeInteger = (value: string | null, fallback: number, positive: boolean) => {
+  if (value === null) return fallback;
+  if (!/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || (positive ? parsed <= 0 : parsed < 0)) return null;
+  return parsed;
+};
+
+export function parseListParameters(
+  url: URL,
+  defaults: {
+    readonly limit: number;
+    readonly maximum: number;
+    readonly cursor: "offset" | "before";
+  },
+) {
+  const cursorValue = safeInteger(url.searchParams.get(defaults.cursor), 0, false);
+  const limitValue = safeInteger(url.searchParams.get("limit"), defaults.limit, true);
+  if (cursorValue === null || limitValue === null) return null;
+  const status = url.searchParams.get("status") ?? "";
+  if (status !== "" && !isRunStatus(status)) return null;
+  return {
+    squadronId: url.searchParams.get("squadronId") ?? "",
+    query: (url.searchParams.get("q") ?? "").slice(0, 240),
+    status,
+    cursor: defaults.cursor === "before" && !url.searchParams.has("before") ? null : cursorValue,
+    limit: Math.min(defaults.maximum, limitValue),
+  };
+}
+
 const authenticate = (operate: boolean) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
@@ -67,19 +98,44 @@ export const workflowHttpLayer = Layer.unwrap(
         const id = parts[3] ? decodeURIComponent(parts[3]) : undefined;
         if (!operate) {
           if (id === "sidebar") {
-            const offset = Number(url.searchParams.get("offset") ?? 0);
-            const status = url.searchParams.get("status") ?? "";
-            if (!Number.isSafeInteger(offset) || offset < 0)
-              return HttpServerResponse.jsonUnsafe({ message: "Invalid offset" }, { status: 400 });
-            if (status !== "" && !isRunStatus(status))
-              return HttpServerResponse.jsonUnsafe({ message: "Invalid status" }, { status: 400 });
+            const parameters = parseListParameters(url, {
+              limit: 50,
+              maximum: 100,
+              cursor: "offset",
+            });
+            if (!parameters)
+              return HttpServerResponse.jsonUnsafe(
+                { message: "Invalid list parameters" },
+                { status: 400 },
+              );
             return HttpServerResponse.jsonUnsafe(
               yield* readWorkflowEntries(
-                url.searchParams.get("squadronId") ?? "",
-                (url.searchParams.get("q") ?? "").slice(0, 240),
-                offset,
-                Number(url.searchParams.get("limit") ?? 50),
-                status,
+                parameters.squadronId,
+                parameters.query,
+                parameters.cursor!,
+                parameters.limit,
+                parameters.status,
+              ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+            );
+          }
+          if (id === "board") {
+            const parameters = parseListParameters(url, {
+              limit: 24,
+              maximum: 48,
+              cursor: "offset",
+            });
+            if (!parameters)
+              return HttpServerResponse.jsonUnsafe(
+                { message: "Invalid list parameters" },
+                { status: 400 },
+              );
+            return HttpServerResponse.jsonUnsafe(
+              yield* readBoard(
+                parameters.squadronId,
+                parameters.query,
+                parameters.cursor!,
+                parameters.limit,
+                parameters.status,
               ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
             );
           }
@@ -101,6 +157,23 @@ export const workflowHttpLayer = Layer.unwrap(
             return HttpServerResponse.jsonUnsafe({
               artifact: yield* service.artifact(id, decodeURIComponent(parts[5])),
             });
+          if (id && parts[4] === "timeline") {
+            const parameters = parseListParameters(url, {
+              limit: 50,
+              maximum: 100,
+              cursor: "before",
+            });
+            if (!parameters)
+              return HttpServerResponse.jsonUnsafe(
+                { message: "Invalid timeline parameters" },
+                { status: 400 },
+              );
+            return HttpServerResponse.jsonUnsafe(
+              yield* readTimeline(id, parameters.cursor, parameters.limit).pipe(
+                Effect.provideService(SqlClient.SqlClient, sql),
+              ),
+            );
+          }
           if (id) {
             const knownVersion = url.searchParams.get("ifReadVersion");
             if (knownVersion !== null) {
@@ -196,6 +269,8 @@ export const workflowHttpLayer = Layer.unwrap(
       );
     return Layer.mergeAll(
       HttpRouter.add("GET", "/api/j5/workflows", handler(false)),
+      HttpRouter.add("GET", "/api/j5/workflows/board", handler(false)),
+      HttpRouter.add("GET", "/api/j5/workflows/:id/timeline", handler(false)),
       HttpRouter.add("GET", "/api/j5/workflows/:id", handler(false)),
       HttpRouter.add("GET", "/api/j5/workflows/:id/artifacts/:artifactId", handler(false)),
       HttpRouter.add("POST", "/api/j5/workflows", handler(true)),
