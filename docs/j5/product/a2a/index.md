@@ -75,7 +75,7 @@ The **person-side policy** is upstream's: whether the person's own send steers o
 
 A person takes part in the same protocol as an agent, with two differences that follow from being a person.
 
-Delivery is the **inbox**, not a conversation. An ask to a person lands in their inbox, gathered across every Squadron on the server. The person's answer, exactly as written, is the reply that closes the Exchange and reaches the asker — no relay, no summary. A person receives only asks and replies; a plain message to a person is refused, because a plain message carries nothing the sender's own thread does not already show, and if the person must see something then seeing it _is_ the obligation.
+Delivery is the **inbox**, not a conversation. An ask to a person lands in their inbox, gathered across every Squadron on the server. The person's answer, exactly as written, is the reply that closes the Exchange and reaches the asker — no relay, no summary. A person receives only asks; a plain message to a person is refused, because a plain message carries nothing the sender's own thread does not already show, and if the person must see something then seeing it _is_ the obligation. The person never opens an ask through the platform: their channel to an agent is that agent's thread, which they can open at any time, and their only act on the ledger is the answer that closes an Exchange.
 
 Silence is **never measured about a person**. A person has no turn that ends. How long their open asks have waited is a fact the inbox and the Fleet page show; nothing nags.
 
@@ -134,7 +134,7 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 ### Envelopes
 
 22. Every delivered message carries an envelope naming the sender, the sender's Squadron, what is owed, and the measured time.
-23. A person's message sent through the graph carries an envelope saying the person is not watching the agent's conversation and will see only what returns on the Exchange.
+23. The answer a person gives in the inbox reaches the agent wrapped in an envelope that says the Exchange is closed and no further reply is owed.
 
 ## Scenarios
 
@@ -153,5 +153,5 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 - 2026-08-31 — self-send refused; identity facts stated by the platform ([record](../../worklog/picker-and-self-messaging-rulings-2026-08-31.md)).
 - 2026-09-02 — a person receives only asks and replies ([record](../../worklog/human-addressed-sends-ruling-2026-09-02.md)).
 - 2026-09-03 — agent deliveries queue; only the person steers; former QS1–QS4 ([record](../../worklog/queue-vs-steer-ruling-2026-09-03.md)). 2026-09-05 — the person-side default returns to upstream's (steer on send, an explicit queue shortcut) with the upstream integration (PR #112); the agent-side queue policy, the Astra exception and the truthful-steer guard stand, and the two policies are recorded as independent.
-- 2026-09-04 — the Codex Astra exception ([record](../../worklog/astra-peer-delivery-2026-09-04.md)); 2026-09-08 — the delivery guidance that path appended ("continue the unfinished task… change course only when the user's instructions require it") is removed: an agent told by a peer that it should change course should not wait for a user who may never come; the model's behavior is observed instead (issue filed).
+- 2026-09-04 — the Codex Astra exception ([record](../../worklog/astra-peer-delivery-2026-09-04.md)); 2026-09-08 — a person never opens an ask through the platform; their only ledger act is the closing answer (the 2026-08-14 design's person-as-sender is dropped; the unused person-origin envelope channel goes with it, issue #119). Same day, the delivery guidance that path appended ("continue the unfinished task… change course only when the user's instructions require it") is removed: an agent told by a peer that it should change course should not wait for a user who may never come; the model's behavior is observed instead (issue filed).
 - 2026-09-05 — rewritten into the definition shape; 2026-09-07 — provenance and placement moved to the Squadron definition (they are organization, not communication). One change of substance: an agent may hold several open asks to a person, with explicit follow-ups shown in the inbox — reversing the one-ask-per-person rule of 2026-09-02 (issue #111). Former identifiers: D1 → Participants (delegation half retired); D2 → Participants; D3, D8 → The ledger, AC3; D4 → AC5; D5 → Delivery, AC1; D6 → Silence, AC20; D7 → the A2A plan; D9 → The Exchange; D10 → the Squadron definition (placement and provenance), with its obligation half being the Exchange; R3 → How an Exchange works, AC9; R4 → Silence; R21 → the Squadron definition; R22 → Participants; R25 → Envelopes, AC22; QS1–QS4 → Delivery, AC13–AC15.
