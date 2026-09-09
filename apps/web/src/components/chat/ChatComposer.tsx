@@ -1,4 +1,5 @@
 import { useAgentMentionPicker } from "../../j5/agents/useAgentMentionPicker";
+import { applyAgentMentionSelection } from "@t3tools/client-runtime/j5/agent-mentions";
 import type { SteerState } from "@t3tools/client-runtime/j5/steer-state";
 import type {
   AssistantCitation,
@@ -2715,15 +2716,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const { snapshot, trigger } = resolveActiveComposerTrigger();
       if (!trigger) return;
       if (item.type === "agent") {
-        const applied = applyPromptReplacement(
-          trigger.rangeStart,
-          trigger.rangeEnd,
-          `@agent:${item.personaId} `,
-          {
-            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
-          },
-        );
-        if (applied) setComposerHighlightedItemId(null);
+        if (applyAgentMentionSelection(item, trigger, snapshot.value, applyPromptReplacement))
+          setComposerHighlightedItemId(null);
         return;
       }
       if (item.type === "path") {

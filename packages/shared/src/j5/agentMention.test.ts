@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { detectComposerTrigger } from "../composerTrigger.ts";
 import { collectComposerInlineTokens } from "../composerInlineTokens.ts";
+import { agentMentionReplacement, detectAgentMention } from "./agentMention.ts";
 
 describe("agent mention syntax", () => {
   it("recognizes the same stable agent token anywhere in a prompt", () => {
@@ -25,5 +26,16 @@ describe("agent mention syntax", () => {
     expect(collectComposerInlineTokens('@"agent:notes" ')).toEqual([
       expect.objectContaining({ type: "mention", value: "agent:notes" }),
     ]);
+  });
+
+  it("round-trips the inserted replacement through the trigger detector", () => {
+    const replacement = agentMentionReplacement("team-researcher");
+    expect(replacement).toBe("@agent:team-researcher ");
+    expect(detectAgentMention(replacement.trimEnd(), 0, replacement.length - 1)).toEqual({
+      kind: "agent",
+      query: "team-researcher",
+      rangeStart: 0,
+      rangeEnd: replacement.length - 1,
+    });
   });
 });
