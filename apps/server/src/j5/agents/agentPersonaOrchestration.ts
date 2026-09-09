@@ -15,6 +15,7 @@ import * as Schema from "effect/Schema";
 
 import { validateAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { prepareAgentPersonaLaunch } from "./agentPersonaLaunch.ts";
+import { validateAgentPersonaSubagent } from "./agentPersonaSubagent.ts";
 import {
   AgentPersonaLibraryError,
   makeAgentPersonaLibrary,
@@ -177,5 +178,16 @@ export const makeAgentPersonaGuards = <D, A, E>(deps: {
         command: CommandContext & { readonly modelSelection?: ModelSelection | undefined },
       ): Effect.Effect<void, D> =>
         reject(command, agentPersonaModelMismatchError(thread, command.modelSelection)),
+      /** Delegated child: an explicit assignment must match the child's provider and route. */
+      subagent: (
+        command: CommandContext & {
+          readonly agentPersonaAssignment?: OrchestrationV2AgentPersonaAssignment | undefined;
+          readonly modelSelection: ModelSelection;
+        },
+        driver: string,
+      ): Effect.Effect<void, D> =>
+        validateAgentPersonaSubagent(command, library, driver).pipe(
+          Effect.mapError((cause) => deps.dispatchError(command, cause)),
+        ),
     };
   });

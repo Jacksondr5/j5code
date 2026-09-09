@@ -1,4 +1,3 @@
-import { validateAgentPersonaSubagent } from "../j5/agents/agentPersonaSubagent.ts";
 import {
   type ChatAttachment,
   CommandId,
@@ -4607,16 +4606,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ),
       );
 
-      yield* validateAgentPersonaSubagent(command, personaLibrary, targetAdapter.driver).pipe(
-        Effect.mapError(
-          (cause) =>
-            new OrchestratorDispatchError({
-              commandId: command.commandId,
-              commandType: command.type,
-              cause,
-            }),
-        ),
-      );
+      yield* personaGuards.subagent(command, targetAdapter.driver);
 
       const now = command.createdAt ?? (yield* DateTime.now);
       const taskNodeId = idAllocator.derive.delegatedTaskNode({
