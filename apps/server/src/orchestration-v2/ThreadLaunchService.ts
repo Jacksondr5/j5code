@@ -4,7 +4,6 @@ import {
   type MessageId,
   type ModelSelection,
   type OrchestrationV2Actor,
-  type OrchestrationV2AgentPersonaAssignment,
   type OrchestrationV2AgentPersonaRequest,
   type OrchestrationV2CreationSource,
   type OrchestrationV2ThreadProjection,
@@ -36,7 +35,10 @@ import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.t
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
-import { prepareAgentPersonaLaunch } from "../j5/agents/agentPersonaLaunch.ts";
+import {
+  durableLaunchModelSelection,
+  resolveAgentPersonaLaunch,
+} from "../j5/agents/agentPersonaOrchestration.ts";
 import { makeAgentPersonaLibrary } from "../j5/agents/agentPersonaLibrary.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as IdAllocator from "./IdAllocator.ts";
@@ -474,24 +476,13 @@ export const make = Effect.gen(function* () {
           "update-thread",
         )("Reusing an existing thread requires a thread id.");
       }
-      if (input.reuseExistingThread === true && input.agentPersona !== undefined) {
-        return yield* mapError(
-          input,
-          "resolve-agent-persona",
-        )("Agent persona assignment requires a newly created thread.");
-      }
 
       const launchReceipt = yield* readReceipt(input, input.commandId);
-      let launchModelSelection = input.modelSelection;
-      let agentPersonaAssignment: OrchestrationV2AgentPersonaAssignment | undefined;
-      if (input.agentPersona !== undefined && Option.isNone(launchReceipt)) {
-        agentPersonaAssignment = yield* prepareAgentPersonaLaunch(
-          input.agentPersona,
-          yield* providerRegistry.getProviders,
-          personaLibrary,
-        ).pipe(Effect.mapError(mapError(input, "resolve-agent-persona")));
-        launchModelSelection = agentPersonaAssignment.resolvedModelSelection;
-      }
+      const personaLaunch = yield* resolveAgentPersonaLaunch(input, {
+        replay: Option.isSome(launchReceipt),
+        providers: providerRegistry.getProviders,
+        library: personaLibrary,
+      }).pipe(Effect.mapError(mapError(input, "resolve-agent-persona")));
       return yield* Effect.gen(function* () {
         const candidateThreadId =
           input.threadId ??
@@ -521,10 +512,9 @@ export const make = Effect.gen(function* () {
                 threadId: candidateThreadId,
                 projectId: input.projectId,
                 title: input.title,
-                modelSelection: launchModelSelection,
+                ...personaLaunch,
                 runtimeMode: input.runtimeMode,
                 interactionMode: input.interactionMode,
-                ...(agentPersonaAssignment === undefined ? {} : { agentPersonaAssignment }),
                 branch: initialBranch,
                 worktreePath: initialWorktreePath,
                 createdBy: input.createdBy,
@@ -542,13 +532,10 @@ export const make = Effect.gen(function* () {
         const threadId =
           claimed.storedEvents.find((stored) => stored.event.type.startsWith("thread."))?.event
             .threadId ?? candidateThreadId;
-        const durableThread = claimed.storedEvents.find(
-          (stored) => stored.event.type === "thread.created",
+        const durableModelSelection = durableLaunchModelSelection(
+          claimed.storedEvents,
+          personaLaunch.modelSelection,
         );
-        const durableModelSelection =
-          durableThread?.event.type === "thread.created"
-            ? durableThread.event.payload.modelSelection
-            : launchModelSelection;
         if (project.id !== input.projectId) {
           return yield* mapError(input, "resolve-project", threadId)("Project identity changed.");
         }
