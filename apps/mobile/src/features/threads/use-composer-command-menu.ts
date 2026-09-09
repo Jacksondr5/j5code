@@ -1,4 +1,5 @@
 import { useAgentMentionPicker } from "../../j5/agents/useAgentMentionPicker";
+import { agentMentionReplacement } from "@t3tools/shared/j5/agentMention";
 import type { EnvironmentId, ProviderInteractionMode, ServerProvider } from "@t3tools/contracts";
 import {
   detectComposerTrigger,
@@ -121,7 +122,7 @@ export function resolveComposerCommandSelection(input: {
 
   let replacement = "";
   if (item.type === "agent") {
-    replacement = `@agent:${item.personaId} `;
+    replacement = agentMentionReplacement(item.personaId);
   } else if (item.type === "path") {
     replacement = `${serializeComposerFileLink(item.path)} `;
   } else if (item.type === "skill") {

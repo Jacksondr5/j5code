@@ -4,7 +4,7 @@ import {
   ProviderInstanceId,
   type OrchestrationV2AgentPersonaCatalog,
 } from "@t3tools/contracts";
-import { agentPersonaMentionItems } from "./agentMentions.ts";
+import { agentPersonaMentionItems, applyAgentMentionSelection } from "./agentMentions.ts";
 
 const persona = (
   personaId: string,
@@ -58,5 +58,22 @@ describe("agent picker", () => {
   });
   it("does not reuse another environment's results before a catalog loads", () => {
     expect(agentPersonaMentionItems(null, "")).toEqual([]);
+  });
+});
+
+describe("agent mention selection", () => {
+  it("replaces exactly the typed trigger with the stable mention and reports the outcome", () => {
+    const calls: Array<unknown[]> = [];
+    const text = "fix @agent:sc please";
+    const trigger = { rangeStart: 4, rangeEnd: 13 };
+    const applied = applyAgentMentionSelection({ personaId: "scout" }, trigger, text, (...args) => {
+      calls.push(args);
+      return true;
+    });
+    expect(applied).toBe(true);
+    expect(calls).toEqual([[4, 13, "@agent:scout ", { expectedText: "@agent:sc" }]]);
+    expect(applyAgentMentionSelection({ personaId: "scout" }, trigger, text, () => false)).toBe(
+      false,
+    );
   });
 });
