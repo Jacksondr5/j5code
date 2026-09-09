@@ -10,6 +10,7 @@ import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-ro
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { HumanInboxBell } from "../../j5/a2a/HumanInboxBell";
+import { WorkflowGateBell } from "../../j5/workflow/WorkflowGateBell";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
 import { T3Wordmark } from "../T3Wordmark";
@@ -58,6 +59,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
         isElectron && "drag-region",
       )}
     >
+      <WorkflowGateBell />
       {backdropVariant ? <SidebarStageBackdrop variant={backdropVariant} /> : null}
       <SidebarTrigger
         className={cn(
