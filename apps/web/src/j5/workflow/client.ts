@@ -4,6 +4,7 @@ import {
   WorkflowEntries,
   WorkflowThreadParent,
 } from "@j5/workflow-contracts/sidebar";
+import { BoardPage, TimelinePage } from "@j5/workflow-contracts/observability";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
@@ -109,6 +110,26 @@ export const listWorkflowEntries = (
     request(
       `/sidebar?squadronId=${encodeURIComponent(squadronId)}&q=${encodeURIComponent(query)}&status=${encodeURIComponent(status)}&offset=${offset}&limit=${limit}`,
     ).pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(WorkflowEntries))),
+  );
+
+export const listWorkflowBoard = (
+  squadronId: string,
+  query = "",
+  status = "",
+  offset = 0,
+  limit = 24,
+) =>
+  runtime.runPromise(
+    request(
+      `/board?squadronId=${encodeURIComponent(squadronId)}&q=${encodeURIComponent(query)}&status=${encodeURIComponent(status)}&offset=${offset}&limit=${limit}`,
+    ).pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(BoardPage))),
+  );
+
+export const readWorkflowTimeline = (runId: string, before: number | null, limit = 50) =>
+  runtime.runPromise(
+    request(
+      `/${encodeURIComponent(runId)}/timeline?${before === null ? "" : `before=${before}&`}limit=${limit}`,
+    ).pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(TimelinePage))),
   );
 
 export const readWorkflowApprovalCount = () =>

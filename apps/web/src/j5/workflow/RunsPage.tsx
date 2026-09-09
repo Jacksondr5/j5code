@@ -8,11 +8,35 @@ import { SidebarInset } from "../../components/ui/sidebar";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useSquadronDirectory } from "../squadron/SquadronDirectory";
 import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
+import { statusPresentation } from "./presentation";
+import { useWorkflowQuery, workflowListAtom } from "./queries";
+import { effectiveTab, effectiveView, serializeRunsSearch, type RunsSearch } from "./runsSearch";
+import { useCreateWorkflow } from "./useCreateWorkflow";
+import { WorkflowBoard } from "./WorkflowBoard";
 import WorkflowRunDetail from "./WorkflowRunDetail";
 import { WorkflowRunList } from "./WorkflowRunList";
-import { useWorkflowQuery, workflowListAtom } from "./queries";
-import { statusPresentation } from "./presentation";
-import { useCreateWorkflow } from "./useCreateWorkflow";
+
+function WorkflowSearchInput({
+  initialValue,
+  onCommit,
+}: {
+  readonly initialValue: string;
+  readonly onCommit: (value: string) => void;
+}) {
+  const [value, setValue] = useState(initialValue);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => onCommit(value.trim()), 200);
+    return () => window.clearTimeout(timeout);
+  }, [onCommit, value]);
+  return (
+    <Input
+      className="mt-1 w-56"
+      onChange={(event) => setValue(event.currentTarget.value)}
+      placeholder="Request text"
+      value={value}
+    />
+  );
+}
 
 export function RunsPage() {
   const environmentId = usePrimaryEnvironmentId();
@@ -20,64 +44,74 @@ export function RunsPage() {
   const navigate = useNavigate();
   const targetHash = useLocation({ select: (location) => location.hash });
   const directory = useSquadronDirectory();
-  const [scope, setScope] = useState(search.squadronId ?? "");
-  const [offset, setOffset] = useState(0);
-  const [searchText, setSearchText] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const scope = search.squadronId ?? "";
+  const page = search.page ?? 0;
   const selected = search.runId ?? null;
+  const view = effectiveView(search);
+  const tab = effectiveTab(search, targetHash);
 
-  const setSelected = useCallback(
-    (id: string | null, squadronId = scope) => {
+  const updateSearch = useCallback(
+    (patch: Partial<RunsSearch>, hash?: string) => {
       void navigate({
         to: "/runs",
-        search: {
-          runId: id ?? undefined,
-          squadronId: squadronId || undefined,
-          newWorkflow: undefined,
-        },
-        hash: id ? "workflow-approval" : "",
+        search: (current) => serializeRunsSearch({ ...current, ...patch }),
+        ...(hash === undefined ? {} : { hash }),
         replace: true,
       });
     },
-    [navigate, scope],
+    [navigate],
   );
-
+  const setSelected = useCallback(
+    (id: string | null, squadronId = scope) =>
+      updateSearch(
+        {
+          runId: id ?? undefined,
+          squadronId: squadronId || undefined,
+          newWorkflow: undefined,
+          tab: undefined,
+        },
+        "",
+      ),
+    [scope, updateSearch],
+  );
   const onCreated = useCallback(
-    (run: { id: string; squadronId: string }) => {
-      setScope(run.squadronId);
-      setOffset(0);
-      setSelected(run.id, run.squadronId);
-    },
-    [setSelected],
+    (run: { id: string; squadronId: string }) =>
+      updateSearch(
+        {
+          runId: run.id,
+          squadronId: run.squadronId,
+          newWorkflow: undefined,
+          page: undefined,
+          tab: undefined,
+        },
+        "",
+      ),
+    [updateSearch],
   );
   const creation = useCreateWorkflow(onCreated);
+  const setCreationOpen = creation.setOpen;
+  const setQuery = useCallback(
+    (value: string) => {
+      const q = value || undefined;
+      if (q !== search.q) updateSearch({ q, page: undefined });
+    },
+    [search.q, updateSearch],
+  );
 
   useEffect(() => {
-    if (search.squadronId !== undefined && search.squadronId !== scope) {
-      setScope(search.squadronId);
-      setOffset(0);
-    }
-    if (search.newWorkflow === true) creation.setOpen(true);
-  }, [creation.setOpen, scope, search.newWorkflow, search.squadronId]);
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      setDebouncedSearch(searchText);
-      setOffset(0);
-    }, 200);
-    return () => window.clearTimeout(timeout);
-  }, [searchText]);
+    if (search.newWorkflow === true) setCreationOpen(true);
+  }, [search.newWorkflow, setCreationOpen]);
 
   const listQuery = useWorkflowQuery(
-    environmentId === null
+    environmentId === null || (view === "board" && selected === null)
       ? null
       : workflowListAtom({
           environmentId,
           input: {
             squadronId: scope,
-            search: debouncedSearch,
-            status: statusFilter,
-            page: Math.floor(offset / 50),
+            search: search.q ?? "",
+            status: search.status ?? "",
+            page,
             pageSize: 50,
           },
         }),
@@ -89,7 +123,7 @@ export function RunsPage() {
 
   return (
     <SidebarInset className="min-h-0 overflow-y-auto">
-      <main className="mx-auto w-full max-w-6xl space-y-6 p-4 wco:pt-[calc(env(titlebar-area-height)+1rem)] sm:p-6 sm:wco:pt-[calc(env(titlebar-area-height)+1.5rem)]">
+      <main className="mx-auto w-full max-w-7xl space-y-6 p-4 wco:pt-[calc(env(titlebar-area-height)+1rem)] sm:p-6 sm:wco:pt-[calc(env(titlebar-area-height)+1.5rem)]">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold">Workflows</h1>
@@ -98,7 +132,7 @@ export function RunsPage() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Button onClick={() => creation.setOpen(true)}>New workflow</Button>
+            <Button onClick={() => setCreationOpen(true)}>New workflow</Button>
             <Link className="self-center underline" to="/">
               Back to threads
             </Link>
@@ -120,11 +154,14 @@ export function RunsPage() {
             <select
               className="mt-1 block rounded border bg-background p-2"
               value={scope}
-              onChange={(event) => {
-                setScope(event.target.value);
-                setOffset(0);
-                setSelected(null, event.target.value);
-              }}
+              onChange={(event) =>
+                updateSearch({
+                  squadronId: event.target.value || undefined,
+                  runId: undefined,
+                  page: undefined,
+                  tab: undefined,
+                })
+              }
             >
               <option value="">All Squadrons</option>
               {directory.squadrons.map((item) => (
@@ -136,22 +173,23 @@ export function RunsPage() {
           </label>
           <label className="text-sm">
             Search
-            <Input
-              className="mt-1 w-56"
-              onChange={(event) => setSearchText(event.currentTarget.value)}
-              placeholder="Request text"
-              value={searchText}
+            <WorkflowSearchInput
+              initialValue={search.q ?? ""}
+              key={search.q ?? ""}
+              onCommit={setQuery}
             />
           </label>
           <label className="text-sm">
             Status
             <select
               className="mt-1 block rounded border bg-background p-2"
-              onChange={(event) => {
-                setStatusFilter(event.currentTarget.value);
-                setOffset(0);
-              }}
-              value={statusFilter}
+              onChange={(event) =>
+                updateSearch({
+                  status: (event.currentTarget.value || undefined) as RunsSearch["status"],
+                  page: undefined,
+                })
+              }
+              value={search.status ?? ""}
             >
               <option value="">All statuses</option>
               {Object.keys(statusPresentation).map((status) => (
@@ -161,36 +199,83 @@ export function RunsPage() {
               ))}
             </select>
           </label>
-          <span className="pb-2 text-sm text-muted-foreground">
-            {total} {total === 1 ? "workflow" : "workflows"}
-          </span>
-        </div>
-        <div className="grid gap-6 md:grid-cols-[17rem_minmax(0,1fr)]">
-          <WorkflowRunList
-            hasError={pageError !== null}
-            offset={offset}
-            onCreate={() => creation.setOpen(true)}
-            onOffset={setOffset}
-            onSelect={setSelected}
-            runs={runs}
-            selected={selected}
-            total={total}
-          />
-          {!selected ? (
-            <section className="rounded-lg border p-8 text-center">
-              <h2 className="font-semibold">Select a workflow</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Choose one from the list, or start a new workflow.
-              </p>
-            </section>
-          ) : environmentId ? (
-            <WorkflowRunDetail
-              environmentId={environmentId}
-              runId={selected}
-              revealApproval={targetHash === "workflow-approval"}
-            />
+          <div aria-label="Workflow view" className="flex rounded border p-1">
+            <Button
+              aria-pressed={view === "board"}
+              size="sm"
+              variant={view === "board" ? "secondary" : "ghost"}
+              onClick={() => updateSearch({ view: "board", runId: undefined, tab: undefined })}
+            >
+              Board
+            </Button>
+            <Button
+              aria-pressed={view === "list"}
+              size="sm"
+              variant={view === "list" ? "secondary" : "ghost"}
+              onClick={() => updateSearch({ view: "list" })}
+            >
+              List
+            </Button>
+          </div>
+          {view === "list" ? (
+            <span className="pb-2 text-sm text-muted-foreground">
+              {total} {total === 1 ? "workflow" : "workflows"}
+            </span>
           ) : null}
         </div>
+        {view === "board" && selected === null && environmentId ? (
+          <WorkflowBoard
+            environmentId={environmentId}
+            onPage={(next) => updateSearch({ page: next || undefined })}
+            onSelect={(id, squadronId) =>
+              updateSearch(
+                {
+                  runId: id,
+                  squadronId,
+                  newWorkflow: undefined,
+                  view: "board",
+                  tab: undefined,
+                },
+                "",
+              )
+            }
+            page={page}
+            q={search.q ?? ""}
+            squadronId={scope}
+            status={search.status ?? ""}
+          />
+        ) : (
+          <div className="grid gap-6 md:grid-cols-[17rem_minmax(0,1fr)]">
+            <WorkflowRunList
+              hasError={pageError !== null}
+              offset={page * 50}
+              onCreate={() => setCreationOpen(true)}
+              onOffset={(next) =>
+                updateSearch({ page: next > 0 ? Math.floor(next / 50) : undefined })
+              }
+              onSelect={setSelected}
+              runs={runs}
+              selected={selected}
+              total={total}
+            />
+            {!selected ? (
+              <section className="rounded-lg border p-8 text-center">
+                <h2 className="font-semibold">Select a workflow</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Choose one from the list, or start a new workflow.
+                </p>
+              </section>
+            ) : environmentId ? (
+              <WorkflowRunDetail
+                environmentId={environmentId}
+                onTabChange={(next) => updateSearch({ tab: next }, "")}
+                revealApproval={targetHash.replace(/^#/u, "") === "workflow-approval"}
+                runId={selected}
+                tab={tab}
+              />
+            ) : null}
+          </div>
+        )}
       </main>
       <CreateWorkflowDialog
         open={creation.open}
