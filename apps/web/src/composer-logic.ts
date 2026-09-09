@@ -1,3 +1,4 @@
+import { detectAgentMention } from "@t3tools/shared/j5/agentMention";
 import type { AssistantCitation } from "@t3tools/contracts";
 import {
   serializeAssistantCitation,
@@ -9,7 +10,7 @@ import {
 } from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
-export type ComposerTriggerKind = "path" | "slash-command" | "skill";
+export type ComposerTriggerKind = "agent" | "path" | "slash-command" | "skill";
 export type ComposerSlashCommand = "model" | "plan" | "default";
 export type ComposerSubmissionIntent = "foreground" | "background";
 
@@ -249,6 +250,8 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
       rangeEnd: cursor,
     };
   }
+  const agentMention = detectAgentMention(token, tokenStart, cursor);
+  if (agentMention !== null) return agentMention;
   if (!token.startsWith("@")) {
     return null;
   }
