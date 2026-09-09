@@ -1,37 +1,44 @@
 ---
-title: "Shared Squadrons — multiple people, one server"
-kind: spec
+title: "Shared Squadrons"
+kind: definition
 ---
 
 # Shared Squadrons
 
-Feature definition of record for the multi-user capability. The goal it serves ([problems doc](../problems.md), [use cases 2a](../use-cases.md)): a team shares Squadrons — when one person goes off shift, the next picks up the Squadron immediately with **no context transfer**; and two humans stand in front of the same agent, removing the Slack/Teams relay from human↔human↔agent workflows. Rulings baked in: R9 and R29 in [the register](../design-review-2026-08-21.md). Backlog candidate — likely post-item-4 (the fleet must be observable by one person before it's shareable between several), and a **deep architecture session is required before any build**.
+## Problem
 
-## What this is — and the two things it is not
+As agents do more of the work, the need to share them between people grows. A level-2 support team hands a Squadron from one shift to the next and wants **no context transfer**. Two developers already relay agent output to each other over chat — one asks their agent, pastes the answer to the other — and would rather stand in front of the same agent together ([problems](../problems.md): Shared Squadrons; [use cases](../use-cases.md)).
 
-Shared Squadrons is a **distinct third capability** in the cross-machine space:
+## Definition
 
-| Capability           | Shape                                                                   | Where it's defined                                 |
-| -------------------- | ----------------------------------------------------------------------- | -------------------------------------------------- |
-| Cross-device         | one person, several servers; read-models merge in the client            | [cross-device position](../cross-device.md), X1–X5 |
-| Federation           | two people's _servers_ exchange messages via the peer registry          | X4 — the designated cross-person seam              |
-| **Shared Squadrons** | **several people on one server, sharing the same Squadrons and agents** | this document                                      |
+**Shared Squadrons** is several people on one server sharing the same Squadrons and the same agents. It is one of three distinct capabilities in the multi-machine, multi-person space, and the only one where no state crosses machines and no server peers with another:
 
-Neither of the other two answers it: no state crosses machines here, and no peering is involved. It's multi-user, co-located.
+| Capability           | Shape                                                            | Defined in                         |
+| -------------------- | ---------------------------------------------------------------- | ---------------------------------- |
+| Cross-device         | one person, several servers; views merge in the client           | [cross-device](../cross-device.md) |
+| Federation           | two people's servers exchange messages through the peer registry | [cross-device](../cross-device.md) |
+| **Shared Squadrons** | **several people on one server, sharing Squadrons and agents**   | this document                      |
 
-## Settled now, binding now
+Two constraints are in force **now**, on everything built, because retrofitting multiple people onto single-person assumptions is the expensive path this avoids:
 
-These constraints are in force **today**, on everything built from here on — retrofitting multi-user onto singleton assumptions is the expensive path this avoids:
+- **Nothing may assume exactly one person.** Every person-facing surface — the inbox, the backlog pane, notifications, addressing — is scoped to a person, never to "the user."
+- **Every person has a durable person id**, minted locally at first run and carried on every ledger row and envelope. External authentication binds to that id later; the id is stable without being authenticated, which is what keeps login deferred today. Where the binding happens is a later design.
+- **An agent addresses a specific person or every person on the server.** There is no group management: one server has a practical ceiling on people and work, and groups are complexity with no identified need.
 
-- **The multi-human invariant** (R29): nothing may assume exactly one human. Every human-facing surface — inbox, backlog pane, notifications, addressing — is person-scoped, never singleton-scoped.
-- **Person ids** (R9): every ledger row and envelope carries a durable local person id (`human:<id>`). External auth (e.g. Clerk) _binds to_ the existing id later, at whichever seam the architecture session lands on — the id is stable without being authenticated, which is what keeps app login deferred today.
-- **Delivery targets are one user or all users** (R29): an agent addresses a specific person, or every person on the server. **No human group management** — one server has a practical ceiling on people and work, and group semantics are complexity with no identified need.
+Doors deliberately left open and undesigned: addressing a _duty_ rather than a person ("the on-call", resolving to whoever holds it now); two people in one agent conversation, presence, and per-person attribution in shared chats.
 
-## Recorded doors (open, deliberately undesigned)
+## Acceptance criteria
 
-- **Duty-based addressing**: shift work implies exchanges addressed to a _duty_ rather than a person — "the on-call," resolving to whoever holds the duty now. Written on the door next to external-systems-as-nodes; not designed.
-- Multi-user chat mechanics (two people in one agent conversation), presence, and per-person attribution in shared chats — the architecture session's territory.
+1. No surface, projection or tool assumes exactly one person; each is scoped by person id.
+2. Every ledger row and envelope carries the person id of any person it involves.
+3. An ask can be addressed to one person or to every person on the server, and to nothing in between.
+4. A person's id is stable across restarts and does not depend on authentication.
 
-## What the architecture session must answer
+## Scenarios
 
-How multiple authenticated people attach to one server (auth binding, transport, T3's single-user assumptions); attribution and read-state in shared surfaces; what "all users" delivery means for the inbox model; whether shift handoff needs any state beyond what person-scoped surfaces already give. Until that session, this document is the vision plus the invariants — nothing more is designed.
+- **Shift handoff.** The on-shift engineer for Support Rotation goes home; the next engineer opens the same server, sees the same Squadron, the same agents, and the same open asks in their own inbox, and continues without a handover conversation. (AC1, AC3)
+
+## History
+
+- 2026-08-22 — the multi-person invariant and person ids ruled binding now; the capability defined and set apart from cross-device and federation; former R9, R29, and the cross-device position ([record](../design-review-2026-08-21.md)).
+- 2026-09-08 — rewritten into the definition shape. Former identifiers: R9 → AC2, AC4; R29 → AC1, AC3. The architecture session this capability needs before any build — how several authenticated people attach to one server, attribution and read state in shared surfaces, what "every person" delivery means for the inbox — is that session's agenda, not this definition's.
