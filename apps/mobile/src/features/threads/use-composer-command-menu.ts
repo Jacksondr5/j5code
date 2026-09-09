@@ -263,8 +263,7 @@ export function useComposerCommandMenu({
   const agentPicker = useAgentMentionPicker(environmentId, selectedProviderStatus?.driver, trigger);
   const items = useMemo<ComposerCommandItem[]>(() => {
     if (!trigger) return [];
-    const agents = agentPicker.items;
-    if (trigger.kind === "agent") return agents;
+    if (trigger.kind === "agent") return agentPicker.items;
 
     if (trigger.kind === "slash-command") {
       const q = trigger.query.toLowerCase();
@@ -374,20 +373,17 @@ export function useComposerCommandMenu({
     }
 
     if (trigger.kind === "path") {
-      return [
-        ...agents,
-        ...pathSearch.entries.map((entry) => {
-          const parts = entry.path.split("/");
-          return {
-            id: `path:${entry.path}`,
-            type: "path" as const,
-            path: entry.path,
-            kind: entry.kind,
-            label: parts[parts.length - 1] ?? entry.path,
-            description: parts.length > 1 ? parts.slice(0, -1).join("/") : "",
-          };
-        }),
-      ];
+      return pathSearch.entries.map((entry) => {
+        const parts = entry.path.split("/");
+        return {
+          id: `path:${entry.path}`,
+          type: "path" as const,
+          path: entry.path,
+          kind: entry.kind,
+          label: parts[parts.length - 1] ?? entry.path,
+          description: parts.length > 1 ? parts.slice(0, -1).join("/") : "",
+        };
+      });
     }
 
     return [];
@@ -435,7 +431,7 @@ export function useComposerCommandMenu({
     trigger,
     items,
     skills,
-    isLoading: pathSearch.isPending || agentPicker.isPending,
+    isLoading: pathSearch.isPending || (trigger?.kind === "agent" && agentPicker.isPending),
     onSelect,
   };
 }

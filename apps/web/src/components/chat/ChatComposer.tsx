@@ -1936,20 +1936,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const agentPicker = useAgentMentionPicker(environmentId, selectedProvider, composerTrigger);
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
-    const agents = agentPicker.items;
-    if (composerTrigger.kind === "agent") return agents;
+    if (composerTrigger.kind === "agent") return agentPicker.items;
     if (composerTrigger.kind === "path") {
-      return [
-        ...agents,
-        ...workspaceEntries.entries.map((entry) => ({
-          id: `path:${entry.kind}:${entry.path}`,
-          type: "path" as const,
-          path: entry.path,
-          pathKind: entry.kind,
-          label: basenameOfPath(entry.path),
-          description: entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))),
-        })),
-      ];
+      return workspaceEntries.entries.map((entry) => ({
+        id: `path:${entry.kind}:${entry.path}`,
+        type: "path",
+        path: entry.path,
+        pathKind: entry.kind,
+        label: basenameOfPath(entry.path),
+        description: entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))),
+      }));
     }
     if (composerTrigger.kind === "slash-command") {
       const builtInSlashCommandItems = [
@@ -2106,14 +2102,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ]);
 
   const isComposerMenuLoading =
-    agentPicker.isPending ||
+    (composerTriggerKind === "agent" && agentPicker.isPending) ||
     (composerTriggerKind === "path" && pathTriggerQuery.length > 0 && workspaceEntries.isPending);
   const composerMenuEmptyState = useMemo(() => {
     if (composerTriggerKind === "agent") return agentPicker.error ?? "No available agents found.";
     if (composerTriggerKind === "skill") {
       return "No skills found. Try / to browse provider commands.";
     }
-    return composerTriggerKind === "path" ? "No matching files or agents." : "No matching command.";
+    return composerTriggerKind === "path"
+      ? "No matching files or folders."
+      : "No matching command.";
   }, [composerTriggerKind, agentPicker.error]);
 
   // ------------------------------------------------------------------
