@@ -83,7 +83,7 @@ No inputs. Read-only; no events.
 
 **Result:** exactly one of `interrupt_requested` (a running turn is being interrupted) or `already_idle` (no running turn; no side effect). An interrupt acknowledgement and an observed terminal run state are separate facts; the tool never claims a turn stopped merely because interruption was requested. Anything else is an error naming the caller's actual Squadron and the corrected retry.
 
-**Rule.** Stop and archive are single-target. The unit cascade belongs to Crews, which stop and archive as units through their own verbs when they exist.
+**Rules.** Stop and archive are single-target; the unit cascade belongs to Crews, which stop and archive as units through their own verbs when they exist. A stop is final across restarts: a committed stop wins even if the provider has not yet acknowledged it, so a stopped run is never resumed by upstream's restart continuation.
 
 ### `archive_agent`
 
@@ -135,7 +135,7 @@ No inputs. Read-only; no events.
 6. `list_participants` marks the caller's row `self`, reports a person's row as unable to receive a plain message and able to be asked, and omits threads without a Squadron home.
 7. `spawn_agent` refuses a call that omits provider, model, or reasoning, and refuses a choice outside the Role's allowlist with an error naming the Role.
 8. A spawned agent's first turn contains its own participant id and Squadron.
-9. `stop_agent` and `archive_agent` act on exactly one agent; neither cascades.
+9. `stop_agent` and `archive_agent` act on exactly one agent; neither cascades; a stopped run is never resumed after a server restart, even when restart continuation is enabled.
 10. `archive_agent` on a target with open Exchanges or a running turn refuses with the list of consequences and a token; the same call with that token archives; a stale token is refused with fresh facts.
 11. `clear_own_ask` closes only an Exchange the caller opened and records the closure as sender-cleared.
 12. Every error from every verb names the actual state and the next command.
@@ -147,4 +147,5 @@ No inputs. Read-only; no events.
 - 2026-08-31 — self-send refused; the `self` row; identity facts in the spawn's first turn; `display_name` on every row; `create_threads` and `t3_thread_start` omitted ([record](../../worklog/picker-and-self-messaging-rulings-2026-08-31.md)).
 - 2026-09-02 — a person receives only asks and replies ([record](../../worklog/human-addressed-sends-ruling-2026-09-02.md)).
 - 2026-09-05 — several open asks per person, with explicit follow-ups through `regarding`, replacing the one-ask-per-person refusal of 2026-09-02 (issue #111).
+- 2026-09-05 — a committed stop wins over restart continuation (upstream integration, PR #112).
 - 2026-09-07 — rewritten from a stack of dated contract revisions into current-state contracts; every verb's build state true as of this date (all six verbs shipped; `regarding` and the person follow-up rule are issue #111).
