@@ -15,6 +15,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
+import { stringify as yaml } from "yaml";
 import { ServerConfig } from "../../config.ts";
 import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
@@ -33,8 +34,7 @@ const definition = {
   displayName: "Team Researcher",
   instructions: "Return cited evidence from the workspace.",
 };
-const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-const definitionJson = encodeJson(definition);
+const definitionYaml = yaml(definition);
 const isPublicCommand = Schema.is(OrchestrationV2PublicCommand);
 const providers: ServerProvider[] = definition.modelRoute.map((target) => ({
   instanceId: ProviderInstanceId.make(target.driver),
@@ -69,7 +69,7 @@ const providers: ServerProvider[] = definition.modelRoute.map((target) => ({
 const fixture = Effect.gen(function* () {
   const library = yield* makeAgentPersonaLibrary;
   yield* library.importFiles({
-    files: [{ name: "agent.json", content: definitionJson }],
+    files: [{ name: "agent.yaml", content: definitionYaml }],
     replaceExisting: false,
   });
   const now = yield* DateTime.now;
@@ -230,9 +230,9 @@ describe("saved agent subagent invocation", () => {
         id: "team-writer",
         authority: { defaultPolicy: "workspace-write", allowedPolicies: ["workspace-write"] },
       };
-      const content = encodeJson(writer);
+      const content = yaml(writer);
       yield* library.importFiles({
-        files: [{ name: "writer.json", content }],
+        files: [{ name: "writer.yaml", content }],
         replaceExisting: false,
       });
       calls.length = 0;
