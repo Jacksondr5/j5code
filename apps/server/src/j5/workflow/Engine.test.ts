@@ -581,12 +581,43 @@ it.effect("migrates twice and recovers state, command receipts and fenced claims
       definition,
     );
     assert.deepStrictEqual(duplicate, finished);
+    const revisionConflict = yield* Effect.exit(
+      restarted.command(
+        {
+          commandId: "wrong-revision",
+          runId: run.id,
+          expectedRevision: finished.revision + 1,
+          event: { type: "cancel" },
+          now: 60_004,
+        },
+        definition,
+      ),
+    );
+    assert.isTrue(Exit.isFailure(revisionConflict));
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`CREATE TRIGGER fail_workflow_receipt BEFORE INSERT ON j5_workflow_receipts
+      WHEN NEW.command_id='receipt-failure'
+      BEGIN SELECT RAISE(ABORT, 'induced receipt failure'); END`;
+    const receiptFailure = yield* Effect.exit(
+      restarted.command(
+        {
+          commandId: "receipt-failure",
+          runId: run.id,
+          expectedRevision: finished.revision,
+          event: { type: "cancel" },
+          now: 60_005,
+        },
+        definition,
+      ),
+    );
+    assert.isTrue(Exit.isFailure(receiptFailure));
+    assert.deepStrictEqual(yield* restarted.get(run.id), finished);
+    yield* sql`DROP TRIGGER fail_workflow_receipt`;
     const detail = yield* restarted.detail(run.id);
     assert.notProperty(detail.actions[0]!, "input");
     assert.notProperty(detail.artifacts[0]!, "content");
     // A replay is the original response, including its then-pending action state.
     assert.deepStrictEqual(yield* restarted.command(start, definition), run);
-    const sql = yield* SqlClient.SqlClient;
     const values = yield* sql<{ count: number }>`SELECT count(*) AS count FROM j5_workflow_values`;
     const activeArtifacts = yield* sql<{
       count: number;
@@ -594,9 +625,14 @@ it.effect("migrates twice and recovers state, command receipts and fenced claims
     const legacyRuns = yield* sql<{
       count: number;
     }>`SELECT count(*) AS count FROM j5_workflow_runs_legacy_v1`;
+    const observations = yield* sql<{
+      count: number;
+    }>`SELECT count(*) AS count FROM j5_workflow_observations WHERE run_id=${run.id}`;
     assert.isAbove(values[0]!.count, 0);
     assert.equal(activeArtifacts[0]!.count, finished.artifacts.length);
     assert.equal(legacyRuns[0]!.count, 0);
+    // Replay, no-op, revision, stale-claim, command-id, and receipt failures add no evidence.
+    assert.equal(observations[0]!.count, 2);
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
 

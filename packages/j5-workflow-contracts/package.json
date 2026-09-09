@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./fh": "./src/fh.ts",
+    "./observability": "./src/observability.ts",
     "./sidebar": "./src/sidebar.ts"
   },
   "scripts": {
