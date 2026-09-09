@@ -17,35 +17,6 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
         label: "environment-data:orchestration-v2:dispatch-command",
         tag: ORCHESTRATION_V2_WS_METHODS.dispatchCommand,
       }),
-      importAgentPersonas: createEnvironmentRpcCommand(runtime, {
-        label: "environment-data:orchestration-v2:import-agent-personas",
-        tag: ORCHESTRATION_V2_WS_METHODS.importAgentPersonas,
-      }),
-      setImportedAgentPersonaEnabled: createEnvironmentRpcCommand(runtime, {
-        label: "environment-data:orchestration-v2:set-imported-agent-persona-enabled",
-        tag: ORCHESTRATION_V2_WS_METHODS.setImportedAgentPersonaEnabled,
-      }),
-      removeImportedAgentPersona: createEnvironmentRpcCommand(runtime, {
-        label: "environment-data:orchestration-v2:remove-imported-agent-persona",
-        tag: ORCHESTRATION_V2_WS_METHODS.removeImportedAgentPersona,
-      }),
-      removeSourceAgentPersona: createEnvironmentRpcCommand(runtime, {
-        label: "environment-data:orchestration-v2:remove-source-agent-persona",
-        tag: ORCHESTRATION_V2_WS_METHODS.removeSourceAgentPersona,
-      }),
-      removeAgentPersona: createEnvironmentRpcCommand(runtime, {
-        label: "environment-data:orchestration-v2:remove-agent-persona",
-        tag: ORCHESTRATION_V2_WS_METHODS.removeAgentPersona,
-      }),
-      editImportedAgentPersona: createEnvironmentRpcCommand(runtime, {
-        label: "environment-data:orchestration-v2:edit-imported-agent-persona",
-        tag: ORCHESTRATION_V2_WS_METHODS.editImportedAgentPersona,
-      }),
-      agentPersonaCatalog: createEnvironmentRpcQueryAtomFamily(runtime, {
-        label: "environment-data:orchestration-v2:agent-persona-catalog",
-        tag: ORCHESTRATION_V2_WS_METHODS.getAgentPersonaCatalog,
-        staleTimeMs: 0,
-      }),
       threadProjection: createEnvironmentRpcQueryAtomFamily(runtime, {
         label: "environment-data:orchestration-v2:thread-projection",
         tag: ORCHESTRATION_V2_WS_METHODS.getThreadProjection,
