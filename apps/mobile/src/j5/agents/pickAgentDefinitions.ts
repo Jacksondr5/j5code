@@ -1,5 +1,5 @@
 import { AGENT_PERSONA_IMPORT_MAX_FILES, isAgentPersonaDefinitionFile } from "@t3tools/contracts";
-import { prepareAgentPersonaImport } from "@t3tools/client-runtime/state/agent-personas";
+import { prepareAgentPersonaImport } from "@t3tools/client-runtime/j5/agent-personas";
 
 import { beginForegroundHandoff } from "../../lib/foreground-handoff";
 

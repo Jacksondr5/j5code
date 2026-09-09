@@ -7,12 +7,12 @@ import {
   prepareAgentPersonaImport,
   importAgentPersonasWithConfirmation,
   presentAgentPersonaCatalog,
-} from "@t3tools/client-runtime/state/agent-personas";
+} from "@t3tools/client-runtime/j5/agent-personas";
 import type { AgentPersonaEditInput, EnvironmentId } from "@t3tools/contracts";
 import { useMemo, useRef, useState } from "react";
 
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
-import { orchestrationEnvironment } from "../../state/orchestration";
+import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 import { useEnvironmentQuery } from "../../state/query";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -59,7 +59,7 @@ export function AgentLibrarySettings() {
   const catalog = useEnvironmentQuery(
     effectiveEnvironmentId === null
       ? null
-      : orchestrationEnvironment.v2.agentPersonaCatalog({
+      : agentPersonaEnvironment.catalog({
           environmentId: effectiveEnvironmentId,
           input: {},
         }),
@@ -71,10 +71,10 @@ export function AgentLibrarySettings() {
     environmentId: EnvironmentId;
     initial: AgentPersonaEditInput;
   } | null>(null);
-  const importAgents = useAtomCommand(orchestrationEnvironment.v2.importAgentPersonas, {
+  const importAgents = useAtomCommand(agentPersonaEnvironment.importAgentPersonas, {
     reportFailure: false,
   });
-  const removeAgent = useAtomCommand(orchestrationEnvironment.v2.removeAgentPersona, {
+  const removeAgent = useAtomCommand(agentPersonaEnvironment.removeAgentPersona, {
     reportFailure: false,
   });
   async function importSelection(files: File[]) {
@@ -137,10 +137,9 @@ export function AgentLibrarySettings() {
       setBusy(false);
     }
   }
-  const setAgentEnabled = useAtomCommand(
-    orchestrationEnvironment.v2.setImportedAgentPersonaEnabled,
-    { reportFailure: false },
-  );
+  const setAgentEnabled = useAtomCommand(agentPersonaEnvironment.setImportedAgentPersonaEnabled, {
+    reportFailure: false,
+  });
   async function toggleAgent(personaId: string, enabled: boolean) {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
