@@ -51,7 +51,7 @@ There are three kinds of message.
 
 **Between agents**, one Exchange is open per pair of participants at a time. If the same agent asks the same peer again while the first question is still open, the second ask joins the open Exchange as a follow-up rather than opening a second one, so a chatty pair does not manufacture a pile of separate obligations. One reply closes the Exchange and everything that joined it.
 
-**To a person**, an agent may hold several open asks at once, because distinct questions deserve distinct inbox items. A follow-up to a question the person has not yet answered is explicit: the agent names the Exchange it is following up on, and the follow-up joins that Exchange and is shown beneath the original ask, so the person always sees the whole question.
+**To a person**, an agent may hold several open asks at once, because distinct questions deserve distinct inbox items. A follow-up to a question the person has not yet answered is explicit: the agent references the open Exchange by its id — the id it received when it asked, and which every envelope on that Exchange carries — and the follow-up joins that Exchange and is shown beneath the original ask, so the person always sees the whole question.
 
 **Closing** is mechanical. An Exchange closes when the reply arrives, when the sender withdraws its own ask, or when the receiver is retired. Whether the reply was _complete_ is not the platform's judgment: a sender who is not satisfied opens a new Exchange about the earlier one, and the platform never decides that on its behalf.
 
@@ -77,7 +77,7 @@ A person takes part in the same protocol as an agent, with two differences that 
 
 Delivery is the **inbox**, not a conversation. An ask to a person lands in their inbox, gathered across every Squadron on the server. The person's answer, exactly as written, is the reply that closes the Exchange and reaches the asker — no relay, no summary. A person receives only asks and replies; a plain message to a person is refused, because a plain message carries nothing the sender's own thread does not already show, and if the person must see something then seeing it _is_ the obligation.
 
-Silence is **never measured about a person**. A person has no turn that ends. How long their open asks have waited is a fact the inbox and the Fleet page show; nothing nags. When a person sends a message through the graph rather than the chat, its envelope says plainly that the person is not watching the agent's conversation and will see only what comes back on the Exchange.
+Silence is **never measured about a person**. A person has no turn that ends. How long their open asks have waited is a fact the inbox and the Fleet page show; nothing nags.
 
 ## Silence
 
@@ -107,7 +107,7 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 5. An ask opens an Exchange between its sender and receiver, carries a one-line intent, and carries an urgency when the receiver is a person.
 6. While an Exchange is open between two agents, a further ask from the same sender to the same receiver joins it as a follow-up rather than opening a second Exchange.
 7. An agent may hold several open Exchanges with the same person at once, each shown as its own inbox item.
-8. A follow-up to an open ask to a person names the Exchange it follows up on, joins it, and is shown beneath the original ask in the inbox.
+8. A follow-up to an open ask to a person references that Exchange by its id, joins it, and is shown beneath the original ask in the inbox.
 9. One reply naming the Exchange closes it, together with every follow-up that joined it; the sender may withdraw its own ask; the receiver's retirement closes it with a notice to the sender; nothing else closes it.
 10. A message from an agent to itself is refused with an error naming the caller's own id.
 11. No Squadron, placement, or Role restricts which participants may message each other.
@@ -121,7 +121,7 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 
 ### The person
 
-16. An agent-to-person send that is neither an ask nor a reply is refused with an error naming the two legal moves.
+16. An agent-to-person send that is not an ask is refused with an error naming the legal move; a person cannot open an ask through the platform.
 17. An ask to a person appears in that person's inbox regardless of which Squadron it came from.
 18. A person's answer to an ask is delivered to the asker exactly as written, as the reply that closes the Exchange.
 19. No silence notice is ever written about a person.

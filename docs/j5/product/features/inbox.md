@@ -1,95 +1,72 @@
 ---
-title: "Inbox — the human obligation queue, designed"
-kind: spec
+title: "Inbox"
+kind: definition
 ---
 
 # Inbox
 
-Feature definition of record for the inbox's human surface, settled
-2026-08-29 with Jackson
-([session rulings IB1–IB7](../../worklog/inbox-session-2026-08-29.md)).
-It realizes the surface R5/R26 defined: the pure obligation queue —
-letters agents deliberately sent to the human, every item blocking a
-sender — and the dogfood definition's heart: asks land here, and the
-verbatim answer closes the exchange. Approved mockup in the design
-workspace (`product/inbox/mockups/`); decision aid, not pixel spec.
-Backend contract: A4's inbox projection + idempotent `answer` API.
+## Problem
 
-## Only asks reach a person (ruled 2026-09-02)
+When many agents are working, what is needed from the user gets lost. An agent sits idle waiting on a decision the user does not know is needed; a question bubbles up through other agents like a game of telephone and arrives garbled or not at all; a person coming back to the fleet has no way to see what is waiting on them ([problems](../problems.md): human attention is scarce and gets lost).
 
-The inbox's purity has a sender-side mirror: **an agent cannot send a
-person a plain message at all** — every agent-to-human send is an ask
-(intent + urgency, closed by the person's reply) or a reply to the
-person's own ask. A plain send to a human is refused by the tool,
-fail-closed, and the address book reports the human row as
-`can_receive_message: false, can_open_exchange: true`. Why: a plain message
-to a person carries nothing the sender's own thread does not already show,
-and chatty agents would otherwise flood the person with traffic that owes
-nothing. If nobody needs to act, the agent says so in its own thread or
-tells whoever holds the work context (spawner or Captain — the thread the
-human is already reading; not routing, R22 stands). If the person must see
-it, seeing it is the obligation: it is an ask. Corollary: **one open ask per
-agent→person pair** — a second ask while one is open is refused (a coalesced
-follow-up to a person would be an invisible plain delivery, #45's finding);
-the agent waits for the reply or clears its ask and re-asks with the combined
-content, so the item you see is always the whole ask. Permanent law, not a v0
-override; contract of record in [`../a2a/agent-tools.md`](../a2a/agent-tools.md).
+The inbox is the one place a person looks to find everything that is waiting on them, and the one place where answering actually closes the loop — the person's words reach the agent that asked, unchanged.
 
-## Where it lives
+## Definition
 
-A **bell icon with a numbered open-count badge in the rail header's trailing 32px
-control-grid slot, DOM-ordered after the rail logo and aligned with the search/create
-controls**, opening a **main-view Inbox page** (IB2; amended 2026-08-31 per Jackson's
-PR #23 review). The page starts full-width;
-iterate smaller as the product matures. The inbox is **person-scoped**
-(R9/R29 — never assume one human) and **not Squadron-scoped**: obligations
-are global to the person; each item wears its Squadron; the rail's scope
-dropdown governs the thread list only (IB7).
+The **inbox** is a person's queue of open asks addressed to them. It is **person-scoped, not Squadron-scoped**: a person has one inbox for the whole server, every item wears the Squadron it came from, and no Squadron selection elsewhere in the app hides an item.
 
-## The item
+The inbox is **pure**. It holds only asks that agents deliberately sent to the person — nothing inferred, no automatically promoted stalls, no plain messages, no platform alerts. Every item blocks a sender, so the count on the bell means exactly "things waiting on me." The purity has a sender-side mirror: an agent can send a person only an ask; a plain message to a person is refused, because if the person must see something then seeing it is the obligation. The person, in turn, never opens an ask through the platform — their channel to any agent is that agent's thread — and their only act on the ledger is the answer that closes an Exchange.
 
-Sender, Squadron, **intent as the subject line**, message body, urgency,
-and time-since-opened as a measured R25 fact ("open 4h"). **Urgency is
-the loudest element** — blocking / soon / fyi. The list orders by urgency,
-then age (IB3–IB4). Collapsed items show header + intent; expanding
-reveals the body and reply box.
+An agent may have several asks open with the same person at once, each its own item. A follow-up to a question the person has not yet answered — sent by the agent with the open Exchange's id — joins that item and is shown beneath the original ask, so the person always reads the whole question.
 
-## Answering — two first-class flows (IB1)
+An item shows who is asking and from which Squadron, the ask's **intent** as its subject line, the body, its **urgency** — the loudest element — and how long it has been open. The list orders by urgency, then age.
 
-1. **Quick reply in place.** The user answers from the item; the platform
-   clears the ask and the reply-delivery envelope tells the agent the
-   platform did so (the reply closed the exchange entirely — R3).
-2. **Go to the agent.** Asks are often compressed; "Open thread →" jumps
-   to the asker's thread, where the user reads context and replies as
-   normal chat. Closure then comes from the sender's side: **the agent
-   clears its own ask via tool** once the conversation resolved it —
-   sender-judges-completeness applied to withdrawal.
+A person answers in one of two ways. **Reply in place**: the answer, exactly as written, is the reply that closes the Exchange and reaches the agent, with an envelope that tells the agent the platform closed it. **Go to the agent**: the person opens the asker's thread, reads the context, and replies in ordinary chat; the agent then withdraws its own ask once the conversation resolved it, and the item leaves the inbox honestly.
 
-> **Platform dependency:** flow 2's clear-own-ask tool (+ ledger event)
-> has no build ticket yet; until it ships, in-thread-resolved asks linger
-> open. Tracked with the Director.
+A replied item recedes to a collapsed **Replied** shelf. An ask whose sender is archived leaves the inbox immediately — the archive dialog was the loud moment, and a confirmed archive means the person wants it gone.
 
-## Lifecycle
+The inbox is reached from a bell in the rail that carries the count of open items and opens a full page.
 
-Answered items recede into a collapsed **Answered shelf** (IB5). Dropped
-asks — the sender was archived — **leave the inbox immediately** (IB6):
-the archive-time warning (R1/J1–J3) is the loud moment, and a confirmed
-archive means the user wants it gone. No terminal rows.
+The inbox is **not** a backlog (a non-blocking note an agent wants to keep is a Memo), **not** an alerts feed (an agent that fell over is a measured fact for the Fleet page, not an obligation), and **not** Squadron-scoped.
 
-## What the inbox is not
+## Acceptance criteria
 
-Not a backlog (non-blocking items are Memos — R26), not an alerts feed in
-v0 (the platform-alerts lane — errored agents, delivery alarms — is
-post-v0 per SB7; the Fleet page carries fallen-over agents meanwhile),
-not Squadron-scoped, and never a place for inferred mail or auto-promoted
-stalls (R5).
+### Contents
 
-## Deferred (with reasons)
+1. The inbox lists every open ask addressed to the person from every Squadron on the server, and nothing else: no plain messages, no inferred items, no promoted stalls, no platform alerts.
+2. A plain message from an agent to a person is refused at the tool; the person's row in the address book says it cannot receive one.
+3. Several open asks from the same agent to the same person appear as separate items; a follow-up that references an open ask by its Exchange id appears beneath that ask's original text in the same item.
+4. The bell's count equals the number of open items.
 
-- **Platform-alerts lane** (SB7's second lane) — post-v0; separate data
-  model, possibly shared surface.
-- **Asker's-current-state on items** — marginal for v0 and the silence
-  detector records first-match facts only until A10; revisit if
-  dogfooding wants it.
-- **Smaller/embedded inbox forms** (popover, split pane) — after the
-  full page proves the flows.
+### The item
+
+5. Each item shows the sender, the sender's Squadron, the intent as its subject line, the body, the urgency, and the time since it was opened; urgency is the most prominent element.
+6. Items are ordered by urgency first, then by age, oldest first within an urgency.
+7. A collapsed item shows the sender line and the intent; expanding it shows the body and the reply box.
+
+### Answering
+
+8. Replying in place delivers the person's text to the asker exactly as written, closes the Exchange, and tells the agent the platform closed it.
+9. "Open thread" navigates to the asker's thread; an ask resolved there stays open until the agent withdraws it, and then leaves the inbox.
+10. A replied item moves to the collapsed Replied shelf and is no longer counted.
+11. An ask whose sender is archived leaves the inbox immediately, with no terminal row.
+
+### Placement
+
+12. The inbox is not filtered by the sidebar's Squadron scope; each item names its Squadron.
+13. The bell with its count is present in the rail on every page and opens the inbox page.
+
+## Scenarios
+
+- **Two questions, one agent.** An agent in Billing Migration asks the user "merge now or after the audit?" (urgency _soon_) and, separately, "may I delete the old branch?" Two items appear, the _soon_ one first. The agent later follows up on the first by name; the follow-up text appears beneath it. The user answers each in place; each agent-side Exchange closes with the exact text; both items move to the Replied shelf. (AC3, AC5, AC6, AC8, AC10)
+- **Answering in the thread.** The user opens an asker's thread from its item, discusses the question there, and the agent, satisfied, withdraws its ask; the item leaves the inbox. (AC9)
+- **Across Squadrons.** With the sidebar scoped to Website Redesign, an ask from an agent in Support Rotation still appears, wearing "Support Rotation". (AC1, AC12)
+- **An archived asker.** An agent with an open ask to the user is archived after the dialog's warning; its item is gone from the inbox the moment the archive completes. (AC11)
+
+## History
+
+- 2026-08-29 — designed; former IB1–IB7 ([record](../../worklog/inbox-session-2026-08-29.md)).
+- 2026-08-31 — the bell moves to the rail header (Jackson's review of the inbox build).
+- 2026-09-02 — a person receives only asks and replies ([record](../../worklog/human-addressed-sends-ruling-2026-09-02.md)).
+- 2026-09-05 — several open asks per agent and person, with follow-ups shown beneath the original (issue #111); the shelf is named "Replied", the one word for a closed Exchange on every surface (glossary).
+- 2026-09-08 — rewritten into the definition shape. Former identifiers: IB1 → Answering, AC8–AC9; IB2 → AC13; IB3–IB4 → AC5–AC6; IB5 → AC10; IB6 → AC11; IB7 → AC12. The "clear-own-ask has no build ticket" note is gone: the verb shipped. The deferred items that lived here (a platform-alerts lane, the asker's current state on items, smaller inbox forms) are backlog candidates, not part of this definition.

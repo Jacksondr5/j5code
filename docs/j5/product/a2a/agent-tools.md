@@ -21,11 +21,11 @@ An agent learns what it can do from its tools, and it reads a tool's description
 
 ### `send_message`
 
-**Description:** "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask or a reply: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. You may have several asks open with the same person; to follow up on one that is still open, name it in regarding and your message joins it. Set urgency only when asking the human. Use this tool only for participants already returned by list_participants; when creating a Peer Agent, put any reply expectation in spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. Reuse client_request_id to retry the same send safely."
+**Description:** "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. You may have several asks open with the same person; to follow up on one that is still open, name it in regarding and your message joins it. Set urgency only when asking the human. Use this tool only for participants already returned by list_participants; when creating a Peer Agent, put any reply expectation in spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. Reuse client_request_id to retry the same send safely."
 
 | Input               | Type              | Required                             | Meaning                                                                         |
 | ------------------- | ----------------- | ------------------------------------ | ------------------------------------------------------------------------------- |
-| `to`                | ParticipantId     | yes                                  | A recipient listed by `list_participants`; a person requires an ask or a reply  |
+| `to`                | ParticipantId     | yes                                  | A recipient listed by `list_participants`; a person accepts only an ask         |
 | `message`           | string, non-empty | yes                                  | The body; the envelope adds sender identity and Squadron                        |
 | `expect_reply`      | boolean           | no                                   | Opens an Exchange (or, between agents, joins the open one); requires `intent`   |
 | `intent`            | string            | with `expect_reply`                  | One-line summary shown wherever the Exchange is listed                          |
@@ -36,9 +36,9 @@ An agent learns what it can do from its tools, and it reads a tool's description
 
 **Result:** the message id and the Exchange's state.
 
-**Rules.** A message to the caller itself is refused. A plain send to a person is refused. Between agents, a further ask to a peer that already holds an open Exchange from the caller joins it as a follow-up. To a person, a further ask opens a new Exchange and a new inbox item unless it names an open one in `regarding`, in which case it joins that Exchange and is shown beneath the original ask. An ask to a person without an urgency is refused.
+**Rules.** A message to the caller itself is refused. A send to a person that is not an ask is refused; a person never opens an Exchange, so there is nothing for an agent to reply to. Between agents, a further ask to a peer that already holds an open Exchange from the caller joins it as a follow-up. To a person, a further ask opens a new Exchange and a new inbox item unless it names an open one in `regarding`, in which case it joins that Exchange and is shown beneath the original ask. An ask to a person without an urgency is refused.
 
-**Errors**, each naming the actual state and the next command: the caller has no Squadron home; the recipient is not addressable (pointing at `list_participants`); the recipient is the caller (naming the caller's own id, and `schedule_task` for a future trigger to oneself); an ask without an intent; a plain send to a person (naming the two legal moves and the own-thread alternative); an ask to a person without urgency; an `exchange_id` or `regarding` that is unknown, already closed, or not the caller's (naming the Exchange's actual state).
+**Errors**, each naming the actual state and the next command: the caller has no Squadron home; the recipient is not addressable (pointing at `list_participants`); the recipient is the caller (naming the caller's own id, and `schedule_task` for a future trigger to oneself); an ask without an intent; a send to a person that is not an ask (naming the legal move and the own-thread alternative); an ask to a person without urgency; an `exchange_id` or `regarding` that is unknown, already closed, or not the caller's (naming the Exchange's actual state).
 
 **Events:** message and Exchange events in the ledger; delivery receipts follow asynchronously.
 
@@ -128,7 +128,7 @@ No inputs. Read-only; no events.
 ## Acceptance criteria
 
 1. Every J5 verb's shipped description string is byte-identical to the description in this definition.
-2. A plain `send_message` to a person is refused with an error naming the two legal moves; an ask to a person without urgency is refused.
+2. A `send_message` to a person that is not an ask is refused with an error naming the legal move; an ask to a person without urgency is refused.
 3. A further ask to a person opens a new Exchange and inbox item; an ask that names an open Exchange in `regarding` joins it and is shown beneath the original ask.
 4. Between agents, a further ask to a peer holding an open Exchange from the caller joins it as a follow-up.
 5. A `send_message` to the caller itself is refused with an error naming the caller's own id.
@@ -146,6 +146,7 @@ No inputs. Read-only; no events.
 - 2026-08-30 — the spawn brief carries the task and the reply expectation; one sentence of brief steering in `spawn_agent` ([record](../../worklog/spawning-guide-session-2026-08-30.md)).
 - 2026-08-31 — self-send refused; the `self` row; identity facts in the spawn's first turn; `display_name` on every row; `create_threads` and `t3_thread_start` omitted ([record](../../worklog/picker-and-self-messaging-rulings-2026-08-31.md)).
 - 2026-09-02 — a person receives only asks and replies ([record](../../worklog/human-addressed-sends-ruling-2026-09-02.md)).
+- 2026-09-08 — a person receives asks only; the reply form toward a person is retired with the person-originated ask.
 - 2026-09-05 — several open asks per person, with explicit follow-ups through `regarding`, replacing the one-ask-per-person refusal of 2026-09-02 (issue #111).
 - 2026-09-05 — a committed stop wins over restart continuation (upstream integration, PR #112).
 - 2026-09-07 — rewritten from a stack of dated contract revisions into current-state contracts; every verb's build state true as of this date (all six verbs shipped; `regarding` and the person follow-up rule are issue #111).
