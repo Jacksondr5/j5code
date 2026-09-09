@@ -1,4 +1,3 @@
-import { AgentPersonaCatalogError, AgentPersonaImportConflictError } from "./j5/agentPersona.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -90,6 +89,7 @@ import {
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
 } from "./provider.ts";
+import { J5AgentPersonaRpcGroup } from "./j5/agentPersona.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   PullRequestActionInput,
@@ -1103,71 +1103,6 @@ export const WsOrchestrationV2DispatchCommandRpc = Rpc.make(
   },
 );
 
-export const WsOrchestrationV2GetAgentPersonaCatalogRpc = Rpc.make(
-  ORCHESTRATION_V2_WS_METHODS.getAgentPersonaCatalog,
-  {
-    payload: OrchestrationV2RpcSchemas.getAgentPersonaCatalog.input,
-    success: OrchestrationV2RpcSchemas.getAgentPersonaCatalog.output,
-    error: Schema.Union([EnvironmentAuthorizationError, AgentPersonaCatalogError]),
-  },
-);
-
-export const WsOrchestrationV2ImportAgentPersonasRpc = Rpc.make(
-  ORCHESTRATION_V2_WS_METHODS.importAgentPersonas,
-  {
-    payload: OrchestrationV2RpcSchemas.importAgentPersonas.input,
-    success: OrchestrationV2RpcSchemas.importAgentPersonas.output,
-    error: Schema.Union([
-      EnvironmentAuthorizationError,
-      AgentPersonaCatalogError,
-      AgentPersonaImportConflictError,
-    ]),
-  },
-);
-export const WsOrchestrationV2SetImportedAgentPersonaEnabledRpc = Rpc.make(
-  ORCHESTRATION_V2_WS_METHODS.setImportedAgentPersonaEnabled,
-  {
-    payload: OrchestrationV2RpcSchemas.setImportedAgentPersonaEnabled.input,
-    success: OrchestrationV2RpcSchemas.setImportedAgentPersonaEnabled.output,
-    error: Schema.Union([EnvironmentAuthorizationError, AgentPersonaCatalogError]),
-  },
-);
-export const WsOrchestrationV2RemoveImportedAgentPersonaRpc = Rpc.make(
-  ORCHESTRATION_V2_WS_METHODS.removeImportedAgentPersona,
-  {
-    payload: OrchestrationV2RpcSchemas.removeImportedAgentPersona.input,
-    success: OrchestrationV2RpcSchemas.removeImportedAgentPersona.output,
-    error: Schema.Union([EnvironmentAuthorizationError, AgentPersonaCatalogError]),
-  },
-);
-
-export const WsOrchestrationV2RemoveSourceAgentPersonaRpc = Rpc.make(
-  ORCHESTRATION_V2_WS_METHODS.removeSourceAgentPersona,
-  {
-    payload: OrchestrationV2RpcSchemas.removeSourceAgentPersona.input,
-    success: OrchestrationV2RpcSchemas.removeSourceAgentPersona.output,
-    error: Schema.Union([EnvironmentAuthorizationError, AgentPersonaCatalogError]),
-  },
-);
-
-export const WsOrchestrationV2RemoveAgentPersonaRpc = Rpc.make(
-  ORCHESTRATION_V2_WS_METHODS.removeAgentPersona,
-  {
-    payload: OrchestrationV2RpcSchemas.removeAgentPersona.input,
-    success: OrchestrationV2RpcSchemas.removeAgentPersona.output,
-    error: Schema.Union([EnvironmentAuthorizationError, AgentPersonaCatalogError]),
-  },
-);
-
-export const WsOrchestrationV2EditImportedAgentPersonaRpc = Rpc.make(
-  ORCHESTRATION_V2_WS_METHODS.editImportedAgentPersona,
-  {
-    payload: OrchestrationV2RpcSchemas.editImportedAgentPersona.input,
-    success: OrchestrationV2RpcSchemas.editImportedAgentPersona.output,
-    error: Schema.Union([EnvironmentAuthorizationError, AgentPersonaCatalogError]),
-  },
-);
-
 export const WsOrchestrationV2GetTurnDiffRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.getTurnDiff, {
   payload: OrchestrationV2RpcSchemas.getTurnDiff.input,
   success: OrchestrationV2RpcSchemas.getTurnDiff.output,
@@ -1473,13 +1408,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeBackgroundPolicyRpc,
   WsSubscribeResourceTelemetryRpc,
   WsOrchestrationV2DispatchCommandRpc,
-  WsOrchestrationV2GetAgentPersonaCatalogRpc,
-  WsOrchestrationV2ImportAgentPersonasRpc,
-  WsOrchestrationV2RemoveImportedAgentPersonaRpc,
-  WsOrchestrationV2RemoveSourceAgentPersonaRpc,
-  WsOrchestrationV2RemoveAgentPersonaRpc,
-  WsOrchestrationV2EditImportedAgentPersonaRpc,
-  WsOrchestrationV2SetImportedAgentPersonaEnabledRpc,
   WsOrchestrationV2GetWorkflowScriptRpc,
   WsOrchestrationV2GetTurnDiffRpc,
   WsOrchestrationV2GetFullThreadDiffRpc,
@@ -1490,4 +1418,4 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeArchivedShellRpc,
   WsOrchestrationV2SubscribeShellRpc,
   WsOrchestrationV2SubscribeThreadRpc,
-);
+).merge(J5AgentPersonaRpcGroup);
