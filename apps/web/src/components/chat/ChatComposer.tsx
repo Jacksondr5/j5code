@@ -23,7 +23,6 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
-import { presentAgentPersonaAssignment } from "@t3tools/client-runtime/state/agent-personas";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import {
@@ -778,6 +777,7 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { AgentPersonaAssignmentControl } from "../../j5/agents/AgentPersonaAssignmentControl";
 import { toastManager } from "../ui/toast";
 import {
   BotIcon,
@@ -859,49 +859,6 @@ const runtimeModeConfig: Record<
 };
 
 const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[];
-function AgentPersonaAssignmentControl(props: {
-  readonly assignment: OrchestrationV2AgentPersonaAssignment;
-}) {
-  const presentation = presentAgentPersonaAssignment(props.assignment);
-
-  return (
-    <>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <ComposerControl
-              type="button"
-              disabled
-              aria-label={`Agent persona: ${presentation.personaLabel}`}
-            />
-          }
-        >
-          <ComposerControlIcon icon={BotIcon} opticalSize="large" />
-          {presentation.personaLabel}
-        </TooltipTrigger>
-        <TooltipPopup side="top">
-          Assigned by an agent orchestrator when this task started.
-        </TooltipPopup>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <ComposerControl
-              type="button"
-              disabled
-              aria-label={`Assigned model: ${presentation.routeLabel}`}
-              className="max-w-64 overflow-hidden text-ellipsis whitespace-nowrap"
-            />
-          }
-        >
-          {presentation.routeLabel}
-        </TooltipTrigger>
-        <TooltipPopup side="top">This persona's model route is fixed for this task.</TooltipPopup>
-      </Tooltip>
-    </>
-  );
-}
-
 const extendReplacementRangeForTrailingSpace = (
   text: string,
   rangeEnd: number,

@@ -6,7 +6,7 @@ import { SymbolView } from "../../components/AppSymbol";
 import {
   presentAgentPersonaCatalog,
   importAgentPersonasWithConfirmation,
-} from "@t3tools/client-runtime/state/agent-personas";
+} from "@t3tools/client-runtime/j5/agent-personas";
 import type {
   AgentPersonaEditInput,
   AgentPersonaImportConflict,
@@ -25,7 +25,7 @@ import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { AppText as Text } from "../../components/AppText";
 import { cn } from "../../lib/cn";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
-import { orchestrationEnvironment } from "../../state/orchestration";
+import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 import { useEnvironmentQuery } from "../../state/query";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
 import { SettingsSection } from "../../features/settings/components/SettingsSection";
@@ -43,7 +43,7 @@ export function AgentLibrarySettingsScreen() {
   const catalog = useEnvironmentQuery(
     effectiveEnvironmentId === null
       ? null
-      : orchestrationEnvironment.v2.agentPersonaCatalog({
+      : agentPersonaEnvironment.catalog({
           environmentId: effectiveEnvironmentId,
           input: {},
         }),
@@ -60,10 +60,10 @@ export function AgentLibrarySettingsScreen() {
   } | null>(null);
   const [notification, setNotification] = useState<AgentLibraryNotification | null>(null);
   const dismissNotification = useCallback(() => setNotification(null), []);
-  const importAgents = useAtomCommand(orchestrationEnvironment.v2.importAgentPersonas, {
+  const importAgents = useAtomCommand(agentPersonaEnvironment.importAgentPersonas, {
     reportFailure: false,
   });
-  const removeAgent = useAtomCommand(orchestrationEnvironment.v2.removeAgentPersona, {
+  const removeAgent = useAtomCommand(agentPersonaEnvironment.removeAgentPersona, {
     reportFailure: false,
   });
   async function importSelection(kind: "folder" | "agent") {
@@ -101,10 +101,9 @@ export function AgentLibrarySettingsScreen() {
       setBusy(false);
     }
   }
-  const setAgentEnabled = useAtomCommand(
-    orchestrationEnvironment.v2.setImportedAgentPersonaEnabled,
-    { reportFailure: false },
-  );
+  const setAgentEnabled = useAtomCommand(agentPersonaEnvironment.setImportedAgentPersonaEnabled, {
+    reportFailure: false,
+  });
   async function toggleAgent(personaId: string, enabled: boolean) {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
@@ -213,56 +212,55 @@ export function AgentLibrarySettingsScreen() {
           </SettingsSection>
         ) : null}
 
-        <SettingsSection
-          title="Scoped agents"
-          headerAction={
-            Platform.OS === "web" ? (
-              <Text className="text-sm text-foreground-muted">
-                Use Settings → Agents in the web app to import files.
-              </Text>
-            ) : (
-              <View
-                className="self-start"
-                pointerEvents={busy || effectiveEnvironmentId === null ? "none" : "auto"}
+        <View className="flex-row flex-wrap items-center justify-between gap-3 px-2">
+          <Text className="text-sm font-t3-medium text-foreground-muted">Scoped agents</Text>
+          {Platform.OS === "web" ? (
+            <Text className="text-sm text-foreground-muted">
+              Use Settings → Agents in the web app to import files.
+            </Text>
+          ) : (
+            <View
+              className="self-start"
+              pointerEvents={busy || effectiveEnvironmentId === null ? "none" : "auto"}
+            >
+              <ControlPillMenu
+                actions={[
+                  {
+                    id: "agent",
+                    title: "Agent file",
+                    attributes: { disabled: busy || effectiveEnvironmentId === null },
+                  },
+                  {
+                    id: "folder",
+                    title: "Folder",
+                    attributes: { disabled: busy || effectiveEnvironmentId === null },
+                  },
+                ]}
+                onPressAction={({ nativeEvent }) => {
+                  if (nativeEvent.event === "agent" || nativeEvent.event === "folder")
+                    void importSelection(nativeEvent.event);
+                }}
               >
-                <ControlPillMenu
-                  actions={[
-                    {
-                      id: "agent",
-                      title: "Agent file",
-                      attributes: { disabled: busy || effectiveEnvironmentId === null },
-                    },
-                    {
-                      id: "folder",
-                      title: "Folder",
-                      attributes: { disabled: busy || effectiveEnvironmentId === null },
-                    },
-                  ]}
-                  onPressAction={({ nativeEvent }) => {
-                    if (nativeEvent.event === "agent" || nativeEvent.event === "folder")
-                      void importSelection(nativeEvent.event);
-                  }}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Import agents"
+                  accessibilityState={{ disabled: busy || effectiveEnvironmentId === null }}
+                  disabled={busy || effectiveEnvironmentId === null}
+                  className="flex-row items-center gap-2 rounded-lg border border-border px-4 py-3 disabled:opacity-40"
                 >
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Import agents"
-                    accessibilityState={{ disabled: busy || effectiveEnvironmentId === null }}
-                    disabled={busy || effectiveEnvironmentId === null}
-                    className="flex-row items-center gap-2 rounded-lg border border-border px-4 py-3 disabled:opacity-40"
-                  >
-                    <Text className="text-sm text-foreground">Import</Text>
-                    <SymbolView
-                      name="chevron.down"
-                      size={14}
-                      tintColorClassName="accent-icon"
-                      type="monochrome"
-                    />
-                  </Pressable>
-                </ControlPillMenu>
-              </View>
-            )
-          }
-        >
+                  <Text className="text-sm text-foreground">Import</Text>
+                  <SymbolView
+                    name="chevron.down"
+                    size={14}
+                    tintColorClassName="accent-icon"
+                    type="monochrome"
+                  />
+                </Pressable>
+              </ControlPillMenu>
+            </View>
+          )}
+        </View>
+        <SettingsSection>
           <View className="gap-2">
             {effectiveEnvironmentId === null ? (
               <AgentMessage title="No connected environments" />

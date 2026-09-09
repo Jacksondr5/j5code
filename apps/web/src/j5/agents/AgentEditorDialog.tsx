@@ -4,7 +4,7 @@ import {
   AGENT_PERSONA_HARNESSES,
   agentPersonaModelChoices,
   agentPersonaModelChoiceId,
-} from "@t3tools/client-runtime/state/agent-personas";
+} from "@t3tools/client-runtime/j5/agent-personas";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { AgentPersonaEditInput, EnvironmentId } from "@t3tools/contracts";
 import { useState } from "react";
@@ -40,7 +40,7 @@ import {
   MenuRadioGroup,
   MenuRadioItem,
 } from "../../components/ui/menu";
-import { orchestrationEnvironment } from "../../state/orchestration";
+import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 
@@ -64,7 +64,7 @@ export function AgentEditorDialog(props: {
       ({ target, available }) => available && target.driver === harness.driver,
     ),
   })).filter(({ models }) => models.length > 0);
-  const save = useAtomCommand(orchestrationEnvironment.v2.editImportedAgentPersona, {
+  const save = useAtomCommand(agentPersonaEnvironment.editImportedAgentPersona, {
     reportFailure: false,
   });
   async function submit() {

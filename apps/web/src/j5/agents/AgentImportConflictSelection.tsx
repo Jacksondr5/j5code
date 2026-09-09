@@ -1,4 +1,4 @@
-import { AGENT_PERSONA_IMPORT_CONFIRMATION_MESSAGE } from "@t3tools/client-runtime/state/agent-personas";
+import { AGENT_PERSONA_IMPORT_CONFIRMATION_MESSAGE } from "@t3tools/client-runtime/j5/agent-personas";
 import type {
   AgentPersonaImportConflict,
   AgentPersonaImportConflictError,
