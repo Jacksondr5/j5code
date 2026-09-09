@@ -1,4 +1,3 @@
-import { AgentPersonaCatalogError, AgentPersonaImportConflictError } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Encoding from "effect/Encoding";
@@ -134,8 +133,7 @@ import {
   observeRpcStreamEffect as instrumentRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
-import { definitionDigest, makeAgentPersonaLibrary } from "./j5/agents/agentPersonaLibrary.ts";
-import { buildAgentPersonaCatalog } from "./j5/agents/agentPersonaRouting.ts";
+import { makeAgentPersonaRpcHandlers } from "./j5/agents/agentPersonaRpc.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
@@ -201,8 +199,6 @@ const resolveDiscoveryForConfig = <A, E, R>(
     Effect.timeoutOption(CONFIG_DISCOVERY_TIMEOUT),
     Effect.map(Option.getOrElse(onTimeout)),
   );
-
-const isAgentPersonaImportConflict = Schema.is(AgentPersonaImportConflictError);
 
 export const resolveAvailableEditorsForConfig = <A, E, R>(
   discovery: Effect.Effect<ReadonlyArray<A>, E, R>,
@@ -631,7 +627,6 @@ const makeWsRpcLayer = (
       const providerInstallation = yield* makeProviderInstallation();
       const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
-      const personaLibrary = yield* makeAgentPersonaLibrary;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
@@ -1318,6 +1313,10 @@ const makeWsRpcLayer = (
         }
       });
 
+      const agentPersonaRpcHandlers = yield* makeAgentPersonaRpcHandlers({
+        providers: providerRegistry.getProviders,
+        observe: observeRpcEffect,
+      });
       const handlers = ServerWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
@@ -1387,123 +1386,7 @@ const makeWsRpcLayer = (
                 : {}),
             },
           ),
-        [ORCHESTRATION_V2_WS_METHODS.getAgentPersonaCatalog]: (_input) =>
-          observeRpcEffect(
-            ORCHESTRATION_V2_WS_METHODS.getAgentPersonaCatalog,
-            Effect.gen(function* () {
-              const library = yield* personaLibrary
-                .catalog()
-                .pipe(
-                  Effect.mapError(
-                    (cause) => new AgentPersonaCatalogError({ message: String(cause) }),
-                  ),
-                );
-              const catalog = buildAgentPersonaCatalog(
-                yield* providerRegistry.getProviders,
-                library.definitions,
-              );
-              const importedIds = new Set(library.importedIds);
-              const editable = new Map(
-                library.definitions
-                  .filter(({ id }) => importedIds.has(id))
-                  .map((definition) => [
-                    definition.id,
-                    {
-                      definitionDigest: definitionDigest(definition),
-                      modelRoute: definition.modelRoute,
-                    },
-                  ]),
-              );
-              const disabledIds = new Set(library.disabledIds);
-              return {
-                personas: catalog.personas.map((persona) => ({
-                  ...persona,
-                  imported: importedIds.has(persona.personaId),
-                  ...(editable.has(persona.personaId)
-                    ? { editable: editable.get(persona.personaId)! }
-                    : {}),
-                  availability: disabledIds.has(persona.personaId)
-                    ? { status: "unavailable" as const, reason: "disabled" as const }
-                    : persona.availability,
-                })),
-              };
-            }),
-            { "rpc.aggregate": "orchestrationV2" },
-          ),
-        [ORCHESTRATION_V2_WS_METHODS.importAgentPersonas]: (input) =>
-          observeRpcEffect(
-            ORCHESTRATION_V2_WS_METHODS.importAgentPersonas,
-            personaLibrary
-              .importFiles(input)
-              .pipe(
-                Effect.mapError((cause) =>
-                  isAgentPersonaImportConflict(cause)
-                    ? cause
-                    : new AgentPersonaCatalogError({ message: String(cause) }),
-                ),
-              ),
-            { "rpc.aggregate": "orchestrationV2" },
-          ),
-        [ORCHESTRATION_V2_WS_METHODS.setImportedAgentPersonaEnabled]: (input) =>
-          observeRpcEffect(
-            ORCHESTRATION_V2_WS_METHODS.setImportedAgentPersonaEnabled,
-            personaLibrary
-              .setImportedEnabled(input.personaId, input.enabled)
-              .pipe(
-                Effect.mapError(
-                  (cause) => new AgentPersonaCatalogError({ message: String(cause) }),
-                ),
-              ),
-            { "rpc.aggregate": "orchestrationV2" },
-          ),
-        [ORCHESTRATION_V2_WS_METHODS.removeImportedAgentPersona]: (input) =>
-          observeRpcEffect(
-            ORCHESTRATION_V2_WS_METHODS.removeImportedAgentPersona,
-            personaLibrary
-              .removeImported(input.personaId)
-              .pipe(
-                Effect.mapError(
-                  (cause) => new AgentPersonaCatalogError({ message: String(cause) }),
-                ),
-              ),
-            { "rpc.aggregate": "orchestrationV2" },
-          ),
-        [ORCHESTRATION_V2_WS_METHODS.removeSourceAgentPersona]: (input) =>
-          observeRpcEffect(
-            ORCHESTRATION_V2_WS_METHODS.removeSourceAgentPersona,
-            personaLibrary
-              .removeSource(input.personaId)
-              .pipe(
-                Effect.mapError(
-                  (cause) => new AgentPersonaCatalogError({ message: String(cause) }),
-                ),
-              ),
-            { "rpc.aggregate": "orchestrationV2" },
-          ),
-        [ORCHESTRATION_V2_WS_METHODS.removeAgentPersona]: (input) =>
-          observeRpcEffect(
-            ORCHESTRATION_V2_WS_METHODS.removeAgentPersona,
-            personaLibrary
-              .removeAgent(input.personaId)
-              .pipe(
-                Effect.mapError(
-                  (cause) => new AgentPersonaCatalogError({ message: String(cause) }),
-                ),
-              ),
-            { "rpc.aggregate": "orchestrationV2" },
-          ),
-        [ORCHESTRATION_V2_WS_METHODS.editImportedAgentPersona]: (input) =>
-          observeRpcEffect(
-            ORCHESTRATION_V2_WS_METHODS.editImportedAgentPersona,
-            personaLibrary
-              .editImported(input)
-              .pipe(
-                Effect.mapError(
-                  (cause) => new AgentPersonaCatalogError({ message: String(cause) }),
-                ),
-              ),
-            { "rpc.aggregate": "orchestrationV2" },
-          ),
+        ...agentPersonaRpcHandlers,
         [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.getWorkflowScript,

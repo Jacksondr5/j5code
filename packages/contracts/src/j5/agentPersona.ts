@@ -1,5 +1,8 @@
 import * as Schema from "effect/Schema";
+import * as Rpc from "effect/unstable/rpc/Rpc";
+import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
+import { EnvironmentAuthorizationError } from "../auth.ts";
 import { PositiveInt, TrimmedNonEmptyString } from "../baseSchemas.ts";
 import { ModelSelection } from "../modelSelection.ts";
 import { ProviderDriverKind } from "../providerInstance.ts";
@@ -172,3 +175,121 @@ export const AgentPersonaImportInput = Schema.Struct({
   ),
 });
 export type AgentPersonaImportInput = typeof AgentPersonaImportInput.Type;
+
+// ---------------------------------------------------------------------------
+// Library management RPCs. These ride the upstream WebSocket RPC transport via one
+// `WsRpcGroup.merge(...)` call so environment scoping, remote connections, and
+// mobile keep working without a second wire path, while every definition stays here.
+// ---------------------------------------------------------------------------
+
+export const J5_AGENT_PERSONA_WS_METHODS = {
+  getAgentPersonaCatalog: "j5.agentPersonas.getCatalog",
+  importAgentPersonas: "j5.agentPersonas.import",
+  editImportedAgentPersona: "j5.agentPersonas.editImported",
+  setImportedAgentPersonaEnabled: "j5.agentPersonas.setImportedEnabled",
+  removeImportedAgentPersona: "j5.agentPersonas.removeImported",
+  removeSourceAgentPersona: "j5.agentPersonas.removeSource",
+  removeAgentPersona: "j5.agentPersonas.remove",
+} as const;
+
+export const J5AgentPersonaRpcSchemas = {
+  getAgentPersonaCatalog: {
+    input: Schema.Struct({}),
+    output: OrchestrationV2AgentPersonaCatalog,
+  },
+  importAgentPersonas: {
+    input: AgentPersonaImportInput,
+    output: Schema.Struct({ importedIds: Schema.Array(AgentPersonaId) }),
+  },
+  editImportedAgentPersona: {
+    input: AgentPersonaEditInput,
+    output: Schema.Void,
+  },
+  setImportedAgentPersonaEnabled: {
+    input: Schema.Struct({ personaId: AgentPersonaId, enabled: Schema.Boolean }),
+    output: Schema.Void,
+  },
+  removeImportedAgentPersona: {
+    input: Schema.Struct({ personaId: AgentPersonaId }),
+    output: Schema.Void,
+  },
+  removeSourceAgentPersona: {
+    input: Schema.Struct({ personaId: AgentPersonaId }),
+    output: Schema.Void,
+  },
+  removeAgentPersona: {
+    input: Schema.Struct({ personaId: AgentPersonaId }),
+    output: Schema.Void,
+  },
+} as const;
+
+const catalogErrors = Schema.Union([EnvironmentAuthorizationError, AgentPersonaCatalogError]);
+
+export const WsJ5GetAgentPersonaCatalogRpc = Rpc.make(
+  J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaCatalog,
+  {
+    payload: J5AgentPersonaRpcSchemas.getAgentPersonaCatalog.input,
+    success: J5AgentPersonaRpcSchemas.getAgentPersonaCatalog.output,
+    error: catalogErrors,
+  },
+);
+export const WsJ5ImportAgentPersonasRpc = Rpc.make(
+  J5_AGENT_PERSONA_WS_METHODS.importAgentPersonas,
+  {
+    payload: J5AgentPersonaRpcSchemas.importAgentPersonas.input,
+    success: J5AgentPersonaRpcSchemas.importAgentPersonas.output,
+    error: Schema.Union([
+      EnvironmentAuthorizationError,
+      AgentPersonaCatalogError,
+      AgentPersonaImportConflictError,
+    ]),
+  },
+);
+export const WsJ5EditImportedAgentPersonaRpc = Rpc.make(
+  J5_AGENT_PERSONA_WS_METHODS.editImportedAgentPersona,
+  {
+    payload: J5AgentPersonaRpcSchemas.editImportedAgentPersona.input,
+    success: J5AgentPersonaRpcSchemas.editImportedAgentPersona.output,
+    error: catalogErrors,
+  },
+);
+export const WsJ5SetImportedAgentPersonaEnabledRpc = Rpc.make(
+  J5_AGENT_PERSONA_WS_METHODS.setImportedAgentPersonaEnabled,
+  {
+    payload: J5AgentPersonaRpcSchemas.setImportedAgentPersonaEnabled.input,
+    success: J5AgentPersonaRpcSchemas.setImportedAgentPersonaEnabled.output,
+    error: catalogErrors,
+  },
+);
+export const WsJ5RemoveImportedAgentPersonaRpc = Rpc.make(
+  J5_AGENT_PERSONA_WS_METHODS.removeImportedAgentPersona,
+  {
+    payload: J5AgentPersonaRpcSchemas.removeImportedAgentPersona.input,
+    success: J5AgentPersonaRpcSchemas.removeImportedAgentPersona.output,
+    error: catalogErrors,
+  },
+);
+export const WsJ5RemoveSourceAgentPersonaRpc = Rpc.make(
+  J5_AGENT_PERSONA_WS_METHODS.removeSourceAgentPersona,
+  {
+    payload: J5AgentPersonaRpcSchemas.removeSourceAgentPersona.input,
+    success: J5AgentPersonaRpcSchemas.removeSourceAgentPersona.output,
+    error: catalogErrors,
+  },
+);
+export const WsJ5RemoveAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.removeAgentPersona, {
+  payload: J5AgentPersonaRpcSchemas.removeAgentPersona.input,
+  success: J5AgentPersonaRpcSchemas.removeAgentPersona.output,
+  error: catalogErrors,
+});
+
+/** Merged into `WsRpcGroup` by one appended call; no other upstream registration exists. */
+export const J5AgentPersonaRpcGroup = RpcGroup.make(
+  WsJ5GetAgentPersonaCatalogRpc,
+  WsJ5ImportAgentPersonasRpc,
+  WsJ5EditImportedAgentPersonaRpc,
+  WsJ5SetImportedAgentPersonaEnabledRpc,
+  WsJ5RemoveImportedAgentPersonaRpc,
+  WsJ5RemoveSourceAgentPersonaRpc,
+  WsJ5RemoveAgentPersonaRpc,
+);
