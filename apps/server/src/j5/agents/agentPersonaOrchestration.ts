@@ -1,4 +1,5 @@
 import type {
+  CommandId,
   ModelSelection,
   OrchestrationV2AgentPersonaAssignment,
   OrchestrationV2AgentPersonaRequest,
@@ -14,7 +15,11 @@ import * as Schema from "effect/Schema";
 
 import { validateAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { prepareAgentPersonaLaunch } from "./agentPersonaLaunch.ts";
-import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
+import {
+  AgentPersonaLibraryError,
+  makeAgentPersonaLibrary,
+  type createAgentPersonaLibrary,
+} from "./agentPersonaLibrary.ts";
 
 type Library = ReturnType<typeof createAgentPersonaLibrary>;
 type PersonaThread = Pick<OrchestrationV2AppThread, "id" | "agentPersonaAssignment">;
@@ -125,3 +130,52 @@ export const durableLaunchModelSelection = (
   const created = storedEvents.find((stored) => stored.event.type === "thread.created")?.event;
   return created?.type === "thread.created" ? created.payload.modelSelection : fallback;
 };
+
+type CommandContext = { readonly commandId: CommandId; readonly type: string };
+type ThreadCreateCommand = Extract<OrchestrationV2Command, { readonly type: "thread.create" }>;
+
+/**
+ * Guards for the upstream orchestrator, built once next to its other services. The upstream
+ * file supplies only its two error constructors and the adapter lookup; every call site is a
+ * single `yield*`. Failures use the orchestrator's own error types so dispatch semantics do
+ * not change.
+ */
+export const makeAgentPersonaGuards = <D, A, E>(deps: {
+  readonly getDriver: (providerInstanceId: ProviderInstanceId) => Effect.Effect<string, E>;
+  readonly adapterError: (
+    command: CommandContext,
+    providerInstanceId: ProviderInstanceId,
+    cause: E,
+  ) => A;
+  readonly dispatchError: (command: CommandContext, cause: unknown) => D;
+}) =>
+  Effect.gen(function* () {
+    const library = yield* makeAgentPersonaLibrary;
+    const reject = (command: CommandContext, message: string | undefined) =>
+      message === undefined ? Effect.void : Effect.fail(deps.dispatchError(command, message));
+    return {
+      library,
+      /** `thread.create`: the assignment must be an intact snapshot on the resolved route. */
+      threadCreate: (command: ThreadCreateCommand): Effect.Effect<void, D | A> =>
+        guardAgentPersonaThreadCreate(command, library, (providerInstanceId) =>
+          deps
+            .getDriver(providerInstanceId)
+            .pipe(
+              Effect.mapError((cause) => deps.adapterError(command, providerInstanceId, cause)),
+            ),
+        ).pipe(
+          Effect.catchIf(isLibraryError, (cause) =>
+            Effect.fail(deps.dispatchError(command, cause)),
+          ),
+        ),
+      /** Thread commands: explicit model or provider changes are rejected on persona threads. */
+      routeLocked: (thread: PersonaThread, command: CommandContext): Effect.Effect<void, D> =>
+        reject(command, agentPersonaRouteLockedError(thread, command.type)),
+      /** Message dispatch: a different model selection than the resolved route is rejected. */
+      modelMismatch: (
+        thread: PersonaThread,
+        command: CommandContext & { readonly modelSelection?: ModelSelection | undefined },
+      ): Effect.Effect<void, D> =>
+        reject(command, agentPersonaModelMismatchError(thread, command.modelSelection)),
+    };
+  });
