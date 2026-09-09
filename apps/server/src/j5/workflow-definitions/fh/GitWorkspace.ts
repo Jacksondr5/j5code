@@ -5,6 +5,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
+import * as Schema from "effect/Schema";
 import { hash } from "../../workflow/Definition.ts";
 
 const commandSignal = new NodeAsyncHooks.AsyncLocalStorage<AbortSignal>();
@@ -14,6 +15,7 @@ export const withCommandSignal = <A>(
 ): Promise<A> => commandSignal.run(signal, operation);
 
 const exec = NodeUtil.promisify(NodeChildProcess.execFile);
+const decodeRuntime = Schema.decodeUnknownSync(Schema.Struct({ node_path: Schema.String }));
 export async function command(
   cwd: string,
   executable: string,
@@ -143,6 +145,28 @@ export async function receipt(root: string, id: string): Promise<unknown | undef
   if (!(await exists(path))) return undefined;
   return JSON.parse(await NodeFSP.readFile(path, "utf8"));
 }
+export async function verificationEnvironment(
+  worktree: string,
+  checks: readonly { executable: string }[],
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<NodeJS.ProcessEnv> {
+  const vite = checks.find((check) => NodePath.basename(check.executable) === "vp");
+  if (!vite) return env;
+  // Vite+ built-ins such as lint can launch Node from PATH rather than the project runtime.
+  const runtime = await command(worktree, vite.executable, ["env", "current", "--json"], { env });
+  if (runtime.exitCode !== 0)
+    throw new Error(`Cannot resolve verification Node runtime: ${runtime.output}`);
+  const node = decodeRuntime(JSON.parse(runtime.output)).node_path;
+  if (!NodePath.isAbsolute(node) || !(await exists(node))) {
+    throw new Error(`Invalid verification Node runtime: ${node}`);
+  }
+  const pathKey = Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
+  return {
+    ...env,
+    [pathKey]: [NodePath.dirname(node), env[pathKey]].filter(Boolean).join(NodePath.delimiter),
+  };
+}
+
 export async function validation(
   worktree: string,
   baseCommit: string,
@@ -153,10 +177,12 @@ export async function validation(
   root: string,
   actionId: string,
   signal: AbortSignal,
+  correctionApproval: { gateRevision: number; artifactHash: string; actor: string } | null = null,
 ) {
   const saved = await receipt(root, actionId);
   if (saved !== undefined) return saved;
   if (!checks.length) throw new Error("Required verification commands are missing");
+  const env = await verificationEnvironment(worktree, checks);
   const before = await candidate(worktree, baseCommit);
   const marker = NodePath.join(root, "receipts", `${hash(actionId)}.started`);
   await NodeFSP.mkdir(NodePath.join(root, "receipts"), { recursive: true });
@@ -165,7 +191,7 @@ export async function validation(
   await NodeFSP.writeFile(marker, before.codeIdentity, { flag: "wx", flush: true });
   const results = [];
   for (const check of checks) {
-    const result = await command(worktree, check.executable, check.args, { signal });
+    const result = await command(worktree, check.executable, check.args, { signal, env });
     results.push({ ...check, ...result });
   }
   const after = await candidate(worktree, baseCommit);
@@ -173,6 +199,8 @@ export async function validation(
     throw new Error("Verification changed candidate files");
   const result = {
     ...after,
+    effectiveChecksHash: hash(checks),
+    correctionApproval,
     checks: results,
     passed: results.every((check) => check.exitCode === 0),
   };

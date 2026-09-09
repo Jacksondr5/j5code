@@ -16,6 +16,24 @@ export const PlanHandoff = Schema.Struct({
   checks: Schema.Array(VerificationCommand).check(Schema.isMinLength(1)),
   assumptions: Schema.Array(Text),
 });
+export const CheckCorrection = Schema.Struct({
+  originalIndex: Schema.Number,
+  replacement: VerificationCommand,
+  repositoryEvidence: Schema.Array(Text).check(Schema.isMinLength(1)),
+  verificationIntent: Text,
+});
+export const VerificationDiagnosis = Schema.Struct({
+  planHash: Text,
+  failedValidationHash: Text,
+  explanation: Text,
+  outcome: Schema.Literals([
+    "implementation_repair",
+    "environment_repair",
+    "check_correction",
+    "unable_to_repair",
+  ]),
+  corrections: Schema.Array(CheckCorrection),
+});
 export const ReviewHandoff = Schema.Struct({
   verdict: Schema.Literals(["accept", "revise"]),
   subjectHash: Text,
@@ -27,6 +45,10 @@ export const Validation = Schema.Struct({
   codeIdentity: Text,
   tree: Text,
   passed: Schema.Boolean,
+  effectiveChecksHash: Text,
+  correctionApproval: Schema.NullOr(
+    Schema.Struct({ gateRevision: Schema.Number, artifactHash: Text, actor: Text }),
+  ),
   checks: Schema.Array(
     Schema.Struct({
       executable: Text,
@@ -46,6 +68,10 @@ export const Publication = Schema.Struct({
   commitMessage: Text,
   title: Text,
   body: Text,
+  effectiveChecksHash: Text,
+  correctionApproval: Schema.NullOr(
+    Schema.Struct({ gateRevision: Schema.Number, artifactHash: Text, actor: Text }),
+  ),
 });
 export const CommitResult = Schema.Struct({ commit: Text, codeIdentity: Text });
 export const PushResult = Schema.Struct({ commit: Text, remoteSha: Text });

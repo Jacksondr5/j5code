@@ -12,7 +12,9 @@ export const statusPresentation = {
 } satisfies Record<RunDetail["status"], { label: string; marker: string }>;
 
 export const phaseLabel = (phase: string) =>
-  phase.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
+  phase === "checks_approval"
+    ? "Corrected checks approval"
+    : phase.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
 
 export function expectedNextStep(run: RunDetail, definition?: WorkflowDefinitionPresentation) {
   if (run.status === "waiting_approval") return "Waiting for your decision";

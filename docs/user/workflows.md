@@ -6,6 +6,12 @@ beside a thread to review runs and resolve approvals without leaving the convers
 All workflows opens the complete paginated history across Squadrons. Individual agent conversations are available under workflow
 activity and include a durable link back to their parent workflow.
 
+When an approved verification command fails, the workflow diagnoses whether the code,
+environment, or command needs repair. A command correction requires a separate **Approve
+corrected checks** decision before it can run. The original plan remains unchanged. A run can
+approve one correction, with at most two proposal versions, and the replacement must preserve
+the number, order, and intent of the approved checks.
+
 Open **Workflows**, choose **New workflow**, then select an eligible Squadron, enter
 a development request and base ref, and choose **Start workflow**. A Squadron must
 contain exactly one project; ineligible Squadrons are explained in the dialog. The base ref is

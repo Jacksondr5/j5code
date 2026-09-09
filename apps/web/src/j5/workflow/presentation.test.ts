@@ -20,6 +20,7 @@ describe("workflow presentation", () => {
       exactAndRelativeTime("2026-09-07T10:00:00.000Z", Date.parse("2026-09-07T10:03:00Z")).relative,
     ).toBe("Active 3m ago");
     expect(phaseLabel("publication_approval")).toBe("Publication approval");
+    expect(phaseLabel("checks_approval")).toBe("Corrected checks approval");
   });
 
   it("presents timed-out and cleanup failures with their available action", () => {

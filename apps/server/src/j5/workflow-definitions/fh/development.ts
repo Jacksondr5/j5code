@@ -2,29 +2,39 @@ import { definitionHash } from "../manifest.ts";
 import type { Action, Artifact, Run } from "@j5/workflow-contracts";
 import * as Handoff from "@j5/workflow-contracts/fh";
 import * as Schema from "effect/Schema";
-import { canonical, hash, type Definition, type Phase } from "../../workflow/Definition.ts";
+import {
+  canonical,
+  gateHash,
+  hash,
+  type Definition,
+  type Phase,
+} from "../../workflow/Definition.ts";
 
 const decodePublication = Schema.decodeUnknownSync(Handoff.Publication);
+const decodePlanHandoff = Schema.decodeUnknownSync(Handoff.PlanHandoff);
 const decodeReviewHandoff = Schema.decodeUnknownSync(Handoff.ReviewHandoff);
 const decodeValidation = Schema.decodeUnknownSync(Handoff.Validation);
+const decodeVerificationDiagnosis = Schema.decodeUnknownSync(Handoff.VerificationDiagnosis);
 const decodeWorkspace = Schema.decodeUnknownSync(Handoff.Workspace);
 
-export const INSTRUCTIONS_VERSION = 2;
+export const INSTRUCTIONS_VERSION = 4;
 const instructions = {
   scout:
-    "Inspect the repository and supplied evidence. Cite concrete paths. Separate confirmed facts from unknowns. Return {summary,evidence:string[],unknowns:string[]}.",
+    "Inspect the repository and supplied evidence from the workflow worktree root, which is also where validation executes. Cite concrete paths. Record relevant test configuration, package scripts, project runtime selection, and dependency setup. Separate confirmed facts from unknowns. Return {summary,evidence:string[],unknowns:string[]}.",
   navigator:
-    "Produce a minimal implementation plan addressing the request and review feedback. Resolve unspecified product choices using the simplest option consistent with the request and supplied evidence. Record each choice in assumptions and never ask the user for clarification. Record required verification as executable/argument arrays, without shell expansion. Return {summary,steps:string[],checks:{executable,args:string[]}[],assumptions:string[]}.",
+    "Produce a minimal implementation plan addressing the request and review feedback. Validation executes from the workflow worktree root. Derive every verification command from Scout repository evidence and verify paths, configuration selection, and project names. Package-specific commands must select their directory or configuration explicitly. Resolve unspecified product choices using the simplest option consistent with the request and supplied evidence. Record each choice in assumptions and never ask the user for clarification. Record required verification as executable/argument arrays, without shell expansion or a working-directory field. Return {summary,steps:string[],checks:{executable,args:string[]}[],assumptions:string[]}.",
   advocate:
-    "Review the latest plan for request completeness, user behavior, and supplied evidence. Findings are blocking only when the plan contradicts the request or supplied evidence, is infeasible, or lacks executable verification. Reasonable assumptions resolving unspecified product choices are non-blocking, but recording a choice as an assumption does not exempt it from the blocking criteria. Record preference disagreements as non-blocking findings for human consideration at plan approval. Never require user clarification or prior human approval. Return revise if and only if at least one finding is blocking; otherwise return accept, including when non-blocking findings exist. Return {verdict:'accept'|'revise',subjectHash,findings:{blocking:boolean,description:string}[]} using the supplied plan hash.",
+    "Review the latest plan for request completeness, user behavior, and supplied evidence. Validation executes from the workflow worktree root: verify command paths, explicit package/configuration selection, and project names against Scout evidence. Findings are blocking only when the plan contradicts the request or supplied evidence, is infeasible, or lacks executable verification. Reasonable assumptions resolving unspecified product choices are non-blocking, but recording a choice as an assumption does not exempt it from the blocking criteria. Record preference disagreements as non-blocking findings for human consideration at plan approval. Never require user clarification or prior human approval. Return revise if and only if at least one finding is blocking; otherwise return accept, including when non-blocking findings exist. Return {verdict:'accept'|'revise',subjectHash,findings:{blocking:boolean,description:string}[]} using the supplied plan hash.",
   skeptic:
-    "Review the latest plan for feasibility, hidden assumptions, failure modes, and sufficient executable verification. Findings are blocking only when the plan contradicts the request or supplied evidence, is infeasible, or lacks executable verification. Reasonable assumptions resolving unspecified product choices are non-blocking, but recording a choice as an assumption does not exempt it from the blocking criteria. Record preference disagreements as non-blocking findings for human consideration at plan approval. Never require user clarification or prior human approval. Return revise if and only if at least one finding is blocking; otherwise return accept, including when non-blocking findings exist. Return {verdict:'accept'|'revise',subjectHash,findings:{blocking:boolean,description:string}[]} using the supplied plan hash.",
+    "Review the latest plan for feasibility, hidden assumptions, failure modes, and sufficient executable verification. Validation executes from the workflow worktree root: verify command paths, explicit package/configuration selection, and project names against Scout evidence. Findings are blocking only when the plan contradicts the request or supplied evidence, is infeasible, or lacks executable verification. Reasonable assumptions resolving unspecified product choices are non-blocking, but recording a choice as an assumption does not exempt it from the blocking criteria. Record preference disagreements as non-blocking findings for human consideration at plan approval. Never require user clarification or prior human approval. Return revise if and only if at least one finding is blocking; otherwise return accept, including when non-blocking findings exist. Return {verdict:'accept'|'revise',subjectHash,findings:{blocking:boolean,description:string}[]} using the supplied plan hash.",
   builder:
-    "Implement only the latest approved plan in this workspace. Address review feedback and failed checks. Never commit, push, or create a PR. Return {summary,changes:string[]}.",
+    "Implement only the latest approved plan in this workspace. Validation and your verification commands execute from the workflow worktree root. Prepare dependencies using the repository setup instructions, including workspace tooling packages such as lint plugins; sharing only root node_modules may be insufficient. Use the repository-selected runtime. Run the exact approved executable/argument arrays when reporting verification results. A modified command that passes is evidence for a check-correction proposal, never a successful approved check. Address review feedback and diagnosed implementation or environment failures. Never alter repository test configuration merely to make an incorrect command succeed. Never commit, push, or create a PR. Return {summary,changes:string[]}.",
+  verification_diagnosis:
+    "Act as the Skeptic. Inspect the failed validation and repository evidence from the workflow worktree root without modifying files. Classify the failure as implementation_repair, environment_repair, check_correction, or unable_to_repair. For a check correction, preserve verification intent and propose only exact replacement executable/argument arrays backed by repository evidence. Identify each failed original check by its zero-based index. Never delete checks, suppress errors, change their order, or propose repository configuration changes to accommodate a bad command. Only one correction can be approved and only two proposal versions may be recorded; if that capacity is spent, return unable_to_repair with the concrete reason and no corrections. Return {planHash,failedValidationHash,explanation,outcome,corrections:{originalIndex,replacement:{executable,args},repositoryEvidence:string[],verificationIntent}[]}.",
   critic:
-    "Review the complete candidate changes against the approved plan and recorded validation. Do not modify files. Return revise if and only if at least one finding is blocking; otherwise return accept, including when non-blocking findings exist. Return {verdict:'accept'|'revise',subjectHash,findings:{blocking:boolean,description:string}[]} using the supplied codeIdentity.",
+    "Review the complete candidate changes against the approved plan and recorded validation. Validation executes from the workflow worktree root; confirm the recorded commands exactly match the approved effective checks, including any approved correction and its provenance. Do not modify files. Return revise if and only if at least one finding is blocking; otherwise return accept, including when non-blocking findings exist. Return {verdict:'accept'|'revise',subjectHash,findings:{blocking:boolean,description:string}[]} using the supplied codeIdentity.",
   sentry:
-    "Review candidate changes for security, reliability, data loss, and regression risks. Do not modify files. Return revise if and only if at least one finding is blocking; otherwise return accept, including when non-blocking findings exist. Return {verdict:'accept'|'revise',subjectHash,findings:{blocking:boolean,description:string}[]} using the supplied codeIdentity.",
+    "Review candidate changes for security, reliability, data loss, and regression risks. Validation executes from the workflow worktree root; confirm the recorded commands exactly match the approved effective checks, including any approved correction and its provenance. Do not modify files. Return revise if and only if at least one finding is blocking; otherwise return accept, including when non-blocking findings exist. Return {verdict:'accept'|'revise',subjectHash,findings:{blocking:boolean,description:string}[]} using the supplied codeIdentity.",
 } as const;
 
 const PLAN_BUDGET = 3;
@@ -49,8 +59,10 @@ const matchingReviews = (run: Run, phase: "plan_review" | "code_review", subject
   artifactsIn(run, phase).filter(
     (artifact) => decodeReviewHandoff(artifact.content).subjectHash === subject,
   );
-const decisionsIn = (run: Run, phase: "plan_approval" | "publication_approval") =>
-  run.approvals.filter((decision) => decision.phase === phase);
+const decisionsIn = (
+  run: Run,
+  phase: "plan_approval" | "checks_approval" | "publication_approval",
+) => run.approvals.filter((decision) => decision.phase === phase);
 const uniqueArtifacts = (artifacts: ReadonlyArray<Artifact | undefined>) =>
   artifacts.filter(
     (artifact, index, all): artifact is Artifact =>
@@ -64,6 +76,7 @@ export function selectAgentEvidence(run: Run, personaId: keyof typeof instructio
   const plan = lastIn(run, "plan");
   const build = lastIn(run, "build");
   const validation = lastIn(run, "validation");
+  const diagnosis = lastIn(run, "verification_diagnosis");
   const planChanges = decisionsIn(run, "plan_approval").filter(
     (decision) => decision.decision === "request_changes",
   );
@@ -96,14 +109,24 @@ export function selectAgentEvidence(run: Run, personaId: keyof typeof instructio
         plan,
         build,
         validation,
+        diagnosis,
         ...(validation
           ? matchingReviews(run, "code_review", decodeValidation(validation.content).codeIdentity)
           : []),
       ];
       decisions = [
         ...decisionsIn(run, "plan_approval").filter((decision) => decision.decision === "approve"),
+        ...decisionsIn(run, "checks_approval").filter(
+          (decision) => decision.decision === "approve",
+        ),
         ...publicationChanges,
       ];
+      break;
+    case "verification_diagnosis":
+      artifacts = [workspace, context, plan, validation, diagnosis];
+      decisions = decisionsIn(run, "checks_approval").filter(
+        (decision) => decision.decision === "request_changes",
+      );
       break;
     case "critic":
     case "sentry":
@@ -114,6 +137,34 @@ export function selectAgentEvidence(run: Run, personaId: keyof typeof instructio
   return { artifacts: uniqueArtifacts(artifacts), decisions };
 }
 
+export const approvedCheckCorrection = (run: Run) => {
+  for (const approval of decisionsIn(run, "checks_approval").filter(
+    (decision) => decision.decision === "approve",
+  )) {
+    for (const diagnosis of artifactsIn(run, "verification_diagnosis")) {
+      const content = decodeVerificationDiagnosis(diagnosis.content);
+      if (content.outcome !== "check_correction") continue;
+      const failed = artifactsIn(run, "validation").find(
+        (artifact) => artifact.hash === content.failedValidationHash,
+      );
+      if (!failed) continue;
+      const plan = latest(run, "plan");
+      if (approval.artifactHash === gateHash([plan, failed, diagnosis])) {
+        return { approval, diagnosis, failed, content };
+      }
+    }
+  }
+  return undefined;
+};
+
+export const effectiveChecks = (run: Run) => {
+  const checks = [...decodePlanHandoff(latest(run, "plan").content).checks];
+  const correction = approvedCheckCorrection(run);
+  for (const item of correction?.content.corrections ?? [])
+    checks[item.originalIndex] = item.replacement;
+  return { checks, correction };
+};
+
 const codeEvidence = (run: Run, task: string) => {
   const planApproval = decisionsIn(run, "plan_approval").findLast(
     (decision) => decision.decision === "approve",
@@ -121,11 +172,29 @@ const codeEvidence = (run: Run, task: string) => {
   const publicationApproval = decisionsIn(run, "publication_approval").findLast(
     (decision) => decision.decision === "approve",
   );
+  const correction = approvedCheckCorrection(run);
   switch (task) {
     case "workspace":
       return { artifacts: [], decisions: [] };
     case "validation":
-      return { artifacts: uniqueArtifacts([lastIn(run, "plan")]), decisions: [planApproval] };
+      return {
+        artifacts: uniqueArtifacts([
+          lastIn(run, "plan"),
+          correction?.failed,
+          correction?.diagnosis,
+        ]),
+        decisions: [planApproval, correction?.approval],
+      };
+    case "repair_capacity":
+    case "verification_block":
+      return {
+        artifacts: uniqueArtifacts([
+          lastIn(run, "plan"),
+          lastIn(run, "validation"),
+          lastIn(run, "verification_diagnosis"),
+        ]),
+        decisions: [],
+      };
     case "metadata":
       return {
         artifacts: uniqueArtifacts([lastIn(run, "build"), lastIn(run, "validation")]),
@@ -182,7 +251,34 @@ const phases: Phase[] = [
     maxVisits: 3,
   },
   taskPhase("build", "agent", ["builder"], { pass: "validation" }, 3),
-  taskPhase("validation", "code", ["validation"], { pass: "code_review", revise: "build" }, 3),
+  taskPhase(
+    "validation",
+    "code",
+    ["validation"],
+    { pass: "code_review", revise: "verification_diagnosis" },
+    4,
+  ),
+  taskPhase(
+    "verification_diagnosis",
+    "agent",
+    ["verification_diagnosis"],
+    {
+      implementation_repair: "repair_capacity",
+      environment_repair: "repair_capacity",
+      check_correction: "checks_approval",
+      unable_to_repair: "verification_block",
+    },
+    5,
+  ),
+  taskPhase("repair_capacity", "code", ["repair_capacity"], { pass: "build" }, 4),
+  {
+    id: "checks_approval",
+    kind: "gate",
+    tasks: [],
+    transitions: { approve: "validation", request_changes: "verification_diagnosis" },
+    maxVisits: 2,
+  },
+  taskPhase("verification_block", "code", ["verification_block"], {}, 4),
   taskPhase(
     "code_review",
     "agent",
@@ -211,6 +307,8 @@ const outputSchemas = {
   skeptic: Handoff.ReviewHandoff,
   builder: Handoff.CodeCompleteHandoff,
   validation: Handoff.Validation,
+  verification_diagnosis: Handoff.VerificationDiagnosis,
+  repair_capacity: Schema.Struct({ ready: Schema.Literal(true) }),
   critic: Handoff.ReviewHandoff,
   sentry: Handoff.ReviewHandoff,
   metadata: Handoff.Publication,
@@ -223,6 +321,54 @@ function validate(action: Action, output: unknown, run: Run): unknown {
   const schema = outputSchemas[action.task as keyof typeof outputSchemas];
   if (!schema) throw new Error(`No output schema for ${action.task}`);
   const content = Schema.decodeUnknownSync(schema)(output);
+  if (action.task === "verification_diagnosis") {
+    const diagnosis = decodeVerificationDiagnosis(content);
+    const plan = latest(run, "plan");
+    const failed = latest(run, "validation");
+    const validation = decodeValidation(failed.content);
+    if (validation.passed) throw new Error("Diagnosis requires a failed validation");
+    if (diagnosis.planHash !== plan.hash || diagnosis.failedValidationHash !== failed.hash)
+      throw new Error("Diagnosis refers to superseded plan or validation evidence");
+    if (diagnosis.outcome !== "check_correction") {
+      if (diagnosis.corrections.length)
+        throw new Error("Only check corrections may replace checks");
+      return content;
+    }
+    if (approvedCheckCorrection(run)) throw new Error("Only one approved correction is permitted");
+    if (
+      artifactsIn(run, "verification_diagnosis").filter(
+        (artifact) => decodeVerificationDiagnosis(artifact.content).outcome === "check_correction",
+      ).length >= 2
+    )
+      throw new Error("The two-version correction proposal limit is exhausted");
+    if (!diagnosis.corrections.length) throw new Error("A check correction needs replacements");
+    const planChecks = decodePlanHandoff(plan.content).checks;
+    if (
+      validation.effectiveChecksHash !== hash(planChecks) ||
+      validation.checks.length !== planChecks.length ||
+      validation.checks.some(
+        (result, index) =>
+          canonical({ executable: result.executable, args: result.args }) !==
+          canonical(planChecks[index]),
+      )
+    )
+      throw new Error("Failed validation does not match the approved plan checks");
+    const indices = diagnosis.corrections.map((correction) => correction.originalIndex);
+    if (
+      indices.some((index) => !Number.isInteger(index) || index < 0 || index >= planChecks.length)
+    )
+      throw new Error("Correction refers to an invalid check index");
+    if (new Set(indices).size !== indices.length)
+      throw new Error("Correction contains duplicate check indices");
+    for (const correction of diagnosis.corrections) {
+      const original = planChecks[correction.originalIndex]!;
+      const result = validation.checks[correction.originalIndex];
+      if (!result || result.exitCode === 0)
+        throw new Error("Correction may target only checks that failed");
+      if (canonical(original) === canonical(correction.replacement))
+        throw new Error("Correction replacement must change the command");
+    }
+  }
   if (["advocate", "skeptic", "critic", "sentry"].includes(action.task)) {
     const review = decodeReviewHandoff(content);
     const expected =
@@ -278,9 +424,10 @@ const definition: Omit<Definition, "hash"> = {
       };
     }
     const workspace = decodeWorkspace(latest(run, "workspace").content);
-    const personaId = task.id as keyof typeof instructions;
+    const instructionId = task.id as keyof typeof instructions;
+    const personaId = instructionId === "verification_diagnosis" ? "skeptic" : instructionId;
     const inputs = developmentInputs(run.inputs);
-    const selected = selectAgentEvidence(run, personaId);
+    const selected = selectAgentEvidence(run, instructionId);
     const selectedEvidenceIds = [
       ...selected.artifacts.map((artifact) => artifact.id),
       ...selected.decisions.map((decision) => `decision:${hash(decision)}`),
@@ -295,7 +442,7 @@ const definition: Omit<Definition, "hash"> = {
       branch: workspace.branch,
       selectedEvidenceIds,
       selectedEvidenceHashes,
-      prompt: `Workflow operating instructions v${INSTRUCTIONS_VERSION}. ${instructions[personaId]}\nReturn ONLY one JSON object. Do not invoke other agents or change Git history.\n${canonical(
+      prompt: `Workflow operating instructions v${INSTRUCTIONS_VERSION}. ${instructions[instructionId]}\nReturn ONLY one JSON object. Do not invoke other agents or change Git history.\n${canonical(
         {
           request: inputs.request,
           suppliedEvidence: inputs.evidence,
@@ -329,9 +476,20 @@ const definition: Omit<Definition, "hash"> = {
     }
     if (phase.id === "validation")
       return decodeValidation(artifacts[0]!.content).passed ? "pass" : "revise";
+    if (phase.id === "verification_diagnosis")
+      return decodeVerificationDiagnosis(artifacts[0]!.content).outcome;
     return "pass";
   },
   gateArtifacts: (run, phase) => {
+    if (phase.id === "checks_approval") {
+      const diagnosis = latest(run, "verification_diagnosis");
+      const content = decodeVerificationDiagnosis(diagnosis.content);
+      const failed = artifactsIn(run, "validation").find(
+        (artifact) => artifact.hash === content.failedValidationHash,
+      );
+      if (!failed) throw new Error("Referenced failed validation evidence is missing");
+      return [latest(run, "plan"), failed, diagnosis];
+    }
     const reviewPhase = phase.id === "plan_approval" ? "plan_review" : "code_review";
     const subject = latest(run, phase.id === "plan_approval" ? "plan" : "metadata");
     const reviews = matchingReviews(

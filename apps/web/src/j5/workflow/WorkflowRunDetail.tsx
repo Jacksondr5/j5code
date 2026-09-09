@@ -166,7 +166,13 @@ function GateDecisionForm({ model }: { readonly model: ReturnType<typeof useWork
               text: event.target.value,
             })
           }
-          placeholder={`Feedback sent to ${run.phase === "publication_approval" ? "implementation" : "plan revision"}`}
+          placeholder={`Feedback sent to ${
+            run.phase === "publication_approval"
+              ? "implementation"
+              : run.phase === "checks_approval"
+                ? "verification diagnosis"
+                : "plan revision"
+          }`}
         />
         <div className="flex flex-wrap gap-2">
           <Button
@@ -178,7 +184,9 @@ function GateDecisionForm({ model }: { readonly model: ReturnType<typeof useWork
               ? actionLabel.approve
               : run.phase === "publication_approval"
                 ? "Approve and publish"
-                : "Approve plan"}
+                : run.phase === "checks_approval"
+                  ? "Approve corrected checks"
+                  : "Approve plan"}
           </Button>
           <Button
             disabled={model.pendingAction !== null}
@@ -409,7 +417,9 @@ export default function WorkflowRunDetail({
             <h3 className="font-semibold">
               {run.phase === "publication_approval"
                 ? "Review publication evidence"
-                : "Review plan and verification commands"}
+                : run.phase === "checks_approval"
+                  ? "Approve corrected checks"
+                  : "Review plan and verification commands"}
             </h3>
             <p className="text-sm text-muted-foreground">
               Your decision applies only to gate revision {run.gate.revision} and the evidence
