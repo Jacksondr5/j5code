@@ -61,7 +61,27 @@ export async function git(
   return result.output.trim();
 }
 export async function resolveBase(repository: string, baseRef: string): Promise<string> {
-  return git(repository, ["rev-parse", "--verify", "--end-of-options", `${baseRef}^{commit}`]);
+  const ref = baseRef.trim();
+  if (!ref) throw new Error("Enter a base ref before starting the workflow");
+  try {
+    return await git(repository, ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`]);
+  } catch {
+    throw new Error(`Base ref "${ref}" does not resolve to a commit in ${repository}`);
+  }
+}
+
+export async function publicationBaseBranch(repository: string, baseRef: string): Promise<string> {
+  if (baseRef !== "HEAD") return baseRef.replace(/^origin\//, "");
+  const upstream = await command(repository, "git", [
+    "rev-parse",
+    "--abbrev-ref",
+    "--symbolic-full-name",
+    "@{upstream}",
+  ]);
+  if (upstream.exitCode === 0) return upstream.output.trim().replace(/^[^/]+\//, "");
+  const branch = await git(repository, ["branch", "--show-current"]);
+  if (branch) return branch;
+  throw new Error("HEAD is detached; enter an explicit base branch before starting the workflow");
 }
 export async function exists(path: string): Promise<boolean> {
   try {

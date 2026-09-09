@@ -5,7 +5,11 @@ import { listSquadrons, type ManagedSquadron } from "./squadronClient";
 export type SquadronDirectoryState =
   | { readonly status: "loading"; readonly squadrons: ReadonlyArray<ManagedSquadron> }
   | { readonly status: "ready"; readonly squadrons: ReadonlyArray<ManagedSquadron> }
-  | { readonly status: "error"; readonly squadrons: ReadonlyArray<ManagedSquadron> };
+  | {
+      readonly status: "error";
+      readonly squadrons: ReadonlyArray<ManagedSquadron>;
+      readonly error: string;
+    };
 
 let snapshot: SquadronDirectoryState = { status: "loading", squadrons: [] };
 const listeners = new Set<() => void>();
@@ -43,10 +47,10 @@ export const refreshSquadronDirectory = (options: { readonly force?: boolean } =
       snapshot = { status: "ready", squadrons };
       hasLoaded = true;
     })
-    .catch(() => {
+    .catch((cause) => {
       // Keep the selected scope resolvable on a transient failure; clearing
       // this list would silently turn a selected Squadron into zoom-out.
-      snapshot = { status: "error", squadrons: snapshot.squadrons };
+      snapshot = { status: "error", squadrons: snapshot.squadrons, error: String(cause) };
       hasLoaded = false;
     })
     .finally(() => {
@@ -57,10 +61,10 @@ export const refreshSquadronDirectory = (options: { readonly force?: boolean } =
 };
 
 /** One authenticated directory read is shared by the gate and visible scope controls. */
-export function useSquadronDirectory() {
+export function useSquadronDirectory(enabled = true) {
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   useEffect(() => {
-    void refreshSquadronDirectory();
-  }, []);
+    if (enabled) void refreshSquadronDirectory();
+  }, [enabled]);
   return { ...state, refresh: refreshSquadronDirectory };
 }

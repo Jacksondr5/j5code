@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 
 export const RunStatus = Schema.Literals([
   "running",
+  "restarting",
   "waiting_approval",
   "blocked",
   "cancelling",
@@ -17,6 +18,7 @@ export const WorkflowFailureCategory = Schema.Literals([
   "missing_gate_evidence",
   "definition_mismatch",
   "candidate_changed",
+  "restart_cleanup_failed",
   "transition_unavailable",
   "unknown",
 ]);
@@ -31,6 +33,8 @@ export const Artifact = Schema.Struct({
   governs: Schema.Array(Schema.String),
 });
 export type Artifact = typeof Artifact.Type;
+export const ArtifactMetadata = Artifact.mapFields(({ content: _content, ...fields }) => fields);
+export type ArtifactMetadata = typeof ArtifactMetadata.Type;
 export const Action = Schema.Struct({
   id: Schema.String,
   runId: Schema.String,
@@ -43,10 +47,12 @@ export const Action = Schema.Struct({
   status: Schema.Literals(["pending", "claimed", "completed", "blocked", "cancelled"]),
   deadline: Schema.Number,
   input: Schema.Unknown,
-  result: Schema.NullOr(Artifact),
+  resultArtifactId: Schema.NullOr(Schema.String),
   externalIdentity: Schema.optional(Schema.String),
 });
 export type Action = typeof Action.Type;
+export const ActionSummary = Action.mapFields(({ input: _input, ...fields }) => fields);
+export type ActionSummary = typeof ActionSummary.Type;
 export const Gate = Schema.Struct({
   revision: Schema.Number,
   artifactHash: Schema.String,
@@ -58,6 +64,7 @@ export const Decision = Schema.Struct({
   decision: Schema.Literals(["approve", "request_changes", "cancel"]),
   feedback: Schema.String,
   actor: Schema.String,
+  phase: Schema.optional(Schema.String),
 });
 export type Decision = typeof Decision.Type;
 export const Run = Schema.Struct({
@@ -78,7 +85,28 @@ export const Run = Schema.Struct({
   failureCategory: Schema.optional(Schema.NullOr(WorkflowFailureCategory)),
   relevantActionId: Schema.optional(Schema.NullOr(Schema.String)),
   recovery: Schema.NullOr(
-    Schema.Literals(["retry", "restore_definition", "inspect_external_result"]),
+    Schema.Literals(["retry", "restore_definition", "inspect_external_result", "retry_restart"]),
+  ),
+  restart: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        phase: Schema.String,
+        visit: Schema.Number,
+        deadline: Schema.Number,
+        cleanupActionIds: Schema.Array(Schema.String),
+        targetDefinitionHash: Schema.String,
+      }),
+    ),
+  ),
+  definitionUpgrades: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        actor: Schema.String,
+        fromHash: Schema.String,
+        toHash: Schema.String,
+        atRevision: Schema.Number,
+      }),
+    ),
   ),
   gate: Schema.NullOr(Gate),
   actions: Schema.Array(Action),
@@ -87,20 +115,48 @@ export const Run = Schema.Struct({
   visits: Schema.Record(Schema.String, Schema.Number),
   createdAt: Schema.optional(Schema.String),
   updatedAt: Schema.optional(Schema.String),
+  readVersion: Schema.optional(Schema.Number),
 });
 export type Run = typeof Run.Type;
-export const RunSummary = Run.mapFields(
-  ({
-    actions: _actions,
-    artifacts: _artifacts,
-    approvals: _approvals,
-    visits: _visits,
-    inputs: _inputs,
-    execution: _execution,
-    ...fields
-  }) => fields,
-);
-export type RunSummary = typeof RunSummary.Type;
+export const RunDetail = Schema.Struct({
+  id: Schema.String,
+  definitionId: Schema.String,
+  definitionVersion: Schema.Number,
+  definitionHash: Schema.String,
+  squadronId: Schema.String,
+  projectId: Schema.String,
+  repository: Schema.String,
+  baseCommit: Schema.String,
+  request: Schema.String,
+  phase: Schema.String,
+  revision: Schema.Number,
+  readVersion: Schema.Number,
+  status: RunStatus,
+  cause: Schema.NullOr(Schema.String),
+  failureCategory: Schema.optional(Schema.NullOr(WorkflowFailureCategory)),
+  relevantActionId: Schema.optional(Schema.NullOr(Schema.String)),
+  recovery: Schema.NullOr(
+    Schema.Literals(["retry", "restore_definition", "inspect_external_result", "retry_restart"]),
+  ),
+  restart: Schema.optional(Run.fields.restart),
+  definitionUpgrades: Schema.optional(Run.fields.definitionUpgrades),
+  restartAvailability: Schema.Struct({
+    available: Schema.Boolean,
+    reason: Schema.String,
+    targetDefinitionHash: Schema.String,
+    nextVisit: Schema.NullOr(Schema.Number),
+    maxVisits: Schema.NullOr(Schema.Number),
+    compatibleDefinitionUpgrade: Schema.Boolean,
+  }),
+  gate: Schema.NullOr(Gate),
+  actions: Schema.Array(ActionSummary),
+  artifacts: Schema.Array(ArtifactMetadata),
+  approvals: Schema.Array(Decision),
+  visits: Schema.Record(Schema.String, Schema.Number),
+  createdAt: Schema.optional(Schema.String),
+  updatedAt: Schema.optional(Schema.String),
+});
+export type RunDetail = typeof RunDetail.Type;
 
 export const WorkflowPhasePresentation = Schema.Struct({
   id: Schema.String,
@@ -143,4 +199,8 @@ export const MetadataRequest = Schema.Struct({
   commitMessage: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
   title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
   body: Schema.String.check(Schema.isMaxLength(20000)),
+});
+export const RestartPhaseRequest = Schema.Struct({
+  ...Mutation.fields,
+  definitionHash: Schema.String,
 });

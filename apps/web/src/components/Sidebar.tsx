@@ -1,4 +1,3 @@
-import { WorkflowSidebar } from "../j5/workflow/WorkflowSidebar";
 import { isWorkflowThread } from "@j5/workflow-contracts/sidebar";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { autoAnimate } from "@formkit/auto-animate";
@@ -3671,7 +3670,6 @@ export default function Sidebar() {
           </SidebarGroup>
         }
       >
-        <WorkflowSidebar query={threadSearchQuery} />
         <SidebarGroup className="ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pb-1 pt-0">
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (

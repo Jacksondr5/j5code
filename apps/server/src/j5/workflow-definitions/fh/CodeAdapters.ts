@@ -76,7 +76,7 @@ export function makeCodeAdapters(
           "--",
         ]),
         repository: await Workspace.git(run.repository, ["remote", "get-url", "origin"]),
-        baseBranch: inputs.baseRef.replace(/^origin\//, ""),
+        baseBranch: await Workspace.publicationBaseBranch(run.repository, inputs.baseRef),
         headBranch: getWorkspace(run).branch,
         commitMessage: `feat: ${handoff.summary.split("\n")[0]!.slice(0, 100)}`,
         title: handoff.summary.split("\n")[0]!.slice(0, 120),

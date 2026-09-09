@@ -42,4 +42,10 @@ describe("workflow review documents", () => {
     expect(isWorkflowThread("workflow:manual-thread")).toBe(false);
     expect(isWorkflowThread("thread:wf:ordinary")).toBe(false);
   });
+  it("keeps a 96 KiB diff out of the Markdown projection until its section is expanded", () => {
+    const diff = "x".repeat(96 * 1024);
+    const markdown = reviewDocument({ summary: "Validated candidate", diff });
+    expect(markdown).toBe("Validated candidate");
+    expect(markdown.length).toBeLessThan(96);
+  });
 });

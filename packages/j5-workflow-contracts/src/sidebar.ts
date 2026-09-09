@@ -9,19 +9,17 @@ export const WorkflowEntry = Schema.Struct({
   status: RunStatus,
   revision: Schema.Number,
   gateRevision: Schema.NullOr(Schema.Number),
-  // Optional for entries produced by a server that has not restarted onto the
-  // timestamp projection yet. The client renders legacy activity as unavailable.
-  updatedAt: Schema.optional(Schema.NullOr(Schema.String)),
+  updatedAt: Schema.String,
 });
 export type WorkflowEntry = typeof WorkflowEntry.Type;
 export const WorkflowEntries = Schema.Struct({
   runs: Schema.Array(WorkflowEntry),
   hasMore: Schema.Boolean,
-  // Optional during rolling client/server upgrades. Clients must not present a
-  // missing approval count as a confirmed zero.
-  total: Schema.optional(Schema.Number),
-  waitingApprovalCount: Schema.optional(Schema.Number),
+  total: Schema.Number,
+  waitingApprovalCount: Schema.Number,
 });
+
+export const WorkflowApprovalCount = Schema.Struct({ count: Schema.Number });
 
 export const WorkflowThreadParent = Schema.Struct({
   runId: Schema.String,

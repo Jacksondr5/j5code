@@ -1,9 +1,9 @@
 # Development workflows
 
 Workflows needing approval appear in the Inbox as distinct workflow items and keep a
-text **Needs approval** status until the gate is resolved. The sidebar prioritizes
-approvals, blocked and failed work; **All workflows** opens complete paginated history
-across Squadrons. Individual agent conversations are available under workflow
+text **Needs approval** status until the gate is resolved. Open Workflows in the panel
+beside a thread to review runs and resolve approvals without leaving the conversation.
+All workflows opens the complete paginated history across Squadrons. Individual agent conversations are available under workflow
 activity and include a durable link back to their parent workflow.
 
 Open **Workflows**, choose **New workflow**, then select an eligible Squadron, enter
@@ -11,12 +11,21 @@ a development request and base ref, and choose **Start workflow**. A Squadron mu
 contain exactly one project; ineligible Squadrons are explained in the dialog. The base ref is
 resolved once. Each run owns a separate branch and worktree under the server home.
 
-Scout collects evidence, Navigator proposes the plan and executable checks, and
-Advocate and Skeptic review it. **Approve plan** authorizes the displayed plan
-version and checks. Builder implements it; the server executes those exact checks,
-then Critic and Sentry review the validated candidate. Failed checks and blocking
+Scout collects evidence, and Navigator proposes the plan and executable checks. Plans
+record assumptions used to resolve unspecified product choices. Advocate and Skeptic
+block a plan only when it contradicts the request or supplied evidence, is infeasible,
+or lacks executable verification.
+
+**Approve plan** authorizes the displayed plan version and checks. If reviewers still
+reject the plan when no further plan-review cycle is available, the workflow reaches
+**Approve plan** with both reviews attached. Approval permits implementation despite
+reviewer dissent. Requesting further changes after the revision budget is exhausted
+requires a new run.
+
+Builder implements the approved plan; the server executes its exact checks, then Critic
+and Sentry review the validated candidate. Failed checks and blocking implementation
 reviews require repairs. There are at most two plan revisions and two implementation
-repair rounds. Exhaustion blocks the run.
+repair rounds. Implementation-repair exhaustion continues to block the run.
 
 At the publication gate, inspect the recorded per-file diff, reviews, repository,
 branches, commit message, and draft PR title/body. Save edited publication text before
@@ -33,6 +42,11 @@ Cancel stops successors and interrupts owned work; it preserves artifacts,
 worktrees, and already completed publication.
 
 Blocked workflows explain their failure category, technical cause, and permitted recovery.
+When plan or code review reaches its deadline, **Restart plan review** or
+**Restart code review** stops the old reviewers and starts both reviewers again with a
+fresh 30-minute window. The restart uses the next existing review attempt and retains
+earlier evidence and conversation links. If reviewer cleanup fails, retry the restart
+or cancel the workflow.
 **Reconcile action** is available only when reconciliation is supported and retains the
 same action identity, deadline, and budgets. An interrupted verification command with an unknown
 result requires inspection; there is no bypass button. A missing or changed

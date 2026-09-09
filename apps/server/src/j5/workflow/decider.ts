@@ -13,6 +13,15 @@ export type Event =
     }
   | { readonly type: "decision"; readonly decision: Decision }
   | { readonly type: "retry" }
+  | {
+      readonly type: "restart_phase";
+      readonly targetDefinitionHash: string;
+      readonly actor: string;
+      readonly compatibleDefinitionUpgrade: boolean;
+    }
+  | { readonly type: "restart_ready" }
+  | { readonly type: "restart_cleanup_failed"; readonly cause: string }
+  | { readonly type: "retry_restart" }
   | { readonly type: "cancel" }
   | { readonly type: "cancelled" }
   | { readonly type: "invalidate"; readonly cause: string }
@@ -28,6 +37,14 @@ export type Event =
 export class Conflict extends Error {}
 export const actionId = (run: Run, task: string, attempt: number): string =>
   `wf:${hash([run.id, run.phase, run.revision, task, attempt])}`;
+
+const selectedEvidenceHashes = (input: unknown): ReadonlyArray<string> => {
+  if (input === null || typeof input !== "object") return [];
+  if ("selectedEvidenceHashes" in input && Array.isArray(input.selectedEvidenceHashes)) {
+    return input.selectedEvidenceHashes.filter((item): item is string => typeof item === "string");
+  }
+  return "original" in input ? selectedEvidenceHashes(input.original) : [];
+};
 
 const blocked = (
   run: Run,
@@ -96,7 +113,7 @@ function enter(run: Run, definition: Definition, next: string, now: number): Run
     status: "pending",
     deadline: now + 30 * 60 * 1000,
     input: definition.input(current, phase, task),
-    result: null,
+    resultArtifactId: null,
   }));
   return { ...current, actions: [...current.actions, ...actions] };
 }
@@ -124,9 +141,13 @@ export function decide(
       ? { ...previous, revision: previous.revision + 1, status: "cancelled" }
       : previous;
   }
+  const restartUpgrade =
+    event.type === "restart_phase" &&
+    event.compatibleDefinitionUpgrade &&
+    definition?.hash === event.targetDefinitionHash;
   if (
     !definition ||
-    definition.hash !== previous.definitionHash ||
+    (definition.hash !== previous.definitionHash && !restartUpgrade) ||
     definition.version !== previous.definitionVersion
   ) {
     return {
@@ -152,6 +173,115 @@ export function decide(
           recovery: null,
         }
       : previous;
+  if (event.type === "retry_restart") {
+    if (previous.status !== "blocked" || previous.recovery !== "retry_restart" || !previous.restart)
+      throw new Conflict("This restart cannot be retried");
+    return {
+      ...previous,
+      revision: previous.revision + 1,
+      status: "restarting",
+      cause: null,
+      failureCategory: null,
+      recovery: null,
+    };
+  }
+  if (event.type === "restart_cleanup_failed") {
+    if (previous.status !== "restarting" || !previous.restart) return previous;
+    return {
+      ...blocked(
+        { ...previous, revision: previous.revision + 1 },
+        event.cause,
+        "retry_restart",
+        "restart_cleanup_failed",
+      ),
+      restart: previous.restart,
+    };
+  }
+  if (event.type === "restart_ready") {
+    if (previous.status !== "restarting" || !previous.restart) return previous;
+    const phase = phaseById(definition, previous.restart.phase);
+    const run = { ...previous, revision: previous.revision + 1 };
+    const actions: Action[] = phase.tasks.map((task) => ({
+      id: actionId(run, task.id, 1),
+      runId: run.id,
+      phase: phase.id,
+      revision: run.revision,
+      task: task.id,
+      attempt: 1,
+      kind: phase.kind as "agent" | "code",
+      adapter: task.adapter,
+      status: "pending",
+      deadline: previous.restart!.deadline,
+      input: definition.input(run, phase, task),
+      resultArtifactId: null,
+    }));
+    return {
+      ...run,
+      status: "running",
+      cause: null,
+      failureCategory: null,
+      relevantActionId: null,
+      recovery: null,
+      restart: null,
+      actions: [...run.actions, ...actions],
+    };
+  }
+  if (event.type === "restart_phase") {
+    if (
+      previous.status !== "blocked" ||
+      previous.failureCategory !== "action_deadline_expired" ||
+      !["plan_review", "code_review"].includes(previous.phase)
+    )
+      throw new Conflict("Only a timed-out review phase can be restarted");
+    if (event.targetDefinitionHash !== definition.hash)
+      throw new Conflict("Displayed workflow definition has changed");
+    const phase = phaseById(definition, previous.phase);
+    const visit = (previous.visits[previous.phase] ?? 0) + 1;
+    if (visit > phase.maxVisits) throw new Conflict("Review phase attempt budget is exhausted");
+    const cleanupActionIds = previous.actions
+      .filter(
+        (action) =>
+          action.phase === previous.phase &&
+          ["pending", "claimed", "blocked"].includes(action.status),
+      )
+      .map((action) => action.id);
+    const revision = previous.revision + 1;
+    return {
+      ...previous,
+      revision,
+      definitionHash: definition.hash,
+      ...(previous.definitionHash === definition.hash
+        ? {}
+        : {
+            definitionUpgrades: [
+              ...(previous.definitionUpgrades ?? []),
+              {
+                actor: event.actor,
+                fromHash: previous.definitionHash,
+                toHash: definition.hash,
+                atRevision: revision,
+              },
+            ],
+          }),
+      status: "restarting",
+      cause: null,
+      failureCategory: null,
+      relevantActionId: null,
+      recovery: null,
+      gate: null,
+      visits: { ...previous.visits, [previous.phase]: visit },
+      restart: {
+        phase: previous.phase,
+        visit,
+        deadline: now + 30 * 60 * 1000,
+        cleanupActionIds,
+        targetDefinitionHash: definition.hash,
+      },
+      actions: previous.actions.map((action) =>
+        cleanupActionIds.includes(action.id) ? { ...action, status: "cancelled" as const } : action,
+      ),
+    };
+  }
   let run: Run = { ...previous, revision: previous.revision + 1 };
   const phase = phaseById(definition, run.phase);
   if (event.type === "invalidate") {
@@ -213,7 +343,7 @@ export function decide(
     }
     if (decision.decision === "request_changes" && !decision.feedback.trim())
       throw new Conflict("Feedback is required");
-    run = { ...run, approvals: [...run.approvals, decision] };
+    run = { ...run, approvals: [...run.approvals, { ...decision, phase: previous.phase }] };
     if (decision.decision === "cancel")
       return { ...decide(previous, { type: "cancel" }, definition, now), approvals: run.approvals };
     const next = phase.transitions[decision.decision];
@@ -279,8 +409,9 @@ export function decide(
           "invalid_action_output",
           action.id,
         );
+      const { externalIdentity: _externalIdentity, ...actionWithoutIdentity } = action;
       const corrected: Action = {
-        ...action,
+        ...actionWithoutIdentity,
         revision: run.revision,
         id: actionId(run, action.task, action.attempt + 1),
         attempt: action.attempt + 1,
@@ -305,20 +436,26 @@ export function decide(
       phase: action.phase,
       revision: action.revision,
       attempt: action.attempt,
-      governs: previous.artifacts.map((item) => item.hash),
+      governs: selectedEvidenceHashes(action.input),
     };
     run = {
       ...run,
       artifacts: [...run.artifacts, artifact],
       actions: run.actions.map((item) =>
-        item.id === action.id ? { ...item, status: "completed", result: artifact } : item,
+        item.id === action.id
+          ? { ...item, status: "completed", resultArtifactId: artifact.id }
+          : item,
       ),
     };
     const currentActions = phase.tasks.map((task) =>
       run.actions.findLast((item) => item.phase === phase.id && item.task === task.id),
     );
     if (currentActions.some((item) => item?.status !== "completed")) return run;
-    const artifacts = currentActions.flatMap((item) => (item?.result ? [item.result] : []));
+    const artifacts = currentActions.flatMap((item) => {
+      if (!item?.resultArtifactId) return [];
+      const artifact = run.artifacts.find((candidate) => candidate.id === item.resultArtifactId);
+      return artifact ? [artifact] : [];
+    });
     const outcome = definition.outcome(run, phase, artifacts);
     const next = phase.transitions[outcome];
     return next

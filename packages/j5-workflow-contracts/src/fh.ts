@@ -14,6 +14,7 @@ export const PlanHandoff = Schema.Struct({
   summary: Text,
   steps: Schema.Array(Text).check(Schema.isMinLength(1)),
   checks: Schema.Array(VerificationCommand).check(Schema.isMinLength(1)),
+  assumptions: Schema.Array(Text),
 });
 export const ReviewHandoff = Schema.Struct({
   verdict: Schema.Literals(["accept", "revise"]),

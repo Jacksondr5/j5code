@@ -1,6 +1,17 @@
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { readWorkflowEntries, readWorkflowThreadParent } from "./SidebarRead.ts";
-import { GateRequest, MetadataRequest, Mutation, StartRequest } from "@j5/workflow-contracts";
+import {
+  readWorkflowApprovalCount,
+  readWorkflowEntries,
+  readWorkflowThreadParent,
+} from "./SidebarRead.ts";
+import {
+  GateRequest,
+  MetadataRequest,
+  Mutation,
+  RestartPhaseRequest,
+  RunStatus,
+  StartRequest,
+} from "@j5/workflow-contracts";
 import { AuthOrchestrationReadScope, AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -22,7 +33,9 @@ import { WorkflowService } from "../workflow-definitions/Service.ts";
 const decodeGateRequestEffect = Schema.decodeUnknownEffect(GateRequest);
 const decodeMetadataRequestEffect = Schema.decodeUnknownEffect(MetadataRequest);
 const decodeMutationEffect = Schema.decodeUnknownEffect(Mutation);
+const decodeRestartPhaseRequestEffect = Schema.decodeUnknownEffect(RestartPhaseRequest);
 const decodeStartRequestEffect = Schema.decodeUnknownEffect(StartRequest);
+const isRunStatus = Schema.is(RunStatus);
 
 const authenticate = (operate: boolean) =>
   Effect.gen(function* () {
@@ -55,17 +68,27 @@ export const workflowHttpLayer = Layer.unwrap(
         if (!operate) {
           if (id === "sidebar") {
             const offset = Number(url.searchParams.get("offset") ?? 0);
+            const status = url.searchParams.get("status") ?? "";
             if (!Number.isSafeInteger(offset) || offset < 0)
               return HttpServerResponse.jsonUnsafe({ message: "Invalid offset" }, { status: 400 });
+            if (status !== "" && !isRunStatus(status))
+              return HttpServerResponse.jsonUnsafe({ message: "Invalid status" }, { status: 400 });
             return HttpServerResponse.jsonUnsafe(
               yield* readWorkflowEntries(
                 url.searchParams.get("squadronId") ?? "",
                 (url.searchParams.get("q") ?? "").slice(0, 240),
                 offset,
                 Number(url.searchParams.get("limit") ?? 50),
+                status,
               ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
             );
           }
+          if (id === "approval-count")
+            return HttpServerResponse.jsonUnsafe({
+              count: yield* readWorkflowApprovalCount().pipe(
+                Effect.provideService(SqlClient.SqlClient, sql),
+              ),
+            });
           if (id === "thread-parent")
             return HttpServerResponse.jsonUnsafe({
               parent: yield* readWorkflowThreadParent(url.searchParams.get("threadId") ?? "").pipe(
@@ -74,10 +97,28 @@ export const workflowHttpLayer = Layer.unwrap(
             });
           if (id === "definitions")
             return HttpServerResponse.jsonUnsafe({ definitions: service.definitions });
-          if (id) return HttpServerResponse.jsonUnsafe({ run: yield* service.get(id) });
-          return HttpServerResponse.jsonUnsafe({
-            runs: yield* service.list(url.searchParams.get("squadronId") ?? ""),
-          });
+          if (id && parts[4] === "artifacts" && parts[5])
+            return HttpServerResponse.jsonUnsafe({
+              artifact: yield* service.artifact(id, decodeURIComponent(parts[5])),
+            });
+          if (id) {
+            const knownVersion = url.searchParams.get("ifReadVersion");
+            if (knownVersion !== null) {
+              const parsed = Number(knownVersion);
+              if (!Number.isSafeInteger(parsed) || parsed < 0)
+                return HttpServerResponse.jsonUnsafe(
+                  { message: "Invalid read version" },
+                  { status: 400 },
+                );
+              if ((yield* service.readVersion(id)) === parsed)
+                return HttpServerResponse.empty({ status: 304 });
+            }
+            return HttpServerResponse.jsonUnsafe({ run: yield* service.get(id) });
+          }
+          return HttpServerResponse.jsonUnsafe(
+            { message: "Unknown workflow read" },
+            { status: 404 },
+          );
         }
         const body = yield* request.json;
         if (!id)
@@ -112,6 +153,17 @@ export const workflowHttpLayer = Layer.unwrap(
             }),
           });
         }
+        if (action === "restart-phase") {
+          const input = yield* decodeRestartPhaseRequestEffect(body);
+          return HttpServerResponse.jsonUnsafe({
+            run: yield* service.mutate(id, input.commandId, input.expectedRevision, {
+              type: "restart_phase",
+              targetDefinitionHash: input.definitionHash,
+              actor: session.subject,
+              compatibleDefinitionUpgrade: false,
+            }),
+          });
+        }
         const input = yield* decodeMutationEffect(body);
         if (action !== "cancel" && action !== "retry")
           return HttpServerResponse.jsonUnsafe({ message: "Unknown action" }, { status: 404 });
@@ -124,7 +176,7 @@ export const workflowHttpLayer = Layer.unwrap(
           WorkflowError: (error) =>
             Effect.succeed(
               HttpServerResponse.jsonUnsafe(
-                { message: error.detail },
+                { message: error.detail, error: { code: error.code, detail: error.detail } },
                 {
                   status: error.code === "conflict" ? 409 : error.code === "not_found" ? 404 : 400,
                 },
@@ -145,6 +197,7 @@ export const workflowHttpLayer = Layer.unwrap(
     return Layer.mergeAll(
       HttpRouter.add("GET", "/api/j5/workflows", handler(false)),
       HttpRouter.add("GET", "/api/j5/workflows/:id", handler(false)),
+      HttpRouter.add("GET", "/api/j5/workflows/:id/artifacts/:artifactId", handler(false)),
       HttpRouter.add("POST", "/api/j5/workflows", handler(true)),
       HttpRouter.add("POST", "/api/j5/workflows/:id/:action", handler(true)),
     );

@@ -27,6 +27,8 @@ export const AgentInput = Schema.Struct({
   prompt: Schema.String,
   worktree: Schema.String,
   branch: Schema.String,
+  selectedEvidenceIds: Schema.Array(Schema.String),
+  selectedEvidenceHashes: Schema.Array(Schema.String),
 });
 const isAgentInput = Schema.is(AgentInput);
 const decodeInput = Schema.decodeUnknownEffect(AgentInput);
@@ -61,11 +63,11 @@ export const makeAgentAdapter = Effect.gen(function* () {
         const threadId = threadIdFor(action.id);
         const messageId = MessageId.make(`${action.id}:message`);
         const receipt = yield* receipts.getByCommandId(CommandId.make(action.id));
-        const existing = Option.isSome(receipt)
+        let projection = Option.isSome(receipt)
           ? yield* threads.getThreadProjection(threadId)
           : null;
-        if (!existing?.runs.some((item) => item.userMessageId === messageId)) {
-          const assignment = existing?.thread.agentPersonaAssignment;
+        if (!projection?.runs.some((item) => item.userMessageId === messageId)) {
+          const assignment = projection?.thread.agentPersonaAssignment;
           const authorityPolicy =
             assignment?.authorityPolicy ??
             getBuiltInAgentPersona(input.personaId).authority.defaultPolicy;
@@ -111,8 +113,9 @@ export const makeAgentAdapter = Effect.gen(function* () {
             createdBy: "user",
             creationSource: "web",
           });
+          projection = yield* threads.getThreadProjection(threadId);
         }
-        const projection = yield* threads.getThreadProjection(threadId);
+        if (projection === null) projection = yield* threads.getThreadProjection(threadId);
         const exactRun = findActionRun(projection.runs, action.id);
         if (!exactRun)
           return {
@@ -158,6 +161,18 @@ export const makeAgentAdapter = Effect.gen(function* () {
           threadId,
           runId: exactRun.id,
         });
+        const updated = yield* threads.getThreadProjection(threadId);
+        const interrupted = updated.runs.find((item) => item.id === exactRun.id);
+        if (
+          interrupted &&
+          !["completed", "failed", "cancelled", "interrupted", "rolled_back"].includes(
+            interrupted.status,
+          )
+        )
+          return yield* new WorkflowError({
+            code: "conflict",
+            detail: `Provider run ${exactRun.id} did not confirm interruption`,
+          });
       }).pipe(Effect.mapError(failure)),
   } satisfies Adapter;
 });

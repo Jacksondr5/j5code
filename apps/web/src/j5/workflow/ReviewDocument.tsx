@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import ChatMarkdown from "../../components/ChatMarkdown";
 import { getDiffLineStat, getRenderablePatch, resolveFileDiffPath } from "../../lib/diffRendering";
 import { reviewDocument } from "./artifactMarkdown";
@@ -58,24 +58,33 @@ export function ReviewDocument({ content }: { content: unknown }) {
     typeof content.diff === "string"
       ? content.diff
       : null;
+  const [diffOpen, setDiffOpen] = useState(false);
+  const [sourceOpen, setSourceOpen] = useState(false);
   return (
     <div className="space-y-4">
       <article className="rounded-lg border bg-background p-5" aria-label="Review document">
         <ChatMarkdown text={markdown} cwd={undefined} />
       </article>
       {diff !== null && (
-        <details open className="rounded-lg border p-4">
+        <details
+          className="rounded-lg border p-4"
+          onToggle={(event) => setDiffOpen(event.currentTarget.open)}
+        >
           <summary className="cursor-pointer font-medium">Candidate diff</summary>
-          <div className="mt-3">
-            <RecordedDiff diff={diff} />
-          </div>
+          {diffOpen ? (
+            <div className="mt-3">
+              <RecordedDiff diff={diff} />
+            </div>
+          ) : null}
         </details>
       )}
-      <details>
+      <details onToggle={(event) => setSourceOpen(event.currentTarget.open)}>
         <summary className="cursor-pointer text-xs text-muted-foreground">Source artifact</summary>
-        <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">
-          {JSON.stringify(content, null, 2)}
-        </pre>
+        {sourceOpen ? (
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">
+            {JSON.stringify(content, null, 2)}
+          </pre>
+        ) : null}
       </details>
     </div>
   );

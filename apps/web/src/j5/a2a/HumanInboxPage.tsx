@@ -24,9 +24,8 @@ import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { answerHumanExchange, listHumanInbox, type HumanInboxItem } from "./humanInboxClient";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
-import type { WorkflowEntry } from "@j5/workflow-contracts/sidebar";
-import { listWorkflowEntries } from "../workflow/client";
 import { phaseLabel, statusPresentation } from "../workflow/presentation";
+import { useWorkflowQuery, workflowListAtom } from "../workflow/queries";
 
 interface HumanInboxAnswerAttempt {
   readonly message: string;
@@ -278,8 +277,16 @@ export function HumanInboxPage() {
   const [personId, setPersonId] = useState<string | null>(null);
   const [items, setItems] = useState<ReadonlyArray<HumanInboxItem>>([]);
   const [answeredItems, setAnsweredItems] = useState<ReadonlyArray<HumanInboxItem>>([]);
-  const [workflowItems, setWorkflowItems] = useState<ReadonlyArray<WorkflowEntry>>([]);
-  const [workflowCount, setWorkflowCount] = useState(0);
+  const workflowQuery = useWorkflowQuery(
+    primaryEnvironmentId === null
+      ? null
+      : workflowListAtom({
+          environmentId: primaryEnvironmentId,
+          input: { squadronId: "", search: "", status: "waiting_approval", page: 0, pageSize: 100 },
+        }),
+  );
+  const workflowItems = workflowQuery.data?.runs ?? [];
+  const workflowCount = workflowQuery.data?.total ?? 0;
   const [answers, setAnswers] = useState<HumanInboxAnswers>({});
   const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -290,18 +297,13 @@ export function HumanInboxPage() {
     setLoading(true);
     setError(null);
     try {
-      const [openResponse, answeredResponse, workflows] = await Promise.all([
+      const [openResponse, answeredResponse] = await Promise.all([
         listHumanInbox(requestedPersonId, "open"),
         listHumanInbox(requestedPersonId, "answered"),
-        listWorkflowEntries("", "", 0, 100),
       ]);
-      if (workflows.waitingApprovalCount === null)
-        throw new Error("Workflow approval count is temporarily unavailable.");
       setPersonId(openResponse.personId);
       setItems(openResponse.items);
       setAnsweredItems(answeredResponse.items);
-      setWorkflowItems(workflows.runs.filter((run) => run.status === "waiting_approval"));
-      setWorkflowCount(workflows.waitingApprovalCount);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load the inbox.");
       throw cause;
@@ -312,9 +314,6 @@ export function HumanInboxPage() {
 
   useEffect(() => {
     void refresh().catch(() => undefined);
-    const changed = () => void refresh().catch(() => undefined);
-    window.addEventListener("j5-workflows-changed", changed);
-    return () => window.removeEventListener("j5-workflows-changed", changed);
   }, [refresh]);
 
   const answer = async (item: HumanInboxItem) => {

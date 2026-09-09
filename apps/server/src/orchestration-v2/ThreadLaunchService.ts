@@ -4,6 +4,8 @@ import {
   type MessageId,
   type ModelSelection,
   type OrchestrationV2Actor,
+  type OrchestrationV2AgentPersonaAssignment,
+  type OrchestrationV2AgentPersonaRequest,
   type OrchestrationV2CreationSource,
   type OrchestrationV2ThreadProjection,
   type PlanId,
@@ -34,6 +36,12 @@ import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.t
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import { buildBuiltInAgentPersonaAssignment } from "../j5/agents/agentPersonaAssignment.ts";
+import { getBuiltInAgentPersona } from "../j5/agents/agentPersonas.ts";
+import {
+  resolveBuiltInAgentPersonaRoute,
+  unavailableAgentPersonaReason,
+} from "../j5/agents/agentPersonaRouting.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 import { makeProviderFailure } from "./ProviderFailure.ts";
@@ -71,6 +79,7 @@ export interface ThreadLaunchInput {
   readonly modelSelection: ModelSelection;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
+  readonly agentPersona?: OrchestrationV2AgentPersonaRequest;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
   readonly initialMessage?: ThreadLaunchInitialMessage;
   /** Generic provenance for a child created from a proposed plan. */
@@ -90,6 +99,7 @@ export class ThreadLaunchError extends Schema.TaggedErrorClass<ThreadLaunchError
   {
     operation: Schema.Literals([
       "resolve-project",
+      "resolve-agent-persona",
       "read-receipt",
       "generate-metadata",
       "provision-worktree",
@@ -110,6 +120,9 @@ export class ThreadLaunchError extends Schema.TaggedErrorClass<ThreadLaunchError
   override get message(): string {
     if (this.operation === "register-squadron" && this.threadId !== undefined) {
       return `Thread ${this.threadId} was created but could not be assigned its required Squadron home. Replay the same creation command to retry registration; the durable thread was not deleted.`;
+    }
+    if (this.operation === "resolve-agent-persona") {
+      return this.cause instanceof Error ? this.cause.message : String(this.cause);
     }
     return `Thread launch ${this.commandId} failed during ${this.operation}.`;
   }
@@ -464,8 +477,75 @@ export const make = Effect.gen(function* () {
           "update-thread",
         )("Reusing an existing thread requires a thread id.");
       }
+      if (input.reuseExistingThread === true && input.agentPersona !== undefined) {
+        return yield* mapError(
+          input,
+          "resolve-agent-persona",
+        )("Agent persona assignment requires a newly created thread.");
+      }
 
       const launchReceipt = yield* readReceipt(input, input.commandId);
+      let launchModelSelection = input.modelSelection;
+      let agentPersonaAssignment: OrchestrationV2AgentPersonaAssignment | undefined;
+      if (input.agentPersona !== undefined && Option.isNone(launchReceipt)) {
+        const definition = getBuiltInAgentPersona(input.agentPersona.personaId);
+        const requestedAuthorityPolicy = input.agentPersona.authorityPolicy;
+        if (
+          requestedAuthorityPolicy !== undefined &&
+          !definition.authority.allowedPolicies.some(
+            (policy) => policy === requestedAuthorityPolicy,
+          )
+        ) {
+          return yield* mapError(
+            input,
+            "resolve-agent-persona",
+          )(
+            `Authority policy ${requestedAuthorityPolicy} is not allowed for ${input.agentPersona.personaId}.`,
+          );
+        }
+        const resolution = resolveBuiltInAgentPersonaRoute({
+          personaId: input.agentPersona.personaId,
+          providers: yield* providerRegistry.getProviders,
+          ...(input.agentPersona.authorityPolicy === undefined
+            ? {}
+            : { authorityPolicy: input.agentPersona.authorityPolicy }),
+        });
+        if (resolution.status === "unavailable") {
+          const reason = unavailableAgentPersonaReason(resolution);
+          return yield* mapError(
+            input,
+            "resolve-agent-persona",
+          )(
+            reason === "authority-not-enforceable"
+              ? `Agent persona ${input.agentPersona.personaId} is blocked because neither route can enforce its authority policy.`
+              : `Agent persona ${input.agentPersona.personaId} is blocked because its primary and fallback models are unavailable.`,
+          );
+        }
+        const assignment = buildBuiltInAgentPersonaAssignment({
+          resolution,
+          ...(input.agentPersona.authorityPolicy === undefined
+            ? {}
+            : { authorityPolicy: input.agentPersona.authorityPolicy }),
+        });
+        if (assignment.status === "invalid-authority-policy") {
+          return yield* mapError(
+            input,
+            "resolve-agent-persona",
+          )(
+            `Authority policy ${assignment.requestedPolicy} is not allowed for ${assignment.personaId}.`,
+          );
+        }
+        if (assignment.status === "authority-not-enforceable") {
+          return yield* mapError(
+            input,
+            "resolve-agent-persona",
+          )(
+            `Agent persona ${assignment.personaId} is blocked because ${assignment.driver} cannot enforce ${assignment.requestedPolicy} authority.`,
+          );
+        }
+        agentPersonaAssignment = assignment.assignment;
+        launchModelSelection = assignment.assignment.resolvedModelSelection;
+      }
       return yield* Effect.gen(function* () {
         const candidateThreadId =
           input.threadId ??
@@ -495,9 +575,10 @@ export const make = Effect.gen(function* () {
                 threadId: candidateThreadId,
                 projectId: input.projectId,
                 title: input.title,
-                modelSelection: input.modelSelection,
+                modelSelection: launchModelSelection,
                 runtimeMode: input.runtimeMode,
                 interactionMode: input.interactionMode,
+                ...(agentPersonaAssignment === undefined ? {} : { agentPersonaAssignment }),
                 branch: initialBranch,
                 worktreePath: initialWorktreePath,
                 createdBy: input.createdBy,
@@ -515,6 +596,13 @@ export const make = Effect.gen(function* () {
         const threadId =
           claimed.storedEvents.find((stored) => stored.event.type.startsWith("thread."))?.event
             .threadId ?? candidateThreadId;
+        const durableThread = claimed.storedEvents.find(
+          (stored) => stored.event.type === "thread.created",
+        );
+        const durableModelSelection =
+          durableThread?.event.type === "thread.created"
+            ? durableThread.event.payload.modelSelection
+            : launchModelSelection;
         if (project.id !== input.projectId) {
           return yield* mapError(input, "resolve-project", threadId)("Project identity changed.");
         }
@@ -539,7 +627,7 @@ export const make = Effect.gen(function* () {
               text: input.initialMessage.text,
               attachments: input.initialMessage.attachments,
               ...(input.generateTitle === true ? { titleSeed: input.title } : {}),
-              modelSelection: input.modelSelection,
+              modelSelection: durableModelSelection,
               dispatchMode: { type: "defer_start" },
               createdBy: input.createdBy,
               creationSource: input.creationSource,

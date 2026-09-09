@@ -33,12 +33,14 @@ it.effect(
       adapter: "persona",
       status: "pending",
       deadline: 1800000,
-      result: null,
+      resultArtifactId: null,
       input: {
         personaId: "publisher",
         prompt: "Test unsupported authority",
         worktree: "/test",
         branch: "test",
+        selectedEvidenceIds: [],
+        selectedEvidenceHashes: [],
       },
     };
     const run: Run = {
