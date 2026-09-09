@@ -11,7 +11,10 @@ import { SymbolView, type AppSymbolName } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
 import { GlassSurface } from "../../components/GlassSurface";
 import { PierreEntryIcon } from "../../components/PierreEntryIcon";
+import type { agentPersonaMentionItems } from "@t3tools/client-runtime/j5/agent-mentions";
+
 export type ComposerCommandItem =
+  | ReturnType<typeof agentPersonaMentionItems>[number]
   | {
       readonly id: string;
       readonly type: "path";
@@ -78,6 +81,8 @@ const SKILL_SOURCE_SYMBOL_BY_KIND: Record<ProviderSkillSourceKind, AppSymbolName
 
 function itemIcon(item: ComposerCommandItem): AppSymbolName | null {
   switch (item.type) {
+    case "agent":
+      return "person.crop.circle";
     case "slash-command":
     case "provider-slash-command":
       return "terminal";
@@ -90,12 +95,14 @@ function itemIcon(item: ComposerCommandItem): AppSymbolName | null {
 
 function groupLabel(triggerKind: ComposerTriggerKind | null): string | null {
   switch (triggerKind) {
+    case "agent":
+      return "Agents";
     case "slash-command":
       return "Commands";
     case "skill":
       return "Skills";
     case "path":
-      return "Files";
+      return "Files and agents";
     default:
       return null;
   }
@@ -106,8 +113,10 @@ function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean):
     return triggerKind === "path" ? "Searching files…" : "Loading…";
   }
   switch (triggerKind) {
+    case "agent":
+      return "No available agents found.";
     case "path":
-      return "No matching files or folders.";
+      return "No matching files or agents.";
     case "skill":
       return "No skills found.";
     case "slash-command":

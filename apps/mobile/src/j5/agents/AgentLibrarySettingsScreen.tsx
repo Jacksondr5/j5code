@@ -342,7 +342,7 @@ export function AgentLibrarySettingsScreen() {
         <SettingsSection title="Agent library">
           <View className="rounded-2xl bg-card px-4 py-3">
             <Text className="text-base text-foreground">
-              Run Books activate agents from this environment’s library. Edit imported agents here.
+              Mention agents with @ in Codex or Claude. Edit imported agents here.
             </Text>
           </View>
         </SettingsSection>

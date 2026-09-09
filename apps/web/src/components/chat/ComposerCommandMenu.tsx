@@ -26,7 +26,10 @@ import { Command, CommandGroup, CommandItem, CommandList } from "../ui/command";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { ComposerBanner } from "./ComposerBanner";
 
+import type { agentPersonaMentionItems } from "@t3tools/client-runtime/j5/agent-mentions";
+
 export type ComposerCommandItem =
+  | ReturnType<typeof agentPersonaMentionItems>[number]
   | {
       id: string;
       type: "path";
@@ -183,6 +186,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
         <span className="min-w-0 max-w-[48ch] flex-1 truncate text-left text-secondary-label text-xs">
           {props.item.description}
         </span>
+        {props.item.type === "agent" ? <Badge variant="outline">Agent</Badge> : null}
         {skillSourceKind ? (
           <SkillSourceBadge
             kind={skillSourceKind}

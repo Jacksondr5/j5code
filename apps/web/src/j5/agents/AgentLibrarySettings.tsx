@@ -390,7 +390,7 @@ export function AgentLibrarySettings() {
       <SettingsSection title="Agents">
         <SettingsRow
           title="Agent library"
-          description="Run Books activate agents from this environment’s library. Edit imported agents here."
+          description="Mention agents with @ in Codex or Claude. Edit imported agents here."
         />
         {orderedEnvironments.length > 1 ? (
           <SettingsRow
