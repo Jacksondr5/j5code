@@ -1,3 +1,4 @@
+import { checkClaudeAuthentication } from "../../j5/agents/claudeAuthentication.ts";
 import {
   type ClaudeSettings,
   type ModelCapabilities,
@@ -550,6 +551,28 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         status: "warning",
         auth: { status: "unknown" },
         message: "Could not verify Claude authentication status from initialization result.",
+      },
+    });
+  }
+
+  const authentication = yield* checkClaudeAuthentication(claudeSettings, resolvedEnvironment);
+  if (authentication !== "authenticated") {
+    return buildServerProvider({
+      presentation: CLAUDE_PRESENTATION,
+      enabled: true,
+      checkedAt,
+      models,
+      slashCommands: dedupedSlashCommands,
+      skills,
+      probe: {
+        installed: true,
+        version: parsedVersion,
+        status: "warning",
+        auth: { status: authentication },
+        message:
+          authentication === "unauthenticated"
+            ? "Claude is signed out on this server. Run `claude auth login` in a terminal on the server using this provider's configured executable and environment. /login is not supported in this chat."
+            : "Could not verify Claude login. Check `claude auth status` in a terminal on the server using this provider's configured executable and environment.",
       },
     });
   }
