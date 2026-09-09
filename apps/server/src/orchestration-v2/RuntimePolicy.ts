@@ -11,11 +11,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as ProjectionProjects from "../persistence/Services/ProjectionProjects.ts";
-import {
-  makeAgentPersonaLibrary,
-  type createAgentPersonaLibrary,
-} from "../j5/agents/agentPersonaLibrary.ts";
-import { resolveAgentPersonaRuntimePolicy } from "../j5/agents/agentPersonaRuntime.ts";
+import { makeAgentPersonaRuntimePolicyResolver } from "../j5/agents/agentPersonaRuntime.ts";
 import {
   ProviderAdapterV2RuntimePolicy,
   type ProviderAdapterV2RuntimePolicy as ProviderAdapterV2RuntimePolicyType,
@@ -62,20 +58,14 @@ export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePol
   "t3/orchestration-v2/RuntimePolicy/RuntimePolicyV2",
 ) {}
 
-const runtimePolicyForThread = (
-  input: { readonly thread: OrchestrationV2AppThread; readonly cwd: string | null },
-  library: ReturnType<typeof createAgentPersonaLibrary>,
-) =>
-  resolveAgentPersonaRuntimePolicy(input, library).pipe(
-    Effect.mapError(
-      (cause) =>
-        new RuntimePolicyResolveError({
-          projectId: input.thread.projectId,
-          providerInstanceId: input.thread.providerInstanceId,
-          cause,
-        }),
-    ),
-  );
+const resolveThreadPolicy = makeAgentPersonaRuntimePolicyResolver(
+  (input, cause) =>
+    new RuntimePolicyResolveError({
+      projectId: input.thread.projectId,
+      providerInstanceId: input.thread.providerInstanceId,
+      cause,
+    }),
+);
 
 /**
  * IMPLEMENTATIONS
@@ -83,10 +73,9 @@ const runtimePolicyForThread = (
 export const layer: Layer.Layer<RuntimePolicyV2> = Layer.effect(
   RuntimePolicyV2,
   Effect.gen(function* () {
-    const library = yield* makeAgentPersonaLibrary;
+    const resolve = yield* resolveThreadPolicy;
     return RuntimePolicyV2.of({
-      resolve: (input) =>
-        runtimePolicyForThread({ thread: input.thread, cwd: input.thread.worktreePath }, library),
+      resolve: (input) => resolve({ thread: input.thread, cwd: input.thread.worktreePath }),
     });
   }),
 );
@@ -99,7 +88,7 @@ export const layerFromProjectRepository: Layer.Layer<
   RuntimePolicyV2,
   Effect.gen(function* () {
     const projects = yield* ProjectionProjects.ProjectionProjectRepository;
-    const library = yield* makeAgentPersonaLibrary;
+    const resolve = yield* resolveThreadPolicy;
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
         const cwd =
@@ -127,7 +116,7 @@ export const layerFromProjectRepository: Layer.Layer<
               }),
             ),
           ));
-        return yield* runtimePolicyForThread({ thread: input.thread, cwd }, library);
+        return yield* resolve({ thread: input.thread, cwd });
       }),
     });
   }),

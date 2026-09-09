@@ -2,7 +2,11 @@ import * as Effect from "effect/Effect";
 import type { OrchestrationV2AppThread } from "@t3tools/contracts";
 import { ProviderAdapterV2RuntimePolicy } from "../../orchestration-v2/ProviderAdapter.ts";
 import { getBuiltInAgentPersonaInstructions } from "./agentPersonaPrompts.ts";
-import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
+import {
+  AgentPersonaLibraryError,
+  makeAgentPersonaLibrary,
+  type createAgentPersonaLibrary,
+} from "./agentPersonaLibrary.ts";
 import { getAgentAuthorityRules } from "./agentPersonas.ts";
 import {
   providerCanEnforceAgentPersonaAuthority,
@@ -63,3 +67,23 @@ export const resolveAgentPersonaRuntimePolicy = (
       }),
     ),
   );
+
+export interface AgentPersonaRuntimePolicyInput {
+  readonly thread: OrchestrationV2AppThread;
+  readonly cwd: string | null;
+}
+
+/**
+ * Resolver for the upstream RuntimePolicy layers: builds the library once and maps failures
+ * through the caller-supplied error constructor, so the upstream file adds no persona logic.
+ */
+export const makeAgentPersonaRuntimePolicyResolver = <E>(
+  toError: (input: AgentPersonaRuntimePolicyInput, cause: unknown) => E,
+) =>
+  Effect.gen(function* () {
+    const library = yield* makeAgentPersonaLibrary;
+    return (input: AgentPersonaRuntimePolicyInput) =>
+      resolveAgentPersonaRuntimePolicy(input, library).pipe(
+        Effect.mapError((cause) => toError(input, cause)),
+      );
+  });

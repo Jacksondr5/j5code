@@ -39,12 +39,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
-import { makeAgentPersonaLibrary } from "../j5/agents/agentPersonaLibrary.ts";
-import {
-  agentPersonaModelMismatchError,
-  agentPersonaRouteLockedError,
-  guardAgentPersonaThreadCreate,
-} from "../j5/agents/agentPersonaOrchestration.ts";
+import { makeAgentPersonaGuards } from "../j5/agents/agentPersonaOrchestration.ts";
 import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import { CommandPolicyV2 } from "./CommandPolicy.ts";
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
@@ -544,7 +539,6 @@ function rootProviderThreadsForProvider(
 }
 
 const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(function* () {
-  const personaLibrary = yield* makeAgentPersonaLibrary;
   const checkpointService = yield* CheckpointServiceV2;
   const commandPolicy = yield* CommandPolicyV2;
   const contextHandoffService = yield* ContextHandoffServiceV2;
@@ -553,6 +547,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const idAllocator = yield* IdAllocatorV2;
   const projectionStore = yield* ProjectionStoreV2;
   const providerAdapters = yield* ProviderAdapterRegistryV2;
+  const personaGuards = yield* makeAgentPersonaGuards({
+    getDriver: (providerInstanceId) =>
+      providerAdapters.get(providerInstanceId).pipe(Effect.map((adapter) => adapter.driver)),
+    adapterError: (command, providerInstanceId, cause) =>
+      new OrchestratorProviderAdapterError({
+        commandId: command.commandId,
+        providerInstanceId,
+        cause,
+      }),
+    dispatchError: (command, cause) =>
+      new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause,
+      }),
+  });
   const continuationRequests = yield* ProviderContinuationRequests;
   const providerSessions = yield* ProviderSessionManagerV2;
   const providerSwitchService = yield* ProviderSwitchServiceV2;
@@ -1349,29 +1359,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     command: Extract<OrchestrationV2Command, { readonly type: "thread.create" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
   ) {
-    yield* guardAgentPersonaThreadCreate(command, personaLibrary, (providerInstanceId) =>
-      providerAdapters.get(providerInstanceId).pipe(
-        Effect.map((adapter) => adapter.driver),
-        Effect.mapError(
-          (cause) =>
-            new OrchestratorProviderAdapterError({
-              commandId: command.commandId,
-              providerInstanceId,
-              cause,
-            }),
-        ),
-      ),
-    ).pipe(
-      Effect.catchTag(
-        "AgentPersonaLibraryError",
-        (cause) =>
-          new OrchestratorDispatchError({
-            commandId: command.commandId,
-            commandType: command.type,
-            cause,
-          }),
-      ),
-    );
+    yield* personaGuards.threadCreate(command);
 
     yield* Effect.annotateCurrentSpan({
       "orchestration_v2.command_id": command.commandId,
@@ -1561,14 +1549,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Thread ${command.threadId} is not pinned and cannot be reordered.`,
       });
     }
-    const personaRouteLocked = agentPersonaRouteLockedError(thread, command.type);
-    if (personaRouteLocked !== undefined) {
-      return yield* new OrchestratorDispatchError({
-        commandId: command.commandId,
-        commandType: command.type,
-        cause: personaRouteLocked,
-      });
-    }
+    yield* personaGuards.routeLocked(thread, command);
     if (
       command.type === "thread.settle" &&
       (projection.runs.some((run) =>
@@ -2927,17 +2908,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
       }
 
-      const personaModelMismatch = agentPersonaModelMismatchError(
-        projection.thread,
-        command.modelSelection,
-      );
-      if (personaModelMismatch !== undefined) {
-        return yield* new OrchestratorDispatchError({
-          commandId: command.commandId,
-          commandType: command.type,
-          cause: personaModelMismatch,
-        });
-      }
+      yield* personaGuards.modelMismatch(projection.thread, command);
       if (projection.thread.settledOverride !== null) {
         const now = yield* DateTime.now;
         const thread: OrchestrationV2AppThread = {
