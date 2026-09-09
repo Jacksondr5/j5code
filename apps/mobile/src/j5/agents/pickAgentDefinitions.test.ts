@@ -32,19 +32,19 @@ beforeEach(() => {
 });
 
 describe("native agent definition selection", () => {
-  it("collects nested agent.json files under the selected directory", async () => {
+  it("collects nested agent.yaml files under the selected directory", async () => {
     pickers.Directory.pickDirectoryAsync.mockImplementation(async () => {
       expect(isForegroundHandoffActive()).toBe(true);
       return new pickers.Directory("team", "root", [
         new pickers.File("README.md"),
-        new pickers.Directory("scout", "root/scout", [new pickers.File("agent.json")]),
-        new pickers.Directory("builder", "root/builder", [new pickers.File("agent.json")]),
+        new pickers.Directory("scout", "root/scout", [new pickers.File("agent.yaml")]),
+        new pickers.Directory("builder", "root/builder", [new pickers.File("agent.yaml")]),
       ]);
     });
     const files = await pickAgentDefinitions("folder");
     expect(files?.map(({ name }) => name).sort()).toEqual([
-      "team/builder/agent.json",
-      "team/scout/agent.json",
+      "team/builder/agent.yaml",
+      "team/scout/agent.yaml",
     ]);
     expect(isForegroundHandoffActive()).toBe(false);
     expect(pickers.File.pickFileAsync).not.toHaveBeenCalled();
@@ -53,9 +53,9 @@ describe("native agent definition selection", () => {
   it("reads only the single chosen file", async () => {
     pickers.File.pickFileAsync.mockResolvedValue({
       canceled: false,
-      result: new pickers.File("agent.json"),
+      result: new pickers.File("agent.yaml"),
     });
-    expect(await pickAgentDefinitions("agent")).toEqual([{ name: "agent.json", content: "{}" }]);
+    expect(await pickAgentDefinitions("agent")).toEqual([{ name: "agent.yaml", content: "{}" }]);
     expect(pickers.Directory.pickDirectoryAsync).not.toHaveBeenCalled();
     expect(isForegroundHandoffActive()).toBe(false);
   });
