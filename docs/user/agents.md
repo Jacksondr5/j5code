@@ -18,10 +18,10 @@ Open **Settings → Agents** on web, desktop, or mobile to see reusable personas
 To add your own definitions:
 
 1. Open **Settings → Agents** and select the destination environment.
-2. Use **Import** beside **Scoped agents**. Choose **Folder** to include all JSON and YAML definitions in that folder and its subfolders, or **Import → Agent file** to select one `.json`, `.yaml`, or `.yml` file. Other files are ignored. Each file must contain one agent definition with its own unique ID.
+2. Use **Import** beside **Scoped agents**. Choose **Folder** to include all YAML definitions (`.yaml` or `.yml`) in that folder and its subfolders, or **Import → Agent file** to select one YAML file. Other files are ignored. Each file must contain one agent definition with its own unique ID.
 3. The library refreshes after a successful import. Import and removal results appear as temporary toast notifications. A selection can contain up to 50 definitions, each at most 64 KiB. If any definition is invalid, none of the selection is imported; the error identifies the file.
 
-YAML is convenient for writing multiline instructions without escaped line breaks. Use `instructions: |` followed by indented text. JSON and YAML use the same fields and validation. Keep one definition per file and avoid keeping both formats for the same agent in an imported folder.
+Definitions are YAML files. Use `instructions: |` followed by indented text for multiline instructions. Keep one definition per file; JSON files are not imported.
 
 Definitions are copied from your device into the selected environment, including a remote environment. Later changes to the original files require another import. If any selected agent IDs already exist, a confirmation lists the affected agents. Each conflicting agent has a replacement toggle, initially on. Turn it off to skip importing that agent and keep its current definition. Choose **Import selected** to import new agents and overwrite the selected existing agents, including local edits, or **Cancel** to import nothing. Turning off every replacement still imports any new agents in the selection. Replacement preserves each agent’s on/off setting and existing tasks; future launches use the imported definition. Original source files remain unchanged. If an existing definition changes while confirmation is open, you will be asked to confirm again. Duplicate IDs within the same selection are always rejected.
 

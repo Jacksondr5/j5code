@@ -238,8 +238,8 @@ export function AgentLibrarySettings() {
           ref={fileInput}
           type="file"
           hidden
-          accept=".json,.yaml,.yml,application/json,application/yaml,text/yaml"
-          aria-label="Choose agent JSON or YAML file"
+          accept=".yaml,.yml,application/yaml,text/yaml"
+          aria-label="Choose agent YAML file"
           onChange={(event) => {
             const files = Array.from(event.currentTarget.files ?? []);
             event.currentTarget.value = "";

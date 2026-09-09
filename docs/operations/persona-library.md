@@ -4,7 +4,7 @@ Persona files live on the server environment, including when clients connect rem
 
 ## Import from a client
 
-Settings → Agents provides one **Import** menu with **Agent file** and **Folder** options on web, desktop, iOS, and Android. Folder selection includes `.json`, `.yaml`, and `.yml` files recursively; a single-file selection imports only that definition. The client uploads selected definition contents to the chosen environment using authenticated orchestration-operate RPCs. Paths are diagnostic labels, never server write destinations.
+Settings → Agents provides one **Import** menu with **Agent file** and **Folder** options on web, desktop, iOS, and Android. Folder selection includes `.yaml` and `.yml` files recursively; a single-file selection imports only that definition. The client uploads selected definition contents to the chosen environment using authenticated orchestration-operate RPCs. Paths are diagnostic labels, never server write destinations.
 
 Imports are copies, stored as one atomically replaced `<stateDir>/imported-agent-personas.json` collection. Imported IDs take precedence over the source library below. The UI first imports with `replaceExisting: false`. Existing IDs produce a typed `AgentPersonaImportConflictError` before any writes, carrying names, IDs, and definition digests. Cancel rejects the entire selection. Each conflict has a replacement toggle. Import selected retries the same files with `replaceExisting: true`, the approved `confirmedConflicts`, and `skippedPersonaIds` for toggled-off agents; the server checks those digests under the mutation permit and requests fresh confirmation for new or changed conflicts. Skipped IDs are excluded before conflict checks and writes, even if their definitions were removed while the dialog was open. They stay skipped across retries. New agents are imported alongside approved replacements; an entirely skipped selection succeeds without writing. Acceptance overwrites local edits only for approved replacements while preserving enabled state and saved task snapshots. The RPC retains explicit replacement without `confirmedConflicts` for existing clients; duplicate IDs within a batch are always rejected. All files are validated before writing. Batches are limited to 50 files and 64 KiB of UTF-8 per file. Other file extensions are ignored; unrelated or malformed JSON/YAML fails the entire selection.
 
@@ -16,7 +16,7 @@ The pencil editor saves name, description, runtime policy, and the primary/fallb
 
 ## Read server folders directly
 
-By default, the server reads immediate `.json`, `.yaml`, and `.yml` files in `<stateDir>/personas`. If neither that folder nor explicit configuration exists, it offers the bundled examples. An existing empty folder is an intentionally empty library.
+By default, the server reads immediate `.yaml` and `.yml` files in `<stateDir>/personas`. If neither that folder nor explicit configuration exists, it offers the bundled examples. An existing empty folder is an intentionally empty library.
 
 To select other folders, create `<stateDir>/agent-personas.json`:
 
@@ -28,7 +28,7 @@ To select other folders, create `<stateDir>/agent-personas.json`:
 
 Relative paths resolve from the state directory. Explicit configuration replaces the default/example catalog. An empty `folders` list disables source definitions; client imports remain available. The server never clones a repository or performs git operations; maintain the folders using an editor and git as desired.
 
-Each immediate JSON or YAML file contains one definition. Both formats use the same schema. YAML uses version 1.2; duplicate keys, multiple documents, custom tags, and aliases are rejected. Internal imports, configuration, and snapshots remain JSON. For example, `agent.yaml`:
+Each immediate YAML file contains one definition. YAML uses version 1.2; duplicate keys, multiple documents, custom tags, and aliases are rejected. JSON definition files are ignored in source folders and rejected on import; only the internal import store, configuration, and snapshots remain JSON. For example, `agent.yaml`:
 
 ```yaml
 id: team-researcher
