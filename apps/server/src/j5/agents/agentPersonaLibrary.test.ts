@@ -42,7 +42,7 @@ const fixture = Effect.gen(function* () {
   const write = (name: string, value: unknown) =>
     fs
       .makeDirectory(folder, { recursive: true })
-      .pipe(Effect.andThen(fs.writeFileString(path.join(folder, name), json(value))));
+      .pipe(Effect.andThen(fs.writeFileString(path.join(folder, name), yaml(value))));
   return { fs, path, stateDir, folder, library, write };
 });
 
@@ -76,7 +76,7 @@ describe("folder-backed persona library", () => {
   it.effect("loads arbitrary persona ids and custom artifacts without adding built-ins", () =>
     Effect.gen(function* () {
       const { library, write } = yield* fixture;
-      yield* write("researcher.json", custom);
+      yield* write("researcher.yaml", custom);
       assert.deepEqual(yield* library.load(), [custom]);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -84,10 +84,10 @@ describe("folder-backed persona library", () => {
   it.effect("reads relative and absolute source folders in deterministic order", () =>
     Effect.gen(function* () {
       const { library, fs, path, stateDir, folder, write } = yield* fixture;
-      yield* write("z.json", custom);
+      yield* write("z.yaml", custom);
       const second = path.join(stateDir, "team-library");
       yield* fs.makeDirectory(second);
-      yield* fs.writeFileString(path.join(second, "a.json"), json({ ...custom, id: "another" }));
+      yield* fs.writeFileString(path.join(second, "a.yaml"), yaml({ ...custom, id: "another" }));
       yield* fs.writeFileString(
         path.join(stateDir, "agent-personas.json"),
         json({ folders: ["personas", second] }),
@@ -104,8 +104,8 @@ describe("folder-backed persona library", () => {
   it.effect("rejects duplicate ids across files instead of choosing an arbitrary winner", () =>
     Effect.gen(function* () {
       const { library, write } = yield* fixture;
-      yield* write("a.json", custom);
-      yield* write("b.json", { ...custom, version: 4 });
+      yield* write("a.yaml", custom);
+      yield* write("b.yaml", { ...custom, version: 4 });
       assert.include(String(yield* library.load().pipe(Effect.flip)), "Duplicate persona id");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -113,7 +113,7 @@ describe("folder-backed persona library", () => {
   it.effect("reports invalid files, invalid configuration, and missing configured folders", () =>
     Effect.gen(function* () {
       const { library, write, fs, path, stateDir } = yield* fixture;
-      yield* write("invalid.json", { ...custom, outputArtifact: "UndefinedArtifact" });
+      yield* write("invalid.yaml", { ...custom, outputArtifact: "UndefinedArtifact" });
       assert.include(String(yield* library.load().pipe(Effect.flip)), "Invalid persona file");
       yield* fs.writeFileString(path.join(stateDir, "agent-personas.json"), "not json");
       assert.isDefined(yield* library.load().pipe(Effect.flip));
@@ -130,10 +130,10 @@ describe("folder-backed persona library", () => {
     () =>
       Effect.gen(function* () {
         const { library, write, fs, folder } = yield* fixture;
-        yield* write("researcher.json", custom);
+        yield* write("researcher.yaml", custom);
         const assignment = assignmentFor(yield* library.snapshot(custom));
         assert.isDefined(assignment.definitionDigest);
-        yield* write("researcher.json", { ...custom, instructions: "Changed behavior" });
+        yield* write("researcher.yaml", { ...custom, instructions: "Changed behavior" });
         assert.equal((yield* library.load())[0]?.instructions, "Changed behavior");
         assert.deepEqual(yield* library.readSnapshot(assignment), custom);
         yield* fs.remove(folder, { recursive: true });
@@ -199,9 +199,9 @@ describe("folder-backed persona library", () => {
 });
 
 describe("imported persona library", () => {
-  const file = (definition: typeof custom, name = "agent.json") => ({
+  const file = (definition: typeof custom, name = "agent.yaml") => ({
     name,
-    content: json(definition),
+    content: yaml(definition),
   });
 
   it.effect("imports a nested folder batch and retains it across library instances", () =>
@@ -209,7 +209,7 @@ describe("imported persona library", () => {
       const { library, fs, path, stateDir } = yield* fixture;
       const other = { ...custom, id: "second-agent" };
       const result = yield* library.importFiles({
-        files: [file(custom, "team/researcher/agent.json"), file(other, "team/second/agent.json")],
+        files: [file(custom, "team/researcher/agent.yaml"), file(other, "team/second/agent.yaml")],
         replaceExisting: false,
       });
       assert.deepEqual(result.importedIds, [custom.id, other.id]);
@@ -233,12 +233,12 @@ describe("imported persona library", () => {
         .importFiles({
           files: [
             file({ ...custom, id: "valid-new-agent" }),
-            { name: "broken/agent.json", content: "{}" },
+            { name: "broken/agent.yaml", content: "{}" },
           ],
           replaceExisting: false,
         })
         .pipe(Effect.flip);
-      assert.include(String(error), "broken/agent.json");
+      assert.include(String(error), "broken/agent.yaml");
       assert.deepEqual(yield* library.load(), before);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -246,7 +246,7 @@ describe("imported persona library", () => {
   it.effect("requires explicit replacement and restores the source on removal", () =>
     Effect.gen(function* () {
       const { library, write } = yield* fixture;
-      yield* write("agent.json", custom);
+      yield* write("agent.yaml", custom);
       const changed = { ...custom, instructions: "Updated instructions" };
       const input = { files: [file(changed)], replaceExisting: false };
       assert.include(String(yield* library.importFiles(input).pipe(Effect.flip)), "already exist");
@@ -262,8 +262,8 @@ describe("imported persona library", () => {
     Effect.gen(function* () {
       const { library } = yield* fixture;
       for (const files of [
-        [file(custom, "a/agent.json"), file(custom, "b/agent.json")],
-        [{ name: "large.json", content: "é".repeat(32769) }],
+        [file(custom, "a/agent.yaml"), file(custom, "b/agent.yaml")],
+        [{ name: "large.yaml", content: "é".repeat(32769) }],
         [],
         Array.from({ length: 51 }, (_, i) => file({ ...custom, id: `agent-${i}` })),
       ]) {
@@ -321,7 +321,7 @@ describe("imported persona library", () => {
   it.effect("preserves disabled state on replacement and clears it on removal", () =>
     Effect.gen(function* () {
       const { library, write } = yield* fixture;
-      yield* write("source.json", custom);
+      yield* write("source.yaml", custom);
       yield* library.importFiles({ files: [file(custom)], replaceExisting: true });
       yield* library.setImportedEnabled(custom.id, false);
       yield* library.importFiles({
@@ -386,8 +386,8 @@ describe("removing folder-loaded agents", () => {
       Effect.gen(function* () {
         const { library, write, fs, path, stateDir, folder } = yield* fixture;
         const scout = { ...custom, displayName: "My Local Scout" };
-        yield* write("local-scout.json", scout);
-        yield* write("other.json", { ...custom, id: "other-agent" });
+        yield* write("local-scout.yaml", scout);
+        yield* write("other.yaml", { ...custom, id: "other-agent" });
         const assignment = {
           ...assignmentFor(yield* library.snapshot(scout)),
           displayName: scout.displayName,
@@ -398,14 +398,14 @@ describe("removing folder-loaded agents", () => {
           (yield* restarted.load()).map(({ id }) => id),
           ["other-agent"],
         );
-        assert.equal(yield* fs.readFileString(path.join(folder, "local-scout.json")), json(scout));
+        assert.equal(yield* fs.readFileString(path.join(folder, "local-scout.yaml")), yaml(scout));
         const error = yield* prepareAgentPersonaLaunch({ personaId: scout.id }, [], restarted).pipe(
           Effect.flip,
         );
         assert.include(String(error), "Unknown agent persona");
         assert.deepEqual(yield* restarted.readSnapshot(assignment), scout);
         yield* restarted.importFiles({
-          files: [{ name: "local-scout.json", content: json(scout) }],
+          files: [{ name: "local-scout.yaml", content: yaml(scout) }],
           replaceExisting: false,
         });
         assert.isTrue((yield* restarted.load()).some(({ id }) => id === scout.id));
@@ -427,7 +427,7 @@ describe("removing folder-loaded agents", () => {
         assert.notInclude(remaining, "scout");
         assert.notInclude(remaining, "builder");
         yield* library.importFiles({
-          files: [{ name: "agent.json", content: json(custom) }],
+          files: [{ name: "agent.yaml", content: yaml(custom) }],
           replaceExisting: false,
         });
         assert.include(
@@ -446,10 +446,10 @@ describe("complete agent removal", () => {
       Effect.gen(function* () {
         for (const mode of ["source", "import", "override"] as const) {
           const { library, write, fs, path, stateDir, folder } = yield* fixture;
-          if (mode !== "import") yield* write("agent.json", custom);
+          if (mode !== "import") yield* write("agent.yaml", custom);
           if (mode !== "source") {
             yield* library.importFiles({
-              files: [{ name: "agent.json", content: json(custom) }],
+              files: [{ name: "agent.yaml", content: yaml(custom) }],
               replaceExisting: true,
             });
             yield* library.setImportedEnabled(custom.id, false);
@@ -463,10 +463,10 @@ describe("complete agent removal", () => {
           assert.notInclude(catalog.disabledIds, custom.id);
           assert.deepEqual(yield* restarted.readSnapshot(assignment), custom);
           if (mode !== "import")
-            assert.equal(yield* fs.readFileString(path.join(folder, "agent.json")), json(custom));
+            assert.equal(yield* fs.readFileString(path.join(folder, "agent.yaml")), yaml(custom));
           yield* restarted.removeAgent(custom.id);
           yield* restarted.importFiles({
-            files: [{ name: "agent.json", content: json(custom) }],
+            files: [{ name: "agent.yaml", content: yaml(custom) }],
             replaceExisting: false,
           });
           assert.isTrue((yield* restarted.load()).some(({ id }) => id === custom.id));
@@ -490,9 +490,9 @@ describe("editing imported agents", () => {
     () =>
       Effect.gen(function* () {
         const { library, write, fs, path, stateDir, folder } = yield* fixture;
-        yield* write("agent.json", custom);
+        yield* write("agent.yaml", custom);
         yield* library.importFiles({
-          files: [{ name: "agent.json", content: json(custom) }],
+          files: [{ name: "agent.yaml", content: yaml(custom) }],
           replaceExisting: true,
         });
         const assignment = assignmentFor(yield* library.snapshot(custom));
@@ -520,7 +520,7 @@ describe("editing imported agents", () => {
           modelRoute: update.modelRoute,
         });
         assert.include(catalog.disabledIds, custom.id);
-        assert.equal(yield* fs.readFileString(path.join(folder, "agent.json")), json(custom));
+        assert.equal(yield* fs.readFileString(path.join(folder, "agent.yaml")), yaml(custom));
         assert.deepEqual(yield* restarted.readSnapshot(assignment), custom);
         assert.notEqual(definitionDigest(changed), assignment.definitionDigest);
         yield* restarted.setImportedEnabled(custom.id, true);
@@ -537,7 +537,7 @@ describe("editing imported agents", () => {
       Effect.gen(function* () {
         const { library } = yield* fixture;
         yield* library.importFiles({
-          files: [{ name: "agent.json", content: json(custom) }],
+          files: [{ name: "agent.yaml", content: yaml(custom) }],
           replaceExisting: false,
         });
         for (const input of [
@@ -581,10 +581,10 @@ describe("editing imported agents", () => {
             allowedPolicies: ["read-only", "workspace-write"],
           },
         });
-        yield* write("agent.json", definition);
+        yield* write("agent.yaml", definition);
         yield* library.editImported(edit(definition)).pipe(Effect.flip);
         yield* library.importFiles({
-          files: [{ name: "agent.json", content: json(definition) }],
+          files: [{ name: "agent.yaml", content: yaml(definition) }],
           replaceExisting: true,
         });
         yield* library.editImported({ ...edit(definition), displayName: "New name" });
@@ -598,15 +598,15 @@ describe("confirmed import replacement", () => {
     Effect.gen(function* () {
       const { library } = yield* fixture;
       yield* library.importFiles({
-        files: [{ name: "agent.json", content: json(custom) }],
+        files: [{ name: "agent.yaml", content: yaml(custom) }],
         replaceExisting: false,
       });
       yield* library.setImportedEnabled(custom.id, false);
       const assignment = assignmentFor(yield* library.snapshot(custom));
       const replacement = { ...custom, version: custom.version + 1, displayName: "Company update" };
       const files = [
-        { name: "updated/agent.json", content: json(replacement) },
-        { name: "new/agent.json", content: json({ ...custom, id: "new-agent" }) },
+        { name: "updated/agent.yaml", content: yaml(replacement) },
+        { name: "new/agent.yaml", content: yaml({ ...custom, id: "new-agent" }) },
       ];
       const conflict = yield* library
         .importFiles({ files, replaceExisting: false })
@@ -644,12 +644,12 @@ describe("confirmed import replacement", () => {
     Effect.gen(function* () {
       const { library } = yield* fixture;
       yield* library.importFiles({
-        files: [{ name: "agent.json", content: json(custom) }],
+        files: [{ name: "agent.yaml", content: yaml(custom) }],
         replaceExisting: false,
       });
       const files = [
-        { name: "agent.json", content: json({ ...custom, version: 10 }) },
-        { name: "new.json", content: json({ ...custom, id: "new-agent" }) },
+        { name: "agent.yaml", content: yaml({ ...custom, version: 10 }) },
+        { name: "new.yaml", content: yaml({ ...custom, id: "new-agent" }) },
       ];
       const original = yield* library
         .importFiles({ files, replaceExisting: false })
@@ -666,7 +666,7 @@ describe("confirmed import replacement", () => {
       yield* library.importFiles({
         files: [
           {
-            name: "new.json",
+            name: "new.yaml",
             content: json({ ...custom, id: "new-agent", displayName: "Another import" }),
           },
         ],
@@ -701,7 +701,7 @@ describe("selective import replacement", () => {
       const kept = { ...custom, id: "keep-agent", displayName: "Local edits" };
       yield* library.importFiles({
         files: [custom, kept].map((value) => ({
-          name: `${value.id}/agent.json`,
+          name: `${value.id}/agent.yaml`,
           content: json(value),
         })),
         replaceExisting: false,
@@ -711,7 +711,7 @@ describe("selective import replacement", () => {
         { ...custom, version: 10 },
         { ...kept, version: 10, displayName: "Company update" },
         { ...custom, id: "new-agent" },
-      ].map((value) => ({ name: `${value.id}/agent.json`, content: json(value) }));
+      ].map((value) => ({ name: `${value.id}/agent.yaml`, content: yaml(value) }));
       const conflict = yield* library
         .importFiles({ files, replaceExisting: false })
         .pipe(Effect.flip);
@@ -745,7 +745,7 @@ describe("selective import replacement", () => {
   it.effect("does not restore a skipped agent removed while confirmation was open", () =>
     Effect.gen(function* () {
       const { library } = yield* fixture;
-      const files = [{ name: "agent.json", content: json(custom) }];
+      const files = [{ name: "agent.yaml", content: yaml(custom) }];
       yield* library.importFiles({ files, replaceExisting: false });
       yield* library.removeAgent(custom.id);
       const result = yield* library.importFiles({
@@ -762,7 +762,7 @@ describe("selective import replacement", () => {
 
 describe("YAML agent definitions", () => {
   it.effect(
-    "imports YAML and JSON together and preserves literal instructions in JSON storage and snapshots",
+    "imports every YAML extension and preserves literal instructions in JSON storage and snapshots",
     () =>
       Effect.gen(function* () {
         const { library, fs, path, stateDir } = yield* fixture;
@@ -774,7 +774,7 @@ describe("YAML agent definitions", () => {
         const result = yield* library.importFiles({
           files: [
             { name: "team/agent.YAML", content },
-            { name: "team/other.json", content: json({ ...custom, id: "other" }) },
+            { name: "team/other.yaml", content: yaml({ ...custom, id: "other" }) },
             { name: "team/third.yml", content: yaml({ ...custom, id: "third" }) },
           ],
           replaceExisting: false,
@@ -790,7 +790,7 @@ describe("YAML agent definitions", () => {
         assert.isTrue(stored.trimStart().startsWith("["));
         const conflict = yield* library
           .importFiles({
-            files: [{ name: "agent.json", content: json(definition) }],
+            files: [{ name: "agent.yaml", content: yaml(definition) }],
             replaceExisting: false,
           })
           .pipe(Effect.flip);
@@ -806,13 +806,13 @@ describe("YAML agent definitions", () => {
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("loads YAML source folders and rejects duplicate IDs across formats", () =>
+  it.effect("loads YAML source folders and rejects duplicate IDs across extensions", () =>
     Effect.gen(function* () {
       const { library, fs, path, folder, write } = yield* fixture;
       yield* fs.makeDirectory(folder, { recursive: true });
       yield* fs.writeFileString(path.join(folder, "agent.yml"), yaml(custom));
       assert.deepEqual(yield* library.load(), [custom]);
-      yield* write("agent.json", custom);
+      yield* write("agent.yaml", custom);
       assert.include(String(yield* library.load().pipe(Effect.flip)), "Duplicate persona id");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -832,7 +832,7 @@ describe("YAML agent definitions", () => {
         const error = yield* library
           .importFiles({
             files: [
-              { name: "valid.json", content: json({ ...custom, id: "valid" }) },
+              { name: "valid.yaml", content: yaml({ ...custom, id: "valid" }) },
               { name: "invalid.yaml", content },
             ],
             replaceExisting: false,
@@ -844,13 +844,33 @@ describe("YAML agent definitions", () => {
       const duplicate = yield* library
         .importFiles({
           files: [
-            { name: "agent.json", content: json(custom) },
+            { name: "agent.yaml", content: yaml(custom) },
             { name: "agent.yaml", content: yaml(custom) },
           ],
           replaceExisting: false,
         })
         .pipe(Effect.flip);
       assert.include(String(duplicate), "Multiple selected files");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects JSON imports and ignores JSON files in source folders", () =>
+    Effect.gen(function* () {
+      const { library, fs, path, folder } = yield* fixture;
+      const error = yield* library
+        .importFiles({
+          files: [{ name: "team/agent.json", content: json(custom) }],
+          replaceExisting: false,
+        })
+        .pipe(Effect.flip);
+      assert.include(String(error), "Unsupported agent file: team/agent.json");
+      yield* fs.makeDirectory(folder, { recursive: true });
+      yield* fs.writeFileString(path.join(folder, "legacy.json"), json(custom));
+      yield* fs.writeFileString(path.join(folder, "agent.yaml"), yaml({ ...custom, id: "kept" }));
+      assert.deepEqual(
+        (yield* library.load()).map(({ id }) => id),
+        ["kept"],
+      );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

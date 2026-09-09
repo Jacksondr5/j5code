@@ -120,7 +120,7 @@ export function presentAgentPersonaCatalog(
   });
 }
 
-/** Read only selected JSON and YAML files; paths are labels, never server filesystem destinations. */
+/** Read only selected YAML files; paths are labels, never server filesystem destinations. */
 export async function prepareAgentPersonaImport(
   files: ReadonlyArray<{
     readonly name: string;
@@ -130,7 +130,7 @@ export async function prepareAgentPersonaImport(
 ) {
   const definitions = files.filter((file) => isAgentPersonaDefinitionFile(file.name));
   if (definitions.length === 0)
-    throw new Error("No JSON or YAML agent definitions found in the selection.");
+    throw new Error("No YAML agent definitions found in the selection.");
   if (definitions.length > AGENT_PERSONA_IMPORT_MAX_FILES)
     throw new Error(
       `Select at most ${AGENT_PERSONA_IMPORT_MAX_FILES} agent definitions at a time.`,

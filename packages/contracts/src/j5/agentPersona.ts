@@ -141,8 +141,8 @@ export const OrchestrationV2AgentPersonaCatalog = Schema.Struct({
 });
 export type OrchestrationV2AgentPersonaCatalog = typeof OrchestrationV2AgentPersonaCatalog.Type;
 
-export const isAgentPersonaDefinitionFile = (name: string): boolean =>
-  /\.(json|ya?ml)$/i.test(name);
+/** User-authored definitions are YAML only; internal stores and snapshots stay JSON. */
+export const isAgentPersonaDefinitionFile = (name: string): boolean => /\.ya?ml$/i.test(name);
 
 export const AGENT_PERSONA_IMPORT_MAX_FILES = 50;
 export const AGENT_PERSONA_IMPORT_MAX_BYTES = 65536;
