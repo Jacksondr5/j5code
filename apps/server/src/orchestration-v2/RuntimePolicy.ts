@@ -15,7 +15,7 @@ import {
   makeAgentPersonaLibrary,
   type createAgentPersonaLibrary,
 } from "../j5/agents/agentPersonaLibrary.ts";
-import { resolveAgentPersonaRuntime } from "../j5/agents/agentPersonaRuntime.ts";
+import { resolveAgentPersonaRuntimePolicy } from "../j5/agents/agentPersonaRuntime.ts";
 import {
   ProviderAdapterV2RuntimePolicy,
   type ProviderAdapterV2RuntimePolicy as ProviderAdapterV2RuntimePolicyType,
@@ -66,14 +66,7 @@ const runtimePolicyForThread = (
   input: { readonly thread: OrchestrationV2AppThread; readonly cwd: string | null },
   library: ReturnType<typeof createAgentPersonaLibrary>,
 ) =>
-  resolveAgentPersonaRuntime(input.thread, library).pipe(
-    Effect.map((policy) =>
-      ProviderAdapterV2RuntimePolicy.make({
-        ...policy,
-        interactionMode: input.thread.interactionMode,
-        cwd: input.cwd,
-      }),
-    ),
+  resolveAgentPersonaRuntimePolicy(input, library).pipe(
     Effect.mapError(
       (cause) =>
         new RuntimePolicyResolveError({

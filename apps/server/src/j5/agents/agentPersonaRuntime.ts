@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import type { OrchestrationV2AppThread } from "@t3tools/contracts";
+import { ProviderAdapterV2RuntimePolicy } from "../../orchestration-v2/ProviderAdapter.ts";
 import { getBuiltInAgentPersonaInstructions } from "./agentPersonaPrompts.ts";
 import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import { getAgentAuthorityRules } from "./agentPersonas.ts";
@@ -47,3 +48,18 @@ export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime"
     ...(instructions === undefined ? {} : { agentPersonaInstructions: instructions }),
   };
 });
+
+/** The thread's full runtime policy: persona sandbox and instructions when assigned, the plain mode otherwise. */
+export const resolveAgentPersonaRuntimePolicy = (
+  input: { readonly thread: OrchestrationV2AppThread; readonly cwd: string | null },
+  library: ReturnType<typeof createAgentPersonaLibrary>,
+) =>
+  resolveAgentPersonaRuntime(input.thread, library).pipe(
+    Effect.map((policy) =>
+      ProviderAdapterV2RuntimePolicy.make({
+        ...policy,
+        interactionMode: input.thread.interactionMode,
+        cwd: input.cwd,
+      }),
+    ),
+  );

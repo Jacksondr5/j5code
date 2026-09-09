@@ -40,7 +40,11 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import { makeAgentPersonaLibrary } from "../j5/agents/agentPersonaLibrary.ts";
-import { validateAgentPersonaAssignment } from "../j5/agents/agentPersonaAssignment.ts";
+import {
+  agentPersonaModelMismatchError,
+  agentPersonaRouteLockedError,
+  guardAgentPersonaThreadCreate,
+} from "../j5/agents/agentPersonaOrchestration.ts";
 import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import { CommandPolicyV2 } from "./CommandPolicy.ts";
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
@@ -1345,61 +1349,29 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     command: Extract<OrchestrationV2Command, { readonly type: "thread.create" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
   ) {
-    const assignmentError =
-      command.agentPersonaAssignment === undefined
-        ? undefined
-        : yield* personaLibrary.readSnapshot(command.agentPersonaAssignment).pipe(
-            Effect.map((definition) =>
-              validateAgentPersonaAssignment(command.agentPersonaAssignment!, definition),
-            ),
-            Effect.mapError(
-              (cause) =>
-                new OrchestratorDispatchError({
-                  commandId: command.commandId,
-                  commandType: command.type,
-                  cause,
-                }),
-            ),
-          );
-    if (assignmentError !== undefined) {
-      return yield* new OrchestratorDispatchError({
-        commandId: command.commandId,
-        commandType: command.type,
-        cause: assignmentError,
-      });
-    }
-    if (command.agentPersonaAssignment !== undefined) {
-      const adapter = yield* providerAdapters.get(command.modelSelection.instanceId).pipe(
+    yield* guardAgentPersonaThreadCreate(command, personaLibrary, (providerInstanceId) =>
+      providerAdapters.get(providerInstanceId).pipe(
+        Effect.map((adapter) => adapter.driver),
         Effect.mapError(
           (cause) =>
             new OrchestratorProviderAdapterError({
               commandId: command.commandId,
-              providerInstanceId: command.modelSelection.instanceId,
+              providerInstanceId,
               cause,
             }),
         ),
-      );
-      if (adapter.driver !== command.agentPersonaAssignment.resolvedDriver) {
-        return yield* new OrchestratorDispatchError({
-          commandId: command.commandId,
-          commandType: command.type,
-          cause: "Agent persona assignment provider instance does not match its resolved driver.",
-        });
-      }
-    }
-    if (
-      command.agentPersonaAssignment !== undefined &&
-      !modelSelectionsEqual(
-        command.modelSelection,
-        command.agentPersonaAssignment.resolvedModelSelection,
-      )
-    ) {
-      return yield* new OrchestratorDispatchError({
-        commandId: command.commandId,
-        commandType: command.type,
-        cause: "Agent persona assignment must match the thread model selection.",
-      });
-    }
+      ),
+    ).pipe(
+      Effect.catchTag(
+        "AgentPersonaLibraryError",
+        (cause) =>
+          new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause,
+          }),
+      ),
+    );
 
     yield* Effect.annotateCurrentSpan({
       "orchestration_v2.command_id": command.commandId,
@@ -1589,14 +1561,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Thread ${command.threadId} is not pinned and cannot be reordered.`,
       });
     }
-    if (
-      thread.agentPersonaAssignment !== undefined &&
-      (command.type === "thread.model-selection.set" || command.type === "provider.switch")
-    ) {
+    const personaRouteLocked = agentPersonaRouteLockedError(thread, command.type);
+    if (personaRouteLocked !== undefined) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
-        cause: `Agent persona thread ${command.threadId} has an immutable model route.`,
+        cause: personaRouteLocked,
       });
     }
     if (
@@ -2957,18 +2927,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
       }
 
-      if (
-        projection.thread.agentPersonaAssignment !== undefined &&
-        command.modelSelection !== undefined &&
-        !modelSelectionsEqual(
-          command.modelSelection,
-          projection.thread.agentPersonaAssignment.resolvedModelSelection,
-        )
-      ) {
+      const personaModelMismatch = agentPersonaModelMismatchError(
+        projection.thread,
+        command.modelSelection,
+      );
+      if (personaModelMismatch !== undefined) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,
-          cause: `Agent persona thread ${command.threadId} has an immutable model route.`,
+          cause: personaModelMismatch,
         });
       }
       if (projection.thread.settledOverride !== null) {
