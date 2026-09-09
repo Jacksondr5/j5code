@@ -1,7 +1,7 @@
 import { agentPersonaMentionItems } from "@t3tools/client-runtime/j5/agent-mentions";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useMemo } from "react";
-import { orchestrationEnvironment } from "../../state/orchestration";
+import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 import { useEnvironmentQuery } from "../../state/query";
 
 export function useAgentMentionPicker(
@@ -9,12 +9,10 @@ export function useAgentMentionPicker(
   provider: string | undefined,
   trigger: { kind: string; query: string } | null,
 ) {
-  const enabled =
-    (provider === "codex" || provider === "claudeAgent") &&
-    (trigger?.kind === "agent" || trigger?.kind === "path");
+  const enabled = (provider === "codex" || provider === "claudeAgent") && trigger?.kind === "agent";
   const catalog = useEnvironmentQuery(
     enabled && environmentId !== null
-      ? orchestrationEnvironment.v2.agentPersonaCatalog({ environmentId, input: {} })
+      ? agentPersonaEnvironment.catalog({ environmentId, input: {} })
       : null,
   );
   const items = useMemo(

@@ -102,7 +102,7 @@ function groupLabel(triggerKind: ComposerTriggerKind | null): string | null {
     case "skill":
       return "Skills";
     case "path":
-      return "Files and agents";
+      return "Files";
     default:
       return null;
   }
@@ -116,7 +116,7 @@ function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean):
     case "agent":
       return "No available agents found.";
     case "path":
-      return "No matching files or agents.";
+      return "No matching files or folders.";
     case "skill":
       return "No skills found.";
     case "slash-command":
