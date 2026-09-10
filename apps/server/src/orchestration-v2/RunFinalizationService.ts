@@ -1,4 +1,4 @@
-import { CheckpointScopeId, ProjectId, RunId, ThreadId } from "@t3tools/contracts";
+import { CheckpointScopeId, RunId, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -31,10 +31,8 @@ export class RunFinalizationObserver extends Context.Reference<{
   readonly refreshAfterTurn: Effect.Effect<void>;
   readonly refresh: (input: {
     readonly cwd: string;
-    readonly projectId: ProjectId;
     readonly threadId: ThreadId;
     readonly runId: RunId;
-    readonly planMarkdown: string | null;
   }) => Effect.Effect<void, RunFinalizationRefreshError>;
 }>("t3/orchestration-v2/RunFinalizationObserver", {
   defaultValue: () => ({ refresh: () => Effect.void, refreshAfterTurn: Effect.void }),
@@ -76,17 +74,8 @@ export const make = Effect.gen(function* () {
       );
     const cwd = projection.checkpointScopes.find((scope) => scope.id === input.scopeId)?.cwd;
     if (cwd !== undefined) {
-      const plan = projection.plans.findLast(
-        (candidate) => candidate.kind === "proposed_plan" && candidate.runId === input.runId,
-      );
       yield* observer
-        .refresh({
-          cwd,
-          projectId: projection.thread.projectId,
-          threadId: input.threadId,
-          runId: input.runId,
-          planMarkdown: plan?.kind === "proposed_plan" ? plan.markdown : null,
-        })
+        .refresh({ cwd, threadId: input.threadId, runId: input.runId })
         .pipe(
           Effect.mapError(
             (cause) =>

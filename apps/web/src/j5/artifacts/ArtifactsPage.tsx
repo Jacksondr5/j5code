@@ -22,6 +22,7 @@ import { artifactEnvironment } from "../../state/artifacts";
 import { useEnvironmentQuery } from "../../state/query";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { listArtifacts, readArtifact } from "./artifactClient";
+import { nextArtifactRefreshGeneration } from "./artifactRefresh";
 
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdx"]);
 const IMAGE_MEDIA_TYPES: Readonly<Record<string, string>> = {
@@ -148,8 +149,9 @@ export function ArtifactsPage({
   }, [refreshGeneration, selectedEnvironmentId, selectedProjectId]);
 
   useEffect(() => {
-    if (artifactChange.data === null || artifactChange.data.revision === 0) return;
-    setRefreshGeneration((generation) => generation + 1);
+    setRefreshGeneration((generation) =>
+      nextArtifactRefreshGeneration(generation, artifactChange.data),
+    );
   }, [artifactChange.data]);
 
   useEffect(() => {

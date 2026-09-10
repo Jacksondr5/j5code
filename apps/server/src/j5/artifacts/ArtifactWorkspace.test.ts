@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 import { ProjectId } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -114,6 +115,41 @@ describe("ArtifactWorkspace", () => {
         assert.isTrue(windowsWriteResult._tag === "Failure");
       }).pipe(Effect.provide(TestLayer)),
     ),
+  );
+
+  it.effect.skipIf(!symlinksSupported)(
+    "rejects an escaping directory symlink before creating external directories",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const serverConfig = yield* ServerConfig.ServerConfig;
+          const artifacts = yield* ArtifactWorkspace.ArtifactWorkspace;
+          const outside = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: "j5-artifacts-outside-",
+          });
+
+          yield* artifacts.prepare(projectId);
+          const artifactRoot = path.join(
+            serverConfig.stateDir,
+            ArtifactWorkspace.ARTIFACT_DIRECTORY_NAME,
+            ArtifactWorkspace.artifactProjectDirectoryName(projectId),
+          );
+          yield* fileSystem.symlink(outside, path.join(artifactRoot, "link"));
+
+          const result = yield* Effect.exit(
+            artifacts.write({
+              projectId,
+              relativePath: "link/new-directory/file.md",
+              content: "must not escape",
+            }),
+          );
+
+          assert.isTrue(result._tag === "Failure");
+          assert.isFalse(yield* fileSystem.exists(path.join(outside, "new-directory")));
+        }).pipe(Effect.provide(TestLayer)),
+      ),
   );
 
   it.effect("watches for files created in the artifacts directory", () =>

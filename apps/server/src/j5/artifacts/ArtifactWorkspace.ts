@@ -98,6 +98,37 @@ export const layer = Layer.effect(
     const artifactRootFor = (projectId: ProjectId) =>
       path.join(artifactsDir, artifactProjectDirectoryName(projectId));
 
+    const resolveNearestExistingAncestor = Effect.fn(
+      "ArtifactWorkspace.resolveNearestExistingAncestor",
+    )(function* (candidate: string, boundary: string) {
+      let current = candidate;
+      while (
+        !(yield* fileSystem
+          .exists(current)
+          .pipe(
+            Effect.mapError(
+              workspaceError("write-artifact", "The artifact directory could not be inspected."),
+            ),
+          ))
+      ) {
+        const parent = path.dirname(current);
+        if (parent === current || !isPathWithin(path, boundary, parent)) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "write-artifact",
+            detail: "Artifact paths cannot leave the artifacts directory.",
+          });
+        }
+        current = parent;
+      }
+      return yield* fileSystem
+        .realPath(current)
+        .pipe(
+          Effect.mapError(
+            workspaceError("write-artifact", "The artifact directory could not be resolved."),
+          ),
+        );
+    });
+
     const resolveArtifactsBase = Effect.fn("ArtifactWorkspace.resolveArtifactsBase")(function* () {
       yield* fileSystem
         .makeDirectory(artifactsDir, { recursive: true })
@@ -320,6 +351,16 @@ export const layer = Layer.effect(
         }
 
         const parent = path.dirname(requestedPath);
+        const realExistingAncestor = yield* resolveNearestExistingAncestor(
+          parent,
+          workspace.realArtifactRoot,
+        );
+        if (!isPathWithin(path, workspace.realArtifactRoot, realExistingAncestor)) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "write-artifact",
+            detail: "Artifact links cannot leave the artifacts directory.",
+          });
+        }
         yield* fileSystem
           .makeDirectory(parent, { recursive: true })
           .pipe(
