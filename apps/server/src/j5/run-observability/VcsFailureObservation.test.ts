@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest";
 import {
   CheckpointScopeId,
   MessageId,
+  ProjectId,
   ProviderInstanceId,
   RunId,
   ThreadId,
@@ -34,6 +35,7 @@ const now = DateTime.makeUnsafe("2026-09-04T12:00:00Z");
 function fixture() {
   const turnItems: Array<OrchestrationV2TurnItem> = [];
   const projection = {
+    thread: { projectId: ProjectId.make("observation-project") },
     runs: [
       {
         id: input.runId,
@@ -54,6 +56,7 @@ function fixture() {
       },
     ],
     checkpointScopes: [{ id: input.scopeId, cwd: "/repo" }],
+    plans: [],
     turnItems,
   } as unknown as OrchestrationV2ThreadProjection;
   const projections = Layer.mock(ProjectionStore.ProjectionStoreV2)({
