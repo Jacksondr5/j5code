@@ -2,13 +2,17 @@ import { assert, it } from "@effect/vitest";
 import type { EnvironmentId } from "@t3tools/contracts";
 
 import {
+  retainBoardReference,
   retainNewestRunDetail,
+  retainTimelinePage,
   retainWorkflowListReference,
   isPollableWorkflowAtom,
   shouldPollWorkflowQueries,
   workflowArtifactAtom,
+  workflowBoardAtom,
   workflowDetailAtom,
   workflowListAtom,
+  workflowTimelineAtom,
   workflowIntervalTransition,
   workflowDefinitionsQuery,
   workflowApprovalCountQuery,
@@ -65,6 +69,24 @@ it("classifies only periodically refreshed workflow queries as pollable", () => 
     isPollableWorkflowAtom(workflowDetailAtom({ environmentId, input: { runId: "run" } })),
   );
   assert.isTrue(isPollableWorkflowAtom(workflowApprovalCountQuery(environmentId)));
+  assert.isTrue(
+    isPollableWorkflowAtom(
+      workflowBoardAtom({
+        environmentId,
+        input: { squadronId: "", search: "", status: "", page: 0, pageSize: 24 },
+      }),
+    ),
+  );
+  assert.isTrue(
+    isPollableWorkflowAtom(
+      workflowTimelineAtom({ environmentId, input: { runId: "run", before: null } }),
+    ),
+  );
+  assert.isFalse(
+    isPollableWorkflowAtom(
+      workflowTimelineAtom({ environmentId, input: { runId: "run", before: 10 } }),
+    ),
+  );
   assert.isFalse(isPollableWorkflowAtom(workflowDefinitionsQuery(environmentId)));
   assert.isFalse(
     isPollableWorkflowAtom(
@@ -84,6 +106,93 @@ it("classifies only periodically refreshed workflow queries as pollable", () => 
         },
       }),
     ),
+  );
+});
+
+const boardCard = {
+  id: "run",
+  squadronId: "squadron",
+  title: "Build a board",
+  phase: "plan",
+  status: "running",
+  revision: 2,
+  readVersion: 3,
+  gateRevision: null,
+  updatedAt: "2026-09-09T00:00:00Z",
+  definitionId: "fh-development",
+  definitionVersion: 1,
+  definitionHash: "hash",
+  visit: 1,
+  visits: { plan: 1 },
+  failureCategory: null,
+  actions: [
+    {
+      actionId: "action",
+      phase: "plan",
+      task: "Planner",
+      attempt: 1,
+      actionKind: "agent",
+      actionStatus: "claimed",
+      deadline: 1,
+      threadId: "thread",
+      sessionRunId: "provider",
+      sessionStatus: "running",
+      requestedAt: "2026-09-09T00:00:00Z",
+      completedAt: null,
+    },
+  ],
+} as const;
+
+it("retains board pages and reuses unchanged card objects", () => {
+  const first = retainBoardReference("board-stable", {
+    cards: [boardCard],
+    hasMore: false,
+    total: 1,
+    waitingApprovalCount: 0,
+  });
+  assert.strictEqual(
+    retainBoardReference("board-stable", { ...first, cards: [{ ...boardCard }] }),
+    first,
+  );
+  const countChanged = retainBoardReference("board-stable", { ...first, total: 2 });
+  assert.notStrictEqual(countChanged, first);
+  assert.strictEqual(countChanged.cards[0], first.cards[0]);
+  const sessionChanged = retainBoardReference("board-stable", {
+    ...countChanged,
+    cards: [
+      {
+        ...boardCard,
+        actions: [{ ...boardCard.actions[0], sessionStatus: "completed" }],
+      },
+    ],
+  });
+  assert.notStrictEqual(sessionChanged.cards[0], first.cards[0]);
+});
+
+it("keys timeline pages by run and cursor and retains non-newer heads", () => {
+  const head = workflowTimelineAtom({ environmentId, input: { runId: "run", before: null } });
+  assert.strictEqual(
+    head,
+    workflowTimelineAtom({ environmentId, input: { runId: "run", before: null } }),
+  );
+  assert.notStrictEqual(
+    head,
+    workflowTimelineAtom({ environmentId, input: { runId: "run", before: 4 } }),
+  );
+  const page = {
+    runId: "run",
+    headRevision: 4,
+    readVersion: 5,
+    revisions: [],
+    nextBefore: null,
+  } as const;
+  assert.strictEqual(
+    retainTimelinePage("timeline-stable", page),
+    retainTimelinePage("timeline-stable", { ...page }),
+  );
+  assert.notStrictEqual(
+    retainTimelinePage("timeline-stable", { ...page, headRevision: 5, readVersion: 6 }),
+    page,
   );
 });
 

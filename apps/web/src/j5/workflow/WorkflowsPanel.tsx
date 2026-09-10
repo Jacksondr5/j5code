@@ -8,7 +8,7 @@ import { useSquadronAmbientScope } from "../squadron/SquadronDraftState";
 import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
 import WorkflowRunDetail from "./WorkflowRunDetail";
 import { WorkflowRunList } from "./WorkflowRunList";
-import { useWorkflowQuery, workflowListAtom } from "./queries";
+import { useWorkflowQuery, workflowBoardAtom, workflowDefinitionsQuery } from "./queries";
 import { useCreateWorkflow } from "./useCreateWorkflow";
 import { effectiveWorkflowPanelOffset, useWorkflowPanelStore } from "./workflowPanelStore";
 
@@ -25,6 +25,8 @@ export default function WorkflowsPanel() {
   );
   const selectRun = useWorkflowPanelStore((state) => state.selectRun);
   const setOffset = useWorkflowPanelStore((state) => state.setOffset);
+  const tab = useWorkflowPanelStore((state) => state.tab);
+  const setTab = useWorkflowPanelStore((state) => state.setTab);
   const onCreated = useCallback(
     (run: { id: string; squadronId: string }) => {
       setOffset(run.squadronId, 0);
@@ -36,7 +38,7 @@ export default function WorkflowsPanel() {
   const listQuery = useWorkflowQuery(
     environmentId === null || selectedRunId !== null
       ? null
-      : workflowListAtom({
+      : workflowBoardAtom({
           environmentId,
           input: {
             squadronId: ambientScope,
@@ -46,6 +48,9 @@ export default function WorkflowsPanel() {
             pageSize: 20,
           },
         }),
+  );
+  const definitions = useWorkflowQuery(
+    environmentId === null ? null : workflowDefinitionsQuery(environmentId),
   );
   const select = useCallback((id: string) => selectRun(id), [selectRun]);
 
@@ -70,11 +75,12 @@ export default function WorkflowsPanel() {
                 runId: undefined,
                 squadronId: ambientScope || undefined,
                 newWorkflow: undefined,
+                view: "board",
               }}
             />
           }
         >
-          All workflows
+          Open board
         </Button>
       </div>
       <ScrollArea className="min-h-0 flex-1">
@@ -82,7 +88,10 @@ export default function WorkflowsPanel() {
           {selectedRunId && environmentId ? (
             <WorkflowRunDetail
               environmentId={environmentId}
+              layout="stacked"
               runId={selectedRunId}
+              tab={tab}
+              onTabChange={setTab}
               onOpenThread={(threadId) =>
                 void navigate({
                   to: "/$environmentId/$threadId",
@@ -101,7 +110,9 @@ export default function WorkflowsPanel() {
           ) : null}
           {!selectedRunId && listQuery.data ? (
             <WorkflowRunList
-              runs={listQuery.data.runs}
+              runs={listQuery.data.cards}
+              cards={listQuery.data.cards}
+              definitions={definitions.data ?? []}
               total={listQuery.data.total}
               offset={offset}
               selected={null}

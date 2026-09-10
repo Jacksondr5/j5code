@@ -6,6 +6,10 @@ beside a thread to review runs and resolve approvals without leaving the convers
 All workflows opens the complete paginated history across Squadrons. Individual agent conversations are available under workflow
 activity and include a durable link back to their parent workflow.
 
+The Workflows page opens as a Board so you can scan phase progress, active agents, and approvals
+across runs. Open a run and choose Timeline to trace recorded phase changes, agent or code work,
+and human decisions; older imported history may show without an exact event time.
+
 Open **Workflows**, choose **New workflow**, then select an eligible Squadron, enter
 a development request and base ref, and choose **Start workflow**. A Squadron must
 contain exactly one project; ineligible Squadrons are explained in the dialog. The base ref is

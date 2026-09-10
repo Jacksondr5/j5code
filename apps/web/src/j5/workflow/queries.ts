@@ -1,6 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { Artifact, ArtifactMetadata, RunDetail } from "@j5/workflow-contracts";
 import { WorkflowEntries } from "@j5/workflow-contracts/sidebar";
+import type { BoardCard } from "@j5/workflow-contracts/observability";
+import { BoardPage, TimelinePage } from "@j5/workflow-contracts/observability";
 import type { EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -11,10 +13,12 @@ import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { formatEnvironmentQueryError } from "../../state/query";
 import {
   listWorkflowDefinitions,
+  listWorkflowBoard,
   listWorkflowEntries,
   readArtifact,
   readRun,
   readWorkflowApprovalCount,
+  readWorkflowTimeline,
 } from "./client";
 
 export interface WorkflowListInput {
@@ -32,6 +36,8 @@ export interface WorkflowQueryTarget<Input> {
 
 const keyOf = <Input>(target: WorkflowQueryTarget<Input>) => JSON.stringify(target);
 const listCache = new Map<string, typeof WorkflowEntries.Type>();
+const boardCache = new Map<string, BoardPage>();
+const timelineCache = new Map<string, TimelinePage>();
 const detailCache = new Map<string, RunDetail>();
 const artifactCache = new Map<string, Artifact>();
 const emptyWorkflowQuery = Atom.make(AsyncResult.initial<never, never>(false)).pipe(
@@ -71,6 +77,78 @@ export const retainWorkflowListReference = (key: string, next: typeof WorkflowEn
   listCache.set(key, next);
   return next;
 };
+
+const sameBoardAction = (left: BoardCard["actions"][number], right: BoardCard["actions"][number]) =>
+  left.actionId === right.actionId &&
+  left.phase === right.phase &&
+  left.task === right.task &&
+  left.attempt === right.attempt &&
+  left.actionKind === right.actionKind &&
+  left.actionStatus === right.actionStatus &&
+  left.deadline === right.deadline &&
+  left.threadId === right.threadId &&
+  left.sessionRunId === right.sessionRunId &&
+  left.sessionStatus === right.sessionStatus &&
+  left.requestedAt === right.requestedAt &&
+  left.completedAt === right.completedAt;
+
+const sameBoardCard = (left: BoardCard, right: BoardCard) =>
+  left.id === right.id &&
+  left.squadronId === right.squadronId &&
+  left.title === right.title &&
+  left.phase === right.phase &&
+  left.status === right.status &&
+  left.revision === right.revision &&
+  left.readVersion === right.readVersion &&
+  left.gateRevision === right.gateRevision &&
+  left.updatedAt === right.updatedAt &&
+  left.definitionId === right.definitionId &&
+  left.definitionVersion === right.definitionVersion &&
+  left.definitionHash === right.definitionHash &&
+  left.visit === right.visit &&
+  left.failureCategory === right.failureCategory &&
+  Object.keys(left.visits).length === Object.keys(right.visits).length &&
+  Object.entries(left.visits).every(([phase, visits]) => right.visits[phase] === visits) &&
+  left.actions.length === right.actions.length &&
+  left.actions.every((action, index) => {
+    const other = right.actions[index];
+    return other !== undefined && sameBoardAction(action, other);
+  });
+
+export const retainBoardReference = (key: string, next: BoardPage) => {
+  const previous = boardCache.get(key);
+  if (previous === undefined) {
+    boardCache.set(key, next);
+    return next;
+  }
+  const cards = next.cards.map((card, index) => {
+    const prior = previous.cards[index];
+    return prior !== undefined && sameBoardCard(prior, card) ? prior : card;
+  });
+  if (
+    previous.total === next.total &&
+    previous.waitingApprovalCount === next.waitingApprovalCount &&
+    previous.hasMore === next.hasMore &&
+    cards.length === previous.cards.length &&
+    cards.every((card, index) => card === previous.cards[index])
+  )
+    return previous;
+  const retained = { ...next, cards };
+  boardCache.set(key, retained);
+  return retained;
+};
+
+export const retainTimelinePage = (key: string, next: TimelinePage) => {
+  const previous = timelineCache.get(key);
+  if (
+    previous !== undefined &&
+    previous.headRevision === next.headRevision &&
+    next.readVersion <= previous.readVersion
+  )
+    return previous;
+  timelineCache.set(key, next);
+  return next;
+};
 export const retainNewestRunDetail = (previous: RunDetail | undefined, next: RunDetail | null) =>
   next === null || (previous !== undefined && next.readVersion <= previous.readVersion)
     ? previous
@@ -106,6 +184,50 @@ export const workflowListQuery = Atom.family((key: string) => {
       Atom.withLabel(`j5-workflow:list:${key}`),
     ),
   );
+});
+
+export const workflowBoardQuery = Atom.family((key: string) => {
+  const target = JSON.parse(key) as WorkflowQueryTarget<WorkflowListInput>;
+  return markPollable(
+    Atom.make(
+      Effect.promise(async () =>
+        retainBoardReference(
+          key,
+          await listWorkflowBoard(
+            target.input.squadronId,
+            target.input.search,
+            target.input.status,
+            target.input.page * target.input.pageSize,
+            target.input.pageSize,
+          ),
+        ),
+      ),
+    ).pipe(
+      Atom.swr({ staleTime: 5_000, revalidateOnMount: true }),
+      Atom.setIdleTTL(5 * 60_000),
+      Atom.withLabel(`j5-workflow:board:${key}`),
+    ),
+  );
+});
+
+export const workflowTimelineQuery = Atom.family((key: string) => {
+  const target = JSON.parse(key) as WorkflowQueryTarget<{
+    readonly runId: string;
+    readonly before: number | null;
+  }>;
+  const atom = Atom.make(
+    Effect.promise(async () =>
+      retainTimelinePage(key, await readWorkflowTimeline(target.input.runId, target.input.before)),
+    ),
+  ).pipe(
+    Atom.swr({
+      staleTime: target.input.before === null ? 5_000 : Number.POSITIVE_INFINITY,
+      revalidateOnMount: target.input.before === null,
+    }),
+    Atom.setIdleTTL(target.input.before === null ? 5 * 60_000 : 30 * 60_000),
+    Atom.withLabel(`j5-workflow:timeline:${key}`),
+  );
+  return target.input.before === null ? markPollable(atom) : atom;
 });
 
 export const workflowDetailQuery = Atom.family((key: string) => {
@@ -246,6 +368,11 @@ export function useWorkflowQuery<A, E>(atom: Atom.Atom<AsyncResult.AsyncResult<A
 
 export const workflowListAtom = (target: WorkflowQueryTarget<WorkflowListInput>) =>
   workflowListQuery(keyOf(target));
+export const workflowBoardAtom = (target: WorkflowQueryTarget<WorkflowListInput>) =>
+  workflowBoardQuery(keyOf(target));
+export const workflowTimelineAtom = (
+  target: WorkflowQueryTarget<{ readonly runId: string; readonly before: number | null }>,
+) => workflowTimelineQuery(keyOf(target));
 export const workflowDetailAtom = (target: WorkflowQueryTarget<{ readonly runId: string }>) =>
   workflowDetailQuery(keyOf(target));
 export const workflowArtifactAtom = (
