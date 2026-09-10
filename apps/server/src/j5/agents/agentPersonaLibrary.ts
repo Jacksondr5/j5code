@@ -176,6 +176,8 @@ export function createAgentPersonaLibrary(storage?: {
       definitions: [...definitions.values()],
       importedIds: imported.map(({ id }) => id),
       disabledIds: imported.filter(({ enabled }) => enabled === false).map(({ id }) => id),
+      /** Excluded source definitions with no imported override; listed so they can be restored. */
+      removedSources: sources.filter(({ id }) => removed.has(id) && !definitions.has(id)),
     };
   });
   const load = Effect.fn("AgentPersonaLibrary.load")(function* () {
@@ -364,6 +366,26 @@ export function createAgentPersonaLibrary(storage?: {
     yield* excludeSource(id);
   }, importPermit.withPermit);
 
+  const restoreSource = Effect.fn("AgentPersonaLibrary.restoreSource")(function* (id: string) {
+    if (storage === undefined)
+      return yield* new AgentPersonaLibraryError({
+        message: "Persona library storage is unavailable.",
+      });
+    const removed = new Set(yield* readRemovedSourceIds());
+    if (!removed.has(id))
+      return yield* new AgentPersonaLibraryError({
+        message: "This agent is not removed in this environment. Refresh the library.",
+      });
+    removed.delete(id);
+    yield* writeFileStringAtomically({
+      filePath: storage.path.join(storage.stateDir, "removed-source-agent-personas.json"),
+      contents: yield* encodeRemovedSourceIds([...removed]),
+    }).pipe(
+      Effect.provideService(FileSystem.FileSystem, storage.fs),
+      Effect.provideService(Path.Path, storage.path),
+    );
+  }, importPermit.withPermit);
+
   const removeAgent = Effect.fn("AgentPersonaLibrary.removeAgent")(function* (id: string) {
     const imported = yield* readImports();
     // Persist source exclusion first so deleting an override cannot reveal its source again.
@@ -430,6 +452,7 @@ export function createAgentPersonaLibrary(storage?: {
     removeImported,
     removeSource,
     removeAgent,
+    restoreSource,
     snapshot,
     readSnapshot,
   };

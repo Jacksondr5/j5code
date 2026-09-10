@@ -29,6 +29,8 @@ const AUTHORITY_LABELS: Readonly<Record<AgentPersonaAuthorityPolicy, string>> = 
 export interface AgentPersonaCatalogRow {
   readonly personaId: AgentPersonaId;
   readonly imported: boolean;
+  /** Removed source or bundled definitions stay listed with a Restore action. */
+  readonly removed: boolean;
   readonly enabled: boolean;
   readonly edit: AgentPersonaEditInput | null;
   readonly displayName: string;
@@ -36,8 +38,8 @@ export interface AgentPersonaCatalogRow {
   readonly acceptedInput: string;
   readonly outputArtifact: string;
   readonly authority: string;
-  readonly availability: "available" | "blocked" | "disabled";
-  readonly availabilityLabel: "Available" | "Blocked" | "Disabled";
+  readonly availability: "available" | "blocked" | "disabled" | "removed";
+  readonly availabilityLabel: "Available" | "Blocked" | "Disabled" | "Removed";
   readonly route: string;
 }
 
@@ -82,10 +84,13 @@ export function presentAgentPersonaCatalog(
     const available = persona.availability.status === "available";
     const disabled =
       persona.availability.status === "unavailable" && persona.availability.reason === "disabled";
+    const removed =
+      persona.availability.status === "unavailable" && persona.availability.reason === "removed";
     return {
       personaId: persona.personaId,
       imported: persona.imported ?? false,
-      enabled: !disabled,
+      removed,
+      enabled: !disabled && !removed,
       edit:
         persona.imported && persona.editable
           ? {
@@ -107,15 +112,29 @@ export function presentAgentPersonaCatalog(
             `${AUTHORITY_LABELS[policy]}${policy === persona.defaultAuthorityPolicy ? " (default)" : ""}`,
         )
         .join(", "),
-      availability: disabled ? "disabled" : available ? "available" : "blocked",
-      availabilityLabel: disabled ? "Disabled" : available ? "Available" : "Blocked",
+      availability: removed
+        ? "removed"
+        : disabled
+          ? "disabled"
+          : available
+            ? "available"
+            : "blocked",
+      availabilityLabel: removed
+        ? "Removed"
+        : disabled
+          ? "Disabled"
+          : available
+            ? "Available"
+            : "Blocked",
       route: available
         ? `${providerLabel(persona.availability.resolvedDriver)} · ${persona.availability.resolvedModelSelection.model} · ${persona.availability.resolvedRoute}`
         : persona.availability.reason === "authority-not-enforceable"
           ? "Required authority is not yet enforceable"
-          : disabled
-            ? "Disabled for new launches"
-            : "Primary and fallback models unavailable",
+          : removed
+            ? "Removed from this library"
+            : disabled
+              ? "Disabled for new launches"
+              : "Primary and fallback models unavailable",
     };
   });
 }

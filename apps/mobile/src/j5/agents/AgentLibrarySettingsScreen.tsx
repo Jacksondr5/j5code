@@ -66,6 +66,9 @@ export function AgentLibrarySettingsScreen() {
   const removeAgent = useAtomCommand(agentPersonaEnvironment.removeAgentPersona, {
     reportFailure: false,
   });
+  const restoreAgent = useAtomCommand(agentPersonaEnvironment.restoreSourceAgentPersona, {
+    reportFailure: false,
+  });
   async function importSelection(kind: "folder" | "agent") {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
@@ -133,6 +136,25 @@ export function AgentLibrarySettingsScreen() {
       });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       setNotification({ type: "success", title: "Agent removed" });
+      catalog.refresh();
+    } catch (error) {
+      setNotification({
+        type: "error",
+        title: "Agent action failed",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function restorePersona(personaId: string) {
+    if (effectiveEnvironmentId === null || busy) return;
+    const environmentId = effectiveEnvironmentId;
+    setBusy(true);
+    try {
+      const result = await restoreAgent({ environmentId, input: { personaId } });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      setNotification({ type: "success", title: "Agent restored" });
       catalog.refresh();
     } catch (error) {
       setNotification({
@@ -291,59 +313,78 @@ export function AgentLibrarySettingsScreen() {
                           </Text>
                         </View>
                       </View>
-                      <View className="flex-row items-center gap-2">
-                        {persona.imported ? (
-                          <Switch
-                            value={persona.enabled}
-                            disabled={busy}
-                            accessibilityLabel={`Enable ${persona.displayName}`}
-                            onValueChange={(enabled) =>
-                              void toggleAgent(persona.personaId, enabled)
-                            }
-                          />
-                        ) : null}
+                      {persona.removed ? (
                         <Pressable
                           accessibilityRole="button"
-                          accessibilityLabel={`Edit ${persona.displayName}`}
-                          accessibilityHint={
-                            persona.edit
-                              ? "Edit this imported copy"
-                              : "Import a copy to edit this agent"
-                          }
-                          accessibilityState={{ disabled: busy || persona.edit === null }}
-                          disabled={busy || persona.edit === null}
-                          className="size-11 items-center justify-center rounded-lg disabled:opacity-40"
-                          onPress={() => {
-                            if (persona.edit && effectiveEnvironmentId)
-                              setEditing({
-                                environmentId: effectiveEnvironmentId,
-                                initial: persona.edit,
-                              });
-                          }}
+                          accessibilityLabel={`Restore ${persona.displayName}`}
+                          accessibilityState={{ disabled: busy }}
+                          disabled={busy}
+                          className="h-11 flex-row items-center gap-2 rounded-lg border border-border px-3 disabled:opacity-40"
+                          onPress={() => void restorePersona(persona.personaId)}
                         >
                           <SymbolView
-                            name="pencil"
-                            size={18}
+                            name="arrow.uturn.backward"
+                            size={16}
                             tintColorClassName="accent-icon"
                             type="monochrome"
                           />
+                          <Text className="text-sm text-foreground">Restore</Text>
                         </Pressable>
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={`Remove ${persona.displayName}`}
-                          accessibilityState={{ disabled: busy }}
-                          disabled={busy}
-                          className="size-11 items-center justify-center rounded-lg border border-danger-foreground/30 disabled:opacity-40"
-                          onPress={() => void removePersona(persona.personaId)}
-                        >
-                          <SymbolView
-                            name="trash"
-                            size={18}
-                            tintColorClassName="accent-danger-foreground"
-                            type="monochrome"
-                          />
-                        </Pressable>
-                      </View>
+                      ) : (
+                        <View className="flex-row items-center gap-2">
+                          {persona.imported ? (
+                            <Switch
+                              value={persona.enabled}
+                              disabled={busy}
+                              accessibilityLabel={`Enable ${persona.displayName}`}
+                              onValueChange={(enabled) =>
+                                void toggleAgent(persona.personaId, enabled)
+                              }
+                            />
+                          ) : null}
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Edit ${persona.displayName}`}
+                            accessibilityHint={
+                              persona.edit
+                                ? "Edit this imported copy"
+                                : "Import a copy to edit this agent"
+                            }
+                            accessibilityState={{ disabled: busy || persona.edit === null }}
+                            disabled={busy || persona.edit === null}
+                            className="size-11 items-center justify-center rounded-lg disabled:opacity-40"
+                            onPress={() => {
+                              if (persona.edit && effectiveEnvironmentId)
+                                setEditing({
+                                  environmentId: effectiveEnvironmentId,
+                                  initial: persona.edit,
+                                });
+                            }}
+                          >
+                            <SymbolView
+                              name="pencil"
+                              size={18}
+                              tintColorClassName="accent-icon"
+                              type="monochrome"
+                            />
+                          </Pressable>
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Remove ${persona.displayName}`}
+                            accessibilityState={{ disabled: busy }}
+                            disabled={busy}
+                            className="size-11 items-center justify-center rounded-lg border border-danger-foreground/30 disabled:opacity-40"
+                            onPress={() => void removePersona(persona.personaId)}
+                          >
+                            <SymbolView
+                              name="trash"
+                              size={18}
+                              tintColorClassName="accent-danger-foreground"
+                              type="monochrome"
+                            />
+                          </Pressable>
+                        </View>
+                      )}
                     </View>
                     <Text className="text-sm text-foreground-muted">{persona.description}</Text>
                   </View>

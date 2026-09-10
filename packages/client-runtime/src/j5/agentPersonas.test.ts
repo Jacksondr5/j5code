@@ -457,3 +457,21 @@ it("retains skipped agents through fresh confirmation and accepts an empty repla
   });
   expect(result?.importedIds).toEqual(["new-agent"]);
 });
+
+it("presents removed source agents as restorable and never launchable", () => {
+  const persona = catalog.personas[1]!;
+  const removed = presentAgentPersonaCatalog({
+    personas: [
+      { ...persona, removed: true, availability: { status: "unavailable", reason: "removed" } },
+    ],
+  })[0];
+  expect(removed).toMatchObject({
+    imported: false,
+    removed: true,
+    enabled: false,
+    availability: "removed",
+    availabilityLabel: "Removed",
+    route: "Removed from this library",
+  });
+  expect(presentAgentPersonaCatalog({ personas: [persona] })[0]?.removed).toBe(false);
+});

@@ -35,7 +35,7 @@ Orchestrators activate personas in this version. Selecting a persona directly wh
 
 Persona instructions describe intended behavior. They do not grant permissions or guarantee that an agent obeys them. The displayed runtime policy reflects supported provider controls; unsupported modes appear as **Blocked**.
 
-The trash action also works for folder-loaded agents and bundled examples. Source files remain unchanged, and removal survives restarts. To restore an agent, use **Import → Agent file** and select its original definition file.
+The trash action also works for folder-loaded agents and bundled examples. Source files remain unchanged, and removal survives restarts. A removed example or folder agent stays in the list marked **Removed** with a **Restore** action that brings it back; a removed imported copy is gone and must be imported again.
 
 The persona library is separate from the task's Agents right panel, which shows runtime activity.
 
