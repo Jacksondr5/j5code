@@ -4,8 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useSidebar } from "../../components/ui/sidebar";
 import { cn } from "../../lib/utils";
+import { usePrimaryEnvironmentId } from "../../state/environments";
 import { readOpenInboxCount } from "./humanInboxCountClient";
 import { HUMAN_INBOX_REFRESH_EVENT } from "./humanInboxRefresh";
+import { useWorkflowQuery, workflowApprovalCountQuery } from "../workflow/queries";
 
 export const COUNT_POLL_INTERVAL_MS = 7_500;
 
@@ -13,7 +15,11 @@ export const shouldShowOpenInboxCount = (count: number | null) => count !== null
 
 export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean }) {
   const { isMobile, setOpenMobile } = useSidebar();
-  const [count, setCount] = useState<number | null>(null);
+  const environmentId = usePrimaryEnvironmentId();
+  const workflowCount = useWorkflowQuery(
+    environmentId === null ? null : workflowApprovalCountQuery(environmentId),
+  );
+  const [humanCount, setHumanCount] = useState<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -29,10 +35,10 @@ export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean })
       inFlight = true;
       void readOpenInboxCount()
         .then((response) => {
-          if (active) setCount(response.count);
+          if (active) setHumanCount(response.count);
         })
         .catch(() => {
-          if (active) setCount(null);
+          if (active) setHumanCount(null);
         })
         .finally(() => {
           inFlight = false;
@@ -66,6 +72,11 @@ export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean })
       document.removeEventListener("visibilitychange", refreshVisibleWindow);
     };
   }, []);
+
+  const count =
+    humanCount === null || workflowCount.data == null
+      ? null
+      : humanCount + workflowCount.data.count;
 
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) setOpenMobile(false);

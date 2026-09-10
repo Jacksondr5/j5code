@@ -1,12 +1,12 @@
 import * as Effect from "effect/Effect";
 import type { OrchestrationV2AppThread } from "@t3tools/contracts";
 import { ProviderAdapterV2RuntimePolicy } from "../../orchestration-v2/ProviderAdapter.ts";
-import { getBuiltInAgentPersonaInstructions } from "./agentPersonaPrompts.ts";
 import {
   AgentPersonaLibraryError,
   makeAgentPersonaLibrary,
   type createAgentPersonaLibrary,
 } from "./agentPersonaLibrary.ts";
+import { validateAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { getAgentAuthorityRules } from "./agentPersonas.ts";
 import {
   providerCanEnforceAgentPersonaAuthority,
@@ -20,36 +20,30 @@ export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime"
 ) {
   const assignment = thread.agentPersonaAssignment;
   if (assignment === undefined) return { runtimeMode: thread.runtimeMode };
-  let instructions: string | undefined;
-  if (assignment.definitionDigest === undefined) {
-    instructions = getBuiltInAgentPersonaInstructions(assignment);
-  } else {
-    const definition = yield* library.readSnapshot(assignment);
-    if (
-      !definition.authority.allowedPolicies.includes(assignment.authorityPolicy) ||
-      !providerCanEnforceAgentPersonaAuthority(
-        assignment.resolvedDriver,
-        assignment.authorityPolicy,
-      )
-    ) {
-      return yield* new AgentPersonaLibraryError({
-        message: "The assigned persona runtime permissions are unsupported.",
-      });
-    }
-    const rules = getAgentAuthorityRules(assignment.authorityPolicy);
-    instructions = `${definition.instructions}\n\n## Selected behavior: ${assignment.authorityPolicy}\nThese are operating instructions, not additional sandbox guarantees.\n${
-      rules.mayCommit
-        ? "Commit and push only within the authorized publication scope."
-        : "Never commit or push."
-    }\n${rules.mayWritePullRequest ? "Open or update pull requests only within the authorized scope." : "Do not mutate pull requests."}\nNever merge a pull request.\n${
-      assignment.authorityPolicy === "critic-fix"
-        ? "Edit only to address the requested review findings."
-        : ""
-    }`;
+  const definition = yield* library.readSnapshot(assignment);
+  const invalid = validateAgentPersonaAssignment(assignment, definition);
+  if (invalid) return yield* new AgentPersonaLibraryError({ message: invalid });
+  if (
+    !definition.authority.allowedPolicies.includes(assignment.authorityPolicy) ||
+    !providerCanEnforceAgentPersonaAuthority(assignment.resolvedDriver, assignment.authorityPolicy)
+  ) {
+    return yield* new AgentPersonaLibraryError({
+      message: "The assigned persona runtime permissions are unsupported.",
+    });
   }
+  const rules = getAgentAuthorityRules(assignment.authorityPolicy);
+  const instructions = `${definition.instructions}\n\n## Selected behavior: ${assignment.authorityPolicy}\nThese are operating instructions, not additional sandbox guarantees.\n${
+    rules.mayCommit
+      ? "Commit and push only within the authorized publication scope."
+      : "Never commit or push."
+  }\n${rules.mayWritePullRequest ? "Open or update pull requests only within the authorized scope." : "Do not mutate pull requests."}\nNever merge a pull request.\n${
+    assignment.authorityPolicy === "critic-fix"
+      ? "Edit only to address the requested review findings."
+      : ""
+  }`;
   return {
     ...translateAgentPersonaProviderPolicy(assignment.authorityPolicy, assignment.resolvedDriver),
-    ...(instructions === undefined ? {} : { agentPersonaInstructions: instructions }),
+    agentPersonaInstructions: instructions,
   };
 });
 

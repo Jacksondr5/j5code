@@ -22,6 +22,45 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
+  it("opens and toggles the workflows singleton", () => {
+    useRightPanelStore.getState().open(refA, "workflows");
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "workflows",
+      surfaces: [{ id: "workflows", kind: "workflows" }],
+    });
+    useRightPanelStore.getState().toggle(refA, "workflows");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).isOpen,
+    ).toBe(false);
+    useRightPanelStore.getState().open(refA, "workflows");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
+    ).toHaveLength(1);
+  });
+
+  it("preserves workflows surfaces when migrating the existing storage version", () => {
+    expect(
+      migratePersistedRightPanelState({
+        byThreadKey: {
+          "env-1:thread-A": {
+            isOpen: true,
+            activeSurfaceId: "workflows",
+            surfaces: [{ id: "workflows", kind: "workflows" }],
+          },
+        },
+      }),
+    ).toEqual({
+      byThreadKey: {
+        "env-1:thread-A": {
+          isOpen: true,
+          activeSurfaceId: "workflows",
+          surfaces: [{ id: "workflows", kind: "workflows" }],
+        },
+      },
+      threadPanelVisibilityByThreadKey: {},
+    });
+  });
   it("drops the legacy singleton terminal surface during migration", () => {
     expect(
       migratePersistedRightPanelState({

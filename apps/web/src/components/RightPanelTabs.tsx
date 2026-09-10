@@ -16,6 +16,7 @@ import {
   GitPullRequest,
   Globe2,
   Plus,
+  Workflow,
   TerminalSquare,
   Volume2,
   VolumeOff,
@@ -107,12 +108,14 @@ interface RightPanelTabsProps {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddAgents: () => void;
+  onAddWorkflows: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
   pullRequestAvailable: boolean;
   agentsAvailable: boolean;
+  workflowsAvailable: boolean;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
   /** Running + waiting subagents; badges the Agents card in the empty state. */
   liveAgentCount: number;
@@ -142,6 +145,7 @@ const SURFACE_DISABLED_REASONS = {
   diff: "Diff is only available for server threads in Git repositories.",
   pullRequest: "This thread's branch has no pull request yet.",
   agents: "Agents are only available from a thread.",
+  workflows: "Workflows are only available from a thread.",
 } as const;
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -164,6 +168,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   diff: "Available for Git repositories.",
   pullRequest: "No pull request on this branch yet.",
   agents: "Available from a thread.",
+  workflows: "Available from a thread.",
 } as const;
 
 type TabContextMenuAction =
@@ -301,12 +306,14 @@ function RightPanelEmptyState(props: {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddAgents: () => void;
+  onAddWorkflows: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
   pullRequestAvailable: boolean;
   agentsAvailable: boolean;
+  workflowsAvailable: boolean;
   liveAgentCount: number;
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
@@ -364,8 +371,18 @@ function RightPanelEmptyState(props: {
       badgeCount: 0,
     },
     {
+      label: "Workflows",
+      description: "Review runs and resolve approvals.",
+      icon: Workflow,
+      shortcut: "W",
+      available: props.workflowsAvailable,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.workflows,
+      onClick: props.onAddWorkflows,
+      badgeCount: 0,
+    },
+    {
       label: "Agents",
-      description: "Follow subagents and workflows.",
+      description: "Follow subagents.",
       icon: Bot,
       shortcut: "A",
       available: props.agentsAvailable,
@@ -606,6 +623,8 @@ function surfaceTitle(
       return `#${surface.number}`;
     case "agents":
       return "Agents";
+    case "workflows":
+      return "Workflows";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -687,6 +706,8 @@ function SurfaceIcon({
       );
     case "agents":
       return <Bot className="size-3 shrink-0" />;
+    case "workflows":
+      return <Workflow className="size-3 shrink-0" />;
   }
 }
 
@@ -807,6 +828,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       available: props.pullRequestAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.pullRequest,
       onClick: props.onAddPullRequest,
+    },
+    {
+      label: "Workflows",
+      icon: Workflow,
+      shortcut: "W",
+      available: props.workflowsAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.workflows,
+      onClick: props.onAddWorkflows,
     },
     {
       label: "Agents",
@@ -1254,12 +1283,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddFiles={props.onAddFiles}
             onAddPullRequest={props.onAddPullRequest}
             onAddAgents={props.onAddAgents}
+            onAddWorkflows={props.onAddWorkflows}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}
             pullRequestAvailable={props.pullRequestAvailable}
             agentsAvailable={props.agentsAvailable}
+            workflowsAvailable={props.workflowsAvailable}
             liveAgentCount={props.liveAgentCount}
           />
         ) : (

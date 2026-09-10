@@ -13,7 +13,7 @@ The right-panel view is available in the web and desktop clients.
 
 ## Persona library
 
-Open **Settings → Agents** on web, desktop, or mobile to see reusable personas in a connected environment. Select an environment to inspect its library and available model routes. Personas can be authored in folders and shared through git; supplied examples are starting points you can customize.
+Open **Settings → Agents** on web, desktop, or mobile to see reusable personas in a connected environment. Select an environment to inspect its library and available model routes. New environments start with an empty library. Import YAML definitions or configure a source folder to add personas.
 
 To add your own definitions:
 
@@ -27,16 +27,18 @@ Definitions are copied from your device into the selected environment, including
 
 Each agent shows its availability badge beside its name and a destructive trash icon. Imported entries also have an **On/Off** switch. New imports start on. Turn an agent off to keep it in the library while preventing new launches; its status changes to **Disabled**. Turn it back on to make it available for activation, subject to its model and runtime-policy requirements. The setting belongs to the selected environment and survives restarts and edits.
 
-Use the trash icon to remove an agent whether it is on or off. Removal deletes its imported copy and excludes any underlying example or folder definition with that ID, so the agent disappears from the library. Running tasks keep their saved definition.
+Use the trash icon to remove an agent whether it is on or off. Removal deletes its imported copy and excludes any underlying folder definition with that ID, so the agent disappears from the library. Running tasks keep their saved definition.
 
-Use the **pencil icon** on an imported agent to edit its **Name**, **Description**, **Runtime policy**, and **Primary/Fallback models** with their reasoning settings. Open the model menu to see signed-in providers. Hover over a provider to open its models in a side submenu (tap on mobile). Reasoning stays in a separate control showing all options supported by the selected model. Model choices come from the selected environment. Previously configured values are retained until you change them, including unavailable models and other reasoning levels. Save updates only the imported copy and preserves its on/off setting. Cancel discards the draft. Changes affect future launches; the original file and existing tasks stay unchanged. Import a copy first to edit a folder-loaded agent or example. Instructions and the agent ID are not editable in this form.
+Use the **pencil icon** on an imported agent to edit its **Name**, **Description**, **Runtime policy**, and **Primary/Fallback models** with their reasoning settings. Open the model menu to see signed-in providers. Hover over a provider to open its models in a side submenu (tap on mobile). Reasoning stays in a separate control showing all options supported by the selected model. Model choices come from the selected environment. Previously configured values are retained until you change them, including unavailable models and other reasoning levels. Save updates only the imported copy and preserves its on/off setting. Cancel discards the draft. Changes affect future launches; the original file and existing tasks stay unchanged. Import a copy first to edit a folder-loaded agent. Instructions and the agent ID are not editable in this form.
 
 Orchestrators activate personas in this version. Selecting a persona directly when creating a task is planned. A task keeps the definition and model route it launched with, even when the library changes.
 
 Persona instructions describe intended behavior. They do not grant permissions or guarantee that an agent obeys them. The displayed runtime policy reflects supported provider controls; unsupported modes appear as **Blocked**.
 
-The trash action also works for folder-loaded agents and bundled examples. Source files remain unchanged, and removal survives restarts. To restore an agent, use **Import → Agent file** and select its original definition file.
+The trash action also works for folder-loaded agents. Source files remain unchanged, and removal survives restarts. To restore an agent, use **Import → Agent file** and select its original definition file.
 
 The persona library is separate from the task's Agents right panel, which shows runtime activity.
 
 For environment setup, see [Configure a persona library](../operations/persona-library.md).
+
+Development workflows require scout, navigator, advocate, skeptic, builder, critic, and sentry. Every role is saved when the workflow starts, including its model choice; later edits affect future workflows. Tasks created without saved definitions remain readable but require a fresh task to continue.

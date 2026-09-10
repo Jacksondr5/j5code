@@ -14,6 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { validateAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
+import { unavailableReason } from "./agentPersonaRouting.ts";
 import { prepareAgentPersonaLaunch } from "./agentPersonaLaunch.ts";
 import {
   AgentPersonaLibraryError,
@@ -92,6 +93,7 @@ export interface AgentPersonaLaunch {
  */
 export const resolveAgentPersonaLaunch = Effect.fn("j5.resolveAgentPersonaLaunch")(function* (
   input: {
+    readonly preparedPersonaAssignment?: OrchestrationV2AgentPersonaAssignment | undefined;
     readonly reuseExistingThread?: boolean | undefined;
     readonly agentPersona?: OrchestrationV2AgentPersonaRequest | undefined;
     readonly modelSelection: ModelSelection;
@@ -103,15 +105,46 @@ export const resolveAgentPersonaLaunch = Effect.fn("j5.resolveAgentPersonaLaunch
   },
 ) {
   const requested: AgentPersonaLaunch = { modelSelection: input.modelSelection };
-  if (input.agentPersona === undefined) return requested;
+  if (input.agentPersona === undefined && input.preparedPersonaAssignment === undefined)
+    return requested;
   if (input.reuseExistingThread === true) {
     return yield* new AgentPersonaLibraryError({
       message: "Agent persona assignment requires a newly created thread.",
     });
   }
   if (options.replay) return requested;
+  if (input.preparedPersonaAssignment !== undefined) {
+    if (input.agentPersona !== undefined)
+      return yield* new AgentPersonaLibraryError({
+        message: "Choose a persona request or a prepared assignment.",
+      });
+    const assignment = input.preparedPersonaAssignment;
+    const definition = yield* options.library.readSnapshot(assignment);
+    const invalid = validateAgentPersonaAssignment(assignment, definition);
+    if (invalid) return yield* new AgentPersonaLibraryError({ message: invalid });
+    const provider = (yield* options.providers).find(
+      ({ instanceId }) => instanceId === assignment.resolvedModelSelection.instanceId,
+    );
+    const target = definition.modelRoute[assignment.resolvedRoute === "primary" ? 0 : 1];
+    if (
+      !provider ||
+      provider.driver !== assignment.resolvedDriver ||
+      unavailableReason(provider, target)
+    )
+      return yield* new AgentPersonaLibraryError({
+        message: `Pinned provider/model for ${assignment.personaId} is unavailable. Restore ${assignment.resolvedModelSelection.instanceId}/${target.model} and retry.`,
+      });
+    if (!modelSelectionsEqual(input.modelSelection, assignment.resolvedModelSelection))
+      return yield* new AgentPersonaLibraryError({
+        message: "Prepared assignment must match the launch model selection.",
+      });
+    return {
+      modelSelection: assignment.resolvedModelSelection,
+      agentPersonaAssignment: assignment,
+    };
+  }
   const agentPersonaAssignment = yield* prepareAgentPersonaLaunch(
-    input.agentPersona,
+    input.agentPersona!,
     yield* options.providers,
     options.library,
   );

@@ -8,18 +8,6 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
-import scout from "./examples/scout.json" with { type: "json" };
-import navigator from "./examples/navigator.json" with { type: "json" };
-import advocate from "./examples/advocate.json" with { type: "json" };
-import skeptic from "./examples/skeptic.json" with { type: "json" };
-import builder from "./examples/builder.json" with { type: "json" };
-import critic from "./examples/critic.json" with { type: "json" };
-import sentry from "./examples/sentry.json" with { type: "json" };
-import publisher from "./examples/publisher.json" with { type: "json" };
-import investigator from "./examples/investigator.json" with { type: "json" };
-import prosecutor from "./examples/prosecutor.json" with { type: "json" };
-import herald from "./examples/herald.json" with { type: "json" };
-
 export const AGENT_PERSONA_IDS = BUILT_IN_AGENT_PERSONA_IDS;
 export type { AgentPersonaId };
 export type AgentArtifactId = string;
@@ -119,29 +107,5 @@ export function decodeAgentPersonaDefinition(value: unknown): AgentPersonaDefini
   return definition;
 }
 
-/** Bundled examples use exactly the same format and validation as imported definitions. */
-export const BUILT_IN_AGENT_PERSONAS = {
-  scout: decodeAgentPersonaDefinition(scout),
-  navigator: decodeAgentPersonaDefinition(navigator),
-  advocate: decodeAgentPersonaDefinition(advocate),
-  skeptic: decodeAgentPersonaDefinition(skeptic),
-  builder: decodeAgentPersonaDefinition(builder),
-  critic: decodeAgentPersonaDefinition(critic),
-  sentry: decodeAgentPersonaDefinition(sentry),
-  publisher: decodeAgentPersonaDefinition(publisher),
-  investigator: decodeAgentPersonaDefinition(investigator),
-  prosecutor: decodeAgentPersonaDefinition(prosecutor),
-  herald: decodeAgentPersonaDefinition(herald),
-};
-
-export const getBuiltInAgentPersona = (id: string): AgentPersonaDefinition => {
-  const definition = listBuiltInAgentPersonas().find((candidate) => candidate.id === id);
-  if (!definition) throw new Error(`Unknown agent persona: ${id}.`);
-  return definition;
-};
-
 export const getAgentAuthorityRules = (id: AgentAuthorityPolicyId): AgentAuthorityRules =>
   AGENT_AUTHORITY_RULES[id];
-
-export const listBuiltInAgentPersonas = (): ReadonlyArray<AgentPersonaDefinition> =>
-  Object.values(BUILT_IN_AGENT_PERSONAS);

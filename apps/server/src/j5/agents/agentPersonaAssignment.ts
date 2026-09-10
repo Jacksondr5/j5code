@@ -3,7 +3,6 @@ import { type OrchestrationV2AgentPersonaAssignment, ProviderDriverKind } from "
 import type { AgentPersonaRouteResolution } from "./agentPersonaRouting.ts";
 import { providerCanEnforceAgentPersonaAuthority } from "./agentPersonaProviderPolicy.ts";
 import {
-  getBuiltInAgentPersona,
   type AgentAuthorityPolicyId,
   type AgentPersonaId,
   type AgentPersonaDefinition,
@@ -31,10 +30,10 @@ export type AgentPersonaAssignmentResult =
 
 export function buildAgentPersonaAssignment(input: {
   readonly resolution: AvailableAgentPersonaRoute;
-  readonly definition?: AgentPersonaDefinition;
+  readonly definition: AgentPersonaDefinition;
   readonly authorityPolicy?: AgentAuthorityPolicyId;
 }): AgentPersonaAssignmentResult {
-  const definition = input.definition ?? getBuiltInAgentPersona(input.resolution.personaId);
+  const definition = input.definition;
   const authorityPolicy = input.authorityPolicy ?? definition.authority.defaultPolicy;
   if (!definition.authority.allowedPolicies.some((policy) => policy === authorityPolicy)) {
     return {
@@ -68,7 +67,7 @@ export function buildAgentPersonaAssignment(input: {
 
 export function validateAgentPersonaAssignment(
   assignment: OrchestrationV2AgentPersonaAssignment,
-  definition: AgentPersonaDefinition = getBuiltInAgentPersona(assignment.personaId),
+  definition: AgentPersonaDefinition,
 ): string | undefined {
   const target = definition.modelRoute[assignment.resolvedRoute === "primary" ? 0 : 1];
   const optionId = target.driver === "codex" ? "reasoningEffort" : "effort";

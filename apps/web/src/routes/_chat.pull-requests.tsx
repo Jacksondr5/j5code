@@ -1933,12 +1933,14 @@ function PullRequestsRouteView() {
             onAddFiles={() => undefined}
             onAddPullRequest={() => undefined}
             onAddAgents={() => undefined}
+            onAddWorkflows={() => undefined}
             browserAvailable={false}
             terminalAvailable={false}
             diffAvailable={false}
             filesAvailable={false}
             pullRequestAvailable={false}
             agentsAvailable={false}
+            workflowsAvailable={false}
             liveAgentCount={0}
             pullRequestStatusSeeds={listedPullRequestTabStatuses}
           >

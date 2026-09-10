@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as UsageRouteImport } from './routes/usage'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as RunsRouteImport } from './routes/runs'
 import { Route as PairRouteImport } from './routes/pair'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as ConnectRouteImport } from './routes/connect'
@@ -41,6 +42,11 @@ const UsageRoute = UsageRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RunsRoute = RunsRouteImport.update({
+  id: '/runs',
+  path: '/runs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PairRoute = PairRouteImport.update({
@@ -154,6 +160,7 @@ export interface FileRoutesByFullPath {
   '/connect': typeof ConnectRoute
   '/inbox': typeof InboxRoute
   '/pair': typeof PairRoute
+  '/runs': typeof RunsRoute
   '/settings': typeof SettingsRouteWithChildren
   '/usage': typeof UsageRoute
   '/pull-requests': typeof ChatPullRequestsRoute
@@ -177,6 +184,7 @@ export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
   '/inbox': typeof InboxRoute
   '/pair': typeof PairRoute
+  '/runs': typeof RunsRoute
   '/settings': typeof SettingsRouteWithChildren
   '/usage': typeof UsageRoute
   '/pull-requests': typeof ChatPullRequestsRoute
@@ -203,6 +211,7 @@ export interface FileRoutesById {
   '/connect': typeof ConnectRoute
   '/inbox': typeof InboxRoute
   '/pair': typeof PairRoute
+  '/runs': typeof RunsRoute
   '/settings': typeof SettingsRouteWithChildren
   '/usage': typeof UsageRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
@@ -230,6 +239,7 @@ export interface FileRouteTypes {
     | '/connect'
     | '/inbox'
     | '/pair'
+    | '/runs'
     | '/settings'
     | '/usage'
     | '/pull-requests'
@@ -253,6 +263,7 @@ export interface FileRouteTypes {
     | '/connect'
     | '/inbox'
     | '/pair'
+    | '/runs'
     | '/settings'
     | '/usage'
     | '/pull-requests'
@@ -278,6 +289,7 @@ export interface FileRouteTypes {
     | '/connect'
     | '/inbox'
     | '/pair'
+    | '/runs'
     | '/settings'
     | '/usage'
     | '/_chat/pull-requests'
@@ -304,6 +316,7 @@ export interface RootRouteChildren {
   ConnectRoute: typeof ConnectRoute
   InboxRoute: typeof InboxRoute
   PairRoute: typeof PairRoute
+  RunsRoute: typeof RunsRoute
   SettingsRoute: typeof SettingsRouteWithChildren
   UsageRoute: typeof UsageRoute
   ConnectCallbackRoute: typeof ConnectCallbackRoute
@@ -324,6 +337,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/runs': {
+      id: '/runs'
+      path: '/runs'
+      fullPath: '/runs'
+      preLoaderRoute: typeof RunsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/pair': {
@@ -529,6 +549,7 @@ const rootRouteChildren: RootRouteChildren = {
   ConnectRoute: ConnectRoute,
   InboxRoute: InboxRoute,
   PairRoute: PairRoute,
+  RunsRoute: RunsRoute,
   SettingsRoute: SettingsRouteWithChildren,
   UsageRoute: UsageRoute,
   ConnectCallbackRoute: ConnectCallbackRoute,

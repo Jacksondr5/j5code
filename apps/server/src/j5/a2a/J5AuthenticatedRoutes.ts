@@ -1,4 +1,6 @@
 import * as Layer from "effect/Layer";
+import { workflowLayer } from "../workflow-definitions/Service.ts";
+import { workflowHttpLayer } from "../workflow/Http.ts";
 
 import {
   CLIENT_READS_OPEN_COUNT_PATH,
@@ -16,7 +18,8 @@ import { threadHomesHttpRouteLayer } from "./ThreadHomesHttp.ts";
  * One authenticated J5 route aggregate. New J5 HTTP route layers enter here
  * rather than adding another upstream server composition seam.
  */
-export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
+export const j5AuthenticatedRouteRegistration = Layer.mergeAll(
+  workflowHttpLayer,
   humanInboxHttpRouteLayer,
   preArchiveFactsHttpRouteLayer,
   squadronHttpRouteLayer,
@@ -27,3 +30,7 @@ export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
     openInboxCount: CLIENT_READS_OPEN_COUNT_PATH,
   }),
 ).pipe(Layer.provide(squadronManagementServiceLayer));
+
+export const j5AuthenticatedRoutesLayer = j5AuthenticatedRouteRegistration.pipe(
+  Layer.provide(workflowLayer),
+);

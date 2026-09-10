@@ -1,3 +1,4 @@
+import { TEST_PERSONAS } from "./testFixtures.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 
@@ -22,7 +23,10 @@ const criticRoute = {
 
 describe("agent persona assignment", () => {
   it("snapshots the default authority and resolved route", () => {
-    const result = buildAgentPersonaAssignment({ resolution: criticRoute });
+    const result = buildAgentPersonaAssignment({
+      definition: TEST_PERSONAS.critic,
+      resolution: criticRoute,
+    });
     assert.equal(result.status, "assigned");
     if (result.status !== "assigned") return;
     assert.deepEqual(result.assignment, {
@@ -37,6 +41,7 @@ describe("agent persona assignment", () => {
 
   it("blocks Critic Fix Mode on a provider that cannot enforce workspace authority", () => {
     const result = buildAgentPersonaAssignment({
+      definition: TEST_PERSONAS.critic,
       resolution: criticRoute,
       authorityPolicy: "critic-fix",
     });
@@ -50,6 +55,7 @@ describe("agent persona assignment", () => {
 
   it("rejects an authority policy outside the persona contract", () => {
     const result = buildAgentPersonaAssignment({
+      definition: TEST_PERSONAS.critic,
       resolution: criticRoute,
       authorityPolicy: "workspace-write",
     });
@@ -63,26 +69,32 @@ describe("agent persona assignment", () => {
 
   it("rejects forged assignments that combine a persona with elevated authority", () => {
     assert.equal(
-      validateAgentPersonaAssignment({
-        personaId: "scout",
-        definitionVersion: 1,
-        authorityPolicy: "publish-only",
-        resolvedRoute: "primary",
-        resolvedDriver: ProviderDriverKind.make("codex"),
-        resolvedModelSelection: {
-          instanceId: ProviderInstanceId.make("codex"),
-          model: "gpt-5.6-terra",
-          options: [{ id: "reasoningEffort", value: "high" }],
+      validateAgentPersonaAssignment(
+        {
+          personaId: "scout",
+          definitionVersion: 1,
+          authorityPolicy: "publish-only",
+          resolvedRoute: "primary",
+          resolvedDriver: ProviderDriverKind.make("codex"),
+          resolvedModelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5.6-terra",
+            options: [{ id: "reasoningEffort", value: "high" }],
+          },
         },
-      }),
+        TEST_PERSONAS.scout,
+      ),
       "Agent persona assignment uses an authority policy outside its definition.",
     );
   });
 
   it("accepts a server-built assignment that matches the declared route", () => {
-    const result = buildAgentPersonaAssignment({ resolution: criticRoute });
+    const result = buildAgentPersonaAssignment({
+      definition: TEST_PERSONAS.critic,
+      resolution: criticRoute,
+    });
     assert.equal(result.status, "assigned");
     if (result.status !== "assigned") return;
-    assert.isUndefined(validateAgentPersonaAssignment(result.assignment));
+    assert.isUndefined(validateAgentPersonaAssignment(result.assignment, TEST_PERSONAS.critic));
   });
 });

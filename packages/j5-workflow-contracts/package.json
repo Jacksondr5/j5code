@@ -1,0 +1,19 @@
+{
+  "name": "@j5/workflow-contracts",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./fh": "./src/fh.ts",
+    "./sidebar": "./src/sidebar.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@typescript/native-preview": "catalog:"
+  }
+}

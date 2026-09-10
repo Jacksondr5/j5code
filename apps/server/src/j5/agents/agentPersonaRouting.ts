@@ -10,8 +10,6 @@ import {
 } from "@t3tools/contracts";
 
 import {
-  getBuiltInAgentPersona,
-  listBuiltInAgentPersonas,
   type AgentModelTarget,
   type AgentPersonaDefinition,
   type AgentPersonaId,
@@ -68,7 +66,7 @@ export function unavailableAgentPersonaReason(
     : "routes-unavailable";
 }
 
-function unavailableReason(
+export function unavailableReason(
   provider: ServerProvider,
   target: AgentModelTarget,
 ): AgentPersonaRouteFailureCode | undefined {
@@ -112,11 +110,11 @@ function candidatesForTarget(
 
 export function resolveAgentPersonaRoute(input: {
   readonly personaId: AgentPersonaId;
-  readonly definition?: AgentPersonaDefinition;
+  readonly definition: AgentPersonaDefinition;
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly authorityPolicy?: AgentPersonaAuthorityPolicy;
 }): AgentPersonaRouteResolution {
-  const definition = input.definition ?? getBuiltInAgentPersona(input.personaId);
+  const definition = input.definition;
   const authorityPolicy = input.authorityPolicy ?? definition.authority.defaultPolicy;
   const rejectedTargets: Array<AgentPersonaRouteAttempt> = [];
 
@@ -174,7 +172,7 @@ export function resolveAgentPersonaRoute(input: {
 
 export function buildAgentPersonaCatalog(
   providers: ReadonlyArray<ServerProvider>,
-  definitions: ReadonlyArray<AgentPersonaDefinition> = listBuiltInAgentPersonas(),
+  definitions: ReadonlyArray<AgentPersonaDefinition> = [],
 ): OrchestrationV2AgentPersonaCatalog {
   return {
     personas: definitions.map((definition) => {

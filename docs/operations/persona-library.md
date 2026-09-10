@@ -16,7 +16,7 @@ The pencil editor saves name, description, runtime policy, and the primary/fallb
 
 ## Read server folders directly
 
-By default, the server reads immediate `.yaml` and `.yml` files in `<stateDir>/personas`. If neither that folder nor explicit configuration exists, it offers the bundled examples. An existing empty folder is an intentionally empty library.
+By default, the server reads immediate `.yaml` and `.yml` files in `<stateDir>/personas`. If neither that folder nor explicit configuration exists, the library is empty. No persona definitions are bundled.
 
 To select other folders, create `<stateDir>/agent-personas.json`:
 
@@ -26,7 +26,7 @@ To select other folders, create `<stateDir>/agent-personas.json`:
 }
 ```
 
-Relative paths resolve from the state directory. Explicit configuration replaces the default/example catalog. An empty `folders` list disables source definitions; client imports remain available. The server never clones a repository or performs git operations; maintain the folders using an editor and git as desired.
+Relative paths resolve from the state directory. Explicit configuration replaces the default source folder. An empty `folders` list disables source definitions; client imports remain available. The server never clones a repository or performs git operations; maintain the folders using an editor and git as desired.
 
 Each immediate YAML file contains one definition. YAML uses version 1.2; duplicate keys, multiple documents, custom tags, and aliases are rejected. JSON definition files are ignored in source folders and rejected on import; only the internal import store, configuration, and snapshots remain JSON. For example, `agent.yaml`:
 
@@ -58,10 +58,12 @@ instructions: |-
 
 Choose exact models and reasoning values advertised by the environment. The server supports Codex and Claude persona policies; other adapters remain unavailable for activation in this revision. `diagnostic` and `publish-only` are blocked pending the required operation boundaries.
 
-Copy and customize the starter files in `apps/server/src/j5/agents/examples/` when working from the repository. Source folders may be shared through git. The source format is identical for starter and custom personas. The file limit is 64 KiB, with 32,768 characters available for instructions. Declare custom handoff names in an optional `artifacts` array before referencing them in `inputArtifacts` or `outputArtifact`.
+Keep definitions in a separate local folder or import YAML files through Settings. Source folders may be shared through git. The file limit is 64 KiB, with 32,768 characters available for instructions. Declare custom handoff names in an optional `artifacts` array before referencing them in `inputArtifacts` or `outputArtifact`.
 
 Reopen Settings → Agents to read the updated catalog, or launch a new persona through the existing orchestrator contract. The server reads files on each catalog request and new activation; a restart is unnecessary. Empty libraries display an empty state. Missing configured folders, malformed files, undefined artifact references, or duplicate ids fail the library read and prevent new persona launches. Fix the indicated source and retry.
 
 Changing the configuration or a source file does not modify running tasks. Every new assignment records a content digest and has an immutable definition snapshot under `<stateDir>/agent-persona-snapshots`. Back up and restore that directory alongside the event database. A missing or corrupt snapshot blocks reuse rather than silently substituting current instructions. Do not prune snapshots while tasks or their forks may reference them. Ordinary non-persona tasks are unaffected by library errors.
 
-In-app editing, direct human persona selection, and library git controls are follow-up work.
+Settings can edit imported copies. Direct human persona selection and library git controls are follow-up work.
+
+Development workflows need the IDs `scout`, `navigator`, `advocate`, `skeptic`, `builder`, `critic`, and `sentry`. Their definitions must permit `workspace-write` for builder, `critic-review` for critic, and `read-only` for all other roles. All seven snapshots and exact model selections are saved at workflow start. Restoring a pinned provider is required if it becomes unavailable; retries never choose another model. Legacy tasks without snapshots remain readable but require a fresh task to continue.
