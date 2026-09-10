@@ -1,8 +1,8 @@
 # Artifacts
 
 Artifacts are planning documents generated while an agent works, such as plans, specifications,
-research notes, and diagrams. J5 Code stores these files under the project workspace's shared
-`artifacts/` directory and shows them in the Artifacts page.
+research notes, and diagrams. J5 Code stores these files in its application data, outside the
+repository, and shows them in the Artifacts page.
 
 Use Artifacts for durable, user-consumable planning outputs that should remain available across
 threads and agents. Do not use it for source code, build output, logs, temporary scratch files, or
@@ -19,17 +19,13 @@ you work. Artifact file references in chat use a distinct **Artifact** chip; cho
 document directly in the Artifacts panel.
 
 While the Artifacts page is open, its file list and the selected preview update automatically when
-an agent creates, edits, or removes a file in the project's `artifacts/` directory.
+an agent creates, edits, or removes a project artifact.
 
 When a provider emits a structured proposed plan, J5 Code saves the completed plan automatically as
-the shared `artifacts/plan.md`. Agents are also instructed to put other planning documents in that
-same directory. Artifacts are shared by every agent working in the project rather than partitioned
-by thread.
+the shared `artifacts/plan.md`. Agents use J5 Code's artifact tools to create and read other planning
+documents. Artifacts are shared by every agent working in the project rather than partitioned by
+thread. The `artifacts/` prefix shown in chat is a logical path and does not create a directory in
+the repository, so no Git ignore rule is needed.
 
-In a Git workspace, J5 Code adds `/artifacts/` to Git's local exclude file at `.git/info/exclude`.
-This keeps generated documents out of commits without modifying the repository's tracked
-`.gitignore`. If the repository already tracks files under `artifacts/`, J5 Code refuses to hide the
-directory and shows an error in the Artifacts page.
-
-Artifacts are local to the environment and project workspace where they were generated. They are
+Artifacts are local to the environment and project where they were generated. They are
 not synced between machines or treated as shared Squadron documents.

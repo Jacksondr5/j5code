@@ -6,7 +6,7 @@ import * as ProviderTurnStart from "../../orchestration-v2/ProviderTurnStartServ
 import * as ProjectService from "../../project/ProjectService.ts";
 import { ArtifactWorkspace } from "./ArtifactWorkspace.ts";
 
-/** Prepares the shared artifact workspace before the provider can create planning files. */
+/** Prepares shared project artifact storage before the provider can create planning files. */
 export const layer = Layer.effect(
   ProviderTurnStart.ProviderTurnStartObserver,
   Effect.gen(function* () {
@@ -19,11 +19,11 @@ export const layer = Layer.effect(
           const project = yield* projects.getById(input.projectId);
           if (Option.isNone(project)) {
             return yield* Effect.logWarning(
-              "Provider turn has no project workspace for artifact preparation",
+              "Provider turn has no project for artifact preparation",
               input,
             );
           }
-          yield* artifacts.prepare(project.value.workspaceRoot);
+          yield* artifacts.prepare(input.projectId);
         }).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning("Artifact workspace could not be prepared before provider turn", {

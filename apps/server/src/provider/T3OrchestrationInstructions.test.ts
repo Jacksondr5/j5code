@@ -43,12 +43,14 @@ describe("T3 orchestration provider instructions", () => {
 
   it("routes durable planning outputs into artifacts and excludes working files", () => {
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "durable, user-consumable planning outputs");
-    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "project workspace's shared");
-    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`artifacts/`");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`write_artifact`");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`list_artifacts`");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`read_artifact`");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "across threads and agents");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "source code, build output, logs");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "temporary scratch files");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Artifacts panel");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "outside the repository");
   });
 
   it("injects prompt fallback only for an MCP-enabled first run", () => {

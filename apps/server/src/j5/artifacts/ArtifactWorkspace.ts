@@ -1,4 +1,5 @@
-import type { ArtifactContent, ArtifactEntry } from "@t3tools/contracts";
+import type { ArtifactContent, ArtifactEntry, ProjectId } from "@t3tools/contracts";
+import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -8,16 +9,17 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { writeFileStringAtomically } from "../../atomicWrite.ts";
-import * as VcsProcess from "../../vcs/VcsProcess.ts";
+import { ServerConfig } from "../../config.ts";
 
 export const ARTIFACT_DIRECTORY_NAME = "artifacts";
-export const ARTIFACT_IGNORE_PATTERN = "/artifacts/";
 export const MAX_ARTIFACT_COUNT = 500;
 export const MAX_ARTIFACT_BYTES = 5 * 1024 * 1024;
+
+export const artifactProjectDirectoryName = (projectId: ProjectId): string =>
+  NodeCrypto.createHash("sha256").update(projectId).digest("hex");
 
 export class ArtifactWorkspaceError extends Schema.TaggedErrorClass<ArtifactWorkspaceError>()(
   "ArtifactWorkspaceError",
@@ -33,19 +35,24 @@ export class ArtifactWorkspaceError extends Schema.TaggedErrorClass<ArtifactWork
 }
 
 export interface ArtifactWorkspaceShape {
-  readonly prepare: (cwd: string) => Effect.Effect<void, ArtifactWorkspaceError>;
+  readonly prepare: (projectId: ProjectId) => Effect.Effect<void, ArtifactWorkspaceError>;
   readonly list: (
-    cwd: string,
+    projectId: ProjectId,
   ) => Effect.Effect<ReadonlyArray<ArtifactEntry>, ArtifactWorkspaceError>;
   readonly read: (input: {
-    readonly cwd: string;
+    readonly projectId: ProjectId;
     readonly relativePath: string;
   }) => Effect.Effect<ArtifactContent, ArtifactWorkspaceError>;
+  readonly write: (input: {
+    readonly projectId: ProjectId;
+    readonly relativePath: string;
+    readonly content: string;
+  }) => Effect.Effect<ArtifactEntry, ArtifactWorkspaceError>;
   readonly exportPlan: (input: {
-    readonly cwd: string;
+    readonly projectId: ProjectId;
     readonly markdown: string;
   }) => Effect.Effect<void, ArtifactWorkspaceError>;
-  readonly watch: (cwd: string) => Stream.Stream<void, ArtifactWorkspaceError>;
+  readonly watch: (projectId: ProjectId) => Stream.Stream<void, ArtifactWorkspaceError>;
 }
 
 export class ArtifactWorkspace extends Context.Service<ArtifactWorkspace, ArtifactWorkspaceShape>()(
@@ -68,6 +75,7 @@ export const watchArtifactDirectory = (
   );
 
 const normalizeText = (value: string) => (value.endsWith("\n") ? value : `${value}\n`);
+const normalizeArtifactRelativePath = (value: string) => value.replaceAll("\\", "/");
 
 const isPathWithin = (path: Path.Path, parent: string, candidate: string) => {
   const relative = path.relative(parent, candidate);
@@ -84,160 +92,41 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const vcsProcess = yield* VcsProcess.VcsProcess;
-    const ignoreSemaphore = yield* Semaphore.make(1);
+    const serverConfig = yield* ServerConfig;
+    const artifactsDir = path.join(serverConfig.stateDir, ARTIFACT_DIRECTORY_NAME);
 
-    const runGit = Effect.fn("ArtifactWorkspace.runGit")(function* (
-      cwd: string,
-      args: ReadonlyArray<string>,
-      operation: string,
-    ) {
-      return yield* vcsProcess
-        .run({
-          operation,
-          command: "git",
-          args,
-          cwd,
-          allowNonZeroExit: true,
-          timeoutMs: 10_000,
-          maxOutputBytes: 256 * 1024,
-        })
+    const artifactRootFor = (projectId: ProjectId) =>
+      path.join(artifactsDir, artifactProjectDirectoryName(projectId));
+
+    const resolveArtifactsBase = Effect.fn("ArtifactWorkspace.resolveArtifactsBase")(function* () {
+      yield* fileSystem
+        .makeDirectory(artifactsDir, { recursive: true })
         .pipe(
           Effect.mapError(
-            workspaceError(operation, "Git could not prepare the artifacts directory."),
+            workspaceError(
+              "create-artifacts",
+              "The application artifacts directory could not be created.",
+            ),
           ),
         );
-    });
-
-    const resolveWorkspace = Effect.fn("ArtifactWorkspace.resolveWorkspace")(function* (
-      cwd: string,
-    ) {
-      const normalizedCwd = path.resolve(cwd);
-      const cwdInfo = yield* fileSystem
-        .stat(normalizedCwd)
+      return yield* fileSystem
+        .realPath(artifactsDir)
         .pipe(
           Effect.mapError(
-            workspaceError("resolve-workspace", "The project workspace is not available."),
+            workspaceError(
+              "resolve-artifacts",
+              "The application artifacts directory could not be resolved.",
+            ),
           ),
         );
-      if (cwdInfo.type !== "Directory") {
-        return yield* new ArtifactWorkspaceError({
-          operation: "resolve-workspace",
-          detail: "The project workspace is not a directory.",
-        });
-      }
-
-      const gitRoot = yield* runGit(
-        normalizedCwd,
-        ["rev-parse", "--show-toplevel"],
-        "resolve-git-root",
-      );
-      const workspaceRoot =
-        gitRoot.exitCode === 0 && gitRoot.stdout.trim().length > 0
-          ? path.resolve(gitRoot.stdout.trim())
-          : normalizedCwd;
-      return {
-        workspaceRoot,
-        artifactRoot: path.join(workspaceRoot, ARTIFACT_DIRECTORY_NAME),
-        git: gitRoot.exitCode === 0,
-      };
-    });
-
-    const ensureIgnored = Effect.fn("ArtifactWorkspace.ensureIgnored")(function* (input: {
-      readonly workspaceRoot: string;
-      readonly artifactRoot: string;
-      readonly git: boolean;
-    }) {
-      if (!input.git) return;
-
-      yield* ignoreSemaphore.withPermits(1)(
-        Effect.gen(function* () {
-          const tracked = yield* runGit(
-            input.workspaceRoot,
-            ["ls-files", "--", ARTIFACT_DIRECTORY_NAME],
-            "check-artifacts-tracked",
-          );
-          if (tracked.exitCode !== 0) {
-            return yield* new ArtifactWorkspaceError({
-              operation: "check-artifacts-tracked",
-              detail: "Git could not verify whether artifacts are tracked.",
-            });
-          }
-          if (tracked.stdout.trim().length > 0) {
-            return yield* new ArtifactWorkspaceError({
-              operation: "check-artifacts-tracked",
-              detail:
-                "The artifacts directory already contains tracked files. Untrack them before enabling automatic artifacts.",
-            });
-          }
-
-          const gitPath = yield* runGit(
-            input.workspaceRoot,
-            ["rev-parse", "--git-path", "info/exclude"],
-            "resolve-git-exclude",
-          );
-          if (gitPath.exitCode !== 0 || gitPath.stdout.trim().length === 0) {
-            return yield* new ArtifactWorkspaceError({
-              operation: "resolve-git-exclude",
-              detail: "Git's local exclude file could not be resolved.",
-            });
-          }
-          const excludePath = path.resolve(input.workspaceRoot, gitPath.stdout.trim());
-          const current = yield* fileSystem.readFileString(excludePath).pipe(
-            Effect.catchTag("PlatformError", (error) =>
-              error.reason._tag === "NotFound" ? Effect.succeed("") : Effect.fail(error),
-            ),
-            Effect.mapError(
-              workspaceError("read-git-exclude", "Git's local exclude file could not be read."),
-            ),
-          );
-          const hasPattern = current
-            .split(/\r?\n/u)
-            .some((line) => line.trim() === ARTIFACT_IGNORE_PATTERN);
-          if (!hasPattern) {
-            const separator = current.length === 0 || current.endsWith("\n") ? "" : "\n";
-            yield* fileSystem
-              .writeFileString(excludePath, `${separator}${ARTIFACT_IGNORE_PATTERN}\n`, {
-                flag: "a",
-              })
-              .pipe(
-                Effect.mapError(
-                  workspaceError(
-                    "write-git-exclude",
-                    "The artifacts directory could not be added to Git's local exclude file.",
-                  ),
-                ),
-              );
-          }
-
-          yield* fileSystem
-            .makeDirectory(input.artifactRoot, { recursive: true })
-            .pipe(
-              Effect.mapError(
-                workspaceError("create-artifacts", "The artifacts directory could not be created."),
-              ),
-            );
-          const ignored = yield* runGit(
-            input.workspaceRoot,
-            ["check-ignore", "--no-index", "--quiet", "--", ARTIFACT_DIRECTORY_NAME],
-            "verify-artifacts-ignored",
-          );
-          if (ignored.exitCode !== 0) {
-            return yield* new ArtifactWorkspaceError({
-              operation: "verify-artifacts-ignored",
-              detail:
-                "Git still considers the artifacts directory visible. Check for a negating .gitignore rule before generating artifacts.",
-            });
-          }
-        }),
-      );
     });
 
     const resolveExistingArtifactRoot = Effect.fn("ArtifactWorkspace.resolveExistingArtifactRoot")(
-      function* (cwd: string) {
-        const workspace = yield* resolveWorkspace(cwd);
+      function* (projectId: ProjectId) {
+        const artifactsBase = yield* resolveArtifactsBase();
+        const artifactRoot = artifactRootFor(projectId);
         const exists = yield* fileSystem
-          .exists(workspace.artifactRoot)
+          .exists(artifactRoot)
           .pipe(
             Effect.mapError(
               workspaceError(
@@ -246,51 +135,44 @@ export const layer = Layer.effect(
               ),
             ),
           );
-        if (!exists) return { ...workspace, realArtifactRoot: null };
+        if (!exists) return { artifactRoot, realArtifactRoot: null };
         const realArtifactRoot = yield* fileSystem
-          .realPath(workspace.artifactRoot)
+          .realPath(artifactRoot)
           .pipe(
             Effect.mapError(
               workspaceError("resolve-artifacts", "The artifacts directory could not be resolved."),
             ),
           );
-        const realWorkspaceRoot = yield* fileSystem
-          .realPath(workspace.workspaceRoot)
-          .pipe(
-            Effect.mapError(
-              workspaceError("resolve-artifacts", "The project workspace could not be resolved."),
-            ),
-          );
-        if (!isPathWithin(path, realWorkspaceRoot, realArtifactRoot)) {
+        if (!isPathWithin(path, artifactsBase, realArtifactRoot)) {
           return yield* new ArtifactWorkspaceError({
             operation: "resolve-artifacts",
-            detail: "The artifacts directory cannot be a link outside the project workspace.",
+            detail: "The project artifacts directory cannot link outside application storage.",
           });
         }
-        return { ...workspace, realArtifactRoot };
+        return { artifactRoot, realArtifactRoot };
       },
     );
 
     const prepare: ArtifactWorkspaceShape["prepare"] = Effect.fn("ArtifactWorkspace.prepare")(
-      function* (cwd) {
-        const workspace = yield* resolveWorkspace(cwd);
-        yield* ensureIgnored(workspace);
-        if (!workspace.git) {
-          yield* fileSystem
-            .makeDirectory(workspace.artifactRoot, { recursive: true })
-            .pipe(
-              Effect.mapError(
-                workspaceError("create-artifacts", "The artifacts directory could not be created."),
+      function* (projectId) {
+        yield* resolveArtifactsBase();
+        yield* fileSystem
+          .makeDirectory(artifactRootFor(projectId), { recursive: true })
+          .pipe(
+            Effect.mapError(
+              workspaceError(
+                "create-artifacts",
+                "The project artifacts directory could not be created.",
               ),
-            );
-        }
+            ),
+          );
       },
     );
 
     const list: ArtifactWorkspaceShape["list"] = Effect.fn("ArtifactWorkspace.list")(
-      function* (cwd) {
-        yield* prepare(cwd);
-        const workspace = yield* resolveExistingArtifactRoot(cwd);
+      function* (projectId) {
+        yield* prepare(projectId);
+        const workspace = yield* resolveExistingArtifactRoot(projectId);
         if (workspace.realArtifactRoot === null) return [];
         const names = yield* fileSystem
           .readDirectory(workspace.realArtifactRoot, { recursive: true })
@@ -340,20 +222,21 @@ export const layer = Layer.effect(
 
     const read: ArtifactWorkspaceShape["read"] = Effect.fn("ArtifactWorkspace.read")(
       function* (input) {
-        const workspace = yield* resolveExistingArtifactRoot(input.cwd);
+        const workspace = yield* resolveExistingArtifactRoot(input.projectId);
         if (workspace.realArtifactRoot === null) {
           return yield* new ArtifactWorkspaceError({
             operation: "read-artifact",
             detail: "The artifact does not exist.",
           });
         }
-        if (input.relativePath.trim().length === 0 || path.isAbsolute(input.relativePath)) {
+        const relativePath = normalizeArtifactRelativePath(input.relativePath);
+        if (relativePath.trim().length === 0 || path.isAbsolute(relativePath)) {
           return yield* new ArtifactWorkspaceError({
             operation: "read-artifact",
             detail: "Artifact paths must be relative to the artifacts directory.",
           });
         }
-        const requestedPath = path.resolve(workspace.realArtifactRoot, input.relativePath);
+        const requestedPath = path.resolve(workspace.realArtifactRoot, relativePath);
         if (!isPathWithin(path, workspace.realArtifactRoot, requestedPath)) {
           return yield* new ArtifactWorkspaceError({
             operation: "read-artifact",
@@ -395,7 +278,7 @@ export const layer = Layer.effect(
           );
         const binary = looksBinary(bytes);
         return {
-          path: input.relativePath.replaceAll("\\", "/"),
+          path: relativePath,
           byteLength: bytes.byteLength,
           encoding: binary ? "base64" : "utf8",
           content: binary ? Buffer.from(bytes).toString("base64") : new TextDecoder().decode(bytes),
@@ -403,11 +286,95 @@ export const layer = Layer.effect(
       },
     );
 
+    const write: ArtifactWorkspaceShape["write"] = Effect.fn("ArtifactWorkspace.write")(
+      function* (input) {
+        const relativePath = normalizeArtifactRelativePath(input.relativePath);
+        if (relativePath.trim().length === 0 || path.isAbsolute(relativePath)) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "write-artifact",
+            detail: "Artifact paths must be relative to the artifacts directory.",
+          });
+        }
+        const byteLength = new TextEncoder().encode(input.content).byteLength;
+        if (byteLength > MAX_ARTIFACT_BYTES) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "write-artifact",
+            detail: `This artifact is larger than the ${MAX_ARTIFACT_BYTES / 1024 / 1024} MB limit.`,
+          });
+        }
+
+        yield* prepare(input.projectId);
+        const workspace = yield* resolveExistingArtifactRoot(input.projectId);
+        if (workspace.realArtifactRoot === null) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "write-artifact",
+            detail: "The project artifacts directory could not be resolved.",
+          });
+        }
+        const requestedPath = path.resolve(workspace.realArtifactRoot, relativePath);
+        if (!isPathWithin(path, workspace.realArtifactRoot, requestedPath)) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "write-artifact",
+            detail: "Artifact paths cannot leave the artifacts directory.",
+          });
+        }
+
+        const parent = path.dirname(requestedPath);
+        yield* fileSystem
+          .makeDirectory(parent, { recursive: true })
+          .pipe(
+            Effect.mapError(
+              workspaceError("write-artifact", "The artifact directory could not be created."),
+            ),
+          );
+        const realParent = yield* fileSystem
+          .realPath(parent)
+          .pipe(
+            Effect.mapError(
+              workspaceError("write-artifact", "The artifact directory could not be resolved."),
+            ),
+          );
+        if (!isPathWithin(path, workspace.realArtifactRoot, realParent)) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "write-artifact",
+            detail: "Artifact links cannot leave the artifacts directory.",
+          });
+        }
+
+        yield* writeFileStringAtomically({ filePath: requestedPath, contents: input.content }).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+          Effect.mapError(workspaceError("write-artifact", "The artifact could not be written.")),
+        );
+        const info = yield* fileSystem
+          .stat(requestedPath)
+          .pipe(
+            Effect.mapError(
+              workspaceError("write-artifact", "The written artifact could not be inspected."),
+            ),
+          );
+        return {
+          path: relativePath,
+          byteLength: Number(info.size),
+          modifiedAt: Option.match(info.mtime, {
+            onNone: () => null,
+            onSome: (value) => value.toISOString(),
+          }),
+        } satisfies ArtifactEntry;
+      },
+    );
+
     const exportPlan: ArtifactWorkspaceShape["exportPlan"] = Effect.fn(
       "ArtifactWorkspace.exportPlan",
     )(function* (input) {
-      yield* prepare(input.cwd);
-      const workspace = yield* resolveWorkspace(input.cwd);
+      yield* prepare(input.projectId);
+      const workspace = yield* resolveExistingArtifactRoot(input.projectId);
+      if (workspace.realArtifactRoot === null) {
+        return yield* new ArtifactWorkspaceError({
+          operation: "resolve-artifacts",
+          detail: "The project artifacts directory could not be resolved.",
+        });
+      }
       const realArtifactRoot = yield* fileSystem
         .realPath(workspace.artifactRoot)
         .pipe(
@@ -415,17 +382,20 @@ export const layer = Layer.effect(
             workspaceError("resolve-artifacts", "The artifacts directory could not be resolved."),
           ),
         );
-      const realWorkspaceRoot = yield* fileSystem
-        .realPath(workspace.workspaceRoot)
+      const realArtifactsBase = yield* fileSystem
+        .realPath(artifactsDir)
         .pipe(
           Effect.mapError(
-            workspaceError("resolve-artifacts", "The project workspace could not be resolved."),
+            workspaceError(
+              "resolve-artifacts",
+              "The application artifacts directory could not be resolved.",
+            ),
           ),
         );
-      if (!isPathWithin(path, realWorkspaceRoot, realArtifactRoot)) {
+      if (!isPathWithin(path, realArtifactsBase, realArtifactRoot)) {
         return yield* new ArtifactWorkspaceError({
           operation: "resolve-artifacts",
-          detail: "The artifacts directory cannot be a link outside the project workspace.",
+          detail: "The project artifacts directory cannot link outside application storage.",
         });
       }
 
@@ -442,9 +412,10 @@ export const layer = Layer.effect(
       );
     });
 
-    const watch: ArtifactWorkspaceShape["watch"] = (cwd) =>
+    const watch: ArtifactWorkspaceShape["watch"] = (projectId) =>
       Stream.unwrap(
-        resolveExistingArtifactRoot(cwd).pipe(
+        prepare(projectId).pipe(
+          Effect.andThen(resolveExistingArtifactRoot(projectId)),
           Effect.flatMap((workspace) =>
             workspace.realArtifactRoot === null
               ? Effect.fail(
@@ -458,6 +429,6 @@ export const layer = Layer.effect(
         ),
       );
 
-    return ArtifactWorkspace.of({ prepare, list, read, exportPlan, watch });
+    return ArtifactWorkspace.of({ prepare, list, read, write, exportPlan, watch });
   }),
 );

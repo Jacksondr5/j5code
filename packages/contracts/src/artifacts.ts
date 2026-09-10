@@ -20,6 +20,36 @@ export const ArtifactContent = Schema.Struct({
 });
 export type ArtifactContent = typeof ArtifactContent.Type;
 
+export const ArtifactReadInput = Schema.Struct({
+  path: Schema.String,
+});
+export type ArtifactReadInput = typeof ArtifactReadInput.Type;
+
+export const ArtifactWriteInput = Schema.Struct({
+  path: Schema.String,
+  content: Schema.String,
+});
+export type ArtifactWriteInput = typeof ArtifactWriteInput.Type;
+
+export const ArtifactWriteResult = Schema.Struct({
+  artifact: ArtifactEntry,
+  logicalPath: Schema.String,
+});
+export type ArtifactWriteResult = typeof ArtifactWriteResult.Type;
+
+export class ArtifactMcpFailure extends Schema.TaggedErrorClass<ArtifactMcpFailure>()(
+  "ArtifactMcpFailure",
+  {
+    code: Schema.Literals([
+      "capability_denied",
+      "thread_not_found",
+      "invalid_request",
+      "operation_failed",
+    ]),
+    message: Schema.String,
+  },
+) {}
+
 export const ArtifactListRequest = Schema.Struct({
   projectId: ProjectId,
 });

@@ -2317,6 +2317,7 @@ function useChatMarkdownState({
       const artifactPath = artifactPathFromWorkspaceRelativePath(
         fileLinkMeta.workspaceRelativePath,
       );
+      const logicalArtifactPath = artifactPath === null ? null : `artifacts/${artifactPath}`;
       const canPreviewMedia =
         mediaMimeTypeFromExtension(
           fileLinkMeta.basename.slice(fileLinkMeta.basename.lastIndexOf(".")),
@@ -2331,25 +2332,27 @@ function useChatMarkdownState({
       return (
         <MarkdownFileLink
           href={fileLinkMeta.targetPath}
-          targetPath={fileLinkMeta.targetPath}
-          iconPath={fileLinkMeta.filePath}
-          displayPath={fileLinkMeta.displayPath}
+          targetPath={logicalArtifactPath ?? fileLinkMeta.targetPath}
+          iconPath={logicalArtifactPath ?? fileLinkMeta.filePath}
+          displayPath={logicalArtifactPath ?? fileLinkMeta.displayPath}
           panelPath={panelPath}
           line={fileLinkMeta.line}
           label={labelParts.join(" · ")}
           copyMarkdown={copyMarkdown}
           theme={resolvedTheme}
           threadRef={threadRef}
-          {...(canUseShellActions ? { onOpen: openInPreferredEditor } : {})}
+          {...(artifactPath === null && canUseShellActions
+            ? { onOpen: openInPreferredEditor }
+            : {})}
           onOpenInPanel={artifactPath === null ? openFileInPanel : openArtifactInPanel}
           onOpenMedia={
-            threadRef && canPreviewMedia
+            artifactPath === null && threadRef && canPreviewMedia
               ? () => openMarkdownMedia(mediaPath, fileLinkMeta.filePath)
               : undefined
           }
           openInEditorMenuLabel={preferredEditorMenuLabel}
           onReveal={
-            canUseShellActions && revealInFileManagerLabel !== undefined
+            artifactPath === null && canUseShellActions && revealInFileManagerLabel !== undefined
               ? () => revealMarkdownFileInFileManager(fileLinkMeta)
               : undefined
           }

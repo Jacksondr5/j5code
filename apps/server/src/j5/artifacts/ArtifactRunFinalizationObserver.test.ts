@@ -9,7 +9,7 @@ import * as ProjectService from "../../project/ProjectService.ts";
 import { layer } from "./ArtifactRunFinalizationObserver.ts";
 import { ArtifactWorkspace } from "./ArtifactWorkspace.ts";
 
-it.effect("exports a completed plan into the shared project workspace", () => {
+it.effect("exports a completed plan into shared project application storage", () => {
   const projectId = ProjectId.make("project:shared-artifacts");
   const threadId = ThreadId.make("thread:isolated-worktree");
   const runId = RunId.make("run:shared-artifacts");
@@ -44,8 +44,6 @@ it.effect("exports a completed plan into the shared project workspace", () => {
     assert.deepStrictEqual(refresh.mock.calls, [
       [{ cwd: "/thread-worktree", projectId, threadId, runId, planMarkdown: "# Shared plan" }],
     ]);
-    assert.deepStrictEqual(exportPlan.mock.calls, [
-      [{ cwd: "/project-workspace", markdown: "# Shared plan" }],
-    ]);
+    assert.deepStrictEqual(exportPlan.mock.calls, [[{ projectId, markdown: "# Shared plan" }]]);
   }).pipe(Effect.provide(testLayer));
 });

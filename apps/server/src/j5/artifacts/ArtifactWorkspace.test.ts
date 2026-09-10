@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { ProjectId } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -6,68 +7,89 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 
-import * as VcsProcess from "../../vcs/VcsProcess.ts";
+import * as ServerConfig from "../../config.ts";
 import * as ArtifactWorkspace from "./ArtifactWorkspace.ts";
 
-const TestLayer = Layer.empty.pipe(
-  Layer.provideMerge(ArtifactWorkspace.layer),
-  Layer.provideMerge(VcsProcess.layer),
+const TestLayer = ArtifactWorkspace.layer.pipe(
+  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-artifacts-state-" })),
   Layer.provideMerge(NodeServices.layer),
 );
 
-const git = Effect.fn("ArtifactWorkspace.test.git")(function* (
-  cwd: string,
-  args: ReadonlyArray<string>,
-) {
-  const process = yield* VcsProcess.VcsProcess;
-  return yield* process.run({
-    operation: "ArtifactWorkspace.test.git",
-    command: "git",
-    args,
-    cwd,
-    timeoutMs: 10_000,
-  });
-});
+const projectId = ProjectId.make("project:artifacts-test");
 
 describe("ArtifactWorkspace", () => {
-  it.effect("exports a plan beneath an ignored artifacts directory", () =>
+  it.effect("exports a plan beneath server-owned application storage", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "j5-artifacts-git-" });
-        yield* git(cwd, ["init"]);
-
+        const serverConfig = yield* ServerConfig.ServerConfig;
         const artifacts = yield* ArtifactWorkspace.ArtifactWorkspace;
-        yield* artifacts.exportPlan({ cwd, markdown: "# Plan\n\nShip it." });
 
-        const listed = yield* artifacts.list(cwd);
+        yield* artifacts.exportPlan({ projectId, markdown: "# Plan\n\nShip it." });
+
+        const listed = yield* artifacts.list(projectId);
         assert.equal(listed.length, 1);
         assert.equal(listed[0]!.path, "plan.md");
-        const read = yield* artifacts.read({ cwd, relativePath: listed[0]!.path });
+        const read = yield* artifacts.read({ projectId, relativePath: listed[0]!.path });
         assert.equal(read.encoding, "utf8");
         assert.equal(read.content, "# Plan\n\nShip it.\n");
 
-        const ignored = yield* git(cwd, ["check-ignore", "--no-index", "--", "artifacts"]);
-        assert.equal(ignored.exitCode, 0);
-        assert.equal((yield* git(cwd, ["status", "--short"])).stdout.trim(), "");
-
-        const excludePath = (yield* git(cwd, [
-          "rev-parse",
-          "--git-path",
-          "info/exclude",
-        ])).stdout.trim();
-        const exclude = yield* fileSystem.readFileString(path.resolve(cwd, excludePath));
-        assert.equal(
-          exclude
-            .split(/\r?\n/u)
-            .filter((line) => line === ArtifactWorkspace.ARTIFACT_IGNORE_PATTERN).length,
-          1,
+        const planPath = path.join(
+          serverConfig.stateDir,
+          ArtifactWorkspace.ARTIFACT_DIRECTORY_NAME,
+          ArtifactWorkspace.artifactProjectDirectoryName(projectId),
+          "plan.md",
+        );
+        assert.isTrue(yield* fileSystem.exists(planPath));
+        assert.isFalse(
+          yield* fileSystem.exists(path.join(serverConfig.cwd, "artifacts", "plan.md")),
         );
 
-        yield* artifacts.exportPlan({ cwd, markdown: "# Plan\n\nShip it." });
-        const excludeAfterRetry = yield* fileSystem.readFileString(path.resolve(cwd, excludePath));
-        assert.equal(excludeAfterRetry, exclude);
+        yield* artifacts.exportPlan({ projectId, markdown: "# Plan\n\nShip it." });
+        assert.equal(yield* fileSystem.readFileString(planPath), "# Plan\n\nShip it.\n");
+      }).pipe(Effect.provide(TestLayer)),
+    ),
+  );
+
+  it.effect("keeps projects isolated", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const artifacts = yield* ArtifactWorkspace.ArtifactWorkspace;
+        const otherProjectId = ProjectId.make("project:other-artifacts-test");
+        yield* artifacts.exportPlan({ projectId, markdown: "# First" });
+        yield* artifacts.exportPlan({ projectId: otherProjectId, markdown: "# Second" });
+
+        assert.equal(
+          (yield* artifacts.read({ projectId, relativePath: "plan.md" })).content,
+          "# First\n",
+        );
+        assert.equal(
+          (yield* artifacts.read({ projectId: otherProjectId, relativePath: "plan.md" })).content,
+          "# Second\n",
+        );
+      }).pipe(Effect.provide(TestLayer)),
+    ),
+  );
+
+  it.effect("writes nested text artifacts through the application boundary", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const artifacts = yield* ArtifactWorkspace.ArtifactWorkspace;
+        const written = yield* artifacts.write({
+          projectId,
+          relativePath: "diagrams/flow.html",
+          content: "<main>Flow</main>",
+        });
+
+        assert.equal(written.path, "diagrams/flow.html");
+        assert.equal(
+          (yield* artifacts.read({ projectId, relativePath: written.path })).content,
+          "<main>Flow</main>",
+        );
+        const listed = yield* artifacts.list(projectId);
+        assert.equal(listed[0]?.path, "diagrams/flow.html");
+        assert.equal(listed[0]?.byteLength, 17);
       }).pipe(Effect.provide(TestLayer)),
     ),
   );
@@ -75,13 +97,21 @@ describe("ArtifactWorkspace", () => {
   it.effect("rejects reads that leave the artifacts directory", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem;
-        const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "j5-artifacts-path-" });
         const artifacts = yield* ArtifactWorkspace.ArtifactWorkspace;
-        yield* artifacts.prepare(cwd);
+        yield* artifacts.prepare(projectId);
 
-        const result = yield* Effect.exit(artifacts.read({ cwd, relativePath: "../outside.txt" }));
+        const result = yield* Effect.exit(
+          artifacts.read({ projectId, relativePath: "../outside.txt" }),
+        );
         assert.isTrue(result._tag === "Failure");
+        const writeResult = yield* Effect.exit(
+          artifacts.write({ projectId, relativePath: "../outside.txt", content: "nope" }),
+        );
+        assert.isTrue(writeResult._tag === "Failure");
+        const windowsWriteResult = yield* Effect.exit(
+          artifacts.write({ projectId, relativePath: "..\\outside.txt", content: "nope" }),
+        );
+        assert.isTrue(windowsWriteResult._tag === "Failure");
       }).pipe(Effect.provide(TestLayer)),
     ),
   );
@@ -98,71 +128,12 @@ describe("ArtifactWorkspace", () => {
             return Stream.make({ _tag: "Create" as const, path: "new-plan.md" });
           },
         },
-        "/workspace/artifacts",
+        "/application/artifacts/project",
       );
 
       assert.equal((yield* Stream.runCollect(changes)).length, 1);
-      assert.equal(watchedPath, "/workspace/artifacts");
+      assert.equal(watchedPath, "/application/artifacts/project");
       assert.isTrue(recursive);
     }),
-  );
-
-  it.effect("refuses to hide an already tracked artifacts directory", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "j5-artifacts-tracked-" });
-        yield* git(cwd, ["init"]);
-        yield* fileSystem.makeDirectory(path.join(cwd, "artifacts"));
-        yield* fileSystem.writeFileString(path.join(cwd, "artifacts", "existing.md"), "tracked");
-        yield* git(cwd, ["add", "artifacts/existing.md"]);
-
-        const artifacts = yield* ArtifactWorkspace.ArtifactWorkspace;
-        const result = yield* Effect.exit(artifacts.prepare(cwd));
-        assert.isTrue(result._tag === "Failure");
-        if (result._tag === "Failure") {
-          assert.include(String(result.cause), "already contains tracked files");
-        }
-      }).pipe(Effect.provide(TestLayer)),
-    ),
-  );
-
-  it.effect("uses Git's resolved exclude file from a linked worktree", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const container = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "j5-artifacts-worktree-",
-        });
-        const repository = path.join(container, "repository");
-        const linked = path.join(container, "linked");
-        yield* fileSystem.makeDirectory(repository);
-        yield* git(repository, ["init"]);
-        yield* git(repository, ["config", "user.email", "artifacts@example.test"]);
-        yield* git(repository, ["config", "user.name", "Artifacts Test"]);
-        yield* fileSystem.writeFileString(path.join(repository, "README.md"), "# Test\n");
-        yield* git(repository, ["add", "README.md"]);
-        yield* git(repository, ["commit", "-m", "initial"]);
-        yield* git(repository, ["worktree", "add", "-b", "artifacts-test", linked]);
-
-        const artifacts = yield* ArtifactWorkspace.ArtifactWorkspace;
-        yield* artifacts.exportPlan({
-          cwd: linked,
-          markdown: "# Linked worktree plan",
-        });
-
-        assert.equal((yield* git(linked, ["status", "--short"])).stdout.trim(), "");
-        assert.isTrue(yield* fileSystem.exists(path.join(linked, "artifacts", "plan.md")));
-        const excludePath = (yield* git(linked, [
-          "rev-parse",
-          "--git-path",
-          "info/exclude",
-        ])).stdout.trim();
-        const exclude = yield* fileSystem.readFileString(path.resolve(linked, excludePath));
-        assert.include(exclude, ArtifactWorkspace.ARTIFACT_IGNORE_PATTERN);
-      }).pipe(Effect.provide(TestLayer)),
-    ),
   );
 });

@@ -25,12 +25,12 @@ export const layer = Layer.effect(
                   const project = yield* projects.getById(input.projectId);
                   if (Option.isNone(project)) {
                     return yield* Effect.logWarning(
-                      "Completed plan has no project workspace for artifact export",
+                      "Completed plan has no project for artifact export",
                       { projectId: input.projectId, threadId: input.threadId, runId: input.runId },
                     );
                   }
                   yield* artifacts.exportPlan({
-                    cwd: project.value.workspaceRoot,
+                    projectId: input.projectId,
                     markdown: planMarkdown,
                   });
                 }).pipe(

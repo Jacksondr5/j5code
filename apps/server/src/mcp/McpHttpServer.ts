@@ -10,10 +10,14 @@ import { McpProtocol, McpSchema, McpServer, Tool } from "effect/unstable/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { layer as ArtifactWorkspaceLive } from "../j5/artifacts/ArtifactWorkspace.ts";
+import * as ArtifactMcpService from "./ArtifactMcpService.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
+import { ArtifactToolkitHandlersLive } from "./toolkits/artifacts/handlers.ts";
+import { ArtifactToolkit } from "./toolkits/artifacts/tools.ts";
 import { OrchestratorToolkitHandlersLive } from "./toolkits/orchestrator/handlers.ts";
 import { OrchestratorToolkit } from "./toolkits/orchestrator/tools.ts";
 import {
@@ -235,6 +239,11 @@ export const WorktreeToolkitRegistrationLive = McpServer.toolkit(WorktreeToolkit
   Layer.provide(WorktreeMcpService.layer),
 );
 
+export const ArtifactToolkitRegistrationLive = McpServer.toolkit(ArtifactToolkit).pipe(
+  Layer.provide(ArtifactToolkitHandlersLive),
+  Layer.provide(ArtifactMcpService.layer.pipe(Layer.provide(ArtifactWorkspaceLive))),
+);
+
 const McpTransportLive = McpServer.layerHttp({
   name: "T3 Code",
   version: packageJson.version,
@@ -244,6 +253,7 @@ const McpTransportLive = McpServer.layerHttp({
 
 export const layer = Layer.mergeAll(
   PreviewToolkitRegistrationLive,
+  ArtifactToolkitRegistrationLive,
   J5OrchestratorSurfaceRegistrationLive,
   WorktreeToolkitRegistrationLive,
   // J5 fork extension: one shared toolkit registration for all J5-owned tools.

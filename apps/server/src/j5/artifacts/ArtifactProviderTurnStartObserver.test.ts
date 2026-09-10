@@ -20,7 +20,7 @@ const projectLayer = Layer.mock(ProjectService.ProjectService)({
 });
 
 describe("ArtifactProviderTurnStartObserver", () => {
-  it.effect("prepares the shared project workspace before a provider turn", () => {
+  it.effect("prepares shared project application storage before a provider turn", () => {
     const prepare = vi.fn(() => Effect.void);
     const testLayer = layer.pipe(
       Layer.provide(Layer.mergeAll(projectLayer, Layer.mock(ArtifactWorkspace)({ prepare }))),
@@ -30,7 +30,7 @@ describe("ArtifactProviderTurnStartObserver", () => {
       const observer = yield* ProviderTurnStart.ProviderTurnStartObserver;
       yield* observer.prepare(input);
 
-      assert.deepStrictEqual(prepare.mock.calls, [["/project-workspace"]]);
+      assert.deepStrictEqual(prepare.mock.calls, [[input.projectId]]);
     }).pipe(Effect.provide(testLayer));
   });
 

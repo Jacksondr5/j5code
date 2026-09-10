@@ -16,7 +16,7 @@ import * as ProjectService from "../../project/ProjectService.ts";
 import { artifactHttpRouteLayer } from "./ArtifactHttp.ts";
 import { ArtifactWorkspace } from "./ArtifactWorkspace.ts";
 
-it("reads artifacts through the authenticated project workspace boundary", async () => {
+it("reads artifacts through the authenticated project boundary", async () => {
   const projectId = ProjectId.make("project:artifacts-http");
   let authorized = false;
   const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
@@ -34,12 +34,14 @@ it("reads artifacts through the authenticated project workspace boundary", async
     getById: () => Effect.succeed(Option.some({ workspaceRoot: "/workspace" } as never)),
   });
   const artifacts = Layer.mock(ArtifactWorkspace)({
-    list: (cwd) =>
-      Effect.succeed([{ path: `${cwd.slice(1)}/plan.md`, byteLength: 7, modifiedAt: null }]),
-    read: ({ cwd, relativePath }) =>
+    list: (requestedProjectId) =>
+      Effect.succeed([
+        { path: `${requestedProjectId.slice(8)}/plan.md`, byteLength: 7, modifiedAt: null },
+      ]),
+    read: ({ projectId: requestedProjectId, relativePath }) =>
       Effect.succeed({
         path: relativePath,
-        byteLength: cwd.length,
+        byteLength: requestedProjectId.length,
         encoding: "utf8" as const,
         content: "# Plan\n",
       }),
@@ -67,14 +69,14 @@ it("reads artifacts through the authenticated project workspace boundary", async
     const list = await post(ARTIFACT_LIST_PATH, { projectId });
     assert.equal(list.status, 200);
     assert.deepStrictEqual(await list.json(), {
-      entries: [{ path: "workspace/plan.md", byteLength: 7, modifiedAt: null }],
+      entries: [{ path: "artifacts-http/plan.md", byteLength: 7, modifiedAt: null }],
     });
 
     const read = await post(ARTIFACT_READ_PATH, { projectId, path: "plan.md" });
     assert.equal(read.status, 200);
     assert.deepStrictEqual(await read.json(), {
       path: "plan.md",
-      byteLength: 10,
+      byteLength: 22,
       encoding: "utf8",
       content: "# Plan\n",
     });

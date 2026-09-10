@@ -76,7 +76,7 @@ const operationFailure = (cause: unknown) => {
     : Effect.succeed(HttpServerResponse.jsonUnsafe({ error: tag, message: detail }, { status }));
 };
 
-const resolveProjectCwd = Effect.fn("j5.artifacts.resolveProjectCwd")(function* (
+const requireProject = Effect.fn("j5.artifacts.requireProject")(function* (
   projects: ProjectService.ProjectService["Service"],
   projectId: ProjectId,
 ) {
@@ -84,7 +84,6 @@ const resolveProjectCwd = Effect.fn("j5.artifacts.resolveProjectCwd")(function* 
   if (Option.isNone(project)) {
     return yield* new ArtifactProjectUnavailableError({ projectId });
   }
-  return project.value.workspaceRoot;
 });
 
 class ArtifactProjectUnavailableError extends Schema.TaggedErrorClass<ArtifactProjectUnavailableError>()(
@@ -92,11 +91,11 @@ class ArtifactProjectUnavailableError extends Schema.TaggedErrorClass<ArtifactPr
   { projectId: ProjectId },
 ) {
   override get message(): string {
-    return `Project ${this.projectId} does not have an available workspace.`;
+    return `Project ${this.projectId} is not available.`;
   }
 }
 
-/** Authenticated J5 routes keep ignored artifact files outside the workspace search index. */
+/** Authenticated J5 routes expose project artifacts from server-owned application storage. */
 export const artifactHttpRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const artifacts = yield* ArtifactWorkspace;
@@ -115,7 +114,9 @@ export const artifactHttpRouteLayer = Layer.unwrap(
         if (Result.isFailure(decoded)) return requestFailure("A valid projectId is required.");
         const input = decoded.success;
         const result = yield* Effect.result(
-          resolveProjectCwd(projects, input.projectId).pipe(Effect.flatMap(artifacts.list)),
+          requireProject(projects, input.projectId).pipe(
+            Effect.flatMap(() => artifacts.list(input.projectId)),
+          ),
         );
         return Result.isSuccess(result)
           ? HttpServerResponse.jsonUnsafe({ entries: result.success })
@@ -143,8 +144,10 @@ export const artifactHttpRouteLayer = Layer.unwrap(
           return requestFailure("A valid projectId and artifact path are required.");
         const input = decoded.success;
         const result = yield* Effect.result(
-          resolveProjectCwd(projects, input.projectId).pipe(
-            Effect.flatMap((cwd) => artifacts.read({ cwd, relativePath: input.path })),
+          requireProject(projects, input.projectId).pipe(
+            Effect.flatMap(() =>
+              artifacts.read({ projectId: input.projectId, relativePath: input.path }),
+            ),
           ),
         );
         return Result.isSuccess(result)

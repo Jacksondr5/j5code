@@ -2531,14 +2531,14 @@ const makeWsRpcLayer = (
                     Effect.fail(
                       new ArtifactWatchError({
                         projectId: input.projectId,
-                        detail: `Project ${input.projectId} does not have an available workspace.`,
+                        detail: `Project ${input.projectId} is not available.`,
                       }),
                     ),
-                  onSome: (project) =>
+                  onSome: () =>
                     Effect.succeed(
                       Stream.merge(
                         Stream.make({ projectId: input.projectId, revision: 0 }),
-                        artifactWorkspace.watch(project.workspaceRoot).pipe(
+                        artifactWorkspace.watch(input.projectId).pipe(
                           Stream.mapError(
                             (cause) =>
                               new ArtifactWatchError({
