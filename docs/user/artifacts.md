@@ -4,6 +4,10 @@ Artifacts are planning documents generated while an agent works, such as plans, 
 research notes, and diagrams. J5 Code stores these files under the project workspace's shared
 `artifacts/` directory and shows them in the Artifacts page.
 
+Use Artifacts for durable, user-consumable planning outputs that should remain available across
+threads and agents. Do not use it for source code, build output, logs, temporary scratch files, or
+ordinary repository documentation.
+
 Open Artifacts from the folder icon at the bottom of the sidebar. Choose a project workspace, then
 choose a file to preview it. Markdown, text, source files, common image formats, and sandboxed HTML
 documents can be previewed without opening an editor. HTML previews cannot run scripts or access
