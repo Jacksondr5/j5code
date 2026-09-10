@@ -25,6 +25,7 @@ export const AGENT_PERSONA_RPC_SCOPES = {
   [METHODS.removeImportedAgentPersona]: AuthOrchestrationOperateScope,
   [METHODS.removeSourceAgentPersona]: AuthOrchestrationOperateScope,
   [METHODS.removeAgentPersona]: AuthOrchestrationOperateScope,
+  [METHODS.restoreSourceAgentPersona]: AuthOrchestrationOperateScope,
 } as const;
 
 /** Matches the per-session `observeRpcEffect` closure in ws.ts (instrumentation plus scope check). */
@@ -69,17 +70,26 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
                 ]),
             );
             const disabledIds = new Set(current.disabledIds);
+            const removed = buildAgentPersonaCatalog(yield* deps.providers, current.removedSources);
             return {
-              personas: catalog.personas.map((persona) => ({
-                ...persona,
-                imported: importedIds.has(persona.personaId),
-                ...(editable.has(persona.personaId)
-                  ? { editable: editable.get(persona.personaId)! }
-                  : {}),
-                availability: disabledIds.has(persona.personaId)
-                  ? { status: "unavailable" as const, reason: "disabled" as const }
-                  : persona.availability,
-              })),
+              personas: [
+                ...catalog.personas.map((persona) => ({
+                  ...persona,
+                  imported: importedIds.has(persona.personaId),
+                  ...(editable.has(persona.personaId)
+                    ? { editable: editable.get(persona.personaId)! }
+                    : {}),
+                  availability: disabledIds.has(persona.personaId)
+                    ? { status: "unavailable" as const, reason: "disabled" as const }
+                    : persona.availability,
+                })),
+                ...removed.personas.map((persona) => ({
+                  ...persona,
+                  imported: false,
+                  removed: true,
+                  availability: { status: "unavailable" as const, reason: "removed" as const },
+                })),
+              ],
             };
           }),
           TRACE,
@@ -124,6 +134,12 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
         observe(
           METHODS.removeAgentPersona,
           library.removeAgent(input.personaId).pipe(Effect.mapError(catalogError)),
+          TRACE,
+        ),
+      [METHODS.restoreSourceAgentPersona]: (input: Input<"restoreSourceAgentPersona">) =>
+        observe(
+          METHODS.restoreSourceAgentPersona,
+          library.restoreSource(input.personaId).pipe(Effect.mapError(catalogError)),
           TRACE,
         ),
     };

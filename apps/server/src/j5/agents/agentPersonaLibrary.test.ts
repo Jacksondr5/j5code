@@ -874,3 +874,44 @@ describe("YAML agent definitions", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
+
+describe("restoring removed agents", () => {
+  it.effect("lists removed bundled and folder agents for restore and brings them back", () =>
+    Effect.gen(function* () {
+      const { library, write, fs, path, stateDir } = yield* fixture;
+      yield* write("agent.yaml", custom);
+      yield* library.removeAgent(custom.id);
+      const removedCatalog = yield* library.catalog();
+      assert.deepEqual(
+        removedCatalog.removedSources.map(({ id }) => id),
+        [custom.id],
+      );
+      assert.isFalse(removedCatalog.definitions.some(({ id }) => id === custom.id));
+      assert.isFalse((yield* library.load()).some(({ id }) => id === custom.id));
+      yield* library.restoreSource(custom.id);
+      const restarted = createAgentPersonaLibrary({ fs, path, stateDir });
+      const restored = yield* restarted.catalog();
+      assert.deepEqual(restored.removedSources, []);
+      assert.isTrue(restored.definitions.some(({ id }) => id === custom.id));
+      assert.include(
+        String(yield* restarted.restoreSource(custom.id).pipe(Effect.flip)),
+        "not removed",
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("does not list a removed source while an imported copy overrides it", () =>
+    Effect.gen(function* () {
+      const { library, write } = yield* fixture;
+      yield* write("agent.yaml", custom);
+      yield* library.removeSource(custom.id);
+      yield* library.importFiles({
+        files: [{ name: "agent.yaml", content: yaml({ ...custom, version: 9 }) }],
+        replaceExisting: false,
+      });
+      const catalog = yield* library.catalog();
+      assert.deepEqual(catalog.removedSources, []);
+      assert.equal(catalog.definitions.find(({ id }) => id === custom.id)?.version, 9);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});

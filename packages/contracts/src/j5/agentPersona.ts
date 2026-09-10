@@ -88,7 +88,12 @@ export const OrchestrationV2AgentPersonaAvailability = Schema.Union([
   }),
   Schema.Struct({
     status: Schema.Literal("unavailable"),
-    reason: Schema.Literals(["routes-unavailable", "authority-not-enforceable", "disabled"]),
+    reason: Schema.Literals([
+      "routes-unavailable",
+      "authority-not-enforceable",
+      "disabled",
+      "removed",
+    ]),
   }),
 ]);
 export type OrchestrationV2AgentPersonaAvailability =
@@ -118,6 +123,8 @@ export type AgentPersonaEditInput = typeof AgentPersonaEditInput.Type;
 export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
   personaId: AgentPersonaId,
   imported: Schema.optional(Schema.Boolean),
+  /** A source or bundled definition the user removed; it stays listed so it can be restored. */
+  removed: Schema.optional(Schema.Boolean),
   editable: Schema.optional(AgentPersonaEditableDetails),
   definitionVersion: PositiveInt,
   displayName: TrimmedNonEmptyString,
@@ -190,6 +197,7 @@ export const J5_AGENT_PERSONA_WS_METHODS = {
   removeImportedAgentPersona: "j5.agentPersonas.removeImported",
   removeSourceAgentPersona: "j5.agentPersonas.removeSource",
   removeAgentPersona: "j5.agentPersonas.remove",
+  restoreSourceAgentPersona: "j5.agentPersonas.restoreSource",
 } as const;
 
 export const J5AgentPersonaRpcSchemas = {
@@ -218,6 +226,10 @@ export const J5AgentPersonaRpcSchemas = {
     output: Schema.Void,
   },
   removeAgentPersona: {
+    input: Schema.Struct({ personaId: AgentPersonaId }),
+    output: Schema.Void,
+  },
+  restoreSourceAgentPersona: {
     input: Schema.Struct({ personaId: AgentPersonaId }),
     output: Schema.Void,
   },
@@ -282,6 +294,14 @@ export const WsJ5RemoveAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.re
   success: J5AgentPersonaRpcSchemas.removeAgentPersona.output,
   error: catalogErrors,
 });
+export const WsJ5RestoreSourceAgentPersonaRpc = Rpc.make(
+  J5_AGENT_PERSONA_WS_METHODS.restoreSourceAgentPersona,
+  {
+    payload: J5AgentPersonaRpcSchemas.restoreSourceAgentPersona.input,
+    success: J5AgentPersonaRpcSchemas.restoreSourceAgentPersona.output,
+    error: catalogErrors,
+  },
+);
 
 /** Merged into `WsRpcGroup` by one appended call; no other upstream registration exists. */
 export const J5AgentPersonaRpcGroup = RpcGroup.make(
@@ -292,4 +312,5 @@ export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5RemoveImportedAgentPersonaRpc,
   WsJ5RemoveSourceAgentPersonaRpc,
   WsJ5RemoveAgentPersonaRpc,
+  WsJ5RestoreSourceAgentPersonaRpc,
 );

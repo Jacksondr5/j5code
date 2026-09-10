@@ -2,7 +2,7 @@ import { toastManager } from "../../components/ui/toast";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { AgentImportConflictSelection } from "./AgentImportConflictSelection";
 import { AgentEditorDialog } from "./AgentEditorDialog";
-import { ChevronDownIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import { ChevronDownIcon, PencilIcon, Trash2Icon, Undo2Icon } from "lucide-react";
 import {
   prepareAgentPersonaImport,
   importAgentPersonasWithConfirmation,
@@ -75,6 +75,9 @@ export function AgentLibrarySettings() {
     reportFailure: false,
   });
   const removeAgent = useAtomCommand(agentPersonaEnvironment.removeAgentPersona, {
+    reportFailure: false,
+  });
+  const restoreAgent = useAtomCommand(agentPersonaEnvironment.restoreSourceAgentPersona, {
     reportFailure: false,
   });
   async function importSelection(files: File[]) {
@@ -169,6 +172,25 @@ export function AgentLibrarySettings() {
       });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       toastManager.add({ type: "success", title: "Agent removed" });
+      catalog.refresh();
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Agent action failed",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function restorePersona(personaId: string) {
+    if (effectiveEnvironmentId === null || busy) return;
+    const environmentId = effectiveEnvironmentId;
+    setBusy(true);
+    try {
+      const result = await restoreAgent({ environmentId, input: { personaId } });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      toastManager.add({ type: "success", title: "Agent restored" });
       catalog.refresh();
     } catch (error) {
       toastManager.add({
@@ -304,46 +326,59 @@ export function AgentLibrarySettings() {
               }
               description={persona.description}
               control={
-                <div className="flex flex-wrap items-center gap-2">
-                  {persona.imported ? (
-                    <Switch
-                      checked={persona.enabled}
-                      disabled={busy}
-                      aria-label={`Enable ${persona.displayName}`}
-                      onCheckedChange={(enabled) => void toggleAgent(persona.personaId, enabled)}
-                    />
-                  ) : null}
+                persona.removed ? (
                   <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    disabled={busy || persona.edit === null}
-                    aria-label={`Edit ${persona.displayName}`}
-                    title={
-                      persona.edit
-                        ? `Edit ${persona.displayName}`
-                        : "Import a copy to edit this agent"
-                    }
-                    onClick={() => {
-                      if (persona.edit && effectiveEnvironmentId)
-                        setEditing({
-                          environmentId: effectiveEnvironmentId,
-                          initial: persona.edit,
-                        });
-                    }}
-                  >
-                    <PencilIcon className="size-4" />
-                  </Button>
-                  <Button
-                    variant="destructive-outline"
-                    size="icon-sm"
+                    variant="outline"
+                    size="sm"
                     disabled={busy}
-                    aria-label={`Remove ${persona.displayName}`}
-                    title={`Remove ${persona.displayName}`}
-                    onClick={() => void removePersona(persona.personaId)}
+                    aria-label={`Restore ${persona.displayName}`}
+                    onClick={() => void restorePersona(persona.personaId)}
                   >
-                    <Trash2Icon className="size-4" />
+                    <Undo2Icon className="size-4" />
+                    Restore
                   </Button>
-                </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {persona.imported ? (
+                      <Switch
+                        checked={persona.enabled}
+                        disabled={busy}
+                        aria-label={`Enable ${persona.displayName}`}
+                        onCheckedChange={(enabled) => void toggleAgent(persona.personaId, enabled)}
+                      />
+                    ) : null}
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={busy || persona.edit === null}
+                      aria-label={`Edit ${persona.displayName}`}
+                      title={
+                        persona.edit
+                          ? `Edit ${persona.displayName}`
+                          : "Import a copy to edit this agent"
+                      }
+                      onClick={() => {
+                        if (persona.edit && effectiveEnvironmentId)
+                          setEditing({
+                            environmentId: effectiveEnvironmentId,
+                            initial: persona.edit,
+                          });
+                      }}
+                    >
+                      <PencilIcon className="size-4" />
+                    </Button>
+                    <Button
+                      variant="destructive-outline"
+                      size="icon-sm"
+                      disabled={busy}
+                      aria-label={`Remove ${persona.displayName}`}
+                      title={`Remove ${persona.displayName}`}
+                      onClick={() => void removePersona(persona.personaId)}
+                    >
+                      <Trash2Icon className="size-4" />
+                    </Button>
+                  </div>
+                )
               }
             />
           ))
