@@ -1,6 +1,6 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ThreadId } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowUpRightIcon,
   CheckCircle2Icon,
@@ -434,12 +434,18 @@ export function HumanInboxPage() {
                           </div>
                           <Button
                             render={
-                              <a
-                                href={`/runs?runId=${encodeURIComponent(item.id)}&squadronId=${encodeURIComponent(item.squadronId)}#workflow-approval`}
+                              <Link
+                                to="/runs"
+                                search={{
+                                  runId: item.id,
+                                  squadronId: item.squadronId,
+                                  tab: "overview",
+                                }}
+                                hash="workflow-approval"
                               />
                             }
                             size="sm"
-                            variant="outline"
+                            className="shrink-0"
                           >
                             Review evidence
                           </Button>

@@ -30,7 +30,7 @@ function WorkflowSearchInput({
   }, [onCommit, value]);
   return (
     <Input
-      className="mt-1 w-56"
+      className="mt-1 h-9 w-full"
       onChange={(event) => setValue(event.currentTarget.value)}
       placeholder="Request text"
       value={value}
@@ -148,11 +148,11 @@ export function RunsPage() {
             {creation.mutationError}
           </p>
         ) : null}
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/20 p-3">
           <label className="text-sm">
-            Browse Squadron
+            Squadron
             <select
-              className="mt-1 block rounded border bg-background p-2"
+              className="mt-1 block h-9 w-48 rounded border bg-background px-2"
               value={scope}
               onChange={(event) =>
                 updateSearch({
@@ -171,7 +171,7 @@ export function RunsPage() {
               ))}
             </select>
           </label>
-          <label className="text-sm">
+          <label className="min-w-48 flex-1 text-sm">
             Search
             <WorkflowSearchInput
               initialValue={search.q ?? ""}
@@ -182,7 +182,7 @@ export function RunsPage() {
           <label className="text-sm">
             Status
             <select
-              className="mt-1 block rounded border bg-background p-2"
+              className="mt-1 block h-9 rounded border bg-background px-2"
               onChange={(event) =>
                 updateSearch({
                   status: (event.currentTarget.value || undefined) as RunsSearch["status"],

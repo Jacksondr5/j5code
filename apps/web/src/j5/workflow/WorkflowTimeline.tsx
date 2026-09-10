@@ -8,19 +8,27 @@ import { useWorkflowQuery, workflowTimelineAtom } from "./queries";
 import {
   detectDissent,
   flattenTimeline,
-  groupTimelineLanes,
+  groupTimelinePhases,
   type TimelineDisplayEntry,
 } from "./timelineModel";
 
 const eventLabel = (entry: TimelineDisplayEntry) => {
-  const name = entry.kind.replaceAll("_", " ");
+  const name =
+    entry.kind === "gate_opened"
+      ? "Approval requested"
+      : entry.kind === "gate_revised"
+        ? "Approval updated"
+        : entry.kind === "action_queued"
+          ? "Queued"
+          : entry.kind === "action_completed"
+            ? "Finished"
+            : entry.kind === "action_failed"
+              ? "Failed"
+              : entry.kind === "phase_entered"
+                ? "Phase entered"
+                : phaseLabel(entry.kind);
   const detail =
-    entry.task ??
-    entry.phase ??
-    entry.decision ??
-    entry.failureCategory ??
-    entry.cause ??
-    entry.eventType;
+    entry.task ?? entry.decision ?? entry.failureCategory ?? entry.cause ?? entry.eventType;
   return detail ? `${name} · ${phaseLabel(detail)}` : name;
 };
 
@@ -54,7 +62,7 @@ function WorkflowTimelineForRun({ environmentId, runId, layout = "wide" }: Workf
     [currentOlder, head.data, olderPages],
   );
   const entries = useMemo(() => flattenTimeline(pages), [pages]);
-  const lanes = useMemo(() => groupTimelineLanes(entries), [entries]);
+  const groups = useMemo(() => groupTimelinePhases(entries), [entries]);
   const dissent = useMemo(() => detectDissent(entries), [entries]);
   const nextBefore = before === null ? head.data?.nextBefore : currentOlder?.nextBefore;
 
@@ -67,6 +75,18 @@ function WorkflowTimelineForRun({ environmentId, runId, layout = "wide" }: Workf
   if (!head.data) return <p className="rounded border p-4">Loading workflow timeline…</p>;
   return (
     <section aria-label="Workflow timeline" className="space-y-4">
+      <header className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="font-semibold">Workflow activity</h3>
+        <span className="text-xs text-muted-foreground">
+          Newest first · {entries.length} recorded events loaded
+        </span>
+      </header>
+      {entries.some((entry) => entry.partial) ? (
+        <p className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
+          Some imported history is incomplete. Events stay in recorded order; unavailable times are
+          not estimated.
+        </p>
+      ) : null}
       {dissent.map((item) => (
         <div className="rounded border border-warning p-3 text-sm" key={item.gateRevision}>
           <strong>Reviewer dissent:</strong> {item.reviewers.join(", ")} requested revision in{" "}
@@ -74,25 +94,79 @@ function WorkflowTimelineForRun({ environmentId, runId, layout = "wide" }: Workf
           {item.overriddenBy ? ` Later approved by ${item.overriddenBy}.` : ""}
         </div>
       ))}
-      <div className={layout === "wide" ? "grid gap-4 lg:grid-cols-4" : "space-y-4"}>
-        {lanes.map((lane) => (
-          <section className="min-w-0 rounded-lg border p-3" key={`${lane.lane}:${lane.label}`}>
-            <h3 className="font-semibold">{lane.label}</h3>
-            <ol className="mt-3 space-y-3">
-              {lane.entries.map((entry) => (
-                <li className="border-l-2 pl-3 text-sm" key={entry.id}>
-                  <div className="font-medium capitalize">{eventLabel(entry)}</div>
-                  <div className="text-xs text-muted-foreground">
-                    Revision {entry.revision} ·{" "}
-                    {entry.partial || entry.recordedAt === null
-                      ? "time unavailable"
-                      : new Date(entry.recordedAt).toLocaleString()}
-                  </div>
-                  {entry.verdict ? (
-                    <div className="text-xs text-muted-foreground">Verdict: {entry.verdict}</div>
-                  ) : null}
-                </li>
-              ))}
+      {!entries.length ? (
+        <p className="rounded-lg border p-4 text-sm text-muted-foreground">
+          No recorded activity yet.
+        </p>
+      ) : null}
+      <div className="space-y-3">
+        {groups.map((group) => (
+          <section
+            className={
+              layout === "wide"
+                ? "grid min-w-0 gap-3 rounded-lg border p-4 lg:grid-cols-[9rem_minmax(0,1fr)]"
+                : "min-w-0 space-y-3 rounded-lg border p-3"
+            }
+            key={group.id}
+          >
+            <header>
+              <h4 className="text-sm font-semibold">
+                {group.phase ? phaseLabel(group.phase) : "Workflow"}
+              </h4>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {group.visit === null ? "Visit unavailable" : `Visit ${group.visit}`}
+              </p>
+            </header>
+            <ol className="min-w-0 space-y-2">
+              {group.entries.map((entry) => {
+                const isGate = ["gate_opened", "gate_revised", "decision"].includes(entry.kind);
+                return (
+                  <li
+                    className={`min-w-0 rounded-md border-l-2 px-3 py-2 text-sm ${isGate ? "border-primary bg-primary/5" : "border-border bg-muted/20"}`}
+                    key={entry.id}
+                  >
+                    <details>
+                      <summary className="cursor-pointer break-words">
+                        <span className="font-medium">{eventLabel(entry)}</span>
+                        {entry.attempt !== undefined ? (
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            Attempt {entry.attempt}
+                          </span>
+                        ) : null}
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          {entry.partial || entry.recordedAt === null
+                            ? "Time unavailable"
+                            : new Date(entry.recordedAt).toLocaleString()}
+                        </span>
+                      </summary>
+                      <div className="mt-3 space-y-1 border-t pt-2 text-xs text-muted-foreground">
+                        <div>Revision {entry.revision}</div>
+                        {entry.actor ? <div>Decision by {entry.actor}</div> : null}
+                        {entry.gateRevision !== undefined ? (
+                          <div>Approval revision {entry.gateRevision}</div>
+                        ) : null}
+                        {entry.fromPhase ? (
+                          <div>
+                            From {phaseLabel(entry.fromPhase)}
+                            {entry.fromVisit ? ` · visit ${entry.fromVisit}` : ""}
+                          </div>
+                        ) : null}
+                        {entry.cause ? (
+                          <div className="whitespace-pre-wrap break-words">{entry.cause}</div>
+                        ) : null}
+                        {entry.actionId ? (
+                          <div className="break-all">Action {entry.actionId}</div>
+                        ) : null}
+                      </div>
+                    </details>
+                    {entry.verdict ? (
+                      <p className="mt-1 text-xs font-medium">
+                        Review: {phaseLabel(entry.verdict)}
+                      </p>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ol>
           </section>
         ))}

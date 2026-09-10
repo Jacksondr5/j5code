@@ -23,7 +23,7 @@ import {
   ReviewerSummary,
   Status,
 } from "./RunsPageEvidence";
-import { expectedNextStep, failureHeading, phaseLabel } from "./presentation";
+import { failureHeading, phaseLabel } from "./presentation";
 import { useWorkflowRunDetail, type PendingWorkflowAction } from "./useWorkflowRunDetail";
 
 const actionLabel: Record<PendingWorkflowAction, string> = {
@@ -298,13 +298,21 @@ export function WorkflowRunOverview({
           <h2 className="min-w-0 break-words text-xl font-semibold">{run.request}</h2>
           <Status status={run.status} />
         </div>
-        <p>
-          {phaseLabel(run.phase)} · {expectedNextStep(run, model.definition)}
-        </p>
-        <p className="text-sm text-muted-foreground">
-          Squadron: <span className="break-all">{run.squadronId}</span> · Repository:{" "}
-          <span className="break-all">{run.repository}</span>
-        </p>
+        <details className="text-sm text-muted-foreground">
+          <summary className="cursor-pointer">
+            {run.repository.split(/[\\/]/).findLast(Boolean)} · Run details
+          </summary>
+          <dl className="mt-2 space-y-1 text-xs">
+            <div>
+              <dt>Squadron ID</dt>
+              <dd className="break-all">{run.squadronId}</dd>
+            </div>
+            <div>
+              <dt>Repository</dt>
+              <dd className="break-all">{run.repository}</dd>
+            </div>
+          </dl>
+        </details>
       </div>
       <Progress definition={model.definition} run={run} />
       {run.cause ? (
@@ -464,11 +472,10 @@ export function WorkflowRunOverview({
         </Button>
       ) : null}
       {["running", "restarting", "waiting_approval", "blocked"].includes(run.status) ? (
-        <div className="rounded-lg border border-destructive/30 p-4">
-          <h3 className="font-medium">Stop workflow</h3>
-          <p className="mb-3 text-sm text-muted-foreground">
-            Stops successor work and interrupts owned work. Artifacts, worktrees, and completed
-            publication results are retained.
+        <details className="text-sm">
+          <summary className="cursor-pointer text-muted-foreground">Workflow actions</summary>
+          <p className="my-2 text-sm text-muted-foreground">
+            Cancelling stops active work and keeps recorded evidence and publication results.
           </p>
           <Button
             disabled={model.pendingAction !== null}
@@ -477,7 +484,7 @@ export function WorkflowRunOverview({
           >
             Cancel workflow
           </Button>
-        </div>
+        </details>
       ) : null}
       <Result artifacts={model.artifacts} />
       <details className="rounded-lg border p-4" open={model.hasOpenActions}>

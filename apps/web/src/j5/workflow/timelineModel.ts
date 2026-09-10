@@ -11,6 +11,25 @@ export interface TimelineLane {
   readonly entries: readonly TimelineDisplayEntry[];
 }
 
+/** Keep consecutive phase visits together without merging a later return to the same phase. */
+export function groupTimelinePhases(entries: readonly TimelineDisplayEntry[]) {
+  const groups: Array<{
+    id: string;
+    phase: string | null;
+    visit: number | null;
+    entries: TimelineDisplayEntry[];
+  }> = [];
+  for (const entry of entries) {
+    const previous = groups.at(-1);
+    if (previous && previous.phase === entry.phase && previous.visit === entry.visit) {
+      previous.entries.push(entry);
+    } else {
+      groups.push({ id: entry.id, phase: entry.phase, visit: entry.visit, entries: [entry] });
+    }
+  }
+  return groups;
+}
+
 export const flattenTimeline = (pages: readonly TimelinePage[]): TimelineDisplayEntry[] => {
   const revisions = new Map<number, TimelinePage["revisions"][number]>();
   for (const page of pages)

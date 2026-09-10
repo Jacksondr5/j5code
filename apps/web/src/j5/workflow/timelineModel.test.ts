@@ -1,6 +1,11 @@
 import { assert, it } from "@effect/vitest";
 
-import { detectDissent, groupTimelineLanes, type TimelineDisplayEntry } from "./timelineModel";
+import {
+  detectDissent,
+  groupTimelineLanes,
+  groupTimelinePhases,
+  type TimelineDisplayEntry,
+} from "./timelineModel";
 
 const entry = (
   revision: number,
@@ -15,6 +20,30 @@ const entry = (
   phase: null,
   visit: null,
   ...extra,
+});
+
+it("separates repeated phase visits and preserves partial history in revision order", () => {
+  const entries = [
+    entry(6, "action_queued", { phase: "plan", visit: 2 }),
+    entry(5, "phase_entered", { phase: "plan", visit: 2 }),
+    entry(4, "action_completed", { phase: "plan_review", visit: 1 }),
+    entry(3, "action_completed", { phase: "plan", visit: 1 }),
+    entry(2, "event", { partial: true, recordedAt: null }),
+  ];
+  const groups = groupTimelinePhases(entries);
+  assert.deepEqual(
+    groups.map((group) => [group.phase, group.visit, group.entries.length]),
+    [
+      ["plan", 2, 2],
+      ["plan_review", 1, 1],
+      ["plan", 1, 1],
+      [null, null, 1],
+    ],
+  );
+  assert.deepEqual(
+    groups.flatMap((group) => group.entries),
+    entries,
+  );
 });
 
 it("groups entries into stable lanes without changing revision order", () => {

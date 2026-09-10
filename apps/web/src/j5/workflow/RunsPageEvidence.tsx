@@ -74,12 +74,12 @@ export function Progress({
     <section className="rounded-lg border p-4" aria-label="Workflow progress">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="font-semibold">Current: {phaseLabel(run.phase)}</h3>
+          <h3 className="font-semibold">{phaseLabel(run.phase)}</h3>
           <p className="text-sm text-muted-foreground">{expectedNextStep(run, definition)}</p>
         </div>
         {currentPhase && currentPhase.maxVisits > 1 && (
           <span className="text-sm">
-            {phaseLabel(run.phase)} attempt {visits} of {currentPhase.maxVisits}
+            Attempt {visits} of {currentPhase.maxVisits}
           </span>
         )}
       </div>
@@ -88,18 +88,22 @@ export function Progress({
           <summary className="cursor-pointer text-sm font-medium">
             All {definition.phases.length} phases
           </summary>
-          <ol className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+          <ol className="mt-3 flex flex-wrap gap-2 text-xs">
             {strip?.cells.map((phase, index) => {
               return (
                 <li
-                  className={`rounded border p-2 ${phase.state === "current" || phase.state === "blocked" ? "border-primary" : ""}`}
+                  className={`rounded border px-2 py-1.5 ${phase.state === "current" || phase.state === "blocked" ? "border-primary bg-primary/10 font-medium" : "text-muted-foreground"}`}
                   key={phase.id}
                 >
                   {index + 1}. {phase.label} {phase.kind === "gate" && "· Human gate"}
                   <span className="block text-xs text-muted-foreground">
-                    {phase.visits
-                      ? `Visited ${phase.visits} time${phase.visits === 1 ? "" : "s"}; current validity depends on later transitions.`
-                      : "Not visited"}
+                    {phase.state === "current"
+                      ? "Current"
+                      : phase.state === "blocked"
+                        ? "Blocked"
+                        : phase.visits
+                          ? `Visited ${phase.visits}×`
+                          : "Not visited"}
                   </span>
                 </li>
               );

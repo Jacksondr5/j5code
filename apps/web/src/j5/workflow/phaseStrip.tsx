@@ -1,4 +1,5 @@
 import type { RunDetail, WorkflowDefinitionPresentation } from "@j5/workflow-contracts";
+import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 
 import { phaseLabel } from "./presentation";
 
@@ -62,18 +63,36 @@ export function PhaseStrip({
 }) {
   const model = phaseStripModel(phases, visits, currentPhase, status);
   return (
-    <ol className="flex min-w-0 gap-1" aria-label="Workflow phases">
-      {model.cells.map((cell) => (
-        <li
-          aria-current={cell.state === "current" || cell.state === "blocked" ? "step" : undefined}
-          className={`h-2 min-w-1 flex-1 rounded-sm ${color[cell.state]}`}
-          key={cell.id}
-        >
-          <span className="sr-only">
-            {cell.label}: {cell.state}
-          </span>
-        </li>
-      ))}
-    </ol>
+    <div className="space-y-2">
+      <ol className="flex min-w-0 gap-1" aria-label="Workflow phases">
+        {model.cells.map((cell) => (
+          <li
+            aria-current={cell.state === "current" || cell.state === "blocked" ? "step" : undefined}
+            className="min-w-1 flex-1"
+            key={cell.id}
+          >
+            <Tooltip>
+              <TooltipTrigger
+                render={<span className={`block h-2 rounded-sm ${color[cell.state]}`} />}
+              >
+                <span className="sr-only">
+                  {cell.label}: {cell.state === "done" ? "visited" : cell.state}
+                </span>
+              </TooltipTrigger>
+              <TooltipPopup>
+                {cell.label}: {cell.state === "done" ? "visited" : cell.state}
+              </TooltipPopup>
+            </Tooltip>
+          </li>
+        ))}
+      </ol>
+      <p className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span>
+          Visited {model.cells.filter((cell) => cell.visits > 0).length} of {model.cells.length}{" "}
+          phases
+        </span>
+        <span className="font-medium text-foreground">{phaseLabel(currentPhase)}</span>
+      </p>
+    </div>
   );
 }

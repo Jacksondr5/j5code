@@ -34,7 +34,7 @@ export const WorkflowBoardCard = memo(function WorkflowBoardCard({
   const currentDefinitionPhase = definition?.phases.find((phase) => phase.id === card.phase);
   return (
     <Link
-      className="flex min-h-48 min-w-0 flex-col rounded-lg border p-4 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className={`flex min-w-0 flex-col rounded-lg border p-4 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${card.status === "waiting_approval" || card.status === "blocked" ? "border-warning/60 bg-warning/5" : card.status === "running" ? "border-primary/40" : ""}`}
       onClick={(event) => {
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
@@ -47,17 +47,17 @@ export const WorkflowBoardCard = memo(function WorkflowBoardCard({
       }}
       to="/runs"
     >
-      <span className="line-clamp-2 font-semibold">{card.title}</span>
-      <span className="mt-2">
+      <span className="mb-2">
         <Status status={card.status} />
       </span>
+      <span className="line-clamp-2 text-sm font-semibold leading-relaxed">{card.title}</span>
       <span className="mt-2 text-sm">
         {phaseLabel(card.phase)}
         {currentDefinitionPhase && currentDefinitionPhase.maxVisits > 1
-          ? ` · visit ${card.visit ?? 0}/${currentDefinitionPhase.maxVisits}`
+          ? ` · attempt ${card.visit ?? 0} of ${currentDefinitionPhase.maxVisits}`
           : ""}
       </span>
-      {definition ? (
+      {definition && !["completed", "cancelled", "failed"].includes(card.status) ? (
         <div className="mt-3">
           <PhaseStrip
             currentPhase={card.phase}
@@ -76,9 +76,12 @@ export const WorkflowBoardCard = memo(function WorkflowBoardCard({
           ))}
         </ul>
       ) : null}
-      <span className="mt-auto pt-3 text-xs text-muted-foreground">
-        {card.gateRevision !== null ? `Gate ${card.gateRevision} · ` : ""}
+      {card.status === "waiting_approval" ? (
+        <span className="mt-2 text-sm font-medium">Your decision is needed</span>
+      ) : null}
+      <span className="mt-auto flex items-center justify-between gap-2 pt-3 text-xs text-muted-foreground">
         <WorkflowTimestamp value={card.updatedAt} />
+        <span className="shrink-0 text-foreground">View workflow →</span>
       </span>
     </Link>
   );
@@ -118,7 +121,7 @@ export function WorkflowBoard({
   return (
     <section aria-label="Workflow board" className="space-y-4">
       {board.data.cards.length ? (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {board.data.cards.map((card) => (
             <WorkflowBoardCard
               card={card}
