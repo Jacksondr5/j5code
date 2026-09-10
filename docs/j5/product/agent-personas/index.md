@@ -6,7 +6,7 @@ status: 1
 
 # Agent persona definition contract
 
-Revised 2026-09-08 following [Jacksondr5's PR #75 review](https://github.com/Jacksondr5/j5code/pull/75) and Bryant's approval of folder loading first. A **persona** is the current implementation of a user-authored [Role](../features/roles.md), not a second product concept. The eleven definitions below are starter examples, not a closed platform registry or a prescribed workflow.
+Revised 2026-09-08 following [Jacksondr5's PR #75 review](https://github.com/Jacksondr5/j5code/pull/75) and Bryant's approval of folder loading first. A **persona** is the current implementation of a user-authored [Role](../features/roles.md), not a second product concept. Definitions live in external YAML libraries; the platform ships no persona definitions.
 
 ## Delivery boundary
 
@@ -24,10 +24,10 @@ Crew composition, Playbook steps, workflow gates, and lifecycle automation remai
 - UI imports show a confirmation for existing IDs: each conflicting agent has a replacement toggle. Cancel imports nothing; Import selected imports new agents and overwrites only the selected existing definitions, including local edits, while preserving enabled state and saved tasks. Toggled-off agents are skipped throughout the import. New or changed conflicts require fresh confirmation. Duplicate IDs within a selection fail the batch. The trash action removes the imported copy and excludes any underlying source definition, without altering running tasks. Source edits require reimporting unless the server reads that folder directly through configuration.
 - A library combines imported copies with optional source folders on the selected environment's filesystem. Definitions are plain YAML files with markdown instruction content, editable and shareable through ordinary editors and git. Git is optional. Loading never clones, pulls, pushes, or executes a file.
 - For directly configured source folders, each immediate `.yaml` or `.yml` file holds one definition. JSON files are ignored there and rejected on import. Nested directories and other file types are ignored. Configuration selects folders explicitly; order is preserved and filenames are sorted. Duplicate ids fail the library read rather than silently choosing a winner.
-- The default library folder is `personas` below the environment's state directory. If that folder and explicit configuration are absent, the application offers the bundled examples. An existing empty folder or explicit empty folder list yields no source definitions; imports remain available. Explicit configuration replaces the examples; it never implicitly merges or overrides them.
+- The default library folder is `personas` below the environment's state directory. If that folder and explicit configuration are absent, the library is empty. An existing empty folder or explicit empty folder list also yields no source definitions; imports remain available.
 - `<stateDir>/agent-personas.json` accepts `{ "folders": ["personas", "/absolute/team-library"] }`. Relative paths resolve from that environment's state directory. Configuration and source files are re-read at catalog requests and new activations; no restart or continuous watcher is required. Reopening Settings reads the library again.
-- Missing configured folders, malformed configuration or definitions, undefined structured artifacts, and duplicate ids produce an actionable library error. A launch fails before thread creation. No invalid source silently falls back to the examples.
-- The same validation applies to bundled and imported definitions. The bundled examples are compiled into the server; to make an editable copy, write the same fields as a YAML file in a source folder or import it.
+- Missing configured folders, malformed configuration or definitions, undefined structured artifacts, and duplicate ids produce an actionable library error. A launch fails before thread creation. No invalid source silently falls back to another definition.
+- Source folders and imports use the same YAML validation. Settings edits imported copies.
 
 ## Definition format
 
@@ -45,25 +45,7 @@ Each definition has:
 | `authority.defaultPolicy`, `authority.allowedPolicies` | A default and allowed selection from the runtime-policy vocabulary below. The default must be allowed.                                                   |
 | `modelRoute`                                           | Ordered primary and fallback targets. Each names `driver`, exact `model`, and `reasoningEffort`.                                                         |
 
-Files are limited to 64 KiB. This slice retains exactly two route targets and supports routing to Codex and Claude. Other providers are unavailable for persona activation until their adapter policies are supported. Broader ordered model allowlists belong to a later Role-library revision; none of these limits fixes the persona's name or model choices to the starter examples.
-
-## Starter examples
-
-These examples are user-editable content. Their operating instructions describe intended behavior, including no-commit or no-merge expectations; those words do not themselves enforce permissions.
-
-| ID             | Display name | Description                                                         | Accepted input                                            | Required output       | Authority                       | Primary route            | Secondary route           |
-| -------------- | ------------ | ------------------------------------------------------------------- | --------------------------------------------------------- | --------------------- | ------------------------------- | ------------------------ | ------------------------- |
-| `scout`        | Scout        | Collects cited evidence into a Context Brief. Read-only.            | Evidence request or prompt                                | `ContextBrief`        | `read-only`                     | `gpt-5.6-terra`, high    | `claude-opus-5`, high     |
-| `navigator`    | Navigator    | Turns a Context Brief into an implementation plan. Read-only.       | `ContextBrief`                                            | `PlanHandoff`         | `read-only`                     | `gpt-5.6-sol`, high      | `claude-fable-5-1`, high  |
-| `advocate`     | Advocate     | Checks a plan against product and design requirements.              | `PlanHandoff` plus Jira, Confluence, or Figma evidence    | `PlanCritique`        | `read-only`                     | `claude-sonnet-5`, high  | `gpt-5.6-terra`, high     |
-| `skeptic`      | Skeptic      | Stress-tests a plan for feasibility, risk, and hidden scope.        | `PlanHandoff` plus repository evidence                    | `PlanCritique`        | `read-only`                     | `claude-opus-5`, high    | `gpt-5.6-terra`, high     |
-| `builder`      | Builder      | Implements an approved handoff. Never commits or pushes.            | `PlanHandoff`, `DiagnosisHandoff`, or `ReviewInbox`       | `CodeCompleteHandoff` | `workspace-write`               | `gpt-5.6-sol`, high      | `claude-opus-5`, high     |
-| `critic`       | Critic       | Reviews implementation; Fix Mode may apply targeted fixes.          | `CodeCompleteHandoff` plus governing handoff and diff     | `ReviewHandoff`       | `critic-review` or `critic-fix` | `claude-opus-5`, high    | `gpt-5.6-terra`, high     |
-| `sentry`       | Sentry       | Reviews a diff for security, authorization, secrets, and PII risks. | `CodeCompleteHandoff` plus diff and relevant architecture | `ReviewHandoff`       | `read-only`                     | `claude-fable-5-1`, high | `gpt-5.6-terra`, high     |
-| `publisher`    | Publisher    | Commits, pushes, and opens or updates a PR. Never merges.           | `CodeCompleteHandoff` plus resolved review findings       | `PublicationReceipt`  | `publish-only`                  | `gpt-5.6-terra`, medium  | `claude-sonnet-5`, medium |
-| `investigator` | Investigator | Reproduces and diagnoses bugs without landing a fix.                | Bug report, Jira issue, or diagnostic prompt              | `DiagnosisHandoff`    | `diagnostic`                    | `gpt-5.6-sol`, high      | `claude-fable-5-1`, high  |
-| `prosecutor`   | Prosecutor   | Challenges a diagnosis, its evidence, and proposed repair.          | `DiagnosisHandoff` plus available evidence                | `DiagnosisCritique`   | `read-only`                     | `claude-opus-5`, high    | `gpt-5.6-terra`, high     |
-| `herald`       | Herald       | Reads and classifies GitHub review feedback.                        | Pull request target and review state                      | `ReviewInbox`         | `read-only`                     | `gpt-5.6-terra`, high    | `claude-sonnet-5`, high   |
+Files are limited to 64 KiB. This slice retains exactly two route targets and supports routing to Codex and Claude. Other providers are unavailable for persona activation until their adapter policies are supported. Broader ordered model allowlists belong to a later Role-library revision; persona names and model choices belong to the external definitions.
 
 ## Model routing
 
@@ -191,7 +173,7 @@ A launch reads and validates the definition once, resolves the route, and atomic
 
 The ordinary command receipt remains the replay boundary. A replay reuses its stored launch result rather than reading changed source. Forks inherit the assignment; provider-native children do not. Direct creation validates the referenced snapshot and route. Runtime instruction composition reads the same immutable snapshot, including after an environment restart. Source edits, removal, or source reconfiguration affect new launches only. Missing or modified snapshots cause an explicit failure, never adoption of a newer definition.
 
-Backups and environment migration must preserve snapshots together with the event database. Projection rebuild preserves the assignment references without reading source folders. Pre-library built-in assignments without a digest remain readable through the version-1 compatibility path. This compatibility path does not accept arbitrary custom definitions.
+Backups and environment migration must preserve snapshots together with the event database. Projection rebuild preserves the assignment references without reading source folders. Legacy assignments without a digest remain readable, but cannot run again. Start a fresh task; current definitions are never silently attached to old tasks.
 
 ## Clients and activation
 

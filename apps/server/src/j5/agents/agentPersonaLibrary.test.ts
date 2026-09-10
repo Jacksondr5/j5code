@@ -15,7 +15,8 @@ import { stringify as yaml } from "yaml";
 
 import { prepareAgentPersonaLaunch } from "./agentPersonaLaunch.ts";
 import { definitionDigest, createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
-import { BUILT_IN_AGENT_PERSONAS, decodeAgentPersonaDefinition } from "./agentPersonas.ts";
+import { TEST_PERSONAS } from "./testFixtures.ts";
+import { decodeAgentPersonaDefinition } from "./agentPersonas.ts";
 import { validateAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
 
@@ -24,7 +25,7 @@ const isImportConflict = Schema.is(AgentPersonaImportConflictError);
 const json = (value: unknown) => JSON.stringify(value);
 
 const custom = decodeAgentPersonaDefinition({
-  ...BUILT_IN_AGENT_PERSONAS.scout,
+  ...TEST_PERSONAS.scout,
   id: "team-researcher",
   displayName: "Team Researcher",
   version: 3,
@@ -62,10 +63,10 @@ const assignmentFor = (digest: string | undefined): OrchestrationV2AgentPersonaA
 });
 
 describe("folder-backed persona library", () => {
-  it.effect("loads examples only when no library has been configured", () =>
+  it.effect("starts empty when no library has been configured", () =>
     Effect.gen(function* () {
       const { library, fs, folder, stateDir, path } = yield* fixture;
-      assert.lengthOf(yield* library.load(), 11);
+      assert.deepEqual(yield* library.load(), []);
       yield* fs.makeDirectory(folder);
       assert.deepEqual(yield* library.load(), []);
       yield* fs.writeFileString(path.join(stateDir, "agent-personas.json"), json({ folders: [] }));
@@ -216,7 +217,7 @@ describe("imported persona library", () => {
       const restarted = createAgentPersonaLibrary({ fs, path, stateDir });
       const catalog = yield* restarted.catalog();
       assert.deepEqual(catalog.importedIds, result.importedIds);
-      assert.lengthOf(catalog.definitions, 13);
+      assert.lengthOf(catalog.definitions, 2);
       assert.deepEqual(
         catalog.definitions.find(({ id }) => id === custom.id),
         custom,

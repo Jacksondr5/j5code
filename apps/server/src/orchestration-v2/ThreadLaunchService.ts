@@ -5,6 +5,7 @@ import {
   type ModelSelection,
   type OrchestrationV2Actor,
   type OrchestrationV2AgentPersonaRequest,
+  type OrchestrationV2AgentPersonaAssignment,
   type OrchestrationV2CreationSource,
   type OrchestrationV2ThreadProjection,
   type PlanId,
@@ -78,6 +79,8 @@ export interface ThreadLaunchInput {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly agentPersona?: OrchestrationV2AgentPersonaRequest;
+  /** Server-only assignment captured by a workflow before it becomes runnable. */
+  readonly preparedPersonaAssignment?: OrchestrationV2AgentPersonaAssignment;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
   readonly initialMessage?: ThreadLaunchInitialMessage;
   /** Generic provenance for a child created from a proposed plan. */
@@ -475,6 +478,12 @@ export const make = Effect.gen(function* () {
           input,
           "update-thread",
         )("Reusing an existing thread requires a thread id.");
+      }
+      if (input.reuseExistingThread === true && input.agentPersona !== undefined) {
+        return yield* mapError(
+          input,
+          "resolve-agent-persona",
+        )("Agent persona assignment requires a newly created thread.");
       }
 
       const launchReceipt = yield* readReceipt(input, input.commandId);

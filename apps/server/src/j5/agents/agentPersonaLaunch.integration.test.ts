@@ -36,8 +36,8 @@ import { makeProviderRegistryLayer } from "../../provider/testUtils/providerRegi
 import * as ServerSettings from "../../serverSettings.ts";
 import * as TextGeneration from "../../textGeneration/TextGeneration.ts";
 import { SquadronThreadCreationService } from "../a2a/SquadronThreadCreationService.ts";
-import { makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
-import { BUILT_IN_AGENT_PERSONAS } from "./agentPersonas.ts";
+import { definitionDigest, makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
+import { TEST_PERSONAS } from "./testFixtures.ts";
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
 
 // The harness below mirrors orchestration-v2/ThreadLaunchService.test.ts so persona launch
@@ -268,6 +268,15 @@ it.effect("launches one persona directly without requiring workflow sequencing",
     });
 
     yield* Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      yield* fs.makeDirectory(path.join(config.stateDir, "personas"), { recursive: true });
+      for (const definition of [TEST_PERSONAS.scout, TEST_PERSONAS.publisher])
+        yield* fs.writeFileString(
+          path.join(config.stateDir, "personas", `${definition.id}.yaml`),
+          yamlStringify(definition),
+        );
       const launches = yield* ThreadLaunch.ThreadLaunchService;
       const threads = yield* ThreadManagement.ThreadManagementService;
       const launched = yield* launches.launch({
@@ -279,6 +288,8 @@ it.effect("launches one persona directly without requiring workflow sequencing",
       });
 
       const expectedAssignment = {
+        definitionDigest: definitionDigest(TEST_PERSONAS.scout),
+        displayName: TEST_PERSONAS.scout.displayName,
         personaId: "scout",
         definitionVersion: 1,
         authorityPolicy: "read-only",
@@ -359,7 +370,15 @@ it.effect("launches one persona directly without requiring workflow sequencing",
         invalidAuthorityError.message,
         "Authority policy publish-only is not allowed for scout.",
       );
-    }).pipe(Effect.provide(harness.layer));
+    }).pipe(
+      Effect.provide(
+        harness.layer.pipe(
+          Layer.provideMerge(ServerConfig.layerTest("/repo", { prefix: "j5-persona-launch-" })),
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
+      Effect.scoped,
+    );
   }),
 );
 it.effect("blocks a direct persona launch when both declared model routes are unavailable", () =>
@@ -367,6 +386,15 @@ it.effect("blocks a direct persona launch when both declared model routes are un
     const harness = makeHarness({ providers: [] });
 
     yield* Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      yield* fs.makeDirectory(path.join(config.stateDir, "personas"), { recursive: true });
+      for (const definition of [TEST_PERSONAS.scout, TEST_PERSONAS.publisher])
+        yield* fs.writeFileString(
+          path.join(config.stateDir, "personas", `${definition.id}.yaml`),
+          yamlStringify(definition),
+        );
       const launches = yield* ThreadLaunch.ThreadLaunchService;
       const error = yield* launches
         .launch({
@@ -384,7 +412,15 @@ it.effect("blocks a direct persona launch when both declared model routes are un
         error.message,
         "Agent persona scout is blocked because its primary and fallback models are unavailable.",
       );
-    }).pipe(Effect.provide(harness.layer));
+    }).pipe(
+      Effect.provide(
+        harness.layer.pipe(
+          Layer.provideMerge(ServerConfig.layerTest("/repo", { prefix: "j5-persona-launch-" })),
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
+      Effect.scoped,
+    );
   }),
 );
 
@@ -394,7 +430,7 @@ it.effect(
   "launches an imported persona and replays its receipt after the source is removed",
   () => {
     const definition = {
-      ...BUILT_IN_AGENT_PERSONAS.scout,
+      ...TEST_PERSONAS.scout,
       id: "team-researcher",
       displayName: "Team Researcher",
       version: 2,
@@ -482,6 +518,16 @@ it.effect(
       );
       yield* library.removeImported(definition.id);
       yield* fs.remove(folder, { recursive: true });
+      const assignment = projection.thread.agentPersonaAssignment!;
+      const { agentPersona: _request, ...preparedInput } = input;
+      const prepared = yield* launches.launch({
+        ...preparedInput,
+        commandId: CommandId.make("command:pinned-persona"),
+        threadId: ThreadId.make("thread:pinned-persona"),
+        modelSelection: assignment.resolvedModelSelection,
+        preparedPersonaAssignment: assignment,
+      });
+      assert.deepEqual(prepared.projection.thread.agentPersonaAssignment, assignment);
       const replay = yield* launches.launch(input);
       assert.equal(replay.threadId, launched.threadId);
       const policy = yield* resolveAgentPersonaRuntime(projection.thread, library);

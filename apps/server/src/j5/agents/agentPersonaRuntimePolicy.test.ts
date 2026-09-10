@@ -17,7 +17,6 @@ import {
   RuntimePolicyV2,
 } from "../../orchestration-v2/RuntimePolicy.ts";
 import * as ProjectionProjects from "../../persistence/Services/ProjectionProjects.ts";
-import { BUILDER_AGENT_PERSONA_INSTRUCTIONS_V1 } from "./agentPersonaPrompts.ts";
 
 // Mirrors the fixtures in orchestration-v2/RuntimePolicy.test.ts (FORK.md).
 const projectId = ProjectId.make("project:runtime-policy");
@@ -83,84 +82,26 @@ const TestLayer = layerFromProjectRepository.pipe(
   ),
 );
 
-it.layer(TestLayer)("agent persona runtime policy", (it) => {
-  it.effect("lets durable persona authority override the thread runtime mode", () =>
-    Effect.gen(function* () {
-      const policy = yield* RuntimePolicyV2;
-      const now = yield* DateTime.now;
-      const thread = {
-        ...makeThread({ now, worktreePath: "/project-worktree" }),
-        agentPersonaAssignment: {
-          personaId: "critic",
-          definitionVersion: 1,
-          authorityPolicy: "critic-review",
-          resolvedRoute: "primary",
-          resolvedDriver: ProviderDriverKind.make("codex"),
-          resolvedModelSelection: modelSelection,
-        },
-      } satisfies OrchestrationV2AppThread;
-      const resolved = yield* policy.resolve({ thread, modelSelection });
-
-      assert.deepEqual(resolved, {
-        runtimeMode: "approval-required",
-        interactionMode: "default",
-        cwd: "/project-worktree",
-        approvalPolicy: "never",
-        sandboxPolicy: {
-          type: "readOnly",
-          access: { type: "fullAccess" },
-          networkAccess: false,
-        },
-      });
-    }),
-  );
-
-  it.effect("degrades an unsafe historical persona assignment to read-only", () =>
-    Effect.gen(function* () {
-      const policy = yield* RuntimePolicyV2;
-      const now = yield* DateTime.now;
-      const thread = {
-        ...makeThread({ now, worktreePath: "/project-worktree" }),
-        agentPersonaAssignment: {
-          personaId: "publisher",
-          definitionVersion: 1,
-          authorityPolicy: "publish-only",
-          resolvedRoute: "primary",
-          resolvedDriver: ProviderDriverKind.make("codex"),
-          resolvedModelSelection: modelSelection,
-        },
-      } satisfies OrchestrationV2AppThread;
-      const resolved = yield* policy.resolve({ thread, modelSelection });
-
-      assert.equal(resolved.runtimeMode, "approval-required");
-      assert.equal(resolved.approvalPolicy, "never");
-      assert.deepEqual(resolved.sandboxPolicy, {
-        type: "readOnly",
-        access: { type: "fullAccess" },
-        networkAccess: false,
-      });
-    }),
-  );
-
-  it.effect("adds the versioned Builder instructions to its runtime policy", () =>
-    Effect.gen(function* () {
-      const policy = yield* RuntimePolicyV2;
-      const now = yield* DateTime.now;
-      const thread = {
-        ...makeThread({ now, worktreePath: "/project-worktree" }),
-        agentPersonaAssignment: {
-          personaId: "builder",
-          definitionVersion: 1,
-          authorityPolicy: "workspace-write",
-          resolvedRoute: "primary",
-          resolvedDriver: ProviderDriverKind.make("codex"),
-          resolvedModelSelection: modelSelection,
-        },
-      } satisfies OrchestrationV2AppThread;
-
-      const resolved = yield* policy.resolve({ thread, modelSelection });
-
-      assert.equal(resolved.agentPersonaInstructions, BUILDER_AGENT_PERSONA_INSTRUCTIONS_V1);
-    }),
-  );
+it.layer(TestLayer)("legacy persona runtime policy", (it) => {
+  for (const personaId of ["builder", "critic", "publisher"] as const) {
+    it.effect(`rejects ${personaId} without a snapshot and requires a fresh task`, () =>
+      Effect.gen(function* () {
+        const policy = yield* RuntimePolicyV2;
+        const now = yield* DateTime.now;
+        const thread = {
+          ...makeThread({ now, worktreePath: "/project-worktree" }),
+          agentPersonaAssignment: {
+            personaId,
+            definitionVersion: 1,
+            authorityPolicy: "read-only" as const,
+            resolvedRoute: "primary" as const,
+            resolvedDriver: ProviderDriverKind.make("codex"),
+            resolvedModelSelection: modelSelection,
+          },
+        };
+        const error = yield* policy.resolve({ thread, modelSelection }).pipe(Effect.flip);
+        assert.include(String(error.cause), "Start a fresh task");
+      }),
+    );
+  }
 });

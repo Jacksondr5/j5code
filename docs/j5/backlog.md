@@ -20,7 +20,7 @@ Spawn peer agents, communication layer, inbox, communication graph. Steal target
 
 User-authored, portable Role definitions loaded from folders, with configurable identity and instructions. Personas are the current implementation of Roles; the eleven provided definitions are examples, not a fixed product methodology.
 
-[Contract and delivery boundaries](product/agent-personas/). PR #75 covers documentation. The dependent stack implements the library, environment routing, durable assignment, provider-policy translation, and informational Settings. A local implementation or passing test does not mark a phase merged. In-app editing, direct human selection, library git controls, skill allowlists, posture, drift indicators, output validation, and diagnostic/publication operations remain follow-up work. See [Roles](product/features/roles.md) for the product direction.
+[Contract and delivery boundaries](product/agent-personas/). PR #75 covers documentation. The dependent stack implements the library, environment routing, durable assignment, provider-policy translation, and informational Settings. A local implementation or passing test does not mark a phase merged. Direct human selection, library git controls, skill allowlists, posture, drift indicators, output validation, and diagnostic/publication operations remain follow-up work. See [Roles](product/features/roles.md) for the product direction.
 
 ## 4. PR / Agent dashboard _(scope expanded by Jackson; 4a PR pane opening 2026-08-17 for human engineers)_
 

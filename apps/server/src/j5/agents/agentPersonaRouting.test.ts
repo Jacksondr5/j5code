@@ -8,7 +8,8 @@ import {
 
 import { buildAgentPersonaCatalog, resolveAgentPersonaRoute } from "./agentPersonaRouting.ts";
 import { providerCanEnforceAgentPersonaAuthority } from "./agentPersonaProviderPolicy.ts";
-import { listBuiltInAgentPersonas, type AgentModelTarget } from "./agentPersonas.ts";
+import { listTestPersonas, TEST_PERSONAS } from "./testFixtures.ts";
+import { type AgentModelTarget } from "./agentPersonas.ts";
 
 function model(
   slug: string,
@@ -76,10 +77,11 @@ function providerForTarget(
 
 describe("agent persona routing", () => {
   it("uses every enforceable persona's declared primary route when it is available", () => {
-    for (const definition of listBuiltInAgentPersonas()) {
+    for (const definition of listTestPersonas()) {
       const [primary, fallback] = definition.modelRoute;
       const resolution = resolveAgentPersonaRoute({
         personaId: definition.id,
+        definition,
         providers: [providerForTarget(fallback), providerForTarget(primary)],
       });
 
@@ -96,10 +98,11 @@ describe("agent persona routing", () => {
   });
 
   it("uses only an enforceable declared fallback after its primary is unavailable", () => {
-    for (const definition of listBuiltInAgentPersonas()) {
+    for (const definition of listTestPersonas()) {
       const [primary, fallback] = definition.modelRoute;
       const resolution = resolveAgentPersonaRoute({
         personaId: definition.id,
+        definition,
         providers: [providerForTarget(primary, { enabled: false }), providerForTarget(fallback)],
       });
 
@@ -120,10 +123,11 @@ describe("agent persona routing", () => {
   });
 
   it("skips Claude and uses the Codex fallback for Critic Fix Mode", () => {
-    const definition = listBuiltInAgentPersonas().find(({ id }) => id === "critic")!;
+    const definition = listTestPersonas().find(({ id }) => id === "critic")!;
     const [primary, fallback] = definition.modelRoute;
     const resolution = resolveAgentPersonaRoute({
       personaId: "critic",
+      definition: TEST_PERSONAS.critic,
       authorityPolicy: "critic-fix",
       providers: [providerForTarget(primary), providerForTarget(fallback)],
     });
@@ -140,13 +144,13 @@ describe("agent persona routing", () => {
 
   it("blocks Builder fallback, Investigator, and Publisher when authority cannot be enforced", () => {
     for (const personaId of ["builder", "investigator", "publisher"] as const) {
-      const definition = listBuiltInAgentPersonas().find(({ id }) => id === personaId)!;
+      const definition = listTestPersonas().find(({ id }) => id === personaId)!;
       const [primary, fallback] = definition.modelRoute;
       const providers =
         personaId === "builder"
           ? [providerForTarget(primary, { enabled: false }), providerForTarget(fallback)]
           : [providerForTarget(primary), providerForTarget(fallback)];
-      const resolution = resolveAgentPersonaRoute({ personaId, providers });
+      const resolution = resolveAgentPersonaRoute({ personaId, providers, definition });
 
       assert.equal(resolution.status, "unavailable", personaId);
       if (resolution.status === "available") continue;
@@ -160,9 +164,10 @@ describe("agent persona routing", () => {
   });
 
   it("blocks every persona when both declared routes are unavailable", () => {
-    for (const definition of listBuiltInAgentPersonas()) {
+    for (const definition of listTestPersonas()) {
       const resolution = resolveAgentPersonaRoute({
         personaId: definition.id,
+        definition,
         providers: [],
       });
 
@@ -186,6 +191,7 @@ describe("agent persona routing", () => {
   it("selects the primary provider, exact model, and provider-specific effort option", () => {
     const resolution = resolveAgentPersonaRoute({
       personaId: "scout",
+      definition: TEST_PERSONAS.scout,
       providers: [
         provider({
           instanceId: "codex",
@@ -213,6 +219,7 @@ describe("agent persona routing", () => {
   it("uses fallback only after recording why the primary is ineligible", () => {
     const resolution = resolveAgentPersonaRoute({
       personaId: "skeptic",
+      definition: TEST_PERSONAS.skeptic,
       providers: [
         provider({
           instanceId: "claudeAgent",
@@ -254,6 +261,7 @@ describe("agent persona routing", () => {
     const terra = model("gpt-5.6-terra", "reasoningEffort");
     const resolution = resolveAgentPersonaRoute({
       personaId: "scout",
+      definition: TEST_PERSONAS.scout,
       providers: [
         provider({ instanceId: "codex_work", driver: "codex", models: [terra] }),
         provider({ instanceId: "codex", driver: "codex", models: [terra] }),
@@ -268,6 +276,7 @@ describe("agent persona routing", () => {
   it("fails closed when neither target advertises the exact model and effort", () => {
     const resolution = resolveAgentPersonaRoute({
       personaId: "skeptic",
+      definition: TEST_PERSONAS.skeptic,
       providers: [
         provider({
           instanceId: "claudeAgent",
@@ -291,18 +300,21 @@ describe("agent persona routing", () => {
   });
 
   it("builds the ordered presentation catalog with environment-specific availability", () => {
-    const catalog = buildAgentPersonaCatalog([
-      provider({
-        instanceId: "codex",
-        driver: "codex",
-        models: [model("gpt-5.6-terra", "reasoningEffort")],
-      }),
-    ]);
+    const catalog = buildAgentPersonaCatalog(
+      [
+        provider({
+          instanceId: "codex",
+          driver: "codex",
+          models: [model("gpt-5.6-terra", "reasoningEffort")],
+        }),
+      ],
+      listTestPersonas(),
+    );
 
     assert.equal(catalog.personas.length, 11);
     assert.equal(catalog.personas[0]?.personaId, "scout");
     assert.equal(catalog.personas[0]?.definitionVersion, 1);
-    assert.equal(catalog.personas[0]?.acceptedInput, "Evidence request or prompt");
+    assert.equal(catalog.personas[0]?.acceptedInput, "Test input.");
     assert.equal(catalog.personas[0]?.outputArtifact, "ContextBrief");
     assert.deepEqual(catalog.personas[0]?.availability, {
       status: "available",
@@ -327,7 +339,7 @@ describe("agent persona routing", () => {
 
 it("presents imported definitions without transmitting their instruction bodies", () => {
   const definition = {
-    ...listBuiltInAgentPersonas()[0]!,
+    ...TEST_PERSONAS.scout,
     id: "team-researcher",
     displayName: "Team Researcher",
   };

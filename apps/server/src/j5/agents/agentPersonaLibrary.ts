@@ -19,12 +19,7 @@ import { parseDocument } from "yaml";
 
 import { writeFileStringAtomically } from "../../atomicWrite.ts";
 import { ServerConfig } from "../../config.ts";
-import {
-  decodeAgentPersonaDefinition,
-  getBuiltInAgentPersona,
-  listBuiltInAgentPersonas,
-  AgentPersonaDefinition,
-} from "./agentPersonas.ts";
+import { decodeAgentPersonaDefinition, AgentPersonaDefinition } from "./agentPersonas.ts";
 
 export class AgentPersonaLibraryError extends Schema.TaggedErrorClass<AgentPersonaLibraryError>()(
   "AgentPersonaLibraryError",
@@ -78,7 +73,7 @@ export function createAgentPersonaLibrary(storage?: {
   readonly path: Path.Path;
 }) {
   const loadSources = Effect.fn("AgentPersonaLibrary.loadSources")(function* () {
-    if (storage === undefined) return listBuiltInAgentPersonas();
+    if (storage === undefined) return [];
     const { stateDir, fs, path } = storage;
     const configText = yield* fs.readFileString(path.join(stateDir, "agent-personas.json")).pipe(
       Effect.map(Option.some),
@@ -102,7 +97,7 @@ export function createAgentPersonaLibrary(storage?: {
             : Effect.fail(error),
         ),
       );
-      if (Option.isNone(entries)) return listBuiltInAgentPersonas();
+      if (Option.isNone(entries)) return [];
       for (const name of [...entries.value].sort()) {
         if (!isAgentPersonaDefinitionFile(name)) continue;
         const file = path.join(folder, name);
@@ -375,7 +370,10 @@ export function createAgentPersonaLibrary(storage?: {
   const snapshot = Effect.fn("AgentPersonaLibrary.snapshot")(function* (
     definition: AgentPersonaDefinition,
   ) {
-    if (storage === undefined) return undefined;
+    if (storage === undefined)
+      return yield* new AgentPersonaLibraryError({
+        message: "Persona snapshot storage is unavailable.",
+      });
     const { fs, path, stateDir } = storage;
     const digest = definitionDigest(definition);
     yield* writeFileStringAtomically({
@@ -392,10 +390,9 @@ export function createAgentPersonaLibrary(storage?: {
     assignment: OrchestrationV2AgentPersonaAssignment,
   ) {
     if (assignment.definitionDigest === undefined) {
-      const definition = yield* Effect.try(() => getBuiltInAgentPersona(assignment.personaId));
-      if (definition.version !== assignment.definitionVersion)
-        return yield* new AgentPersonaLibraryError({ message: "Unknown legacy persona version." });
-      return definition;
+      return yield* new AgentPersonaLibraryError({
+        message: "This legacy task has no persona snapshot. Start a fresh task to continue.",
+      });
     }
     if (storage === undefined)
       return yield* new AgentPersonaLibraryError({
@@ -435,7 +432,7 @@ export function createAgentPersonaLibrary(storage?: {
   };
 }
 
-/** Capture the environment at service construction. Pure unit layers can use the bundled examples. */
+/** Capture the environment at service construction. Unconfigured environments have an empty library. */
 export const makeAgentPersonaLibrary = Effect.gen(function* () {
   const config = yield* Effect.serviceOption(ServerConfig);
   if (Option.isNone(config)) return createAgentPersonaLibrary();
