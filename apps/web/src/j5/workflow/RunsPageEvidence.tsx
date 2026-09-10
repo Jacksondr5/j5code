@@ -9,6 +9,7 @@ import { lazy, Suspense, useState } from "react";
 
 import { useWorkflowQuery, workflowArtifactAtom } from "./queries";
 import { expectedNextStep, phaseLabel, statusPresentation } from "./presentation";
+import { PhaseStrip, phaseStripModel } from "./phaseStrip";
 
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -66,6 +67,9 @@ export function Progress({
   const current = definition?.phases.findIndex((phase) => phase.id === run.phase) ?? -1;
   const currentPhase = definition?.phases[current];
   const visits = run.visits[run.phase] ?? 0;
+  const strip = definition
+    ? phaseStripModel(definition.phases, run.visits, run.phase, run.status)
+    : null;
   return (
     <section className="rounded-lg border p-4" aria-label="Workflow progress">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -85,17 +89,16 @@ export function Progress({
             All {definition.phases.length} phases
           </summary>
           <ol className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
-            {definition.phases.map((phase, index) => {
-              const phaseVisits = run.visits[phase.id] ?? 0;
+            {strip?.cells.map((phase, index) => {
               return (
                 <li
-                  className={`rounded border p-2 ${index === current ? "border-primary" : ""}`}
+                  className={`rounded border p-2 ${phase.state === "current" || phase.state === "blocked" ? "border-primary" : ""}`}
                   key={phase.id}
                 >
-                  {index + 1}. {phaseLabel(phase.id)} {phase.kind === "gate" && "· Human gate"}
+                  {index + 1}. {phase.label} {phase.kind === "gate" && "· Human gate"}
                   <span className="block text-xs text-muted-foreground">
-                    {phaseVisits
-                      ? `Visited ${phaseVisits} time${phaseVisits === 1 ? "" : "s"}; current validity depends on later transitions.`
+                    {phase.visits
+                      ? `Visited ${phase.visits} time${phase.visits === 1 ? "" : "s"}; current validity depends on later transitions.`
                       : "Not visited"}
                   </span>
                 </li>
@@ -112,6 +115,16 @@ export function Progress({
           Detailed progress is unavailable because this run’s pinned definition could not be loaded.
         </p>
       )}
+      {definition ? (
+        <div className="mt-3">
+          <PhaseStrip
+            currentPhase={run.phase}
+            phases={definition.phases}
+            status={run.status}
+            visits={run.visits}
+          />
+        </div>
+      ) : null}
     </section>
   );
 }

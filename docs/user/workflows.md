@@ -12,6 +12,10 @@ corrected checks** decision before it can run. The original plan remains unchang
 approve one correction, with at most two proposal versions, and the replacement must preserve
 the number, order, and intent of the approved checks.
 
+The Workflows page opens as a Board so you can scan phase progress, active agents, and approvals
+across runs. Open a run and choose Timeline to trace recorded phase changes, agent or code work,
+and human decisions; older imported history may show without an exact event time.
+
 Open **Workflows**, choose **New workflow**, then select an eligible Squadron, enter
 a development request and base ref, and choose **Start workflow**. A Squadron must
 contain exactly one project; ineligible Squadrons are explained in the dialog. The base ref is
