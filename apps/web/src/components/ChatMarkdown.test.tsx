@@ -1,4 +1,5 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { act, type ComponentProps, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { create, type ReactTestRenderer } from "react-test-renderer";
@@ -7,6 +8,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { getSyntaxHighlighterPromise } from "../lib/syntaxHighlighting";
 import { Button } from "./ui/button";
 import { setMarkdownTaskChecked } from "./files/filePreviewMode";
+import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => null }));
 vi.mock("../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
@@ -378,6 +380,60 @@ describe("ChatMarkdown skill chips", () => {
 });
 
 describe("ChatMarkdown file option chips", () => {
+  it("styles artifact references and opens them in the artifact surface", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const threadRef = scopeThreadRef(
+      EnvironmentId.make("env-artifact"),
+      ThreadId.make("thread-artifact"),
+    );
+    useRightPanelStore.setState({ byThreadKey: {}, threadPanelVisibilityByThreadKey: {} });
+    let renderer: ReactTestRenderer | undefined;
+
+    try {
+      await act(async () => {
+        renderer = create(
+          <ChatMarkdown
+            cwd="/tmp/project"
+            text="[Plan](artifacts/plan.md)"
+            threadRef={threadRef}
+          />,
+        );
+      });
+      const link = renderer!.root.findByProps({ "data-artifact": "" });
+      expect(link.props.className).toContain("border-violet-500/35");
+      expect(
+        link.findAllByType("span").some((span) => span.children.join("").includes("Artifact")),
+      ).toBe(true);
+
+      await act(async () => {
+        link.props.onClick({
+          metaKey: false,
+          ctrlKey: false,
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+        });
+      });
+
+      expect(
+        selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef),
+      ).toEqual({
+        isOpen: true,
+        activeSurfaceId: "artifacts",
+        surfaces: [
+          {
+            id: "artifacts",
+            kind: "artifacts",
+            selectedPath: "plan.md",
+            selectionRequestId: 1,
+          },
+        ],
+      });
+    } finally {
+      await act(async () => renderer?.unmount());
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("keeps the fallback button text selectable", () => {
     const html = renderToStaticMarkup(
       <ChatMarkdown cwd="/tmp/project" text="[Source](/tmp/project/src/main.ts)" />,

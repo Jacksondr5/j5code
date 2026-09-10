@@ -8120,10 +8120,13 @@ export default function ChatView(props: ChatViewProps) {
       />
     ) : renderedRightPanelSurface?.kind === "artifacts" && activeProject ? (
       <ArtifactsPage
-        key={`${activeProject.environmentId}:${activeProject.id}`}
+        key={`${activeProject.environmentId}:${activeProject.id}:${renderedRightPanelSurface.selectionRequestId}`}
         embedded
         initialEnvironmentId={activeProject.environmentId}
         initialProjectId={activeProject.id}
+        {...(renderedRightPanelSurface.selectedPath === null
+          ? {}
+          : { initialPath: renderedRightPanelSurface.selectedPath })}
       />
     ) : (renderedRightPanelSurface?.kind === "files" ||
         renderedRightPanelSurface?.kind === "file") &&

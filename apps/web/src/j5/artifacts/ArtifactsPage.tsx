@@ -53,12 +53,14 @@ function binaryDataUrl(content: ArtifactContent) {
 export interface ArtifactsPageProps {
   readonly initialEnvironmentId?: string;
   readonly initialProjectId?: string;
+  readonly initialPath?: string;
   readonly embedded?: boolean;
 }
 
 export function ArtifactsPage({
   initialEnvironmentId,
   initialProjectId,
+  initialPath,
   embedded = false,
 }: ArtifactsPageProps) {
   const projects = useProjects();
@@ -72,7 +74,7 @@ export function ArtifactsPage({
     initialEnvironmentId && initialProjectId ? `${initialEnvironmentId}:${initialProjectId}` : null;
   const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(() => initialKey);
   const [entries, setEntries] = useState<ReadonlyArray<ArtifactEntry>>([]);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(() => initialPath ?? null);
   const [content, setContent] = useState<ArtifactContent | null>(null);
   const [listState, setListState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [contentState, setContentState] = useState<"idle" | "loading" | "ready" | "error">("idle");

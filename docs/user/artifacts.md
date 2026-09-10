@@ -11,7 +11,8 @@ J5 Code's page context.
 
 From a project thread, you can also open the right panel and choose **Artifacts**. This view stays
 scoped to the current project workspace, so planning documents remain beside the conversation while
-you work.
+you work. Artifact file references in chat use a distinct **Artifact** chip; choose one to open that
+document directly in the Artifacts panel.
 
 While the Artifacts page is open, its file list and the selected preview update automatically when
 an agent creates, edits, or removes a file in the project's `artifacts/` directory.

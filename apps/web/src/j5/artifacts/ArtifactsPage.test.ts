@@ -30,6 +30,8 @@ describe("artifact previews", () => {
     expect(chatViewSource).toContain('renderedRightPanelSurface?.kind === "artifacts"');
     expect(chatViewSource).toContain("<ArtifactsPage");
     expect(chatViewSource).toContain("embedded");
+    expect(chatViewSource).toContain("initialPath: renderedRightPanelSurface.selectedPath");
+    expect(source).toContain("useState<string | null>(() => initialPath ?? null)");
     expect(source).toContain("grid-cols-[minmax(9rem,13rem)_minmax(0,1fr)]");
   });
 });
