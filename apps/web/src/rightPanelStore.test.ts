@@ -331,6 +331,16 @@ describe("rightPanelStore", () => {
     });
   });
 
+  it("keeps artifacts as a workspace singleton surface", () => {
+    useRightPanelStore.getState().open(refA, "artifacts");
+    useRightPanelStore.getState().open(refA, "artifacts");
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "artifacts",
+      surfaces: [{ id: "artifacts", kind: "artifacts" }],
+    });
+  });
+
   it("replaces the standalone explorer with peer file surfaces", () => {
     useRightPanelStore.getState().open(refA, "files");
     useRightPanelStore.getState().openFile(refA, "src/index.ts");

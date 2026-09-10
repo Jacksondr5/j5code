@@ -16,6 +16,7 @@ import { resolveStorage } from "./lib/storage";
 import type { ThreadPanelPresentation } from "./rightPanelLayout";
 
 export const RIGHT_PANEL_KINDS = [
+  "artifacts",
   "diff",
   "files",
   "file",
@@ -38,6 +39,7 @@ export type RightPanelSurface =
       splitDirection?: "horizontal" | "vertical";
     }
   | { id: "diff"; kind: "diff" }
+  | { id: "artifacts"; kind: "artifacts" }
   | { id: "files"; kind: "files" }
   | {
       id: `file:${string}` | `attachment:${string}`;
@@ -153,6 +155,8 @@ const singletonSurface = (
   kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "pull-request">,
 ): RightPanelSurface => {
   switch (kind) {
+    case "artifacts":
+      return { id: "artifacts", kind };
     case "diff":
       return { id: "diff", kind };
     case "files":
@@ -693,6 +697,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             if (workspaceAvailable) return current;
             const surfaces = current.surfaces.filter(
               (surface) =>
+                surface.kind !== "artifacts" &&
                 surface.kind !== "files" &&
                 (surface.kind !== "file" || surface.attachment !== undefined),
             );

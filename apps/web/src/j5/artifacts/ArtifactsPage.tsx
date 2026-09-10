@@ -53,9 +53,14 @@ function binaryDataUrl(content: ArtifactContent) {
 export interface ArtifactsPageProps {
   readonly initialEnvironmentId?: string;
   readonly initialProjectId?: string;
+  readonly embedded?: boolean;
 }
 
-export function ArtifactsPage({ initialEnvironmentId, initialProjectId }: ArtifactsPageProps) {
+export function ArtifactsPage({
+  initialEnvironmentId,
+  initialProjectId,
+  embedded = false,
+}: ArtifactsPageProps) {
   const projects = useProjects();
   const { environments } = useEnvironments();
   const environmentLabels = useMemo(
@@ -78,9 +83,8 @@ export function ArtifactsPage({ initialEnvironmentId, initialProjectId }: Artifa
   const selectedProject = useMemo(
     () =>
       projects.find((project) => projectKey(project) === selectedProjectKey) ??
-      projects.at(0) ??
-      null,
-    [projects, selectedProjectKey],
+      (embedded ? null : (projects.at(0) ?? null)),
+    [embedded, projects, selectedProjectKey],
   );
   const selectedEnvironmentId = selectedProject?.environmentId ?? null;
   const selectedProjectId = selectedProject?.id ?? null;
@@ -96,10 +100,11 @@ export function ArtifactsPage({ initialEnvironmentId, initialProjectId }: Artifa
   );
 
   useEffect(() => {
+    if (embedded) return;
     if (selectedProject !== null && selectedProjectKey !== projectKey(selectedProject)) {
       setSelectedProjectKey(projectKey(selectedProject));
     }
-  }, [selectedProject, selectedProjectKey]);
+  }, [embedded, selectedProject, selectedProjectKey]);
 
   useEffect(() => {
     if (selectedEnvironmentId === null || selectedProjectId === null) {
@@ -182,72 +187,111 @@ export function ArtifactsPage({ initialEnvironmentId, initialProjectId }: Artifa
   const html = selectedExtension === "html" || selectedExtension === "htm";
 
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
+    <SidebarInset
+      className={cn(
+        "min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate",
+        embedded ? "h-full" : "h-dvh",
+      )}
+    >
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header
+        {!embedded ? (
+          <header
+            className={cn(
+              "flex shrink-0 items-center gap-3 px-3 sm:px-5",
+              isElectron
+                ? "drag-region h-[52px] wco:h-[env(titlebar-area-height)] wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]"
+                : "h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)]",
+              COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
+            )}
+          >
+            <WorkspaceBreadcrumb ariaLabel="Artifacts breadcrumb">
+              <WorkspaceBreadcrumbItem current>Artifacts</WorkspaceBreadcrumbItem>
+            </WorkspaceBreadcrumb>
+            <Button
+              aria-label="Refresh artifacts"
+              className="no-drag ms-auto"
+              disabled={listState === "loading" || selectedProject === null}
+              onClick={refresh}
+              size="icon-xs"
+              variant="ghost"
+            >
+              <RefreshCwIcon
+                className={cn("size-3.5", listState === "loading" && "animate-spin")}
+              />
+            </Button>
+          </header>
+        ) : null}
+
+        <div
           className={cn(
-            "flex shrink-0 items-center gap-3 px-3 sm:px-5",
-            isElectron
-              ? "drag-region h-[52px] wco:h-[env(titlebar-area-height)] wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]"
-              : "h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)]",
-            COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
+            "grid min-h-0 flex-1 border-t border-border",
+            embedded
+              ? "grid-cols-[minmax(9rem,13rem)_minmax(0,1fr)]"
+              : "grid-cols-1 md:grid-cols-[17rem_18rem_minmax(0,1fr)]",
           )}
         >
-          <WorkspaceBreadcrumb ariaLabel="Artifacts breadcrumb">
-            <WorkspaceBreadcrumbItem current>Artifacts</WorkspaceBreadcrumbItem>
-          </WorkspaceBreadcrumb>
-          <Button
-            aria-label="Refresh artifacts"
-            className="no-drag ms-auto"
-            disabled={listState === "loading" || selectedProject === null}
-            onClick={refresh}
-            size="icon-xs"
-            variant="ghost"
-          >
-            <RefreshCwIcon className={cn("size-3.5", listState === "loading" && "animate-spin")} />
-          </Button>
-        </header>
-
-        <div className="grid min-h-0 flex-1 grid-cols-1 border-t border-border md:grid-cols-[17rem_18rem_minmax(0,1fr)]">
-          <ScrollArea className="min-h-0 border-b border-border md:border-e md:border-b-0">
-            <div className="p-2">
-              <p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Workspaces</p>
-              {projects.map((project) => {
-                const selected =
-                  selectedProject !== null && projectKey(project) === projectKey(selectedProject);
-                return (
-                  <button
-                    key={projectKey(project)}
-                    aria-pressed={selected}
-                    className={cn(
-                      "flex w-full cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
-                      selected && "bg-muted",
-                    )}
-                    onClick={() => {
-                      setSelectedProjectKey(projectKey(project));
-                      setSelectedPath(null);
-                    }}
-                    type="button"
-                  >
-                    <FolderArchiveIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0">
-                      <span className="block truncate">{project.title}</span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {environmentLabels.get(project.environmentId) ?? "Environment"}
+          {!embedded ? (
+            <ScrollArea className="min-h-0 border-b border-border md:border-e md:border-b-0">
+              <div className="p-2">
+                <p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Workspaces</p>
+                {projects.map((project) => {
+                  const selected =
+                    selectedProject !== null && projectKey(project) === projectKey(selectedProject);
+                  return (
+                    <button
+                      key={projectKey(project)}
+                      aria-pressed={selected}
+                      className={cn(
+                        "flex w-full cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+                        selected && "bg-muted",
+                      )}
+                      onClick={() => {
+                        setSelectedProjectKey(projectKey(project));
+                        setSelectedPath(null);
+                      }}
+                      type="button"
+                    >
+                      <FolderArchiveIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0">
+                        <span className="block truncate">{project.title}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {environmentLabels.get(project.environmentId) ?? "Environment"}
+                        </span>
                       </span>
-                    </span>
-                  </button>
-                );
-              })}
-              {projects.length === 0 ? (
-                <p className="px-2 py-6 text-sm text-muted-foreground">No workspaces yet.</p>
-              ) : null}
-            </div>
-          </ScrollArea>
+                    </button>
+                  );
+                })}
+                {projects.length === 0 ? (
+                  <p className="px-2 py-6 text-sm text-muted-foreground">No workspaces yet.</p>
+                ) : null}
+              </div>
+            </ScrollArea>
+          ) : null}
 
-          <ScrollArea className="min-h-0 border-b border-border md:border-e md:border-b-0">
+          <ScrollArea
+            className={cn(
+              "min-h-0 border-border",
+              embedded ? "border-e" : "border-b md:border-e md:border-b-0",
+            )}
+          >
             <div className="p-2">
-              <p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Files</p>
+              <div className="flex items-center px-2 py-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Files</p>
+                {embedded ? (
+                  <Button
+                    aria-label="Refresh artifacts"
+                    className="ms-auto"
+                    disabled={listState === "loading" || selectedProject === null}
+                    onClick={refresh}
+                    size="icon-xs"
+                    variant="ghost"
+                  >
+                    <RefreshCwIcon
+                      className={cn("size-3.5", listState === "loading" && "animate-spin")}
+                    />
+                  </Button>
+                ) : null}
+              </div>
               {entries.map((entry) => {
                 const Icon = artifactIcon(entry.path);
                 return (
@@ -283,7 +327,7 @@ export function ArtifactsPage({ initialEnvironmentId, initialProjectId }: Artifa
           </ScrollArea>
 
           <ScrollArea className="min-h-0">
-            <div className="min-h-full p-5 md:p-8">
+            <div className={cn("min-h-full", embedded ? "p-4" : "p-5 md:p-8")}>
               {contentState === "loading" ? (
                 <p className="text-sm text-muted-foreground">Opening artifact…</p>
               ) : contentState === "error" ? (

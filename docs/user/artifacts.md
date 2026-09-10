@@ -9,6 +9,10 @@ choose a file to preview it. Markdown, text, source files, common image formats,
 documents can be previewed without opening an editor. HTML previews cannot run scripts or access
 J5 Code's page context.
 
+From a project thread, you can also open the right panel and choose **Artifacts**. This view stays
+scoped to the current project workspace, so planning documents remain beside the conversation while
+you work.
+
 While the Artifacts page is open, its file list and the selected preview update automatically when
 an agent creates, edits, or removes a file in the project's `artifacts/` directory.
 
