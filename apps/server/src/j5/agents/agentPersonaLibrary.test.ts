@@ -915,3 +915,56 @@ describe("restoring removed agents", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
+
+describe("personal agents", () => {
+  it.effect(
+    "creates an enabled imported agent from Settings details and rejects duplicate IDs",
+    () =>
+      Effect.gen(function* () {
+        const { library, fs, path, stateDir } = yield* fixture;
+        const created = yield* library.createPersona({
+          id: "my-reviewer",
+          displayName: "My Reviewer",
+          description: "Reviews my changes.",
+          instructions: "# My Reviewer\n\nReview carefully.",
+          authorityPolicy: "read-only",
+          modelRoute: custom.modelRoute,
+        });
+        assert.equal(created.personaId, "my-reviewer");
+        const restarted = createAgentPersonaLibrary({ fs, path, stateDir });
+        const catalog = yield* restarted.catalog();
+        const definition = catalog.definitions.find(({ id }) => id === "my-reviewer");
+        assert.isTrue(catalog.importedIds.includes("my-reviewer"));
+        assert.isFalse(catalog.disabledIds.includes("my-reviewer"));
+        assert.deepEqual(definition?.authority, {
+          defaultPolicy: "read-only",
+          allowedPolicies: ["read-only"],
+        });
+        assert.equal(definition?.outputArtifact, "Response");
+        assert.equal(definition?.version, 1);
+        assert.isTrue((yield* restarted.load()).some(({ id }) => id === "my-reviewer"));
+        const duplicate = yield* restarted
+          .createPersona({
+            id: "my-reviewer",
+            displayName: "Again",
+            description: "Again.",
+            instructions: "Again.",
+            authorityPolicy: "read-only",
+            modelRoute: custom.modelRoute,
+          })
+          .pipe(Effect.flip);
+        assert.include(String(duplicate), "already exists");
+        const bundled = yield* restarted
+          .createPersona({
+            id: "scout",
+            displayName: "Scout",
+            description: "Clash.",
+            instructions: "Clash.",
+            authorityPolicy: "read-only",
+            modelRoute: custom.modelRoute,
+          })
+          .pipe(Effect.flip);
+        assert.include(String(bundled), "already exists");
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});

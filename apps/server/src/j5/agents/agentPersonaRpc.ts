@@ -26,6 +26,7 @@ export const AGENT_PERSONA_RPC_SCOPES = {
   [METHODS.removeSourceAgentPersona]: AuthOrchestrationOperateScope,
   [METHODS.removeAgentPersona]: AuthOrchestrationOperateScope,
   [METHODS.restoreSourceAgentPersona]: AuthOrchestrationOperateScope,
+  [METHODS.createAgentPersona]: AuthOrchestrationOperateScope,
 } as const;
 
 /** Matches the per-session `observeRpcEffect` closure in ws.ts (instrumentation plus scope check). */
@@ -140,6 +141,12 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
         observe(
           METHODS.restoreSourceAgentPersona,
           library.restoreSource(input.personaId).pipe(Effect.mapError(catalogError)),
+          TRACE,
+        ),
+      [METHODS.createAgentPersona]: (input: Input<"createAgentPersona">) =>
+        observe(
+          METHODS.createAgentPersona,
+          library.createPersona(input).pipe(Effect.mapError(catalogError)),
           TRACE,
         ),
     };

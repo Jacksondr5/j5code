@@ -119,6 +119,21 @@ export const AgentPersonaEditInput = Schema.Struct({
 });
 export type AgentPersonaEditInput = typeof AgentPersonaEditInput.Type;
 
+export const AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH = 32768;
+/** A personal agent authored in Settings; the server fills the remaining definition fields. */
+export const AgentPersonaCreateInput = Schema.Struct({
+  id: AgentPersonaId,
+  displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
+  description: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
+  instructions: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH),
+  ),
+  authorityPolicy: AgentPersonaAuthorityPolicy,
+  modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+});
+export type AgentPersonaCreateInput = typeof AgentPersonaCreateInput.Type;
+
 /** Environment-specific, presentation-safe view of one library persona. */
 export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
   personaId: AgentPersonaId,
@@ -198,6 +213,7 @@ export const J5_AGENT_PERSONA_WS_METHODS = {
   removeSourceAgentPersona: "j5.agentPersonas.removeSource",
   removeAgentPersona: "j5.agentPersonas.remove",
   restoreSourceAgentPersona: "j5.agentPersonas.restoreSource",
+  createAgentPersona: "j5.agentPersonas.create",
 } as const;
 
 export const J5AgentPersonaRpcSchemas = {
@@ -232,6 +248,10 @@ export const J5AgentPersonaRpcSchemas = {
   restoreSourceAgentPersona: {
     input: Schema.Struct({ personaId: AgentPersonaId }),
     output: Schema.Void,
+  },
+  createAgentPersona: {
+    input: AgentPersonaCreateInput,
+    output: Schema.Struct({ personaId: AgentPersonaId }),
   },
 } as const;
 
@@ -303,6 +323,12 @@ export const WsJ5RestoreSourceAgentPersonaRpc = Rpc.make(
   },
 );
 
+export const WsJ5CreateAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.createAgentPersona, {
+  payload: J5AgentPersonaRpcSchemas.createAgentPersona.input,
+  success: J5AgentPersonaRpcSchemas.createAgentPersona.output,
+  error: catalogErrors,
+});
+
 /** Merged into `WsRpcGroup` by one appended call; no other upstream registration exists. */
 export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5GetAgentPersonaCatalogRpc,
@@ -313,4 +339,5 @@ export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5RemoveSourceAgentPersonaRpc,
   WsJ5RemoveAgentPersonaRpc,
   WsJ5RestoreSourceAgentPersonaRpc,
+  WsJ5CreateAgentPersonaRpc,
 );

@@ -1,5 +1,6 @@
 import { AgentLibraryToast, type AgentLibraryNotification } from "./AgentLibraryToast";
 import { AgentImportConflictModal } from "./AgentImportConflictModal";
+import { AgentCreateModal } from "./AgentCreateModal";
 import { AgentEditorModal } from "./AgentEditorModal";
 import { ControlPillMenu } from "../../components/ControlPill";
 import { SymbolView } from "../../components/AppSymbol";
@@ -59,6 +60,7 @@ export function AgentLibrarySettingsScreen() {
     initial: AgentPersonaEditInput;
   } | null>(null);
   const [notification, setNotification] = useState<AgentLibraryNotification | null>(null);
+  const [creating, setCreating] = useState(false);
   const dismissNotification = useCallback(() => setNotification(null), []);
   const importAgents = useAtomCommand(agentPersonaEnvironment.importAgentPersonas, {
     reportFailure: false,
@@ -236,51 +238,69 @@ export function AgentLibrarySettingsScreen() {
 
         <View className="flex-row flex-wrap items-center justify-between gap-3 px-2">
           <Text className="text-sm font-t3-medium text-foreground-muted">Scoped agents</Text>
-          {Platform.OS === "web" ? (
-            <Text className="text-sm text-foreground-muted">
-              Use Settings → Agents in the web app to import files.
-            </Text>
-          ) : (
-            <View
-              className="self-start"
-              pointerEvents={busy || effectiveEnvironmentId === null ? "none" : "auto"}
+          <View className="flex-row flex-wrap items-center gap-2">
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Create agent"
+              accessibilityState={{ disabled: busy || effectiveEnvironmentId === null }}
+              disabled={busy || effectiveEnvironmentId === null}
+              className="flex-row items-center gap-2 rounded-lg border border-border px-4 py-3 disabled:opacity-40"
+              onPress={() => setCreating(true)}
             >
-              <ControlPillMenu
-                actions={[
-                  {
-                    id: "agent",
-                    title: "Agent file",
-                    attributes: { disabled: busy || effectiveEnvironmentId === null },
-                  },
-                  {
-                    id: "folder",
-                    title: "Folder",
-                    attributes: { disabled: busy || effectiveEnvironmentId === null },
-                  },
-                ]}
-                onPressAction={({ nativeEvent }) => {
-                  if (nativeEvent.event === "agent" || nativeEvent.event === "folder")
-                    void importSelection(nativeEvent.event);
-                }}
+              <SymbolView
+                name="plus"
+                size={14}
+                tintColorClassName="accent-icon"
+                type="monochrome"
+              />
+              <Text className="text-sm text-foreground">Create</Text>
+            </Pressable>
+            {Platform.OS === "web" ? (
+              <Text className="text-sm text-foreground-muted">
+                Use Settings → Agents in the web app to import files.
+              </Text>
+            ) : (
+              <View
+                className="self-start"
+                pointerEvents={busy || effectiveEnvironmentId === null ? "none" : "auto"}
               >
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Import agents"
-                  accessibilityState={{ disabled: busy || effectiveEnvironmentId === null }}
-                  disabled={busy || effectiveEnvironmentId === null}
-                  className="flex-row items-center gap-2 rounded-lg border border-border px-4 py-3 disabled:opacity-40"
+                <ControlPillMenu
+                  actions={[
+                    {
+                      id: "agent",
+                      title: "Agent file",
+                      attributes: { disabled: busy || effectiveEnvironmentId === null },
+                    },
+                    {
+                      id: "folder",
+                      title: "Folder",
+                      attributes: { disabled: busy || effectiveEnvironmentId === null },
+                    },
+                  ]}
+                  onPressAction={({ nativeEvent }) => {
+                    if (nativeEvent.event === "agent" || nativeEvent.event === "folder")
+                      void importSelection(nativeEvent.event);
+                  }}
                 >
-                  <Text className="text-sm text-foreground">Import</Text>
-                  <SymbolView
-                    name="chevron.down"
-                    size={14}
-                    tintColorClassName="accent-icon"
-                    type="monochrome"
-                  />
-                </Pressable>
-              </ControlPillMenu>
-            </View>
-          )}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Import agents"
+                    accessibilityState={{ disabled: busy || effectiveEnvironmentId === null }}
+                    disabled={busy || effectiveEnvironmentId === null}
+                    className="flex-row items-center gap-2 rounded-lg border border-border px-4 py-3 disabled:opacity-40"
+                  >
+                    <Text className="text-sm text-foreground">Import</Text>
+                    <SymbolView
+                      name="chevron.down"
+                      size={14}
+                      tintColorClassName="accent-icon"
+                      type="monochrome"
+                    />
+                  </Pressable>
+                </ControlPillMenu>
+              </View>
+            )}
+          </View>
         </View>
         <SettingsSection>
           <View className="gap-2">
@@ -396,6 +416,17 @@ export function AgentLibrarySettingsScreen() {
       </ScrollView>
       {notification ? (
         <AgentLibraryToast notification={notification} onDismiss={dismissNotification} />
+      ) : null}
+      {creating && effectiveEnvironmentId ? (
+        <AgentCreateModal
+          environmentId={effectiveEnvironmentId}
+          onClose={() => setCreating(false)}
+          onCreated={(displayName) => {
+            setCreating(false);
+            setNotification({ type: "success", title: `Created ${displayName}` });
+            catalog.refresh();
+          }}
+        />
       ) : null}
       {editing ? (
         <AgentEditorModal
