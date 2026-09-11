@@ -19,7 +19,6 @@ import {
   agentPersonaUsageById,
   formatAgentPersonaDuration,
   presentAgentPersonaUsage,
-
   draftAgentAssignmentPreview,
   agentPersonaDuplicateDraft,
   agentPersonaIdError,
@@ -667,6 +666,7 @@ describe("agent usage, origin, and library folders", () => {
       }),
     ).toBe("Missing");
   });
+});
 
 it("previews a draft launch from the catalog route and refuses unavailable agents", () => {
   const available = catalog.personas[0]!;
