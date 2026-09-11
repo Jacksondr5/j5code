@@ -7,6 +7,7 @@ import {
   type AgentPersonaCreateDraft,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import { AgentEditorDialog } from "./AgentEditorDialog";
+import { AgentFolderPickerDialog } from "./AgentFolderPickerDialog";
 import {
   ChevronDownIcon,
   EllipsisVerticalIcon,
@@ -50,7 +51,6 @@ import {
   MenuTrigger,
 } from "../../components/ui/menu";
 import { Button } from "../../components/ui/button";
-import { Input } from "../../components/ui/input";
 import { Switch } from "../../components/ui/switch";
 import { Badge } from "../../components/ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
@@ -118,7 +118,7 @@ export function AgentLibrarySettings() {
   const setLibraryFolders = useAtomCommand(agentPersonaEnvironment.setLibraryFolders, {
     reportFailure: false,
   });
-  const [newFolder, setNewFolder] = useState("");
+  const [pickingFolder, setPickingFolder] = useState(false);
   const otherEnvironments = orderedEnvironments.filter(
     (environment) => environment.environmentId !== effectiveEnvironmentId,
   );
@@ -212,7 +212,6 @@ export function AgentLibrarySettings() {
     try {
       const result = await setLibraryFolders({ environmentId, input: { folders } });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-      setNewFolder("");
       librarySources.refresh();
       catalog.refresh();
     } catch (error) {
@@ -741,41 +740,29 @@ export function AgentLibrarySettings() {
                     : "Bundled examples appear until a folder is configured or the default folder exists. Adding a folder writes agent-personas.json."
                 }
                 control={
-                  <form
-                    className="flex w-full items-center gap-2 sm:w-auto"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      const folder = newFolder.trim();
-                      if (folder === "") return;
-                      void saveFolders([
-                        ...(librarySources.data?.folders ?? []).map(
-                          ({ configuredPath }) => configuredPath,
-                        ),
-                        folder,
-                      ]);
-                    }}
-                  >
-                    <Input
-                      value={newFolder}
-                      disabled={busy}
-                      placeholder="/path/to/team-library"
-                      aria-label="Folder path"
-                      className="w-full font-mono sm:w-72"
-                      onChange={(event) => setNewFolder(event.target.value)}
-                    />
-                    <Button
-                      type="submit"
-                      variant="outline"
-                      disabled={busy || newFolder.trim() === ""}
-                    >
-                      Add
-                    </Button>
-                  </form>
+                  <Button variant="outline" disabled={busy} onClick={() => setPickingFolder(true)}>
+                    <PlusIcon aria-hidden="true" className="size-4" />
+                    Add folder
+                  </Button>
                 }
               />
             </>
           ) : null}
         </SettingsSection>
+      ) : null}
+      {pickingFolder && effectiveEnvironmentId ? (
+        <AgentFolderPickerDialog
+          environmentId={effectiveEnvironmentId}
+          environmentLabel={selectedEnvironment?.label ?? "this environment"}
+          onClose={() => setPickingFolder(false)}
+          onSelect={(path) => {
+            setPickingFolder(false);
+            void saveFolders([
+              ...(librarySources.data?.folders ?? []).map(({ configuredPath }) => configuredPath),
+              path,
+            ]);
+          }}
+        />
       ) : null}
       {creating && effectiveEnvironmentId ? (
         <AgentCreateDialog

@@ -15,6 +15,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import type { PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import { parseDocument } from "yaml";
@@ -72,6 +73,7 @@ const LibraryConfig = Schema.Struct({
 const decodeLibraryConfig = Schema.decodeUnknownEffect(Schema.fromJsonString(LibraryConfig));
 const encodeLibraryConfig = Schema.encodeEffect(Schema.fromJsonString(LibraryConfig));
 const DEFAULT_FOLDER = "personas";
+const MAX_FOLDER_DEPTH = 16;
 export const definitionDigest = (definition: AgentPersonaDefinition): string =>
   NodeCrypto.createHash("sha256").update(JSON.stringify(definition)).digest("hex");
 
@@ -103,28 +105,61 @@ export function createAgentPersonaLibrary(storage?: {
     };
   });
 
+  /**
+   * Every definition file under a folder, walking subfolders in sorted order like the
+   * import picker does. Dot-directories such as .git are skipped; depth is capped so a
+   * symlink cycle cannot spin forever. Returns null when the root does not exist.
+   */
+  const listDefinitionFiles = Effect.fn("AgentPersonaLibrary.listDefinitionFiles")(function* (
+    root: string,
+  ) {
+    if (storage === undefined) return null;
+    const { fs, path } = storage;
+    const files: string[] = [];
+    const walk: (folder: string, depth: number) => Effect.Effect<void, PlatformError> = Effect.fn(
+      "AgentPersonaLibrary.walk",
+    )(function* (folder, depth) {
+      const names = yield* fs.readDirectory(folder);
+      for (const name of [...names].sort()) {
+        const entry = path.join(folder, name);
+        const stat = yield* fs.stat(entry);
+        if (stat.type === "Directory") {
+          if (!name.startsWith(".") && depth < MAX_FOLDER_DEPTH) yield* walk(entry, depth + 1);
+        } else if (stat.type === "File" && isAgentPersonaDefinitionFile(name)) {
+          files.push(entry);
+        }
+      }
+    });
+    const exists = yield* fs.exists(root);
+    if (!exists) return null;
+    yield* walk(root, 0);
+    return files;
+  });
+
   const loadSources = Effect.fn("AgentPersonaLibrary.loadSources")(function* () {
     const bundled = { definitions: listBuiltInAgentPersonas(), paths: new Map<string, string>() };
     if (storage === undefined) return bundled;
-    const { fs, path } = storage;
+    const { fs } = storage;
     const { configured, folders } = yield* resolveFolders();
     const definitions = new Map<string, AgentPersonaDefinition>();
     const paths = new Map<string, string>();
     for (const folder of folders.map(({ path }) => path)) {
-      const entries = yield* fs.readDirectory(folder).pipe(
-        Effect.map(Option.some),
+      const files = yield* listDefinitionFiles(folder).pipe(
         Effect.catch((error) =>
           !configured && error.reason._tag === "NotFound"
-            ? Effect.succeed(Option.none())
+            ? Effect.succeed(null)
             : Effect.fail(error),
         ),
       );
-      if (Option.isNone(entries)) return bundled;
-      for (const name of [...entries.value].sort()) {
-        if (!isAgentPersonaDefinitionFile(name)) continue;
-        const file = path.join(folder, name);
+      if (files === null) {
+        if (configured)
+          return yield* new AgentPersonaLibraryError({
+            message: `Configured persona folder does not exist: ${folder}`,
+          });
+        return bundled;
+      }
+      for (const file of files) {
         const stat = yield* fs.stat(file);
-        if (stat.type !== "File") continue;
         if (Number(stat.size) > 65536)
           return yield* new AgentPersonaLibraryError({
             message: `Persona file exceeds 64 KiB: ${file}`,
@@ -147,7 +182,7 @@ export function createAgentPersonaLibrary(storage?: {
     return { definitions: [...definitions.values()], paths };
   });
 
-  /** Folder inventory for Settings; counts YAML files without decoding them. */
+  /** Folder inventory for Settings; counts YAML files in the folder tree without decoding them. */
   const sources = Effect.fn("AgentPersonaLibrary.sources")(function* () {
     if (storage === undefined)
       return yield* new AgentPersonaLibraryError({
@@ -157,16 +192,13 @@ export function createAgentPersonaLibrary(storage?: {
     const { configured, folders } = yield* resolveFolders();
     const inventory = [];
     for (const folder of folders) {
-      const entries = yield* fs.readDirectory(folder.path).pipe(
-        Effect.map(Option.some),
-        Effect.catch(() => Effect.succeed(Option.none())),
+      const files = yield* listDefinitionFiles(folder.path).pipe(
+        Effect.catch(() => Effect.succeed(null)),
       );
       inventory.push({
         ...folder,
-        exists: Option.isSome(entries),
-        definitionCount: Option.isSome(entries)
-          ? entries.value.filter(isAgentPersonaDefinitionFile).length
-          : 0,
+        exists: files !== null,
+        definitionCount: files?.length ?? 0,
       });
     }
     return {
