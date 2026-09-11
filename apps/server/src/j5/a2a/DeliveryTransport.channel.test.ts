@@ -60,6 +60,20 @@ it("selects the closed-envelope variant only for persisted reply deliveries", ()
   assert.notInclude(followup, "platform closed this exchange");
 });
 
+it("fails closed for a person-origin delivery that is not an exchange reply", () => {
+  for (const exchangeRole of ["none", "ask", "followup"] as const) {
+    assert.throws(
+      () =>
+        formatAgentDeliveryEnvelope({
+          ...delivery,
+          senderId: ParticipantId.make("human:channel-person"),
+          exchangeRole,
+        }),
+      /Unsupported A2A delivery: person human:channel-person sent a/,
+    );
+  }
+});
+
 it("fails closed for an unknown persisted delivery envelope channel", () => {
   assert.throws(
     () =>

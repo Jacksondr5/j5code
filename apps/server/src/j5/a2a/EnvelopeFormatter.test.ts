@@ -10,7 +10,6 @@ import {
   A2A_SEND_TOOL_DESCRIPTION,
   formatClosedHumanEnvelope,
   formatClosedPeerEnvelope,
-  formatHumanEnvelope,
   formatPeerEnvelope,
   formatSilenceNoticeEnvelope,
 } from "./EnvelopeFormatter.ts";
@@ -49,7 +48,7 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
     message: "Please verify the worker.",
   });
 
-  assert.equal(A2A_ENVELOPE_VERSION, 15);
+  assert.equal(A2A_ENVELOPE_VERSION, 16);
   assert.include(rendered, "Cross-agent message");
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
   assert.include(rendered, "agent:sender");
@@ -115,16 +114,7 @@ it("does not interpret caller text as an envelope template", () => {
   assert.equal(rendered.match(/send_message\(/g)?.length, 1);
 });
 
-it("tells agents that human-origin exchanges require an explicit tool reply", () => {
-  const rendered = formatHumanEnvelope({
-    senderId: ParticipantId.make("human:formatter-person"),
-    exchangeId: ExchangeId.make("exchange:human"),
-    message: "Please report status.",
-  });
-
-  assert.include(rendered, "[Message from human:formatter-person]");
-  assert.include(rendered, "This person is not watching this chat");
-  assert.include(rendered, 'exchange_id="exchange:human"');
+it("keeps the tool descriptions on their documented contracts", () => {
   assert.equal(
     A2A_SEND_TOOL_DESCRIPTION,
     "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask or a reply: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by list_participants; when creating a Peer Agent, put any reply expectation in spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. A caller without a registered home is refused. Reuse client_request_id to retry the same send safely.",
@@ -159,7 +149,7 @@ it("tells agents that human-origin exchanges require an explicit tool reply", ()
     /consult.*(?:spawn|archive)|(?:spawn|archive).*changes/i,
   );
   assert.notMatch(
-    [rendered, A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION].join("\n"),
+    [A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION].join("\n"),
     /\b(?:J5|A2A)\b/,
   );
 });

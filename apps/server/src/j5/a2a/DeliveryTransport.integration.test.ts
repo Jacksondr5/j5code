@@ -99,7 +99,7 @@ import {
   live as watchdogLayer,
   QUEUED_RUN_WATCHDOG_DELAY_MS,
 } from "../run-observability/QueuedRunWatchdog.ts";
-import { formatHumanEnvelope, formatPeerEnvelope } from "./EnvelopeFormatter.ts";
+import { formatClosedHumanEnvelope, formatPeerEnvelope } from "./EnvelopeFormatter.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { A2ALifecycleService, manualLayer as lifecycleServiceLayer } from "./LifecycleService.ts";
 import { A2ASenderRetiredError, A2ASendService, layer as sendServiceLayer } from "./SendService.ts";
@@ -1013,12 +1013,14 @@ it.effect("attributes human-origin delivery to the user actor", () =>
       const target = yield* seedTarget("human-origin");
       const humanMessageId = LedgerMessageId.make("message:j5-a2a-delivery-human-origin");
       const personId = ParticipantId.make("human:transport-person");
-      const message = "Human-authored request delivered through A2A.";
+      const message = "Human-authored answer delivered through A2A.";
 
+      // The inbox answer is the only person-originated message: a closing reply.
       yield* transport.deliverAgent({
         ...target.delivery,
         messageId: humanMessageId,
         senderId: personId,
+        exchangeRole: "reply",
         message,
       });
 
@@ -1028,9 +1030,8 @@ it.effect("attributes human-origin delivery to the user actor", () =>
       assert.equal(delivered?.createdBy, "user");
       assert.equal(
         delivered?.text,
-        formatHumanEnvelope({
+        formatClosedHumanEnvelope({
           senderId: personId,
-          exchangeId: target.exchangeId,
           message,
         }),
       );
