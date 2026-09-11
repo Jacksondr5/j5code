@@ -12,6 +12,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   prepareAgentPersonaImport,
   importAgentPersonasWithConfirmation,
+  agentPersonaDuplicateDraft,
   agentPersonaIdError,
   agentPersonaIdFromName,
   defaultAgentPersonaModelRoute,
@@ -539,5 +540,32 @@ describe("personal agent authoring", () => {
     ]);
     const single = defaultAgentPersonaModelRoute([providers[0]!]);
     expect(single?.[0]).toEqual(single?.[1]);
+  });
+});
+
+it("prefills a duplicate with the source content and a fresh name and ID", () => {
+  expect(
+    agentPersonaDuplicateDraft({
+      id: "scout",
+      version: 3,
+      displayName: "Scout",
+      description: "Collects evidence.",
+      instructions: "# Scout",
+      authority: { defaultPolicy: "read-only", allowedPolicies: ["read-only", "critic-review"] },
+      modelRoute: [
+        { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
+        { driver: "claudeAgent", model: "claude-opus-5", reasoningEffort: "high" },
+      ],
+    }),
+  ).toEqual({
+    displayName: "Scout copy",
+    id: "scout-copy",
+    description: "Collects evidence.",
+    instructions: "# Scout",
+    authorityPolicy: "read-only",
+    modelRoute: [
+      { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
+      { driver: "claudeAgent", model: "claude-opus-5", reasoningEffort: "high" },
+    ],
   });
 });

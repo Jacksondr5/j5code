@@ -4,6 +4,7 @@ import {
   AGENT_AUTHORITY_RULES,
   AGENT_PERSONA_IDS,
   BUILT_IN_AGENT_PERSONAS,
+  decodeAgentPersonaDefinition,
   getBuiltInAgentPersona,
   listBuiltInAgentPersonas,
 } from "./agentPersonas.ts";
@@ -80,4 +81,29 @@ describe("built-in agent persona catalog", () => {
       assert.isFalse(rules.mayMergePullRequest);
     }
   });
+});
+
+it("accepts a personal agent without handoff artifact fields", () => {
+  const definition = decodeAgentPersonaDefinition({
+    id: "my-reviewer",
+    version: 1,
+    displayName: "My Reviewer",
+    description: "Reviews my changes.",
+    instructions: "Review carefully.",
+    authority: { defaultPolicy: "read-only", allowedPolicies: ["read-only"] },
+    modelRoute: [
+      { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
+      { driver: "claudeAgent", model: "claude-opus-5", reasoningEffort: "high" },
+    ],
+  });
+  assert.equal(definition.outputArtifact, undefined);
+  assert.equal(definition.inputArtifacts, undefined);
+  assert.throws(
+    () =>
+      decodeAgentPersonaDefinition({
+        ...definition,
+        outputArtifact: "Undeclared",
+      }),
+    /undefined artifact Undeclared/,
+  );
 });

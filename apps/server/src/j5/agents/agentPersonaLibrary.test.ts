@@ -480,6 +480,7 @@ describe("editing imported agents", () => {
     personaId: definition.id,
     expectedDigest: definitionDigest(definition),
     displayName: definition.displayName,
+    instructions: definition.instructions,
     description: definition.description,
     authorityPolicy: definition.authority.defaultPolicy,
     modelRoute: definition.modelRoute,
@@ -660,6 +661,7 @@ describe("confirmed import replacement", () => {
         expectedDigest: definitionDigest(custom),
         displayName: "Concurrent edit",
         description: custom.description,
+        instructions: custom.instructions,
         authorityPolicy: custom.authority.defaultPolicy,
         modelRoute: custom.modelRoute,
       });
@@ -940,7 +942,8 @@ describe("personal agents", () => {
           defaultPolicy: "read-only",
           allowedPolicies: ["read-only"],
         });
-        assert.equal(definition?.outputArtifact, "Response");
+        assert.equal(definition?.outputArtifact, undefined);
+        assert.equal(definition?.acceptedInput, undefined);
         assert.equal(definition?.version, 1);
         assert.isTrue((yield* restarted.load()).some(({ id }) => id === "my-reviewer"));
         const duplicate = yield* restarted
@@ -966,5 +969,42 @@ describe("personal agents", () => {
           .pipe(Effect.flip);
         assert.include(String(bundled), "already exists");
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("reading and editing definitions", () => {
+  it.effect("reads any listed definition, including removed sources, and edits instructions", () =>
+    Effect.gen(function* () {
+      const { library, write } = yield* fixture;
+      yield* write("agent.yaml", custom);
+      assert.deepEqual(yield* library.read(custom.id), custom);
+      yield* library.removeSource(custom.id);
+      assert.deepEqual(yield* library.read(custom.id), custom);
+      assert.include(
+        String(yield* library.read("missing-agent").pipe(Effect.flip)),
+        "Unknown agent",
+      );
+      const created = yield* library.createPersona({
+        id: "my-reviewer",
+        displayName: "My Reviewer",
+        description: "Reviews my changes.",
+        instructions: "Review carefully.",
+        authorityPolicy: "read-only",
+        modelRoute: custom.modelRoute,
+      });
+      const before = yield* library.read(created.personaId);
+      yield* library.editImported({
+        personaId: created.personaId,
+        expectedDigest: definitionDigest(before),
+        displayName: before.displayName,
+        description: before.description,
+        instructions: "Review carefully.\n\nAlways cite file paths.",
+        authorityPolicy: "read-only",
+        modelRoute: before.modelRoute,
+      });
+      const after = yield* library.read(created.personaId);
+      assert.equal(after.version, before.version + 1);
+      assert.include(after.instructions, "Always cite file paths.");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

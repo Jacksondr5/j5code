@@ -9,6 +9,7 @@ import type {
   AgentPersonaAuthorityPolicy,
   AgentPersonaImportInput,
   AgentPersonaImportConflict,
+  AgentPersonaDefinitionView,
   AgentPersonaEditInput,
   AgentPersonaModelTarget,
   ServerProvider,
@@ -32,11 +33,12 @@ export interface AgentPersonaCatalogRow {
   /** Removed source or bundled definitions stay listed with a Restore action. */
   readonly removed: boolean;
   readonly enabled: boolean;
-  readonly edit: AgentPersonaEditInput | null;
+  /** Everything the edit dialog needs except instructions, which it loads on open. */
+  readonly edit: Omit<AgentPersonaEditInput, "instructions"> | null;
   readonly displayName: string;
   readonly description: string;
-  readonly acceptedInput: string;
-  readonly outputArtifact: string;
+  readonly acceptedInput: string | undefined;
+  readonly outputArtifact: string | undefined;
   readonly authority: string;
   readonly availability: "available" | "blocked" | "disabled" | "removed";
   readonly availabilityLabel: "Available" | "Blocked" | "Disabled" | "Removed";
@@ -309,4 +311,27 @@ export function defaultAgentPersonaModelRoute(
   const fallback =
     available.find(({ target }) => target.driver !== primary.target.driver) ?? primary;
   return [primary.target, fallback.target];
+}
+
+export interface AgentPersonaCreateDraft {
+  readonly displayName: string;
+  readonly id: string;
+  readonly description: string;
+  readonly instructions: string;
+  readonly authorityPolicy: AgentPersonaAuthorityPolicy;
+  readonly modelRoute: readonly [AgentPersonaModelTarget, AgentPersonaModelTarget];
+}
+
+/** Prefill the create dialog from any listed agent; the copy gets its own name and ID. */
+export function agentPersonaDuplicateDraft(
+  definition: AgentPersonaDefinitionView,
+): AgentPersonaCreateDraft {
+  return {
+    displayName: `${definition.displayName} copy`,
+    id: agentPersonaIdFromName(`${definition.id}-copy`),
+    description: definition.description,
+    instructions: definition.instructions,
+    authorityPolicy: definition.authority.defaultPolicy,
+    modelRoute: definition.modelRoute,
+  };
 }

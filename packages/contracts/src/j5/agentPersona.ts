@@ -109,26 +109,47 @@ export const AgentPersonaEditableDetails = Schema.Struct({
   definitionDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
 });
+export const AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH = 32768;
+const AgentPersonaInstructions = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH),
+);
 export const AgentPersonaEditInput = Schema.Struct({
   personaId: AgentPersonaId,
   expectedDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   description: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
+  instructions: AgentPersonaInstructions,
   authorityPolicy: AgentPersonaAuthorityPolicy,
   modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
 });
 export type AgentPersonaEditInput = typeof AgentPersonaEditInput.Type;
 
-export const AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH = 32768;
+/** The full definition as stored; the catalog omits instructions to keep lists small. */
+export const AgentPersonaDefinitionView = Schema.Struct({
+  id: AgentPersonaId,
+  version: PositiveInt,
+  displayName: TrimmedNonEmptyString,
+  description: TrimmedNonEmptyString,
+  instructions: AgentPersonaInstructions,
+  acceptedInput: Schema.optional(TrimmedNonEmptyString),
+  artifacts: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  inputArtifacts: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  outputArtifact: Schema.optional(TrimmedNonEmptyString),
+  authority: Schema.Struct({
+    defaultPolicy: AgentPersonaAuthorityPolicy,
+    allowedPolicies: Schema.Array(AgentPersonaAuthorityPolicy),
+  }),
+  modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+});
+export type AgentPersonaDefinitionView = typeof AgentPersonaDefinitionView.Type;
+
 /** A personal agent authored in Settings; the server fills the remaining definition fields. */
 export const AgentPersonaCreateInput = Schema.Struct({
   id: AgentPersonaId,
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   description: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
-  instructions: Schema.String.check(
-    Schema.isMinLength(1),
-    Schema.isMaxLength(AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH),
-  ),
+  instructions: AgentPersonaInstructions,
   authorityPolicy: AgentPersonaAuthorityPolicy,
   modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
 });
@@ -144,8 +165,8 @@ export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
   definitionVersion: PositiveInt,
   displayName: TrimmedNonEmptyString,
   description: TrimmedNonEmptyString,
-  acceptedInput: TrimmedNonEmptyString,
-  outputArtifact: TrimmedNonEmptyString,
+  acceptedInput: Schema.optional(TrimmedNonEmptyString),
+  outputArtifact: Schema.optional(TrimmedNonEmptyString),
   defaultAuthorityPolicy: AgentPersonaAuthorityPolicy,
   allowedAuthorityPolicies: Schema.Array(AgentPersonaAuthorityPolicy),
   availability: OrchestrationV2AgentPersonaAvailability,
@@ -214,6 +235,7 @@ export const J5_AGENT_PERSONA_WS_METHODS = {
   removeAgentPersona: "j5.agentPersonas.remove",
   restoreSourceAgentPersona: "j5.agentPersonas.restoreSource",
   createAgentPersona: "j5.agentPersonas.create",
+  readAgentPersona: "j5.agentPersonas.read",
 } as const;
 
 export const J5AgentPersonaRpcSchemas = {
@@ -252,6 +274,14 @@ export const J5AgentPersonaRpcSchemas = {
   createAgentPersona: {
     input: AgentPersonaCreateInput,
     output: Schema.Struct({ personaId: AgentPersonaId }),
+  },
+  readAgentPersona: {
+    input: Schema.Struct({ personaId: AgentPersonaId }),
+    output: Schema.Struct({
+      definition: AgentPersonaDefinitionView,
+      fileName: TrimmedNonEmptyString,
+      yaml: Schema.String,
+    }),
   },
 } as const;
 
@@ -329,6 +359,12 @@ export const WsJ5CreateAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.cr
   error: catalogErrors,
 });
 
+export const WsJ5ReadAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.readAgentPersona, {
+  payload: J5AgentPersonaRpcSchemas.readAgentPersona.input,
+  success: J5AgentPersonaRpcSchemas.readAgentPersona.output,
+  error: catalogErrors,
+});
+
 /** Merged into `WsRpcGroup` by one appended call; no other upstream registration exists. */
 export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5GetAgentPersonaCatalogRpc,
@@ -340,4 +376,5 @@ export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5RemoveAgentPersonaRpc,
   WsJ5RestoreSourceAgentPersonaRpc,
   WsJ5CreateAgentPersonaRpc,
+  WsJ5ReadAgentPersonaRpc,
 );

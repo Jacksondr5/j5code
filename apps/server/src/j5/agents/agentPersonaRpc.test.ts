@@ -21,6 +21,9 @@ describe("agent persona RPC scopes", () => {
     expect(requiredScopeForRpcMethod(J5_AGENT_PERSONA_WS_METHODS.createAgentPersona)).toBe(
       AuthOrchestrationOperateScope,
     );
+    expect(requiredScopeForRpcMethod(J5_AGENT_PERSONA_WS_METHODS.readAgentPersona)).toBe(
+      AuthOrchestrationReadScope,
+    );
     expect(requiredScopeForRpcMethod(J5_AGENT_PERSONA_WS_METHODS.removeSourceAgentPersona)).toBe(
       AuthOrchestrationOperateScope,
     );

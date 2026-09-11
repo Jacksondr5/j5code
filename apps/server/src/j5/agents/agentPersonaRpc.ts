@@ -10,6 +10,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import { stringify as toYaml } from "yaml";
 
 import { definitionDigest, makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import { buildAgentPersonaCatalog } from "./agentPersonaRouting.ts";
@@ -27,6 +28,7 @@ export const AGENT_PERSONA_RPC_SCOPES = {
   [METHODS.removeAgentPersona]: AuthOrchestrationOperateScope,
   [METHODS.restoreSourceAgentPersona]: AuthOrchestrationOperateScope,
   [METHODS.createAgentPersona]: AuthOrchestrationOperateScope,
+  [METHODS.readAgentPersona]: AuthOrchestrationReadScope,
 } as const;
 
 /** Matches the per-session `observeRpcEffect` closure in ws.ts (instrumentation plus scope check). */
@@ -147,6 +149,20 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
         observe(
           METHODS.createAgentPersona,
           library.createPersona(input).pipe(Effect.mapError(catalogError)),
+          TRACE,
+        ),
+      [METHODS.readAgentPersona]: (input: Input<"readAgentPersona">) =>
+        observe(
+          METHODS.readAgentPersona,
+          library.read(input.personaId).pipe(
+            Effect.map((definition) => ({
+              definition,
+              fileName: `${definition.id}.yaml`,
+              // Block scalars keep multiline instructions readable; the import parser accepts the result.
+              yaml: toYaml(definition, { lineWidth: 0 }),
+            })),
+            Effect.mapError(catalogError),
+          ),
           TRACE,
         ),
     };

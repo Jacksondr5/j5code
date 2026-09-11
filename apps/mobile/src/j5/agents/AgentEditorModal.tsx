@@ -1,6 +1,6 @@
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { AgentPersonaEditInput, EnvironmentId } from "@t3tools/contracts";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -11,18 +11,38 @@ import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 
 export function AgentEditorModal(props: {
   environmentId: EnvironmentId;
-  initial: AgentPersonaEditInput;
+  initial: Omit<AgentPersonaEditInput, "instructions">;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [draft, setDraft] = useState(props.initial);
+  // Instructions are not in the catalog; load them once the sheet opens.
+  const [instructions, setInstructions] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const save = useAtomCommand(agentPersonaEnvironment.editImportedAgentPersona, {
     reportFailure: false,
   });
+  const read = useAtomCommand(agentPersonaEnvironment.readAgentPersona, {
+    reportFailure: false,
+  });
+  useEffect(() => {
+    let cancelled = false;
+    void read({ environmentId: props.environmentId, input: { personaId: props.initial.personaId } })
+      .then((result) => {
+        if (cancelled) return;
+        if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+        setInstructions(result.value.definition.instructions);
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.environmentId, props.initial.personaId, read]);
   async function submit() {
-    if (saving) return;
+    if (saving || instructions === null) return;
     setSaving(true);
     setError(null);
     try {
@@ -32,6 +52,7 @@ export function AgentEditorModal(props: {
           ...draft,
           displayName: draft.displayName.trim(),
           description: draft.description.trim(),
+          instructions,
         },
       });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
@@ -94,6 +115,24 @@ export function AgentEditorModal(props: {
                 onChangeText={(description) => setDraft({ ...draft, description })}
               />
             </View>
+            <View className="gap-2">
+              <Text>Instructions</Text>
+              <TextInput
+                accessibilityLabel="Instructions"
+                multiline
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={{ minHeight: 160 }}
+                placeholder={instructions === null ? "Loading…" : undefined}
+                value={instructions ?? ""}
+                editable={!saving && instructions !== null}
+                onChangeText={setInstructions}
+              />
+              <Text className="text-xs text-foreground-muted">
+                Markdown. Instructions describe behavior; the runtime policy below is what is
+                enforced.
+              </Text>
+            </View>
             <AgentRoutePolicyFields
               environmentId={props.environmentId}
               value={draft}
@@ -108,7 +147,13 @@ export function AgentEditorModal(props: {
             ) : null}
             <Pressable
               accessibilityRole="button"
-              disabled={saving || !draft.displayName.trim() || !draft.description.trim()}
+              disabled={
+                saving ||
+                instructions === null ||
+                !instructions.trim() ||
+                !draft.displayName.trim() ||
+                !draft.description.trim()
+              }
               className="items-center rounded-xl bg-primary px-4 py-3 disabled:opacity-40"
               onPress={() => void submit()}
             >
