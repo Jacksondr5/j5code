@@ -19,6 +19,7 @@ import {
   agentPersonaUsageById,
   formatAgentPersonaDuration,
   presentAgentPersonaUsage,
+  draftAgentAssignmentPreview,
   agentPersonaDuplicateDraft,
   agentPersonaIdError,
   agentPersonaIdFromName,
@@ -665,4 +666,19 @@ describe("agent usage, origin, and library folders", () => {
       }),
     ).toBe("Missing");
   });
+});
+
+it("previews a draft launch from the catalog route and refuses unavailable agents", () => {
+  const available = catalog.personas[0]!;
+  const preview = draftAgentAssignmentPreview(available.personaId, catalog);
+  expect(preview).toMatchObject({
+    personaId: available.personaId,
+    displayName: available.displayName,
+    authorityPolicy: "read-only",
+    resolvedRoute: "fallback",
+    resolvedModelSelection: { model: "server-selected-model" },
+  });
+  expect(draftAgentAssignmentPreview(catalog.personas[1]!.personaId, catalog)).toBeNull();
+  expect(draftAgentAssignmentPreview("missing", catalog)).toBeNull();
+  expect(draftAgentAssignmentPreview(available.personaId, null)).toBeNull();
 });

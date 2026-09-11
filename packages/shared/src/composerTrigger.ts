@@ -1,4 +1,5 @@
-export type ComposerTriggerKind = "path" | "slash-command" | "slash-model" | "skill";
+import { detectAgentMention } from "./j5/agentMention.ts";
+export type ComposerTriggerKind = "agent" | "path" | "slash-command" | "slash-model" | "skill";
 export type ComposerSlashCommand = "model" | "plan" | "default";
 
 export interface ComposerTrigger {
@@ -112,6 +113,8 @@ export function detectComposerTrigger(
       rangeEnd: cursor,
     };
   }
+  const agentMention = detectAgentMention(token, tokenStart, cursor);
+  if (agentMention !== null) return agentMention;
   if (!token.startsWith("@")) {
     return null;
   }

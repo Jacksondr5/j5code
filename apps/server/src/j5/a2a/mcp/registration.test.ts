@@ -48,6 +48,7 @@ it.effect("registers the exact composed production J5 orchestration surface", ()
       "archive_agent",
       "clear_own_ask",
       "delete_scheduled_task",
+      "invoke_agent",
       "list_participants",
       "list_scheduled_tasks",
       "orchestrator_capabilities",

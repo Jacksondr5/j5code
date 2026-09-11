@@ -29,6 +29,7 @@ import { cn } from "~/lib/utils";
 import { orchestrationEnvironment } from "~/state/orchestration";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Button } from "~/components/ui/button";
+import { AgentRowIdentity } from "../j5/agents/AgentIdentityChip";
 
 /**
  * In-flight states all present as Working (one steady state, per the
@@ -138,7 +139,13 @@ function agentActivityText(agent: RuntimeSubagent): string | null {
 }
 
 /** Flat, non-interactive agent status line. No unfold. */
-function AgentRow({ agent }: { agent: RuntimeSubagent }) {
+function AgentRow({
+  agent,
+  environmentId = null,
+}: {
+  agent: RuntimeSubagent;
+  environmentId?: EnvironmentId | null;
+}) {
   const visuals = STATUS_VISUALS[agent.status];
   const statusLabel =
     agent.kind === "subagent_batch" && agent.status === "idle" ? "Idle" : visuals.label;
@@ -167,6 +174,7 @@ function AgentRow({ agent }: { agent: RuntimeSubagent }) {
             {role}
           </span>
         ) : null}
+        <AgentRowIdentity environmentId={environmentId} childThreadId={agent.childThreadId} />
       </span>
       <span className="col-start-3 row-start-1 min-w-14 text-right font-mono text-[.7rem] text-muted-foreground/80">
         <span className="inline-flex items-center gap-1">
@@ -562,7 +570,7 @@ export function AgentsPanel({
                 Direct spawns
               </div>
               {model.directAgents.map((agent) => (
-                <AgentRow key={agent.id} agent={agent} />
+                <AgentRow key={agent.id} agent={agent} environmentId={environmentId} />
               ))}
             </section>
           ) : null}

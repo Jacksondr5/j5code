@@ -1508,7 +1508,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 )}
                 data-testid={`thread-card-identity-${thread.id}`}
               >
-                <ThreadCardIdentity home={props.threadHome} fallbackFolder={props.projectTitle} />
+                <ThreadCardIdentity
+                  home={props.threadHome}
+                  fallbackFolder={props.projectTitle}
+                  agentPersonaAssignment={thread.agentPersonaAssignment}
+                />
               </span>
               {pinIndicator}
               {/* The visible state owns this slot's width: status at rest,

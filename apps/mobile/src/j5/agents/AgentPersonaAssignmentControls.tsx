@@ -14,6 +14,8 @@ export function AgentPersonaAssignmentControls(props: {
   readonly assignment: OrchestrationV2AgentPersonaAssignment;
   /** When known, the current library is compared with the launch snapshot to show drift. */
   readonly environmentId?: EnvironmentId;
+  /** Present only for an unsent draft, where the choice can still be undone. */
+  readonly onClear?: () => void;
 }) {
   const presentation = presentAgentPersonaAssignment(props.assignment);
   const catalog = useEnvironmentQuery(
@@ -38,6 +40,16 @@ export function AgentPersonaAssignmentControls(props: {
         maxWidth={200}
         static
       />
+      {props.onClear ? (
+        <ComposerInlineControl
+          accessibilityLabel="Remove agent"
+          accessibilityHint="Start as a regular task instead"
+          icon="xmark"
+          label=""
+          maxWidth={44}
+          onPress={props.onClear}
+        />
+      ) : null}
       {drift === "changed" ? (
         <ComposerInlineControl
           accessibilityLabel="Agent definition changed since launch"

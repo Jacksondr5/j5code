@@ -447,3 +447,27 @@ export function agentPersonaFolderStatusLabel(folder: AgentPersonaLibraryFolder)
   if (!folder.exists) return "Missing";
   return `${folder.definitionCount} ${folder.definitionCount === 1 ? "definition" : "definitions"}`;
 }
+
+/**
+ * What a draft launch will pin once the server resolves the agent: built from the catalog's
+ * current route so the composer can show the same lock control before and after the first send.
+ */
+export function draftAgentAssignmentPreview(
+  personaId: string,
+  catalog: OrchestrationV2AgentPersonaCatalog | null | undefined,
+): OrchestrationV2AgentPersonaAssignment | null {
+  const persona = catalog?.personas.find((candidate) => candidate.personaId === personaId);
+  if (persona === undefined || persona.availability.status !== "available") return null;
+  return {
+    personaId: persona.personaId,
+    definitionVersion: persona.definitionVersion,
+    ...(persona.definitionDigest === undefined
+      ? {}
+      : { definitionDigest: persona.definitionDigest }),
+    displayName: persona.displayName,
+    authorityPolicy: persona.defaultAuthorityPolicy,
+    resolvedRoute: persona.availability.resolvedRoute,
+    resolvedDriver: persona.availability.resolvedDriver,
+    resolvedModelSelection: persona.availability.resolvedModelSelection,
+  };
+}

@@ -1,10 +1,12 @@
+import { AGENT_INVOCATION_INSTRUCTIONS } from "../j5/agents/agentInvocationInstructions.ts";
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
 
 ## T3 Code orchestration
 
 The \`t3-code\` MCP server provides app-owned orchestration. Treat these concepts distinctly:
 
-- A provider-native Subagent is child work created and owned inside one provider session. When the user asks for a subagent, worker, delegation, or parallel help, use your provider's native Subagent mechanism. T3 observes what providers expose, but it does not create or organize Subagents.
+${AGENT_INVOCATION_INSTRUCTIONS}
+- A provider-native Subagent is child work created and owned inside one provider session. For requests without an explicit saved-agent mention, when the user asks for a subagent, worker, delegation, or parallel help, use your provider's native Subagent mechanism. T3 observes the native activity providers expose.
 - A Peer Agent is a full participant with its own top-level thread. Use platform \`spawn_agent\` to create one. Its brief states the task and whether a reply is expected; when you need a reply, include what should come back in that brief instead of sending a follow-up ask.
 - Use \`list_participants\` to resolve an already-addressable agent or the human. Only for later work owed by an existing participant, use \`send_message(..., expect_reply=true, intent="...")\` to open an Exchange. The reply arrives later as an incoming message; continue with other work instead of polling.
 - \`schedule_task\` creates persistent recurring work in the app scheduler. Pass \`schedule\` as a structured object, never as JSON text: \`{"type":"interval","everyMs":3600000}\` for an interval, or \`{"type":"fixed_time","timeOfDay":"09:00","weekdays":[1,2,3,4,5]}\` for a wall-clock schedule. By default runs return to the current thread; set \`bindToCurrentThread=false\` only when the user wants a fresh thread for every run. After scheduling, report the returned cadence and next run time.

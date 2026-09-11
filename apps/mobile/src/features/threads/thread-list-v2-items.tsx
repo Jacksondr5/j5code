@@ -14,6 +14,7 @@ import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSw
 import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
 import { ControlPillMenu } from "../../components/ControlPill";
+import { AgentIdentityChip } from "../../j5/agents/AgentIdentityChip";
 import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { ProviderIcon } from "../../components/ProviderIcon";
@@ -730,6 +731,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       >
         {thread.title}
       </Text>
+      <AgentIdentityChip assignment={thread.agentPersonaAssignment} />
       {props.searchMatch ? (
         <View className="mt-1">
           <ThreadSearchMatchExcerpt

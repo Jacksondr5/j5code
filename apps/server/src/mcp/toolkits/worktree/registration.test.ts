@@ -198,6 +198,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "archive_agent",
         "clear_own_ask",
         "delete_scheduled_task",
+        "invoke_agent",
         "list_artifacts",
         "list_participants",
         "list_scheduled_tasks",
