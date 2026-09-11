@@ -293,6 +293,7 @@ export function createAgentPersonaLibrary(storage?: {
         version: original.version + 1,
         displayName: input.displayName,
         description: input.description,
+        instructions: input.instructions,
         authority:
           input.authorityPolicy === original.authority.defaultPolicy
             ? original.authority
@@ -346,10 +347,6 @@ export function createAgentPersonaLibrary(storage?: {
         displayName: input.displayName,
         description: input.description,
         instructions: input.instructions,
-        acceptedInput: "Ordinary prompts and supporting evidence",
-        artifacts: ["Response"],
-        inputArtifacts: [],
-        outputArtifact: "Response",
         authority: {
           defaultPolicy: input.authorityPolicy,
           allowedPolicies: [input.authorityPolicy],
@@ -441,6 +438,19 @@ export function createAgentPersonaLibrary(storage?: {
       yield* writeImports(imported.filter((definition) => definition.id !== id));
   }, importPermit.withPermit);
 
+  /** The stored definition of any listed agent, including removed sources, for edit, duplicate, and export. */
+  const read = Effect.fn("AgentPersonaLibrary.read")(function* (id: string) {
+    const current = yield* catalog();
+    const definition =
+      current.definitions.find((candidate) => candidate.id === id) ??
+      current.removedSources.find((candidate) => candidate.id === id);
+    if (definition === undefined)
+      return yield* new AgentPersonaLibraryError({
+        message: "Unknown agent in this environment. Refresh the library.",
+      });
+    return definition;
+  });
+
   const snapshot = Effect.fn("AgentPersonaLibrary.snapshot")(function* (
     definition: AgentPersonaDefinition,
   ) {
@@ -495,6 +505,7 @@ export function createAgentPersonaLibrary(storage?: {
     catalog,
     importFiles,
     createPersona,
+    read,
     editImported,
     setImportedEnabled,
     removeImported,

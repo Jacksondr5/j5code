@@ -3,6 +3,7 @@ import {
   agentPersonaIdError,
   agentPersonaIdFromName,
   defaultAgentPersonaModelRoute,
+  type AgentPersonaCreateDraft,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type {
@@ -36,6 +37,8 @@ Describe its identity, what it looks for, and how it works.`;
 /** Author a personal agent; it is stored as an imported definition of this environment. */
 export function AgentCreateDialog(props: {
   environmentId: EnvironmentId;
+  /** Prefill from an existing agent (Duplicate); the ID is treated as user-chosen. */
+  initial?: AgentPersonaCreateDraft;
   onClose: () => void;
   onCreated: (displayName: string) => void;
 }) {
@@ -49,15 +52,19 @@ export function AgentCreateDialog(props: {
     instructions: string;
     authorityPolicy: AgentPersonaAuthorityPolicy;
     modelRoute: readonly [AgentPersonaModelTarget, AgentPersonaModelTarget] | null;
-  }>({
-    displayName: "",
-    id: "",
-    idEdited: false,
-    description: "",
-    instructions: "",
-    authorityPolicy: "read-only",
-    modelRoute: null,
-  });
+  }>(
+    props.initial
+      ? { ...props.initial, idEdited: true }
+      : {
+          displayName: "",
+          id: "",
+          idEdited: false,
+          description: "",
+          instructions: "",
+          authorityPolicy: "read-only",
+          modelRoute: null,
+        },
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const modelRoute = draft.modelRoute ?? defaultRoute;
@@ -112,7 +119,7 @@ export function AgentCreateDialog(props: {
           }}
         >
           <DialogHeader>
-            <DialogTitle>Create agent</DialogTitle>
+            <DialogTitle>{props.initial ? "Duplicate agent" : "Create agent"}</DialogTitle>
             <DialogDescription>
               A personal agent for this environment. It joins the library like an import, so you can
               edit, switch off, or remove it later.

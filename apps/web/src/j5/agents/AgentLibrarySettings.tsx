@@ -2,8 +2,19 @@ import { toastManager } from "../../components/ui/toast";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { AgentImportConflictSelection } from "./AgentImportConflictSelection";
 import { AgentCreateDialog } from "./AgentCreateDialog";
+import {
+  agentPersonaDuplicateDraft,
+  type AgentPersonaCreateDraft,
+} from "@t3tools/client-runtime/j5/agent-personas";
 import { AgentEditorDialog } from "./AgentEditorDialog";
-import { ChevronDownIcon, PencilIcon, PlusIcon, Trash2Icon, Undo2Icon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  EllipsisVerticalIcon,
+  PencilIcon,
+  PlusIcon,
+  Trash2Icon,
+  Undo2Icon,
+} from "lucide-react";
 import {
   prepareAgentPersonaImport,
   importAgentPersonasWithConfirmation,
@@ -68,10 +79,10 @@ export function AgentLibrarySettings() {
   const folderInput = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<{ initial?: AgentPersonaCreateDraft } | null>(null);
   const [editing, setEditing] = useState<{
     environmentId: EnvironmentId;
-    initial: AgentPersonaEditInput;
+    initial: Omit<AgentPersonaEditInput, "instructions">;
   } | null>(null);
   const importAgents = useAtomCommand(agentPersonaEnvironment.importAgentPersonas, {
     reportFailure: false,
@@ -80,6 +91,9 @@ export function AgentLibrarySettings() {
     reportFailure: false,
   });
   const restoreAgent = useAtomCommand(agentPersonaEnvironment.restoreSourceAgentPersona, {
+    reportFailure: false,
+  });
+  const readAgent = useAtomCommand(agentPersonaEnvironment.readAgentPersona, {
     reportFailure: false,
   });
   async function importSelection(files: File[]) {
@@ -185,6 +199,53 @@ export function AgentLibrarySettings() {
       setBusy(false);
     }
   }
+  async function readDefinition(personaId: string) {
+    if (effectiveEnvironmentId === null) throw new Error("Select an environment first.");
+    const result = await readAgent({
+      environmentId: effectiveEnvironmentId,
+      input: { personaId },
+    });
+    if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+    return result.value;
+  }
+  async function duplicatePersona(personaId: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const { definition } = await readDefinition(personaId);
+      setCreating({ initial: agentPersonaDuplicateDraft(definition) });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Agent action failed",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function exportPersona(personaId: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const { fileName, yaml } = await readDefinition(personaId);
+      const url = URL.createObjectURL(new Blob([yaml], { type: "application/yaml" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = fileName;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      toastManager.add({ type: "success", title: `Exported ${fileName}` });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Agent action failed",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
   async function restorePersona(personaId: string) {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
@@ -279,7 +340,7 @@ export function AgentLibrarySettings() {
             <Button
               variant="outline"
               disabled={busy || effectiveEnvironmentId === null}
-              onClick={() => setCreating(true)}
+              onClick={() => setCreating({})}
             >
               <PlusIcon aria-hidden="true" className="size-4" />
               Create agent
@@ -338,47 +399,70 @@ export function AgentLibrarySettings() {
               }
               description={persona.description}
               control={
-                persona.removed ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    aria-label={`Restore ${persona.displayName}`}
-                    onClick={() => void restorePersona(persona.personaId)}
-                  >
-                    <Undo2Icon className="size-4" />
-                    Restore
-                  </Button>
-                ) : (
-                  <div className="flex flex-wrap items-center gap-2">
-                    {persona.imported ? (
-                      <Switch
-                        checked={persona.enabled}
-                        disabled={busy}
-                        aria-label={`Enable ${persona.displayName}`}
-                        onCheckedChange={(enabled) => void toggleAgent(persona.personaId, enabled)}
-                      />
-                    ) : null}
+                <div className="flex flex-wrap items-center gap-2">
+                  {persona.removed ? (
                     <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      disabled={busy || persona.edit === null}
-                      aria-label={`Edit ${persona.displayName}`}
-                      title={
-                        persona.edit
-                          ? `Edit ${persona.displayName}`
-                          : "Import a copy to edit this agent"
-                      }
-                      onClick={() => {
-                        if (persona.edit && effectiveEnvironmentId)
-                          setEditing({
-                            environmentId: effectiveEnvironmentId,
-                            initial: persona.edit,
-                          });
-                      }}
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      aria-label={`Restore ${persona.displayName}`}
+                      onClick={() => void restorePersona(persona.personaId)}
                     >
-                      <PencilIcon className="size-4" />
+                      <Undo2Icon className="size-4" />
+                      Restore
                     </Button>
+                  ) : (
+                    <>
+                      {persona.imported ? (
+                        <Switch
+                          checked={persona.enabled}
+                          disabled={busy}
+                          aria-label={`Enable ${persona.displayName}`}
+                          onCheckedChange={(enabled) =>
+                            void toggleAgent(persona.personaId, enabled)
+                          }
+                        />
+                      ) : null}
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        disabled={busy || persona.edit === null}
+                        aria-label={`Edit ${persona.displayName}`}
+                        title={
+                          persona.edit
+                            ? `Edit ${persona.displayName}`
+                            : "Duplicate this agent to edit a copy"
+                        }
+                        onClick={() => {
+                          if (persona.edit && effectiveEnvironmentId)
+                            setEditing({
+                              environmentId: effectiveEnvironmentId,
+                              initial: persona.edit,
+                            });
+                        }}
+                      >
+                        <PencilIcon className="size-4" />
+                      </Button>
+                    </>
+                  )}
+                  <Menu>
+                    <MenuTrigger
+                      disabled={busy}
+                      aria-label={`More actions for ${persona.displayName}`}
+                      render={<Button variant="ghost" size="icon-sm" />}
+                    >
+                      <EllipsisVerticalIcon className="size-4" />
+                    </MenuTrigger>
+                    <MenuPopup align="end">
+                      <MenuItem onClick={() => void duplicatePersona(persona.personaId)}>
+                        Duplicate as personal agent
+                      </MenuItem>
+                      <MenuItem onClick={() => void exportPersona(persona.personaId)}>
+                        Export YAML
+                      </MenuItem>
+                    </MenuPopup>
+                  </Menu>
+                  {persona.removed ? null : (
                     <Button
                       variant="destructive-outline"
                       size="icon-sm"
@@ -389,8 +473,8 @@ export function AgentLibrarySettings() {
                     >
                       <Trash2Icon className="size-4" />
                     </Button>
-                  </div>
-                )
+                  )}
+                </div>
               }
             />
           ))
@@ -399,9 +483,10 @@ export function AgentLibrarySettings() {
       {creating && effectiveEnvironmentId ? (
         <AgentCreateDialog
           environmentId={effectiveEnvironmentId}
-          onClose={() => setCreating(false)}
+          {...(creating.initial ? { initial: creating.initial } : {})}
+          onClose={() => setCreating(null)}
           onCreated={(displayName) => {
-            setCreating(false);
+            setCreating(null);
             toastManager.add({ type: "success", title: `Created ${displayName}` });
             catalog.refresh();
           }}

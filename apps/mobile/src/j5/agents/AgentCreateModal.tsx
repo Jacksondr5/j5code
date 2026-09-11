@@ -3,6 +3,7 @@ import {
   agentPersonaIdError,
   agentPersonaIdFromName,
   defaultAgentPersonaModelRoute,
+  type AgentPersonaCreateDraft,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type {
@@ -23,6 +24,8 @@ import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 /** Author a personal agent; it is stored as an imported definition of this environment. */
 export function AgentCreateModal(props: {
   environmentId: EnvironmentId;
+  /** Prefill from an existing agent (Duplicate); the ID is treated as user-chosen. */
+  initial?: AgentPersonaCreateDraft;
   onClose: () => void;
   onCreated: (displayName: string) => void;
 }) {
@@ -36,15 +39,19 @@ export function AgentCreateModal(props: {
     instructions: string;
     authorityPolicy: AgentPersonaAuthorityPolicy;
     modelRoute: readonly [AgentPersonaModelTarget, AgentPersonaModelTarget] | null;
-  }>({
-    displayName: "",
-    id: "",
-    idEdited: false,
-    description: "",
-    instructions: "",
-    authorityPolicy: "read-only",
-    modelRoute: null,
-  });
+  }>(
+    props.initial
+      ? { ...props.initial, idEdited: true }
+      : {
+          displayName: "",
+          id: "",
+          idEdited: false,
+          description: "",
+          instructions: "",
+          authorityPolicy: "read-only",
+          modelRoute: null,
+        },
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const modelRoute = draft.modelRoute ?? defaultRoute;
@@ -98,7 +105,9 @@ export function AgentCreateModal(props: {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <View className="flex-row items-center justify-between px-5 py-3">
-            <Text className="text-xl font-t3-semibold">Create agent</Text>
+            <Text className="text-xl font-t3-semibold">
+              {props.initial ? "Duplicate agent" : "Create agent"}
+            </Text>
             <Pressable
               accessibilityRole="button"
               disabled={saving}

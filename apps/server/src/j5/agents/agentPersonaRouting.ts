@@ -188,8 +188,12 @@ export function buildAgentPersonaCatalog(
         definitionVersion: definition.version,
         displayName: definition.displayName,
         description: definition.description,
-        acceptedInput: definition.acceptedInput,
-        outputArtifact: definition.outputArtifact,
+        ...(definition.acceptedInput === undefined
+          ? {}
+          : { acceptedInput: definition.acceptedInput }),
+        ...(definition.outputArtifact === undefined
+          ? {}
+          : { outputArtifact: definition.outputArtifact }),
         defaultAuthorityPolicy: definition.authority.defaultPolicy,
         allowedAuthorityPolicies: [...definition.authority.allowedPolicies],
         availability:

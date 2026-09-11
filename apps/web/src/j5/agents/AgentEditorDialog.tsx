@@ -1,6 +1,6 @@
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { AgentPersonaEditInput, EnvironmentId } from "@t3tools/contracts";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "../../components/ui/button";
 import {
@@ -20,18 +20,38 @@ import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 
 export function AgentEditorDialog(props: {
   environmentId: EnvironmentId;
-  initial: AgentPersonaEditInput;
+  initial: Omit<AgentPersonaEditInput, "instructions">;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [draft, setDraft] = useState(props.initial);
+  // Instructions are not in the catalog; load them once the dialog opens.
+  const [instructions, setInstructions] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const save = useAtomCommand(agentPersonaEnvironment.editImportedAgentPersona, {
     reportFailure: false,
   });
+  const read = useAtomCommand(agentPersonaEnvironment.readAgentPersona, {
+    reportFailure: false,
+  });
+  useEffect(() => {
+    let cancelled = false;
+    void read({ environmentId: props.environmentId, input: { personaId: props.initial.personaId } })
+      .then((result) => {
+        if (cancelled) return;
+        if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+        setInstructions(result.value.definition.instructions);
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.environmentId, props.initial.personaId, read]);
   async function submit() {
-    if (saving) return;
+    if (saving || instructions === null) return;
     setSaving(true);
     setError(null);
     try {
@@ -41,6 +61,7 @@ export function AgentEditorDialog(props: {
           ...draft,
           displayName: draft.displayName.trim(),
           description: draft.description.trim(),
+          instructions,
         },
       });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
@@ -92,6 +113,21 @@ export function AgentEditorDialog(props: {
                 onChange={(event) => setDraft({ ...draft, description: event.target.value })}
               />
             </label>
+            <label className="grid gap-1.5 text-sm">
+              Instructions
+              <Textarea
+                value={instructions ?? ""}
+                required
+                disabled={saving || instructions === null}
+                placeholder={instructions === null ? "Loading…" : undefined}
+                className="min-h-40 font-mono text-xs"
+                onChange={(event) => setInstructions(event.target.value)}
+              />
+              <span className="text-xs text-muted-foreground">
+                Markdown. Instructions describe behavior; the runtime policy below is what is
+                enforced.
+              </span>
+            </label>
             <AgentRoutePolicyFields
               environmentId={props.environmentId}
               value={draft}
@@ -111,7 +147,13 @@ export function AgentEditorDialog(props: {
             </Button>
             <Button
               type="submit"
-              disabled={saving || !draft.displayName.trim() || !draft.description.trim()}
+              disabled={
+                saving ||
+                instructions === null ||
+                !instructions.trim() ||
+                !draft.displayName.trim() ||
+                !draft.description.trim()
+              }
             >
               {saving ? "Saving…" : "Save changes"}
             </Button>

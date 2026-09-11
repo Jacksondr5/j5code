@@ -1,6 +1,10 @@
 import { AgentLibraryToast, type AgentLibraryNotification } from "./AgentLibraryToast";
 import { AgentImportConflictModal } from "./AgentImportConflictModal";
 import { AgentCreateModal } from "./AgentCreateModal";
+import {
+  agentPersonaDuplicateDraft,
+  type AgentPersonaCreateDraft,
+} from "@t3tools/client-runtime/j5/agent-personas";
 import { AgentEditorModal } from "./AgentEditorModal";
 import { ControlPillMenu } from "../../components/ControlPill";
 import { SymbolView } from "../../components/AppSymbol";
@@ -15,7 +19,7 @@ import type {
   EnvironmentId,
 } from "@t3tools/contracts";
 import { useNavigation } from "@react-navigation/native";
-import { Platform, Pressable, ScrollView, Switch, View } from "react-native";
+import { Platform, Pressable, ScrollView, Share, Switch, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCallback, useEffect, useState } from "react";
 
@@ -57,10 +61,10 @@ export function AgentLibrarySettingsScreen() {
   useEffect(() => () => confirmation?.resolve(null), [confirmation]);
   const [editing, setEditing] = useState<{
     environmentId: EnvironmentId;
-    initial: AgentPersonaEditInput;
+    initial: Omit<AgentPersonaEditInput, "instructions">;
   } | null>(null);
   const [notification, setNotification] = useState<AgentLibraryNotification | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<{ initial?: AgentPersonaCreateDraft } | null>(null);
   const dismissNotification = useCallback(() => setNotification(null), []);
   const importAgents = useAtomCommand(agentPersonaEnvironment.importAgentPersonas, {
     reportFailure: false,
@@ -69,6 +73,9 @@ export function AgentLibrarySettingsScreen() {
     reportFailure: false,
   });
   const restoreAgent = useAtomCommand(agentPersonaEnvironment.restoreSourceAgentPersona, {
+    reportFailure: false,
+  });
+  const readAgent = useAtomCommand(agentPersonaEnvironment.readAgentPersona, {
     reportFailure: false,
   });
   async function importSelection(kind: "folder" | "agent") {
@@ -139,6 +146,58 @@ export function AgentLibrarySettingsScreen() {
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       setNotification({ type: "success", title: "Agent removed" });
       catalog.refresh();
+    } catch (error) {
+      setNotification({
+        type: "error",
+        title: "Agent action failed",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function readDefinition(personaId: string) {
+    if (effectiveEnvironmentId === null) throw new Error("Select an environment first.");
+    const result = await readAgent({
+      environmentId: effectiveEnvironmentId,
+      input: { personaId },
+    });
+    if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+    return result.value;
+  }
+  async function duplicatePersona(personaId: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const { definition } = await readDefinition(personaId);
+      setCreating({ initial: agentPersonaDuplicateDraft(definition) });
+    } catch (error) {
+      setNotification({
+        type: "error",
+        title: "Agent action failed",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+  /** Native platforms share a real .yaml file; the web build falls back to sharing the text. */
+  async function exportPersona(personaId: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const { fileName, yaml } = await readDefinition(personaId);
+      if (Platform.OS === "web") {
+        await Share.share({ title: fileName, message: yaml });
+      } else {
+        const [FileSystem, Sharing] = await Promise.all([
+          import("expo-file-system/legacy"),
+          import("expo-sharing"),
+        ]);
+        const uri = `${FileSystem.cacheDirectory ?? ""}${fileName}`;
+        await FileSystem.writeAsStringAsync(uri, yaml);
+        await Sharing.shareAsync(uri, { mimeType: "application/yaml", dialogTitle: fileName });
+      }
     } catch (error) {
       setNotification({
         type: "error",
@@ -245,7 +304,7 @@ export function AgentLibrarySettingsScreen() {
               accessibilityState={{ disabled: busy || effectiveEnvironmentId === null }}
               disabled={busy || effectiveEnvironmentId === null}
               className="flex-row items-center gap-2 rounded-lg border border-border px-4 py-3 disabled:opacity-40"
-              onPress={() => setCreating(true)}
+              onPress={() => setCreating({})}
             >
               <SymbolView
                 name="plus"
@@ -333,61 +392,96 @@ export function AgentLibrarySettingsScreen() {
                           </Text>
                         </View>
                       </View>
-                      {persona.removed ? (
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={`Restore ${persona.displayName}`}
-                          accessibilityState={{ disabled: busy }}
-                          disabled={busy}
-                          className="h-11 flex-row items-center gap-2 rounded-lg border border-border px-3 disabled:opacity-40"
-                          onPress={() => void restorePersona(persona.personaId)}
-                        >
-                          <SymbolView
-                            name="arrow.uturn.backward"
-                            size={16}
-                            tintColorClassName="accent-icon"
-                            type="monochrome"
-                          />
-                          <Text className="text-sm text-foreground">Restore</Text>
-                        </Pressable>
-                      ) : (
-                        <View className="flex-row items-center gap-2">
-                          {persona.imported ? (
-                            <Switch
-                              value={persona.enabled}
-                              disabled={busy}
-                              accessibilityLabel={`Enable ${persona.displayName}`}
-                              onValueChange={(enabled) =>
-                                void toggleAgent(persona.personaId, enabled)
-                              }
-                            />
-                          ) : null}
+                      <View className="flex-row items-center gap-2">
+                        {persona.removed ? (
                           <Pressable
                             accessibilityRole="button"
-                            accessibilityLabel={`Edit ${persona.displayName}`}
-                            accessibilityHint={
-                              persona.edit
-                                ? "Edit this imported copy"
-                                : "Import a copy to edit this agent"
-                            }
-                            accessibilityState={{ disabled: busy || persona.edit === null }}
-                            disabled={busy || persona.edit === null}
-                            className="size-11 items-center justify-center rounded-lg disabled:opacity-40"
-                            onPress={() => {
-                              if (persona.edit && effectiveEnvironmentId)
-                                setEditing({
-                                  environmentId: effectiveEnvironmentId,
-                                  initial: persona.edit,
-                                });
-                            }}
+                            accessibilityLabel={`Restore ${persona.displayName}`}
+                            accessibilityState={{ disabled: busy }}
+                            disabled={busy}
+                            className="h-11 flex-row items-center gap-2 rounded-lg border border-border px-3 disabled:opacity-40"
+                            onPress={() => void restorePersona(persona.personaId)}
                           >
                             <SymbolView
-                              name="pencil"
+                              name="arrow.uturn.backward"
+                              size={16}
+                              tintColorClassName="accent-icon"
+                              type="monochrome"
+                            />
+                            <Text className="text-sm text-foreground">Restore</Text>
+                          </Pressable>
+                        ) : (
+                          <>
+                            {persona.imported ? (
+                              <Switch
+                                value={persona.enabled}
+                                disabled={busy}
+                                accessibilityLabel={`Enable ${persona.displayName}`}
+                                onValueChange={(enabled) =>
+                                  void toggleAgent(persona.personaId, enabled)
+                                }
+                              />
+                            ) : null}
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel={`Edit ${persona.displayName}`}
+                              accessibilityHint={
+                                persona.edit
+                                  ? "Edit this imported copy"
+                                  : "Duplicate this agent to edit a copy"
+                              }
+                              accessibilityState={{ disabled: busy || persona.edit === null }}
+                              disabled={busy || persona.edit === null}
+                              className="size-11 items-center justify-center rounded-lg disabled:opacity-40"
+                              onPress={() => {
+                                if (persona.edit && effectiveEnvironmentId)
+                                  setEditing({
+                                    environmentId: effectiveEnvironmentId,
+                                    initial: persona.edit,
+                                  });
+                              }}
+                            >
+                              <SymbolView
+                                name="pencil"
+                                size={18}
+                                tintColorClassName="accent-icon"
+                                type="monochrome"
+                              />
+                            </Pressable>
+                          </>
+                        )}
+                        <ControlPillMenu
+                          actions={[
+                            {
+                              id: "duplicate",
+                              title: "Duplicate as personal agent",
+                              attributes: { disabled: busy },
+                            },
+                            { id: "export", title: "Export YAML", attributes: { disabled: busy } },
+                          ]}
+                          onPressAction={({ nativeEvent }) => {
+                            if (nativeEvent.event === "duplicate")
+                              void duplicatePersona(persona.personaId);
+                            else if (nativeEvent.event === "export")
+                              void exportPersona(persona.personaId);
+                          }}
+                        >
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`More actions for ${persona.displayName}`}
+                            accessibilityState={{ disabled: busy }}
+                            disabled={busy}
+                            className="size-11 items-center justify-center rounded-lg disabled:opacity-40"
+                          >
+                            <SymbolView
+                              name="ellipsis"
                               size={18}
                               tintColorClassName="accent-icon"
                               type="monochrome"
                             />
                           </Pressable>
+                        </ControlPillMenu>
+                        {persona.removed ? null : (
                           <Pressable
                             accessibilityRole="button"
                             accessibilityLabel={`Remove ${persona.displayName}`}
@@ -403,8 +497,8 @@ export function AgentLibrarySettingsScreen() {
                               type="monochrome"
                             />
                           </Pressable>
-                        </View>
-                      )}
+                        )}
+                      </View>
                     </View>
                     <Text className="text-sm text-foreground-muted">{persona.description}</Text>
                   </View>
@@ -420,9 +514,10 @@ export function AgentLibrarySettingsScreen() {
       {creating && effectiveEnvironmentId ? (
         <AgentCreateModal
           environmentId={effectiveEnvironmentId}
-          onClose={() => setCreating(false)}
+          {...(creating.initial ? { initial: creating.initial } : {})}
+          onClose={() => setCreating(null)}
           onCreated={(displayName) => {
-            setCreating(false);
+            setCreating(null);
             setNotification({ type: "success", title: `Created ${displayName}` });
             catalog.refresh();
           }}
