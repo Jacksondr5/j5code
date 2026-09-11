@@ -12,7 +12,7 @@ conversation first, then HTML mockup options rendered in the design
 workspace (`product/fleet-sidebar/mockups/`), styled against **real app
 references** (screenshots captured from a live instance +
 `apps/web/src/index.css` tokens). Mockups are decision aids, not pixel
-specs. Feature doc of record: [`../product/features/sidebar-and-roster.md`](../product/features/sidebar-and-roster.md).
+specs. Feature doc of record: [`../product/features/fleet-page.md`](../product/features/fleet-page.md).
 
 Research inputs (in the workspace record): a code sweep of upstream's
 default sidebar (flat list; static creation order — activity never

@@ -40,7 +40,7 @@ What this never does: no replicated state, no multi-master, no Squadron migratio
 ## Scenarios
 
 - **Two servers, one inbox.** The user's client connects to the work server and the home server. An ask from an agent in Billing Migration (work) and one from Support Rotation (home) appear in one inbox, each tagged with its environment; answering each reaches the right server. (AC2, AC3)
-- **A server goes dark.** The home server is asleep; its rows stay on the Fleet page with "last seen 40m ago" and never vanish. (AC4)
+- **A server goes dark.** The home server is asleep; its rows stay on the Fleet page with "as of 40m ago" and never vanish. (AC4)
 - **A Mac-only job.** An agent that must run on a Mac gets its own Squadron homed on the Mac server; it is asked for results by a Squadron elsewhere through a cross-server Exchange, once peering exists. (AC1, AC6)
 
 ## History

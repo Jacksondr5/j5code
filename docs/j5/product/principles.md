@@ -109,7 +109,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** what the human must do to learn the fleet's state.
 
-**Cases:** the Fleet page and the PR pane exist so "how's it going" is a read ([sidebar and roster](./features/sidebar-and-roster.md), [PR pane](./features/pr-pane.md)); cost rolls up per Squadron on a surface, nothing between ([sidebar and roster](./features/sidebar-and-roster.md)); chattiness is a measured metric, not a vibe.
+**Cases:** the Fleet page and the PR pane exist so "how's it going" is a read ([Fleet page](./features/fleet-page.md), [PR pane](./features/pr-pane.md)); cost rolls up per Squadron on a surface, nothing between ([Fleet page](./features/fleet-page.md)); chattiness is a measured metric, not a vibe.
 
 ## Never guess — a plausible fake is worse than a visible gap
 

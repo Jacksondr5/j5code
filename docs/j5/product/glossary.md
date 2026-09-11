@@ -59,7 +59,7 @@ These entries are the distinctions the whole team must share; the glossary owns 
 | envelope                     | The platform's wrapper around a delivered message that tells the receiving agent who sent it and what it owes                                                 | [a2a/index.md](a2a/index.md)                                                     |
 | communication ledger, ledger | The per-Squadron append-only record of every message, delivery, Exchange and notice — the source of truth for all A2A state                                   | [a2a/index.md](a2a/index.md)                                                     |
 | delivery receipt             | The recorded fact that a message reached its receiver's thread                                                                                                | [a2a/index.md](a2a/index.md)                                                     |
-| delivery alarm               | The recorded fact that a delivery failed                                                                                                                      | [features/sidebar-and-roster.md](features/sidebar-and-roster.md)                 |
+| delivery alarm               | The recorded fact that a delivery failed                                                                                                                      | [a2a/index.md](a2a/index.md)                                                     |
 | silence notice               | A platform-authored fact appended when an agent's turn ends without a reply it owed                                                                           | [a2a/index.md](a2a/index.md)                                                     |
 | queue, steer                 | The two ways a message reaches an agent mid-turn: queued behind the active turn, or steered into it. Agent deliveries queue; only a person steers, explicitly | [a2a/index.md](a2a/index.md)                                                     |
 | human node                   | A person as a participant in the communication graph, keyed by person id                                                                                      | [features/inbox.md](features/inbox.md)                                           |
@@ -70,12 +70,12 @@ These entries are the distinctions the whole team must share; the glossary owns 
 | -------------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | person id                  | The durable local identity of one person; nothing may assume there is exactly one person  | [features/shared-squadrons.md](features/shared-squadrons.md)         |
 | inbox                      | The person's queue of open asks addressed to them                                         | [features/inbox.md](features/inbox.md)                               |
-| **Fleet page**             | The page that shows every agent in a Squadron with its measured status                    | [features/sidebar-and-roster.md](features/sidebar-and-roster.md)     |
-| Squadron scope             | The sidebar's selection of one Squadron, or all                                           | [features/sidebar-and-roster.md](features/sidebar-and-roster.md)     |
+| **Fleet page**             | The page that shows every agent in a Squadron with its measured status                    | [features/fleet-page.md](features/fleet-page.md)                     |
+| Squadron scope             | The sidebar's selection of one Squadron, or all                                           | [features/fleet-page.md](features/fleet-page.md)                     |
 | **Memo**                   | A small self-addressed note an agent keeps through the platform, visible to the person    | [features/memos.md](features/memos.md)                               |
 | backlog pane               | The person's view of all agents' Memos                                                    | [features/memos.md](features/memos.md)                               |
 | "Expects reply", "Replied" | The two words reader-facing cards use for an open and a closed Exchange, on every surface | [features/thread-a2a-rendering.md](features/thread-a2a-rendering.md) |
-| observability dashboard    | Retired name: what it described is the Fleet page                                         | [features/sidebar-and-roster.md](features/sidebar-and-roster.md)     |
+| observability dashboard    | Retired name: what it described is the Fleet page                                         | [features/fleet-page.md](features/fleet-page.md)                     |
 
 ## Lifecycle
 
@@ -83,7 +83,7 @@ These entries are the distinctions the whole team must share; the glossary owns 
 | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | archive | Retiring an agent for good; its record stays readable, its open Exchanges end loudly                                                      | [features/archive-flow.md](features/archive-flow.md)                                                                                   |
 | retired | The state of an archived participant                                                                                                      | [features/archive-flow.md](features/archive-flow.md)                                                                                   |
-| orphan  | A working agent whose placement parent has been archived                                                                                  | [features/sidebar-and-roster.md](features/sidebar-and-roster.md)                                                                       |
+| orphan  | A working agent whose placement parent has been archived                                                                                  | [features/fleet-page.md](features/fleet-page.md)                                                                                       |
 | settled | Upstream's thread-triage state ("I'm done looking at this") and nothing else. J5 docs no longer use "settled" to mean a decision was made | upstream mechanics; see [worklog](../worklog/2026-08-29-upstream-settled-vs-archived-research.md) for the confusion this line resolves |
 
 ## Retired names
@@ -94,7 +94,3 @@ These entries are the distinctions the whole team must share; the glossary owns 
 | team                             | Not a concept. Crew is the group that works as a unit; there is no other grouping                                           |
 | thread (as the reply obligation) | Exchange. "Thread" means only upstream's conversation                                                                       |
 | delegate_task                    | Not on the J5 agent surface; a Peer Agent spawn carries its task in the brief, and an Exchange carries any later obligation |
-
-## Terms still waiting for an owner
-
-Fleet page, Squadron scope, orphan and delivery alarm are glossed above with a provisional owner; they move into the Fleet page definition when its contract lands.
