@@ -36,5 +36,5 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 
 ## History
 
-- 2026-08-22 — the concept; former R27 ([record](../design-review-2026-08-21.md)).
+- 2026-08-22 — the concept; former R27 ([record](../../worklog/2026-08-21-design-review.md)).
 - 2026-09-08 — rewritten into the definition shape. Former identifiers: R27(a) → AC3–AC4; R27(b) → Definition (linear first); R27(c), skills per step → not part of the definition, parked. The questions for the Playbooks design session — the step schema, how a Playbook attaches at spawn, the delivery channel for step advancement, the initiative-level view, what "declared complete" means for a multi-agent step — are that session's, not this definition's.

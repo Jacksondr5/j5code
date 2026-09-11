@@ -29,4 +29,4 @@ Deferrable-with-owner: open-Exchanges-vs-settle (A9 surfaces it); member-Peer-sp
 
 ## Standing coordination flags
 
-A4/A6 both claim migration id 006 (relayed to Director); the dogfood-v0.md overrides file governs all v0 scope questions — anything cut during build goes THERE, never inline in feature docs.
+A4/A6 both claim migration id 006 (relayed to Director); the ../plans/dogfood-v0.md overrides file governs all v0 scope questions — anything cut during build goes THERE, never inline in feature docs.

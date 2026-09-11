@@ -5,7 +5,7 @@ kind: spec
 
 # Problems & goals
 
-Captured verbatim-in-spirit from Jackson during the foundations round of the design review (2026-08-22; rulings R24–R35 in `design-review-2026-08-21.md`). Companion to `fleet-vision.md`: that document says _how Jackson operates_; this one says _what hurts and what he wants beyond fixing it_. Every design should trace back to one of the two. Principles referenced live in `principles.md`.
+Captured verbatim-in-spirit from Jackson during the foundations round of the design review (2026-08-22; rulings R24–R35 in `../worklog/2026-08-21-design-review.md`). Companion to `fleet-vision.md`: that document says _how Jackson operates_; this one says _what hurts and what he wants beyond fixing it_. Every design should trace back to one of the two. Principles referenced live in `principles.md`.
 
 ## Problems
 

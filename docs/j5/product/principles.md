@@ -59,7 +59,7 @@ J5 Code has multiple use cases, defined in [use-cases.md](use-cases.md). These a
 
 The principles in this document are what guide us when designing, architecting, and building J5 Code. They frame our thinking when we come up with features. Most importantly, they help us decide what to build and what NOT to build.
 
-Each principle states its rule, what it stands on (beliefs and lenses above), its jurisdiction — the kind of question it decides — and the cases it has already decided. R-numbers point into the [design-review register](./design-review-2026-08-21.md). A principle you cannot cite to kill or reshape a proposal is not pulling its weight.
+Each principle states its rule, what it stands on (beliefs and lenses above), its jurisdiction — the kind of question it decides — and the cases it has already decided. Each case names the definition where its outcome now lives; the case is a pointer, never a second statement of the rule. A principle you cannot cite to kill or reshape a proposal is not pulling its weight.
 
 ## The hierarchy carries decisions, never messages
 
@@ -69,7 +69,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** communication topology and command structure — who may talk to whom, who spawns and briefs whom.
 
-**Cases:** any-to-any messaging is a platform invariant and Captains are never routers (R22); "you command what you brief" — placement = spawner, and spawning-and-briefing a Crew for someone else is proxy management (R21); lateral-coordination norms are Role content, never permission checks.
+**Cases:** any-to-any messaging is a platform invariant and Captains are never routers ([agent-to-agent communication](./a2a/index.md), [Crews](./features/crews.md)); "you command what you brief" — placement equals the spawner, and spawning-and-briefing a Crew for someone else is proxy management ([Squadron](./features/squadron.md), [Crews](./features/crews.md)); lateral-coordination norms are Role content, never permission checks ([Roles](./features/roles.md)).
 
 ## Prompting problems are not platform problems
 
@@ -79,7 +79,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** where a solution lives. When a design wants the platform to enforce a behavior, this is the objection to answer first.
 
-**Cases:** reply completeness is judged by the sender, taught by envelope text, never checked by code (R3); communication-routing norms and human-contact posture live in Role definitions (R23); group cohesion, verbosity, and register are content, not tooling.
+**Cases:** reply completeness is judged by the sender, taught by envelope text, never checked by code ([agent-to-agent communication](./a2a/index.md)); communication-routing norms and human-contact posture live in Role definitions ([Roles](./features/roles.md)); group cohesion, verbosity, and register are content, not tooling.
 
 ## Build tools that make agents better, never systems that make them perfect
 
@@ -89,7 +89,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** a tool's ambition — what any feature is allowed to promise.
 
-**Cases:** Memos are a tool plus visibility (badges, archive warnings, the backlog pane), not forced context injection (R31); Exchange semantics are envelope-taught, not schema-coerced; recovery is cheap by design — respawn a Crew from its definition (R14), reopen an Exchange with `regarding` (R10), nudge from a pane.
+**Cases:** Memos are a tool plus visibility (badges, archive warnings, the backlog pane), not forced context injection ([Memos](./features/memos.md)); Exchange semantics are envelope-taught, not schema-coerced ([agent-to-agent communication](./a2a/index.md)); recovery is cheap by design — respawn a Crew from its definition ([Crews](./features/crews.md)), open a new Exchange about an earlier one ([agent-to-agent communication](./a2a/index.md)), nudge from a pane.
 
 ## The platform delivers facts, never judgment
 
@@ -99,7 +99,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** what the platform may output or automate. Anything phrased as "the platform detects…" gets tested here: is that a measurement or a verdict?
 
-**Cases:** silence notices inform and never auto-close Exchanges; notices carry fact bundles while labels are projection policy (R4); Playbook advancement is agent-declared, never platform-judged (R27); "Crew done" vs "Crew waiting" is structurally the Captain's or human's call, not a gap to engineer away.
+**Cases:** silence notices inform and never auto-close Exchanges, and they carry measured facts while labels are read-time policy ([agent-to-agent communication](./a2a/index.md)); Playbook advancement is agent-declared, never platform-judged ([Playbooks](./features/playbooks.md)); "Crew done" versus "Crew waiting" is structurally the Captain's or the person's call, not a gap to engineer away ([Crews](./features/crews.md)).
 
 ## Status is read, never asked
 
@@ -109,7 +109,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** what the human must do to learn the fleet's state.
 
-**Cases:** the observability dashboard and PR pane exist so "how's it going" is a read; cost rolls up per Squadron on a surface (R7); chattiness is a measured metric, not a vibe (R23).
+**Cases:** the Fleet page and the PR pane exist so "how's it going" is a read ([sidebar and roster](./features/sidebar-and-roster.md), [PR pane](./features/pr-pane.md)); cost rolls up per Squadron on a surface, nothing between ([sidebar and roster](./features/sidebar-and-roster.md)); chattiness is a measured metric, not a vibe.
 
 ## Never guess — a plausible fake is worse than a visible gap
 
@@ -119,7 +119,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** how unknowns, staleness, and degraded measurement render, on every surface.
 
-**Cases:** `mergeable: UNKNOWN` renders as "?", never as mergeable; a broken poller goes quiet with a staleness clock, never loud-wrong; PR↔agent association is conservative — ambiguity shows unassociated rather than guessed (PR pane v1).
+**Cases:** an unknown mergeability renders as "?", never as mergeable; a broken poller goes quiet with a staleness clock, never loud-wrong; PR-to-agent association is conservative — ambiguity shows unassociated rather than guessed ([PR pane](./features/pr-pane.md)).
 
 ## State changes are loud; nothing vanishes silently
 
@@ -129,7 +129,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** lifecycle transitions, terminations, and failures.
 
-**Cases:** archiving a participant or Squadron terminates its obligations with notices to every waiter (R1, R2); an undelivered message is a visible alarm, never a silent loss (A2A M2); membership changes are lifecycle events; archiving an agent with open Memos warns first (R31).
+**Cases:** archiving a participant ends its obligations with notices to every waiter ([archive flow](./features/archive-flow.md)); an undelivered message is a visible alarm, never a silent loss ([agent-to-agent communication](./a2a/index.md)); membership changes are lifecycle events ([Squadron](./features/squadron.md)); archiving an agent with open Memos warns first ([Memos](./features/memos.md)).
 
 ## Simple tools at the frontier
 
@@ -139,7 +139,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** how much to build.
 
-**Cases:** `regarding` shipped because it is one nullable field (R10); Memos are a shaped store, not a generic agent DB (R34); Playbooks ship linear before any DAG (R27); Crews archive as units instead of growing seat-replacement machinery (R14); agent cron/DB primitives wait for a named trigger (R30).
+**Cases:** a follow-up references an earlier Exchange with one field rather than a linking system ([agent-to-agent communication](./a2a/index.md)); Memos are a shaped store, not a generic agent database ([Memos](./features/memos.md)); Playbooks ship linear before any DAG ([Playbooks](./features/playbooks.md)); Crews archive as units instead of growing seat-replacement machinery ([Crews](./features/crews.md)); agent cron and database primitives wait for a named trigger ([Memos](./features/memos.md)).
 
 ## Scoped principles
 

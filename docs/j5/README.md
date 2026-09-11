@@ -30,7 +30,7 @@ matches the workspace's folder structure — content, not paths, is what mirrors
 6. `research/jackson-prior-art/fleet-interviews-synthesis.md` — field lessons
    from a real production agent fleet, and the platform/non-platform boundary
    that governs scope decisions.
-7. `product/decision-log.md` — every settled product decision, one row each.
+7. `worklog/2026-08-14-decision-log.md` — every settled product decision, one row each.
 8. `product/a2a/` — the A2A (agent-to-agent communication) design: decision
    register, grounding model, and `plan.md` with the milestone plan.
 9. `product/features/` — the feature definitions of record: Squadrons, Crews,
@@ -38,7 +38,7 @@ matches the workspace's folder structure — content, not paths, is what mirrors
 
 ## Contents
 
-- `backlog.md` — the prioritized roadmap.
+- `worklog/2026-08-14-backlog.md` — the prioritized roadmap.
 - `product/features/` — feature definitions of record: `squadron.md`,
   `crews.md`, `roles.md`, `playbooks.md`, `memos.md`, `shared-squadrons.md`,
   `pr-pane.md`.

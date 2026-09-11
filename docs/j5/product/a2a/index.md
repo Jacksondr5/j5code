@@ -148,7 +148,7 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 
 - 2026-08-14 — the communication graph drafted; former open questions 1–4 ([record](../../worklog/2026-08-14-communication-graph-draft.md)).
 - 2026-08-16 — design settled; former D1–D10, this file's earlier form.
-- 2026-08-21 — design review: former R3 (closure is mechanical, completeness is the sender's judgment), R4 (notices are measured facts; labels are read-time policy), R10 (a follow-up may name an earlier Exchange), R22 (Captains are never routers), R25 (time facts in envelopes) ([record](../design-review-2026-08-21.md)).
+- 2026-08-21 — design review: former R3 (closure is mechanical, completeness is the sender's judgment), R4 (notices are measured facts; labels are read-time policy), R10 (a follow-up may name an earlier Exchange), R22 (Captains are never routers), R25 (time facts in envelopes) ([record](../../worklog/2026-08-21-design-review.md)).
 - 2026-08-24 — Subagent and Peer Agent distinguished; `delegate_task` excluded, so former D1's delegation edges no longer exist ([record](../../worklog/spawn-terminology-session-2026-08-24.md)).
 - 2026-08-31 — self-send refused; identity facts stated by the platform ([record](../../worklog/picker-and-self-messaging-rulings-2026-08-31.md)).
 - 2026-09-02 — a person receives only asks and replies ([record](../../worklog/human-addressed-sends-ruling-2026-09-02.md)).

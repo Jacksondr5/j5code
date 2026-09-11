@@ -6,7 +6,7 @@ status: 0
 
 # SQ1 — Squadron creation surface
 
-**Governing artifacts:** `../../product/features/squadron.md` §Creation UX (SC1–SC4, definition-of-record, as amended by SB3), **`../../product/dogfood-v0.md` (DV1–DV3 — the single home for v0 overrides; it WINS over feature docs for this build)**, session trail `../squadron-creation-session-2026-08-24.md`, `../dogfood-v0.md` §Phase-3 prerequisite. Mockups in the design workspace (`product/squadron-creation-mockups/`) are decision aids, not pixel specs. Backend receiving contract: the Registrar (PR #10) — creation-time attachment of a thread to an explicit **existing** Squadron, once, immutably.
+**Governing artifacts:** `../../product/features/squadron.md` §Creation UX (SC1–SC4, definition-of-record, as amended by SB3), **`../../plans/dogfood-v0.md` (DV1–DV3 — the single home for v0 overrides; it WINS over feature docs for this build)**, session trail `../squadron-creation-session-2026-08-24.md`, `../../plans/dogfood-v0.md` §Phase-3 prerequisite. Mockups in the design workspace (`product/squadron-creation-mockups/`) are decision aids, not pixel specs. Backend receiving contract: the Registrar (PR #10) — creation-time attachment of a thread to an explicit **existing** Squadron, once, immutably.
 
 ## Goal
 

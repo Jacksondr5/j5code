@@ -6,7 +6,7 @@ status: 0
 
 # A8 — Envelope true-up
 
-**Governing artifacts:** design-review register R3, R10, R25 (../../product/design-review-2026-08-21.md); A2's envelope formatter (one formatter, per-channel renderings, versioned config Jackson owns). Staff against current `j5/main` head.
+**Governing artifacts:** design-review register R3, R10, R25 (../2026-08-21-design-review.md); A2's envelope formatter (one formatter, per-channel renderings, versioned config Jackson owns). Staff against current `j5/main` head.
 
 ## Goal
 

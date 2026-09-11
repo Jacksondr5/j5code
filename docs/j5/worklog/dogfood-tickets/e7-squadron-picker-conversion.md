@@ -6,7 +6,7 @@ status: 1
 
 # E7 — Squadron picker conversion
 
-**Governing artifacts:** `../../product/features/squadron.md` §E7 (definitional law, ruled 2026-08-31), `../picker-and-self-messaging-rulings-2026-08-31.md`, DV1/DV3 (`../../product/dogfood-v0.md`). Origin: Jackson's #20 acceptance pass — the new-thread flow still presented the upstream PROJECT picker before the prompt.
+**Governing artifacts:** `../../product/features/squadron.md` §E7 (definitional law, ruled 2026-08-31), `../picker-and-self-messaging-rulings-2026-08-31.md`, DV1/DV3 (`../../plans/dogfood-v0.md`). Origin: Jackson's #20 acceptance pass — the new-thread flow still presented the upstream PROJECT picker before the prompt.
 
 ## Goal
 
