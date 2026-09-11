@@ -1,3 +1,4 @@
+import { AgentPersonaAssignmentControls } from "../../j5/agents/AgentPersonaAssignmentControls";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { useAtomValue } from "@effect/atom-react";
 import type {
@@ -484,6 +485,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         option.selection.instanceId === currentModelSelection.instanceId &&
         option.selection.model === currentModelSelection.model,
     ) ?? null;
+  const agentPersonaAssignment = props.selectedThread.agentPersonaAssignment;
   const providerOptionDescriptors = useMemo(
     () =>
       resolveProviderOptionDescriptors({
@@ -791,16 +793,23 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                       onPickFiles={props.onPickDraftFiles}
                     />
                     <View className="min-w-0 shrink" style={{ maxWidth: 152 }}>
-                      <ComposerInlineControl
-                        accessibilityLabel="Model and reasoning settings"
-                        emphasized
-                        iconNode={
-                          <ProviderIcon provider={currentModelOption?.providerDriver} size={16} />
-                        }
-                        label={currentModelOption?.label ?? currentModelSelection.model}
-                        maxWidth={152}
-                        onPress={openSettings}
-                      />
+                      {agentPersonaAssignment ? (
+                        <AgentPersonaAssignmentControls
+                          assignment={agentPersonaAssignment}
+                          environmentId={props.environmentId}
+                        />
+                      ) : (
+                        <ComposerInlineControl
+                          accessibilityLabel="Model and reasoning settings"
+                          emphasized
+                          iconNode={
+                            <ProviderIcon provider={currentModelOption?.providerDriver} size={16} />
+                          }
+                          label={currentModelOption?.label ?? currentModelSelection.model}
+                          maxWidth={152}
+                          onPress={openSettings}
+                        />
+                      )}
                     </View>
                   </View>
                 )}

@@ -12,6 +12,17 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   prepareAgentPersonaImport,
   importAgentPersonasWithConfirmation,
+  agentPersonaDrift,
+  agentPersonaFolderNudges,
+  agentPersonaFolderStatusLabel,
+  agentPersonaOriginLabel,
+  agentPersonaUsageById,
+  formatAgentPersonaDuration,
+  presentAgentPersonaUsage,
+  agentPersonaDuplicateDraft,
+  agentPersonaIdError,
+  agentPersonaIdFromName,
+  defaultAgentPersonaModelRoute,
   agentPersonaModelChoices,
   presentAgentPersonaAssignment,
   presentAgentPersonaCatalog,
@@ -259,8 +270,11 @@ it("uses the selected environment's advertised models and reasoning options with
               label: "Reasoning",
               type: "select",
               options: [
-                { id: "medium", label: "Medium" },
+                { id: "xhigh", label: "Extra high" },
                 { id: "high", label: "High" },
+                { id: "medium", label: "Medium" },
+                { id: "minimal", label: "Minimal" },
+                { id: "max", label: "Max" },
               ],
             },
           ],
@@ -270,13 +284,55 @@ it("uses the selected environment's advertised models and reasoning options with
   };
   const choices = agentPersonaModelChoices(
     [provider, { ...provider, instanceId: ProviderInstanceId.make("second-codex") }],
+    [{ driver: "codex", model: "team-model", reasoningEffort: "xhigh" }],
+  );
+  for (const unavailable of [
+    { ...provider, auth: { status: "unauthenticated" as const } },
+    { ...provider, auth: { status: "unknown" as const } },
+    { ...provider, enabled: false },
+    { ...provider, installed: false },
+  ]) {
+    expect(agentPersonaModelChoices([unavailable], [])).toEqual([]);
+    const configured = agentPersonaModelChoices([unavailable], [choices[0]!.target]);
+    expect(configured).toHaveLength(1);
+    expect(configured[0]?.available).toBe(false);
+  }
+  expect(choices).toHaveLength(1);
+  expect(choices[0]).toMatchObject({
+    available: true,
+    label: "Codex · team-model",
+    target: { driver: "codex", model: "team-model", reasoningEffort: "high" },
+    efforts: ["xhigh", "high", "medium", "minimal", "max"],
+  });
+});
+
+it("retains unadvertised models and their configured reasoning levels", () => {
+  const current = [
+    { driver: "codex", model: "legacy-model", reasoningEffort: "xhigh" },
+    { driver: "claudeAgent", model: "custom-model", reasoningEffort: "low" },
+  ] as const;
+  const choices = agentPersonaModelChoices([], current);
+  expect(choices.find(({ target }) => target.model === "legacy-model")).toMatchObject({
+    target: current[0],
+    efforts: ["xhigh"],
+  });
+  expect(choices.find(({ target }) => target.model === "custom-model")?.efforts).toEqual(["low"]);
+  expect(current[0].reasoningEffort).toBe("xhigh");
+});
+
+it("merges all configured reasoning levels for a shared unadvertised model", () => {
+  const choices = agentPersonaModelChoices(
     [],
+    [
+      { driver: "codex", model: "custom-model", reasoningEffort: "low" },
+      { driver: "codex", model: "custom-model", reasoningEffort: "high" },
+      { driver: "codex", model: "custom-model", reasoningEffort: "xhigh" },
+    ],
   );
   expect(choices).toHaveLength(1);
   expect(choices[0]).toMatchObject({
-    label: "Codex · team-model",
-    target: { driver: "codex", model: "team-model", reasoningEffort: "high" },
-    efforts: ["medium", "high"],
+    target: { driver: "codex", model: "custom-model", reasoningEffort: "xhigh" },
+    efforts: ["low", "high", "xhigh"],
   });
 });
 
@@ -411,4 +467,202 @@ it("retains skipped agents through fresh confirmation and accepts an empty repla
     skippedPersonaIds: ["keep", "replace"],
   });
   expect(result?.importedIds).toEqual(["new-agent"]);
+});
+
+it("presents removed source agents as restorable and never launchable", () => {
+  const persona = catalog.personas[1]!;
+  const removed = presentAgentPersonaCatalog({
+    personas: [
+      { ...persona, removed: true, availability: { status: "unavailable", reason: "removed" } },
+    ],
+  })[0];
+  expect(removed).toMatchObject({
+    imported: false,
+    removed: true,
+    enabled: false,
+    availability: "removed",
+    availabilityLabel: "Removed",
+    route: "Removed from this library",
+  });
+  expect(presentAgentPersonaCatalog({ personas: [persona] })[0]?.removed).toBe(false);
+});
+
+const provider = (
+  driver: "codex" | "claudeAgent",
+  instanceId: string,
+  models: ReadonlyArray<string>,
+  optionId: "reasoningEffort" | "effort",
+): ServerProvider => ({
+  instanceId: ProviderInstanceId.make(instanceId),
+  driver: ProviderDriverKind.make(driver),
+  enabled: true,
+  installed: true,
+  version: null,
+  status: "ready",
+  auth: { status: "authenticated" },
+  checkedAt: "2026-09-10T00:00:00.000Z",
+  availability: "available",
+  slashCommands: [],
+  skills: [],
+  models: models.map((slug) => ({
+    slug,
+    name: slug,
+    isCustom: false,
+    capabilities: {
+      optionDescriptors: [
+        {
+          id: optionId,
+          label: "Reasoning",
+          type: "select",
+          options: [
+            { id: "medium", label: "Medium" },
+            { id: "high", label: "High" },
+          ],
+        },
+      ],
+    },
+  })),
+});
+
+describe("personal agent authoring", () => {
+  it("derives stable IDs from names and explains invalid ones", () => {
+    expect(agentPersonaIdFromName("  Team Researcher! ")).toBe("team-researcher");
+    expect(agentPersonaIdFromName("2nd Reviewer")).toBe("agent-2nd-reviewer");
+    expect(agentPersonaIdFromName("---")).toBe("");
+    expect(agentPersonaIdError("team-researcher")).toBeNull();
+    expect(agentPersonaIdError("")).toBe("Enter an ID.");
+    expect(agentPersonaIdError("Team Researcher")).toMatch(/lowercase/);
+    expect(agentPersonaIdError("-lead")).toMatch(/starting with a letter/);
+  });
+
+  it("picks a launchable default route and prefers a second harness for the fallback", () => {
+    expect(defaultAgentPersonaModelRoute([])).toBeNull();
+    const providers = [
+      provider("codex", "codex", ["gpt-5.6-terra"], "reasoningEffort"),
+      provider("claudeAgent", "claude", ["claude-opus-5"], "effort"),
+    ];
+    expect(defaultAgentPersonaModelRoute(providers)).toEqual([
+      { driver: "claudeAgent", model: "claude-opus-5", reasoningEffort: "high" },
+      { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
+    ]);
+    const single = defaultAgentPersonaModelRoute([providers[0]!]);
+    expect(single?.[0]).toEqual(single?.[1]);
+  });
+});
+
+it("prefills a duplicate with the source content and a fresh name and ID", () => {
+  expect(
+    agentPersonaDuplicateDraft({
+      id: "scout",
+      version: 3,
+      displayName: "Scout",
+      description: "Collects evidence.",
+      instructions: "# Scout",
+      authority: { defaultPolicy: "read-only", allowedPolicies: ["read-only", "critic-review"] },
+      modelRoute: [
+        { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
+        { driver: "claudeAgent", model: "claude-opus-5", reasoningEffort: "high" },
+      ],
+    }),
+  ).toEqual({
+    displayName: "Scout copy",
+    id: "scout-copy",
+    description: "Collects evidence.",
+    instructions: "# Scout",
+    authorityPolicy: "read-only",
+    modelRoute: [
+      { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
+      { driver: "claudeAgent", model: "claude-opus-5", reasoningEffort: "high" },
+    ],
+  });
+});
+
+it("reports drift only when both the snapshot and the current definition carry digests", () => {
+  const persona = { ...catalog.personas[0]!, definitionDigest: "a".repeat(64) };
+  const listed = { personas: [persona] };
+  const assignment = { personaId: persona.personaId, definitionDigest: "a".repeat(64) };
+  expect(agentPersonaDrift(assignment, listed)).toBe("current");
+  expect(agentPersonaDrift({ ...assignment, definitionDigest: "b".repeat(64) }, listed)).toBe(
+    "changed",
+  );
+  expect(agentPersonaDrift({ personaId: persona.personaId }, listed)).toBe("unknown");
+  expect(agentPersonaDrift(assignment, { personas: [] })).toBe("unknown");
+  expect(agentPersonaDrift(assignment, null)).toBe("unknown");
+});
+
+describe("agent usage, origin, and library folders", () => {
+  it("summarizes usage densely and omits metrics that were never reported", () => {
+    const busy = presentAgentPersonaUsage({
+      personaId: "scout",
+      threads: 2,
+      runs: 4,
+      completedRuns: 2,
+      failedRuns: 1,
+      averageRunDurationMs: 130_000,
+      lastLaunchedAt: "2026-09-10T11:00:00.000Z",
+      inputTokens: 12_345,
+      outputTokens: 900,
+      routes: [
+        { driver: ProviderDriverKind.make("claudeAgent"), model: "claude-opus-5", threads: 1 },
+        { driver: ProviderDriverKind.make("codex"), model: "gpt-5.6-terra", threads: 1 },
+      ],
+    });
+    expect(busy.line).toBe(
+      "2 tasks · 4 runs · 2 completed · 1 failed · avg 2m 10s · 12.3k in / 900 out · last 2026-09-10",
+    );
+    expect(busy.routes).toEqual([
+      "Claude · claude-opus-5 (1 task)",
+      "Codex · gpt-5.6-terra (1 task)",
+    ]);
+    const idle = presentAgentPersonaUsage({
+      personaId: "critic",
+      threads: 1,
+      runs: 0,
+      completedRuns: 0,
+      failedRuns: 0,
+      averageRunDurationMs: null,
+      lastLaunchedAt: null,
+      inputTokens: null,
+      outputTokens: null,
+      routes: [],
+    });
+    expect(idle.line).toBe("1 task · 0 runs");
+    expect(formatAgentPersonaDuration(3_720_000)).toBe("1h 2m");
+    expect(agentPersonaUsageById(null).size).toBe(0);
+  });
+
+  it("labels origins by kind and names only the parent folder of a source file", () => {
+    expect(agentPersonaOriginLabel({ kind: "bundled" })).toBe("Bundled example");
+    expect(agentPersonaOriginLabel({ kind: "imported" })).toBe("Personal");
+    expect(
+      agentPersonaOriginLabel({ kind: "folder", path: "/srv/state/team-library/a.yaml" }),
+    ).toBe("Folder · team-library");
+    const rows = presentAgentPersonaCatalog({
+      personas: [{ ...catalog.personas[0]!, origin: { kind: "imported" } }, catalog.personas[1]!],
+    });
+    expect(rows[0]?.originLabel).toBe("Personal");
+    expect(rows[1]?.origin).toBeNull();
+  });
+
+  it("surfaces only the two git nudges the spec allows", () => {
+    expect(agentPersonaFolderNudges(null)).toEqual([]);
+    expect(
+      agentPersonaFolderNudges({ repositoryRoot: "/r", uncommittedChanges: false, remoteAhead: 0 }),
+    ).toEqual([]);
+    expect(
+      agentPersonaFolderNudges({ repositoryRoot: "/r", uncommittedChanges: true, remoteAhead: 1 }),
+    ).toEqual([
+      "Uncommitted changes in this folder. Commit to share them.",
+      "1 new commit on the remote. Pull to update this library.",
+    ]);
+    expect(
+      agentPersonaFolderStatusLabel({
+        configuredPath: "personas",
+        path: "/s/personas",
+        exists: false,
+        definitionCount: 0,
+        git: null,
+      }),
+    ).toBe("Missing");
+  });
 });

@@ -88,10 +88,11 @@ export const AgentPersonaDefinition = Schema.Struct({
   version: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   displayName: NonEmpty,
   description: NonEmpty,
-  acceptedInput: NonEmpty,
+  /** Handoff pipelines declare inputs and outputs; personal agents may leave them out. */
+  acceptedInput: Schema.optional(NonEmpty),
   artifacts: Schema.optional(Schema.Array(NonEmpty)),
-  inputArtifacts: Schema.Array(NonEmpty),
-  outputArtifact: NonEmpty,
+  inputArtifacts: Schema.optional(Schema.Array(NonEmpty)),
+  outputArtifact: Schema.optional(NonEmpty),
   authority: Schema.Struct({
     defaultPolicy: AgentPersonaAuthorityPolicy,
     allowedPolicies: Schema.Array(AgentPersonaAuthorityPolicy),
@@ -112,7 +113,10 @@ export function decodeAgentPersonaDefinition(value: unknown): AgentPersonaDefini
     ...BUILT_IN_AGENT_ARTIFACT_IDS,
     ...(definition.artifacts ?? []),
   ]);
-  for (const artifact of [...definition.inputArtifacts, definition.outputArtifact]) {
+  for (const artifact of [
+    ...(definition.inputArtifacts ?? []),
+    ...(definition.outputArtifact === undefined ? [] : [definition.outputArtifact]),
+  ]) {
     if (!artifacts.has(artifact))
       throw new Error(`Persona ${definition.id}: undefined artifact ${artifact}.`);
   }

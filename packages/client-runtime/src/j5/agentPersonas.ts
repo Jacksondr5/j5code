@@ -7,8 +7,14 @@ import {
 } from "@t3tools/contracts";
 import type {
   AgentPersonaAuthorityPolicy,
+  AgentPersonaFolderGitStatus,
+  AgentPersonaLibraryFolder,
+  AgentPersonaOrigin,
+  AgentPersonaUsage,
+  AgentPersonaUsageEntry,
   AgentPersonaImportInput,
   AgentPersonaImportConflict,
+  AgentPersonaDefinitionView,
   AgentPersonaEditInput,
   AgentPersonaModelTarget,
   ServerProvider,
@@ -29,15 +35,21 @@ const AUTHORITY_LABELS: Readonly<Record<AgentPersonaAuthorityPolicy, string>> = 
 export interface AgentPersonaCatalogRow {
   readonly personaId: AgentPersonaId;
   readonly imported: boolean;
+  /** Removed source or bundled definitions stay listed with a Restore action. */
+  readonly removed: boolean;
   readonly enabled: boolean;
-  readonly edit: AgentPersonaEditInput | null;
+  /** Everything the edit dialog needs except instructions, which it loads on open. */
+  readonly edit: Omit<AgentPersonaEditInput, "instructions"> | null;
+  /** Absent from older servers; present entries say where the definition in effect came from. */
+  readonly origin: AgentPersonaOrigin | null;
+  readonly originLabel: string | null;
   readonly displayName: string;
   readonly description: string;
-  readonly acceptedInput: string;
-  readonly outputArtifact: string;
+  readonly acceptedInput: string | undefined;
+  readonly outputArtifact: string | undefined;
   readonly authority: string;
-  readonly availability: "available" | "blocked" | "disabled";
-  readonly availabilityLabel: "Available" | "Blocked" | "Disabled";
+  readonly availability: "available" | "blocked" | "disabled" | "removed";
+  readonly availabilityLabel: "Available" | "Blocked" | "Disabled" | "Removed";
   readonly route: string;
 }
 
@@ -82,10 +94,13 @@ export function presentAgentPersonaCatalog(
     const available = persona.availability.status === "available";
     const disabled =
       persona.availability.status === "unavailable" && persona.availability.reason === "disabled";
+    const removed =
+      persona.availability.status === "unavailable" && persona.availability.reason === "removed";
     return {
       personaId: persona.personaId,
       imported: persona.imported ?? false,
-      enabled: !disabled,
+      removed,
+      enabled: !disabled && !removed,
       edit:
         persona.imported && persona.editable
           ? {
@@ -97,6 +112,8 @@ export function presentAgentPersonaCatalog(
               modelRoute: persona.editable.modelRoute,
             }
           : null,
+      origin: persona.origin ?? null,
+      originLabel: persona.origin ? agentPersonaOriginLabel(persona.origin) : null,
       displayName: persona.displayName,
       description: persona.description,
       acceptedInput: persona.acceptedInput,
@@ -107,15 +124,29 @@ export function presentAgentPersonaCatalog(
             `${AUTHORITY_LABELS[policy]}${policy === persona.defaultAuthorityPolicy ? " (default)" : ""}`,
         )
         .join(", "),
-      availability: disabled ? "disabled" : available ? "available" : "blocked",
-      availabilityLabel: disabled ? "Disabled" : available ? "Available" : "Blocked",
+      availability: removed
+        ? "removed"
+        : disabled
+          ? "disabled"
+          : available
+            ? "available"
+            : "blocked",
+      availabilityLabel: removed
+        ? "Removed"
+        : disabled
+          ? "Disabled"
+          : available
+            ? "Available"
+            : "Blocked",
       route: available
         ? `${providerLabel(persona.availability.resolvedDriver)} · ${persona.availability.resolvedModelSelection.model} · ${persona.availability.resolvedRoute}`
         : persona.availability.reason === "authority-not-enforceable"
           ? "Required authority is not yet enforceable"
-          : disabled
-            ? "Disabled for new launches"
-            : "Primary and fallback models unavailable",
+          : removed
+            ? "Removed from this library"
+            : disabled
+              ? "Disabled for new launches"
+              : "Primary and fallback models unavailable",
     };
   });
 }
@@ -155,7 +186,12 @@ export const AGENT_PERSONA_POLICY_OPTIONS = [
 export const agentPersonaModelChoiceId = (target: AgentPersonaModelTarget) =>
   JSON.stringify([target.driver, target.model]);
 
-/** Keep configured models selectable even when they are absent from the environment's current catalog. */
+export const AGENT_PERSONA_HARNESSES = [
+  { driver: "codex", label: "Codex" },
+  { driver: "claudeAgent", label: "Claude" },
+] as const;
+
+/** Retain configured models while limiting new selections to supported reasoning levels. */
 export function agentPersonaModelChoices(
   providers: ReadonlyArray<ServerProvider>,
   current: ReadonlyArray<AgentPersonaModelTarget>,
@@ -165,11 +201,15 @@ export function agentPersonaModelChoices(
     {
       id: string;
       label: string;
+      modelLabel: string;
+      available: boolean;
       target: AgentPersonaModelTarget;
       efforts: string[];
     }
   >();
   for (const provider of providers) {
+    if (!provider.enabled || !provider.installed || provider.auth.status !== "authenticated")
+      continue;
     if (provider.driver !== "codex" && provider.driver !== "claudeAgent") continue;
     const driver = provider.driver === "codex" ? "codex" : "claudeAgent";
     for (const model of provider.models) {
@@ -188,23 +228,27 @@ export function agentPersonaModelChoices(
       choices.set(id, {
         id,
         label: `${driver === "codex" ? "Codex" : "Claude"} · ${model.slug}`,
+        modelLabel: model.slug,
+        available: true,
         target,
         efforts: [...new Set([...(previous?.efforts ?? []), ...efforts])],
       });
     }
   }
+  const advertisedIds = new Set(choices.keys());
   for (const target of current) {
     const id = agentPersonaModelChoiceId(target);
-    const choice = choices.get(id);
-    if (!choice)
-      choices.set(id, {
-        id,
-        label: `${target.driver === "codex" ? "Codex" : "Claude"} · ${target.model} (not advertised)`,
-        target,
-        efforts: [target.reasoningEffort],
-      });
-    else if (!choice.efforts.includes(target.reasoningEffort))
-      choice.efforts.push(target.reasoningEffort);
+    if (advertisedIds.has(id)) continue;
+    const previous = choices.get(id);
+    const efforts = [...new Set([...(previous?.efforts ?? []), target.reasoningEffort])];
+    choices.set(id, {
+      id,
+      label: `${target.driver === "codex" ? "Codex" : "Claude"} · ${target.model} (not advertised)`,
+      modelLabel: `${target.model} (not advertised)`,
+      available: false,
+      target,
+      efforts,
+    });
   }
   return [...choices.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
@@ -246,3 +290,160 @@ export async function importAgentPersonasWithConfirmation(
 
 export const AGENT_PERSONA_IMPORT_CONFIRMATION_MESSAGE =
   "Turn off agents you don’t want to replace.";
+
+export const AGENT_PERSONA_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+
+/** Suggest a stable ID from a display name: lowercase, hyphenated, starting with a letter. */
+export function agentPersonaIdFromName(name: string): string {
+  const slug = name
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug === "" ? "" : /^[a-z]/.test(slug) ? slug : `agent-${slug}`;
+}
+
+/** Human-readable reason an ID cannot be used, or null when it is acceptable. */
+export function agentPersonaIdError(id: string): string | null {
+  if (id.trim() === "") return "Enter an ID.";
+  if (!AGENT_PERSONA_ID_PATTERN.test(id))
+    return "Use lowercase letters, digits, and single hyphens, starting with a letter.";
+  return null;
+}
+
+/** First advertised model per harness, so a new agent starts with a launchable route. */
+export function defaultAgentPersonaModelRoute(
+  providers: ReadonlyArray<ServerProvider>,
+): [AgentPersonaModelTarget, AgentPersonaModelTarget] | null {
+  const available = agentPersonaModelChoices(providers, []).filter(({ available }) => available);
+  const primary = available[0];
+  if (primary === undefined) return null;
+  const fallback =
+    available.find(({ target }) => target.driver !== primary.target.driver) ?? primary;
+  return [primary.target, fallback.target];
+}
+
+export interface AgentPersonaCreateDraft {
+  readonly displayName: string;
+  readonly id: string;
+  readonly description: string;
+  readonly instructions: string;
+  readonly authorityPolicy: AgentPersonaAuthorityPolicy;
+  readonly modelRoute: readonly [AgentPersonaModelTarget, AgentPersonaModelTarget];
+}
+
+/** Prefill the create dialog from any listed agent; the copy gets its own name and ID. */
+export function agentPersonaDuplicateDraft(
+  definition: AgentPersonaDefinitionView,
+): AgentPersonaCreateDraft {
+  return {
+    displayName: `${definition.displayName} copy`,
+    id: agentPersonaIdFromName(`${definition.id}-copy`),
+    description: definition.description,
+    instructions: definition.instructions,
+    authorityPolicy: definition.authority.defaultPolicy,
+    modelRoute: definition.modelRoute,
+  };
+}
+
+export type AgentPersonaDrift = "current" | "changed" | "unknown";
+
+/**
+ * Compare a thread's launch snapshot with the library's current definition. Legacy
+ * snapshots without a digest, and agents no longer listed, cannot be compared.
+ */
+export function agentPersonaDrift(
+  assignment: Pick<OrchestrationV2AgentPersonaAssignment, "personaId" | "definitionDigest">,
+  catalog: OrchestrationV2AgentPersonaCatalog | null | undefined,
+): AgentPersonaDrift {
+  if (assignment.definitionDigest === undefined) return "unknown";
+  const current = catalog?.personas.find(({ personaId }) => personaId === assignment.personaId);
+  if (current?.definitionDigest === undefined) return "unknown";
+  return current.definitionDigest === assignment.definitionDigest ? "current" : "changed";
+}
+
+export const AGENT_PERSONA_DRIFT_MESSAGE =
+  "This agent's definition changed after this task launched. The task keeps the definition it started with; start a new task to use the current one.";
+
+/** Short origin for a catalog row; folder origins name the file's parent folder only. */
+export function agentPersonaOriginLabel(origin: AgentPersonaOrigin): string {
+  switch (origin.kind) {
+    case "bundled":
+      return "Bundled example";
+    case "imported":
+      return "Personal";
+    case "folder": {
+      const segments = origin.path.split(/[\\/]+/).filter((segment) => segment !== "");
+      const folder = segments.at(-2);
+      return folder === undefined ? "Folder" : `Folder · ${folder}`;
+    }
+  }
+}
+
+const compactCount = (value: number): string =>
+  value >= 1_000_000
+    ? `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`
+    : value >= 1_000
+      ? `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}k`
+      : String(value);
+
+/** Whole-unit duration such as "45s", "2m 10s", or "1h 5m". */
+export function formatAgentPersonaDuration(milliseconds: number): string {
+  const seconds = Math.round(milliseconds / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+export interface AgentPersonaUsageSummary {
+  readonly line: string;
+  readonly routes: ReadonlyArray<string>;
+}
+
+/** One dense line per agent; absent metrics are left out rather than shown as zero. */
+export function presentAgentPersonaUsage(entry: AgentPersonaUsageEntry): AgentPersonaUsageSummary {
+  const parts = [
+    `${entry.threads} ${entry.threads === 1 ? "task" : "tasks"}`,
+    `${entry.runs} ${entry.runs === 1 ? "run" : "runs"}`,
+  ];
+  if (entry.runs > 0) parts.push(`${entry.completedRuns} completed`, `${entry.failedRuns} failed`);
+  if (entry.averageRunDurationMs !== null)
+    parts.push(`avg ${formatAgentPersonaDuration(entry.averageRunDurationMs)}`);
+  if (entry.inputTokens !== null && entry.outputTokens !== null)
+    parts.push(`${compactCount(entry.inputTokens)} in / ${compactCount(entry.outputTokens)} out`);
+  if (entry.lastLaunchedAt !== null) parts.push(`last ${entry.lastLaunchedAt.slice(0, 10)}`);
+  return {
+    line: parts.join(" · "),
+    routes: entry.routes.map(
+      (route) =>
+        `${providerLabel(route.driver)} · ${route.model} (${route.threads} ${route.threads === 1 ? "task" : "tasks"})`,
+    ),
+  };
+}
+
+export function agentPersonaUsageById(
+  usage: AgentPersonaUsage | null | undefined,
+): ReadonlyMap<string, AgentPersonaUsageEntry> {
+  return new Map((usage?.personas ?? []).map((entry) => [entry.personaId, entry]));
+}
+
+/** The only git prompts the roles spec allows: uncommitted work and a remote that moved on. */
+export function agentPersonaFolderNudges(
+  git: AgentPersonaFolderGitStatus | null,
+): ReadonlyArray<string> {
+  if (git === null) return [];
+  const nudges: string[] = [];
+  if (git.uncommittedChanges)
+    nudges.push("Uncommitted changes in this folder. Commit to share them.");
+  if (git.remoteAhead !== null && git.remoteAhead > 0)
+    nudges.push(
+      `${git.remoteAhead} new ${git.remoteAhead === 1 ? "commit" : "commits"} on the remote. Pull to update this library.`,
+    );
+  return nudges;
+}
+
+export function agentPersonaFolderStatusLabel(folder: AgentPersonaLibraryFolder): string {
+  if (!folder.exists) return "Missing";
+  return `${folder.definitionCount} ${folder.definitionCount === 1 ? "definition" : "definitions"}`;
+}
