@@ -73,8 +73,8 @@ import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import {
   A2ADeliveryTransport,
   astraPeerSteeringRun,
-  ASTRA_PEER_DELIVERY_GUIDANCE,
   deliveryMessageId,
+  formatAgentDeliveryEnvelope,
   live as deliveryTransportLayer,
 } from "./DeliveryTransport.ts";
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
@@ -704,25 +704,29 @@ for (const model of ["gpt-6-astra", "astra"]) {
         yield* runWorkerUntil(worker, firstDelivery);
         yield* transport.deliverAgent(target.delivery);
         const secondId = LedgerMessageId.make(`message:${model}:second`);
+        const secondInput = {
+          ...target.delivery,
+          messageId: secondId,
+          exchangeRole: "reply",
+          message: "The answer to your question.",
+        } as const;
         const secondDelivery = yield* transport
-          .deliverAgent({
-            ...target.delivery,
-            messageId: secondId,
-            exchangeRole: "reply",
-            message: "The answer to your question.",
-          })
+          .deliverAgent(secondInput)
           .pipe(Effect.forkChild({ startImmediately: true }));
         yield* runWorkerUntil(worker, secondDelivery);
         const steers = yield* Ref.get(harness.steerInputs);
         assert.lengthOf(steers, 2);
-        assert.sameMembers(
-          steers.map((input) => input.message.messageId),
-          [deliveryMessageId(target.messageId), deliveryMessageId(secondId)],
+        // A steered delivery carries the ordinary envelope and nothing else.
+        assert.sameDeepMembers(
+          steers.map((input) => [input.message.messageId, input.message.text]),
+          [
+            [deliveryMessageId(target.messageId), formatAgentDeliveryEnvelope(target.delivery)],
+            [deliveryMessageId(secondId), formatAgentDeliveryEnvelope(secondInput)],
+          ],
         );
         for (const steer of steers) {
           assert.equal(steer.runId, active.run.id);
           assert.equal(steer.providerTurnId, turn.providerTurnId);
-          assert.include(steer.message.text, ASTRA_PEER_DELIVERY_GUIDANCE);
         }
         const toolCompleted = yield* sink.stream({ threadId: target.threadId }).pipe(
           Stream.filter(
