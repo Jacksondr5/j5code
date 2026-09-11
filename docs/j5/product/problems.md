@@ -1,11 +1,11 @@
 ---
 title: "Problems & goals — what hurts, and what the platform is for"
-kind: spec
+kind: definition
 ---
 
 # Problems & goals
 
-Captured verbatim-in-spirit from Jackson during the foundations round of the design review (2026-08-22; rulings R24–R35 in `../worklog/2026-08-21-design-review.md`). Companion to `fleet-vision.md`: that document says _how Jackson operates_; this one says _what hurts and what he wants beyond fixing it_. Every design should trace back to one of the two. Principles referenced live in `principles.md`.
+Captured verbatim-in-spirit from Jackson during the foundations round of the design review (2026-08-22). Companion to `fleet-vision.md`: that document says _how Jackson operates_; this one says _what hurts and what he wants beyond fixing it_. Every design should trace back to one of the two. Principles referenced live in `principles.md`.
 
 ## Problems
 
@@ -96,7 +96,7 @@ Crews are meant to work the task they're assigned with a high degree of independ
 
 Crews are deliberately disposable: when their task is done, the user or spawner archives them. They archive only as a unit, members are never individually replaced, and recovery from a poisoned Crew is respawning a fresh one from its definition — cheap because the real work lives in durable artifacts (worktree, branch, PR) that survive the agents. Agents can spawn Crews themselves (Captains running Crews without the human in the loop is the point), Captains can archive the Crews they command, and Crew members can't spawn Crews of their own — wanting more hands is an escalation.
 
-The platform ships the machinery — define, spawn, render, archive; the Playbook a Crew executes and the Roles it contains are always the user's content. The PR Group is one Crew definition someone wrote, never the product's opinion. (R12–R20; the definition schema is item 3's design session.)
+The platform ships the machinery — define, spawn, render, archive; the Playbook a Crew executes and the Roles it contains are always the user's content. The PR Group is one Crew definition someone wrote, never the product's opinion. (The definition of record is [Crews](features/crews.md).)
 
 ### Playbooks
 
@@ -114,28 +114,33 @@ As we start to work more and more with agents, the need to share them between hu
 
 ### Supporting tools: cron + DB for agents (parked)
 
-The monitoring fleet's scraper and incident database (see the working fleet in `fleet-vision.md`) stay outside the platform — too use-case-specific. The generic observation stands: both the PR and monitoring systems needed cron jobs and databases that agents had to laboriously self-provision. Parked with a named trigger (R30/R34): revisit when cross-machine sync or repeated setup pain makes hand-rolled stores actually hurt. Agents are perfectly capable of setting these up themselves today; Memos (`features/memos.md`) are the v1 data primitive.
+The monitoring fleet's scraper and incident database (see the working fleet in `fleet-vision.md`) stay outside the platform — too use-case-specific. The generic observation stands: both the PR and monitoring systems needed cron jobs and databases that agents had to laboriously self-provision. Parked with a named trigger: revisit when cross-machine sync or repeated setup pain makes hand-rolled stores actually hurt. Agents are perfectly capable of setting these up themselves today; Memos (`features/memos.md`) are the v1 data primitive.
 
 ## Traceability
 
 One row per problem theme / goal; the pointer is where the answer is designed or tracked.
 
-| Problem / goal                          | Answered by                                                                                                                          | Status                                        |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
-| Fleet observability — agent/Crew state  | Silence taxonomy + ledger projections (A2A M3/M5); Playbook step pointer (R27); dashboard surfaces (R5); status is read, never asked | A2A v1 plan; item 4; Playbooks candidate      |
-| Fleet observability — PR management     | PR pane v1; playback for review-decision audit (M5)                                                                                  | Pane approved, issue #6                       |
-| Fleet observability — cost              | R7 Squadron→agent rollups                                                                                                            | Item 4                                        |
-| Human attention — lost/telephoned asks  | Inbox + urgency (A2A M4); spectrum posture (the human-contact spectrum lens)                                                         | A2A v1 plan                                   |
-| Human attention — drowned conversations | Spectrum posture + delegation to Crews (the human-contact spectrum lens)                                                             | Principle adopted; manifest posture is item 3 |
-| Human attention — "later" lost          | Memos (`features/memos.md`)                                                                                                          | Design settled; backlog candidate             |
-| Async-event blindness                   | Silence notices to waiters (M3); `trigger.fired` (R6); time-stamped envelopes (R25)                                                  | A2A v1 plan                                   |
-| Context as bad memory                   | Status-is-read surfaces; R25; Memos; Playbook step injection (R27)                                                                   | Principles adopted; candidates queued         |
-| Large, unsupervised groups              | Exchanges + sender-judged closure (R3); silence machinery; memo visibility for drift steering (R33); observability dashboard         | A2A v1 plan; item 4                           |
-| More work needs more cleanup            | Archive never destroys work (R15); Crews archive as units (R14); Captain archive rights (R19); workspace cleanup tooling deferred    | Register settled; tooling later               |
-| Traycer/T3 inheritances                 | Durable ledger vs RAM loss (M1); R15 vs over-eager cleanup; A2A + Squadrons vs parent-child-only flat list                           | A2A v1 plan                                   |
-| Roles in platform tooling               | R28 platform-schema-in-git frame                                                                                                     | Item 3 session                                |
-| Crews                                   | R12–R20                                                                                                                              | Register settled; manifest schema is item 3   |
-| Playbooks                               | R27 engine/content split                                                                                                             | Backlog candidate                             |
-| Shared Squadrons                        | R29 — multi-human invariant in force now; one-user-or-all-users delivery; architecture session before build                          | Backlog candidate                             |
-| Agent cron/DB                           | Parked with named trigger (R30/R34)                                                                                                  | Parked                                        |
-| Monitoring fleet                        | Standing test: "does it work for the monitoring fleet, or only coding fleets?" (`fleet-vision.md` implication 6)                     | Ongoing design lens                           |
+| Problem / goal                          | Answered by                                                                                                                                                                                                                                                     | Status                                        |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| Fleet observability — agent/Crew state  | Silence notices and the ledger's projections ([agent-to-agent communication](a2a/index.md)); the Playbook step pointer ([Playbooks](features/playbooks.md)); the Fleet page ([sidebar and roster](features/sidebar-and-roster.md)); status is read, never asked | A2A v1 plan; item 4; Playbooks candidate      |
+| Fleet observability — PR management     | The [PR pane](features/pr-pane.md); playback of the ledger for review-decision audit                                                                                                                                                                            | Pane approved, issue #6                       |
+| Fleet observability — cost              | Cost rolls up per Squadron on the Fleet page                                                                                                                                                                                                                    | Item 4                                        |
+| Human attention — lost/telephoned asks  | The [inbox](features/inbox.md) with urgency; posture on the human-contact spectrum                                                                                                                                                                              | A2A v1 plan                                   |
+| Human attention — drowned conversations | Spectrum posture + delegation to Crews (the human-contact spectrum lens)                                                                                                                                                                                        | Principle adopted; manifest posture is item 3 |
+| Human attention — "later" lost          | Memos (`features/memos.md`)                                                                                                                                                                                                                                     | Design settled; backlog candidate             |
+| Async-event blindness                   | Silence notices to waiters and time facts in envelopes ([agent-to-agent communication](a2a/index.md)); machine triggers as work sources (a recorded door)                                                                                                       | A2A v1 plan                                   |
+| Context as bad memory                   | Status-is-read surfaces; time facts in envelopes; [Memos](features/memos.md); step injection ([Playbooks](features/playbooks.md))                                                                                                                               | Principles adopted; candidates queued         |
+| Large, unsupervised groups              | Exchanges with sender-judged completeness; silence measurement; Memo visibility for drift steering; the Fleet page                                                                                                                                              | A2A v1 plan; item 4                           |
+| More work needs more cleanup            | Archive never destroys work and is loud ([archive flow](features/archive-flow.md)); Crews archive as units and Captains archive what they command ([Crews](features/crews.md)); workspace cleanup tooling deferred                                              | Register settled; tooling later               |
+| Traycer/T3 inheritances                 | A durable ledger instead of in-memory state; archive that never destroys work instead of over-eager cleanup; A2A and Squadrons instead of a parent-child-only flat list                                                                                         | A2A v1 plan                                   |
+| Roles in platform tooling               | [Roles](features/roles.md): user-authored files the platform reads                                                                                                                                                                                              | Item 3 session                                |
+| Crews                                   | [Crews](features/crews.md)                                                                                                                                                                                                                                      | Register settled; manifest schema is item 3   |
+| Playbooks                               | [Playbooks](features/playbooks.md): the engine is the platform's, the steps are the user's                                                                                                                                                                      | Backlog candidate                             |
+| Shared Squadrons                        | [Shared Squadrons](features/shared-squadrons.md): the multi-person invariant in force now; an architecture session before any build                                                                                                                             | Backlog candidate                             |
+| Agent cron/DB                           | Parked with a named trigger ([Memos](features/memos.md) records it)                                                                                                                                                                                             | Parked                                        |
+| Monitoring fleet                        | Standing test: "does it work for the monitoring fleet, or only coding fleets?" (`fleet-vision.md` implication 6)                                                                                                                                                | Ongoing design lens                           |
+
+## History
+
+- 2026-08-22 — captured in the foundations round of the design review ([record](../worklog/2026-08-21-design-review.md)).
+- 2026-09-10 — register identifiers replaced by the definitions that now answer each problem; content unchanged.
