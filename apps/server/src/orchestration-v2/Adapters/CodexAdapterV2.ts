@@ -128,6 +128,7 @@ import {
   makeSubagentConversationArtifacts,
   subagentThreadTitle,
 } from "../SubagentProjection.ts";
+import { withAgentPersonaInstructions } from "../../j5/agents/agentPersonaPrompts.ts";
 
 const CODEX_PROVIDER = ProviderDriverKind.make("codex");
 export const CODEX_DRIVER_KIND = CODEX_PROVIDER;
@@ -665,12 +666,14 @@ export function buildCodexTurnStartParams(input: {
     const effort =
       selectedEffort === undefined ? undefined : yield* decodeTurnReasoningEffort(selectedEffort);
     const serviceTier = getCodexServiceTierOptionValue(input.modelSelection);
-    const developerInstructions =
+    const developerInstructions = withAgentPersonaInstructions(
       input.hasT3Mcp !== true
         ? undefined
         : input.runtimePolicy.interactionMode === "plan"
           ? codexPlanModeDeveloperInstructions(input.browserToolsAvailable ?? true)
-          : codexDefaultModeDeveloperInstructions(input.browserToolsAvailable ?? true);
+          : codexDefaultModeDeveloperInstructions(input.browserToolsAvailable ?? true),
+      input.runtimePolicy.agentPersonaInstructions,
+    );
     const collaborationMode: CodexSchema.ClientRequest__CollaborationMode | undefined =
       input.runtimePolicy.interactionMode !== "plan" && developerInstructions === undefined
         ? undefined

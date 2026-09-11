@@ -143,6 +143,7 @@ import {
   makeSubagentConversationArtifacts,
   subagentThreadTitle,
 } from "../SubagentProjection.ts";
+import { agentPersonaPromptSuffix } from "../../j5/agents/agentPersonaPrompts.ts";
 
 export const CLAUDE_PROVIDER = ProviderDriverKind.make("claudeAgent");
 export const CLAUDE_AGENT_SDK_QUERY_PROTOCOL = "claude-agent-sdk.query" as const;
@@ -728,6 +729,7 @@ export function makeClaudeQueryOptions(input: {
   readonly onUserDialog?: ClaudeQueryOptions["onUserDialog"];
   readonly supportedDialogKinds?: ClaudeQueryOptions["supportedDialogKinds"];
   readonly allowDangerouslySkipPermissions?: boolean;
+  readonly agentPersonaInstructions?: string | undefined;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
   const extraArgs =
@@ -786,7 +788,8 @@ export function makeClaudeQueryOptions(input: {
       preset: "claude_code" as const,
       append:
         buildRuntimeInstructions({ harness: "Claude Code" }) +
-        (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS),
+        (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS) +
+        agentPersonaPromptSuffix(input.agentPersonaInstructions),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
   };
@@ -5277,6 +5280,7 @@ export function makeClaudeAdapterV2(
                 canUseTool,
                 onUserDialog,
                 supportedDialogKinds: ["resume_return"],
+                agentPersonaInstructions: turnInput.runtimePolicy.agentPersonaInstructions,
               }),
             })
             .pipe(
