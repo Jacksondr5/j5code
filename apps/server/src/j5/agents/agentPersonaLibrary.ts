@@ -1,0 +1,451 @@
+import * as NodeCrypto from "node:crypto";
+import {
+  AgentPersonaId,
+  isAgentPersonaDefinitionFile,
+  AgentPersonaImportConflictError,
+  AGENT_PERSONA_IMPORT_MAX_BYTES,
+  AGENT_PERSONA_IMPORT_MAX_FILES,
+  type AgentPersonaImportInput,
+  type AgentPersonaEditInput,
+  type OrchestrationV2AgentPersonaAssignment,
+} from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
+import { parseDocument } from "yaml";
+
+import { writeFileStringAtomically } from "../../atomicWrite.ts";
+import { ServerConfig } from "../../config.ts";
+import {
+  decodeAgentPersonaDefinition,
+  getBuiltInAgentPersona,
+  listBuiltInAgentPersonas,
+  AgentPersonaDefinition,
+} from "./agentPersonas.ts";
+
+export class AgentPersonaLibraryError extends Schema.TaggedErrorClass<AgentPersonaLibraryError>()(
+  "AgentPersonaLibraryError",
+  { message: Schema.String, cause: Schema.optional(Schema.Defect()) },
+) {}
+
+const decodeDefinitionJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(AgentPersonaDefinition),
+);
+/** Launch snapshots are server-written JSON, never user files. */
+const decodeSnapshot = Effect.fn("AgentPersonaLibrary.decodeSnapshot")(function* (text: string) {
+  const definition = yield* decodeDefinitionJson(text);
+  return yield* Effect.try(() => decodeAgentPersonaDefinition(definition));
+});
+/** User-authored definitions (source folders and imports) are YAML documents. */
+const decodeDefinition = Effect.fn("AgentPersonaLibrary.decodeDefinition")(function* (
+  text: string,
+) {
+  const definition = yield* Effect.try((): unknown => {
+    const document = parseDocument(text, { version: "1.2", uniqueKeys: true });
+    const issue = document.errors[0] ?? document.warnings[0];
+    if (issue) throw issue;
+    return document.toJS({ maxAliasCount: 0 });
+  });
+  return yield* Effect.try(() => decodeAgentPersonaDefinition(definition));
+});
+const ImportedDefinition = Schema.Struct({
+  ...AgentPersonaDefinition.fields,
+  enabled: Schema.optional(Schema.Boolean),
+});
+const ImportedDefinitions = Schema.Array(ImportedDefinition);
+const decodeImports = Schema.decodeUnknownEffect(Schema.fromJsonString(ImportedDefinitions));
+const encodeImports = Schema.encodeEffect(Schema.fromJsonString(ImportedDefinitions));
+const RemovedSourceIds = Schema.Array(AgentPersonaId);
+const decodeRemovedSourceIds = Schema.decodeUnknownEffect(Schema.fromJsonString(RemovedSourceIds));
+const encodeRemovedSourceIds = Schema.encodeEffect(Schema.fromJsonString(RemovedSourceIds));
+// RPC layers are session-local; serialize library mutations across all sessions in this process.
+const importPermit = Semaphore.makeUnsafe(1);
+const encodeDefinition = Schema.encodeEffect(Schema.fromJsonString(AgentPersonaDefinition));
+const LibraryConfig = Schema.Struct({
+  folders: Schema.Array(Schema.String.check(Schema.isMinLength(1))),
+});
+const decodeLibraryConfig = Schema.decodeUnknownEffect(Schema.fromJsonString(LibraryConfig));
+export const definitionDigest = (definition: AgentPersonaDefinition): string =>
+  NodeCrypto.createHash("sha256").update(JSON.stringify(definition)).digest("hex");
+
+/** Source folders are read on catalog requests and launches; running tasks use immutable snapshots. */
+export function createAgentPersonaLibrary(storage?: {
+  readonly stateDir: string;
+  readonly fs: FileSystem.FileSystem;
+  readonly path: Path.Path;
+}) {
+  const loadSources = Effect.fn("AgentPersonaLibrary.loadSources")(function* () {
+    if (storage === undefined) return listBuiltInAgentPersonas();
+    const { stateDir, fs, path } = storage;
+    const configText = yield* fs.readFileString(path.join(stateDir, "agent-personas.json")).pipe(
+      Effect.map(Option.some),
+      Effect.catch((error) =>
+        error.reason._tag === "NotFound" ? Effect.succeed(Option.none()) : Effect.fail(error),
+      ),
+    );
+    const explicitlyConfigured = Option.isSome(configText);
+    const folders = Option.isSome(configText)
+      ? (yield* decodeLibraryConfig(configText.value)).folders.map((folder) =>
+          path.resolve(stateDir, folder),
+        )
+      : [path.join(stateDir, "personas")];
+    const definitions = new Map<string, AgentPersonaDefinition>();
+    for (const folder of folders) {
+      const entries = yield* fs.readDirectory(folder).pipe(
+        Effect.map(Option.some),
+        Effect.catch((error) =>
+          !explicitlyConfigured && error.reason._tag === "NotFound"
+            ? Effect.succeed(Option.none())
+            : Effect.fail(error),
+        ),
+      );
+      if (Option.isNone(entries)) return listBuiltInAgentPersonas();
+      for (const name of [...entries.value].sort()) {
+        if (!isAgentPersonaDefinitionFile(name)) continue;
+        const file = path.join(folder, name);
+        const stat = yield* fs.stat(file);
+        if (stat.type !== "File") continue;
+        if (Number(stat.size) > 65536)
+          return yield* new AgentPersonaLibraryError({
+            message: `Persona file exceeds 64 KiB: ${file}`,
+          });
+        const text = yield* fs.readFileString(file);
+        const definition = yield* decodeDefinition(text).pipe(
+          Effect.mapError(
+            (cause) =>
+              new AgentPersonaLibraryError({ message: `Invalid persona file ${file}`, cause }),
+          ),
+        );
+        if (definitions.has(definition.id))
+          return yield* new AgentPersonaLibraryError({
+            message: `Duplicate persona id: ${definition.id}`,
+          });
+        definitions.set(definition.id, definition);
+      }
+    }
+    return [...definitions.values()];
+  });
+
+  const readImports = Effect.fn("AgentPersonaLibrary.readImports")(function* () {
+    if (storage === undefined) return [];
+    const text = yield* storage.fs
+      .readFileString(storage.path.join(storage.stateDir, "imported-agent-personas.json"))
+      .pipe(
+        Effect.catch((error) =>
+          error.reason._tag === "NotFound" ? Effect.succeed("[]") : Effect.fail(error),
+        ),
+      );
+    const definitions = yield* decodeImports(text);
+    const ids = new Set<string>();
+    for (const definition of definitions) {
+      yield* Effect.try(() => decodeAgentPersonaDefinition(definition));
+      if (ids.has(definition.id))
+        return yield* new AgentPersonaLibraryError({
+          message: `Duplicate imported persona id: ${definition.id}`,
+        });
+      ids.add(definition.id);
+    }
+    return definitions;
+  });
+
+  const readRemovedSourceIds = Effect.fn("AgentPersonaLibrary.readRemovedSourceIds")(function* () {
+    if (storage === undefined) return [];
+    const text = yield* storage.fs
+      .readFileString(storage.path.join(storage.stateDir, "removed-source-agent-personas.json"))
+      .pipe(
+        Effect.catch((error) =>
+          error.reason._tag === "NotFound" ? Effect.succeed("[]") : Effect.fail(error),
+        ),
+      );
+    return yield* decodeRemovedSourceIds(text);
+  });
+
+  const catalog = Effect.fn("AgentPersonaLibrary.catalog")(function* () {
+    const sources = yield* loadSources();
+    const imported = yield* readImports();
+    const removed = new Set(yield* readRemovedSourceIds());
+    const definitions = new Map(
+      sources.filter(({ id }) => !removed.has(id)).map((definition) => [definition.id, definition]),
+    );
+    for (const { enabled: _enabled, ...definition } of imported)
+      definitions.set(definition.id, definition);
+    return {
+      definitions: [...definitions.values()],
+      importedIds: imported.map(({ id }) => id),
+      disabledIds: imported.filter(({ enabled }) => enabled === false).map(({ id }) => id),
+    };
+  });
+  const load = Effect.fn("AgentPersonaLibrary.load")(function* () {
+    const library = yield* catalog();
+    const disabled = new Set(library.disabledIds);
+    return library.definitions.filter(({ id }) => !disabled.has(id));
+  });
+
+  const writeImports = Effect.fn("AgentPersonaLibrary.writeImports")(function* (
+    definitions: ReadonlyArray<typeof ImportedDefinition.Type>,
+  ) {
+    if (storage === undefined)
+      return yield* new AgentPersonaLibraryError({
+        message: "Persona import storage is unavailable.",
+      });
+    yield* writeFileStringAtomically({
+      filePath: storage.path.join(storage.stateDir, "imported-agent-personas.json"),
+      contents: yield* encodeImports(definitions),
+    }).pipe(
+      Effect.provideService(FileSystem.FileSystem, storage.fs),
+      Effect.provideService(Path.Path, storage.path),
+    );
+  });
+
+  const importFiles = Effect.fn("AgentPersonaLibrary.importFiles")(function* (
+    input: AgentPersonaImportInput,
+  ) {
+    if (input.files.length === 0 || input.files.length > AGENT_PERSONA_IMPORT_MAX_FILES)
+      return yield* new AgentPersonaLibraryError({
+        message: `Select between 1 and ${AGENT_PERSONA_IMPORT_MAX_FILES} YAML files.`,
+      });
+    const incoming = new Map<string, AgentPersonaDefinition>();
+    for (const file of input.files) {
+      if (!isAgentPersonaDefinitionFile(file.name))
+        return yield* new AgentPersonaLibraryError({
+          message: `Unsupported agent file: ${file.name}`,
+        });
+      if (new TextEncoder().encode(file.content).byteLength > AGENT_PERSONA_IMPORT_MAX_BYTES)
+        return yield* new AgentPersonaLibraryError({ message: `${file.name} exceeds 64 KiB.` });
+      const definition = yield* decodeDefinition(file.content).pipe(
+        Effect.mapError(
+          (cause) =>
+            new AgentPersonaLibraryError({
+              message: `Invalid agent definition: ${file.name}`,
+              cause,
+            }),
+        ),
+      );
+      if (incoming.has(definition.id))
+        return yield* new AgentPersonaLibraryError({
+          message: `Multiple selected files use the id "${definition.id}". Each agent needs a unique id.`,
+        });
+      incoming.set(definition.id, definition);
+    }
+    for (const id of input.skippedPersonaIds ?? []) incoming.delete(id);
+    if (incoming.size === 0) return { importedIds: [] };
+    const existing = (yield* catalog()).definitions;
+    const conflicts = existing
+      .filter(({ id }) => incoming.has(id))
+      .map((definition) => ({
+        personaId: definition.id,
+        displayName: definition.displayName,
+        definitionDigest: definitionDigest(definition),
+      }));
+    const confirmationChanged =
+      input.confirmedConflicts !== undefined &&
+      conflicts.some(
+        (conflict) =>
+          !input.confirmedConflicts?.some(
+            (confirmed) =>
+              confirmed.personaId === conflict.personaId &&
+              confirmed.definitionDigest === conflict.definitionDigest,
+          ),
+      );
+    if (conflicts.length > 0 && (!input.replaceExisting || confirmationChanged))
+      return yield* new AgentPersonaImportConflictError({
+        message: confirmationChanged
+          ? "Existing agents changed. Review the replacement again."
+          : "Agents with these IDs already exist.",
+        conflicts,
+      });
+    const imported = new Map(
+      (yield* readImports()).map((definition) => [definition.id, definition]),
+    );
+    for (const [id, definition] of incoming)
+      imported.set(id, {
+        ...definition,
+        enabled: imported.get(id)?.enabled ?? true,
+      });
+    yield* writeImports([...imported.values()]);
+    return { importedIds: [...incoming.keys()] };
+  }, importPermit.withPermit);
+
+  const editImported = Effect.fn("AgentPersonaLibrary.editImported")(function* (
+    input: AgentPersonaEditInput,
+  ) {
+    const imported = yield* readImports();
+    const current = imported.find(({ id }) => id === input.personaId);
+    if (current === undefined)
+      return yield* new AgentPersonaLibraryError({
+        message: "Imported agent no longer exists. Refresh the library.",
+      });
+    const original = yield* Effect.try(() => decodeAgentPersonaDefinition(current));
+    if (definitionDigest(original) !== input.expectedDigest)
+      return yield* new AgentPersonaLibraryError({
+        message:
+          "This agent changed in another session. Close the editor, refresh the library, and try again.",
+      });
+    const updated = yield* Effect.try(() =>
+      decodeAgentPersonaDefinition({
+        ...original,
+        version: original.version + 1,
+        displayName: input.displayName,
+        description: input.description,
+        authority:
+          input.authorityPolicy === original.authority.defaultPolicy
+            ? original.authority
+            : {
+                defaultPolicy: input.authorityPolicy,
+                allowedPolicies: [input.authorityPolicy],
+              },
+        modelRoute: input.modelRoute,
+      }),
+    ).pipe(
+      Effect.mapError(
+        (cause) => new AgentPersonaLibraryError({ message: "Invalid agent details.", cause }),
+      ),
+    );
+    const encoded = yield* encodeDefinition(updated);
+    if (new TextEncoder().encode(encoded).byteLength > AGENT_PERSONA_IMPORT_MAX_BYTES)
+      return yield* new AgentPersonaLibraryError({ message: "Agent definition exceeds 64 KiB." });
+    yield* writeImports(
+      imported.map((definition) =>
+        definition.id === input.personaId
+          ? {
+              ...updated,
+              enabled: current.enabled ?? true,
+            }
+          : definition,
+      ),
+    );
+  }, importPermit.withPermit);
+
+  const setImportedEnabled = Effect.fn("AgentPersonaLibrary.setImportedEnabled")(function* (
+    id: string,
+    enabled: boolean,
+  ) {
+    const imported = yield* readImports();
+    if (!imported.some((definition) => definition.id === id))
+      return yield* new AgentPersonaLibraryError({
+        message: "Imported agent no longer exists in this environment.",
+      });
+    yield* writeImports(
+      imported.map((definition) =>
+        definition.id === id ? { ...definition, enabled } : definition,
+      ),
+    );
+  }, importPermit.withPermit);
+
+  const removeImported = Effect.fn("AgentPersonaLibrary.removeImported")(function* (id: string) {
+    const imported = yield* readImports();
+    yield* writeImports(imported.filter((definition) => definition.id !== id));
+  }, importPermit.withPermit);
+
+  const excludeSource = Effect.fn("AgentPersonaLibrary.excludeSource")(function* (id: string) {
+    if (storage === undefined)
+      return yield* new AgentPersonaLibraryError({
+        message: "Persona library storage is unavailable.",
+      });
+    const removed = new Set(yield* readRemovedSourceIds());
+    removed.add(id);
+    yield* writeFileStringAtomically({
+      filePath: storage.path.join(storage.stateDir, "removed-source-agent-personas.json"),
+      contents: yield* encodeRemovedSourceIds([...removed]),
+    }).pipe(
+      Effect.provideService(FileSystem.FileSystem, storage.fs),
+      Effect.provideService(Path.Path, storage.path),
+    );
+  });
+
+  const removeSource = Effect.fn("AgentPersonaLibrary.removeSource")(function* (id: string) {
+    if ((yield* readImports()).some((definition) => definition.id === id))
+      return yield* new AgentPersonaLibraryError({
+        message: "This agent was imported. Refresh the library and use Remove import.",
+      });
+    yield* excludeSource(id);
+  }, importPermit.withPermit);
+
+  const removeAgent = Effect.fn("AgentPersonaLibrary.removeAgent")(function* (id: string) {
+    const imported = yield* readImports();
+    // Persist source exclusion first so deleting an override cannot reveal its source again.
+    yield* excludeSource(id);
+    if (imported.some((definition) => definition.id === id))
+      yield* writeImports(imported.filter((definition) => definition.id !== id));
+  }, importPermit.withPermit);
+
+  const snapshot = Effect.fn("AgentPersonaLibrary.snapshot")(function* (
+    definition: AgentPersonaDefinition,
+  ) {
+    if (storage === undefined) return undefined;
+    const { fs, path, stateDir } = storage;
+    const digest = definitionDigest(definition);
+    yield* writeFileStringAtomically({
+      filePath: path.join(stateDir, "agent-persona-snapshots", `${digest}.json`),
+      contents: yield* encodeDefinition(definition),
+    }).pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+    );
+    return digest;
+  });
+
+  const readSnapshot = Effect.fn("AgentPersonaLibrary.readSnapshot")(function* (
+    assignment: OrchestrationV2AgentPersonaAssignment,
+  ) {
+    if (assignment.definitionDigest === undefined) {
+      const definition = yield* Effect.try(() => getBuiltInAgentPersona(assignment.personaId));
+      if (definition.version !== assignment.definitionVersion)
+        return yield* new AgentPersonaLibraryError({ message: "Unknown legacy persona version." });
+      return definition;
+    }
+    if (storage === undefined)
+      return yield* new AgentPersonaLibraryError({
+        message: "Persona snapshot storage is unavailable.",
+      });
+    const digest = assignment.definitionDigest;
+    if (!/^[a-f0-9]{64}$/.test(digest))
+      return yield* new AgentPersonaLibraryError({ message: "Invalid persona snapshot digest." });
+    const text = yield* storage.fs.readFileString(
+      storage.path.join(storage.stateDir, "agent-persona-snapshots", `${digest}.json`),
+    );
+    const definition = yield* decodeSnapshot(text);
+    if (
+      definitionDigest(definition) !== digest ||
+      definition.id !== assignment.personaId ||
+      definition.version !== assignment.definitionVersion ||
+      definition.displayName !== assignment.displayName
+    ) {
+      return yield* new AgentPersonaLibraryError({
+        message: "Persona snapshot does not match its assignment.",
+      });
+    }
+    return definition;
+  });
+
+  return {
+    load,
+    catalog,
+    importFiles,
+    editImported,
+    setImportedEnabled,
+    removeImported,
+    removeSource,
+    removeAgent,
+    snapshot,
+    readSnapshot,
+  };
+}
+
+/** Capture the environment at service construction. Pure unit layers can use the bundled examples. */
+export const makeAgentPersonaLibrary = Effect.gen(function* () {
+  const config = yield* Effect.serviceOption(ServerConfig);
+  if (Option.isNone(config)) return createAgentPersonaLibrary();
+  const fs = yield* Effect.serviceOption(FileSystem.FileSystem);
+  const path = yield* Effect.serviceOption(Path.Path);
+  if (Option.isNone(fs) || Option.isNone(path))
+    return yield* Effect.die(new Error("Persona library requires filesystem and path services."));
+  return createAgentPersonaLibrary({
+    stateDir: config.value.stateDir,
+    fs: fs.value,
+    path: path.value,
+  });
+});

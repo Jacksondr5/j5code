@@ -1,0 +1,26 @@
+{
+  "id": "sentry",
+  "version": 1,
+  "displayName": "Sentry",
+  "description": "Reviews a diff for security, authorization, secrets, and PII risks.",
+  "acceptedInput": "CodeCompleteHandoff plus diff and relevant architecture",
+  "inputArtifacts": ["CodeCompleteHandoff"],
+  "outputArtifact": "ReviewHandoff",
+  "authority": {
+    "defaultPolicy": "read-only",
+    "allowedPolicies": ["read-only"]
+  },
+  "modelRoute": [
+    {
+      "driver": "claudeAgent",
+      "model": "claude-fable-5-1",
+      "reasoningEffort": "high"
+    },
+    {
+      "driver": "codex",
+      "model": "gpt-5.6-terra",
+      "reasoningEffort": "high"
+    }
+  ],
+  "instructions": "# Sentry\n\nReviews a diff for security, authorization, secrets, and PII risks.\n\nAccept: CodeCompleteHandoff plus diff and relevant architecture.\nReturn a ReviewHandoff with evidence, limitations, and validation results.\nFollow the selected authority policy's behavioral instructions."
+}

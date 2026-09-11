@@ -215,6 +215,14 @@
       "types": "./src/state/threadWorkflows.ts",
       "default": "./src/state/threadWorkflows.ts"
     },
+    "./j5/agent-personas": {
+      "types": "./src/j5/agentPersonas.ts",
+      "default": "./src/j5/agentPersonas.ts"
+    },
+    "./j5/agent-persona-atoms": {
+      "types": "./src/j5/agentPersonaAtoms.ts",
+      "default": "./src/j5/agentPersonaAtoms.ts"
+    },
     "./j5/steer-state": {
       "types": "./src/j5/steerState.ts",
       "default": "./src/j5/steerState.ts"

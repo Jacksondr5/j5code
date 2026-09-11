@@ -13,6 +13,7 @@ import {
   getBuiltInAgentPersona,
   listBuiltInAgentPersonas,
   type AgentModelTarget,
+  type AgentPersonaDefinition,
   type AgentPersonaId,
 } from "./agentPersonas.ts";
 import { providerCanEnforceAgentPersonaAuthority } from "./agentPersonaProviderPolicy.ts";
@@ -43,7 +44,7 @@ export type AgentPersonaRouteResolution =
   | {
       readonly status: "available";
       readonly personaId: AgentPersonaId;
-      readonly definitionVersion: 1;
+      readonly definitionVersion: number;
       readonly route: "primary" | "fallback";
       readonly driver: AgentModelTarget["driver"];
       readonly modelSelection: ModelSelection;
@@ -52,7 +53,7 @@ export type AgentPersonaRouteResolution =
   | {
       readonly status: "unavailable";
       readonly personaId: AgentPersonaId;
-      readonly definitionVersion: 1;
+      readonly definitionVersion: number;
       readonly attempts: ReadonlyArray<AgentPersonaRouteAttempt>;
     };
 
@@ -109,12 +110,13 @@ function candidatesForTarget(
     .map(({ provider }) => provider);
 }
 
-export function resolveBuiltInAgentPersonaRoute(input: {
+export function resolveAgentPersonaRoute(input: {
   readonly personaId: AgentPersonaId;
+  readonly definition?: AgentPersonaDefinition;
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly authorityPolicy?: AgentPersonaAuthorityPolicy;
 }): AgentPersonaRouteResolution {
-  const definition = getBuiltInAgentPersona(input.personaId);
+  const definition = input.definition ?? getBuiltInAgentPersona(input.personaId);
   const authorityPolicy = input.authorityPolicy ?? definition.authority.defaultPolicy;
   const rejectedTargets: Array<AgentPersonaRouteAttempt> = [];
 
@@ -170,17 +172,20 @@ export function resolveBuiltInAgentPersonaRoute(input: {
   };
 }
 
-export function buildBuiltInAgentPersonaCatalog(
+export function buildAgentPersonaCatalog(
   providers: ReadonlyArray<ServerProvider>,
+  definitions: ReadonlyArray<AgentPersonaDefinition> = listBuiltInAgentPersonas(),
 ): OrchestrationV2AgentPersonaCatalog {
   return {
-    personas: listBuiltInAgentPersonas().map((definition) => {
-      const resolution = resolveBuiltInAgentPersonaRoute({
+    personas: definitions.map((definition) => {
+      const resolution = resolveAgentPersonaRoute({
         personaId: definition.id,
+        definition,
         providers,
       });
       return {
         personaId: definition.id,
+        definitionVersion: definition.version,
         displayName: definition.displayName,
         description: definition.description,
         acceptedInput: definition.acceptedInput,
