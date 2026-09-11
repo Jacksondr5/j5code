@@ -53,7 +53,7 @@ End of life is archive; its details arrive with the container's growth.
 
 ## Scope
 
-The current build ([dogfood v0](../dogfood-v0.md)) narrows this definition in three places: a Squadron has exactly one folder (AC5 narrowed, stored ready to become a list); "Browse elsewhere" may be absent (AC6 narrowed); and the surfaces converted to Squadron choice are the new-thread flow and the command palette first, with the remaining pickers converted by inventory (AC7 in progress). Later: multi-folder targeting, Squadron archive, colors and avatars, migration of pre-Squadron projects. Never: cross-machine targeting; anything boundary-shaped; a Squadron with no folder.
+The current build ([dogfood v0](../../plans/dogfood-v0.md)) narrows this definition in three places: a Squadron has exactly one folder (AC5 narrowed, stored ready to become a list); "Browse elsewhere" may be absent (AC6 narrowed); and the surfaces converted to Squadron choice are the new-thread flow and the command palette first, with the remaining pickers converted by inventory (AC7 in progress). Later: multi-folder targeting, Squadron archive, colors and avatars, migration of pre-Squadron projects. Never: cross-machine targeting; anything boundary-shaped; a Squadron with no folder.
 
 ## History
 

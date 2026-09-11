@@ -75,7 +75,7 @@ The platform ships the machinery — define, spawn, render, warn, archive. The P
 
 ## History
 
-- 2026-08-21 — the concept: definition versus instance, archive as a unit, archive never destroys work, agents spawn Crews, one Squadron, Captains as derived status, Captain archive rights, members cannot spawn Crews, "you command what you brief", Captains never routers; former R12–R22 ([record](../design-review-2026-08-21.md)). "Team" retired as a word.
+- 2026-08-21 — the concept: definition versus instance, archive as a unit, archive never destroys work, agents spawn Crews, one Squadron, Captains as derived status, Captain archive rights, members cannot spawn Crews, "you command what you brief", Captains never routers; former R12–R22 ([record](../../worklog/2026-08-21-design-review.md)). "Team" retired as a word.
 - 2026-08-23 — the product session: structured-only validation, archive and respawn as judgment moments with a fresh brief; former P-E and J1–J3 ([record](../../worklog/roles-crews-session-2026-08-23.md)).
 - 2026-08-24 — whether Crew members may spawn solo Peer Agents is deliberately left open until Crews are built and a real Crew's behavior can be observed ([record](../../worklog/spawn-terminology-session-2026-08-24.md)).
 - 2026-09-08 — rewritten into the definition shape; "git-versioned" aligned with Roles ("git optional"); posture stated as a lean, not a rule. Former identifiers: R12 → AC1; R14 → AC12; R15 → AC13; R16 → AC9; R17 → AC4–AC5; R18 → AC8; R19 → AC11; R20 → AC10; R21, R22 → Captains; P-E → AC2–AC3; J1–J3 → AC14–AC15. The open question on members spawning solo Peer Agents stays open, recorded above.

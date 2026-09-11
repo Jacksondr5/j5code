@@ -6,7 +6,7 @@ status: 1
 
 # A9 — Lifecycle closure
 
-**Governing artifacts:** design-review register R1 and participant-side R11 (../../product/design-review-2026-08-21.md). Staff against current `j5/main` head. **Hazard note (why this is blocking-tier): participant retirement already happens in practice and currently strands open obligations silently.**
+**Governing artifacts:** design-review register R1 and participant-side R11 (../2026-08-21-design-review.md). Staff against current `j5/main` head. **Hazard note (why this is blocking-tier): participant retirement already happens in practice and currently strands open obligations silently.**
 
 ## Goal
 

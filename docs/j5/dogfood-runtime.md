@@ -1,6 +1,6 @@
 # Dogfood runtime: self-hosted J5 Code server and clients
 
-How Jackson's solo dogfood (phase 3 of [dogfood v0](worklog/dogfood-v0.md)) actually runs: one
+How Jackson's solo dogfood (phase 3 of [dogfood v0](plans/dogfood-v0.md)) actually runs: one
 source-built J5 Code server on a Linux box, reached over Tailscale, with the browser as the client.
 This document is self-contained on purpose — dogfood agents have no access to the design sessions
 that produced it. Decisions and their load-bearing reasons are recorded inline.

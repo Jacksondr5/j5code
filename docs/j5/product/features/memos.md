@@ -53,5 +53,5 @@ Memos are the shaped **first agent data primitive** — append, list what is ope
 
 ## History
 
-- 2026-08-22 — the concept, extracted from the problems and goals; former R26 and R31–R35 ([record](../design-review-2026-08-21.md)).
+- 2026-08-22 — the concept, extracted from the problems and goals; former R26 and R31–R35 ([record](../../worklog/2026-08-21-design-review.md)).
 - 2026-09-08 — rewritten into the definition shape. Former identifiers: R26 → Problem (why not the inbox); R31 → Definition (no per-turn injection), AC2; R32 → AC3; R33 → AC7; R34 → Definition (the first data primitive); R35 → AC4. The parked generic agent store (former R30) is recorded in the last Definition paragraph as not part of Memos.
