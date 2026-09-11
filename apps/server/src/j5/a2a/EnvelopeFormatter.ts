@@ -46,17 +46,7 @@ export const formatClosedPeerEnvelope = (input: {
     closedExchangeInstruction: config.closedExchangeInstruction,
   });
 
-export const formatHumanEnvelope = (input: {
-  readonly senderId: ParticipantId;
-  readonly exchangeId: ExchangeId | null;
-  readonly message: string;
-}): string =>
-  render(config.humanMessage, {
-    senderId: input.senderId,
-    message: input.message,
-    exchangeInstruction: deliveryInstruction(input),
-  });
-
+/** A person's only ledger message is the inbox answer that closes an exchange. */
 export const formatClosedHumanEnvelope = (input: {
   readonly senderId: ParticipantId;
   readonly message: string;

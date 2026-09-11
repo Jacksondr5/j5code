@@ -12,7 +12,6 @@ import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import {
   formatClosedHumanEnvelope,
   formatClosedPeerEnvelope,
-  formatHumanEnvelope,
   formatPeerEnvelope,
 } from "./EnvelopeFormatter.ts";
 import {
@@ -108,6 +107,15 @@ const assertNever = (channel: never): never => {
   throw new Error(`Unsupported A2A delivery envelope channel: ${String(channel)}`);
 };
 
+// A person never opens an ask through the platform; their only ledger message
+// is the inbox answer, delivered as a reply. Nothing produces another shape,
+// so a person-origin non-reply is a corrupt delivery, not a channel.
+const assertPersonReply = (input: AgentDeliveryInput): never => {
+  throw new Error(
+    `Unsupported A2A delivery: person ${input.senderId} sent a ${input.exchangeRole} message ${input.messageId}`,
+  );
+};
+
 /** Use the active run's selection, not the picker selection for future runs. */
 export const astraPeerSteeringRun = (
   target: OrchestrationV2ThreadProjection,
@@ -145,11 +153,7 @@ export const formatAgentDeliveryEnvelope = (input: AgentDeliveryInput): string =
               message: input.message,
             })
         : isHumanParticipantId(input.senderId)
-          ? formatHumanEnvelope({
-              senderId: input.senderId,
-              exchangeId: input.exchangeId,
-              message: input.message,
-            })
+          ? assertPersonReply(input)
           : formatPeerEnvelope({
               senderId: input.senderId,
               originSquadronId: input.originSquadronId,

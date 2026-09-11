@@ -1,8 +1,7 @@
 {
-  "version": 15,
+  "version": 16,
   "peerMessage": "[Cross-agent message from {{senderId}} in squadron {{originSquadronId}}]\n\n{{message}}\n\n{{exchangeInstruction}}",
   "peerClosedMessage": "[Cross-agent message from {{senderId}} in squadron {{originSquadronId}}]\n\n{{message}}\n\n{{closedExchangeInstruction}}",
-  "humanMessage": "[Message from {{senderId}}]\n\n{{message}}\n\nThis person is not watching this chat. They see only what you send back on this exchange.\n\n{{exchangeInstruction}}",
   "humanClosedMessage": "[Message from {{senderId}}]\n\n{{message}}\n\n{{closedExchangeInstruction}}",
   "silenceNotice": "[Cross-agent messaging system notice: {{noticeType}}]\n\n{{message}}\n\nThis is a platform-authored delivery signal, not a peer reply.",
   "replyInstruction": "Reply once with send_message(to=\"{{senderId}}\", exchange_id=\"{{exchangeId}}\", message=\"...\") to close the exchange. Follow-ups from the asker carrying this id join the same exchange.",
