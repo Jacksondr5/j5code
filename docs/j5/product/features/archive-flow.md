@@ -57,6 +57,6 @@ This is **not** a delete, **not** a way to archive a single Crew member, and **n
 ## History
 
 - 2026-08-21 — archive is loud and never destroys work; Crews archive as units; archiving with open Exchanges warns with count, list and confirmation ([record](../../worklog/2026-08-21-design-review.md); former R1, R14, R15 and the Roles/Crews session's J1–J3).
-- 2026-08-29 — the flow designed; former AR1–AR4 ([record](../../worklog/archive-flow-session-2026-08-29.md)).
+- 2026-08-29 — the flow designed; former AR1–AR4 ([record](../../worklog/2026-08-29-archive-flow-session.md)).
 - 2026-09-01 — ask-row anatomy mirrors the inbox item; former AR5 (Jackson's live review of the archive build).
 - 2026-09-08 — rewritten into the definition shape. Former identifiers: AR1 → AC11; AR2 → AC1; AR3 → AC2–AC5; AR4 → AC6–AC9; AR5 → AC3–AC4; J1–J3 → AC3, AC5. Build sequencing that lived here (the dialog shipping ahead of waiter notices) is history.

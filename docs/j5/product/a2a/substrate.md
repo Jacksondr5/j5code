@@ -67,8 +67,8 @@ Agents spawned through upstream's delegation path before the spawn verb existed 
 
 ## History
 
-- 2026-08-24 — Subagent and Peer Agent distinguished; delegation excluded from the product surface ([record](../../worklog/spawn-terminology-session-2026-08-24.md)).
-- 2026-08-29 — the substrate line drawn: the four dispositions, the ownership rule, the fail-closed tool subset ([record](../../worklog/substrate-session-2026-08-29.md)).
+- 2026-08-24 — Subagent and Peer Agent distinguished; delegation excluded from the product surface ([record](../../worklog/2026-08-24-spawn-terminology-session.md)).
+- 2026-08-29 — the substrate line drawn: the four dispositions, the ownership rule, the fail-closed tool subset ([record](../../worklog/2026-08-29-substrate-session.md)).
 - 2026-08-31 — `create_threads` and `t3_thread_start` omitted; `clear_own_ask` built.
-- 2026-09-03 — delivery queues behind an active turn; steering is the person's act ([record](../../worklog/queue-vs-steer-ruling-2026-09-03.md)); 2026-09-04 — the Codex Astra exception ([record](../../worklog/astra-peer-delivery-2026-09-04.md)).
+- 2026-09-03 — delivery queues behind an active turn; steering is the person's act ([record](../../worklog/2026-09-03-queue-vs-steer-ruling.md)); 2026-09-04 — the Codex Astra exception ([record](../../worklog/2026-09-04-astra-peer-delivery.md)).
 - 2026-09-07 — rewritten into the definition shape; stale rows (the open `create_threads` row, "needed-but-unbuilt" `clear_own_ask`, the pending prompt-text edit, Squadron creation as "nothing exists") corrected to the current state.

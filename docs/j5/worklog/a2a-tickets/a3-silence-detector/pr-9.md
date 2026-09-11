@@ -1,7 +1,6 @@
 ---
-kind: ticket
 title: "PR #9 — A3 silence detector"
-status: 1
+kind: record
 ---
 
 # PR #9 — A3 silence detector

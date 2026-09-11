@@ -1,6 +1,6 @@
 ---
 title: "A6 reviewer verdict — feasibility seams, independently measured"
-kind: review
+kind: record
 ---
 
 # A6 reviewer verdict — feasibility seams

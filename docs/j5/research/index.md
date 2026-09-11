@@ -1,7 +1,7 @@
 ---
 title: "Research: T3 Code & Traycer deep dives"
-kind: story
-status: 2
+kind: research
+as_of: 2026-08-19
 ---
 
 # Research: T3 Code & Traycer

@@ -1,7 +1,6 @@
 ---
 title: "A7 — Planned rebase when upstream #2829 merges (event-triggered)"
-kind: ticket
-status: 0
+kind: record
 ---
 
 # A7 — Planned upstream base advance

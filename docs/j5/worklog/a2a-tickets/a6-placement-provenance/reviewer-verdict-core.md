@@ -1,6 +1,6 @@
 ---
 title: "A6 core review — verdict at d65acfdca (changes requested)"
-kind: review
+kind: record
 ---
 
 # A6 core review — verdict

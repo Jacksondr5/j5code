@@ -1,8 +1,9 @@
 ---
 title: "A10 — Silence notices become fact bundles; labels move to projection (R4 amendment of A3)"
-kind: ticket
-status: 0
+kind: record
 ---
+
+> **Record.** The work item of record is [issue #30](https://github.com/Jacksondr5/j5code/issues/30); this ticket text is the history behind it and is not maintained.
 
 # A10 — Silence fact bundles
 

@@ -1,7 +1,6 @@
 ---
 title: "T3 — Rebrand to J5 Code (minimal-churn)"
-kind: ticket
-status: 2
+kind: record
 ---
 
 # T3 — Rebrand to J5 Code

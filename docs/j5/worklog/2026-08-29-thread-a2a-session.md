@@ -1,3 +1,8 @@
+---
+title: "Thread-view A2A rendering session — rulings record (2026-08-29)"
+kind: record
+---
+
 # Thread-view A2A rendering session — rulings record (2026-08-29)
 
 Jackson + UI/UX design agent; dogfood-v0 UX workstream (area 6), same-day

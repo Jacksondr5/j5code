@@ -6,7 +6,7 @@ kind: spec
 # Sidebar & roster
 
 Feature definition of record, settled 2026-08-29 with Jackson
-([session rulings SB1–SB7](../../worklog/sidebar-roster-session-2026-08-29.md)).
+([session rulings SB1–SB7](../../worklog/2026-08-29-sidebar-roster-session.md)).
 The problems it serves ([problems doc](../problems.md)): fleet
 observability ("it's hard to see what agents you aren't talking to are
 doing") and scarce human attention. Approved mockups live in the design

@@ -1,6 +1,6 @@
 ---
 title: "A3 review — independent verdict, rounds 1–3"
-kind: review
+kind: record
 ---
 
 # A3 silence detector — Reviewer verdict

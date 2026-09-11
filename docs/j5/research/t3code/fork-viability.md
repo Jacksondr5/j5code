@@ -1,6 +1,7 @@
 ---
 title: "Fork viability: T3 Code as foundation"
-kind: spec
+kind: research
+as_of: 2026-08-23
 ---
 
 # Fork viability: T3 Code as foundation

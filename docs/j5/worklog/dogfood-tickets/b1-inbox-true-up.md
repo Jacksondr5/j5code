@@ -1,7 +1,6 @@
 ---
 title: "B1 — Inbox surface true-up to IB1–IB7 (post-#11)"
-kind: ticket
-status: 0
+kind: record
 ---
 
 # B1 — Inbox true-up

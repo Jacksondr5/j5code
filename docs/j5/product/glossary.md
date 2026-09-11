@@ -84,7 +84,7 @@ These entries are the distinctions the whole team must share; the glossary owns 
 | archive | Retiring an agent for good; its record stays readable, its open Exchanges end loudly                                                      | [features/archive-flow.md](features/archive-flow.md)                                                                                   |
 | retired | The state of an archived participant                                                                                                      | [features/archive-flow.md](features/archive-flow.md)                                                                                   |
 | orphan  | A working agent whose placement parent has been archived                                                                                  | [features/sidebar-and-roster.md](features/sidebar-and-roster.md)                                                                       |
-| settled | Upstream's thread-triage state ("I'm done looking at this") and nothing else. J5 docs no longer use "settled" to mean a decision was made | upstream mechanics; see [worklog](../worklog/upstream-settled-vs-archived-research-2026-08-29.md) for the confusion this line resolves |
+| settled | Upstream's thread-triage state ("I'm done looking at this") and nothing else. J5 docs no longer use "settled" to mean a decision was made | upstream mechanics; see [worklog](../worklog/2026-08-29-upstream-settled-vs-archived-research.md) for the confusion this line resolves |
 
 ## Retired names
 

@@ -76,8 +76,8 @@ This is **not** a change to what agents receive, **not** a summary layer, and **
 
 ## History
 
-- 2026-08-29 — the four treatments designed; former TA1–TA5 ([record](../../worklog/thread-a2a-session-2026-08-29.md)).
-- 2026-08-31 — three amendments from Jackson's live test of the first build: no envelope expander on parsed cards (the raw fallback stays), no Squadron sub-line, badge copy "Expects reply", clickable sender name. Same day, the prominence session settled card anatomy, states, clamp, alignment, time and linking; former TA6–TA10 ([record](../../worklog/thread-a2a-prominence-session-2026-08-31.md)).
+- 2026-08-29 — the four treatments designed; former TA1–TA5 ([record](../../worklog/2026-08-29-thread-a2a-session.md)).
+- 2026-08-31 — three amendments from Jackson's live test of the first build: no envelope expander on parsed cards (the raw fallback stays), no Squadron sub-line, badge copy "Expects reply", clickable sender name. Same day, the prominence session settled card anatomy, states, clamp, alignment, time and linking; former TA6–TA10 ([record](../../worklog/2026-08-31-thread-a2a-prominence-session.md)).
 - 2026-09-01 — reader copy uses the "Expects reply" / "Replied" family, never closure mechanics (Jackson's final review of the inbox build).
 - 2026-09-05 — "Replied" becomes the one word for a closed Exchange on every surface, replacing "Reply received" on sent cards and "Answered" on the inbox shelf (glossary).
 - 2026-09-08 — rewritten into the definition shape. Former identifiers: TA1 → AC1–AC3; TA2 → AC4; TA3 → AC5; TA4, TA8 → AC6, AC8; TA5 → AC13; TA6 → AC7; TA7 → AC9; TA9 → Definition (time); TA10 → AC11–AC12. The v0 rendering of the person's inbox reply as `Via Inbox · ⟨person⟩` (the "You" claim needs a person binding the auth principal does not yet have) is build status and lives in the dogfood plan.

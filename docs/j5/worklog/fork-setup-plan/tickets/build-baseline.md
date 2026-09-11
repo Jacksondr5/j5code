@@ -1,7 +1,6 @@
 ---
 title: "T2 — Build up & test baseline"
-kind: ticket
-status: 2
+kind: record
 ---
 
 # T2 — Build up & test baseline

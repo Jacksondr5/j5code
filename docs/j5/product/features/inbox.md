@@ -65,8 +65,8 @@ The inbox is **not** a backlog (a non-blocking note an agent wants to keep is a 
 
 ## History
 
-- 2026-08-29 — designed; former IB1–IB7 ([record](../../worklog/inbox-session-2026-08-29.md)).
+- 2026-08-29 — designed; former IB1–IB7 ([record](../../worklog/2026-08-29-inbox-session.md)).
 - 2026-08-31 — the bell moves to the rail header (Jackson's review of the inbox build).
-- 2026-09-02 — a person receives only asks and replies ([record](../../worklog/human-addressed-sends-ruling-2026-09-02.md)).
+- 2026-09-02 — a person receives only asks and replies ([record](../../worklog/2026-09-02-human-addressed-sends-ruling.md)).
 - 2026-09-05 — several open asks per agent and person, with follow-ups shown beneath the original (issue #111); the shelf is named "Replied", the one word for a closed Exchange on every surface (glossary).
 - 2026-09-08 — rewritten into the definition shape. Former identifiers: IB1 → Answering, AC8–AC9; IB2 → AC13; IB3–IB4 → AC5–AC6; IB5 → AC10; IB6 → AC11; IB7 → AC12. The "clear-own-ask has no build ticket" note is gone: the verb shipped. The deferred items that lived here (a platform-alerts lane, the asker's current state on items, smaller inbox forms) are backlog candidates, not part of this definition.

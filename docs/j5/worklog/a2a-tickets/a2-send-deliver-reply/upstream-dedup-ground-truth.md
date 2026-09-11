@@ -1,6 +1,6 @@
 ---
 title: "A2 gate — how upstream dedup actually works at pin 521c50aa9"
-kind: spec
+kind: record
 ---
 
 # Upstream exactly-once mechanics (reviewer-verified)

@@ -1,6 +1,6 @@
 ---
 title: "Process"
-kind: spec
+kind: process
 ---
 
 # Process

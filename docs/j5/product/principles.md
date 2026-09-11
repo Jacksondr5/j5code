@@ -1,6 +1,6 @@
 ---
 title: "Beliefs, lenses, and principles - the machine that turns problems and goals into product"
-kind: spec
+kind: definition
 ---
 
 This document covers the beliefs, lenses, and principles used to design and architect features for J5 Code. Taken together, these 3 things form the machine that transforms the [problems and goals](./problems.md) into [features](features/). Never restate the problems and goals here.
@@ -143,4 +143,4 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 ## Scoped principles
 
-Principles with narrower jurisdiction live with their stories, not here. Currently two: **authority never replicates — messages cross, read-models merge**, which governs all distributed-state design and lives in [the cross-device position paper](./cross-device.md); and **steering is a controller's act, and in J5 the only controller of a turn is the human** — agent deliveries queue by default, with the September 4 Astra exception for peer messages into an already-running Codex turn, delivered as ordinary envelopes. The person's own send follows upstream's default; J5 adds that the person is always told what a steer does on that provider and is refused truthfully when nothing can be steered — which governs mid-turn message dispatch and lives in [the queue-vs-steer ruling record](../worklog/queue-vs-steer-ruling-2026-09-03.md).
+Principles with narrower jurisdiction live with their stories, not here. Currently two: **authority never replicates — messages cross, read-models merge**, which governs all distributed-state design and lives in [the cross-device position paper](./cross-device.md); and **steering is a controller's act, and in J5 the only controller of a turn is the human** — agent deliveries queue by default, with the September 4 Astra exception for peer messages into an already-running Codex turn, delivered as ordinary envelopes. The person's own send follows upstream's default; J5 adds that the person is always told what a steer does on that provider and is refused truthfully when nothing can be steered — which governs mid-turn message dispatch and lives in [the queue-vs-steer ruling record](../worklog/2026-09-03-queue-vs-steer-ruling.md).

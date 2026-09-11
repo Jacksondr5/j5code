@@ -1,8 +1,9 @@
 ---
 title: "A8 — Envelope true-up: reply-delivery rendering, regarding linkage, time facts (R3/R10/R25)"
-kind: ticket
-status: 0
+kind: record
 ---
+
+> **Record.** The work item of record is [issue #29](https://github.com/Jacksondr5/j5code/issues/29); this ticket text is the history behind it and is not maintained.
 
 # A8 — Envelope true-up
 

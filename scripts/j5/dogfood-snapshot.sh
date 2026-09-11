@@ -2,7 +2,7 @@
 # Snapshot the dogfood server's SQLite state with VACUUM INTO, which is safe
 # while the server is running and yields one consistent file. Called by
 # dogfood-update.sh before every update and by the nightly snapshot timer.
-# See docs/j5/dogfood-runtime.md.
+# See docs/j5/runbooks/dogfood-runtime.md.
 
 set -euo pipefail
 

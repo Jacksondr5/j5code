@@ -42,5 +42,5 @@ Roles compose with the guide rather than replacing it: with a Role, the allowlis
 ## History
 
 - 2026-08-29 — provider, model and reasoning become required on every spawn.
-- 2026-08-30 — the guide defined: ownership split, two sections, Roles compose, one sentence of brief steering in the spawn tool; former SP1–SP4 ([record](../../worklog/spawning-guide-session-2026-08-30.md)).
+- 2026-08-30 — the guide defined: ownership split, two sections, Roles compose, one sentence of brief steering in the spawn tool; former SP1–SP4 ([record](../../worklog/2026-08-30-spawning-guide-session.md)).
 - 2026-09-08 — rewritten into the definition shape. Former identifiers: SP1 → Definition (ownership), AC1–AC3, AC5; SP2 → Definition (two sections); SP3 → Definition (Roles compose), AC4; SP4 → Definition (brief conventions; acknowledgements). The example guide that lived in this document is user-space content and belongs with the example Role library, not in a definition.

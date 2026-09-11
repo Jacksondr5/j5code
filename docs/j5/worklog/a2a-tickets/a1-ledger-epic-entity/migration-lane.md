@@ -1,6 +1,6 @@
 ---
 title: "A1 decision — J5 migrations run in their own lane, not upstream's registry"
-kind: spec
+kind: record
 ---
 
 # J5 migrations run in their own lane

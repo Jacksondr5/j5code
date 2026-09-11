@@ -1,6 +1,7 @@
 ---
 title: "Research synthesis: what we build, what we steal, what we design fresh"
-kind: spec
+kind: research
+as_of: 2026-08-23
 ---
 
 # Research synthesis (v2 — verified against current code)

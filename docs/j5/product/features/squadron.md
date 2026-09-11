@@ -58,8 +58,8 @@ The current build ([dogfood v0](../../plans/dogfood-v0.md)) narrows this definit
 ## History
 
 - 2026-08-17 — defined and named; former E1–E6 ([record](../../worklog/2026-08-17-squadron-naming.md); decision log).
-- 2026-08-24 — creation and agent-creation experience; former SC1–SC4 ([record](../../worklog/squadron-creation-session-2026-08-24.md)).
-- 2026-08-29 — sidebar scope replaces Squadron grouping in the sidebar; former SB3 ([record](../../worklog/sidebar-roster-session-2026-08-29.md)).
-- 2026-08-31 — the Squadron is the unit of user choice; former E7 ([record](../../worklog/picker-and-self-messaging-rulings-2026-08-31.md)).
+- 2026-08-24 — creation and agent-creation experience; former SC1–SC4 ([record](../../worklog/2026-08-24-squadron-creation-session.md)).
+- 2026-08-29 — sidebar scope replaces Squadron grouping in the sidebar; former SB3 ([record](../../worklog/2026-08-29-sidebar-roster-session.md)).
+- 2026-08-31 — the Squadron is the unit of user choice; former E7 ([record](../../worklog/2026-08-31-picker-and-self-messaging-rulings.md)).
 - 2026-09-07 — placement and provenance moved here from the A2A definition (former D10 and R21): they are organization, not communication.
 - 2026-09-05 — rewritten into the definition shape. Two changes of substance: a Squadron targets one or more folders, so a folder is required at creation (the name-only Squadron is no longer planned — it would complicate upstream integration) and the folder-required v0 override becomes end-state truth; messages to people are no longer listed as Squadron contents (they belong to the inbox, which is person-scoped, not Squadron-scoped). Former identifiers: E1 → AC1; E2 → AC2; E3 → Definition; E4 → AC3; E5 → AC10; E6 → Definition; E7 → AC7; SC1 → AC5, AC6; SC2 → AC3, AC4; SC3 → AC8, AC9; SC4 → Scope; the A2 `join_epic` consequences → AC2, AC11.

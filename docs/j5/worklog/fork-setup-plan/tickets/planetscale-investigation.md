@@ -1,7 +1,6 @@
 ---
 title: "T4 — PlanetScale / relay investigation"
-kind: ticket
-status: 2
+kind: record
 ---
 
 # T4 — PlanetScale / relay investigation
