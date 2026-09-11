@@ -9,7 +9,11 @@ import { AgentEditorModal } from "./AgentEditorModal";
 import { ControlPillMenu } from "../../components/ControlPill";
 import { SymbolView } from "../../components/AppSymbol";
 import {
+  agentPersonaFolderNudges,
+  agentPersonaFolderStatusLabel,
+  agentPersonaUsageById,
   presentAgentPersonaCatalog,
+  presentAgentPersonaUsage,
   importAgentPersonasWithConfirmation,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import type {
@@ -21,13 +25,13 @@ import type {
 import { useNavigation } from "@react-navigation/native";
 import { Platform, Pressable, ScrollView, Share, Switch, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { pickAgentDefinitions } from "./pickAgentDefinitions";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
 import { cn } from "../../lib/cn";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
@@ -52,6 +56,27 @@ export function AgentLibrarySettingsScreen() {
           environmentId: effectiveEnvironmentId,
           input: {},
         }),
+  );
+  const usage = useEnvironmentQuery(
+    effectiveEnvironmentId === null
+      ? null
+      : agentPersonaEnvironment.usage({ environmentId: effectiveEnvironmentId, input: {} }),
+  );
+  const usageById = useMemo(() => agentPersonaUsageById(usage.data), [usage.data]);
+  const librarySources = useEnvironmentQuery(
+    effectiveEnvironmentId === null
+      ? null
+      : agentPersonaEnvironment.librarySources({
+          environmentId: effectiveEnvironmentId,
+          input: {},
+        }),
+  );
+  const setLibraryFolders = useAtomCommand(agentPersonaEnvironment.setLibraryFolders, {
+    reportFailure: false,
+  });
+  const [newFolder, setNewFolder] = useState("");
+  const otherEnvironments = connectedEnvironments.filter(
+    (environment) => environment.environmentId !== effectiveEnvironmentId,
   );
   const [busy, setBusy] = useState(false);
   const [confirmation, setConfirmation] = useState<{
@@ -78,6 +103,66 @@ export function AgentLibrarySettingsScreen() {
   const readAgent = useAtomCommand(agentPersonaEnvironment.readAgentPersona, {
     reportFailure: false,
   });
+  const confirmReplacement = (error: AgentPersonaImportConflictError) =>
+    new Promise<ReadonlyArray<AgentPersonaImportConflict> | null>((resolve) => {
+      setConfirmation({ error, resolve });
+    });
+  /** Export plus import in one gesture; the target environment validates and resolves ID conflicts. */
+  async function copyPersona(
+    personaId: string,
+    target: { environmentId: EnvironmentId; label: string },
+  ) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const { definition, fileName, yaml } = await readDefinition(personaId);
+      const result = await importAgentPersonasWithConfirmation(
+        [{ name: fileName, content: yaml }],
+        async (input) => {
+          const response = await importAgents({ environmentId: target.environmentId, input });
+          if (response._tag === "Failure") throw squashAtomCommandFailure(response);
+          return response.value;
+        },
+        confirmReplacement,
+      );
+      if (result === null) return;
+      setNotification({
+        type: "success",
+        title:
+          result.importedIds.length === 0
+            ? `${target.label} kept its existing ${definition.displayName}`
+            : `Copied ${definition.displayName} to ${target.label}`,
+      });
+    } catch (error) {
+      setNotification({
+        type: "error",
+        title: "Agent action failed",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveFolders(folders: ReadonlyArray<string>) {
+    if (effectiveEnvironmentId === null || busy) return;
+    const environmentId = effectiveEnvironmentId;
+    setBusy(true);
+    try {
+      const result = await setLibraryFolders({ environmentId, input: { folders } });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      setNewFolder("");
+      librarySources.refresh();
+      catalog.refresh();
+    } catch (error) {
+      setNotification({
+        type: "error",
+        title: "Library folders not saved",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
   async function importSelection(kind: "folder" | "agent") {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
@@ -92,10 +177,7 @@ export function AgentLibrarySettingsScreen() {
           if (response._tag === "Failure") throw squashAtomCommandFailure(response);
           return response.value;
         },
-        (error) =>
-          new Promise<ReadonlyArray<AgentPersonaImportConflict> | null>((resolve) => {
-            setConfirmation({ error, resolve });
-          }),
+        confirmReplacement,
       );
       if (result === null) return;
       setNotification({
@@ -391,6 +473,13 @@ export function AgentLibrarySettingsScreen() {
                             {persona.availabilityLabel}
                           </Text>
                         </View>
+                        {persona.originLabel ? (
+                          <View className="rounded-full border border-border px-2 py-0.5">
+                            <Text className="text-xs font-t3-medium text-foreground-muted">
+                              {persona.originLabel}
+                            </Text>
+                          </View>
+                        ) : null}
                       </View>
                       <View className="flex-row items-center gap-2">
                         {persona.removed ? (
@@ -458,12 +547,36 @@ export function AgentLibrarySettingsScreen() {
                               attributes: { disabled: busy },
                             },
                             { id: "export", title: "Export YAML", attributes: { disabled: busy } },
+                            ...(otherEnvironments.length === 0
+                              ? []
+                              : [
+                                  {
+                                    id: "copy",
+                                    title: "Copy to environment",
+                                    attributes: { disabled: busy },
+                                    subactions: otherEnvironments.map((environment) => ({
+                                      id: `copy:${environment.environmentId}`,
+                                      title: environment.environmentLabel,
+                                    })),
+                                  },
+                                ]),
                           ]}
                           onPressAction={({ nativeEvent }) => {
                             if (nativeEvent.event === "duplicate")
                               void duplicatePersona(persona.personaId);
                             else if (nativeEvent.event === "export")
                               void exportPersona(persona.personaId);
+                            else if (nativeEvent.event.startsWith("copy:")) {
+                              const target = otherEnvironments.find(
+                                (environment) =>
+                                  `copy:${environment.environmentId}` === nativeEvent.event,
+                              );
+                              if (target)
+                                void copyPersona(persona.personaId, {
+                                  environmentId: target.environmentId,
+                                  label: target.environmentLabel,
+                                });
+                            }
                           }}
                         >
                           <Pressable
@@ -501,12 +614,143 @@ export function AgentLibrarySettingsScreen() {
                       </View>
                     </View>
                     <Text className="text-sm text-foreground-muted">{persona.description}</Text>
+                    {(() => {
+                      const entry = usageById.get(persona.personaId);
+                      if (entry === undefined) return null;
+                      const summary = presentAgentPersonaUsage(entry);
+                      return (
+                        <Text
+                          className="text-xs text-foreground-muted"
+                          accessibilityHint={summary.routes.join(". ")}
+                        >
+                          {summary.line}
+                        </Text>
+                      );
+                    })()}
                   </View>
                 );
               })
             )}
           </View>
         </SettingsSection>
+
+        {effectiveEnvironmentId !== null ? (
+          <SettingsSection title="Library sources">
+            <View className="gap-2">
+              <View className="rounded-2xl bg-card px-4 py-3">
+                <Text className="text-sm text-foreground-muted">
+                  Folders this environment reads YAML definitions from. Paths are on the
+                  environment’s machine; relative paths resolve from its state directory.
+                </Text>
+              </View>
+              {librarySources.isPending ? (
+                <AgentMessage title="Loading folders" />
+              ) : librarySources.error ? (
+                <AgentMessage title={librarySources.error} />
+              ) : librarySources.data ? (
+                <>
+                  {librarySources.data.folders.length === 0 ? (
+                    <AgentMessage title="No source folders. Only personal and imported agents are available." />
+                  ) : null}
+                  {librarySources.data.folders.map((folder) => {
+                    const nudges = agentPersonaFolderNudges(folder.git);
+                    return (
+                      <View
+                        key={folder.configuredPath}
+                        className="gap-2 rounded-2xl bg-card px-4 py-3"
+                      >
+                        <View className="flex-row items-center gap-3">
+                          <View className="min-w-0 flex-1 gap-1">
+                            <Text className="text-base font-t3-medium text-foreground">
+                              {folder.configuredPath}
+                            </Text>
+                            {folder.path !== folder.configuredPath ? (
+                              <Text className="text-xs text-foreground-muted">{folder.path}</Text>
+                            ) : null}
+                          </View>
+                          <View
+                            className={cn(
+                              "rounded-full border px-2 py-0.5",
+                              folder.exists ? "border-border" : "border-danger-foreground/30",
+                            )}
+                          >
+                            <Text
+                              className={cn(
+                                "text-xs font-t3-medium",
+                                folder.exists ? "text-foreground-muted" : "text-danger-foreground",
+                              )}
+                            >
+                              {agentPersonaFolderStatusLabel(folder)}
+                            </Text>
+                          </View>
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Stop reading ${folder.configuredPath}`}
+                            accessibilityState={{ disabled: busy }}
+                            disabled={busy}
+                            className="size-11 items-center justify-center rounded-lg border border-danger-foreground/30 disabled:opacity-40"
+                            onPress={() =>
+                              void saveFolders(
+                                (librarySources.data?.folders ?? [])
+                                  .map(({ configuredPath }) => configuredPath)
+                                  .filter((candidate) => candidate !== folder.configuredPath),
+                              )
+                            }
+                          >
+                            <SymbolView
+                              name="trash"
+                              size={18}
+                              tintColorClassName="accent-danger-foreground"
+                              type="monochrome"
+                            />
+                          </Pressable>
+                        </View>
+                        {nudges.map((nudge) => (
+                          <Text key={nudge} className="text-sm text-foreground">
+                            {nudge}
+                          </Text>
+                        ))}
+                      </View>
+                    );
+                  })}
+                  <View className="gap-2 rounded-2xl bg-card px-4 py-3">
+                    <Text className="text-sm text-foreground-muted">
+                      {librarySources.data.configured
+                        ? "Files are read on every catalog request, so edits and git pulls apply without a restart."
+                        : "Bundled examples appear until a folder is configured or the default folder exists. Adding a folder writes agent-personas.json."}
+                    </Text>
+                    <TextInput
+                      accessibilityLabel="Folder path"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      placeholder="/path/to/team-library"
+                      value={newFolder}
+                      editable={!busy}
+                      onChangeText={setNewFolder}
+                    />
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Add folder"
+                      accessibilityState={{ disabled: busy || newFolder.trim() === "" }}
+                      disabled={busy || newFolder.trim() === ""}
+                      className="self-start rounded-lg border border-border px-4 py-3 disabled:opacity-40"
+                      onPress={() =>
+                        void saveFolders([
+                          ...(librarySources.data?.folders ?? []).map(
+                            ({ configuredPath }) => configuredPath,
+                          ),
+                          newFolder.trim(),
+                        ])
+                      }
+                    >
+                      <Text className="text-sm text-foreground">Add folder</Text>
+                    </Pressable>
+                  </View>
+                </>
+              ) : null}
+            </View>
+          </SettingsSection>
+        ) : null}
       </ScrollView>
       {notification ? (
         <AgentLibraryToast notification={notification} onDismiss={dismissNotification} />

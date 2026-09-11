@@ -39,5 +39,14 @@ describe("agent persona RPC scopes", () => {
     expect(requiredScopeForRpcMethod(J5_AGENT_PERSONA_WS_METHODS.removeImportedAgentPersona)).toBe(
       AuthOrchestrationOperateScope,
     );
+    expect(requiredScopeForRpcMethod(J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaUsage)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(
+      requiredScopeForRpcMethod(J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaLibrarySources),
+    ).toBe(AuthOrchestrationReadScope);
+    expect(
+      requiredScopeForRpcMethod(J5_AGENT_PERSONA_WS_METHODS.setAgentPersonaLibraryFolders),
+    ).toBe(AuthOrchestrationOperateScope);
   });
 });

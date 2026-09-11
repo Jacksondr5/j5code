@@ -13,6 +13,12 @@ import {
   prepareAgentPersonaImport,
   importAgentPersonasWithConfirmation,
   agentPersonaDrift,
+  agentPersonaFolderNudges,
+  agentPersonaFolderStatusLabel,
+  agentPersonaOriginLabel,
+  agentPersonaUsageById,
+  formatAgentPersonaDuration,
+  presentAgentPersonaUsage,
   agentPersonaDuplicateDraft,
   agentPersonaIdError,
   agentPersonaIdFromName,
@@ -582,4 +588,81 @@ it("reports drift only when both the snapshot and the current definition carry d
   expect(agentPersonaDrift({ personaId: persona.personaId }, listed)).toBe("unknown");
   expect(agentPersonaDrift(assignment, { personas: [] })).toBe("unknown");
   expect(agentPersonaDrift(assignment, null)).toBe("unknown");
+});
+
+describe("agent usage, origin, and library folders", () => {
+  it("summarizes usage densely and omits metrics that were never reported", () => {
+    const busy = presentAgentPersonaUsage({
+      personaId: "scout",
+      threads: 2,
+      runs: 4,
+      completedRuns: 2,
+      failedRuns: 1,
+      averageRunDurationMs: 130_000,
+      lastLaunchedAt: "2026-09-10T11:00:00.000Z",
+      inputTokens: 12_345,
+      outputTokens: 900,
+      routes: [
+        { driver: ProviderDriverKind.make("claudeAgent"), model: "claude-opus-5", threads: 1 },
+        { driver: ProviderDriverKind.make("codex"), model: "gpt-5.6-terra", threads: 1 },
+      ],
+    });
+    expect(busy.line).toBe(
+      "2 tasks · 4 runs · 2 completed · 1 failed · avg 2m 10s · 12.3k in / 900 out · last 2026-09-10",
+    );
+    expect(busy.routes).toEqual([
+      "Claude · claude-opus-5 (1 task)",
+      "Codex · gpt-5.6-terra (1 task)",
+    ]);
+    const idle = presentAgentPersonaUsage({
+      personaId: "critic",
+      threads: 1,
+      runs: 0,
+      completedRuns: 0,
+      failedRuns: 0,
+      averageRunDurationMs: null,
+      lastLaunchedAt: null,
+      inputTokens: null,
+      outputTokens: null,
+      routes: [],
+    });
+    expect(idle.line).toBe("1 task · 0 runs");
+    expect(formatAgentPersonaDuration(3_720_000)).toBe("1h 2m");
+    expect(agentPersonaUsageById(null).size).toBe(0);
+  });
+
+  it("labels origins by kind and names only the parent folder of a source file", () => {
+    expect(agentPersonaOriginLabel({ kind: "bundled" })).toBe("Bundled example");
+    expect(agentPersonaOriginLabel({ kind: "imported" })).toBe("Personal");
+    expect(
+      agentPersonaOriginLabel({ kind: "folder", path: "/srv/state/team-library/a.yaml" }),
+    ).toBe("Folder · team-library");
+    const rows = presentAgentPersonaCatalog({
+      personas: [{ ...catalog.personas[0]!, origin: { kind: "imported" } }, catalog.personas[1]!],
+    });
+    expect(rows[0]?.originLabel).toBe("Personal");
+    expect(rows[1]?.origin).toBeNull();
+  });
+
+  it("surfaces only the two git nudges the spec allows", () => {
+    expect(agentPersonaFolderNudges(null)).toEqual([]);
+    expect(
+      agentPersonaFolderNudges({ repositoryRoot: "/r", uncommittedChanges: false, remoteAhead: 0 }),
+    ).toEqual([]);
+    expect(
+      agentPersonaFolderNudges({ repositoryRoot: "/r", uncommittedChanges: true, remoteAhead: 1 }),
+    ).toEqual([
+      "Uncommitted changes in this folder. Commit to share them.",
+      "1 new commit on the remote. Pull to update this library.",
+    ]);
+    expect(
+      agentPersonaFolderStatusLabel({
+        configuredPath: "personas",
+        path: "/s/personas",
+        exists: false,
+        definitionCount: 0,
+        git: null,
+      }),
+    ).toBe("Missing");
+  });
 });
