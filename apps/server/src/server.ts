@@ -92,6 +92,8 @@ import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { j5AuthenticatedRoutesLayer } from "./j5/a2a/J5AuthenticatedRoutes.ts";
 import { J5A2AAuxiliaryLayer, J5SquadronCreationLayer } from "./j5/a2a/runtimeLayer.ts";
+import { layer as J5ArtifactRunFinalizationObserverLive } from "./j5/artifacts/ArtifactRunFinalizationObserver.ts";
+import { layer as J5ArtifactWorkspaceLive } from "./j5/artifacts/ArtifactWorkspace.ts";
 import {
   connectHttpApiLayer,
   pendingServiceUpdateExists,
@@ -401,10 +403,16 @@ const OrchestrationV2RuntimeLayerLive = OrchestrationV2ProductionLayerLive.pipe(
   Layer.provide(GitWorkflowLayerLive),
   Layer.provide(ResourceCleanupService.live),
   Layer.provide(
-    RunFinalizationService.observerLive.pipe(
+    J5ArtifactRunFinalizationObserverLive.pipe(
+      Layer.provide(J5ArtifactWorkspaceLive),
       Layer.provide(ProjectionStoreV2.layer),
-      Layer.provide(PullRequestServiceLive),
-      Layer.provide(OrchestrationInfrastructureLayerLive),
+      Layer.provide(
+        RunFinalizationService.observerLive.pipe(
+          Layer.provide(ProjectionStoreV2.layer),
+          Layer.provide(PullRequestServiceLive),
+          Layer.provide(OrchestrationInfrastructureLayerLive),
+        ),
+      ),
     ),
   ),
 );

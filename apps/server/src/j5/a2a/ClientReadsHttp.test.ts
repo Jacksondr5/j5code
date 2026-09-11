@@ -1,12 +1,16 @@
 import { AuthOrchestrationReadScope, AuthSessionId, ThreadId } from "@t3tools/contracts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
+import * as ServerConfig from "../../config.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as ProjectService from "../../project/ProjectService.ts";
+import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
+import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import { ClientReadsService } from "./ClientReadsService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import {
@@ -330,6 +334,13 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
     Layer.provide(Layer.mock(A2ALedger)({})),
     Layer.provide(Layer.mock(SquadronProjectReferences)({})),
     Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+    Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
+    Layer.provide(Layer.mock(VcsProcess.VcsProcess)({})),
+    Layer.provide(
+      ServerConfig.layerTest(process.cwd(), { prefix: "j5-client-reads-http-" }).pipe(
+        Layer.provide(NodeServices.layer),
+      ),
+    ),
     Layer.provide(NodeSqliteClient.layerMemory()),
     Layer.provideMerge(auth),
     Layer.provide(HttpServer.layerServices),

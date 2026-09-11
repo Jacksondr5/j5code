@@ -1,6 +1,7 @@
 import { assert, it, vi } from "@effect/vitest";
 import {
   CheckpointScopeId,
+  ProjectId,
   RunId,
   ThreadId,
   type OrchestrationV2ThreadShell,
@@ -19,10 +20,12 @@ import * as RunFinalization from "./RunFinalizationService.ts";
 it.effect("captures the root checkpoint and refreshes workspace state", () => {
   const threadId = ThreadId.make("thread_finalize");
   const runId = RunId.make("run_finalize");
+  const projectId = ProjectId.make("project_finalize");
   const scopeId = CheckpointScopeId.make("scope_finalize");
   const capture = vi.fn(() => Effect.void);
   const refresh = vi.fn(() => Effect.void);
   const projection = {
+    thread: { projectId },
     checkpointScopes: [{ id: scopeId, cwd: "/repo" }],
   } as unknown as OrchestrationV2ThreadProjection;
   const layer = RunFinalization.layer.pipe(

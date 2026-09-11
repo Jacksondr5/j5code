@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
+import * as ServerConfig from "../../../config.ts";
 import * as GitWorkflowService from "../../../git/GitWorkflowService.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
@@ -197,6 +198,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "archive_agent",
         "clear_own_ask",
         "delete_scheduled_task",
+        "list_artifacts",
         "list_participants",
         "list_scheduled_tasks",
         "orchestrator_capabilities",
@@ -214,6 +216,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "preview_status",
         "preview_type",
         "preview_wait_for",
+        "read_artifact",
         "schedule_task",
         "send_message",
         "spawn_agent",
@@ -224,6 +227,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "t3_worktree_handoff",
         "t3_worktree_status",
         "update_scheduled_task",
+        "write_artifact",
       ]);
 
       const restricted = yield* McpSessionRegistry.issueActiveMcpCredential({
@@ -300,5 +304,15 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         expect(tool.inputSchema.type, `inputSchema.type of ${tool.name}`).toBe("object");
       }
     }),
-  ).pipe(Effect.provide(Layer.mergeAll(NodeHttpServer.layerTest, NodeServices.layer))),
+  ).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        NodeHttpServer.layerTest,
+        NodeServices.layer,
+        ServerConfig.layerTest(process.cwd(), { prefix: "j5-mcp-registration-" }).pipe(
+          Layer.provide(NodeServices.layer),
+        ),
+      ),
+    ),
+  ),
 );
