@@ -32,7 +32,7 @@ it("clips a long identity label and keeps its full text in the sidebar tooltip p
     />,
   );
 
-  expect(markup).toContain("block truncate");
+  expect(markup).toContain("block min-w-0 truncate");
   expect(markup).toContain('data-slot="tooltip-trigger"');
   expect(markup).toContain(label);
 });
