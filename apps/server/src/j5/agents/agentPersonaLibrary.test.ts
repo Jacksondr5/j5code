@@ -1090,3 +1090,46 @@ describe("library sources", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
+
+describe("nested source folders", () => {
+  it.effect("loads definitions from subfolders in sorted order and skips dot-directories", () =>
+    Effect.gen(function* () {
+      const { library, fs, path, folder, write } = yield* fixture;
+      yield* write("z-top.yaml", { ...custom, id: "top" });
+      yield* fs.makeDirectory(path.join(folder, "team-b", "deep"), { recursive: true });
+      yield* fs.makeDirectory(path.join(folder, "team-a"), { recursive: true });
+      yield* fs.makeDirectory(path.join(folder, ".git"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(folder, "team-a", "agent.yaml"),
+        yaml({ ...custom, id: "team-a-agent" }),
+      );
+      yield* fs.writeFileString(
+        path.join(folder, "team-b", "deep", "agent.yaml"),
+        yaml({ ...custom, id: "team-b-agent" }),
+      );
+      yield* fs.writeFileString(
+        path.join(folder, ".git", "agent.yaml"),
+        yaml({ ...custom, id: "ignored" }),
+      );
+      yield* fs.writeFileString(path.join(folder, "team-a", "README.md"), "docs");
+      assert.deepEqual(
+        (yield* library.load()).map(({ id }) => id),
+        ["team-a-agent", "team-b-agent", "top"],
+      );
+      assert.equal(
+        (yield* library.catalog()).sourcePaths.get("team-b-agent"),
+        path.join(folder, "team-b", "deep", "agent.yaml"),
+      );
+      assert.deepEqual(
+        (yield* library.sources()).folders.map(({ definitionCount }) => definitionCount),
+        [3],
+      );
+      // Duplicate ids across subfolders still fail rather than picking a winner.
+      yield* fs.writeFileString(
+        path.join(folder, "team-b", "copy.yaml"),
+        yaml({ ...custom, id: "team-a-agent" }),
+      );
+      assert.include(String(yield* library.load().pipe(Effect.flip)), "Duplicate persona id");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
