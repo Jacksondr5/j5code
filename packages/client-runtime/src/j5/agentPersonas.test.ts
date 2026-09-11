@@ -12,6 +12,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   prepareAgentPersonaImport,
   importAgentPersonasWithConfirmation,
+  agentPersonaDrift,
   agentPersonaDuplicateDraft,
   agentPersonaIdError,
   agentPersonaIdFromName,
@@ -568,4 +569,17 @@ it("prefills a duplicate with the source content and a fresh name and ID", () =>
       { driver: "claudeAgent", model: "claude-opus-5", reasoningEffort: "high" },
     ],
   });
+});
+
+it("reports drift only when both the snapshot and the current definition carry digests", () => {
+  const persona = { ...catalog.personas[0]!, definitionDigest: "a".repeat(64) };
+  const listed = { personas: [persona] };
+  const assignment = { personaId: persona.personaId, definitionDigest: "a".repeat(64) };
+  expect(agentPersonaDrift(assignment, listed)).toBe("current");
+  expect(agentPersonaDrift({ ...assignment, definitionDigest: "b".repeat(64) }, listed)).toBe(
+    "changed",
+  );
+  expect(agentPersonaDrift({ personaId: persona.personaId }, listed)).toBe("unknown");
+  expect(agentPersonaDrift(assignment, { personas: [] })).toBe("unknown");
+  expect(agentPersonaDrift(assignment, null)).toBe("unknown");
 });

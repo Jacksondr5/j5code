@@ -161,6 +161,8 @@ export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
   imported: Schema.optional(Schema.Boolean),
   /** A source or bundled definition the user removed; it stays listed so it can be restored. */
   removed: Schema.optional(Schema.Boolean),
+  /** Content digest of the current definition; compared with launch snapshots to show drift. */
+  definitionDigest: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
   editable: Schema.optional(AgentPersonaEditableDetails),
   definitionVersion: PositiveInt,
   displayName: TrimmedNonEmptyString,
