@@ -16,9 +16,11 @@ Delivered: public fork `Jacksondr5/j5code` (`j5/main` @ `e7597dac8`), pnpm/fnm/R
 
 Spawn peer agents, communication layer, inbox, communication graph. Steal targets: Traycer's typed silence (7-reason taxonomy), thread-scoped idempotent responseIds, broker-owns-delivery/store-owns-identity split, Communication Graph (exactly-once, gap-free, playback). Base: v2's Orchestrator MCP toolkit pattern + `ThreadManagementService`.
 
-## 3. Agent roles / types
+## 3. Agent roles / types _(definition contract revised; implementation stack under review)_
 
-Define agent types, easily spawnable, configurable prompts, "soul" (SOUL.md-style identity). Prior art: Claude `.claude/agents/*.md`, Traycer role claims (runtime dedup half), T3 v2 role labels (one-sentence prompt prefix). The _definition layer_ is ours alone — no one has it.
+User-authored, portable Role definitions loaded from folders, with configurable identity and instructions. Personas are the current implementation of Roles; the eleven provided definitions are examples, not a fixed product methodology.
+
+[Contract and delivery boundaries](product/agent-personas/). PR #75 covers documentation. The dependent stack implements the library, environment routing, durable assignment, provider-policy translation, and informational Settings. A local implementation or passing test does not mark a phase merged. In-app editing, direct human selection, library git controls, skill allowlists, posture, drift indicators, output validation, and diagnostic/publication operations remain follow-up work. See [Roles](product/features/roles.md) for the product direction.
 
 ## 4. PR / Agent dashboard _(scope expanded by Jackson; 4a PR pane opening 2026-08-17 for human engineers)_
 
