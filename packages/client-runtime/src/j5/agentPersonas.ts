@@ -278,3 +278,35 @@ export async function importAgentPersonasWithConfirmation(
 
 export const AGENT_PERSONA_IMPORT_CONFIRMATION_MESSAGE =
   "Turn off agents you don’t want to replace.";
+
+export const AGENT_PERSONA_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+
+/** Suggest a stable ID from a display name: lowercase, hyphenated, starting with a letter. */
+export function agentPersonaIdFromName(name: string): string {
+  const slug = name
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug === "" ? "" : /^[a-z]/.test(slug) ? slug : `agent-${slug}`;
+}
+
+/** Human-readable reason an ID cannot be used, or null when it is acceptable. */
+export function agentPersonaIdError(id: string): string | null {
+  if (id.trim() === "") return "Enter an ID.";
+  if (!AGENT_PERSONA_ID_PATTERN.test(id))
+    return "Use lowercase letters, digits, and single hyphens, starting with a letter.";
+  return null;
+}
+
+/** First advertised model per harness, so a new agent starts with a launchable route. */
+export function defaultAgentPersonaModelRoute(
+  providers: ReadonlyArray<ServerProvider>,
+): [AgentPersonaModelTarget, AgentPersonaModelTarget] | null {
+  const available = agentPersonaModelChoices(providers, []).filter(({ available }) => available);
+  const primary = available[0];
+  if (primary === undefined) return null;
+  const fallback =
+    available.find(({ target }) => target.driver !== primary.target.driver) ?? primary;
+  return [primary.target, fallback.target];
+}

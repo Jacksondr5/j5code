@@ -45,5 +45,9 @@ export function createAgentPersonaEnvironmentAtoms<R, E>(
       label: "environment-data:j5-agent-personas:restore-source",
       tag: J5_AGENT_PERSONA_WS_METHODS.restoreSourceAgentPersona,
     }),
+    createAgentPersona: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:j5-agent-personas:create",
+      tag: J5_AGENT_PERSONA_WS_METHODS.createAgentPersona,
+    }),
   };
 }

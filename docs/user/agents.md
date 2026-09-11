@@ -15,7 +15,9 @@ The right-panel view is available in the web and desktop clients.
 
 Open **Settings → Agents** on web, desktop, or mobile to see reusable personas in a connected environment. Select an environment to inspect its library and available model routes. Personas can be authored in folders and shared through git; supplied examples are starting points you can customize.
 
-To add your own definitions:
+To create a personal agent without writing a file, use **Create agent** beside **Scoped agents**. Give it a name, a stable ID for `@agent:` mentions, a one-line description, markdown instructions, a runtime policy, and primary and fallback models. The agent is stored in the selected environment as an imported definition, so it can be edited, switched off, or removed like any import. Instructions describe behavior; only the runtime policy is enforced.
+
+To import definitions written as files:
 
 1. Open **Settings → Agents** and select the destination environment.
 2. Use **Import** beside **Scoped agents**. Choose **Folder** to include all YAML definitions (`.yaml` or `.yml`) in that folder and its subfolders, or **Import → Agent file** to select one YAML file. Other files are ignored. Each file must contain one agent definition with its own unique ID.

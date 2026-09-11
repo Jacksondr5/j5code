@@ -1,10 +1,3 @@
-import { useAtomValue } from "@effect/atom-react";
-import {
-  AGENT_PERSONA_POLICY_OPTIONS,
-  AGENT_PERSONA_HARNESSES,
-  agentPersonaModelChoices,
-  agentPersonaModelChoiceId,
-} from "@t3tools/client-runtime/j5/agent-personas";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { AgentPersonaEditInput, EnvironmentId } from "@t3tools/contracts";
 import { useState } from "react";
@@ -12,10 +5,9 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View } fr
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
-import { ControlPillMenu } from "../../components/ControlPill";
-import { agentPersonaEnvironment } from "./agentPersonaAtoms";
-import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { AgentRoutePolicyFields } from "./AgentDefinitionFields";
+import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 
 export function AgentEditorModal(props: {
   environmentId: EnvironmentId;
@@ -26,17 +18,6 @@ export function AgentEditorModal(props: {
   const [draft, setDraft] = useState(props.initial);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const providers = useAtomValue(serverEnvironment.providersValueAtom(props.environmentId));
-  const choices = agentPersonaModelChoices(providers ?? [], [
-    ...props.initial.modelRoute,
-    ...draft.modelRoute,
-  ]);
-  const modelGroups = AGENT_PERSONA_HARNESSES.map((harness) => ({
-    ...harness,
-    models: choices.filter(
-      ({ target, available }) => available && target.driver === harness.driver,
-    ),
-  })).filter(({ models }) => models.length > 0);
   const save = useAtomCommand(agentPersonaEnvironment.editImportedAgentPersona, {
     reportFailure: false,
   });
@@ -113,88 +94,13 @@ export function AgentEditorModal(props: {
                 onChangeText={(description) => setDraft({ ...draft, description })}
               />
             </View>
-            <EditorChoice
-              label="Runtime policy"
-              value={draft.authorityPolicy}
+            <AgentRoutePolicyFields
+              environmentId={props.environmentId}
+              value={draft}
+              retainRoute={props.initial.modelRoute}
               disabled={saving}
-              choices={AGENT_PERSONA_POLICY_OPTIONS}
-              onChange={(value) => {
-                const policy = AGENT_PERSONA_POLICY_OPTIONS.find((item) => item.value === value);
-                if (policy) setDraft({ ...draft, authorityPolicy: policy.value });
-              }}
+              onChange={(next) => setDraft({ ...draft, ...next })}
             />
-            {draft.modelRoute.map((target, index) => {
-              const label = index === 0 ? "Primary model" : "Fallback model";
-              const selected = choices.find(({ id }) => id === agentPersonaModelChoiceId(target));
-              const updateTarget = (next: typeof target) =>
-                setDraft({
-                  ...draft,
-                  modelRoute:
-                    index === 0 ? [next, draft.modelRoute[1]] : [draft.modelRoute[0], next],
-                });
-              return (
-                <View key={label} className="gap-3 rounded-xl border border-border p-3">
-                  <View className="flex-row items-start gap-2">
-                    <View className="min-w-0 flex-1 gap-2">
-                      <Text className="text-sm font-t3-medium">{label}</Text>
-                      <ControlPillMenu
-                        actions={modelGroups.map((harness) => {
-                          const { models } = harness;
-                          return {
-                            id: harness.driver,
-                            title: harness.label,
-                            attributes: {
-                              disabled: saving || !models.some(({ efforts }) => efforts.length > 0),
-                            },
-                            subactions: models.map(({ id, modelLabel, efforts }) => ({
-                              id,
-                              title: modelLabel,
-                              state: id === agentPersonaModelChoiceId(target) ? "on" : "off",
-                              attributes: { disabled: saving || efforts.length === 0 },
-                            })),
-                          };
-                        })}
-                        onPressAction={({ nativeEvent }) => {
-                          const choice = choices.find(({ id }) => id === nativeEvent.event);
-                          if (!saving && choice?.available && choice.efforts.length > 0)
-                            updateTarget({
-                              ...choice.target,
-                              reasoningEffort: choice.efforts.includes(target.reasoningEffort)
-                                ? target.reasoningEffort
-                                : choice.target.reasoningEffort,
-                            });
-                        }}
-                      >
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={label}
-                          disabled={saving}
-                          className="rounded-xl border border-border px-3 py-3"
-                        >
-                          <Text numberOfLines={1}>{selected?.label}</Text>
-                        </Pressable>
-                      </ControlPillMenu>
-                    </View>
-                    <View className="w-28">
-                      <EditorChoice
-                        label="Reasoning"
-                        accessibilityLabel={`${label} reasoning`}
-                        value={target.reasoningEffort}
-                        disabled={saving || !selected?.efforts.length}
-                        choices={(selected?.efforts ?? []).map((value) => ({
-                          value,
-                          label: value,
-                        }))}
-                        onChange={(reasoningEffort) => updateTarget({ ...target, reasoningEffort })}
-                      />
-                    </View>
-                  </View>
-                </View>
-              );
-            })}
-            <Text className="text-xs text-foreground-muted">
-              Model availability and runtime policy support are checked for each launch.
-            </Text>
             {error ? (
               <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
                 {error}
@@ -214,63 +120,5 @@ export function AgentEditorModal(props: {
         </KeyboardAvoidingView>
       </SafeAreaView>
     </Modal>
-  );
-}
-
-function EditorChoice(props: {
-  label: string;
-  accessibilityLabel?: string;
-  value: string;
-  disabled: boolean;
-  choices: ReadonlyArray<{ value: string; label: string }>;
-  onChange: (value: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <View className="gap-2">
-      <Text className="text-sm font-t3-medium">{props.label}</Text>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={props.accessibilityLabel ?? props.label}
-        accessibilityState={{ expanded, disabled: props.disabled }}
-        disabled={props.disabled}
-        className="rounded-xl border border-border px-3 py-3"
-        onPress={() => setExpanded(!expanded)}
-      >
-        <Text>
-          {props.choices.find(({ value }) => value === props.value)?.label ?? props.value}
-        </Text>
-      </Pressable>
-      {expanded ? (
-        <ScrollView
-          nestedScrollEnabled
-          keyboardShouldPersistTaps="handled"
-          style={{ maxHeight: 200 }}
-          className="rounded-xl border border-border"
-        >
-          {props.choices.map((choice) => (
-            <Pressable
-              key={choice.value}
-              accessibilityRole="radio"
-              accessibilityState={{ checked: props.value === choice.value }}
-              disabled={props.disabled}
-              className="border-b border-border-subtle px-3 py-3"
-              onPress={() => {
-                props.onChange(choice.value);
-                setExpanded(false);
-              }}
-            >
-              <Text
-                className={
-                  props.value === choice.value ? "font-t3-semibold text-primary" : "text-foreground"
-                }
-              >
-                {choice.label}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      ) : null}
-    </View>
   );
 }

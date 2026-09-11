@@ -12,6 +12,9 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   prepareAgentPersonaImport,
   importAgentPersonasWithConfirmation,
+  agentPersonaIdError,
+  agentPersonaIdFromName,
+  defaultAgentPersonaModelRoute,
   agentPersonaModelChoices,
   presentAgentPersonaAssignment,
   presentAgentPersonaCatalog,
@@ -474,4 +477,67 @@ it("presents removed source agents as restorable and never launchable", () => {
     route: "Removed from this library",
   });
   expect(presentAgentPersonaCatalog({ personas: [persona] })[0]?.removed).toBe(false);
+});
+
+const provider = (
+  driver: "codex" | "claudeAgent",
+  instanceId: string,
+  models: ReadonlyArray<string>,
+  optionId: "reasoningEffort" | "effort",
+): ServerProvider => ({
+  instanceId: ProviderInstanceId.make(instanceId),
+  driver: ProviderDriverKind.make(driver),
+  enabled: true,
+  installed: true,
+  version: null,
+  status: "ready",
+  auth: { status: "authenticated" },
+  checkedAt: "2026-09-10T00:00:00.000Z",
+  availability: "available",
+  slashCommands: [],
+  skills: [],
+  models: models.map((slug) => ({
+    slug,
+    name: slug,
+    isCustom: false,
+    capabilities: {
+      optionDescriptors: [
+        {
+          id: optionId,
+          label: "Reasoning",
+          type: "select",
+          options: [
+            { id: "medium", label: "Medium" },
+            { id: "high", label: "High" },
+          ],
+        },
+      ],
+    },
+  })),
+});
+
+describe("personal agent authoring", () => {
+  it("derives stable IDs from names and explains invalid ones", () => {
+    expect(agentPersonaIdFromName("  Team Researcher! ")).toBe("team-researcher");
+    expect(agentPersonaIdFromName("2nd Reviewer")).toBe("agent-2nd-reviewer");
+    expect(agentPersonaIdFromName("---")).toBe("");
+    expect(agentPersonaIdError("team-researcher")).toBeNull();
+    expect(agentPersonaIdError("")).toBe("Enter an ID.");
+    expect(agentPersonaIdError("Team Researcher")).toMatch(/lowercase/);
+    expect(agentPersonaIdError("-lead")).toMatch(/starting with a letter/);
+  });
+
+  it("picks a launchable default route and prefers a second harness for the fallback", () => {
+    expect(defaultAgentPersonaModelRoute([])).toBeNull();
+    const providers = [
+      provider("codex", "codex", ["gpt-5.6-terra"], "reasoningEffort"),
+      provider("claudeAgent", "claude", ["claude-opus-5"], "effort"),
+    ];
+    expect(defaultAgentPersonaModelRoute(providers)).toEqual([
+      { driver: "claudeAgent", model: "claude-opus-5", reasoningEffort: "high" },
+      { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
+    ]);
+    const single = defaultAgentPersonaModelRoute([providers[0]!]);
+    expect(single?.[0]).toEqual(single?.[1]);
+  });
 });

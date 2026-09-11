@@ -6,6 +6,7 @@ import {
   AGENT_PERSONA_IMPORT_MAX_BYTES,
   AGENT_PERSONA_IMPORT_MAX_FILES,
   type AgentPersonaImportInput,
+  type AgentPersonaCreateInput,
   type AgentPersonaEditInput,
   type OrchestrationV2AgentPersonaAssignment,
 } from "@t3tools/contracts";
@@ -321,6 +322,52 @@ export function createAgentPersonaLibrary(storage?: {
     );
   }, importPermit.withPermit);
 
+  /** Personal agents become imported definitions: editable, switchable, and removable like any import. */
+  const createPersona = Effect.fn("AgentPersonaLibrary.createPersona")(function* (
+    input: AgentPersonaCreateInput,
+  ) {
+    if (storage === undefined)
+      return yield* new AgentPersonaLibraryError({
+        message: "Persona import storage is unavailable.",
+      });
+    const current = yield* catalog();
+    if (
+      current.definitions.some(({ id }) => id === input.id) ||
+      current.removedSources.some(({ id }) => id === input.id)
+    ) {
+      return yield* new AgentPersonaLibraryError({
+        message: `An agent with the ID "${input.id}" already exists. Choose another ID.`,
+      });
+    }
+    const definition = yield* Effect.try(() =>
+      decodeAgentPersonaDefinition({
+        id: input.id,
+        version: 1,
+        displayName: input.displayName,
+        description: input.description,
+        instructions: input.instructions,
+        acceptedInput: "Ordinary prompts and supporting evidence",
+        artifacts: ["Response"],
+        inputArtifacts: [],
+        outputArtifact: "Response",
+        authority: {
+          defaultPolicy: input.authorityPolicy,
+          allowedPolicies: [input.authorityPolicy],
+        },
+        modelRoute: input.modelRoute,
+      }),
+    ).pipe(
+      Effect.mapError(
+        (cause) => new AgentPersonaLibraryError({ message: "Invalid agent details.", cause }),
+      ),
+    );
+    const encoded = yield* encodeDefinition(definition);
+    if (new TextEncoder().encode(encoded).byteLength > AGENT_PERSONA_IMPORT_MAX_BYTES)
+      return yield* new AgentPersonaLibraryError({ message: "Agent definition exceeds 64 KiB." });
+    yield* writeImports([...(yield* readImports()), { ...definition, enabled: true }]);
+    return { personaId: definition.id };
+  }, importPermit.withPermit);
+
   const setImportedEnabled = Effect.fn("AgentPersonaLibrary.setImportedEnabled")(function* (
     id: string,
     enabled: boolean,
@@ -447,6 +494,7 @@ export function createAgentPersonaLibrary(storage?: {
     load,
     catalog,
     importFiles,
+    createPersona,
     editImported,
     setImportedEnabled,
     removeImported,

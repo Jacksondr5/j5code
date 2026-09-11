@@ -1,8 +1,9 @@
 import { toastManager } from "../../components/ui/toast";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { AgentImportConflictSelection } from "./AgentImportConflictSelection";
+import { AgentCreateDialog } from "./AgentCreateDialog";
 import { AgentEditorDialog } from "./AgentEditorDialog";
-import { ChevronDownIcon, PencilIcon, Trash2Icon, Undo2Icon } from "lucide-react";
+import { ChevronDownIcon, PencilIcon, PlusIcon, Trash2Icon, Undo2Icon } from "lucide-react";
 import {
   prepareAgentPersonaImport,
   importAgentPersonasWithConfirmation,
@@ -67,6 +68,7 @@ export function AgentLibrarySettings() {
   const folderInput = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<{
     environmentId: EnvironmentId;
     initial: AgentPersonaEditInput;
@@ -273,29 +275,39 @@ export function AgentLibrarySettings() {
       <SettingsSection
         title="Scoped agents"
         headerAction={
-          <Menu>
-            <MenuTrigger
-              render={<Button variant="outline" />}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
               disabled={busy || effectiveEnvironmentId === null}
+              onClick={() => setCreating(true)}
             >
-              Import
-              <ChevronDownIcon aria-hidden="true" className="size-4" />
-            </MenuTrigger>
-            <MenuPopup align="end">
-              <MenuItem
+              <PlusIcon aria-hidden="true" className="size-4" />
+              Create agent
+            </Button>
+            <Menu>
+              <MenuTrigger
+                render={<Button variant="outline" />}
                 disabled={busy || effectiveEnvironmentId === null}
-                onClick={() => fileInput.current?.click()}
               >
-                Agent file
-              </MenuItem>
-              <MenuItem
-                disabled={busy || effectiveEnvironmentId === null}
-                onClick={() => folderInput.current?.click()}
-              >
-                Folder
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
+                Import
+                <ChevronDownIcon aria-hidden="true" className="size-4" />
+              </MenuTrigger>
+              <MenuPopup align="end">
+                <MenuItem
+                  disabled={busy || effectiveEnvironmentId === null}
+                  onClick={() => fileInput.current?.click()}
+                >
+                  Agent file
+                </MenuItem>
+                <MenuItem
+                  disabled={busy || effectiveEnvironmentId === null}
+                  onClick={() => folderInput.current?.click()}
+                >
+                  Folder
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
+          </div>
         }
       >
         {effectiveEnvironmentId === null ? (
@@ -384,6 +396,17 @@ export function AgentLibrarySettings() {
           ))
         )}
       </SettingsSection>
+      {creating && effectiveEnvironmentId ? (
+        <AgentCreateDialog
+          environmentId={effectiveEnvironmentId}
+          onClose={() => setCreating(false)}
+          onCreated={(displayName) => {
+            setCreating(false);
+            toastManager.add({ type: "success", title: `Created ${displayName}` });
+            catalog.refresh();
+          }}
+        />
+      ) : null}
       {editing ? (
         <AgentEditorDialog
           key={`${editing.environmentId}:${editing.initial.personaId}`}
