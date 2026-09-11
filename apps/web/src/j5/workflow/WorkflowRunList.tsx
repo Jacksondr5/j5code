@@ -5,6 +5,7 @@ import type { BoardCard } from "@j5/workflow-contracts/observability";
 import { Button } from "../../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { memo, useState } from "react";
+import { cn } from "../../lib/utils";
 
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { exactWorkflowTime, phaseLabel, relativeWorkflowTime } from "./presentation";
@@ -51,18 +52,29 @@ const WorkflowRunRow = memo(function WorkflowRunRow({
     : undefined;
   return (
     <button
-      className={`block w-full rounded border p-3 text-left ${selected ? "bg-muted" : ""}`}
+      className={cn(
+        "group relative block w-full rounded-xl border p-3.5 text-left transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        selected
+          ? "border-primary/60 bg-muted/60 shadow-xs"
+          : "border-border/70 bg-card/40 hover:border-border hover:bg-muted/30 hover:shadow-xs",
+      )}
       onClick={() => onSelect(item.id, item.squadronId)}
     >
-      <strong className="line-clamp-2">{item.title}</strong>
-      <span className="mt-2 block">
+      <div className="flex items-start justify-between gap-2">
+        <strong className="line-clamp-2 text-sm font-semibold leading-snug text-foreground group-hover:text-foreground">
+          {item.title}
+        </strong>
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
         <Status status={item.status} />
-      </span>
-      <span className="mt-1 block text-xs text-muted-foreground">
-        {phaseLabel(item.phase)} · <WorkflowTimestamp value={item.updatedAt} />
-      </span>
+      </div>
+      <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground/70">{phaseLabel(item.phase)}</span>
+        <span aria-hidden>·</span>
+        <WorkflowTimestamp value={item.updatedAt} />
+      </div>
       {card && definition ? (
-        <span className="mt-2 block">
+        <span className="mt-2.5 block">
           <PhaseStrip
             currentPhase={card.phase}
             phases={definition.phases}
@@ -108,12 +120,12 @@ export function WorkflowRunList({
   readonly definitions?: readonly WorkflowDefinitionPresentation[];
 }) {
   return (
-    <nav aria-label="Workflows" className="space-y-2">
+    <nav aria-label="Playbooks" className="space-y-2">
       {!hasError && runs.length === 0 && (
         <div className="rounded border p-4 text-sm">
-          <p>No workflows in this scope.</p>
+          <p>No playbooks in this scope.</p>
           <Button className="mt-3" size="sm" onClick={onCreate}>
-            New workflow
+            New playbook
           </Button>
         </div>
       )}

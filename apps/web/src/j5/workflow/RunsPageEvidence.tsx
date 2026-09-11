@@ -8,6 +8,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { lazy, Suspense, useState } from "react";
 
 import { useWorkflowQuery, workflowArtifactAtom } from "./queries";
+import { Badge } from "../../components/ui/badge";
 import { expectedNextStep, phaseLabel, statusPresentation } from "./presentation";
 import { PhaseStrip, phaseStripModel } from "./phaseStrip";
 
@@ -29,10 +30,12 @@ export function EvidenceDocument({ content }: { readonly content: unknown }) {
 export function Status({ status }: { status: RunDetail["status"] }) {
   const presentation = statusPresentation[status];
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium">
-      <span aria-hidden>{presentation.marker}</span>
+    <Badge size="sm" variant={presentation.variant} className="gap-1 font-medium tracking-tight">
+      <span aria-hidden className="text-[10px] leading-none opacity-80">
+        {presentation.marker}
+      </span>
       {presentation.label}
-    </span>
+    </Badge>
   );
 }
 
@@ -71,7 +74,7 @@ export function Progress({
     ? phaseStripModel(definition.phases, run.visits, run.phase, run.status)
     : null;
   return (
-    <section className="rounded-lg border p-4" aria-label="Workflow progress">
+    <section className="rounded-lg border p-4" aria-label="Playbook progress">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="font-semibold">{phaseLabel(run.phase)}</h3>

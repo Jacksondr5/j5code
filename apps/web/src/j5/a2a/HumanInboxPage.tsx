@@ -26,6 +26,7 @@ import { answerHumanExchange, listHumanInbox, type HumanInboxItem } from "./huma
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
 import { phaseLabel, statusPresentation } from "../workflow/presentation";
 import { useWorkflowQuery, workflowListAtom } from "../workflow/queries";
+import { useSquadronDirectory } from "../squadron/SquadronDirectory";
 
 interface HumanInboxAnswerAttempt {
   readonly message: string;
@@ -159,10 +160,14 @@ function OpenInboxItem({
   const urgency = urgencyPresentation[item.urgency];
   const openDuration = formatElapsedDurationLabel(item.openedAt);
   return (
-    <li className="border-b border-border/70 last:border-b-0">
+    <li className="transition-colors hover:bg-muted/30">
       <details className="group/details">
-        <summary className="flex cursor-pointer list-none items-start gap-3 px-1 py-4 outline-hidden marker:hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:gap-4 [&::-webkit-details-marker]:hidden">
-          <Badge className="mt-0.5 uppercase tracking-wide" variant={urgency.variant}>
+        <summary className="flex cursor-pointer list-none items-start gap-3 p-4 outline-hidden marker:hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:gap-4 [&::-webkit-details-marker]:hidden">
+          <Badge
+            className="mt-0.5 uppercase tracking-wide font-medium"
+            size="sm"
+            variant={urgency.variant}
+          >
             {urgency.label}
           </Badge>
           <div className="min-w-0 flex-1">
@@ -181,7 +186,7 @@ function OpenInboxItem({
                 </>
               ) : null}
             </div>
-            <h2 className="mt-1 break-words text-pretty text-base font-semibold leading-snug text-foreground">
+            <h2 className="mt-1.5 break-words text-pretty text-sm font-semibold leading-snug text-foreground">
               {item.intent}
             </h2>
           </div>
@@ -190,7 +195,7 @@ function OpenInboxItem({
             className="mt-1 size-4 shrink-0 text-muted-foreground transition-transform duration-150 group-open/details:rotate-90"
           />
         </summary>
-        <div className="border-t border-border/50 px-1 pb-5 pt-4 sm:ms-24 sm:px-0 sm:pe-1">
+        <div className="border-t border-border/50 px-4 pb-5 pt-4 sm:ms-20 sm:px-4 sm:pe-4">
           <p className="max-w-[72ch] whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
             {item.message}
           </p>
@@ -211,6 +216,7 @@ function OpenInboxItem({
               <Button
                 disabled={pendingExchangeId !== null || answerText.length === 0}
                 onClick={() => answer(item)}
+                size="sm"
                 type="button"
               >
                 {pendingExchangeId === item.exchangeId ? "Delivering…" : "Answer"}
@@ -234,29 +240,38 @@ function AnsweredShelf({
 }) {
   if (items.length === 0) return null;
   return (
-    <details className="group/shelf border-t border-border pt-4">
-      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md py-2 text-sm font-medium text-muted-foreground outline-hidden marker:hidden hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+    <details className="group/shelf mt-8 border-t border-border/70 pt-6">
+      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md py-1.5 text-sm font-medium text-muted-foreground outline-hidden marker:hidden hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
         <ChevronRightIcon
           aria-hidden
           className="size-4 transition-transform duration-150 group-open/shelf:rotate-90"
         />
-        Answered
-        <span className="tabular-nums text-muted-foreground/70">{items.length}</span>
+        <span>Answered</span>
+        <Badge size="sm" variant="secondary" className="tabular-nums">
+          {items.length}
+        </Badge>
       </summary>
-      <ol className="mt-1 divide-y divide-border/60 ps-6">
+      <ol className="mt-3 divide-y divide-border/60 rounded-xl border border-border/70 bg-card/30 overflow-hidden shadow-xs">
         {items.map((item) => {
           const answeredDuration = item.terminalAt
             ? formatElapsedDurationLabel(item.terminalAt)
             : "";
           return (
-            <li className="flex min-w-0 items-start gap-3 py-3" key={item.exchangeId}>
-              <CheckCircle2Icon aria-hidden className="mt-0.5 size-4 shrink-0 text-success" />
-              <div className="min-w-0 flex-1">
-                <p className="break-words text-sm font-medium text-foreground/80">{item.intent}</p>
-                <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {item.senderId} · {item.squadronName}
-                  {` · ${formatAnsweredAgeLabel(answeredDuration)}`}
-                </p>
+            <li
+              className="flex min-w-0 items-center justify-between gap-3 p-3.5 transition-colors hover:bg-muted/30"
+              key={item.exchangeId}
+            >
+              <div className="flex min-w-0 items-start gap-3">
+                <CheckCircle2Icon aria-hidden className="mt-0.5 size-4 shrink-0 text-success" />
+                <div className="min-w-0 flex-1">
+                  <p className="break-words text-sm font-medium text-foreground/90">
+                    {item.intent}
+                  </p>
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {item.senderId} · {item.squadronName}
+                    {` · ${formatAnsweredAgeLabel(answeredDuration)}`}
+                  </p>
+                </div>
               </div>
               <OpenThreadButton
                 environmentAvailable={environmentAvailable}
@@ -274,6 +289,7 @@ function AnsweredShelf({
 export function HumanInboxPage() {
   const navigate = useNavigate();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const { squadrons } = useSquadronDirectory();
   const [personId, setPersonId] = useState<string | null>(null);
   const [items, setItems] = useState<ReadonlyArray<HumanInboxItem>>([]);
   const [answeredItems, setAnsweredItems] = useState<ReadonlyArray<HumanInboxItem>>([]);
@@ -384,7 +400,7 @@ export function HumanInboxPage() {
                 type="button"
                 variant="ghost"
               >
-                <RefreshCwIcon aria-hidden className="size-4" />
+                <RefreshCwIcon aria-hidden className={cn("size-4", loading && "animate-spin")} />
                 Refresh
               </Button>
             </div>
@@ -407,78 +423,153 @@ export function HumanInboxPage() {
             ) : null}
 
             {!loading && error === null && items.length === 0 && workflowCount === 0 ? (
-              <div className="flex min-h-56 flex-col items-center justify-center px-6 py-12 text-center">
-                <span className="flex size-10 items-center justify-center rounded-full bg-success/10 text-success">
+              <div className="mt-12 flex flex-col items-center justify-center rounded-xl border border-dashed border-border/80 p-12 text-center">
+                <span className="flex size-11 items-center justify-center rounded-full bg-success/10 text-success">
                   <InboxIcon aria-hidden className="size-5" />
                 </span>
-                <h2 className="mt-4 text-base font-medium">Nothing is waiting on you</h2>
-                <p className="mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">
-                  New questions and workflow approvals will arrive here.
+                <h2 className="mt-4 text-base font-medium text-foreground">
+                  Nothing is waiting on you
+                </h2>
+                <p className="mt-1.5 max-w-sm text-sm leading-relaxed text-muted-foreground">
+                  New questions and playbook approvals will arrive here.
                 </p>
               </div>
             ) : (
-              <div className="space-y-6">
+              <div className="mt-6 space-y-8">
                 {workflowItems.length > 0 && (
                   <section aria-labelledby="workflow-approvals-heading">
-                    <h2 className="text-sm font-semibold" id="workflow-approvals-heading">
-                      Workflow approvals
-                    </h2>
-                    <ol className="mt-2 divide-y divide-border/70 rounded-md border px-3">
-                      {workflowItems.map((item) => (
-                        <li className="flex items-center justify-between gap-3 py-3" key={item.id}>
-                          <div className="min-w-0">
-                            <p className="truncate font-medium">{item.title}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {statusPresentation[item.status].label} · {phaseLabel(item.phase)}
-                            </p>
-                          </div>
-                          <Button
-                            render={
-                              <Link
-                                to="/runs"
-                                search={{
-                                  runId: item.id,
-                                  squadronId: item.squadronId,
-                                  tab: "overview",
-                                }}
-                                hash="workflow-approval"
-                              />
-                            }
-                            size="sm"
-                            className="shrink-0"
+                    <div className="flex items-center justify-between gap-2 pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <h2
+                          className="text-sm font-semibold tracking-tight text-foreground"
+                          id="workflow-approvals-heading"
+                        >
+                          Playbook approvals
+                        </h2>
+                        <Badge size="sm" variant="secondary" className="tabular-nums">
+                          {workflowCount}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="overflow-hidden rounded-xl border border-border/70 bg-card/40 shadow-xs">
+                      <ol className="divide-y divide-border/60">
+                        {workflowItems.map((item) => {
+                          const elapsed = formatElapsedDurationLabel(item.updatedAt);
+                          const squadron = squadrons.find((s) => s.squadron.id === item.squadronId);
+                          const squadronName = squadron?.squadron.name;
+                          return (
+                            <li
+                              className="flex flex-col gap-3 p-4 transition-colors hover:bg-muted/40 sm:flex-row sm:items-center sm:justify-between"
+                              key={item.id}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                                  <Badge
+                                    size="sm"
+                                    variant="warning"
+                                    className="font-medium uppercase tracking-wide"
+                                  >
+                                    {statusPresentation[item.status]?.label ?? "Needs approval"}
+                                  </Badge>
+                                  <span className="font-medium text-foreground/80">
+                                    {phaseLabel(item.phase)}
+                                  </span>
+                                  {squadronName ? (
+                                    <>
+                                      <span aria-hidden>·</span>
+                                      <span className="truncate">{squadronName}</span>
+                                    </>
+                                  ) : null}
+                                  {elapsed ? (
+                                    <>
+                                      <span aria-hidden>·</span>
+                                      <time className="tabular-nums" dateTime={item.updatedAt}>
+                                        {elapsed === "just now"
+                                          ? "updated just now"
+                                          : `waiting ${elapsed}`}
+                                      </time>
+                                    </>
+                                  ) : null}
+                                </div>
+                                <p className="mt-1.5 break-words text-pretty text-sm font-semibold leading-snug text-foreground">
+                                  {item.title}
+                                </p>
+                              </div>
+                              <Button
+                                render={
+                                  <Link
+                                    to="/runs"
+                                    search={{
+                                      runId: item.id,
+                                      squadronId: item.squadronId,
+                                      tab: "overview",
+                                    }}
+                                    hash="workflow-approval"
+                                  />
+                                }
+                                size="sm"
+                                variant="outline"
+                                className="shrink-0 gap-1.5 self-start sm:self-center"
+                              >
+                                Review evidence
+                                <ArrowUpRightIcon
+                                  aria-hidden
+                                  className="size-3.5 text-muted-foreground"
+                                />
+                              </Button>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                      {workflowCount > workflowItems.length && (
+                        <div className="flex items-center justify-between border-t border-border/50 bg-muted/20 px-4 py-2.5 text-xs text-muted-foreground">
+                          <span>
+                            Showing {workflowItems.length} of {workflowCount} playbook approvals.
+                          </span>
+                          <Link
+                            to="/runs"
+                            search={{ status: "waiting_approval" }}
+                            className="inline-flex items-center gap-1 font-medium text-foreground hover:underline"
                           >
-                            Review evidence
-                          </Button>
-                        </li>
-                      ))}
-                    </ol>
-                    {workflowCount > workflowItems.length && (
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        Showing {workflowItems.length} of {workflowCount} workflow approvals. Open
-                        Workflows for the complete list.
-                      </p>
-                    )}
+                            Open Playbooks
+                            <ArrowUpRightIcon aria-hidden className="size-3" />
+                          </Link>
+                        </div>
+                      )}
+                    </div>
                   </section>
                 )}
-                <section aria-labelledby="agent-questions-heading">
-                  <h2 className="text-sm font-semibold" id="agent-questions-heading">
-                    Agent questions
-                  </h2>
-                  <ol className="mt-2 divide-y divide-border/70">
-                    {items.map((item) => (
-                      <OpenInboxItem
-                        answer={answer}
-                        answerText={answers[item.exchangeId] ?? ""}
-                        environmentAvailable={primaryEnvironmentId !== null}
-                        item={item}
-                        key={item.exchangeId}
-                        onOpenThread={openThread}
-                        pendingExchangeId={pendingExchangeId}
-                        setAnswers={setAnswers}
-                      />
-                    ))}
-                  </ol>
-                </section>
+                {items.length > 0 && (
+                  <section aria-labelledby="agent-questions-heading">
+                    <div className="flex items-center justify-between gap-2 pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <h2
+                          className="text-sm font-semibold tracking-tight text-foreground"
+                          id="agent-questions-heading"
+                        >
+                          Agent questions
+                        </h2>
+                        <Badge size="sm" variant="secondary" className="tabular-nums">
+                          {items.length}
+                        </Badge>
+                      </div>
+                    </div>
+                    <ol className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/70 bg-card/40 shadow-xs">
+                      {items.map((item) => (
+                        <OpenInboxItem
+                          answer={answer}
+                          answerText={answers[item.exchangeId] ?? ""}
+                          environmentAvailable={primaryEnvironmentId !== null}
+                          item={item}
+                          key={item.exchangeId}
+                          onOpenThread={openThread}
+                          pendingExchangeId={pendingExchangeId}
+                          setAnswers={setAnswers}
+                        />
+                      ))}
+                    </ol>
+                  </section>
+                )}
               </div>
             )}
 

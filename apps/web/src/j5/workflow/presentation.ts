@@ -1,15 +1,22 @@
 import type { RunDetail, WorkflowDefinitionPresentation } from "@j5/workflow-contracts";
 
 export const statusPresentation = {
-  running: { label: "Running", marker: "▶" },
-  restarting: { label: "Restarting review", marker: "…" },
-  waiting_approval: { label: "Needs approval", marker: "!" },
-  blocked: { label: "Blocked", marker: "■" },
-  failed: { label: "Failed", marker: "×" },
-  cancelling: { label: "Cancelling", marker: "…" },
-  cancelled: { label: "Cancelled", marker: "—" },
-  completed: { label: "Completed", marker: "✓" },
-} satisfies Record<RunDetail["status"], { label: string; marker: string }>;
+  running: { label: "Running", marker: "▶", variant: "info" as const },
+  restarting: { label: "Restarting review", marker: "…", variant: "warning" as const },
+  waiting_approval: { label: "Needs approval", marker: "!", variant: "warning" as const },
+  blocked: { label: "Blocked", marker: "■", variant: "destructive" as const },
+  failed: { label: "Failed", marker: "×", variant: "error" as const },
+  cancelling: { label: "Cancelling", marker: "…", variant: "secondary" as const },
+  cancelled: { label: "Cancelled", marker: "—", variant: "secondary" as const },
+  completed: { label: "Completed", marker: "✓", variant: "success" as const },
+} satisfies Record<
+  RunDetail["status"],
+  {
+    label: string;
+    marker: string;
+    variant: "default" | "secondary" | "destructive" | "warning" | "success" | "info" | "error";
+  }
+>;
 
 export const phaseLabel = (phase: string) =>
   phase === "checks_approval"
@@ -33,11 +40,13 @@ export function expectedNextStep(run: RunDetail, definition?: WorkflowDefinition
   const phase = definition?.phases.find((item) => item.id === run.phase);
   if (!phase) return "Progress details unavailable for this pinned definition";
   const targets = [...new Set(Object.values(phase.transitions))];
+  const labelFor = (id: string) =>
+    definition?.phases.find((item) => item.id === id)?.label ?? phaseLabel(id);
   if (targets.length === 1)
     return targets[0] === "$complete"
-      ? "Complete the workflow"
-      : `Continue to ${phaseLabel(targets[0]!)}`;
-  return `Next phase depends on the outcome: ${targets.map((item) => (item === "$complete" ? "Complete" : phaseLabel(item))).join(" or ")}`;
+      ? "Complete the playbook"
+      : `Continue to ${labelFor(targets[0]!)}`;
+  return `Next phase depends on the outcome: ${targets.map((item) => (item === "$complete" ? "Complete" : labelFor(item))).join(" or ")}`;
 }
 
 export function failureHeading(run: RunDetail) {
@@ -57,11 +66,11 @@ export function failureHeading(run: RunDetail) {
     case "restart_cleanup_failed":
       return "Reviewer cleanup failed";
     case "transition_unavailable":
-      return "Workflow cannot continue from this outcome";
+      return "Playbook cannot continue from this outcome";
     case "action_failed":
-      return "Workflow action needs attention";
+      return "Playbook action needs attention";
     default:
-      return "Workflow is blocked";
+      return "Playbook is blocked";
   }
 }
 
