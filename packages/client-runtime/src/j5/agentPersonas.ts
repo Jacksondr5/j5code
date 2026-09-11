@@ -7,6 +7,11 @@ import {
 } from "@t3tools/contracts";
 import type {
   AgentPersonaAuthorityPolicy,
+  AgentPersonaFolderGitStatus,
+  AgentPersonaLibraryFolder,
+  AgentPersonaOrigin,
+  AgentPersonaUsage,
+  AgentPersonaUsageEntry,
   AgentPersonaImportInput,
   AgentPersonaImportConflict,
   AgentPersonaDefinitionView,
@@ -35,6 +40,9 @@ export interface AgentPersonaCatalogRow {
   readonly enabled: boolean;
   /** Everything the edit dialog needs except instructions, which it loads on open. */
   readonly edit: Omit<AgentPersonaEditInput, "instructions"> | null;
+  /** Absent from older servers; present entries say where the definition in effect came from. */
+  readonly origin: AgentPersonaOrigin | null;
+  readonly originLabel: string | null;
   readonly displayName: string;
   readonly description: string;
   readonly acceptedInput: string | undefined;
@@ -104,6 +112,8 @@ export function presentAgentPersonaCatalog(
               modelRoute: persona.editable.modelRoute,
             }
           : null,
+      origin: persona.origin ?? null,
+      originLabel: persona.origin ? agentPersonaOriginLabel(persona.origin) : null,
       displayName: persona.displayName,
       description: persona.description,
       acceptedInput: persona.acceptedInput,
@@ -354,3 +364,86 @@ export function agentPersonaDrift(
 
 export const AGENT_PERSONA_DRIFT_MESSAGE =
   "This agent's definition changed after this task launched. The task keeps the definition it started with; start a new task to use the current one.";
+
+/** Short origin for a catalog row; folder origins name the file's parent folder only. */
+export function agentPersonaOriginLabel(origin: AgentPersonaOrigin): string {
+  switch (origin.kind) {
+    case "bundled":
+      return "Bundled example";
+    case "imported":
+      return "Personal";
+    case "folder": {
+      const segments = origin.path.split(/[\\/]+/).filter((segment) => segment !== "");
+      const folder = segments.at(-2);
+      return folder === undefined ? "Folder" : `Folder · ${folder}`;
+    }
+  }
+}
+
+const compactCount = (value: number): string =>
+  value >= 1_000_000
+    ? `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`
+    : value >= 1_000
+      ? `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}k`
+      : String(value);
+
+/** Whole-unit duration such as "45s", "2m 10s", or "1h 5m". */
+export function formatAgentPersonaDuration(milliseconds: number): string {
+  const seconds = Math.round(milliseconds / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+export interface AgentPersonaUsageSummary {
+  readonly line: string;
+  readonly routes: ReadonlyArray<string>;
+}
+
+/** One dense line per agent; absent metrics are left out rather than shown as zero. */
+export function presentAgentPersonaUsage(entry: AgentPersonaUsageEntry): AgentPersonaUsageSummary {
+  const parts = [
+    `${entry.threads} ${entry.threads === 1 ? "task" : "tasks"}`,
+    `${entry.runs} ${entry.runs === 1 ? "run" : "runs"}`,
+  ];
+  if (entry.runs > 0) parts.push(`${entry.completedRuns} completed`, `${entry.failedRuns} failed`);
+  if (entry.averageRunDurationMs !== null)
+    parts.push(`avg ${formatAgentPersonaDuration(entry.averageRunDurationMs)}`);
+  if (entry.inputTokens !== null && entry.outputTokens !== null)
+    parts.push(`${compactCount(entry.inputTokens)} in / ${compactCount(entry.outputTokens)} out`);
+  if (entry.lastLaunchedAt !== null) parts.push(`last ${entry.lastLaunchedAt.slice(0, 10)}`);
+  return {
+    line: parts.join(" · "),
+    routes: entry.routes.map(
+      (route) =>
+        `${providerLabel(route.driver)} · ${route.model} (${route.threads} ${route.threads === 1 ? "task" : "tasks"})`,
+    ),
+  };
+}
+
+export function agentPersonaUsageById(
+  usage: AgentPersonaUsage | null | undefined,
+): ReadonlyMap<string, AgentPersonaUsageEntry> {
+  return new Map((usage?.personas ?? []).map((entry) => [entry.personaId, entry]));
+}
+
+/** The only git prompts the roles spec allows: uncommitted work and a remote that moved on. */
+export function agentPersonaFolderNudges(
+  git: AgentPersonaFolderGitStatus | null,
+): ReadonlyArray<string> {
+  if (git === null) return [];
+  const nudges: string[] = [];
+  if (git.uncommittedChanges)
+    nudges.push("Uncommitted changes in this folder. Commit to share them.");
+  if (git.remoteAhead !== null && git.remoteAhead > 0)
+    nudges.push(
+      `${git.remoteAhead} new ${git.remoteAhead === 1 ? "commit" : "commits"} on the remote. Pull to update this library.`,
+    );
+  return nudges;
+}
+
+export function agentPersonaFolderStatusLabel(folder: AgentPersonaLibraryFolder): string {
+  if (!folder.exists) return "Missing";
+  return `${folder.definitionCount} ${folder.definitionCount === 1 ? "definition" : "definitions"}`;
+}

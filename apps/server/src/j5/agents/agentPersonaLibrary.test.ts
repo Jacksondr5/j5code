@@ -1008,3 +1008,85 @@ describe("reading and editing definitions", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
+
+describe("library sources", () => {
+  it.effect("reports the default folder, its file count, and every folder-loaded origin", () =>
+    Effect.gen(function* () {
+      const { library, write, stateDir, path, fs } = yield* fixture;
+      const before = yield* library.sources();
+      assert.equal(before.configured, false);
+      assert.equal(before.configPath, path.join(stateDir, "agent-personas.json"));
+      assert.deepEqual(before.folders, [
+        {
+          configuredPath: "personas",
+          path: path.join(stateDir, "personas"),
+          exists: false,
+          definitionCount: 0,
+        },
+      ]);
+      assert.equal((yield* library.catalog()).sourcePaths.size, 0);
+
+      yield* write("researcher.yaml", custom);
+      yield* fs.writeFileString(path.join(stateDir, "personas", "notes.md"), "ignored");
+      const after = yield* library.sources();
+      assert.deepEqual(
+        after.folders.map(({ exists, definitionCount }) => ({ exists, definitionCount })),
+        [{ exists: true, definitionCount: 1 }],
+      );
+      assert.equal(
+        (yield* library.catalog()).sourcePaths.get(custom.id),
+        path.join(stateDir, "personas", "researcher.yaml"),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("writes the folder configuration, creating state-directory folders on demand", () =>
+    Effect.gen(function* () {
+      const { library, fs, path, stateDir } = yield* fixture;
+      const team = path.join(stateDir, "..", `${path.basename(stateDir)}-team`);
+      yield* fs.makeDirectory(team);
+      yield* fs.writeFileString(path.join(team, "a.yaml"), yaml({ ...custom, id: "another" }));
+      yield* library.setFolders({ folders: ["personas", team, "personas"] });
+      const sources = yield* library.sources();
+      assert.equal(sources.configured, true);
+      assert.deepEqual(
+        sources.folders.map(({ configuredPath, exists, definitionCount }) => ({
+          configuredPath,
+          exists,
+          definitionCount,
+        })),
+        [
+          { configuredPath: "personas", exists: true, definitionCount: 0 },
+          { configuredPath: team, exists: true, definitionCount: 1 },
+        ],
+      );
+      assert.deepEqual(
+        (yield* library.load()).map(({ id }) => id),
+        ["another"],
+      );
+
+      yield* library.setFolders({ folders: [] });
+      assert.deepEqual(yield* library.load(), []);
+      assert.deepEqual((yield* library.sources()).folders, []);
+      yield* fs.remove(team, { recursive: true });
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects folders that do not exist outside the state directory and non-folders", () =>
+    Effect.gen(function* () {
+      const { library, fs, path, stateDir } = yield* fixture;
+      const missing = path.join(stateDir, "..", `${path.basename(stateDir)}-missing`);
+      assert.include(
+        String(yield* library.setFolders({ folders: [missing] }).pipe(Effect.flip)),
+        "does not exist",
+      );
+      yield* fs.writeFileString(path.join(stateDir, "file.yaml"), yaml(custom));
+      assert.include(
+        String(yield* library.setFolders({ folders: ["file.yaml"] }).pipe(Effect.flip)),
+        "Not a folder",
+      );
+      // A rejected update leaves the configuration untouched.
+      assert.equal((yield* library.sources()).configured, false);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});

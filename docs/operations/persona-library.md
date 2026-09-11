@@ -26,7 +26,11 @@ To select other folders, create `<stateDir>/agent-personas.json`:
 }
 ```
 
-Relative paths resolve from the state directory. Explicit configuration replaces the default/example catalog. An empty `folders` list disables source definitions; client imports remain available. The server never clones a repository or performs git operations; maintain the folders using an editor and git as desired.
+Relative paths resolve from the state directory. Explicit configuration replaces the default/example catalog. An empty `folders` list disables source definitions; client imports remain available. The server never clones, fetches, pulls, or commits; maintain the folders using an editor and git as desired.
+
+Settings → Agents → **Library sources** edits the same file through `getAgentPersonaLibrarySources` (orchestration-read) and `setAgentPersonaLibraryFolders` (orchestration-operate). The read RPC reports each configured entry with its resolved path, whether it exists, and a count of immediate YAML files, plus a read-only git summary when `git` is on the server's PATH and the folder is inside a repository: the repository root, whether `git status -- .` shows uncommitted changes under that folder, and how many commits the tracked upstream is ahead (from the last fetch; the server does not fetch). The write RPC deduplicates entries, creates missing folders that resolve inside the state directory, rejects missing folders elsewhere and any non-directory before writing, and replaces the file atomically under the shared mutation permit. The catalog marks every entry's origin as `bundled`, `imported`, or `folder` with its source file path.
+
+`getAgentPersonaUsage` (orchestration-read) aggregates saved-agent history from the existing orchestration projections at request time: threads whose payload carries an `agentPersonaAssignment` (deleted threads excluded, archived included), their runs by status with the mean duration of completed runs, per-turn provider token reports summed per agent, and the pinned driver/model routes with thread counts. Nothing is persisted; the queries read `payload_json` through SQLite's `json_extract` on the projection tables, so they cost a scan of those tables per Settings open and should not be polled.
 
 Each immediate YAML file contains one definition. YAML uses version 1.2; duplicate keys, multiple documents, custom tags, and aliases are rejected. JSON definition files are ignored in source folders and rejected on import; only the internal import store, configuration, and snapshots remain JSON. For example, `agent.yaml`:
 
@@ -64,4 +68,4 @@ Reopen Settings → Agents to read the updated catalog, or launch a new persona 
 
 Changing the configuration or a source file does not modify running tasks. Every new assignment records a content digest and has an immutable definition snapshot under `<stateDir>/agent-persona-snapshots`. Back up and restore that directory alongside the event database. A missing or corrupt snapshot blocks reuse rather than silently substituting current instructions. Do not prune snapshots while tasks or their forks may reference them. Ordinary non-persona tasks are unaffected by library errors.
 
-In-app editing, direct human persona selection, and library git controls are follow-up work.
+Direct human persona selection is available from the composer; in-app git commit, push, and pull remain out of scope by design (the app surfaces status only and opens the folder in an editor).
