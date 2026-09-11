@@ -11,6 +11,12 @@ Agent definitions are separate from runtime activity, so only agents and workflo
 
 The right-panel view is available in the web and desktop clients.
 
+## Starting a task as an agent
+
+In a new task, the composer offers an **Agent** control beside the model picker whenever the selected environment has launchable agents. Choose one and the model and reasoning controls are replaced by the agent's name and its fixed route; use the **×** control to go back to a regular task before sending. On send, the server resolves the agent's route and pins it to the thread, so the thread shows the same agent chip afterwards. If the agent's definition changes later, the chip shows **Changed**; the running task keeps the definition it started with, and a new task uses the current one.
+
+Threads launched as an agent show the agent beside their home in the thread list, and delegated children in the Agents panel show which saved agent ran them.
+
 ## Persona library
 
 Open **Settings → Agents** on web, desktop, or mobile to see reusable personas in a connected environment. Select an environment to inspect its library and available model routes. Personas can be authored in folders and shared through git; supplied examples are starting points you can customize.
