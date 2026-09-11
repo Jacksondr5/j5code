@@ -230,7 +230,7 @@ export function decide(
     if (
       previous.status !== "blocked" ||
       previous.failureCategory !== "action_deadline_expired" ||
-      !["plan_review", "code_review"].includes(previous.phase)
+      !phaseById(definition, previous.phase).capabilities?.includes("restart")
     )
       throw new Conflict("Only a timed-out review phase can be restarted");
     if (event.targetDefinitionHash !== definition.hash)

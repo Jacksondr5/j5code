@@ -86,6 +86,7 @@ const reviewDefinition: Definition = {
       ],
       transitions: { ok: "plan_approval" },
       maxVisits: 3,
+      capabilities: ["restart"],
     },
     {
       id: "plan_approval",

@@ -84,7 +84,7 @@ export function groupTimelineLanes(entries: readonly TimelineDisplayEntry[]): Ti
     })),
     ...(code.length ? [{ lane: "code" as const, label: "Code", entries: code }] : []),
     ...(gate.length ? [{ lane: "gate" as const, label: "Human gate", entries: gate }] : []),
-    ...(run.length ? [{ lane: "run" as const, label: "Workflow", entries: run }] : []),
+    ...(run.length ? [{ lane: "run" as const, label: "Playbook", entries: run }] : []),
   ];
 }
 

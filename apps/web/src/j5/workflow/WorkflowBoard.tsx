@@ -81,7 +81,7 @@ export const WorkflowBoardCard = memo(function WorkflowBoardCard({
       ) : null}
       <span className="mt-auto flex items-center justify-between gap-2 pt-3 text-xs text-muted-foreground">
         <WorkflowTimestamp value={card.updatedAt} />
-        <span className="shrink-0 text-foreground">View workflow →</span>
+        <span className="shrink-0 text-foreground">View playbook →</span>
       </span>
     </Link>
   );
@@ -114,12 +114,12 @@ export function WorkflowBoard({
   if (board.error)
     return (
       <p role="alert" className="rounded border border-destructive p-4">
-        Workflow board unavailable: {board.error}
+        Playbook board unavailable: {board.error}
       </p>
     );
-  if (!board.data) return <p className="rounded border p-4">Loading workflow board…</p>;
+  if (!board.data) return <p className="rounded border p-4">Loading playbook board…</p>;
   return (
-    <section aria-label="Workflow board" className="space-y-4">
+    <section aria-label="Playbook board" className="space-y-4">
       {board.data.cards.length ? (
         <div className="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {board.data.cards.map((card) => (
@@ -132,14 +132,14 @@ export function WorkflowBoard({
           ))}
         </div>
       ) : (
-        <p className="rounded border p-4 text-sm">No workflows in this scope.</p>
+        <p className="rounded border p-4 text-sm">No playbooks in this scope.</p>
       )}
       <div className="flex items-center justify-between text-sm">
         <Button disabled={page === 0} size="sm" variant="ghost" onClick={() => onPage(page - 1)}>
           Newer
         </Button>
         <span>
-          {board.data.total} {board.data.total === 1 ? "workflow" : "workflows"}
+          {board.data.total} {board.data.total === 1 ? "playbook" : "playbooks"}
         </span>
         <Button
           disabled={!board.data.hasMore}

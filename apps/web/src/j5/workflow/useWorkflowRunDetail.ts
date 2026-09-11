@@ -217,15 +217,27 @@ export function useWorkflowRunDetail(environmentId: EnvironmentId, runId: string
   const decide = useCallback(
     (decision: "approve" | "request_changes" | "cancel") => {
       if (!run?.gate) return;
+      const capabilities = definition?.phases.find((phase) => phase.id === run.phase)?.capabilities;
+      const publication = capabilities?.includes("publication") ?? false;
+      const correctedChecks = capabilities?.includes("checks-approval") ?? false;
+      const planApproval = capabilities?.includes("plan-approval") ?? false;
       const accepted =
         decision === "approve"
-          ? run.phase === "publication_approval"
+          ? publication
             ? "Publication approved; publishing"
-            : "Plan approved; implementation starting"
+            : correctedChecks
+              ? "Corrected checks approved; validation starting"
+              : planApproval
+                ? "Plan approved; implementation starting"
+                : "Playbook evidence approved"
           : decision === "request_changes"
-            ? run.phase === "publication_approval"
+            ? publication
               ? "Changes requested; returning to implementation"
-              : "Changes requested; revising the plan"
+              : correctedChecks
+                ? "Changes requested; revising verification diagnosis"
+                : planApproval
+                  ? "Changes requested; revising the plan"
+                  : "Changes requested; returning to playbook"
             : "Cancellation requested";
       void submit(
         decision === "cancel" ? "cancel" : decision,
@@ -240,7 +252,7 @@ export function useWorkflowRunDetail(environmentId: EnvironmentId, runId: string
         accepted,
       );
     },
-    [feedbackText, run, submit],
+    [definition, feedbackText, run, submit],
   );
 
   const beginDraft = useCallback(

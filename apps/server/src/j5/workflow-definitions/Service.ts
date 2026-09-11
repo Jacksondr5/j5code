@@ -1,4 +1,11 @@
-import { StartRequest, type Run, type RunDetail } from "@j5/workflow-contracts";
+// @effect-diagnostics nodeBuiltinImport:off - shipped YAML is copied beside the server bundle.
+import {
+  StartRequest,
+  type Run,
+  type RunDetail,
+  type WorkflowDefinitionPresentation,
+} from "@j5/workflow-contracts";
+import * as NodeFS from "node:fs";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Clock from "effect/Clock";
@@ -27,6 +34,8 @@ import type { Event } from "../workflow/decider.ts";
 import { makeStore, WorkflowError } from "../workflow/Store.ts";
 import { makeWorker, type Adapter } from "../workflow/Worker.ts";
 import { isWorkflowThread } from "@j5/workflow-contracts/sidebar";
+import { compileYamlWorkflow } from "./Yaml.ts";
+import { createWorkflowLibrary } from "./Library.ts";
 
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
@@ -34,6 +43,7 @@ import {
   prepareWorkflowExecution,
   hasWorkflowSnapshots,
   legacyWorkflowMessage,
+  workflowAuthorities,
 } from "../workflow/Execution.ts";
 
 const decodeValidationEffect = Schema.decodeUnknownEffect(Handoff.Validation);
@@ -53,7 +63,33 @@ export const makeService = Effect.gen(function* () {
   const references = yield* SquadronProjectReferences;
   const threads = yield* ThreadManagementService;
   const persona = yield* makeAgentAdapter;
-  const definitions = [development];
+  const implementations = { "fh-development-v3": development };
+  const shippedDevelopment = compileYamlWorkflow(
+    NodeFS.readFileSync(new URL("./fh/development.yaml", import.meta.url), "utf8"),
+    "shipped:fh/development.yaml",
+    implementations,
+  );
+  const researchReview = compileYamlWorkflow(
+    NodeFS.readFileSync(new URL("./research-review.yaml", import.meta.url), "utf8"),
+    "shipped:research-review.yaml",
+  );
+  const workflowLibrary = createWorkflowLibrary(
+    config.stateDir,
+    [shippedDevelopment, researchReview],
+    implementations,
+  );
+  const definitions = [
+    ...workflowLibrary
+      .catalog()
+      .flatMap((entry) => (entry.enabled && entry.definition ? [entry.definition] : [])),
+    ...workflowLibrary.savedDefinitions(),
+  ];
+  const refreshDefinitions = () => {
+    for (const definition of workflowLibrary
+      .catalog()
+      .flatMap((entry) => (entry.enabled && entry.definition ? [entry.definition] : [])))
+      if (!definitions.some((item) => item.hash === definition.hash)) definitions.push(definition);
+  };
   for (const definition of definitions) validateDefinition(definition);
   const adapters: Record<string, Adapter> = {
     ...makeCodeAdapters(`${config.stateDir}/workflows`),
@@ -94,10 +130,12 @@ export const makeService = Effect.gen(function* () {
       | "visits"
     >,
   ) => {
-    const definition = definitions.find(
-      (item) => item.id === run.definitionId && item.version === run.definitionVersion,
+    const pinnedDefinition = definitions.find(
+      (item) =>
+        item.id === run.definitionId &&
+        item.version === run.definitionVersion &&
+        item.hash === run.definitionHash,
     );
-    const phase = definition?.phases.find((item) => item.id === run.phase);
     if (run.definitionId === "fh-development" && run.definitionVersion < 3)
       return {
         available: false,
@@ -112,8 +150,14 @@ export const makeService = Effect.gen(function* () {
       run.definitionVersion === 2 &&
       run.definitionHash === COMPATIBLE_PLAN_REVIEW_HASH &&
       run.phase === "plan_review";
+    const definition =
+      pinnedDefinition ??
+      (compatibleDefinitionUpgrade
+        ? definitions.find((item) => item.id === run.definitionId)
+        : undefined);
+    const phase = definition?.phases.find((item) => item.id === run.phase);
     const targetDefinitionHash = definition?.hash ?? run.definitionHash;
-    if (!["plan_review", "code_review"].includes(run.phase))
+    if (!phase?.capabilities?.includes("restart"))
       return {
         available: false,
         reason: "Only plan and code review timeouts can be restarted.",
@@ -181,9 +225,19 @@ export const makeService = Effect.gen(function* () {
           code: "conflict",
           detail: "New runs require revision zero",
         });
-      const definition = definitions.find((item) => item.id === input.definitionId);
+      const definition = workflowLibrary
+        .catalog()
+        .find((item) => item.id === input.definitionId && item.enabled)?.definition;
       if (!definition)
         return yield* new WorkflowError({ code: "invalid", detail: "Unknown definition" });
+      if (
+        (input.definitionVersion !== undefined && input.definitionVersion !== definition.version) ||
+        (input.definitionHash !== undefined && input.definitionHash !== definition.hash)
+      )
+        return yield* new WorkflowError({
+          code: "conflict",
+          detail: "Displayed workflow definition has changed",
+        });
       const baseRef = input.baseRef.trim();
       if (!baseRef)
         return yield* new WorkflowError({
@@ -221,7 +275,21 @@ export const makeService = Effect.gen(function* () {
         `${config.stateDir}/workflows`,
         library,
         yield* registry.getProviders,
+        definition.agents ??
+          Object.fromEntries(
+            Object.entries(workflowAuthorities).map(([persona, authority]) => [
+              persona,
+              { persona, authority },
+            ]),
+          ),
+        definition.source
+          ? { source: definition.source, runtime: definition.runtime ?? "unsupported" }
+          : undefined,
       );
+      yield* Effect.try({
+        try: () => workflowLibrary.snapshot(definition),
+        catch: failure,
+      });
       const startedAt = DateTime.formatIso(yield* DateTime.now);
       const initial: Run = {
         id,
@@ -281,9 +349,13 @@ export const makeService = Effect.gen(function* () {
     const run = yield* store.get(id);
     if (event.type !== "cancel" && !hasWorkflowSnapshots(run.execution))
       return yield* new WorkflowError({ code: "invalid", detail: legacyWorkflowMessage });
-    const definition = definitions.find(
-      (item) => item.id === run.definitionId && item.version === run.definitionVersion,
+    let definition = definitions.find(
+      (item) =>
+        item.id === run.definitionId &&
+        item.version === run.definitionVersion &&
+        item.hash === run.definitionHash,
     );
+    const phase = definition?.phases.find((item) => item.id === run.phase);
     let commandEvent = event;
     if (event.type === "restart_phase") {
       if (run.recovery === "retry_restart" && run.restart) {
@@ -302,6 +374,8 @@ export const makeService = Effect.gen(function* () {
             code: "conflict",
             detail: "Displayed workflow definition has changed",
           });
+        if (availability.compatibleDefinitionUpgrade)
+          definition = definitions.find((item) => item.id === run.definitionId);
         if (!definition)
           return yield* new WorkflowError({
             code: "conflict",
@@ -320,7 +394,7 @@ export const makeService = Effect.gen(function* () {
               )) {
                 const artifact = run.artifacts.find((item) => item.id === action.resultArtifactId);
                 if (!artifact) throw new Error(`Missing retained artifact for ${action.id}`);
-                definition.validate(action, artifact.content, run);
+                definition!.validate(action, artifact.content, run);
               }
             },
             catch: (error) =>
@@ -330,7 +404,7 @@ export const makeService = Effect.gen(function* () {
               }),
           });
         }
-        if (run.phase === "code_review" && !(yield* candidateIsCurrent(run))) {
+        if (phase?.capabilities?.includes("candidate-watch") && !(yield* candidateIsCurrent(run))) {
           yield* store.command(
             {
               commandId: `changed:${run.id}:${run.revision}`,
@@ -350,7 +424,9 @@ export const makeService = Effect.gen(function* () {
       }
     }
     if (
-      run.phase === "publication_approval" &&
+      definition?.phases
+        .find((phase) => phase.id === run.phase)
+        ?.capabilities?.includes("publication") &&
       (event.type === "decision" || event.type === "edit_gate") &&
       !(yield* candidateIsCurrent(run))
     ) {
@@ -439,7 +515,10 @@ export const makeService = Effect.gen(function* () {
         candidateCheckedAt.set(record.id, now);
         const run = yield* store.get(record.id);
         const definition = definitions.find(
-          (item) => item.id === run.definitionId && item.version === run.definitionVersion,
+          (item) =>
+            item.id === run.definitionId &&
+            item.version === run.definitionVersion &&
+            item.hash === run.definitionHash,
         );
         if (!definition || definition.hash !== run.definitionHash) {
           yield* store.command(
@@ -454,7 +533,12 @@ export const makeService = Effect.gen(function* () {
           );
           continue;
         }
-        if (!["code_review", "publication_approval"].includes(record.phase)) continue;
+        if (
+          !definition?.phases
+            .find((phase) => phase.id === record.phase)
+            ?.capabilities?.includes("candidate-watch")
+        )
+          continue;
         if (!(yield* candidateIsCurrent(run))) {
           const next = yield* store.command(
             {
@@ -495,21 +579,118 @@ export const makeService = Effect.gen(function* () {
       );
     }
   }).pipe(Effect.retry({ schedule: Schedule.spaced("1 second") }), Effect.forkScoped);
+  // Presentation prerequisites must not prevent saved commands from replaying when the
+  // mutable persona library is temporarily invalid. New starts still perform strict preflight.
+  const personaCatalog = yield* library
+    .catalog()
+    .pipe(Effect.orElseSucceed(() => ({ definitions: [], disabledIds: [] })));
+  const disabledPersonas = new Set(personaCatalog.disabledIds);
+  const availablePersonas = new Set(
+    personaCatalog.definitions
+      .filter((persona) => !disabledPersonas.has(persona.id))
+      .map((persona) => persona.id),
+  );
   return {
     start,
     mutate,
-    definitions: definitions.map(({ id, version, hash, initial, phases }) => ({
-      id,
-      version,
-      hash,
-      initial,
-      phases: phases.map(({ id: phaseId, kind, maxVisits, transitions }) => ({
-        id: phaseId,
-        kind,
-        maxVisits,
-        transitions,
-      })),
-    })),
+    get definitions() {
+      const current = workflowLibrary.catalog();
+      const presentations: WorkflowDefinitionPresentation[] = current.map((entry) => {
+        const definition = entry.definition;
+        const requiredPersonas = Object.values(
+          definition?.agents ??
+            Object.fromEntries(
+              Object.entries(workflowAuthorities).map(([persona, authority]) => [
+                persona,
+                { persona, authority },
+              ]),
+            ),
+        ).map((assignment) => assignment.persona);
+        const missingPersonas = [...new Set(requiredPersonas)].filter(
+          (persona) => !availablePersonas.has(persona),
+        );
+        const diagnostics = [
+          ...entry.diagnostics,
+          ...(missingPersonas.length
+            ? [`Missing or disabled agent personas: ${missingPersonas.join(", ")}`]
+            : []),
+        ];
+        return {
+          id: entry.id,
+          version: definition?.version ?? 0,
+          hash: definition?.hash ?? "",
+          initial: definition?.initial ?? "",
+          title: entry.title,
+          description: entry.description,
+          enabled: entry.enabled && diagnostics.length === 0,
+          source: entry.source,
+          diagnostics,
+          capabilities: [...(definition?.capabilities ?? [])],
+          phases: (definition?.phases ?? []).map(
+            ({ id: phaseId, label, kind, capabilities, maxVisits, transitions }) => ({
+              id: phaseId,
+              ...(label ? { label } : {}),
+              ...(capabilities ? { capabilities: [...capabilities] } : {}),
+              kind,
+              maxVisits,
+              transitions,
+            }),
+          ),
+        };
+      });
+      for (const definition of definitions) {
+        if (presentations.some((item) => item.hash === definition.hash)) continue;
+        presentations.push({
+          id: definition.id,
+          version: definition.version,
+          hash: definition.hash,
+          initial: definition.initial,
+          ...(definition.title === undefined ? {} : { title: definition.title }),
+          ...(definition.description === undefined ? {} : { description: definition.description }),
+          enabled: false,
+          diagnostics: [],
+          capabilities: [...(definition.capabilities ?? [])],
+          phases: definition.phases.map(
+            ({ id, label, kind, capabilities, maxVisits, transitions }) => ({
+              id,
+              ...(label ? { label } : {}),
+              ...(capabilities ? { capabilities: [...capabilities] } : {}),
+              kind,
+              maxVisits,
+              transitions,
+            }),
+          ),
+        });
+      }
+      return presentations;
+    },
+    importDefinitions: (files: readonly { name: string; content: string }[], confirm = false) =>
+      Effect.try({
+        try: () => {
+          workflowLibrary.import(files, confirm);
+          refreshDefinitions();
+          return workflowLibrary.catalog();
+        },
+        catch: failure,
+      }),
+    setDefinitionEnabled: (id: string, enabled: boolean) =>
+      Effect.try({
+        try: () => {
+          workflowLibrary.setEnabled(id, enabled);
+          refreshDefinitions();
+          return workflowLibrary.catalog();
+        },
+        catch: failure,
+      }),
+    removeDefinition: (id: string) =>
+      Effect.try({
+        try: () => {
+          workflowLibrary.remove(id);
+          refreshDefinitions();
+          return workflowLibrary.catalog();
+        },
+        catch: failure,
+      }),
     get: (id: string) => detail(id).pipe(Effect.mapError(failure)),
     readVersion: (id: string) => store.readVersion(id).pipe(Effect.mapError(failure)),
     artifact: (runId: string, artifactId: string) =>

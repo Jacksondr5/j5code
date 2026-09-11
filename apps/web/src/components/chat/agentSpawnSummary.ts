@@ -40,9 +40,9 @@ export function deriveAgentSpawnSummary({
       ? `${working} working`
       : "working"
     : coordinatorStatus === "failed"
-      ? "Workflow failed"
+      ? "Playbook failed"
       : coordinatorStatus === "cancelled" || coordinatorStatus === "interrupted"
-        ? "Workflow stopped"
+        ? "Playbook stopped"
         : failed > 0
           ? `${failed} failed`
           : stopped > 0

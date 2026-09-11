@@ -59,11 +59,11 @@ export default function WorkflowsPanel() {
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b p-3">
         {selectedRunId ? (
           <Button size="sm" variant="ghost" onClick={() => selectRun(null)}>
-            Workflows
+            Playbooks
           </Button>
         ) : null}
         <Button size="sm" onClick={() => creation.setOpen(true)}>
-          New workflow
+          New playbook
         </Button>
         <Button
           size="sm"
@@ -101,11 +101,11 @@ export default function WorkflowsPanel() {
             />
           ) : null}
           {!selectedRunId && listQuery.isPending && !listQuery.data ? (
-            <p className="rounded border p-4 text-sm">Loading workflows…</p>
+            <p className="rounded border p-4 text-sm">Loading playbooks…</p>
           ) : null}
           {!selectedRunId && listQuery.error ? (
             <p role="alert" className="rounded border border-destructive p-4 text-sm">
-              Workflows unavailable: {listQuery.error}
+              Playbooks unavailable: {listQuery.error}
             </p>
           ) : null}
           {!selectedRunId && listQuery.data ? (
@@ -133,6 +133,7 @@ export default function WorkflowsPanel() {
         pending={creation.pending}
         loading={creation.squadronsLoading}
         error={creation.squadronError}
+        definitions={creation.definitions}
         onStart={(input) => void creation.start(input)}
       />
     </div>

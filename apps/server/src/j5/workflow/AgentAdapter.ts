@@ -1,10 +1,4 @@
-import {
-  BuiltInAgentPersonaId,
-  CommandId,
-  MessageId,
-  ProjectId,
-  ThreadId,
-} from "@t3tools/contracts";
+import { CommandId, MessageId, ProjectId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
@@ -23,7 +17,10 @@ import { hash } from "./Definition.ts";
 import type { Adapter } from "./Worker.ts";
 
 export const AgentInput = Schema.Struct({
-  personaId: BuiltInAgentPersonaId,
+  personaId: Schema.String,
+  assignmentKey: Schema.optional(Schema.String),
+  authorityPolicy: Schema.optional(Schema.String),
+  sharedInstance: Schema.optional(Schema.String),
   assignmentDigest: Schema.String,
   prompt: Schema.String,
   worktree: Schema.String,
@@ -38,7 +35,8 @@ const decodeCorrection = Schema.decodeUnknownEffect(
 );
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 const failure = (error: unknown) => new WorkflowError({ code: "invalid", detail: String(error) });
-const threadIdFor = (id: string) => ThreadId.make(`thread:wf:${hash(id)}`);
+const threadIdFor = (runId: string, actionId: string, sharedInstance?: string) =>
+  ThreadId.make(`thread:wf:${hash(sharedInstance ? [runId, sharedInstance] : actionId)}`);
 export const findActionRun = <T extends { readonly userMessageId: string }>(
   runs: readonly T[],
   actionId: string,
@@ -62,22 +60,25 @@ export const makeAgentAdapter = Effect.gen(function* () {
           rawInput = correction.original;
         }
         const input = yield* decodeInput(rawInput);
-        const threadId = threadIdFor(action.id);
+        const threadId = threadIdFor(run.id, action.id, input.sharedInstance);
         const messageId = MessageId.make(`${action.id}:message`);
         const receipt = yield* receipts.getByCommandId(CommandId.make(action.id));
-        let projection = Option.isSome(receipt)
-          ? yield* threads.getThreadProjection(threadId)
-          : null;
+        let projection =
+          Option.isSome(receipt) || input.sharedInstance
+            ? yield* threads.getThreadProjection(threadId).pipe(Effect.orElseSucceed(() => null))
+            : null;
         if (!projection?.runs.some((item) => item.userMessageId === messageId)) {
           const assignment = readWorkflowExecution(run.execution).personas[
-            input.personaId as keyof typeof workflowAuthorities
+            input.assignmentKey ?? input.personaId
           ];
+          const expectedAuthority =
+            input.authorityPolicy ??
+            workflowAuthorities[input.personaId as keyof typeof workflowAuthorities];
           if (
             !assignment ||
             assignment.definitionDigest !== input.assignmentDigest ||
             assignment.personaId !== input.personaId ||
-            assignment.authorityPolicy !==
-              workflowAuthorities[input.personaId as keyof typeof workflowAuthorities]
+            assignment.authorityPolicy !== expectedAuthority
           )
             return {
               status: "blocked",
@@ -90,30 +91,63 @@ export const makeAgentAdapter = Effect.gen(function* () {
             driver: assignment.resolvedDriver,
           };
           // A recorded launch is reconciled using its durable assignment, never a newly chosen route.
-          yield* launch.launch({
-            commandId: CommandId.make(action.id),
-            threadId,
-            squadronId: run.squadronId,
-            projectId: ProjectId.make(run.projectId),
-            title: `${input.personaId}: ${run.id}`,
-            modelSelection: resolution.modelSelection,
-            runtimeMode: translateAgentPersonaProviderPolicy(authorityPolicy, resolution.driver)
-              .runtimeMode,
-            interactionMode: "default",
-            workspaceStrategy: {
-              type: "existing_worktree",
-              worktreePath: input.worktree,
-              branch: input.branch,
-            },
-            preparedPersonaAssignment: assignment,
-            initialMessage: {
+          const text = `${input.prompt}\n${corrections.map((item) => `Output correction required: ${item}`).join("\n")}`;
+          if (input.sharedInstance && projection !== null) {
+            const foreign = projection.runs.find(
+              (item) => !String(item.userMessageId).startsWith("wf:"),
+            );
+            if (foreign)
+              return {
+                status: "blocked",
+                cause: `Shared agent ${input.sharedInstance} contains unexpected work`,
+                recovery: null,
+              } as const;
+            const active = projection?.runs.find(
+              (item) =>
+                !["completed", "failed", "cancelled", "interrupted", "rolled_back"].includes(
+                  item.status,
+                ),
+            );
+            if (active)
+              return {
+                status: "blocked",
+                cause: `Shared agent ${input.sharedInstance} is busy with provider run ${active.id}`,
+                recovery: "retry",
+              } as const;
+            yield* threads.sendToThread({
+              projectId: ProjectId.make(run.projectId),
+              commandId: CommandId.make(action.id),
+              threadId,
               messageId,
+              text,
               attachments: [],
-              text: `${input.prompt}\n${corrections.map((item) => `Output correction required: ${item}`).join("\n")}`,
-            },
-            createdBy: "user",
-            creationSource: "web",
-          });
+              modelSelection: resolution.modelSelection,
+              mode: "auto",
+              createdBy: "user",
+              creationSource: "web",
+            });
+          } else {
+            yield* launch.launch({
+              commandId: CommandId.make(action.id),
+              threadId,
+              squadronId: run.squadronId,
+              projectId: ProjectId.make(run.projectId),
+              title: `${input.sharedInstance ?? input.personaId}: ${run.id}`,
+              modelSelection: resolution.modelSelection,
+              runtimeMode: translateAgentPersonaProviderPolicy(authorityPolicy, resolution.driver)
+                .runtimeMode,
+              interactionMode: "default",
+              workspaceStrategy: {
+                type: "existing_worktree",
+                worktreePath: input.worktree,
+                branch: input.branch,
+              },
+              preparedPersonaAssignment: assignment,
+              initialMessage: { messageId, attachments: [], text },
+              createdBy: "user",
+              creationSource: "web",
+            });
+          }
           projection = yield* threads.getThreadProjection(threadId);
         }
         if (projection === null) projection = yield* threads.getThreadProjection(threadId);
@@ -144,7 +178,10 @@ export const makeAgentAdapter = Effect.gen(function* () {
     interrupt: (action) =>
       Effect.gen(function* () {
         if (Option.isNone(yield* receipts.getByCommandId(CommandId.make(action.id)))) return;
-        const threadId = threadIdFor(action.id);
+        let rawInput = action.input;
+        while (!isAgentInput(rawInput)) rawInput = (yield* decodeCorrection(rawInput)).original;
+        const input = yield* decodeInput(rawInput);
+        const threadId = threadIdFor(action.runId, action.id, input.sharedInstance);
         const projection = yield* threads.getThreadProjection(threadId);
         const exactRun = projection.runs.find(
           (item) => item.userMessageId === `${action.id}:message`,

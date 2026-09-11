@@ -16,7 +16,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch src/bin.ts",
-    "build:bundle": "node ../../scripts/j5-workflow-manifest.mjs --check && vp pack && vp pack src/service-launcher.ts --out-dir dist --no-clean",
+    "build:bundle": "node ../../scripts/j5-workflow-manifest.mjs --check && vp pack && node scripts/copy-workflow-yaml.mjs && vp pack src/service-launcher.ts --out-dir dist --no-clean",
     "start": "node dist/bin.mjs",
     "typecheck": "tsgo --noEmit",
     "test": "vp test run",

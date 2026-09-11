@@ -1,5 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import type { Action, Artifact, Run } from "@j5/workflow-contracts";
+import type { AgentPersonaAuthorityPolicy } from "@t3tools/contracts";
 
 /** Object key order is not part of command or artifact identity. */
 export function canonical(value: unknown): string {
@@ -20,13 +21,17 @@ export const hash = (value: unknown): string =>
 export interface Task {
   readonly id: string;
   readonly adapter: string;
+  /** Named workflow agent instance. Omitted for a fresh conversation. */
+  readonly agent?: string;
 }
 export interface Phase {
   readonly id: string;
+  readonly label?: string;
   readonly kind: "agent" | "code" | "gate";
   readonly tasks: ReadonlyArray<Task>;
   readonly transitions: Readonly<Record<string, string>>;
   readonly maxVisits: number;
+  readonly capabilities?: ReadonlyArray<string>;
 }
 export interface Definition {
   readonly id: string;
@@ -35,6 +40,16 @@ export interface Definition {
   readonly hash: string;
   readonly initial: string;
   readonly phases: ReadonlyArray<Phase>;
+  readonly title?: string;
+  readonly description?: string;
+  readonly capabilities?: ReadonlyArray<string>;
+  /** Canonical authoring source persisted with new runs. */
+  readonly source?: string;
+  /** Runtime implementation pinned into YAML workflow identity and execution snapshots. */
+  readonly runtime?: string;
+  readonly agents?: Readonly<
+    Record<string, { readonly persona: string; readonly authority: AgentPersonaAuthorityPolicy }>
+  >;
   readonly input: (run: Run, phase: Phase, task: Task) => unknown;
   readonly validate: (action: Action, output: unknown, run: Run) => unknown;
   readonly outcome: (run: Run, phase: Phase, artifacts: ReadonlyArray<Artifact>) => string;
@@ -63,10 +78,24 @@ export function validateDefinition(definition: Definition): void {
     if (new Set(phase.tasks.map((task) => task.id)).size !== phase.tasks.length) {
       throw new Error(`Duplicate task in ${phase.id}`);
     }
+    const shared = phase.tasks.flatMap((task) => (task.agent ? [task.agent] : []));
+    if (new Set(shared).size !== shared.length)
+      throw new Error(`Shared agent is scheduled twice in phase ${phase.id}`);
     for (const next of Object.values(phase.transitions)) {
       if (next !== "$complete" && !ids.has(next)) throw new Error(`Unknown transition ${next}`);
     }
   }
+  const reachable = new Set<string>();
+  const pending = [definition.initial];
+  while (pending.length) {
+    const id = pending.pop()!;
+    if (reachable.has(id)) continue;
+    reachable.add(id);
+    const phase = definition.phases.find((item) => item.id === id)!;
+    pending.push(...Object.values(phase.transitions).filter((next) => next !== "$complete"));
+  }
+  const unreachable = definition.phases.find((phase) => !reachable.has(phase.id));
+  if (unreachable) throw new Error(`Unreachable phase ${unreachable.id}`);
 }
 
 export const gateHash = (artifacts: readonly Artifact[]): string =>

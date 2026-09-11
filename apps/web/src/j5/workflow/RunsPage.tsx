@@ -126,13 +126,13 @@ export function RunsPage() {
       <main className="mx-auto w-full max-w-7xl space-y-6 p-4 wco:pt-[calc(env(titlebar-area-height)+1rem)] sm:p-6 sm:wco:pt-[calc(env(titlebar-area-height)+1.5rem)]">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold">Workflows</h1>
+            <h1 className="text-2xl font-semibold">Playbooks</h1>
             <p className="text-sm text-muted-foreground">
               Development requests, recorded evidence, and human decisions.
             </p>
           </div>
           <div className="flex gap-2">
-            <Button onClick={() => setCreationOpen(true)}>New workflow</Button>
+            <Button onClick={() => setCreationOpen(true)}>New playbook</Button>
             <Link className="self-center underline" to="/">
               Back to threads
             </Link>
@@ -140,7 +140,7 @@ export function RunsPage() {
         </header>
         {pageError ? (
           <p role="alert" className="rounded border border-destructive p-3">
-            Workflow data unavailable: {pageError}
+            Playbook data unavailable: {pageError}
           </p>
         ) : null}
         {creation.mutationError ? (
@@ -199,7 +199,7 @@ export function RunsPage() {
               ))}
             </select>
           </label>
-          <div aria-label="Workflow view" className="flex rounded border p-1">
+          <div aria-label="Playbook view" className="flex rounded border p-1">
             <Button
               aria-pressed={view === "board"}
               size="sm"
@@ -219,7 +219,7 @@ export function RunsPage() {
           </div>
           {view === "list" ? (
             <span className="pb-2 text-sm text-muted-foreground">
-              {total} {total === 1 ? "workflow" : "workflows"}
+              {total} {total === 1 ? "playbook" : "playbooks"}
             </span>
           ) : null}
         </div>
@@ -260,9 +260,9 @@ export function RunsPage() {
             />
             {!selected ? (
               <section className="rounded-lg border p-8 text-center">
-                <h2 className="font-semibold">Select a workflow</h2>
+                <h2 className="font-semibold">Select a playbook</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Choose one from the list, or start a new workflow.
+                  Choose one from the list, or start a new playbook.
                 </p>
               </section>
             ) : environmentId ? (
@@ -285,6 +285,7 @@ export function RunsPage() {
         pending={creation.pending}
         loading={creation.squadronsLoading}
         error={creation.squadronError}
+        definitions={creation.definitions}
         onStart={(input) => void creation.start(input)}
       />
     </SidebarInset>

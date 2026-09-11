@@ -96,9 +96,15 @@ function GateDecisionForm({ model }: { readonly model: ReturnType<typeof useWork
   const feedbackRef = useRef<HTMLTextAreaElement>(null);
   const { run } = model;
   if (!run?.gate) return null;
+  const capabilities = model.definition?.phases.find(
+    (phase) => phase.id === run.phase,
+  )?.capabilities;
+  const publication = capabilities?.includes("publication") ?? false;
+  const correctedChecks = capabilities?.includes("checks-approval") ?? false;
+  const planApproval = capabilities?.includes("plan-approval") ?? false;
   return (
     <>
-      {run.phase === "publication_approval" ? (
+      {publication ? (
         <section className="space-y-3 rounded border p-3" aria-label="Publication text">
           <h4 className="font-medium">Publication text</h4>
           {(["commitMessage", "title", "body"] as const).map((field) => (
@@ -167,11 +173,13 @@ function GateDecisionForm({ model }: { readonly model: ReturnType<typeof useWork
             })
           }
           placeholder={`Feedback sent to ${
-            run.phase === "publication_approval"
+            publication
               ? "implementation"
-              : run.phase === "checks_approval"
+              : correctedChecks
                 ? "verification diagnosis"
-                : "plan revision"
+                : planApproval
+                  ? "plan revision"
+                  : "playbook revision"
           }`}
         />
         <div className="flex flex-wrap gap-2">
@@ -182,11 +190,13 @@ function GateDecisionForm({ model }: { readonly model: ReturnType<typeof useWork
           >
             {model.pendingAction === "approve"
               ? actionLabel.approve
-              : run.phase === "publication_approval"
+              : publication
                 ? "Approve and publish"
-                : run.phase === "checks_approval"
+                : correctedChecks
                   ? "Approve corrected checks"
-                  : "Approve plan"}
+                  : planApproval
+                    ? "Approve plan"
+                    : "Approve"}
           </Button>
           <Button
             disabled={model.pendingAction !== null}
@@ -233,11 +243,11 @@ export function WorkflowRunOverview({
   if (model.readError)
     return (
       <p role="alert" className="rounded border border-destructive p-3">
-        Workflow data unavailable: {model.readError}
+        Playbook data unavailable: {model.readError}
       </p>
     );
   if (!model.run)
-    return <section className="rounded-lg border p-8 text-center">Loading workflow…</section>;
+    return <section className="rounded-lg border p-8 text-center">Loading playbook…</section>;
   const run = model.run;
   return (
     <section className="min-w-0 space-y-4">
@@ -338,7 +348,7 @@ export function WorkflowRunOverview({
               </p>
               {run.restartAvailability.compatibleDefinitionUpgrade ? (
                 <p className="text-sm text-muted-foreground">
-                  This saved plan review can be upgraded to the compatible workflow engine. The old
+                  This saved plan review can be upgraded to the compatible playbook engine. The old
                   and new definition hashes and your identity will be recorded.
                 </p>
               ) : null}
@@ -423,11 +433,19 @@ export function WorkflowRunOverview({
         >
           <div>
             <h3 className="font-semibold">
-              {run.phase === "publication_approval"
+              {model.definition?.phases
+                .find((phase) => phase.id === run.phase)
+                ?.capabilities?.includes("publication")
                 ? "Review publication evidence"
-                : run.phase === "checks_approval"
+                : model.definition?.phases
+                      .find((phase) => phase.id === run.phase)
+                      ?.capabilities?.includes("checks-approval")
                   ? "Approve corrected checks"
-                  : "Review plan and verification commands"}
+                  : model.definition?.phases
+                        .find((phase) => phase.id === run.phase)
+                        ?.capabilities?.includes("plan-approval")
+                    ? "Review plan and verification commands"
+                    : "Review playbook evidence"}
             </h3>
             <p className="text-sm text-muted-foreground">
               Your decision applies only to gate revision {run.gate.revision} and the evidence
@@ -473,7 +491,7 @@ export function WorkflowRunOverview({
       ) : null}
       {["running", "restarting", "waiting_approval", "blocked"].includes(run.status) ? (
         <details className="text-sm">
-          <summary className="cursor-pointer text-muted-foreground">Workflow actions</summary>
+          <summary className="cursor-pointer text-muted-foreground">Playbook actions</summary>
           <p className="my-2 text-sm text-muted-foreground">
             Cancelling stops active work and keeps recorded evidence and publication results.
           </p>
@@ -482,7 +500,7 @@ export function WorkflowRunOverview({
             variant="destructive"
             onClick={() => model.setCancelOpen(true)}
           >
-            Cancel workflow
+            Cancel playbook
           </Button>
         </details>
       ) : null}
@@ -579,14 +597,14 @@ export function WorkflowRunOverview({
       <AlertDialog open={model.cancelOpen} onOpenChange={model.setCancelOpen}>
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Cancel this workflow?</AlertDialogTitle>
+            <AlertDialogTitle>Cancel this playbook?</AlertDialogTitle>
             <AlertDialogDescription>
               Successor work will stop and owned work will be interrupted. Recorded evidence,
               worktrees, and completed publication are retained.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Keep workflow</AlertDialogClose>
+            <AlertDialogClose render={<Button variant="outline" />}>Keep playbook</AlertDialogClose>
             <AlertDialogClose
               render={<Button variant="destructive" />}
               onClick={() => {

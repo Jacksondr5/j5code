@@ -160,6 +160,8 @@ export type RunDetail = typeof RunDetail.Type;
 
 export const WorkflowPhasePresentation = Schema.Struct({
   id: Schema.String,
+  label: Schema.optional(Schema.String),
+  capabilities: Schema.optional(Schema.Array(Schema.String)),
   kind: Schema.Literals(["agent", "code", "gate"]),
   maxVisits: Schema.Number,
   transitions: Schema.Record(Schema.String, Schema.String),
@@ -169,6 +171,12 @@ export const WorkflowDefinitionPresentation = Schema.Struct({
   version: Schema.Number,
   hash: Schema.String,
   initial: Schema.String,
+  title: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+  enabled: Schema.optional(Schema.Boolean),
+  source: Schema.optional(Schema.Literals(["imported", "configured", "shipped"])),
+  diagnostics: Schema.optional(Schema.Array(Schema.String)),
+  capabilities: Schema.optional(Schema.Array(Schema.String)),
   phases: Schema.Array(WorkflowPhasePresentation),
 });
 export type WorkflowDefinitionPresentation = typeof WorkflowDefinitionPresentation.Type;
@@ -180,10 +188,25 @@ export const Mutation = Schema.Struct({
 export const StartRequest = Schema.Struct({
   ...Mutation.fields,
   definitionId: Schema.String,
+  definitionVersion: Schema.optional(Schema.Number),
+  definitionHash: Schema.optional(Schema.String),
   squadronId: Schema.String,
   baseRef: Schema.String,
   request: Schema.String.check(Schema.isMinLength(1)),
   evidence: Schema.Array(Schema.String),
+});
+export const WorkflowDefinitionImportRequest = Schema.Struct({
+  files: Schema.Array(
+    Schema.Struct({
+      name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(240)),
+      content: Schema.String.check(Schema.isMaxLength(262144)),
+    }),
+  ),
+  confirmConflicts: Schema.optional(Schema.Boolean),
+});
+export const WorkflowDefinitionStateRequest = Schema.Struct({
+  id: Schema.String,
+  enabled: Schema.Boolean,
 });
 export const GateRequest = Schema.Struct({
   ...Mutation.fields,

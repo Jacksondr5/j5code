@@ -151,6 +151,29 @@ export const listWorkflowDefinitions = () =>
     ),
   );
 
+const definitionsResponse = (path: string, body: unknown) =>
+  runtime.runPromise(
+    request(`/definitions/${path}`, body).pipe(
+      Effect.flatMap(
+        HttpClientResponse.schemaBodyJson(
+          Schema.Struct({ definitions: Schema.Array(WorkflowDefinitionPresentation) }),
+        ),
+      ),
+      Effect.map((result) => result.definitions),
+    ),
+  );
+
+export const importWorkflowDefinitions = (
+  files: readonly { readonly name: string; readonly content: string }[],
+  confirmConflicts = false,
+) => definitionsResponse("import", { files, confirmConflicts });
+
+export const setWorkflowDefinitionEnabled = (id: string, enabled: boolean) =>
+  definitionsResponse("state", { id, enabled });
+
+export const removeWorkflowDefinition = (id: string) =>
+  definitionsResponse("remove", { id, enabled: false });
+
 export const readWorkflowThreadParent = (threadId: string) =>
   runtime.runPromise(
     request(`/thread-parent?threadId=${encodeURIComponent(threadId)}`).pipe(

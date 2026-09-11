@@ -33,7 +33,7 @@ export function phaseStripModel(
           : "pending";
     return {
       id: phase.id,
-      label: phaseLabel(phase.id),
+      label: phase.label ?? phaseLabel(phase.id),
       kind: phase.kind,
       visits: count,
       state,
@@ -64,7 +64,7 @@ export function PhaseStrip({
   const model = phaseStripModel(phases, visits, currentPhase, status);
   return (
     <div className="space-y-2">
-      <ol className="flex min-w-0 gap-1" aria-label="Workflow phases">
+      <ol className="flex min-w-0 gap-1" aria-label="Playbook phases">
         {model.cells.map((cell) => (
           <li
             aria-current={cell.state === "current" || cell.state === "blocked" ? "step" : undefined}
@@ -91,7 +91,9 @@ export function PhaseStrip({
           Visited {model.cells.filter((cell) => cell.visits > 0).length} of {model.cells.length}{" "}
           phases
         </span>
-        <span className="font-medium text-foreground">{phaseLabel(currentPhase)}</span>
+        <span className="font-medium text-foreground">
+          {model.current?.label ?? phaseLabel(currentPhase)}
+        </span>
       </p>
     </div>
   );

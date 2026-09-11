@@ -91,14 +91,14 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
                   ? "text-white/80 hover:bg-white/15 hover:text-white"
                   : "text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground",
               )}
-              aria-label="Workflows"
+              aria-label="Playbooks"
             />
           }
         >
           <WorkflowIcon aria-hidden className="size-4" />
-          <span className="hidden @[24rem]/sidebar-header:inline">Workflows</span>
+          <span className="hidden @[24rem]/sidebar-header:inline">Playbooks</span>
         </TooltipTrigger>
-        <TooltipPopup>Workflows</TooltipPopup>
+        <TooltipPopup>Playbooks</TooltipPopup>
       </Tooltip>
       <div className="relative z-10 -me-1 flex size-8 shrink-0 items-center justify-center md:me-[var(--sidebar-content-inset)]">
         <HumanInboxBell onBackdrop={backdropVariant !== null} />

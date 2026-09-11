@@ -1,12 +1,17 @@
-import type { RunDetail } from "@j5/workflow-contracts";
-import { useCallback, useRef, useState } from "react";
+import type { RunDetail, WorkflowDefinitionPresentation } from "@j5/workflow-contracts";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { toastManager } from "../../components/ui/toast";
 import { useSquadronDirectory } from "../squadron/SquadronDirectory";
-import { mutateRun } from "./client";
+import { listWorkflowDefinitions, mutateRun } from "./client";
 import { refreshWorkflowQueries } from "./queries";
 
-export type CreateWorkflowInput = { squadronId: string; request: string; baseRef: string };
+export type CreateWorkflowInput = {
+  definitionId: string;
+  squadronId: string;
+  request: string;
+  baseRef: string;
+};
 export type CommandAttempt = { payload: string; commandId: string };
 
 export function commandAttemptFor(
@@ -22,8 +27,15 @@ export function useCreateWorkflow(onCreated: (run: RunDetail) => void) {
   const [hasOpened, setHasOpened] = useState(false);
   const [pending, setPending] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [definitions, setDefinitions] = useState<readonly WorkflowDefinitionPresentation[]>([]);
   const attempt = useRef<CommandAttempt | null>(null);
   const directory = useSquadronDirectory(hasOpened);
+  useEffect(() => {
+    if (!hasOpened) return;
+    void listWorkflowDefinitions()
+      .then(setDefinitions)
+      .catch((cause) => setMutationError(String(cause)));
+  }, [hasOpened]);
 
   const setOpen = useCallback((next: boolean) => {
     setOpenState(next);
@@ -33,13 +45,20 @@ export function useCreateWorkflow(onCreated: (run: RunDetail) => void) {
   const start = useCallback(
     async (input: CreateWorkflowInput) => {
       const body = {
-        definitionId: "fh-development",
+        definitionId: input.definitionId,
         squadronId: input.squadronId,
         expectedRevision: 0,
         request: input.request,
         baseRef: input.baseRef,
         evidence: [],
       };
+      const definition = definitions.find((item) => item.id === input.definitionId);
+      if (definition) {
+        Object.assign(body, {
+          definitionVersion: definition.version,
+          definitionHash: definition.hash,
+        });
+      }
       const payload = JSON.stringify({ path: "", body });
       attempt.current = commandAttemptFor(attempt.current, payload, () =>
         window.crypto.randomUUID(),
@@ -52,7 +71,7 @@ export function useCreateWorkflow(onCreated: (run: RunDetail) => void) {
         setOpenState(false);
         toastManager.add({
           type: "success",
-          title: "Workflow accepted; automated work is starting",
+          title: "Playbook accepted; automated work is starting",
         });
         refreshWorkflowQueries();
         onCreated(run);
@@ -61,14 +80,14 @@ export function useCreateWorkflow(onCreated: (run: RunDetail) => void) {
         setMutationError(message);
         toastManager.add({
           type: "error",
-          title: "Workflow creation failed",
+          title: "Playbook creation failed",
           description: message,
         });
       } finally {
         setPending(false);
       }
     },
-    [onCreated],
+    [definitions, onCreated],
   );
 
   return {
@@ -79,6 +98,7 @@ export function useCreateWorkflow(onCreated: (run: RunDetail) => void) {
     squadronError: directory.status === "error" ? directory.error : null,
     pending,
     mutationError,
+    definitions,
     start,
   };
 }

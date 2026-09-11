@@ -13,6 +13,7 @@ import {
 import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 import type { ManagedSquadron } from "../squadron/squadronClient";
+import type { WorkflowDefinitionPresentation } from "@j5/workflow-contracts";
 
 export function CreateWorkflowDialog({
   open,
@@ -22,6 +23,7 @@ export function CreateWorkflowDialog({
   pending,
   loading,
   error,
+  definitions,
   onStart,
 }: {
   readonly open: boolean;
@@ -31,8 +33,10 @@ export function CreateWorkflowDialog({
   readonly pending: boolean;
   readonly loading: boolean;
   readonly error: string | null;
+  readonly definitions: readonly WorkflowDefinitionPresentation[];
   readonly onStart: (input: {
     readonly squadronId: string;
+    readonly definitionId: string;
     readonly request: string;
     readonly baseRef: string;
   }) => void;
@@ -44,22 +48,72 @@ export function CreateWorkflowDialog({
   const [squadronId, setSquadronId] = useState(initialSquadron);
   const [request, setRequest] = useState("");
   const [baseRef, setBaseRef] = useState("HEAD");
+  const availableDefinitions = definitions.filter(
+    (definition) => definition.enabled !== false && !definition.diagnostics?.length,
+  );
+  const unavailableDefinitions = definitions.filter((definition) => definition.diagnostics?.length);
+  const [definitionId, setDefinitionId] = useState("fh-development");
+  const selectedDefinition =
+    availableDefinitions.find((item) => item.id === definitionId) ?? availableDefinitions[0];
+  const selectedDescription = selectedDefinition?.description;
   const selectedSquadron = eligible.some((item) => item.squadron.id === squadronId)
     ? squadronId
     : (eligible.find((item) => item.squadron.id === initialSquadron)?.squadron.id ??
       eligible[0]?.squadron.id ??
       "");
+  const start = () => {
+    if (!selectedDefinition) return;
+    onStart({
+      definitionId: selectedDefinition.id,
+      squadronId: selectedSquadron,
+      request,
+      baseRef: baseRef.trim(),
+    });
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup>
         <DialogHeader>
-          <DialogTitle>New workflow</DialogTitle>
+          <DialogTitle>New playbook</DialogTitle>
           <DialogDescription>
-            Start a deterministic development workflow in a Squadron with exactly one project.
+            Start a playbook in a Squadron with exactly one project.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-3">
+          <label className="block text-sm">
+            Playbook
+            <select
+              aria-label="Playbook definition"
+              className="mt-1 block w-full rounded border bg-background p-2"
+              value={selectedDefinition?.id ?? ""}
+              onChange={(event) => setDefinitionId(event.target.value)}
+            >
+              {availableDefinitions.map((definition) => (
+                <option key={`${definition.id}:${definition.hash}`} value={definition.id}>
+                  {definition.title ?? definition.id}
+                </option>
+              ))}
+            </select>
+            {selectedDescription ? (
+              <span className="mt-1 block text-muted-foreground">{selectedDescription}</span>
+            ) : null}
+          </label>
+          {unavailableDefinitions.length ? (
+            <details
+              open={availableDefinitions.length === 0}
+              className="text-sm text-muted-foreground"
+            >
+              <summary>Unavailable playbooks</summary>
+              <ul className="mt-2 list-disc ps-5">
+                {unavailableDefinitions.map((definition) => (
+                  <li key={`${definition.id}:${definition.hash || definition.source}`}>
+                    {definition.title ?? definition.id}: {definition.diagnostics?.join(" ")}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
           {loading ? (
             <p className="rounded border p-3 text-sm">Loading Squadrons…</p>
           ) : error ? (
@@ -70,7 +124,7 @@ export function CreateWorkflowDialog({
             <label className="block text-sm">
               Squadron
               <select
-                aria-label="Workflow Squadron"
+                aria-label="Playbook Squadron"
                 className="mt-1 block w-full rounded border bg-background p-2"
                 value={selectedSquadron}
                 onChange={(event) => setSquadronId(event.target.value)}
@@ -85,7 +139,7 @@ export function CreateWorkflowDialog({
           ) : (
             <p className="rounded border p-3 text-sm">
               No eligible Squadron has exactly one project. Create or update a Squadron before
-              starting a workflow.
+              starting a playbook.
             </p>
           )}
           {!loading && !error && squadrons.some((item) => item.projectIds.length !== 1) && (
@@ -114,9 +168,9 @@ export function CreateWorkflowDialog({
             />
           </label>
           <label className="block text-sm">
-            Development request
+            Request
             <Textarea
-              aria-label="Development request"
+              aria-label="Playbook request"
               className="mt-1 min-h-32"
               placeholder="Describe the change and acceptance criteria"
               value={request}
@@ -126,12 +180,16 @@ export function CreateWorkflowDialog({
         </DialogPanel>
         <DialogFooter>
           <Button
-            disabled={pending || !selectedSquadron || !request.trim() || !baseRef.trim()}
-            onClick={() =>
-              onStart({ squadronId: selectedSquadron, request, baseRef: baseRef.trim() })
+            disabled={
+              pending ||
+              !selectedDefinition ||
+              !selectedSquadron ||
+              !request.trim() ||
+              !baseRef.trim()
             }
+            onClick={start}
           >
-            {pending ? "Starting…" : "Start workflow"}
+            {pending ? "Starting…" : "Start playbook"}
           </Button>
         </DialogFooter>
       </DialogPopup>

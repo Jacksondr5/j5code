@@ -184,3 +184,90 @@ it.effect("reuses the exact saved assignment for retries and output corrections"
     ),
   );
 });
+
+it.effect("starts a separate turn on an idle named agent conversation", () => {
+  const sent: unknown[] = [];
+  const assignment = testExecution.personas.scout;
+  const action: Action = {
+    id: "second-action",
+    runId: "run",
+    phase: "repair",
+    revision: 2,
+    task: "fix",
+    attempt: 1,
+    kind: "agent",
+    adapter: "persona",
+    status: "pending",
+    deadline: 10000,
+    resultArtifactId: null,
+    input: {
+      personaId: "scout",
+      assignmentKey: "scout",
+      authorityPolicy: "read-only",
+      assignmentDigest: assignment.definitionDigest,
+      sharedInstance: "implementer",
+      prompt: "Continue",
+      worktree: "/test",
+      branch: "test",
+      selectedEvidenceIds: [],
+      selectedEvidenceHashes: [],
+    },
+  };
+  const run = {
+    id: "run",
+    definitionId: "test",
+    definitionVersion: 3,
+    definitionHash: "test",
+    squadronId: "s",
+    projectId: "p",
+    repository: "/test",
+    baseCommit: "base",
+    inputs: {},
+    execution: testExecution,
+    phase: "repair",
+    revision: 2,
+    status: "running",
+    cause: null,
+    recovery: null,
+    gate: null,
+    actions: [action],
+    artifacts: [],
+    approvals: [],
+    visits: { repair: 1 },
+  } satisfies Run;
+  const first = {
+    runs: [{ id: "first-run", userMessageId: "wf:first:message", status: "completed" }],
+    messages: [],
+  };
+  const completed = {
+    runs: [
+      ...first.runs,
+      { id: "second-run", userMessageId: "second-action:message", status: "completed" },
+    ],
+    messages: [
+      { id: "answer", runId: "second-run", role: "assistant", text: '{"summary":"done"}' },
+    ],
+  };
+  let reads = 0;
+  return Effect.gen(function* () {
+    const adapter = yield* makeAgentAdapter;
+    const result = yield* adapter.reconcile(action, run, () => Effect.void);
+    assert.equal(result.status, "completed");
+    assert.lengthOf(sent, 1);
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+        Layer.mock(CommandReceiptStoreV2)({ getByCommandId: () => Effect.succeed(Option.none()) }),
+        Layer.mock(ThreadLaunchService)({ launch: () => Effect.die("Unexpected new thread") }),
+        Layer.mock(ThreadManagementService)({
+          getThreadProjection: () => Effect.succeed((reads++ === 0 ? first : completed) as never),
+          sendToThread: (input) => {
+            sent.push(input);
+            return Effect.succeed({} as never);
+          },
+        }),
+      ),
+    ),
+  );
+});

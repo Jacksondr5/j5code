@@ -265,11 +265,22 @@ const observations = Effect.gen(function* () {
     END`;
 });
 
+const candidateWatch = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`ALTER TABLE j5_workflow_runs ADD COLUMN watch_candidate INTEGER NOT NULL DEFAULT 0`;
+  yield* sql`UPDATE j5_workflow_runs SET watch_candidate=1
+    WHERE phase IN ('code_review','publication_approval')
+      AND status IN ('running','waiting_approval')`;
+  yield* sql`CREATE INDEX j5_workflow_runs_candidate_watch
+    ON j5_workflow_runs(watch_candidate, creation_sequence) WHERE watch_candidate=1`;
+});
+
 const migrate = Migrator.make({});
 export const workflowMigrations = {
   "1_PersistedPhases": initial,
   "2_OptimizedWorkflowState": optimized,
   "3_WorkflowObservations": observations,
+  "4_WorkflowCandidateWatch": candidateWatch,
 };
 export const runWorkflowMigrations = () =>
   migrate({

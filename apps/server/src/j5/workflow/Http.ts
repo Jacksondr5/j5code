@@ -12,6 +12,8 @@ import {
   RestartPhaseRequest,
   RunStatus,
   StartRequest,
+  WorkflowDefinitionImportRequest,
+  WorkflowDefinitionStateRequest,
 } from "@j5/workflow-contracts";
 import { AuthOrchestrationReadScope, AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -36,6 +38,8 @@ const decodeMetadataRequestEffect = Schema.decodeUnknownEffect(MetadataRequest);
 const decodeMutationEffect = Schema.decodeUnknownEffect(Mutation);
 const decodeRestartPhaseRequestEffect = Schema.decodeUnknownEffect(RestartPhaseRequest);
 const decodeStartRequestEffect = Schema.decodeUnknownEffect(StartRequest);
+const decodeDefinitionImportEffect = Schema.decodeUnknownEffect(WorkflowDefinitionImportRequest);
+const decodeDefinitionStateEffect = Schema.decodeUnknownEffect(WorkflowDefinitionStateRequest);
 const isRunStatus = Schema.is(RunStatus);
 
 const safeInteger = (value: string | null, fallback: number, positive: boolean) => {
@@ -194,6 +198,28 @@ export const workflowHttpLayer = Layer.unwrap(
           );
         }
         const body = yield* request.json;
+        if (id === "definitions") {
+          const action = parts[4];
+          if (action === "import") {
+            const input = yield* decodeDefinitionImportEffect(body);
+            yield* service.importDefinitions(input.files, input.confirmConflicts ?? false);
+            return HttpServerResponse.jsonUnsafe({ definitions: service.definitions });
+          }
+          if (action === "state") {
+            const input = yield* decodeDefinitionStateEffect(body);
+            yield* service.setDefinitionEnabled(input.id, input.enabled);
+            return HttpServerResponse.jsonUnsafe({ definitions: service.definitions });
+          }
+          if (action === "remove") {
+            const input = yield* decodeDefinitionStateEffect(body);
+            yield* service.removeDefinition(input.id);
+            return HttpServerResponse.jsonUnsafe({ definitions: service.definitions });
+          }
+          return HttpServerResponse.jsonUnsafe(
+            { message: "Unknown definition action" },
+            { status: 404 },
+          );
+        }
         if (!id)
           return HttpServerResponse.jsonUnsafe({
             run: yield* service.start(yield* decodeStartRequestEffect(body)),

@@ -349,6 +349,7 @@ export const makeStore = Effect.gen(function* () {
     commandId: string,
     event: Event,
     now: number,
+    definition: Definition | undefined,
   ) {
     for (const value of [
       run.inputs,
@@ -390,22 +391,30 @@ export const makeStore = Effect.gen(function* () {
     const responseRun = { ...run, readVersion };
     const snapshot = snapshotOf(responseRun);
     const payload = canonical(snapshot);
+    const watchCandidate =
+      definition?.phases
+        .find((phase) => phase.id === run.phase)
+        ?.capabilities?.includes("candidate-watch") &&
+      ["running", "waiting_approval"].includes(run.status)
+        ? 1
+        : 0;
     yield* sql`INSERT INTO j5_workflow_runs(
         id, definition_id, definition_version, definition_hash, squadron_id,
         project_id, title, phase, gate_revision, activity_at, status_priority,
-        revision, read_version, status, payload
+        revision, read_version, status, payload, watch_candidate
       ) VALUES (
         ${run.id}, ${run.definitionId}, ${run.definitionVersion}, ${run.definitionHash},
         ${run.squadronId}, ${run.projectId}, ${requestTitle(run.inputs)}, ${run.phase},
         ${run.gate?.revision ?? null}, ${now}, ${statusPriority(run.status)}, ${run.revision},
-        ${readVersion}, ${run.status}, ${payload}
+        ${readVersion}, ${run.status}, ${payload}, ${watchCandidate}
       ) ON CONFLICT(id) DO UPDATE SET
         definition_version=excluded.definition_version,
         definition_hash=excluded.definition_hash,
         phase=excluded.phase, gate_revision=excluded.gate_revision,
         activity_at=excluded.activity_at, status_priority=excluded.status_priority,
         revision=excluded.revision, read_version=j5_workflow_runs.read_version+1,
-        status=excluded.status, payload=excluded.payload`;
+        status=excluded.status, payload=excluded.payload,
+        watch_candidate=excluded.watch_candidate`;
     yield* sql`INSERT INTO j5_workflow_history(run_id, revision, command_id, payload)
       VALUES (${run.id}, ${run.revision}, ${commandId}, ${canonical(event)})`;
     return { payload, run: responseRun };
@@ -480,7 +489,7 @@ export const makeStore = Effect.gen(function* () {
         const saved =
           next === previous
             ? { payload: canonical(snapshotOf(previous)), run: previous }
-            : yield* save(persisted, input.commandId, input.event, input.now);
+            : yield* save(persisted, input.commandId, input.event, input.now, definition);
         yield* sql`INSERT INTO j5_workflow_receipts(command_id, input_hash, run_id, payload)
           VALUES (${input.commandId}, ${inputHash}, ${next.id}, ${saved.payload})`;
         return saved.run;
@@ -579,7 +588,7 @@ export const makeStore = Effect.gen(function* () {
       phase, revision, status, creation_sequence AS creationSequence
       FROM j5_workflow_runs
       WHERE status IN ('running','waiting_approval')
-        AND phase IN ('code_review','publication_approval')
+        AND watch_candidate=1
         AND creation_sequence>${afterSequence}
       ORDER BY creation_sequence LIMIT ${Math.min(100, Math.max(1, limit))}`;
   });

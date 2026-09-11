@@ -72,11 +72,11 @@ function WorkflowTimelineForRun({ environmentId, runId, layout = "wide" }: Workf
         Timeline unavailable: {head.error}
       </p>
     );
-  if (!head.data) return <p className="rounded border p-4">Loading workflow timeline…</p>;
+  if (!head.data) return <p className="rounded border p-4">Loading playbook timeline…</p>;
   return (
-    <section aria-label="Workflow timeline" className="space-y-4">
+    <section aria-label="Playbook timeline" className="space-y-4">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="font-semibold">Workflow activity</h3>
+        <h3 className="font-semibold">Playbook activity</h3>
         <span className="text-xs text-muted-foreground">
           Newest first · {entries.length} recorded events loaded
         </span>
@@ -111,7 +111,7 @@ function WorkflowTimelineForRun({ environmentId, runId, layout = "wide" }: Workf
           >
             <header>
               <h4 className="text-sm font-semibold">
-                {group.phase ? phaseLabel(group.phase) : "Workflow"}
+                {group.phase ? phaseLabel(group.phase) : "Playbook"}
               </h4>
               <p className="mt-1 text-xs text-muted-foreground">
                 {group.visit === null ? "Visit unavailable" : `Visit ${group.visit}`}

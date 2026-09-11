@@ -425,7 +425,7 @@ function ExpandedWorkflowSection({
           size="icon-micro"
           variant="ghost-muted"
           onClick={onCollapse}
-          aria-label="Collapse workflow"
+          aria-label="Collapse playbook"
         >
           <ChevronDown aria-hidden className="size-3" />
         </Button>
@@ -537,7 +537,7 @@ export function AgentsPanel({
         <Bot aria-hidden className="size-6 text-muted-foreground/60" />
         <p className="text-sm font-medium">No agents yet</p>
         <p className="max-w-56 text-xs text-muted-foreground">
-          When this thread spawns subagents or runs a workflow, they show up here with live status,
+          When this thread spawns subagents or runs a playbook, they show up here with live status,
           activity, and token usage.
         </p>
       </div>

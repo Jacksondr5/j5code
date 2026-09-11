@@ -232,6 +232,13 @@ const taskPhase = (
   tasks: tasks.map((task) => ({ id: task, adapter: kind === "agent" ? "persona" : task })),
   transitions,
   maxVisits,
+  capabilities: [
+    ...(["plan_review", "code_review"].includes(id) ? ["restart"] : []),
+    ...(id === "plan_review" ? ["plan-review"] : []),
+    ...(id === "code_review" ? ["code-review"] : []),
+    ...(id === "code_review" ? ["candidate-watch"] : []),
+    ...(["commit", "push", "draft"].includes(id) ? ["publication"] : []),
+  ],
 });
 const phases: Phase[] = [
   taskPhase("workspace", "code", ["workspace"], { pass: "scout" }),
@@ -250,6 +257,7 @@ const phases: Phase[] = [
     tasks: [],
     transitions: { approve: "build", request_changes: "plan" },
     maxVisits: 3,
+    capabilities: ["approval", "plan-approval"],
   },
   taskPhase("build", "agent", ["builder"], { pass: "validation" }, 3),
   taskPhase(
@@ -278,6 +286,7 @@ const phases: Phase[] = [
     tasks: [],
     transitions: { approve: "validation", request_changes: "verification_diagnosis" },
     maxVisits: 2,
+    capabilities: ["approval", "checks-approval"],
   },
   taskPhase("verification_block", "code", ["verification_block"], {}, 4),
   taskPhase(
@@ -294,6 +303,7 @@ const phases: Phase[] = [
     tasks: [],
     transitions: { approve: "commit", request_changes: "build", changed: "validation" },
     maxVisits: 3,
+    capabilities: ["candidate-watch", "publication", "approval"],
   },
   taskPhase("commit", "code", ["commit"], { pass: "push" }),
   taskPhase("push", "code", ["push"], { pass: "draft" }),

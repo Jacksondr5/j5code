@@ -27,7 +27,7 @@ export function WorkflowThreadBanner({
   return (
     <aside className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-muted/50 px-4 py-2 text-sm">
       <span>
-        Part of workflow <strong>{parent.title}</strong>
+        Part of playbook <strong>{parent.title}</strong>
       </span>
       <Link
         className="underline"
@@ -35,7 +35,7 @@ export function WorkflowThreadBanner({
         search={{ runId: parent.runId, squadronId: parent.squadronId, newWorkflow: undefined }}
         hash="workflow-approval"
       >
-        Open workflow
+        Open playbook
       </Link>
       <span className="sr-only">Environment {environmentId}</span>
     </aside>

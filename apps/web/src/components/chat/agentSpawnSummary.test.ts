@@ -60,8 +60,8 @@ describe("deriveAgentSpawnSummary", () => {
   });
 
   it.each([
-    ["failed", "Workflow failed", "failed"],
-    ["cancelled", "Workflow stopped", "inactive"],
+    ["failed", "Playbook failed", "failed"],
+    ["cancelled", "Playbook stopped", "inactive"],
   ] as const)(
     "preserves a %s workflow outcome when its children completed",
     (coordinatorStatus, status, tone) => {

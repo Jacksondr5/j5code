@@ -145,7 +145,7 @@ const SURFACE_DISABLED_REASONS = {
   diff: "Diff is only available for server threads in Git repositories.",
   pullRequest: "This thread's branch has no pull request yet.",
   agents: "Agents are only available from a thread.",
-  workflows: "Workflows are only available from a thread.",
+  workflows: "Playbooks are only available from a thread.",
 } as const;
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -371,7 +371,7 @@ function RightPanelEmptyState(props: {
       badgeCount: 0,
     },
     {
-      label: "Workflows",
+      label: "Playbooks",
       description: "Review runs and resolve approvals.",
       icon: Workflow,
       shortcut: "W",
@@ -624,7 +624,7 @@ function surfaceTitle(
     case "agents":
       return "Agents";
     case "workflows":
-      return "Workflows";
+      return "Playbooks";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -830,7 +830,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       onClick: props.onAddPullRequest,
     },
     {
-      label: "Workflows",
+      label: "Playbooks",
       icon: Workflow,
       shortcut: "W",
       available: props.workflowsAvailable,

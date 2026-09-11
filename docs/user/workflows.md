@@ -16,10 +16,67 @@ The Workflows page opens as a Board so you can scan phase progress, active agent
 across runs. Open a run and choose Timeline to trace recorded phase changes, agent or code work,
 and human decisions; older imported history may show without an exact event time.
 
-Open **Workflows**, choose **New workflow**, then select an eligible Squadron, enter
-a development request and base ref, and choose **Start workflow**. A Squadron must
+Open **Workflows**, choose **New workflow**, select a workflow definition and eligible Squadron,
+enter a request and base ref, and choose **Start workflow**. A Squadron must
 contain exactly one project; ineligible Squadrons are explained in the dialog. The base ref is
 resolved once. Each run owns a separate branch and worktree under the server home.
+
+## YAML workflow definitions
+
+Settings → Workflows imports `.yaml` and `.yml` definitions into the selected server environment.
+Imported definitions override configured and shipped definitions with the same id. Disable an
+import to prevent future starts, or remove it to reveal the configured or shipped definition it
+replaced. Invalid files remain listed with their diagnostic and do not hide valid workflows.
+
+Definitions use `schema: t3-workflow/v1`, an ordered `phases` list, and explicit transitions.
+An agent task sets exactly one of `agent` or `persona`. `agent` refers to a named entry under
+`agents` and reuses that conversation on every later phase; `persona` starts a fresh conversation
+for that task. The same named agent cannot run twice in one phase. Built-in outputs are `report`
+and `review`; review verdicts must agree with blocking findings and identify selected evidence.
+Phase visits default to one, so add `visitLimit` to every phase that a transition can revisit.
+
+```yaml
+schema: t3-workflow/v1
+id: focused-research
+version: 1
+name: Focused research
+description: Research, review, and approve a report.
+initial: research
+agents:
+  researcher: { persona: scout, authority: read-only }
+phases:
+  - id: research
+    kind: agent
+    visitLimit: 2
+    tasks:
+      - id: investigate
+        agent: researcher
+        instructions: Research the request and state unknowns.
+        output: report
+    transitions: { completed: review }
+  - id: review
+    kind: agent
+    evidence: [research]
+    tasks:
+      - id: check
+        persona: critic
+        authority: critic-review
+        instructions: Review the report against its evidence.
+        output: review
+    outcome: review
+    transitions: { completed: approval, revise: research }
+  - id: approval
+    kind: gate
+    evidence: [research, review]
+    transitions: { approve: $complete, request_changes: research }
+```
+
+Configured server folders are listed in `<stateDir>/workflow-definitions.json`; relative paths
+resolve from the state directory. Without that file, the server reads immediate YAML files from
+`<stateDir>/workflow-definitions`. Back up `imported-workflows.json` and
+`workflows/definitions`. The latter contains immutable definitions used to resume active and
+historical runs after their library entry changes or is removed. Missing or unsupported saved
+definitions block execution rather than substituting current behavior.
 
 Scout collects evidence, and Navigator proposes the plan and executable checks. Plans
 record assumptions used to resolve unspecified product choices. Advocate and Skeptic
@@ -72,9 +129,10 @@ For local development, use the dedicated home and printed pairing URL:
 vp run dev --home-dir /Users/bastian.huppertz/Projects/j5code-dev-state
 ```
 
-After reviewing changes to workflow source, regenerate its build manifest with
+After reviewing changes to workflow runtime source, regenerate its build manifest with
 `node scripts/j5-workflow-manifest.mjs`. The server build checks this manifest so
-source and bundled Electron execution use the same definition identity.
+source and bundled Electron execution use the reviewed runtime. Development v3 keeps its separate
+compatibility identity so unrelated runtime file moves do not invalidate supported runs.
 
 Before starting, configure the environment’s YAML persona library with scout, navigator, advocate, skeptic, builder, critic, and sentry. Builder must permit workspace-write, critic must permit critic-review, and the other roles must permit read-only. A missing, disabled, invalid, or unavailable role prevents the workflow from starting.
 

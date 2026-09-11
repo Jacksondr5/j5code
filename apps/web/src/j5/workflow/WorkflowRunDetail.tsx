@@ -36,7 +36,7 @@ function WorkflowRunDetailForRun({
   };
   return (
     <section className="min-w-0 space-y-4">
-      <div aria-label="Workflow detail" className="flex gap-1 border-b" role="tablist">
+      <div aria-label="Playbook detail" className="flex gap-1 border-b" role="tablist">
         {(["overview", "timeline"] as const).map((value) => (
           <button
             aria-controls={`workflow-${value}`}

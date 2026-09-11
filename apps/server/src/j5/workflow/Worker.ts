@@ -37,9 +37,12 @@ export const makeWorker = (
 ) => {
   const isWorkflowError = Schema.is(WorkflowError);
   let schedulingCursor = 0;
-  const definitionFor = (run: Pick<Run, "definitionId" | "definitionVersion">) =>
+  const definitionFor = (run: Pick<Run, "definitionId" | "definitionVersion" | "definitionHash">) =>
     definitions.find(
-      (item) => item.id === run.definitionId && item.version === run.definitionVersion,
+      (item) =>
+        item.id === run.definitionId &&
+        item.version === run.definitionVersion &&
+        item.hash === run.definitionHash,
     );
 
   const processRecord = Effect.fn("WorkflowWorker.processRecord")(function* (
@@ -107,7 +110,12 @@ export const makeWorker = (
         );
         return true;
       }
-      if (snapshot.restart.phase === "code_review" && !(yield* candidateIsCurrent(latest))) {
+      if (
+        definitionFor(latest)
+          ?.phases.find((phase) => phase.id === snapshot.restart!.phase)
+          ?.capabilities?.includes("candidate-watch") &&
+        !(yield* candidateIsCurrent(latest))
+      ) {
         yield* store.command(
           {
             commandId: `changed:${snapshot.id}:${latest.revision}`,
@@ -153,6 +161,7 @@ export const makeWorker = (
       const changed = yield* Effect.gen(function* () {
         const current = yield* store.get(snapshot.id);
         if (current.status !== "running") return false;
+        const phase = definition?.phases.find((item) => item.id === action.phase);
         const adapter = adapters[action.adapter];
         let observation: ActionObservation;
         const now = yield* currentTime;
@@ -171,7 +180,7 @@ export const makeWorker = (
             failureCategory: "action_deadline_expired",
           };
         } else {
-          if (["commit", "push", "draft"].includes(action.phase)) {
+          if (phase?.capabilities?.includes("publication")) {
             if (!(yield* candidateIsCurrent(current))) {
               const latest = yield* store.get(snapshot.id);
               yield* store.command(
@@ -243,7 +252,7 @@ export const makeWorker = (
         const latest = yield* store.get(snapshot.id);
         if (
           observation.status === "completed" &&
-          action.phase === "code_review" &&
+          phase?.capabilities?.includes("candidate-watch") &&
           !(yield* candidateIsCurrent(latest))
         ) {
           yield* store.command(
