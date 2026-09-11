@@ -3888,7 +3888,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
     .map((def) => def.id);
   const composerControls = agentPersonaAssignment ? (
-    <AgentPersonaAssignmentControl assignment={agentPersonaAssignment} />
+    <AgentPersonaAssignmentControl
+      assignment={agentPersonaAssignment}
+      environmentId={environmentId}
+    />
   ) : noProviderAvailable ? (
     <Button
       type="button"

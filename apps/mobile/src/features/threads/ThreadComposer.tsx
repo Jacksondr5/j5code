@@ -794,7 +794,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                     />
                     <View className="min-w-0 shrink" style={{ maxWidth: 152 }}>
                       {agentPersonaAssignment ? (
-                        <AgentPersonaAssignmentControls assignment={agentPersonaAssignment} />
+                        <AgentPersonaAssignmentControls
+                          assignment={agentPersonaAssignment}
+                          environmentId={props.environmentId}
+                        />
                       ) : (
                         <ComposerInlineControl
                           accessibilityLabel="Model and reasoning settings"

@@ -335,3 +335,22 @@ export function agentPersonaDuplicateDraft(
     modelRoute: definition.modelRoute,
   };
 }
+
+export type AgentPersonaDrift = "current" | "changed" | "unknown";
+
+/**
+ * Compare a thread's launch snapshot with the library's current definition. Legacy
+ * snapshots without a digest, and agents no longer listed, cannot be compared.
+ */
+export function agentPersonaDrift(
+  assignment: Pick<OrchestrationV2AgentPersonaAssignment, "personaId" | "definitionDigest">,
+  catalog: OrchestrationV2AgentPersonaCatalog | null | undefined,
+): AgentPersonaDrift {
+  if (assignment.definitionDigest === undefined) return "unknown";
+  const current = catalog?.personas.find(({ personaId }) => personaId === assignment.personaId);
+  if (current?.definitionDigest === undefined) return "unknown";
+  return current.definitionDigest === assignment.definitionDigest ? "current" : "changed";
+}
+
+export const AGENT_PERSONA_DRIFT_MESSAGE =
+  "This agent's definition changed after this task launched. The task keeps the definition it started with; start a new task to use the current one.";

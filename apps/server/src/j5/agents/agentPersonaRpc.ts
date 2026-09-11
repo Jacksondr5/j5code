@@ -61,6 +61,12 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
             const current = yield* library.catalog().pipe(Effect.mapError(catalogError));
             const catalog = buildAgentPersonaCatalog(yield* deps.providers, current.definitions);
             const importedIds = new Set(current.importedIds);
+            const digests = new Map(
+              [...current.definitions, ...current.removedSources].map((definition) => [
+                definition.id,
+                definitionDigest(definition),
+              ]),
+            );
             const editable = new Map(
               current.definitions
                 .filter(({ id }) => importedIds.has(id))
@@ -79,6 +85,7 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
                 ...catalog.personas.map((persona) => ({
                   ...persona,
                   imported: importedIds.has(persona.personaId),
+                  definitionDigest: digests.get(persona.personaId)!,
                   ...(editable.has(persona.personaId)
                     ? { editable: editable.get(persona.personaId)! }
                     : {}),
@@ -90,6 +97,7 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
                   ...persona,
                   imported: false,
                   removed: true,
+                  definitionDigest: digests.get(persona.personaId)!,
                   availability: { status: "unavailable" as const, reason: "removed" as const },
                 })),
               ],
