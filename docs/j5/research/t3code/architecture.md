@@ -1,6 +1,7 @@
 ---
 title: "T3 Code — architecture map"
-kind: spec
+kind: research
+as_of: 2026-08-23
 ---
 
 # Architecture map

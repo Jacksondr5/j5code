@@ -1,6 +1,7 @@
 ---
 title: "Traycer organization model deep dive"
-kind: spec
+kind: research
+as_of: 2026-08-23
 ---
 
 # Deep dive: the organization model

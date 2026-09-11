@@ -1,7 +1,6 @@
 ---
 title: "T5 — Light CI & desktop packaging"
-kind: ticket
-status: 2
+kind: record
 ---
 
 # T5 — Light CI & desktop packaging

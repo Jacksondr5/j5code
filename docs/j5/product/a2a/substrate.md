@@ -1,139 +1,74 @@
 ---
 title: "Upstream substrate — what J5 consumes, rebuilds, and builds"
-kind: spec
+kind: definition
 ---
 
-# Upstream substrate ruling (settled 2026-08-29)
+# Upstream substrate
 
-This doc governs the fork's relationship to upstream T3's orchestration code: which upstream
-mechanisms J5 builds on, which it replaces, and what the agent-facing tool surface exposes. It lives
-under `a2a/` because the A2A program forced every decision in it, but its scope is the whole fork.
-Session record with the full evidence trail: [substrate session
-2026-08-29](../../worklog/substrate-session-2026-08-29.md). Vocabulary of record:
-[glossary](../glossary.md) "Spawning" section (ST1–ST5).
+## Problem
 
-## The organizing line
+J5 is a tracking fork of T3 Code. Upstream ships a great deal of machinery that J5 needs — provider adapters, an event-sourced core, thread creation, checkpoints — and some machinery that carries an opinion about how agents are organized, which is the opinion J5 exists to replace. Without a stated line between the two, every feature would re-decide which upstream mechanism to build on, and the agent-facing tool surface would grow by accident with each upstream rebase. This definition draws the line once.
 
-The Subagent/Peer Agent species line (ST1–ST5, 2026-08-24) is what sorts upstream code. **Subagents
-belong to providers**: the platform cannot control their creation and does not try (ST4); upstream
-renders them properly; J5 only observes. **Peer Agents belong to J5**: all platform law — R21
-placement, Squadron inheritance, the creation-time Registrar, ledger participanthood — governs Peer
-Agents and only Peer Agents. Every upstream mechanism is judged by one question: _does it carry an
-opinion about agent organization?_ Topology-free plumbing is consumed; org-shaped opinion is
-replaced by J5's systems.
+## Definition
 
-`delegate_task` was the only occupant of the middle — an app-owned child wearing Subagent
-presentation (sidebar-hidden lineage, `origin: "app_owned"` subagent labeling, creation gated on an
-active parent run) with Peer-shaped capabilities (durable independent runs that survive the
-spawner). ST5 excludes it from the J5 product surface; this doc records the mechanical disposition.
-With it gone the two-species world is clean: every creation is either a provider's business or the
-platform's law.
+### The organizing line
 
-## The four buckets
+The Subagent and Peer Agent distinction (see the [glossary](../glossary.md)) sorts upstream code. **Subagents belong to providers**: the platform cannot control their creation and does not try; upstream renders them; J5 only observes. **Peer Agents belong to J5**: everything the platform says about spawning, membership, placement and messaging applies to Peer Agents and only to them.
 
-| Disposition                               | Upstream mechanism                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Ruling                                                                                                                                                                                                                                                                                   |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Consume as-is**                         | Provider adapters and turn machinery; the event-sourced core (commands → events → projections, receipts, outbox); thread creation with settings inheritance; per-thread interrupt and archive commands; `sendToThread` steer/queue delivery; checkpoints; run-lifecycle events as an observation feed                                                                                                                                                                                                                                                                               | Topology-free plumbing. J5 calls these through their public command seams and never mutates upstream projections directly.                                                                                                                                                               |
-| **Consume as record, never behavior**     | Thread lineage (`lineage.parentThreadId`, `relationshipToParent`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Load-bearing for forks and for rendering provider-native Subagents; also a read-only provenance derivation source for creations that bypass J5 surfaces. Never a lifecycle, display, or org-semantics source for Peer Agents — who spawn with **root lineage** and need nothing from it. |
-| **Rebuild (J5 owns the org opinion)**     | Spawn (`delegate_task`) → J5 spawn verb: root-thread creation + Registrar + placement; its brief carries the initial task plus whether and what reply is expected. Exchanges with `expect_reply` remain the reply-obligation primitive for later work owed by an existing participant, never a second spawn step. Lifecycle cascade → placement-walking `stop_agent`/`archive_agent` dispatching upstream per-thread ops. Org display (Lineage panel) → hierarchy UI reading placement + provenance; the Lineage panel remains as the structure/debug view for Subagents and forks. | These carry upstream's structure-is-spawn-tree opinion, which is the opinion J5 exists to replace.                                                                                                                                                                                       |
-| **Build (nothing exists on either side)** | Open-exchange re-surfacing (a receiver that defers a delivered ask has no "later" — the successor to the retired "auto-wake" question; memo/inbox territory, R24–R35). Orphan/runaway observability (nothing reaps children under any substrate — observe via silence machinery, never auto-kill). Squadron creation UX (SC1–SC4).                                                                                                                                                                                                                                                  | Named build items; each needs its own design pass.                                                                                                                                                                                                                                       |
+Every upstream mechanism is judged by one question: _does it carry an opinion about agent organization?_ Topology-free plumbing is consumed as-is. Organization-shaped opinion is replaced by J5's own systems.
 
-Transport finding backing the rebuild column (measured 2026-08-29, retained proof databases): the
-A2A delivery path is **proven** for the busy-receiver case and code-verified for the idle case
-(delivery starts a run when no run is active/waiting; queued runs are promoted when a blocking run
-terminalizes). Revised 2026-09-03 (issue #73): the busy case originally steered the ask into the
-receiver's active turn; that aborted the receiver's unstarted sibling tool calls, so delivery now
-**queues** behind the active turn and starts when it ends. Steer is an explicit human action on
-the queued row or the composer's Mod+Enter chord, never a delivery mode; the control says what a
-steer does on that provider (active steering on Claude, Codex, and OpenCode; interrupt-and-restart
-on Cursor, ACP, and Grok), and when nothing is steerable it names the run's phase and offers
-Interrupt instead of falling through (ruling record QS3/QS4). The one v1 proof "failure" was an
-instructed silence misread as a delivery bug. `delegate_task`'s completion wake therefore fills no
-gap Exchanges leave open.
+### The four dispositions
 
-## Transport vs A2A — the layering law
+| Disposition                               | Upstream mechanism                                                                                                                                                                                                                                                                                                                                                                                                        | Why                                                                                                                                                                                                                                                                           |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Consume as-is**                         | Provider adapters and turn machinery; the event-sourced core (commands, events, projections, receipts, the outbox); thread creation with settings inheritance; per-thread interrupt and archive; thread-send delivery with its queue and steer modes; checkpoints; run-lifecycle events as an observation feed                                                                                                            | Topology-free plumbing. J5 calls these through their public command seams and never writes into upstream projections directly.                                                                                                                                                |
+| **Consume as record, never behavior**     | Thread lineage (the parent thread and the relationship to it)                                                                                                                                                                                                                                                                                                                                                             | Needed for forks and for rendering provider-native Subagents, and a read-only source for deriving provenance when a creation bypassed J5. Never a source of lifecycle, display or organization for Peer Agents, which are created with root lineage and need nothing from it. |
+| **Rebuild — J5 owns the organization**    | Spawning (upstream's delegation) becomes J5's spawn verb: root-thread creation, the Registrar, placement, and a brief that carries the task and whether a reply is expected. Lifecycle (upstream's cascade) becomes J5's single-target stop and archive verbs. Organization display (upstream's lineage panel) becomes a hierarchy read from placement and provenance; the lineage panel remains for Subagents and forks. | These carry upstream's structure-is-the-spawn-tree opinion.                                                                                                                                                                                                                   |
+| **Build — nothing exists on either side** | Re-surfacing an open Exchange to a receiver that deferred it (inbox and Memo territory); orphan and runaway observability (observe through silence machinery, never auto-kill); Squadron creation.                                                                                                                                                                                                                        | Named build items, each with its own definition.                                                                                                                                                                                                                              |
 
-`t3_thread_send` (and the server seam beneath it, `sendToThread`) is **transport**: it injects text
-into a thread and nothing more. A2A is transport **plus the law**: the envelope carrying sender
-identity and Squadron, the ledger event that makes the message part of the communication graph, the
-Exchange and its reply obligation, delivery receipts, and silence classification. `send_message` is
-`t3_thread_send` wearing the law. A raw thread-send between agents is untracked peer communication —
-it can cause the exact silent stall the communication graph exists to make visible. Therefore: J5
-consumes the seam server-side, and the raw tool never appears on the agent surface.
+### Transport versus communication
 
-## The ownership rule
+Upstream's thread-send, and the server seam beneath it, is **transport**: it injects text into a thread and nothing more. Agent-to-agent communication is transport **plus the record**: the envelope naming the sender and Squadron, the ledger row that makes the message part of the communication graph, the Exchange and what it owes, the delivery receipt, and silence measurement. J5's `send_message` is upstream's thread-send wearing that record. A raw thread-send between agents is untracked peer communication — it can cause the exact silent stall the ledger exists to make visible — so J5 consumes the seam server-side and the raw tool never appears on the agent surface.
 
-**Upstream owns existence and lifecycle state. J5 tables overlay only org facts** (Squadron home,
-placement, provenance, exchange obligations). J5 writes flow through upstream's public command
-seams, never into its projections. J5 read paths either join upstream state or tolerate staleness
-explicitly.
+Delivery to a busy agent queues behind the active turn; steering is the person's act, with one ruled exception for a peer's update into a running Codex Astra turn ([A2A definition](index.md), Delivery).
 
-**Participanthood is granted only by explicit J5 registration surfaces** — the spawn verb, the
-user composer (SC3's immutable Squadron chip → Registrar), or a controlled seed. It is never
-inferred from thread existence or addressability. The guard case that forces this: Codex-native
-Subagents get real shadow AppThreads holding **live** resumable provider thread refs
-(`CodexAdapterV2.ts` `registerSubagentThread`, `activeProviderThreadId` set, `creationSource:
-"provider"`). They are thread-having and send-capable, and they are Subagents — any future
-absorption/backfill sweep must exclude `creationSource: "provider"` and subagent-lineage threads.
+### The ownership rule
 
-## The agent tool surface — `J5OrchestratorSurface`
+**Upstream owns existence and lifecycle state; J5 tables overlay only organization facts** — Squadron home, placement, provenance, Exchange obligations. J5 writes flow through upstream's public command seams, never into its projections; J5 reads either join upstream state or say explicitly that they may be stale.
 
-Mechanism: the fork replaces the upstream orchestrator toolkit registration with a J5-owned subset
-toolkit (a J5 file re-using upstream's exported `Tool` constants; thin handlers delegating to the
-same `OrchestratorMcpService`; one-line swap in the MCP server layer merge). Upstream's toolkit,
-handlers, service, and tests stay compiled and untouched — non-exposure, not deletion.
+**Participanthood is granted only by J5's registration surfaces** — the spawn verb, the composer's Squadron chip, or a controlled seed — and never inferred from a thread's existence or addressability. The case that forces this: Codex-native Subagents get real shadow threads holding live, resumable provider references; they are thread-having and send-capable, and they are still Subagents. Any sweep that absorbs threads into the roster excludes provider-created and Subagent-lineage threads.
 
-| Disposition | Tools                                                                                                                                                                                                                                               | Reason                                                                                                                                                                                                                           |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Keep        | `orchestrator_capabilities` (handler overridden: stops advertising `appOwnedSubagents`/delegation), `schedule_task`, `list_scheduled_tasks`, `update_scheduled_task`, `delete_scheduled_task`, `t3_thread_list`, `t3_thread_read`, `t3_thread_wait` | Observation and self-scheduling carry no org opinion                                                                                                                                                                             |
-| Drop        | `delegate_task`, `task_status`, `task_cancel`                                                                                                                                                                                                       | The excluded middle species (ST5), gone whole                                                                                                                                                                                    |
-| Drop        | `t3_thread_send`, `t3_thread_interrupt`                                                                                                                                                                                                             | Untracked twins of `send_message` / `stop_agent` — they bypass ledger, Exchange, silence, and Squadron-membership law                                                                                                            |
-| **Open**    | `create_threads`, `t3_thread_start`                                                                                                                                                                                                                 | Recommendation on record: drop — raw creation from the agent surface is an unregistered-thread bypass of the spawn verb. Undecided; if kept, their descriptions (which steer callers toward `delegate_task`) must be re-written. |
+### The agent tool surface
 
-Companion edits outside the toolkit: `T3OrchestrationInstructions.ts` prompt text steers agents
-toward `delegate_task` and away from thread creation — it gets a small in-place tracked edit. Both
-touches (the layer swap, the prose edit) go into `FORK.md`'s upstream-touch inventory when the code
-lands.
+J5 replaces upstream's orchestrator toolkit registration with its own subset: a J5-owned toolkit reusing upstream's tool constants, thin handlers delegating to the same service, and a one-line swap in the MCP server layer. Upstream's toolkit stays compiled and untouched — non-exposure, not deletion. The subset is **fail-closed on upstream evolution**: a rebase that brings new upstream tools does not extend the agent surface until someone admits them deliberately, so new agent powers get reviewed against J5's definitions by default.
 
-**The property that makes this the right mechanism**: the subset is fail-closed on upstream
-evolution. A rebase that brings new upstream tools does not extend the agent surface until someone
-deliberately admits them — new agent powers get reviewed against J5 law by default. Rebase conflict
-surface: the `tools.ts` exports and one merge line.
+| Disposition | Tools                                                                                                                                                                                                                                                                                                | Why                                                                                                                                                                                                |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Keep        | `orchestrator_capabilities` (its handler no longer advertises delegation or app-owned subagents), the scheduling verbs (`schedule_task`, `list_scheduled_tasks`, `update_scheduled_task`, `delete_scheduled_task`), and the observation verbs (`t3_thread_list`, `t3_thread_read`, `t3_thread_wait`) | Observation and self-scheduling carry no organization opinion.                                                                                                                                     |
+| Omit        | `delegate_task`, `task_status`, `task_cancel`                                                                                                                                                                                                                                                        | The excluded middle species: a Peer Agent in Subagent dress.                                                                                                                                       |
+| Omit        | `t3_thread_send`, `t3_thread_interrupt`                                                                                                                                                                                                                                                              | Untracked twins of `send_message` and `stop_agent` — they bypass the ledger, the Exchange, silence measurement, and Squadron membership.                                                           |
+| Omit        | `create_threads`, `t3_thread_start`                                                                                                                                                                                                                                                                  | Raw creation from the agent surface would bypass the spawn verb and the Registrar. Admitting either requires a contract in [agent-tools](agent-tools.md) first, never a registration change alone. |
 
-Consequence worth recording: with agent-side raw creation dropped and human creation flowing
-through SC3's composer chip, the "native creations bypass the wrapper" bound from A6 shrinks to
-approximately nothing — the `unknown`-provenance cohort loses both of its sources on this fork.
+Upstream's orchestration prompt text steered agents toward delegation and away from thread creation; J5 carries a small tracked edit to it, recorded in the fork inventory.
 
-### The J5 verb surface — including needed-but-unbuilt
+The J5 verbs themselves — `send_message`, `list_participants`, `spawn_agent`, `stop_agent`, `archive_agent`, `clear_own_ask` — are defined in [agent-tools](agent-tools.md).
 
-The J5 toolkit carries the verbs that wear the law: `send_message`, `list_participants`,
-`spawn_agent`, `stop_agent`, `archive_agent`. One verb is **ruled but unbuilt** and is recorded here
-so it gets an A-series home rather than living only in a feature doc:
+### The legacy cohort
 
-- **`clear_own_ask`** (working name) — a sender closes its **own** open Exchange without a reply
-  message. Required by the inbox design's flow 2 (IB1b,
-  [`features/inbox.md`](../features/inbox.md) "Platform dependency" block): an agent's ask lands in
-  the human inbox, the human resolves it in direct chat instead of the inbox answer API, and the
-  agent then withdraws its ask so the inbox item legitimately exits. Semantics: sender-judged
-  closure (R3) applied to the sender's own withdrawal; refuses non-sender callers; emits a ledger
-  event so the closure is visible in projections (inbox status, Exchange state, the eventual A5
-  graph). Until it ships, in-thread-resolved asks linger open in the human's queue — the known gap
-  the inbox doc tracks.
+Agents spawned through upstream's delegation path before the spawn verb existed are Peer Agents wearing Subagent lineage: registered, durable, placed and provenance-recorded, with a lineage row that says "subagent". They keep working; the species guard reads registration, not lineage.
 
-## Legacy cohort
+## Acceptance criteria
 
-Children spawned through the A6 wrapper's `delegate_task` path before this ruling are **Peer Agents
-wearing subagent lineage**: registered participants with durable independent runs, placed and
-provenance-recorded, whose upstream lineage row says `subagent`. They keep working; the species
-guard reads registration, not lineage, so they are unaffected. No migration is required; the cohort
-is bounded and dogfood-scale.
+1. No J5 code writes into an upstream projection; every J5 mutation goes through an upstream public command seam or a J5-owned table.
+2. The agent surface exposes exactly the J5 verbs and the kept upstream tools listed above; every other upstream tool is absent by construction, and a new upstream tool arriving in a rebase is absent until admitted through a contract change.
+3. An agent-to-agent message sent through the platform always has a ledger row, an envelope, and a delivery outcome; no raw thread-send is reachable from the agent surface.
+4. A thread becomes a participant only through the spawn verb, the composer's Squadron chip, or a controlled seed; a provider-created thread or a Subagent-lineage thread never becomes one by any sweep.
+5. A Peer Agent created through the spawn verb has root lineage; nothing about it is derived from upstream's lineage record.
 
-## Open doors (deliberately, not forgotten)
+## History
 
-- `create_threads` / `t3_thread_start` on the agent surface (table above).
-- Open-exchange re-surfacing for idle receivers (build item; memo/inbox design).
-- Orphan/runaway observability policy (build item; silence-machinery surfacing).
-- Forks/checkpoints session: how the lineage record's non-org consumers coexist with Peer Agent
-  org semantics (flagged 2026-08-29, not yet scheduled).
-- May Crew members spawn solo Peer Agents — stays open per `features/crews.md` (Deferred); nothing
-  in this ruling leans either way.
+- 2026-08-24 — Subagent and Peer Agent distinguished; delegation excluded from the product surface ([record](../../worklog/2026-08-24-spawn-terminology-session.md)).
+- 2026-08-29 — the substrate line drawn: the four dispositions, the ownership rule, the fail-closed tool subset ([record](../../worklog/2026-08-29-substrate-session.md)).
+- 2026-08-31 — `create_threads` and `t3_thread_start` omitted; `clear_own_ask` built.
+- 2026-09-03 — delivery queues behind an active turn; steering is the person's act ([record](../../worklog/2026-09-03-queue-vs-steer-ruling.md)); 2026-09-04 — the Codex Astra exception ([record](../../worklog/2026-09-04-astra-peer-delivery.md)).
+- 2026-09-07 — rewritten into the definition shape; stale rows (the open `create_threads` row, "needed-but-unbuilt" `clear_own_ask`, the pending prompt-text edit, Squadron creation as "nothing exists") corrected to the current state.

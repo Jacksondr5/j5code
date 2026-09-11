@@ -1,6 +1,6 @@
 ---
-kind: spec
 title: "A3 sitter initial audit"
+kind: record
 ---
 
 # A3 sitter initial audit

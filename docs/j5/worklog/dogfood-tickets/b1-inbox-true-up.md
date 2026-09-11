@@ -1,12 +1,11 @@
 ---
 title: "B1 — Inbox surface true-up to IB1–IB7 (post-#11)"
-kind: ticket
-status: 0
+kind: record
 ---
 
 # B1 — Inbox true-up
 
-**Governing artifacts:** `../../product/features/inbox.md` (IB1–IB7, definition-of-record), gap-analysis conformance report (Director log 2026-08-30), `../../product/dogfood-v0.md`. Base: `j5/main` after PR #11 merges — #11's projection/answer API is the contract; this ticket reshapes the view and closes two platform gaps.
+**Governing artifacts:** `../../product/features/inbox.md` (IB1–IB7, definition-of-record), gap-analysis conformance report (Director log 2026-08-30), `../../plans/dogfood-v0.md`. Base: `j5/main` after PR #11 merges — #11's projection/answer API is the contract; this ticket reshapes the view and closes two platform gaps.
 
 ## Scope
 

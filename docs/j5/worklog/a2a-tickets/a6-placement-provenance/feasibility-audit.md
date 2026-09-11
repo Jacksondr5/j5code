@@ -1,6 +1,6 @@
 ---
 title: "A6 feasibility audit — placement integration boundary"
-kind: spec
+kind: record
 ---
 
 # A6 feasibility audit — placement integration boundary

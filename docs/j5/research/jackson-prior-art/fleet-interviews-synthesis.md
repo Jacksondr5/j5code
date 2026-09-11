@@ -1,6 +1,7 @@
 ---
 title: "Fleet interviews — synthesis and the platform/non-platform classification"
-kind: spec
+kind: research
+as_of: 2026-08-23
 ---
 
 # Fleet interviews: synthesis

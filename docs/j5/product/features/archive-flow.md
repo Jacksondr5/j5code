@@ -1,63 +1,62 @@
 ---
-title: "Archive flow — the warning moment, designed"
-kind: spec
+title: "Archive flow"
+kind: definition
 ---
 
 # Archive flow
 
-Feature definition of record, settled 2026-08-29 with Jackson
-([session rulings AR1–AR4](../../worklog/archive-flow-session-2026-08-29.md)).
-This is the UI of the law already in force: archive terminates
-obligations loudly (R1), Crews archive as units (R14), **archive never
-destroys work** (R15), archive-with-open-Exchanges warns with count +
-list + explicit confirmation (J1–J3), and a dropped ask leaves the
-human's inbox immediately because this warning is the loud moment (IB6).
-Approved mockup in the design workspace (`product/archive-flow/`).
+## Problem
 
-## The flow
+Archiving an agent is where obligations get stranded: the agent that was owed a reply never learns its counterpart is gone, the person's inbox keeps an ask nobody will ever withdraw, and children placed under the archived agent are left without anyone noticing. More agents mean more cleanup, and cleanup that happens silently is how a fleet loses track of itself ([problems](../problems.md): more work needs more cleanup; large unsupervised groups). Archiving is also a judgment moment — whether to proceed is the person's or Captain's call — and the platform's only honest contribution is to put the facts in front of whoever is deciding.
 
-1. **Entry**: the existing thread action menu (v0); roster actions reuse
-   the dialog later.
-2. **Pre-archive read**: open asks in both directions + the placement
-   subtree. Unknowns render as "couldn't check" — never as an empty,
-   reassuring list ([never-guess](../principles.md)).
-3. **The dialog — only when facts warrant it.** A clean agent archives
-   without ceremony. Otherwise: the subtree line (cascade names), each
-   waiting ask with sender/urgency/intent/age, the outbound asks that
-   drop, a quiet R15 reassurance (worktrees, branches, PRs survive —
-   cleanup is a separate act), and one destructive-styled confirm. One
-   confirm; no type-to-confirm. _(Amended 2026-09-01 from Jackson's
-   live review of PR #36 — AR5, **row anatomy**: each open-ask row is
-   two lines mirroring the inbox item — header line = **urgency badge
-   first** (blocking/soon/fyi, inbox colors), direction glyph +
-   "To/From ⟨display name⟩" (agents → thread title; humans → person
-   name + "(inbox)"; **unknown → "Unnamed participant"**, raw ids never
-   in the row), time-since via the inbox's own
-   `open {formatElapsedDurationLabel(openedAt)}` helper so the surfaces
-   cannot diverge; second line = the intent verbatim, **clamped at ~3
-   lines with ellipsis**. Section header carries count + consequence
-   ("N open asks will be terminated — waiters are notified"). Title is
-   "Archive ⟨agent name⟩?" with the host's fixed Confirm — the question
-   lives in the title so Confirm is unambiguous; "Archive anyway" as a
-   button label is a nice-to-have riding any future host generalization,
-   never a seam opened for it alone. Mockup of record:
-   design workspace `product/archive-flow/dialog-rows/`, Variant B.)_
-4. **Aftermath**: agent waiters get R1 terminal notices rendered as
-   muted platform notices (TA3); human inbox items leave immediately
-   (IB6); rows leave the active sidebar/roster sets. Nothing is deleted.
+## Definition
 
-## Dependencies
+Archiving retires an agent for good. It **never destroys work**: worktrees, branches and pull requests survive, and cleaning them up is a separate act. It is **loud**: every open Exchange the agent holds ends with a notice to the waiter, and every fact that archiving will change is shown before it happens.
 
-Ships ahead of A9 (the dialog warns truthfully today; waiter notices are
-A9's build). Subtree facts from A6 placement; needs a small client-facing
-pre-archive read. Squadron archive is out of scope (no archive op exists
-on the entity — SC4-later). Open Memos join as a third dialog section
-when Memos ship (R31).
+Before the dialog appears, the platform reads the facts: the agent's open asks in both directions, and the agents placed beneath it. A fact it could not read is shown as "couldn't check" — never as an empty, reassuring list.
 
-## What this feature is not
+**The dialog appears only when the facts warrant it.** An agent with nothing open and nothing beneath it archives without ceremony. Otherwise the dialog is titled "Archive ⟨agent name⟩?" and shows: the agents beneath it that this affects; each open ask that will be terminated, as a two-line row mirroring an inbox item — urgency badge first, then "To" or "From" and the counterpart's name, then the time open, then the intent verbatim; the section's count and consequence ("N open asks will be terminated — waiters are notified"); a quiet reassurance that the workspace survives; and one destructive-styled confirm. One confirm, no type-to-confirm. Every line is a measured fact; the dialog offers no opinion on whether to proceed.
 
-Not a delete (R15 — nothing in the workspace is touched), not a
-seat-level operation (members are never individually archived — R14),
-and not a place for platform judgment: every line in the dialog is a
-measured fact; whether to proceed is entirely the human's or Captain's
-call.
+Afterwards, waiters receive a platform notice that the Exchange ended, the person's inbox items from this agent leave immediately (the dialog was the loud moment), the agent leaves the active sidebar and the Fleet page, and its ledger and conversation stay readable forever. When Memos exist, the agent's open Memos appear as a third section of the dialog.
+
+The flow is reached from the agent's thread and from its Fleet page row. Crews archive only as a unit, through their own flow; a Squadron is not archived through this flow.
+
+This is **not** a delete, **not** a way to archive a single Crew member, and **not** a place for platform judgment.
+
+## Acceptance criteria
+
+### Facts
+
+1. Before the dialog, the platform reads the agent's open asks in both directions and its placement subtree; a read that fails is shown as "couldn't check", never as an empty list.
+
+### The dialog
+
+2. An agent with no open Exchanges and no agents beneath it archives immediately, with no dialog.
+3. Otherwise the dialog names the agent in its title, lists the agents beneath it, lists every open ask with its urgency, direction, counterpart, time open, and verbatim intent, states the count of asks that will be terminated, and reassures that the workspace survives.
+4. An ask row names its counterpart by display name — an agent's thread title, a person's name with "(inbox)" — and never shows a raw id; an unnamed counterpart reads "Unnamed participant".
+5. The dialog has one confirm and no type-to-confirm.
+
+### Aftermath
+
+6. Every waiter on an ended Exchange receives a platform notice rendered as a muted notice line in its thread.
+7. The person's inbox items from the archived agent leave immediately, with no terminal row.
+8. The archived agent leaves the active sidebar and the Fleet page; its ledger and conversation remain readable.
+9. No worktree, branch, or pull request is deleted by archiving.
+
+### Boundaries
+
+10. A Crew member cannot be archived individually through this flow.
+11. The flow is available from the agent's thread and from its Fleet page row.
+
+## Scenarios
+
+- **A clean archive.** An agent in Website Redesign has finished, holds no open asks, and has nothing beneath it; "Archive" retires it with no dialog. (AC2)
+- **A loud archive.** An agent in Billing Migration has an open ask from the Captain (_soon_, "schema target", open 3h) and an ask out to the user, and a helper placed beneath it. The dialog lists the helper, both asks with their rows, "2 open asks will be terminated — waiters are notified", the workspace reassurance, and Confirm. On confirm, the Captain's thread shows a muted notice that the Exchange ended, the user's inbox item is gone, and the agent's branch and pull request are untouched. (AC3, AC4, AC6, AC7, AC9)
+- **A fact the platform couldn't read.** The placement read fails; the dialog says "couldn't check" for the subtree line and still lists the asks it did read. (AC1)
+
+## History
+
+- 2026-08-21 — archive is loud and never destroys work; Crews archive as units; archiving with open Exchanges warns with count, list and confirmation ([record](../../worklog/2026-08-21-design-review.md); former R1, R14, R15 and the Roles/Crews session's J1–J3).
+- 2026-08-29 — the flow designed; former AR1–AR4 ([record](../../worklog/2026-08-29-archive-flow-session.md)).
+- 2026-09-01 — ask-row anatomy mirrors the inbox item; former AR5 (Jackson's live review of the archive build).
+- 2026-09-08 — rewritten into the definition shape. Former identifiers: AR1 → AC11; AR2 → AC1; AR3 → AC2–AC5; AR4 → AC6–AC9; AR5 → AC3–AC4; J1–J3 → AC3, AC5. Build sequencing that lived here (the dialog shipping ahead of waiter notices) is history.

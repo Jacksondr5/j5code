@@ -1,3 +1,8 @@
+---
+title: "Inbox design session — rulings record (2026-08-29)"
+kind: record
+---
+
 # Inbox design session — rulings record (2026-08-29)
 
 Jackson + UI/UX design agent; dogfood-v0 UX workstream (area 5 of the

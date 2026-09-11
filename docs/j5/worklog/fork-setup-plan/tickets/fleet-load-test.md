@@ -1,7 +1,6 @@
 ---
 title: "T6 — Fleet load test & provider smoke"
-kind: ticket
-status: 2
+kind: record
 ---
 
 # T6 — Fleet load test & provider smoke

@@ -1,7 +1,6 @@
 ---
 title: "B6 — Small client-read endpoints (labels, names, counts)"
-kind: ticket
-status: 0
+kind: record
 ---
 
 # B6 — Client reads bundle

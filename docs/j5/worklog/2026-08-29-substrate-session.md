@@ -1,3 +1,8 @@
+---
+title: "Substrate session — rulings record (2026-08-29)"
+kind: record
+---
+
 # Substrate session — rulings record (2026-08-29)
 
 Jackson + architecture evaluator. Origin: Jackson's zoom-out challenge on the A6/#12 evaluation —

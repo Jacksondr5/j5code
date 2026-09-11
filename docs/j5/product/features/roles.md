@@ -1,56 +1,77 @@
 ---
-title: "Roles — reusable agent definitions in platform tooling"
-kind: spec
+title: "Roles"
+kind: definition
 ---
 
 # Roles
 
-Feature definition of record. The problems and goals it serves ([problems doc](../problems.md)): fleets naturally end up with many agents performing the same type of job, and managing those definitions today means self-built solutions — Jackson built one for the prior-art fleets and managing it was a mess. Rulings baked in: R8, R28 in [the register](../design-review-2026-08-21.md), plus the item-3 product session ([worklog record](../../worklog/roles-crews-session-2026-08-23.md)).
+## Problem
 
-## The Role
+A fleet ends up with many agents doing the same kind of job — reviewers, sitters, builders, monitors. Without a reusable definition, every one of them is set up by hand, drifts from the others, and cannot be handed to another person or another agent to spawn. The user who ran the prior-art fleet built a definition system themselves, and managing it was a mess ([problems](../problems.md): Roles defined in platform tooling). Agents also spawn agents, and an agent choosing a kind of helper for the user's budget needs something better than a guess.
 
-A **Role** is a reusable, user-authored definition of a kind of agent. It defines:
+## Definition
 
-- **A required one-line purpose** — the sentence that answers "what is this kind of agent for." It serves both pickers (human dropdown and agent tool listing); a Role without it is not spawnable-by-choice, only by accident.
-- **Identity content in two sections**, both plain markdown, both persistent in the agent's context for its whole life:
-  - **Identity** — who this agent is: values, voice, standing norms. The part the user lets solidify and rarely edits.
-  - **Operating Principles** — how it works at a high level: principles, what it looks for and does in general. Evolves with the user's methodology.
-  - There is deliberately **no prompt in the definition** — the spawner's brief is the prompt, written per instance. Step-by-step operation belongs to [Playbooks](playbooks.md), not the Role.
-- **A model and reasoning-level allowlist** — so agents that spawn other agents with Roles choose the right ones. Ordered; the first entry is the default.
-- **A skill allowlist** — the set of skills exposed to the agent. This is the platform-only part: nobody can gate an agent's tool surface from a markdown file.
-- **Posture on the [human-contact spectrum](../principles.md)** — Foreground or Background, so the agent's communication norms are set at spawn.
+A **Role** is a reusable, user-authored definition of a kind of agent. It is the user's content — a file, portable and shareable — that the platform reads so that spawning the right kind of agent is easy for people and for agents alike.
 
-Roles make it easy for users _and agents_ to spawn the right kind of agent for a task. A Role is spawnable solo, or composed into a [Crew definition](crews.md) as one of its seats.
+A Role defines:
 
-## Authoring: the app is an editing surface
+- **A one-line purpose** — the sentence that answers "what is this kind of agent for." It serves every picker, human and agent; a Role without one cannot be chosen deliberately.
+- **Identity content**, in two plain-markdown sections that stay in the agent's context for its whole life: **Identity** (who this agent is — values, voice, standing norms; the part that solidifies and is rarely edited) and **Operating Principles** (how it works at a high level; the part that evolves with the user's practice). There is deliberately **no prompt in the definition**: the spawner's brief is the prompt, written per instance, and step-by-step operation belongs to a Playbook.
+- **A model and reasoning allowlist**, ordered. It constrains the choice at spawn; it never chooses silently for an agent.
+- **A skill allowlist** — the skills exposed to the agent. This is the one part only the platform can enforce: nobody can gate a tool surface from a markdown file.
+- **A posture on the human-contact spectrum** — how much this kind of agent talks with the person through chat, from Foreground to Background, with the middle allowed — so its communication norms are set at spawn.
 
-Users author and edit Roles **in the app** — a simple markdown editing surface; nobody is pushed out to an external editor to participate. The substance remains **files** (R28): portable, shareable, versionable however the user wants. Git is **optional** — a plain folder works with everything except the git UI; users who point the library at a git repo get exactly three operations in-app — **commit, push, pull** — plus nudges ("you have uncommitted Role changes", "remote is ahead"). Anything difficult — merge conflicts, failed pushes — punts to the user's editor with the error shown (the app already opens it in one click). This is deliberately not a differentiator; minimal effort, forever. One library location in v1 (a default path, configurable); multiple sources are deferred until wanted.
+Roles are authored and edited **in the app**, in a simple markdown editing surface; nobody is pushed out to an external editor to participate. The files remain the substance. Git is optional: a plain folder works with everything except the git controls, and a library pointed at a git repository gets exactly three operations — commit, push, pull — plus nudges when there are uncommitted changes or the remote is ahead. Anything difficult, such as a conflict or a failed push, goes to the user's editor with the error shown. This is deliberately not a differentiator. One library location, configurable.
 
-The **Role Library** view lists every definition with its purpose, posture, and where it's in use ("3 agents running, 1 Crew references this"). **No memory in the bundle** (R8): provider memory is accepted as non-portable local seasoning; what an agent must never forget belongs in its definition.
+The **Role Library** lists every Role with its purpose, its posture, and where it is in use. No memory travels in a Role: provider memory is accepted as non-portable local seasoning; what an agent must never forget belongs in its definition.
 
-## Spawning with a Role
+**Spawning with a Role.** A person picks a Role in the composer's Role dropdown (none selected by default — plain agents remain the default path); selecting one constrains the model and reasoning selectors to the allowlist, with disallowed entries visible but disabled and labeled with the Role that excludes them, and switches an invalid current model to the first allowed one with a visible cue. The spawned thread carries a Role chip. An agent picks a Role from the spawn listing, which shows each Role's purpose, posture and cost tier, because the choosing agent decides on the person's behalf and budget; provider, model and reasoning stay explicit on every agent spawn, constrained by the allowlist and never defaulted for it. A Role is spawnable solo or composed into a Crew.
 
-**Human — folded into the existing new-chat composer:** a Role dropdown below the worktree row, **none selected by default** (plain agents remain the default path). Selecting a Role:
+**Editing a definition never silently changes a running agent.** New spawns get the new definition; running agents keep what they absorbed. What the platform owes is visibility: every agent, and every Crew as a unit, shows a measured **drift** indicator when its definition has changed since it was spawned. The remedy — respawn, or message the agent — is always a person's or Captain's judgment.
 
-- **constrains** the model and effort selectors to the Role's allowlist — disallowed entries stay visible but disabled, labeled with the Role that excludes them (impossible to re-select into an invalid state);
-- **auto-switches** the current model to the first allowlisted one if it's invalid — with a visible cue on the model chip (the change must be watched, not discovered);
-- shows each Role in the dropdown as name + one-line purpose.
+A Role is **not** a runtime object (the agent is), **not** a permission boundary beyond skill gating, and **not** a behavior guarantee: it raises the odds and sets expectations; behavior remains a prompting matter. Prose in a Role ("escalate to your Builder") is never parsed or validated.
 
-The spawned thread carries a **Role chip**. Crew spawning is a **separate surface** (a Crew is launched, not chatted with) — its human UI is deferred to the implementing dev, with the differentiation requirement recorded.
+## Acceptance criteria
 
-**Agent — the spawn tool listing** shows purpose + posture + cost tier per Role, because the choosing agent decides on the user's behalf and budget.
+### The definition
 
-## Definition changes and drift
+1. A Role is a file the user can read, copy, and share; the platform reads it and never rewrites it.
+2. A Role has a required one-line purpose; a Role without one is not offered by any picker.
+3. A Role's identity content is two markdown sections, Identity and Operating Principles, and both are present in the agent's context for its whole life.
+4. A Role contains no prompt; the spawner's brief is the first-turn prompt.
+5. A Role's model and reasoning allowlist is ordered, and its skill allowlist is enforced by the platform at spawn.
+6. A Role declares a posture on the human-contact spectrum, and the spawned agent's communication norms follow it.
 
-**Editing a definition never silently changes a running agent.** New spawns get the new definition; running agents keep what they absorbed — anything else lies about how agents work. What the platform owes instead is visibility: every agent (and Crew, as a unit — any of its definition files) shows a measured **drift indicator** when its definition has changed since spawn. The remedy — respawn, or message the agent — is always human/Captain judgment.
+### Authoring
 
-## What a Role is not
+7. Roles can be created and edited in the app; the app never requires an external editor for ordinary editing.
+8. A library in a plain folder works for everything except the git controls; a library in a git repository offers commit, push and pull and nothing else, and surfaces uncommitted changes and a remote that is ahead.
+9. A git operation that fails or conflicts opens the user's editor with the error shown.
+10. The Role Library shows every Role's purpose, posture, and current use (agents running, Crews referencing it).
 
-Not a runtime object (the agent is), not a permission boundary beyond skill gating, and not a behavior guarantee — a Role raises the odds and sets expectations ([tools, not guarantees](../principles.md)); behavior remains a prompting problem. Prose in a Role ("escalate to your Builder") is never parsed or validated — wiring correctness at the prose level is a prompting concern.
+### Spawning
 
-## Deferred (with reasons)
+11. The composer's Role dropdown selects no Role by default and shows each Role as name plus purpose.
+12. Selecting a Role in the composer disables disallowed models and reasoning levels, labels each with the Role that excludes it, and switches an invalid current selection to the first allowed entry with a visible cue.
+13. The spawned thread carries a Role chip.
+14. An agent's spawn listing shows each Role's purpose, posture and cost tier; an agent spawn with a Role still names provider, model and reasoning explicitly, and a choice outside the allowlist is refused naming the Role.
 
-- **Role claims** (Traycer's runtime self-designation): seats inside Crews make responsibility explicit; the loose-agent duplication problem hasn't been observed on-platform. Revisit on evidence.
-- **Multiple library locations** (per-project, shared team libraries): extend when wanted.
-- **In-app advanced git**: never — the editor owns it.
-- **Technical design** (file format, discovery mechanics, tool schemas): owned by the implementing dev, within these product rulings.
+### Change
+
+15. Editing a Role never changes a running agent.
+16. An agent whose Role file changed since it was spawned shows a drift indicator; a Crew shows one when any of its definition files changed.
+17. Prose in a Role is never parsed or validated.
+
+## Scenarios
+
+- **A reviewer Role.** The user writes "Reviewer" — purpose "reviews other agents' pull requests for correctness", Identity and Operating Principles, an allowlist of two frontier models at high reasoning, review-oriented skills, Background posture. In the composer they pick Reviewer; the cheap model they had selected is disabled and labeled "excluded by Reviewer", the first allowed model is selected with a cue, and the new thread wears a Reviewer chip. (AC2, AC6, AC11–AC13)
+- **An agent spawns a helper.** A Captain in Billing Migration reads the spawn listing — Reviewer: purpose, Background, high cost tier — and spawns one, naming provider, model and reasoning within the allowlist. (AC14)
+- **A definition changes underfoot.** The user tightens Reviewer's Operating Principles while two Reviewers are running; both show drift; the user respawns one and leaves the other to finish. (AC15, AC16)
+- **A plain folder.** The user keeps Roles in a folder with no git; everything works and the git controls are simply absent. (AC8)
+
+## History
+
+- 2026-08-21 — identity is git-versioned definition files with no memory in the bundle; machine-read fields wrap the prose (former R8, R28; posture rider of former R23) ([record](../../worklog/2026-08-21-design-review.md)).
+- 2026-08-23 — the product session: app as editing surface, composer Role dropdown, two-section identity with no prompt, drift never hot-reloads, structured-only validation, minimal in-app git; former P-A–P-F ([record](../../worklog/2026-08-23-roles-crews-session.md)).
+- 2026-08-30 — provider, model and reasoning stay explicit on agent spawns even with a Role; the allowlist constrains ([record](../../worklog/2026-08-30-spawning-guide-session.md)).
+- 2026-09-08 — rewritten into the definition shape; posture stated with the middle of the spectrum allowed, matching the lens. Former identifiers: R8 → AC1, Definition (no memory); R28 → AC1, AC5; P-A, P-F → AC7–AC9; P-B(h) → AC11–AC13; P-B(a) → AC14; P-C → AC3–AC4; P-D → AC15–AC16; P-E → AC17. Deferred items that lived here (Role claims, multiple library locations) are backlog candidates.

@@ -1,3 +1,8 @@
+---
+title: "Sidebar/roster design session — rulings record (2026-08-29)"
+kind: record
+---
+
 # Sidebar/roster design session — rulings record (2026-08-29)
 
 Jackson + UI/UX design agent; dogfood-v0 UX workstream (area 3 of the
@@ -7,7 +12,7 @@ conversation first, then HTML mockup options rendered in the design
 workspace (`product/fleet-sidebar/mockups/`), styled against **real app
 references** (screenshots captured from a live instance +
 `apps/web/src/index.css` tokens). Mockups are decision aids, not pixel
-specs. Feature doc of record: [`../product/features/sidebar-and-roster.md`](../product/features/sidebar-and-roster.md).
+specs. Feature doc of record: [`../product/features/fleet-page.md`](../product/features/fleet-page.md).
 
 Research inputs (in the workspace record): a code sweep of upstream's
 default sidebar (flat list; static creation order — activity never

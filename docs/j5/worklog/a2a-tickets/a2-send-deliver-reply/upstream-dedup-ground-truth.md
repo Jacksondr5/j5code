@@ -1,6 +1,6 @@
 ---
 title: "A2 gate — how upstream dedup actually works at pin 521c50aa9"
-kind: spec
+kind: record
 ---
 
 # Upstream exactly-once mechanics (reviewer-verified)
@@ -12,7 +12,7 @@ are invisible to a first-pass test.
 
 ## Correction to the plan text
 
-`../../../product/a2a/plan.md` §Message pipeline and the A2 ticket both say the worker "derives v2's `clientRequestId`
+`../../../plans/a2a.md` §Message pipeline and the A2 ticket both say the worker "derives v2's `clientRequestId`
 deterministically from the ledger message id."
 
 **`clientRequestId` does not exist on the internal path.** It is an MCP-surface concept only.

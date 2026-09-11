@@ -1,3 +1,8 @@
+---
+title: "Priority input for the v0 reorientation — Product lead, 2026-08-30"
+kind: record
+---
+
 # Priority input for the v0 reorientation — Product lead, 2026-08-30
 
 For Jackson + the Director. State: A1–A3 landed; A4/A6 PRs in flight (built pre-design/pre-substrate); dogfood UX map complete (SB/IB/TA/AR); SQ1 shrunk by DV1–DV3; substrate ruling landed.
@@ -29,4 +34,4 @@ Deferrable-with-owner: open-Exchanges-vs-settle (A9 surfaces it); member-Peer-sp
 
 ## Standing coordination flags
 
-A4/A6 both claim migration id 006 (relayed to Director); the dogfood-v0.md overrides file governs all v0 scope questions — anything cut during build goes THERE, never inline in feature docs.
+A4/A6 both claim migration id 006 (relayed to Director); the ../plans/dogfood-v0.md overrides file governs all v0 scope questions — anything cut during build goes THERE, never inline in feature docs.

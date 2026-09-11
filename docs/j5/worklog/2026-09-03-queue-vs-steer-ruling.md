@@ -1,3 +1,8 @@
+---
+title: "Queue vs steer — ruling record (2026-09-03)"
+kind: record
+---
+
 # Queue vs steer — ruling record (2026-09-03)
 
 Jackson + Product lead, in the Product thread. Origin: issue #73 (agent deliveries steered a mid-turn Claude recipient; the CLI's "now"-priority abort produced fabricated human-refusal text on sibling tool calls) and the two live observations of 2026-09-02 (a composer send interrupting a stalled run and jumping three queued agent messages; five agent messages steered into a live turn and read by the recipient as "queued"). PR #91 implements the ruling; Jackson wanted it right in one PR. Everything below was measured in code before ruling; unmeasured items are marked.
@@ -42,7 +47,7 @@ Jackson authorized an Astra-only experiment after Fleet A spent a 36-minute run 
 
 This changes message admission, not model attention: the provider decides when accepted input reaches the model. Adapter acceptance does not prove the model read it or preserved its original task. Model behavior still needs dogfood evaluation.
 
-Implementation and verification are recorded in [the Astra delivery worklog](./astra-peer-delivery-2026-09-04.md).
+Implementation and verification are recorded in [the Astra delivery worklog](2026-09-04-astra-peer-delivery.md).
 
 ## September 5 integration decision
 

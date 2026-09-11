@@ -1,3 +1,8 @@
+---
+title: "Squadron creation UX session — rulings record (2026-08-24)"
+kind: record
+---
+
 # Squadron creation UX session — rulings record (2026-08-24)
 
 Jackson + Product lead; dogfood phase-3 prerequisite, front-end before back-end per Jackson. Scope: how a user creates a Squadron and creates agents under it. Designed WITHIN the law in force (E1/E2/E4/E6, R21, the creation-time Registrar as the receiving end, primitives-not-methodology) — nothing relitigated. Feature doc updated same day: `product/features/squadron.md` ("Creation UX" section, SC1–SC4). Technical design deliberately not produced — the phase-3 ticket's dev owns it within these rulings.

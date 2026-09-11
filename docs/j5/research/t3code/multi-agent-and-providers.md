@@ -1,6 +1,7 @@
 ---
 title: "T3 Code — multi-agent & providers deep dive"
-kind: spec
+kind: research
+as_of: 2026-08-23
 ---
 
 # Multi-agent & providers

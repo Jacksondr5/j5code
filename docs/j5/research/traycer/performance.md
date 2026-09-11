@@ -1,6 +1,7 @@
 ---
 title: "Traycer performance root-cause analysis"
-kind: spec
+kind: research
+as_of: 2026-08-23
 ---
 
 # Deep dive: performance problems

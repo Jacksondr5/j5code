@@ -1,12 +1,11 @@
 ---
 title: "A7 — Planned rebase when upstream #2829 merges (event-triggered)"
-kind: ticket
-status: 0
+kind: record
 ---
 
 # A7 — Planned upstream base advance
 
-**Governing artifacts:** `FORK.md` in the repo (pin log + integration runbook), `../../product/a2a/plan.md` §Base. **Trigger: upstream PR pingdotgg/t3code#2829 merges to main** — this ticket is scheduled work waiting on that event, not a surprise to absorb mid-build.
+**Governing artifacts:** `FORK.md` in the repo (pin log + integration runbook), `../../plans/a2a.md` §Base. **Trigger: upstream PR pingdotgg/t3code#2829 merges to main** — this ticket is scheduled work waiting on that event, not a surprise to absorb mid-build.
 
 ## Goal
 

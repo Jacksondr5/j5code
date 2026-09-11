@@ -1,6 +1,7 @@
 ---
 title: "T3 Code — feature inventory"
-kind: spec
+kind: research
+as_of: 2026-08-23
 ---
 
 # Feature inventory

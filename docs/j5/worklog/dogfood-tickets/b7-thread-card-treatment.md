@@ -1,12 +1,11 @@
 ---
 title: "B7 — Thread A2A card treatment (TA6–TA10 final design)"
-kind: ticket
-status: 0
+kind: record
 ---
 
 # B7 — Card treatment true-up
 
-**Governing artifacts:** `../../product/features/thread-a2a-rendering.md` §Card anatomy and states (TA6–TA10; TA4 superseded by TA8), session `../thread-a2a-prominence-session-2026-08-31.md`, approved all-states mockup at design workspace `product/thread-a2a/final-treatment/` (decision aid, not pixel spec). Designer available for render questions.
+**Governing artifacts:** `../../product/features/thread-a2a-rendering.md` §Card anatomy and states (TA6–TA10; TA4 superseded by TA8), session `../2026-08-31-thread-a2a-prominence-session.md`, approved all-states mockup at design workspace `product/thread-a2a/final-treatment/` (decision aid, not pixel spec). Designer available for render questions.
 
 ## Scope
 

@@ -1,6 +1,6 @@
 ---
 title: "J5 Code build and test baseline"
-kind: spec
+kind: record
 ---
 
 # J5 Code build and test baseline

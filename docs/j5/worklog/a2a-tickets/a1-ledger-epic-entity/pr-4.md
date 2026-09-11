@@ -1,7 +1,6 @@
 ---
 title: "A1 PR #4 sitter log"
-kind: story
-status: 2
+kind: record
 ---
 
 # A1 PR #4 sitter log

@@ -1,12 +1,11 @@
 ---
 title: "A3 — Silence detector: five typed states (M3)"
-kind: ticket
-status: 0
+kind: record
 ---
 
 # A3 — Silence detector
 
-**Governing artifacts:** `../../../product/a2a/plan.md` (§Silence detection), `../../../product/a2a/index.md` (D6; grounding §"Silence is measured; replies are asserted"). Base: `j5/main` @ `e7597dac8`.
+**Governing artifacts:** `../../../plans/a2a.md` (§Silence detection), `../../../product/a2a/index.md` (D6; grounding §"Silence is measured; replies are asserted"). Base: `j5/main` @ `e7597dac8`.
 
 ## Goal
 
