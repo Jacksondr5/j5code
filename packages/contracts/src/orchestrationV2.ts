@@ -35,6 +35,10 @@ import {
   OrchestrationGetTurnDiffResult,
 } from "./checkpointDiff.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import {
+  OrchestrationV2AgentPersonaAssignment,
+  OrchestrationV2AgentPersonaRequest,
+} from "./j5/agentPersona.ts";
 import { ThreadLinkedPullRequest } from "./orchestration.ts";
 import {
   ProviderApprovalDecision,
@@ -305,6 +309,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  agentPersonaAssignment: Schema.optional(OrchestrationV2AgentPersonaAssignment),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   /** Pull request the user linked to this thread (#8160); optional so
@@ -1325,6 +1330,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  agentPersonaAssignment: Schema.optional(OrchestrationV2AgentPersonaAssignment),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   /** Pull request the user linked to this thread (#8160). */
@@ -2035,6 +2041,7 @@ export const OrchestrationV2Command = Schema.Union([
     modelSelection: ModelSelection,
     runtimeMode: RuntimeMode,
     interactionMode: ProviderInteractionMode,
+    agentPersonaAssignment: Schema.optional(OrchestrationV2AgentPersonaAssignment),
     branch: Schema.NullOr(TrimmedNonEmptyString),
     worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   }),
@@ -2423,6 +2430,7 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  agentPersona: Schema.optional(OrchestrationV2AgentPersonaRequest),
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
   initialMessage: Schema.optional(
     Schema.Struct({
