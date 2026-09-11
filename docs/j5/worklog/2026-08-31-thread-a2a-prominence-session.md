@@ -1,3 +1,8 @@
+---
+title: "Thread-A2A prominence session — rulings record (2026-08-31)"
+kind: record
+---
+
 # Thread-A2A prominence session — rulings record (2026-08-31)
 
 Jackson + UI/UX design agent, commissioned by the Director from Jackson's

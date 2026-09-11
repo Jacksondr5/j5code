@@ -72,6 +72,6 @@ A Role is **not** a runtime object (the agent is), **not** a permission boundary
 ## History
 
 - 2026-08-21 — identity is git-versioned definition files with no memory in the bundle; machine-read fields wrap the prose (former R8, R28; posture rider of former R23) ([record](../../worklog/2026-08-21-design-review.md)).
-- 2026-08-23 — the product session: app as editing surface, composer Role dropdown, two-section identity with no prompt, drift never hot-reloads, structured-only validation, minimal in-app git; former P-A–P-F ([record](../../worklog/roles-crews-session-2026-08-23.md)).
-- 2026-08-30 — provider, model and reasoning stay explicit on agent spawns even with a Role; the allowlist constrains ([record](../../worklog/spawning-guide-session-2026-08-30.md)).
+- 2026-08-23 — the product session: app as editing surface, composer Role dropdown, two-section identity with no prompt, drift never hot-reloads, structured-only validation, minimal in-app git; former P-A–P-F ([record](../../worklog/2026-08-23-roles-crews-session.md)).
+- 2026-08-30 — provider, model and reasoning stay explicit on agent spawns even with a Role; the allowlist constrains ([record](../../worklog/2026-08-30-spawning-guide-session.md)).
 - 2026-09-08 — rewritten into the definition shape; posture stated with the middle of the spectrum allowed, matching the lens. Former identifiers: R8 → AC1, Definition (no memory); R28 → AC1, AC5; P-A, P-F → AC7–AC9; P-B(h) → AC11–AC13; P-B(a) → AC14; P-C → AC3–AC4; P-D → AC15–AC16; P-E → AC17. Deferred items that lived here (Role claims, multiple library locations) are backlog candidates.

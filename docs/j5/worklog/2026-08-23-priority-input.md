@@ -1,3 +1,8 @@
+---
+title: "Priority input for the reprioritization — Product lead, 2026-08-23"
+kind: record
+---
+
 # Priority input for the reprioritization — Product lead, 2026-08-23
 
 One page for Jackson + the Manager. State as of the design review (R1–R35, commits

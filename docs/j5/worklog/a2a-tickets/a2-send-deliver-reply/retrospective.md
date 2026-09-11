@@ -1,6 +1,6 @@
 ---
 title: "A2 retrospective — live provider proof isolation"
-kind: spec
+kind: record
 ---
 
 # Live provider proof isolation

@@ -1,3 +1,8 @@
+---
+title: "Build and install J5 Code for macOS"
+kind: runbook
+---
+
 # Build and install J5 Code for macOS
 
 J5 Code's personal-use build is ad-hoc signed. It has a valid local code signature but no Apple

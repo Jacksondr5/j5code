@@ -1,3 +1,8 @@
+---
+title: "Sidebar/roster design session — rulings record (2026-08-29)"
+kind: record
+---
+
 # Sidebar/roster design session — rulings record (2026-08-29)
 
 Jackson + UI/UX design agent; dogfood-v0 UX workstream (area 3 of the

@@ -1,6 +1,6 @@
 ---
 title: "Agent migration runbook — moving a live agent into J5 with memory intact"
-kind: spec
+kind: runbook
 ---
 
 # Agent migration runbook
@@ -224,9 +224,9 @@ repo already answers, retired-seat corrections, or durable content whose right h
 every agent reads (the source dir was a cwd-keyed commons written by every agent that ever ran with
 that cwd, including disposable crew seats — never per-agent). The durable content now lives in:
 
-- [`process/working-in-the-repo.md`](process/working-in-the-repo.md) — tool traps and repo facts
+- [`process/working-in-the-repo.md`](../process/working-in-the-repo.md) — tool traps and repo facts
   (grep on large files, formatting docs before commit, what web tests can and cannot prove).
-- [`operations/deployment-preferences.md`](operations/deployment-preferences.md) — Jackson's
+- `operations/deployment-preferences.md` (kept in the operator\'s playbooks, outside the repository) — Jackson's
   deployment-design preferences (state stays in `dogfood-runtime.md`).
 - Fleet process law (gates, evidence, staffing, operating rules) — in the operator's playbooks
   outside the repo, never a `docs/j5` page: a docs/j5 page holds facts about the product or the

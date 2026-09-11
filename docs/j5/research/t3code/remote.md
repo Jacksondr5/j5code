@@ -1,6 +1,7 @@
 ---
 title: "T3 Code — remote & multi-machine deep dive"
-kind: spec
+kind: research
+as_of: 2026-08-23
 ---
 
 # Remote & multi-machine

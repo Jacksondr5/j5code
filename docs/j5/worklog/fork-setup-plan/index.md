@@ -1,6 +1,6 @@
 ---
 title: "Plan: fork & setup (backlog item 1)"
-kind: spec
+kind: record
 ---
 
 # Plan — Fork & setup

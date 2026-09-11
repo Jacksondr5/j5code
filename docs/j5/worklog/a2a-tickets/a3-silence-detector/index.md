@@ -1,7 +1,6 @@
 ---
 title: "A3 — Silence detector: five typed states (M3)"
-kind: ticket
-status: 0
+kind: record
 ---
 
 # A3 — Silence detector

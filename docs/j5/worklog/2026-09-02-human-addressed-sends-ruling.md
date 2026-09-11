@@ -1,3 +1,8 @@
+---
+title: "Human-addressed sends: asks only (2026-09-02)"
+kind: record
+---
+
 # Human-addressed sends: asks only (2026-09-02)
 
 Jackson + Product lead, in the Product thread inside J5 (first ruling made from inside the product). Origin: issue #44 — plain messages to a person were found invisible in Jackson's 2026-09-01 session (durable ledger records, no human surface), then reproduced by two migrated agents including Product itself; PR #57 proposed a truthful "invisible in v0" description plus an A/B/C disposition for where such messages should eventually live (A: sender's thread card; B: an inbox lane; C: no ruling). The Director relayed the options; Product brought A as the recommendation.

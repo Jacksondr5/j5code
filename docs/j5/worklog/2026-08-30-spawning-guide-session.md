@@ -1,3 +1,8 @@
+---
+title: "Spawning-guide session — rulings record (2026-08-30)"
+kind: record
+---
+
 # Spawning-guide session — rulings record (2026-08-30)
 
 Jackson + Product lead. Origin: commissioned by Jackson via the Architecture agent after the PR #15 review, where provider/model/reasoning became **required** `spawn_agent` params (inherit-default ruled wrong more often than right). The rebuilt contract in `product/a2a/agent-tools.md` carries a come-back note reserving this territory. Feature doc created same day: `product/features/spawning-guide.md`. Constraints set at commissioning: does not block PR #15; the guide's requirements include updating the `agent-tools.md` contract and the tool implementation when the mechanism lands.

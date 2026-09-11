@@ -1,3 +1,8 @@
+---
+title: "Roles/Crews product session — rulings record (2026-08-23)"
+kind: record
+---
+
 # Roles/Crews product session — rulings record (2026-08-23)
 
 Jackson + Product lead. Scope: the WHAT/WHY of Roles and Crews (backlog item 3), against the design-review inheritance (R8, R12–R22, R28). Technical design deliberately NOT produced — handed to the implementing dev, bounded by these rulings. Feature docs of record updated same day: `product/features/roles.md`, `product/features/crews.md`.

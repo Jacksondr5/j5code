@@ -1,6 +1,7 @@
 ---
 title: "T3 orchestration-v2: what it is, why, and how far along"
-kind: spec
+kind: research
+as_of: 2026-08-23
 ---
 
 # Orchestration-v2 (researched 2026-08-14, subagent read of main `196c8ea0d` + branch `t3code/codex-turn-mapping` @ `77168d081`)

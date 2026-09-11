@@ -1,6 +1,11 @@
+---
+title: "Dogfood runtime: self-hosted J5 Code server and clients"
+kind: runbook
+---
+
 # Dogfood runtime: self-hosted J5 Code server and clients
 
-How Jackson's solo dogfood (phase 3 of [dogfood v0](plans/dogfood-v0.md)) actually runs: one
+How Jackson's solo dogfood (phase 3 of [dogfood v0](../plans/dogfood-v0.md)) actually runs: one
 source-built J5 Code server on a Linux box, reached over Tailscale, with the browser as the client.
 This document is self-contained on purpose — dogfood agents have no access to the design sessions
 that produced it. Decisions and their load-bearing reasons are recorded inline.
@@ -8,7 +13,7 @@ that produced it. Decisions and their load-bearing reasons are recorded inline.
 Pin-advance note (2026-09-06): restart and Codex-version guidance below reflects the selected
 upstream integration. This advance did not execute these Linux deployment procedures or verify
 second-machine/relay/tunnel behavior; the deployment instructions retain their earlier environment
-assumptions. See [FORK.md](../../FORK.md#verification-and-review-at-the-recorded-source) for the
+assumptions. See [FORK.md](../../../FORK.md#verification-and-review-at-the-recorded-source) for the
 exact source and verification limits.
 
 ## Shape and rationale

@@ -142,10 +142,10 @@ No inputs. Read-only; no events.
 
 ## History
 
-- 2026-08-29 — contracts adopted: descriptions as part of the contract, the toolsmith rule, single-target stop and archive, the confirmation-token archive ([record](../../worklog/substrate-session-2026-08-29.md)).
-- 2026-08-30 — the spawn brief carries the task and the reply expectation; one sentence of brief steering in `spawn_agent` ([record](../../worklog/spawning-guide-session-2026-08-30.md)).
-- 2026-08-31 — self-send refused; the `self` row; identity facts in the spawn's first turn; `display_name` on every row; `create_threads` and `t3_thread_start` omitted ([record](../../worklog/picker-and-self-messaging-rulings-2026-08-31.md)).
-- 2026-09-02 — a person receives only asks and replies ([record](../../worklog/human-addressed-sends-ruling-2026-09-02.md)).
+- 2026-08-29 — contracts adopted: descriptions as part of the contract, the toolsmith rule, single-target stop and archive, the confirmation-token archive ([record](../../worklog/2026-08-29-substrate-session.md)).
+- 2026-08-30 — the spawn brief carries the task and the reply expectation; one sentence of brief steering in `spawn_agent` ([record](../../worklog/2026-08-30-spawning-guide-session.md)).
+- 2026-08-31 — self-send refused; the `self` row; identity facts in the spawn's first turn; `display_name` on every row; `create_threads` and `t3_thread_start` omitted ([record](../../worklog/2026-08-31-picker-and-self-messaging-rulings.md)).
+- 2026-09-02 — a person receives only asks and replies ([record](../../worklog/2026-09-02-human-addressed-sends-ruling.md)).
 - 2026-09-08 — a person receives asks only; the reply form toward a person is retired with the person-originated ask.
 - 2026-09-05 — several open asks per person, with explicit follow-ups through `regarding`, replacing the one-ask-per-person refusal of 2026-09-02 (issue #111).
 - 2026-09-05 — a committed stop wins over restart continuation (upstream integration, PR #112).

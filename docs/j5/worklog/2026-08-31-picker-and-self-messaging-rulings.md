@@ -1,3 +1,8 @@
+---
+title: "Two rulings from the #20 acceptance pass (2026-08-31)"
+kind: record
+---
+
 # Two rulings from the #20 acceptance pass (2026-08-31)
 
 Jackson + Product lead, async in the Product thread; relayed for framing by the Director after Jackson's #20 live acceptance pass (the flow passed — both items are forward questions from it). Both framed by Product with recommendations; Jackson ruled "agree" on each, unamended.

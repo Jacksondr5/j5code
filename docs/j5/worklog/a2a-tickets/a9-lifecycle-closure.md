@@ -1,7 +1,6 @@
 ---
 title: "A9 — Lifecycle closure: participant retirement terminates obligations, loudly (R1/R11)"
-kind: ticket
-status: 1
+kind: record
 ---
 
 # A9 — Lifecycle closure
@@ -23,7 +22,7 @@ Retiring a participant terminates its open obligations as a loud, evented act �
 
 ## Scope amendment — Squadron archive deferred
 
-The settled archive-flow work ([product contract](../../product/features/archive-flow.md), [session ruling](../archive-flow-session-2026-08-29.md)) and Squadron SC4 ([feature definition](../../product/features/squadron.md)) supersede A9's original R2/Squadron half. All Squadron-archive-shaped work is deferred to SC4 polished-later: no operation, HTTP/MCP/server surface, warning/confirmation path, event, schema column, or projection dimension ships here. Migration `008_LifecycleClosure` contains no Squadron schema. Existing append-only ledgers already remain readable; a future SC4 implementation can compose the R1 participant termination machinery after its user contract ships.
+The settled archive-flow work ([product contract](../../product/features/archive-flow.md), [session ruling](../2026-08-29-archive-flow-session.md)) and Squadron SC4 ([feature definition](../../product/features/squadron.md)) supersede A9's original R2/Squadron half. All Squadron-archive-shaped work is deferred to SC4 polished-later: no operation, HTTP/MCP/server surface, warning/confirmation path, event, schema column, or projection dimension ships here. Migration `008_LifecycleClosure` contains no Squadron schema. Existing append-only ledgers already remain readable; a future SC4 implementation can compose the R1 participant termination machinery after its user contract ships.
 
 Known migration cost: rebuilding `j5_a2a_exchange` activates A4's `ON DELETE CASCADE`, so 008 snapshots and restores every A4 inbox column opaquely inside the one migration transaction. Any future rebuild of this parent faces the same hazard; recurring snapshot code must become a separately reviewed migration-framework helper rather than another copy-paste.
 

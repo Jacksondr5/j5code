@@ -1,7 +1,6 @@
 ---
 title: "A2 — Send/deliver/reply loop: exchanges, pipeline, envelopes, tools (M2)"
-kind: ticket
-status: 1
+kind: record
 ---
 
 # A2 — Send/deliver/reply loop

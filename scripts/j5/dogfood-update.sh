@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Update the self-hosted J5 Code dogfood server from source and restart it.
 # Run on the server box as the dogfood user; prefer a quiet fleet, since the
-# restart cancels in-flight agent turns. See docs/j5/dogfood-runtime.md.
+# restart cancels in-flight agent turns. See docs/j5/runbooks/dogfood-runtime.md.
 
 set -euo pipefail
 
@@ -39,5 +39,5 @@ for _ in $(seq 1 30); do
 done
 
 echo "Server did not answer after 30 probes (2s request limit, 1s retry delay). Inspect: journalctl --user -u $service -e" >&2
-echo "Rollback: git checkout $previous_ref, rebuild, restore the pre-update snapshot (docs/j5/dogfood-runtime.md)." >&2
+echo "Rollback: git checkout $previous_ref, rebuild, restore the pre-update snapshot (docs/j5/runbooks/dogfood-runtime.md)." >&2
 exit 1

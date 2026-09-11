@@ -1,7 +1,6 @@
 ---
 title: "A2 Squadron mechanical rename PR"
-kind: ticket
-status: 1
+kind: record
 ---
 
 # A2 Squadron mechanical rename PR

@@ -1,6 +1,7 @@
 ---
 title: "Prior art: Jackson's pr-group"
-kind: spec
+kind: research
+as_of: 2026-08-23
 ---
 
 # Prior art: Jackson's `pr-group`

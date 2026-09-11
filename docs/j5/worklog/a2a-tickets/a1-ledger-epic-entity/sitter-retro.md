@@ -1,6 +1,6 @@
 ---
 title: "A1 sitter retirement notes"
-kind: spec
+kind: record
 ---
 
 # A1 sitter retirement notes

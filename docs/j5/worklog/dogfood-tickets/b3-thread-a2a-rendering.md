@@ -1,7 +1,6 @@
 ---
 title: "B3 — Thread-view A2A rendering (TA1–TA5 static treatments)"
-kind: ticket
-status: 0
+kind: record
 ---
 
 # B3 — Thread A2A rendering

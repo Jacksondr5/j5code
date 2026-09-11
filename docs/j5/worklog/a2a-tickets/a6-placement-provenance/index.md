@@ -1,7 +1,6 @@
 ---
 title: "A6 — Spawn placement + provenance (D10)"
-kind: ticket
-status: 0
+kind: record
 ---
 
 # A6 — Spawn placement + provenance

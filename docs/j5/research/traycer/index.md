@@ -1,6 +1,7 @@
 ---
 title: "Traycer research"
-kind: spec
+kind: research
+as_of: 2026-08-23
 ---
 
 # Traycer research

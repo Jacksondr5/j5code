@@ -262,7 +262,7 @@ Fork-owned workflows use the Node version in `.nvmrc`, pnpm `11.10.0`, the froze
 the repo-local Vite Plus binary. `J5 CI` is the push/PR gate for `j5/**`; `J5 Weekly Full Build` is the
 scheduled and manually dispatchable pre-rebase suite plus Apple Silicon desktop build.
 
-See [`docs/j5/macos-packaging.md`](docs/j5/macos-packaging.md) for the local build, signature
+See [`docs/j5/runbooks/macos-packaging.md`](docs/j5/runbooks/macos-packaging.md) for the local build, signature
 verification, install, Gatekeeper approval, and workflow runbook.
 
 ## Final upstream-file review — 2026-09-06

@@ -1,8 +1,9 @@
 ---
 title: "A5 — Graph projection + read API (M5)"
-kind: ticket
-status: 0
+kind: record
 ---
+
+> **Record.** The work item of record is [issue #31](https://github.com/Jacksondr5/j5code/issues/31); this ticket text is the history behind it and is not maintained.
 
 # A5 — Graph projection + read API
 

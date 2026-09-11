@@ -1,7 +1,6 @@
 ---
 title: "A4 — Human node: person-scoped inbox, verbatim answers (M4)"
-kind: ticket
-status: 0
+kind: record
 ---
 
 # A4 — Human node

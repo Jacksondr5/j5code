@@ -1,4 +1,4 @@
 ---
 title: "Tickets"
-kind: spec
+kind: record
 ---
