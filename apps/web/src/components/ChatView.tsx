@@ -296,6 +296,7 @@ import {
   useSquadronDraftScope,
 } from "../j5/squadron/SquadronDraftState";
 import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
+import { clearDraftAgent, draftAgentPersonaLaunch } from "../j5/agents/agentDraftState";
 import {
   buildSquadronPickerEntries,
   resolveCurrentThreadNewThreadDestination,
@@ -7274,6 +7275,7 @@ export default function ChatView(props: ChatViewProps) {
                     createThread: {
                       projectId: activeProject.id,
                       title,
+                      ...draftAgentPersonaLaunch(routeThreadKey),
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,
                       interactionMode: sendInteractionMode,
@@ -7320,6 +7322,7 @@ export default function ChatView(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        clearDraftAgent(routeThreadKey);
         if (turnUsesAttachmentUploads) {
           releaseDraftAttachments(composerAttachmentsSnapshot);
         }
