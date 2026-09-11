@@ -1,3 +1,4 @@
+import { testPreparedConnection } from "../../../test/j5";
 import { assert, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
@@ -29,12 +30,14 @@ it.effect(
         );
       });
 
-      const discovered = yield* listHumanInboxEffect().pipe(
+      const discovered = yield* listHumanInboxEffect(testPreparedConnection(), "open").pipe(
         Effect.provideService(HttpClient.HttpClient, client),
       );
-      const explicit = yield* listHumanInboxEffect(explicitPersonId).pipe(
-        Effect.provideService(HttpClient.HttpClient, client),
-      );
+      const explicit = yield* listHumanInboxEffect(
+        testPreparedConnection(),
+        "open",
+        explicitPersonId,
+      ).pipe(Effect.provideService(HttpClient.HttpClient, client));
 
       assert.deepStrictEqual(discovered, { personId: localPersonId, items: [] });
       assert.deepStrictEqual(explicit, { personId: explicitPersonId, items: [] });
@@ -60,7 +63,9 @@ it.effect("surfaces the server's human inbox error message", () =>
     );
 
     const error = yield* Effect.flip(
-      listHumanInboxEffect().pipe(Effect.provideService(HttpClient.HttpClient, client)),
+      listHumanInboxEffect(testPreparedConnection(), "open").pipe(
+        Effect.provideService(HttpClient.HttpClient, client),
+      ),
     );
 
     assert.instanceOf(error, HumanInboxHttpError);

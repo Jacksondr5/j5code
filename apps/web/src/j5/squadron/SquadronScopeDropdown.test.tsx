@@ -12,6 +12,10 @@ vi.mock("../../components/ui/menu", () => ({
   MenuTrigger: ({ children }: { readonly children: ReactNode }) => <>{children}</>,
 }));
 
+vi.mock("./SquadronDirectory", () => ({
+  useSquadronDirectory: () => ({ status: "ready", squadrons: [], sources: [] }),
+}));
+
 import { SquadronScopeDropdown } from "./SquadronScopeDropdown";
 
 describe("SquadronScopeDropdown", () => {

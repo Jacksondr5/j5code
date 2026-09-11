@@ -1,3 +1,4 @@
+import { testPreparedConnection } from "../../../test/j5";
 import { assert, it, vi } from "@effect/vitest";
 import { ProjectId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -31,7 +32,7 @@ it.effect("reads the authenticated Squadron list from the J5 route", () =>
       );
     });
 
-    const squadrons = yield* listSquadronsEffect().pipe(
+    const squadrons = yield* listSquadronsEffect(testPreparedConnection()).pipe(
       Effect.provideService(HttpClient.HttpClient, client),
     );
 
@@ -62,7 +63,7 @@ it.effect("creates a Squadron only from the explicitly selected existing folder"
       );
     });
 
-    const created = yield* createSquadronEffect({
+    const created = yield* createSquadronEffect(testPreparedConnection(), {
       name: "Created",
       projectId: ProjectId.make("project:selected"),
     }).pipe(Effect.provideService(HttpClient.HttpClient, client));
@@ -86,7 +87,9 @@ it.effect("preserves the authenticated route error for the first-run gate", () =
     );
 
     const error = yield* Effect.flip(
-      listSquadronsEffect().pipe(Effect.provideService(HttpClient.HttpClient, client)),
+      listSquadronsEffect(testPreparedConnection()).pipe(
+        Effect.provideService(HttpClient.HttpClient, client),
+      ),
     );
 
     assert.instanceOf(error, SquadronHttpError);

@@ -1,3 +1,5 @@
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -10,46 +12,67 @@ import {
   shouldShowSquadronDraftChip,
 } from "./SquadronScope.logic";
 
+const environmentId = EnvironmentId.make("remote");
+const homeKey = (threadId: string) =>
+  scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(threadId)));
+
 describe("Squadron scope logic", () => {
   const choices = [
-    { id: "squadron:alpha", name: "Alpha" },
-    { id: "squadron:bravo", name: "Bravo" },
+    { environmentId, id: "squadron:alpha", name: "Alpha" },
+    { environmentId, id: "squadron:bravo", name: "Bravo" },
   ];
 
   it("does not invent an ambient scope", () => {
     expect(resolveSquadronScope(choices, null)).toBeNull();
-    expect(resolveSquadronScope(choices, "squadron:missing")).toBeNull();
+    expect(
+      resolveSquadronScope(choices, { environmentId, squadronId: "squadron:missing" }),
+    ).toBeNull();
   });
 
   it("keeps same-folder Squadrons distinct through Registrar homes, never a project proxy", () => {
     const threads = [
-      { id: "thread:alpha", projectId: "project:shared" },
-      { id: "thread:bravo", projectId: "project:shared" },
-      { id: "thread:native", projectId: "project:shared" },
+      { environmentId, id: "thread:alpha", projectId: "project:shared" },
+      { environmentId, id: "thread:bravo", projectId: "project:shared" },
+      { environmentId, id: "thread:native", projectId: "project:shared" },
     ];
     const homes = new Map([
-      ["thread:alpha", { kind: "known" as const, squadron: { id: "squadron:alpha" } }],
-      ["thread:bravo", { kind: "known" as const, squadron: { id: "squadron:bravo" } }],
-      ["thread:native", { kind: "unknown" as const }],
+      [homeKey("thread:alpha"), { kind: "known" as const, squadron: { id: "squadron:alpha" } }],
+      [homeKey("thread:bravo"), { kind: "known" as const, squadron: { id: "squadron:bravo" } }],
+      [homeKey("thread:native"), { kind: "unknown" as const }],
     ]);
 
     expect(
-      filterThreadsForSquadronScope(threads, { id: "squadron:alpha", name: "Alpha" }, homes),
+      filterThreadsForSquadronScope(
+        threads,
+        { environmentId, id: "squadron:alpha", name: "Alpha" },
+        homes,
+      ),
     ).toEqual([threads[0]]);
     expect(
-      filterThreadsForSquadronScope(threads, { id: "squadron:bravo", name: "Bravo" }, homes),
+      filterThreadsForSquadronScope(
+        threads,
+        { environmentId, id: "squadron:bravo", name: "Bravo" },
+        homes,
+      ),
     ).toEqual([threads[1]]);
   });
 
   it("excludes native/unknown homes while a Squadron is selected and restores them zoomed out", () => {
-    const threads = [{ id: "thread:known" }, { id: "thread:native" }];
+    const threads = [
+      { environmentId, id: "thread:known" },
+      { environmentId, id: "thread:native" },
+    ];
     const homes = new Map([
-      ["thread:known", { kind: "known" as const, squadron: { id: "squadron:alpha" } }],
-      ["thread:native", { kind: "unknown" as const }],
+      [homeKey("thread:known"), { kind: "known" as const, squadron: { id: "squadron:alpha" } }],
+      [homeKey("thread:native"), { kind: "unknown" as const }],
     ]);
 
     expect(
-      filterThreadsForSquadronScope(threads, { id: "squadron:alpha", name: "Alpha" }, homes),
+      filterThreadsForSquadronScope(
+        threads,
+        { environmentId, id: "squadron:alpha", name: "Alpha" },
+        homes,
+      ),
     ).toEqual([threads[0]]);
     expect(filterThreadsForSquadronScope(threads, null, homes)).toEqual(threads);
   });
@@ -121,4 +144,31 @@ describe("Squadron scope logic", () => {
       }),
     ).toEqual({ visible: true, frozen: false, squadronId: "squadron:bravo" });
   });
+});
+
+it("keeps a Squadron scope within its own environment even when IDs match", () => {
+  const otherEnvironment = EnvironmentId.make("other");
+  const threads = [
+    { environmentId, id: "thread:same" },
+    { environmentId: otherEnvironment, id: "thread:same" },
+  ];
+  const homes = new Map(
+    threads.map((thread) => [
+      scopedThreadKey(scopeThreadRef(thread.environmentId, ThreadId.make(thread.id))),
+      { kind: "known" as const, squadron: { id: "squadron:same" } },
+    ]),
+  );
+  expect(
+    filterThreadsForSquadronScope(
+      threads,
+      { environmentId: otherEnvironment, id: "squadron:same", name: "Other" },
+      homes,
+    ),
+  ).toEqual([threads[1]]);
+  expect(
+    resolveSquadronScope([{ environmentId, id: "squadron:same", name: "Local" }], {
+      environmentId: otherEnvironment,
+      squadronId: "squadron:same",
+    }),
+  ).toBeNull();
 });

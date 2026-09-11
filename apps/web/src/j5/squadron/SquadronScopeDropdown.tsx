@@ -1,3 +1,4 @@
+import { scopedSquadronKey } from "@t3tools/contracts/j5";
 import { PlusIcon, RadioIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -12,7 +13,7 @@ import {
 } from "../../components/ui/menu";
 import { SidebarMenuButton } from "../../components/ui/sidebar";
 import { useSquadronDirectory } from "./SquadronDirectory";
-import { setAmbientSquadronId, useSquadronAmbientScope } from "./SquadronDraftState";
+import { setAmbientSquadronScope, useSquadronAmbientScope } from "./SquadronDraftState";
 import { SquadronCreateDialog } from "./SquadronCreateDialog";
 import { resolveSquadronScope } from "./SquadronScope.logic";
 
@@ -39,9 +40,11 @@ export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
   const setCreateOpen = hasControlledCreateState(props)
     ? props.onCreateOpenChange
     : setUncontrolledCreateOpen;
-  const { status, squadrons } = useSquadronDirectory();
+  const { status, squadrons, sources } = useSquadronDirectory();
   const selectedId = useSquadronAmbientScope();
-  const choices = squadrons.map(({ squadron }) => ({
+  const choices = squadrons.map(({ squadron, environmentId, environmentLabel }) => ({
+    environmentId,
+    environmentLabel,
     id: squadron.id,
     name: squadron.name,
   }));
@@ -65,18 +68,67 @@ export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
         </MenuTrigger>
         <MenuPopup align="start" className="w-(--anchor-width)">
           <MenuRadioGroup
-            value={selected?.id ?? "none"}
-            onValueChange={(value) => setAmbientSquadronId(value === "none" ? null : String(value))}
+            value={
+              selected === null
+                ? "none"
+                : scopedSquadronKey({
+                    environmentId: selected.environmentId,
+                    squadronId: selected.id,
+                  })
+            }
+            onValueChange={(value) => {
+              const choice = choices.find(
+                (choice) =>
+                  scopedSquadronKey({
+                    environmentId: choice.environmentId,
+                    squadronId: choice.id,
+                  }) === value,
+              );
+              setAmbientSquadronScope(
+                choice === undefined
+                  ? null
+                  : { environmentId: choice.environmentId, squadronId: choice.id },
+              );
+            }}
           >
             <MenuRadioItem value="none" closeOnClick>
               All Squadrons
             </MenuRadioItem>
             {choices.map((choice) => (
-              <MenuRadioItem key={choice.id} value={choice.id} closeOnClick>
-                {choice.name}
+              <MenuRadioItem
+                key={scopedSquadronKey({
+                  environmentId: choice.environmentId,
+                  squadronId: choice.id,
+                })}
+                value={scopedSquadronKey({
+                  environmentId: choice.environmentId,
+                  squadronId: choice.id,
+                })}
+                closeOnClick
+              >
+                <span className="min-w-0 truncate">
+                  {choice.name}
+                  <span className="ms-2 text-xs text-muted-foreground">
+                    {choice.environmentLabel}
+                  </span>
+                </span>
               </MenuRadioItem>
             ))}
           </MenuRadioGroup>
+          {sources
+            .filter((source) => source.status !== "ready")
+            .map((source) => (
+              <p key={source.environmentId} className="px-3 py-1 text-xs text-muted-foreground">
+                {source.environmentLabel}:{" "}
+                {source.status === "loading"
+                  ? "Loading…"
+                  : source.status === "unsupported"
+                    ? "Squadrons unavailable"
+                    : source.status === "offline"
+                      ? "Offline"
+                      : "Could not refresh Squadrons"}
+              </p>
+            ))}
           <MenuSeparator />
           <MenuItem onClick={() => setCreateOpen(true)}>
             <PlusIcon />

@@ -1,3 +1,4 @@
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import type { Thread } from "../types";
@@ -150,10 +151,13 @@ describe("resolveSquadronPickerDestination", () => {
       updatedAt: "2026-08-31T10:00:00.000Z",
     });
     const destination = resolveSquadronPickerDestination({
-      squadronId: "squadron:bravo",
+      squadron: { environmentId: alpha.environmentId, squadronId: "squadron:bravo" },
       threads: [alpha],
       homesByThreadId: new Map([
-        [alpha.id, { kind: "known" as const, squadron: { id: "squadron:alpha" } }],
+        [
+          scopedThreadKey(scopeThreadRef(alpha.environmentId, alpha.id)),
+          { kind: "known" as const, squadron: { id: "squadron:alpha" } },
+        ],
       ]),
       sortOrder: "updated_at",
     });
@@ -173,11 +177,17 @@ describe("resolveSquadronPickerDestination", () => {
       updatedAt: "2026-08-31T09:00:00.000Z",
     });
     const destination = resolveSquadronPickerDestination({
-      squadronId: "squadron:bravo",
+      squadron: { environmentId: alpha.environmentId, squadronId: "squadron:bravo" },
       threads: [alpha, bravo],
       homesByThreadId: new Map([
-        [alpha.id, { kind: "known" as const, squadron: { id: "squadron:alpha" } }],
-        [bravo.id, { kind: "known" as const, squadron: { id: "squadron:bravo" } }],
+        [
+          scopedThreadKey(scopeThreadRef(alpha.environmentId, alpha.id)),
+          { kind: "known" as const, squadron: { id: "squadron:alpha" } },
+        ],
+        [
+          scopedThreadKey(scopeThreadRef(bravo.environmentId, bravo.id)),
+          { kind: "known" as const, squadron: { id: "squadron:bravo" } },
+        ],
       ]),
       sortOrder: "updated_at",
     });
