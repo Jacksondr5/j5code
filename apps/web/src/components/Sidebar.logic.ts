@@ -93,7 +93,7 @@ export type SidebarEmptyState =
 
 /** The first-run action is unavailable until the Registrar directory is authoritative. */
 export function resolveSidebarEmptyState(input: {
-  readonly directoryStatus: "loading" | "ready" | "error";
+  readonly directoryStatus: "loading" | "ready" | "partial" | "error";
   readonly squadronCount: number;
   readonly squadronScopeName: string | null;
   readonly scopeReadFailed?: boolean;

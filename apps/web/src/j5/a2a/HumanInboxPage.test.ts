@@ -1,3 +1,5 @@
+import { EnvironmentId } from "@t3tools/contracts";
+import { scopedInboxItemKey } from "@t3tools/contracts/j5";
 import { assert, it, vi } from "@effect/vitest";
 
 import {
@@ -5,7 +7,7 @@ import {
   formatAnsweredAgeLabel,
   submitHumanInboxAnswer,
 } from "./HumanInboxPage";
-import type { HumanInboxItem } from "./humanInboxClient";
+import type { ScopedHumanInboxItem as HumanInboxItem } from "./humanInboxClient";
 
 it("captures typed answer text before the state updater runs", () => {
   const event: { currentTarget: { value: string } | null } = {
@@ -38,6 +40,7 @@ it("formats answered ages without appending ago to just now", () => {
 
 it("clears pending state when answer attempt id generation fails", async () => {
   const item = {
+    environmentId: EnvironmentId.make("remote"),
     personId: "human:local-operator",
     squadronId: "squadron:answer-test",
     squadronName: "Answer test",
@@ -73,7 +76,7 @@ it("clears pending state when answer attempt id generation fails", async () => {
     setError: (message) => errors.push(message),
   });
 
-  assert.deepStrictEqual(pending, [item.exchangeId, null]);
+  assert.deepStrictEqual(pending, [scopedInboxItemKey(item), null]);
   assert.deepStrictEqual(errors, [null, "Secure random ids are unavailable."]);
   assert.equal(send.mock.calls.length, 0);
   assert.equal(refresh.mock.calls.length, 0);
@@ -83,6 +86,7 @@ it("clears pending state when answer attempt id generation fails", async () => {
 
 it("reports a stale inbox without treating a delivered answer as failed", async () => {
   const item = {
+    environmentId: EnvironmentId.make("remote"),
     personId: "human:local-operator",
     squadronId: "squadron:refresh-test",
     squadronName: "Refresh test",
@@ -119,7 +123,7 @@ it("reports a stale inbox without treating a delivered answer as failed", async 
     setError: (message) => errors.push(message),
   });
 
-  assert.deepStrictEqual(pending, [item.exchangeId, null]);
+  assert.deepStrictEqual(pending, [scopedInboxItemKey(item), null]);
   assert.deepStrictEqual(errors, [
     null,
     "Answer delivered, but the inbox could not be refreshed. The list may be stale.",
@@ -128,5 +132,67 @@ it("reports a stale inbox without treating a delivered answer as failed", async 
   assert.equal(refresh.mock.calls.length, 1);
   assert.equal(notifyChanged.mock.calls.length, 1);
   assert.equal(onAccepted.mock.calls.length, 1);
-  assert.equal(attempts.has(item.exchangeId), false);
+  assert.equal(attempts.has(scopedInboxItemKey(item)), false);
+});
+
+it("retries an uncertain answer on its original server with the same request id and isolates other servers", async () => {
+  const item = {
+    environmentId: EnvironmentId.make("remote"),
+    personId: "human:remote",
+    squadronId: "squadron:shared",
+    squadronName: "Shared",
+    exchangeId: "exchange:shared",
+    senderId: "agent:sender",
+    senderThreadId: "thread:shared",
+    intent: "Proceed",
+    urgency: "blocking",
+    message: "Question",
+    openedAt: "2026-09-08T00:00:00Z",
+    status: "open",
+    terminalAt: null,
+  } satisfies HumanInboxItem;
+  const attempts = new Map<string, { message: string; clientRequestId: string }>();
+  const send = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("Connection lost after sending"))
+    .mockResolvedValue(undefined);
+  const refresh = vi.fn(async () => undefined);
+  const notifyChanged = vi.fn();
+  const randomUUID = vi
+    .fn()
+    .mockReturnValueOnce("request:remote")
+    .mockReturnValueOnce("request:other");
+  const submit = (current: HumanInboxItem) =>
+    submitHumanInboxAnswer({
+      item: current,
+      message: "Go",
+      attempts,
+      randomUUID,
+      send,
+      refresh,
+      notifyChanged,
+      onAccepted: vi.fn(),
+      setPendingExchangeId: vi.fn(),
+      setError: vi.fn(),
+    });
+  await submit(item);
+  await submit({ ...item, environmentId: EnvironmentId.make("other"), personId: "human:other" });
+  await submit(item);
+  assert.deepStrictEqual(
+    send.mock.calls.map(([environmentId, input]) => [
+      environmentId,
+      input.personId,
+      input.clientRequestId,
+    ]),
+    [
+      ["remote", "human:remote", "request:remote"],
+      ["other", "human:other", "request:other"],
+      ["remote", "human:remote", "request:remote"],
+    ],
+  );
+  assert.deepStrictEqual(refresh.mock.calls, [
+    ["other", "human:other"],
+    ["remote", "human:remote"],
+  ]);
+  assert.deepStrictEqual(notifyChanged.mock.calls, [["other"], ["remote"]]);
 });

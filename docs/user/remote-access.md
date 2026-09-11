@@ -169,3 +169,13 @@ Include the diagnostic message and trace ID when reporting a persistent failure.
 
 For a connection that still fails after linking, check the date and time on both
 devices. For server version warnings, follow [Updating T3 Code](./updating.md).
+
+## Squadrons and Inbox Across Environments
+
+On web and desktop, the Squadron picker and Inbox combine results from your connected J5 environments. Environment labels identify where each Squadron or question lives. Creating a Squadron uses the environment of the folder you choose; opening a thread or answering a question uses that item's environment.
+
+Each environment keeps its own Squadrons, conversations, and inbox identity. Connecting another environment makes its results visible without moving data between servers. A connection with read-only access can display results but cannot create Squadrons or send answers.
+
+If an environment disconnects or cannot refresh, loaded results remain visible with an availability notice. Other connected environments remain usable. An asterisk beside the inbox count means the total is incomplete or stale; a question mark means no positive count is available while some environments cannot be refreshed. Reconnect or use **Refresh** in the Inbox to update the results. Servers without the J5 feature are identified separately.
+
+The native mobile app does not yet include these Squadron and Inbox screens.

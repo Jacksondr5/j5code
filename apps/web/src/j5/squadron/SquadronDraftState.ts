@@ -1,3 +1,4 @@
+import type { ScopedSquadronRef } from "@t3tools/contracts/j5";
 import { useSyncExternalStore } from "react";
 
 import {
@@ -7,13 +8,13 @@ import {
 } from "./SquadronScope.logic";
 
 type Snapshot = {
-  readonly ambientSquadronId: string | null;
+  readonly ambientSquadronRef: ScopedSquadronRef | null;
   readonly ambientScopeSelectionGeneration: number;
   readonly draftStates: Readonly<Record<string, SquadronDraftState<null>>>;
 };
 
 let snapshot: Snapshot = {
-  ambientSquadronId: null,
+  ambientSquadronRef: null,
   ambientScopeSelectionGeneration: 0,
   draftStates: {},
 };
@@ -39,10 +40,10 @@ const draftStateFor = (draftKey: string) => {
   return empty;
 };
 
-export const setAmbientSquadronId = (squadronId: string | null) => {
+export const setAmbientSquadronScope = (scope: ScopedSquadronRef | null) => {
   snapshot = {
     ...snapshot,
-    ambientSquadronId: squadronId,
+    ambientSquadronRef: scope,
     ambientScopeSelectionGeneration: snapshot.ambientScopeSelectionGeneration + 1,
   };
   notify();
@@ -75,7 +76,7 @@ export const freezeDraftSquadronAtFirstSend = (draftKey: string) => {
 export function useSquadronAmbientScope() {
   return useSyncExternalStore(
     subscribe,
-    () => snapshot.ambientSquadronId,
+    () => snapshot.ambientSquadronRef,
     () => null,
   );
 }

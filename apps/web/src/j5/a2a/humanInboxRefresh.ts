@@ -1,5 +1,9 @@
-export const HUMAN_INBOX_REFRESH_EVENT = "j5:human-inbox-refresh";
+import type { EnvironmentId } from "@t3tools/contracts";
 
-export function notifyHumanInboxChanged() {
-  window.dispatchEvent(new Event(HUMAN_INBOX_REFRESH_EVENT));
+import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { inboxCountQueryAtom } from "../state";
+
+/** The page and bell share the owning environment's query; no window-wide refresh broadcast. */
+export function notifyHumanInboxChanged(environmentId: EnvironmentId) {
+  appAtomRegistry.refresh(inboxCountQueryAtom(environmentId));
 }

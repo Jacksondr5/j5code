@@ -21,25 +21,37 @@ const sharedFolder = {
   workspaceRoot: "/work/shared",
 } as const;
 
+const environmentScope = {
+  environmentId: sharedFolder.environmentId,
+  environmentLabel: "Primary",
+  available: true,
+};
+const squadronRef = (squadronId: string) => ({
+  environmentId: sharedFolder.environmentId,
+  squadronId,
+});
+const homeKey = (threadId: string) =>
+  scopedThreadKey(scopeThreadRef(sharedFolder.environmentId, ThreadId.make(threadId)));
+
 describe("Squadron picker", () => {
-  it("renders a Squadron picker row without a folder-description second line", () => {
+  it("labels the Squadron picker row with its environment", () => {
     const [entry] = buildSquadronPickerEntries({
       squadrons: [
         {
+          ...environmentScope,
           squadron: { id: "squadron:alpha", name: "Alpha", createdAt: "2026-08-31T00:00:00Z" },
           projectIds: [sharedFolder.id],
         },
       ],
       projects: [sharedFolder],
-      primaryEnvironmentId: sharedFolder.environmentId,
     });
 
     const row = buildSquadronPickerRow(entry!);
     expect(row).toEqual({
-      searchTerms: ["Alpha", "Shared folder", "/work/shared"],
+      searchTerms: ["Alpha", "Primary", "Shared folder", "/work/shared"],
+      description: "Primary",
       title: "Alpha",
     });
-    expect(row).not.toHaveProperty("description");
   });
 
   it("keys Squadron draft state by immutable returned thread id, never local draft id", () => {
@@ -76,16 +88,17 @@ describe("Squadron picker", () => {
     const entries = buildSquadronPickerEntries({
       squadrons: [
         {
+          ...environmentScope,
           squadron: { id: "squadron:alpha", name: "Alpha", createdAt: "2026-08-31T00:00:00Z" },
           projectIds: [sharedFolder.id],
         },
         {
+          ...environmentScope,
           squadron: { id: "squadron:bravo", name: "Bravo", createdAt: "2026-08-31T00:00:00Z" },
           projectIds: [sharedFolder.id],
         },
       ],
       projects: [sharedFolder],
-      primaryEnvironmentId: sharedFolder.environmentId,
     });
     expect(resolveNewThreadShortcutDestination("ready", entries)).toEqual({ kind: "picker" });
     expect(resolveNewThreadShortcutDestination("ready", [entries[0]!])).toMatchObject({
@@ -98,12 +111,12 @@ describe("Squadron picker", () => {
     const [entry] = buildSquadronPickerEntries({
       squadrons: [
         {
+          ...environmentScope,
           squadron: { id: "squadron:sole", name: "Sole", createdAt: "2026-08-31T00:00:00Z" },
           projectIds: [sharedFolder.id],
         },
       ],
       projects: [sharedFolder],
-      primaryEnvironmentId: sharedFolder.environmentId,
     });
     const handleNewThread = vi.fn(async () => ({
       draftId: "draft:sole",
@@ -128,12 +141,12 @@ describe("Squadron picker", () => {
     const [soleEntry] = buildSquadronPickerEntries({
       squadrons: [
         {
+          ...environmentScope,
           squadron: { id: "squadron:solo", name: "Solo", createdAt: "2026-08-31T00:00:00Z" },
           projectIds: [sharedFolder.id],
         },
       ],
       projects: [sharedFolder, activeFolder],
-      primaryEnvironmentId: sharedFolder.environmentId,
     });
     const destination = resolveCurrentThreadNewThreadDestination(null, "ready", [soleEntry!]);
     const handleNewThread = vi.fn(async () => ({
@@ -163,12 +176,12 @@ describe("Squadron picker", () => {
 
   it("keeps a known current-thread home even when another Squadron is the only shortcut candidate", () => {
     const entries = [
-      { squadronId: "squadron:active", name: "Active", folder: sharedFolder },
-      { squadronId: "squadron:other", name: "Other", folder: sharedFolder },
+      { ...environmentScope, squadronId: "squadron:active", name: "Active", folder: sharedFolder },
+      { ...environmentScope, squadronId: "squadron:other", name: "Other", folder: sharedFolder },
     ];
 
     expect(
-      resolveCurrentThreadNewThreadDestination("squadron:active", "ready", entries),
+      resolveCurrentThreadNewThreadDestination(squadronRef("squadron:active"), "ready", entries),
     ).toMatchObject({ kind: "single-squadron", entry: { squadronId: "squadron:active" } });
   });
 
@@ -180,14 +193,19 @@ describe("Squadron picker", () => {
       workspaceRoot: "/work/branch-source",
     } as const;
     const homeEntry = {
+      ...environmentScope,
       squadronId: "squadron:home",
       name: "Home",
       folder: sharedFolder,
     } as const;
-    const destination = resolveCurrentThreadNewThreadDestination("squadron:home", "ready", [
-      homeEntry,
-      { squadronId: "squadron:other", name: "Other", folder: sourceFolder },
-    ]);
+    const destination = resolveCurrentThreadNewThreadDestination(
+      squadronRef("squadron:home"),
+      "ready",
+      [
+        homeEntry,
+        { ...environmentScope, squadronId: "squadron:other", name: "Other", folder: sourceFolder },
+      ],
+    );
     const handleNewThread = vi.fn(async () => ({
       draftId: "draft:branch-home",
       threadId: ThreadId.make("thread:branch-home"),
@@ -215,11 +233,13 @@ describe("Squadron picker", () => {
 
   it("only auto-starts the index route for a selected or sole Squadron", () => {
     const entries = [
-      { squadronId: "squadron:alpha", name: "Alpha", folder: sharedFolder },
-      { squadronId: "squadron:bravo", name: "Bravo", folder: sharedFolder },
+      { ...environmentScope, squadronId: "squadron:alpha", name: "Alpha", folder: sharedFolder },
+      { ...environmentScope, squadronId: "squadron:bravo", name: "Bravo", folder: sharedFolder },
     ];
 
-    expect(resolveIndexDraftDestination("squadron:bravo", "ready", entries)).toMatchObject({
+    expect(
+      resolveIndexDraftDestination(squadronRef("squadron:bravo"), "ready", entries),
+    ).toMatchObject({
       kind: "single-squadron",
       entry: { squadronId: "squadron:bravo" },
     });
@@ -241,12 +261,12 @@ describe("Squadron picker", () => {
     const [soleEntry] = buildSquadronPickerEntries({
       squadrons: [
         {
+          ...environmentScope,
           squadron: { id: "squadron:solo", name: "Solo", createdAt: "2026-08-31T00:00:00Z" },
           projectIds: [sharedFolder.id],
         },
       ],
       projects: [sharedFolder, mostRecentFolder],
-      primaryEnvironmentId: sharedFolder.environmentId,
     });
     const destination = resolveIndexDraftDestination(null, "ready", [soleEntry!]);
     const handleNewThread = vi.fn(async () => ({
@@ -280,16 +300,17 @@ describe("Squadron picker", () => {
     const entries = buildSquadronPickerEntries({
       squadrons: [
         {
+          ...environmentScope,
           squadron: { id: "squadron:alpha", name: "Alpha", createdAt: "2026-08-31T00:00:00Z" },
           projectIds: [sharedFolder.id],
         },
         {
+          ...environmentScope,
           squadron: { id: "squadron:bravo", name: "Bravo", createdAt: "2026-08-31T00:00:00Z" },
           projectIds: [sharedFolder.id],
         },
       ],
       projects: [sharedFolder],
-      primaryEnvironmentId: sharedFolder.environmentId,
     });
     const bravo = entries[1];
     const handleNewThread = vi.fn(async () => ({
@@ -308,11 +329,14 @@ describe("Squadron picker", () => {
     );
     expect(
       filterThreadsForSquadronScope(
-        [{ id: "thread:alpha" }, { id: "thread:bravo" }],
-        { id: "squadron:bravo", name: "Bravo" },
+        [
+          { environmentId: sharedFolder.environmentId, id: "thread:alpha" },
+          { environmentId: sharedFolder.environmentId, id: "thread:bravo" },
+        ],
+        { environmentId: sharedFolder.environmentId, id: "squadron:bravo", name: "Bravo" },
         new Map([
-          ["thread:alpha", { kind: "known" as const, squadron: { id: "squadron:alpha" } }],
-          ["thread:bravo", { kind: "known" as const, squadron: { id: "squadron:bravo" } }],
+          [homeKey("thread:alpha"), { kind: "known" as const, squadron: { id: "squadron:alpha" } }],
+          [homeKey("thread:bravo"), { kind: "known" as const, squadron: { id: "squadron:bravo" } }],
         ]),
       ).map((thread) => thread.id),
     ).toEqual(["thread:bravo"]);
@@ -322,12 +346,12 @@ describe("Squadron picker", () => {
     const [entry] = buildSquadronPickerEntries({
       squadrons: [
         {
+          ...environmentScope,
           squadron: { id: "squadron:alpha", name: "Alpha", createdAt: "2026-08-31T00:00:00Z" },
           projectIds: [ProjectId.make("project:missing")],
         },
       ],
       projects: [sharedFolder],
-      primaryEnvironmentId: sharedFolder.environmentId,
     });
     const handleNewThread = vi.fn();
     const selectDraftSquadron = vi.fn();
@@ -338,4 +362,66 @@ describe("Squadron picker", () => {
     expect(handleNewThread).not.toHaveBeenCalled();
     expect(selectDraftSquadron).not.toHaveBeenCalled();
   });
+});
+
+it("resolves a remote Squadron's folder and draft on its owning environment", async () => {
+  const remoteId = EnvironmentId.make("remote");
+  const remoteFolder = {
+    ...sharedFolder,
+    environmentId: remoteId,
+    workspaceRoot: "/remote/shared",
+  };
+  const entries = buildSquadronPickerEntries({
+    squadrons: [
+      {
+        ...environmentScope,
+        squadron: { id: "squadron:same", name: "Local", createdAt: "2026-09-08T00:00:00Z" },
+        projectIds: [sharedFolder.id],
+      },
+      {
+        environmentId: remoteId,
+        environmentLabel: "Remote",
+        available: true,
+        squadron: { id: "squadron:same", name: "Remote", createdAt: "2026-09-08T00:00:00Z" },
+        projectIds: [sharedFolder.id],
+      },
+    ],
+    projects: [sharedFolder, remoteFolder],
+  });
+  const destination = resolveCurrentThreadNewThreadDestination(
+    { environmentId: remoteId, squadronId: "squadron:same" },
+    "partial",
+    entries,
+  );
+  expect(destination).toEqual({ kind: "single-squadron", entry: entries[1] });
+  const handleNewThread = vi.fn(async () => ({
+    draftId: "draft:remote",
+    threadId: ThreadId.make("thread:remote"),
+  }));
+  const selectDraftSquadron = vi.fn();
+  if (destination.kind === "single-squadron")
+    await startSquadronDraft({ entry: destination.entry, handleNewThread, selectDraftSquadron });
+  expect(handleNewThread).toHaveBeenCalledWith(remoteFolder);
+  expect(selectDraftSquadron).toHaveBeenCalledWith(
+    scopedThreadKey(scopeThreadRef(remoteId, ThreadId.make("thread:remote"))),
+    "squadron:same",
+  );
+  expect(resolveNewThreadShortcutDestination("partial", [entries[1]!])).toEqual({ kind: "picker" });
+});
+
+it("does not launch a cached Squadron whose environment is unavailable", async () => {
+  const entry = {
+    ...environmentScope,
+    available: false,
+    squadronId: "squadron:offline",
+    name: "Offline",
+    folder: sharedFolder,
+  };
+  const handleNewThread = vi.fn();
+  expect(buildSquadronPickerRow(entry).disabled).toBe(true);
+  expect(resolveNewThreadShortcutDestination("ready", [entry])).toEqual({ kind: "picker" });
+  await expect(
+    startSquadronDraft({ entry, handleNewThread, selectDraftSquadron: vi.fn() }),
+  ).resolves.toBeNull();
+  expect(handleNewThread).not.toHaveBeenCalled();
 });

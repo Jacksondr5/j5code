@@ -1,4 +1,5 @@
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
+import { scopedSquadronKey } from "@t3tools/contracts/j5";
 import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
@@ -2080,8 +2081,8 @@ export default function Sidebar() {
   // exactly one Squadron. Folder/project cardinality is irrelevant: two
   // Squadrons may intentionally share the same folder and must stay choices.
   const squadronPickerEntries = useMemo(
-    () => buildSquadronPickerEntries({ squadrons, projects, primaryEnvironmentId }),
-    [primaryEnvironmentId, projects, squadrons],
+    () => buildSquadronPickerEntries({ squadrons, projects }),
+    [projects, squadrons],
   );
   // The per-row native context-menu callback remains stable through streaming;
   // it reads current Registrar snapshots only when the user chooses an action.
@@ -2095,7 +2096,8 @@ export default function Sidebar() {
   const squadronScope = useMemo(
     () =>
       resolveSquadronScope(
-        squadrons.map(({ squadron }) => ({
+        squadrons.map(({ squadron, environmentId }) => ({
+          environmentId,
           id: squadron.id,
           name: squadron.name,
         })),
@@ -2104,7 +2106,7 @@ export default function Sidebar() {
     [squadronScopeId, squadrons],
   );
   const threadHomes = useThreadHomes(
-    threads.map((thread) => thread.id),
+    threads.map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
     squadronScopeId,
     squadronScopeSelectionGeneration,
   );
@@ -2118,7 +2120,7 @@ export default function Sidebar() {
     },
     [isMobile, router, setOpenMobile],
   );
-  const threadHomesScopeReadState = useThreadHomesScopeReadState();
+  const threadHomesScopeReadState = useThreadHomesScopeReadState(squadronScopeId);
   const scopeReadFailed = squadronScope !== null && threadHomesScopeReadState === "failed";
   const threadHomesRef = useRef(threadHomes);
   threadHomesRef.current = threadHomes;
@@ -2274,7 +2276,7 @@ export default function Sidebar() {
   // filter context changes so a scope/search flip never inherits a deep
   // page state.
   const [settledVisibleCount, setSettledVisibleCount] = useState(SETTLED_TAIL_INITIAL_COUNT);
-  const settledResetKey = squadronScopeId ?? "all";
+  const settledResetKey = squadronScopeId === null ? "all" : scopedSquadronKey(squadronScopeId);
   const lastSettledResetKeyRef = useRef(settledResetKey);
   if (lastSettledResetKeyRef.current !== settledResetKey) {
     lastSettledResetKeyRef.current = settledResetKey;
@@ -3247,9 +3249,13 @@ export default function Sidebar() {
             // has one, otherwise its branch on the local checkout. Its
             // destination remains the immutable Registrar home, never the
             // source thread's folder identity.
-            const home = threadHomesRef.current.get(thread.id);
+            const home = threadHomesRef.current.get(
+              scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+            );
             const destination = resolveCurrentThreadNewThreadDestination(
-              home?.kind === "known" ? home.squadron.id : null,
+              home?.kind === "known"
+                ? { environmentId: thread.environmentId, squadronId: home.squadron.id }
+                : null,
               squadronDirectoryStatusRef.current,
               squadronPickerEntriesRef.current,
             );
@@ -3533,7 +3539,10 @@ export default function Sidebar() {
   const handleNewThreadClick = useCallback(() => {
     if (canCreateThreadWithoutSquadronPicker(squadronDirectoryStatus, squadrons.length)) {
       const entry = squadronPickerEntries[0];
-      if (entry === undefined) return;
+      if (entry === undefined || !entry.available) {
+        openCommandPalette({ open: "new-thread-in" });
+        return;
+      }
       if (isMobile) setOpenMobile(false);
       void startSquadronDraft({
         entry,
@@ -3827,7 +3836,7 @@ export default function Sidebar() {
                             `${thread.environmentId}:${thread.projectId}`,
                           ) ?? null
                         }
-                        threadHome={threadHomes.get(thread.id)}
+                        threadHome={threadHomes.get(threadKey)}
                         providerEntryByInstanceId={
                           providerEntriesByEnvironment.get(thread.environmentId) ??
                           EMPTY_PROVIDER_ENTRIES
@@ -4015,7 +4024,11 @@ export default function Sidebar() {
               <Button
                 size="xs"
                 variant="outline"
-                onClick={() => retryScopedThreadHomes(threads.map((thread) => thread.id))}
+                onClick={() =>
+                  retryScopedThreadHomes(
+                    threads.map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
+                  )
+                }
               >
                 Retry
               </Button>

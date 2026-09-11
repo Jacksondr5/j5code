@@ -15,6 +15,49 @@ import { A2AHumanInbox } from "./HumanInboxService.ts";
 import { A2AParticipantNotFoundError } from "./SendService.ts";
 import { ExchangeId, LedgerMessageId, ParticipantId } from "./contracts.ts";
 
+it("allows read-only connections to read the inbox but rejects answers", async () => {
+  const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+    authenticateHttpRequest: () =>
+      Effect.succeed({
+        sessionId: AuthSessionId.make("auth-session:readonly-inbox"),
+        subject: "read-only-test",
+        method: "bearer-access-token",
+        scopes: [AuthOrchestrationReadScope],
+      }),
+  });
+  const routes = humanInboxHttpRouteLayer.pipe(
+    Layer.provide(
+      Layer.mock(A2AHumanInbox)({
+        resolvePersonId: () => Effect.succeed(ParticipantId.make("human:remote")),
+        list: () => Effect.succeed([]),
+        answer: () => Effect.die("Read-only answer reached the service"),
+      }),
+    ),
+    Layer.provide(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
+    Layer.provideMerge(auth),
+    Layer.provide(HttpServer.layerServices),
+  );
+  const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
+  try {
+    assert.equal((await handler(new Request("http://remote.test/api/j5/a2a/inbox"))).status, 200);
+    const answered = await handler(
+      new Request("http://remote.test/api/j5/a2a/inbox/answer", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          personId: "human:remote",
+          exchangeId: "ask:1",
+          message: "Yes",
+          clientRequestId: "reply:1",
+        }),
+      }),
+    );
+    assert.equal(answered.status, 403);
+  } finally {
+    await dispose();
+  }
+});
+
 it("returns the resolved person above an empty inbox and preserves explicit selection", async () => {
   const localPersonId = ParticipantId.make("human:local-operator");
   const explicitPersonId = ParticipantId.make("human:second-person");

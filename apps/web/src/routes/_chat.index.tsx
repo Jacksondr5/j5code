@@ -17,8 +17,8 @@ import {
   resolveIndexDraftDestination,
   startSquadronDraft,
 } from "../j5/squadron/SquadronPicker.logic";
-import { useAllEnvironmentShellsBootstrapped, useProjects } from "../state/entities";
-import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
+import { useProjects } from "../state/entities";
+import { useEnvironments } from "../state/environments";
 import { APP_DISPLAY_NAME } from "~/branding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 
@@ -36,8 +36,9 @@ function ChatIndexRouteView() {
 function SquadronFirstRunGateLive() {
   const { status, squadrons, refresh } = useSquadronDirectory();
   const state = resolveSquadronFirstRunGateState({
-    authenticatedRouteAvailable: status !== "error",
-    squadronCount: status === "loading" ? null : squadrons.length,
+    authenticatedRouteAvailable:
+      status !== "error" && (status !== "partial" || squadrons.length > 0),
+    squadronCount: squadrons.length > 0 ? squadrons.length : status === "loading" ? null : 0,
   });
 
   return (
@@ -55,16 +56,14 @@ function SquadronFirstRunGateLive() {
 /** Landing creates only where the selected or sole Registrar home is determinate. */
 function IndexDraftLanding() {
   const projects = useProjects();
-  const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const handleNewThread = useNewThreadHandler();
   const { status: squadronDirectoryStatus, squadrons } = useSquadronDirectory();
   const ambientSquadronId = useSquadronAmbientScope();
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const startingRef = useRef(false);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
   const squadronEntries = useMemo(
-    () => buildSquadronPickerEntries({ squadrons, projects, primaryEnvironmentId }),
-    [primaryEnvironmentId, projects, squadrons],
+    () => buildSquadronPickerEntries({ squadrons, projects }),
+    [projects, squadrons],
   );
   const destination = useMemo(
     () => resolveIndexDraftDestination(ambientSquadronId, squadronDirectoryStatus, squadronEntries),
@@ -73,7 +72,6 @@ function IndexDraftLanding() {
 
   useEffect(() => {
     if (
-      !bootstrapped ||
       destination.kind !== "single-squadron" ||
       destination.entry.folder === null ||
       startingRef.current
@@ -100,11 +98,8 @@ function IndexDraftLanding() {
         startingRef.current = false;
         setStartState((state) => ({ ...state, failed: true }));
       });
-  }, [bootstrapped, destination, handleNewThread, startState.retryRequest]);
+  }, [destination, handleNewThread, startState.retryRequest]);
 
-  if (!bootstrapped) {
-    return null;
-  }
   if (destination.kind === "single-squadron") {
     if (destination.entry.folder === null) {
       return <SquadronFolderUnavailable />;
