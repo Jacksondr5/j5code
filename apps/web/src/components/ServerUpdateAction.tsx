@@ -170,7 +170,7 @@ export function ServerUpdateAction({
         title: `${serverLabel} updated`,
         description: isDesktopAppUpdate
           ? `Desktop app relaunched on ${result.value.targetVersion}.`
-          : `Reconnected on t3@${result.value.targetVersion}.`,
+          : `Reconnected on j5code@${result.value.targetVersion}.`,
       });
     } finally {
       pendingUpdateEnvironmentIds.delete(environmentId);

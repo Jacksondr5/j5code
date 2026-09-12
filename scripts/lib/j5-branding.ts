@@ -6,6 +6,9 @@
  * installers, and deep-link dispatchers.
  */
 export const J5_BRANDING = {
+  cli: {
+    packageName: "j5code",
+  },
   desktop: {
     baseName: "J5 Code",
     developmentName: "J5 Code (Dev)",

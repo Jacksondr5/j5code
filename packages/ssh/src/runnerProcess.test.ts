@@ -34,7 +34,7 @@ describe.skipIf(HostProcessPlatform.defaultValue() === "win32")(
           const bin = path.join(fixture, "bin");
           const cliPath = path.join(fixture, "installed cli.mjs");
           const callsPath = path.join(fixture, "package-manager-calls.jsonl");
-          const packageSpec = "t3@0.0.35";
+          const packageSpec = "j5code@0.0.35";
           yield* fs.makeDirectory(bin);
           yield* fs.symlink(process.execPath, path.join(bin, "node"));
           yield* fs.writeFileString(
@@ -158,7 +158,7 @@ if (args.includes("--package")) {
             "--",
             "sh",
             "-c",
-            "command -v t3",
+            "command -v j5code",
           ];
           assert.deepEqual(calls, [expectedCall, expectedCall]);
         }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),

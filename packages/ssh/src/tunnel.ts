@@ -423,21 +423,21 @@ if [ -n "$T3_NODE_SCRIPT_PATH" ]; then
   fi
   exec node "$T3_NODE_SCRIPT_PATH" "$@"
 fi
-if command -v t3 >/dev/null 2>&1; then
-  exec t3 "$@"
+if command -v j5code >/dev/null 2>&1; then
+  exec j5code "$@"
 fi
 # npm extracts a package before it runs the native builds of its dependencies,
-# so a failed build (t3 depends on node-pty, which needs a C toolchain) leaves
-# the npx cache without a t3 executable. \`npx --yes\` then exits 0 without
+# so a failed build (j5code depends on node-pty, which needs a C toolchain) leaves
+# the npx cache without a j5code executable. \`npx --yes\` then exits 0 without
 # running anything at all, which the caller only ever sees as a server that
 # never becomes ready. Resolve the CLI once up front so that install failure is
 # reported here, with npm's own output on stderr.
 require_installed_t3_cli() {
-  T3_CLI_PATH="$("$@" -- sh -c 'command -v t3' || true)"
+  T3_CLI_PATH="$("$@" -- sh -c 'command -v j5code' || true)"
   if [ -n "$T3_CLI_PATH" ]; then
     return 0
   fi
-  printf 'Remote host installed %s but npm produced no t3 executable, which usually means a native dependency (node-pty) failed to build. Install a C toolchain on the remote host (Debian/Ubuntu: build-essential, Fedora/RHEL: gcc-c++ make, macOS: xcode-select --install) and try again.\\n' @@T3_PACKAGE_SPEC@@ >&2
+  printf 'Remote host installed %s but npm produced no j5code executable, which usually means a native dependency (node-pty) failed to build. Install a C toolchain on the remote host (Debian/Ubuntu: build-essential, Fedora/RHEL: gcc-c++ make, macOS: xcode-select --install) and try again.\\n' @@T3_PACKAGE_SPEC@@ >&2
   return 1
 }
 # The launcher records this PID, so exec the CLI without an npm wrapper process.
@@ -449,7 +449,7 @@ if command -v npm >/dev/null 2>&1; then
   require_installed_t3_cli npm exec --yes --package @@T3_PACKAGE_SPEC@@ || exit 1
   exec "$T3_CLI_PATH" "$@"
 fi
-printf 'Remote host is missing the t3 CLI and could not install @@T3_PACKAGE_SPEC@@ because node/npm/npx are unavailable on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' >&2
+printf 'Remote host is missing the j5code CLI and could not install @@T3_PACKAGE_SPEC@@ because node/npm/npx are unavailable on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' >&2
 exit 1
 `;
 
@@ -653,7 +653,7 @@ fi
 `;
 
 export function buildRemoteT3RunnerScript(input?: RemoteT3RunnerOptions): string {
-  const packageSpec = shellSingleQuote(input?.packageSpec?.trim() || "t3@latest");
+  const packageSpec = shellSingleQuote(input?.packageSpec?.trim() || "j5code@latest");
   const nodeScriptPath = input?.nodeScriptPath?.trim() || "";
   return stripTrailingNewlines(
     applyScriptPlaceholders(REMOTE_RUNNER_SCRIPT, {
@@ -673,10 +673,6 @@ export function buildRemoteNodeEnvScript(input?: RemoteT3RunnerOptions): string 
   );
 }
 
-/** Keep the server home aligned with the runner selected by REMOTE_RUNNER_SCRIPT. */
-const defaultServerHomeForRunner = (input?: RemoteT3RunnerOptions) =>
-  input?.nodeScriptPath?.trim() ? "$HOME/.j5code" : "$HOME/.t3";
-
 export function buildRemoteLaunchScript(input?: RemoteT3RunnerOptions): string {
   return applyScriptPlaceholders(REMOTE_LAUNCH_SCRIPT, {
     T3_NODE_ENV_SCRIPT: buildRemoteNodeEnvScript(input),
@@ -688,7 +684,7 @@ export function buildRemoteLaunchScript(input?: RemoteT3RunnerOptions): string {
     T3_READY_TIMEOUT_MS: String(REMOTE_READY_TIMEOUT_MS),
     T3_REUSE_READY_TIMEOUT_MS: String(REMOTE_REUSE_READY_TIMEOUT_MS),
     T3_READY_PROBE_TIMEOUT_MS: String(SSH_READY_PROBE_TIMEOUT_MS),
-    T3_DEFAULT_SERVER_HOME: defaultServerHomeForRunner(input),
+    T3_DEFAULT_SERVER_HOME: "$HOME/.j5code",
   });
 }
 
@@ -699,7 +695,7 @@ export function buildRemotePairingScript(
   return applyScriptPlaceholders(REMOTE_PAIRING_SCRIPT, {
     T3_STATE_KEY: remoteStateKey(target),
     T3_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteT3RunnerScript(input)),
-    T3_DEFAULT_SERVER_HOME: defaultServerHomeForRunner(input),
+    T3_DEFAULT_SERVER_HOME: "$HOME/.j5code",
   });
 }
 

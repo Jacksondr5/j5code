@@ -1,0 +1,96 @@
+name: J5 Signed macOS Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [build/j5-macos-20260912]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: j5-macos-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Signed and notarized Apple Silicon DMG
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      T3CODE_DESKTOP_UPDATE_REPOSITORY: Jacksondr5/j5code
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.10.0
+          run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal --target aarch64-apple-darwin
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test packaging behavior
+        run: pnpm exec vp test run scripts/build-desktop-artifact.test.ts scripts/sign-macos.test.ts
+
+      - name: Prepare Apple signing credentials
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        run: bash scripts/j5/prepare-macos-signing.sh
+
+      - name: Build signed and notarized DMG and ZIP
+        env:
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          T3CODE_APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: pnpm dist:desktop:dmg:arm64 --signed --output-dir release-j5
+
+      - name: Verify app identity, signature, and notarization ticket
+        env:
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmgs=(release-j5/J5-Code-*-arm64.dmg)
+          test "${#dmgs[@]}" -eq 1
+          mount_dir="$(mktemp -d "$RUNNER_TEMP/j5-dmg.XXXXXX")"
+          hdiutil attach "${dmgs[0]}" -mountpoint "$mount_dir" -nobrowse -readonly
+          trap 'hdiutil detach "$mount_dir"; rmdir "$mount_dir"' EXIT
+          app_path="$mount_dir/J5 Code.app"
+          test "$(plutil -extract CFBundleDisplayName raw "$app_path/Contents/Info.plist")" = "J5 Code"
+          test "$(plutil -extract CFBundleIdentifier raw "$app_path/Contents/Info.plist")" = "codes.jackson.j5code"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          codesign -dv --verbose=4 "$app_path" 2>&1 | grep -Fx "TeamIdentifier=$APPLE_TEAM_ID"
+          xcrun stapler validate "$app_path"
+          spctl --assess --type execute --verbose=2 "$app_path"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: j5-code-signed-macos-arm64
+          path: |
+            release-j5/J5-Code-*-arm64.dmg
+            release-j5/J5-Code-*-arm64.zip
+            release-j5/*.blockmap
+            release-j5/*-mac.yml
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove signing files
+        if: ${{ always() }}
+        run: |
+          if [[ -n "${J5_SIGNING_DIR:-}" ]]; then
+            rm -rf -- "$J5_SIGNING_DIR"
+          fi
