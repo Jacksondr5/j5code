@@ -287,6 +287,7 @@ const publishCmd = Command.make(
             yield* runCommand(
               ChildProcess.make(spawnCommand.command, spawnCommand.args, {
                 cwd: repoRoot,
+                stdin: "inherit",
                 stdout: config.verbose ? "inherit" : "ignore",
                 stderr: "inherit",
                 shell: spawnCommand.shell,
