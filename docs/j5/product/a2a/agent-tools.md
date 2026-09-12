@@ -282,8 +282,8 @@ withdrawal honestly.
 
 **Description (contract):** "The Squadron directory for this environment: every Squadron's
 squadron_id, name, and the project ids it references, plus your own thread's project id so you can
-see which Squadron can home you. Use it to obtain the exact squadron_id before join_squadron; it
-works even when you have no Squadron home yet. Read-only."
+see which Squadron can home you. Use it to obtain the exact squadron_id before join_squadron.
+Read-only."
 
 No inputs. Result: `caller_project_id` (null only when the caller thread cannot be read) and
 `squadrons[]` rows of `squadron_id`, `name`, `project_ids`. The server states facts and never
@@ -292,14 +292,12 @@ picks: the caller compares `project_ids` against `caller_project_id` itself. Exi
 
 ## `join_squadron` — built (`j5/main`, 2026-09-12, #129); original-home repair for native threads
 
-**Description (contract):** "Join the Squadron the human selected for you when your thread has no
-Squadron home yet — the state where list_participants and send_message refuse you. Pass the exact
-squadron_id, taken from list_squadrons or from the human; that Squadron must reference your
-thread's project. Your thread, conversation, worktree, and running work stay exactly as they are —
-only your participant registration is added, placed at the Squadron root with no invented spawner.
-Calling it again for the Squadron you already belong to returns your existing registration; a
-thread that already has a different home is refused, because this is not a move. Reuse
-client_request_id to retry safely."
+**Description (contract):** "Join a Squadron when your thread has no Squadron home yet. Pass the
+exact squadron_id, taken from list_squadrons; that Squadron must reference your thread's project.
+Your thread, conversation, worktree, and running work stay exactly as they are. Calling it again for
+the Squadron you already belong to returns your existing registration. Reuse client_request_id to
+retry safely. Warning: you cannot switch Squadrons once you're assigned, be sure you're joining the
+right one."
 
 | Input               | Type              | Required | Meaning                                                |
 | ------------------- | ----------------- | -------- | ------------------------------------------------------ |

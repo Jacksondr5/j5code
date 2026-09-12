@@ -213,10 +213,10 @@ export const J5ListSquadronsResult = Schema.Struct({
 export type J5ListSquadronsResult = typeof J5ListSquadronsResult.Type;
 
 export const J5_JOIN_SQUADRON_DESCRIPTION =
-  "Join the Squadron the human selected for you when your thread has no Squadron home yet — the state where list_participants and send_message refuse you. Pass the exact squadron_id, taken from list_squadrons or from the human; that Squadron must reference your thread's project. Your thread, conversation, worktree, and running work stay exactly as they are — only your participant registration is added, placed at the Squadron root with no invented spawner. Calling it again for the Squadron you already belong to returns your existing registration; a thread that already has a different home is refused, because this is not a move. Reuse client_request_id to retry safely.";
+  "Join a Squadron when your thread has no Squadron home yet. Pass the exact squadron_id, taken from list_squadrons; that Squadron must reference your thread's project. Your thread, conversation, worktree, and running work stay exactly as they are. Calling it again for the Squadron you already belong to returns your existing registration. Reuse client_request_id to retry safely. Warning: you cannot switch Squadrons once you're assigned, be sure you're joining the right one.";
 
 export const J5_LIST_SQUADRONS_DESCRIPTION =
-  "The Squadron directory for this environment: every Squadron's squadron_id, name, and the project ids it references, plus your own thread's project id so you can see which Squadron can home you. Use it to obtain the exact squadron_id before join_squadron; it works even when you have no Squadron home yet. Read-only.";
+  "The Squadron directory for this environment: every Squadron's squadron_id, name, and the project ids it references, plus your own thread's project id so you can see which Squadron can home you. Use it to obtain the exact squadron_id before join_squadron. Read-only.";
 
 export const J5_SPAWN_AGENT_DESCRIPTION =
   "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. Reuse client_request_id to retry the same spawn safely.";
