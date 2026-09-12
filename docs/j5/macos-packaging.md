@@ -63,6 +63,14 @@ T3 Code.
 
 ## GitHub Actions
 
+The CLI is published as `j5code`, with the `j5code` executable. Its workspace name remains `t3`
+to preserve upstream task references and Effect service identifiers. Build with
+`vp run --filter t3 build`, then preview publication with
+`node apps/server/scripts/cli.ts publish --dry-run`. The publish script prepares the public
+manifest and restores the private workspace manifest afterward; use that script for publication.
+Desktop releases must wait until the matching `j5code@<version>` is available on npm so remote
+server updates can install the same version.
+
 - `J5 CI` runs formatting, lint, typecheck, and unit-test gates on every `j5/**` push and PR.
 - `J5 Weekly Full Build` runs Mondays at 08:23 UTC and on manual dispatch. It runs the full suite,
   full build, produces the ad-hoc signed Apple Silicon DMG/ZIP, verifies the mounted app, and uploads

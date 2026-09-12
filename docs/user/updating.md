@@ -35,7 +35,7 @@ The offered action depends on how the server runs:
 For a background service, run the matching version's CLI on the host:
 
 ```sh
-npx t3@<client-version> service update
+npx j5code@<client-version> service update
 ```
 
 Replace `<client-version>` with the version shown in the notice. Using
@@ -43,7 +43,7 @@ Replace `<client-version>` with the version shown in the notice. Using
 service launcher may require this local update before it supports remote updates
 and rollback.
 
-For a foreground server, the copied command is `npx t3@<client-version>`. Add
+For a foreground server, the copied command is `npx j5code@<client-version>`. Add
 `serve` if you normally run without a browser, and preserve options such as
 `--host` or `--tailscale-serve`. See
 [background services](./background-service.md) for service management.

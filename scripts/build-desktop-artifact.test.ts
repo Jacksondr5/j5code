@@ -44,6 +44,7 @@ import {
   renderMacPasskeyEntitlements,
   resolveClerkPasskeyNativeArtifacts,
   resolveMacPasskeySigningConfiguration,
+  resolveOptionalMacPasskeySigningConfiguration,
   resolveDesktopRuntimeDependencies,
   resolveMacStageDependencies,
   resolveFffNativeDependencies,
@@ -1601,6 +1602,23 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       }),
     ),
   );
+
+  it("allows Developer ID signing without passkey provisioning", () => {
+    assert.isUndefined(
+      resolveOptionalMacPasskeySigningConfiguration({ T3CODE_APPLE_TEAM_ID: "ABC1234567" }),
+    );
+  });
+
+  it("still requires provisioning when Clerk passkeys are configured", () => {
+    assert.throws(
+      () =>
+        resolveOptionalMacPasskeySigningConfiguration({
+          T3CODE_APPLE_TEAM_ID: "ABC1234567",
+          T3CODE_CLERK_PUBLISHABLE_KEY: `pk_test_${btoa("example.clerk.accounts.dev$")}`,
+        }),
+      MissingMacPasskeyProvisioningProfileError,
+    );
+  });
 
   it("derives macOS passkey signing configuration from the Clerk publishable key", () => {
     const configuration = resolveMacPasskeySigningConfiguration({

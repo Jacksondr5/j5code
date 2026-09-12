@@ -341,7 +341,7 @@ export function createDevRunnerEnv({
     }
 
     // A dev-runner server is never launcher-managed. When the shell that runs
-    // this script was itself spawned by the machine's managed t3 service (an
+    // this script was itself spawned by the machine's managed j5code service (an
     // agent working inside T3 Code), these leak through and the child server
     // fails startup with "The service launcher started a different t3 version"
     // (serviceLauncherClient.ts resolveStartup).

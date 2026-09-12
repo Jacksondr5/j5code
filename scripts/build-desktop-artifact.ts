@@ -1243,6 +1243,19 @@ function normalizePasskeyRpDomain(value: string): string {
   return parsed.hostname;
 }
 
+export function resolveOptionalMacPasskeySigningConfiguration(
+  env: Readonly<Record<string, string | undefined>>,
+) {
+  // Direct-connection builds need Developer ID signing without Associated Domains.
+  // Once passkeys are configured, retain the full provisioning validation.
+  const configured = [
+    env.T3CODE_MACOS_PROVISIONING_PROFILE,
+    env.T3CODE_CLERK_PUBLISHABLE_KEY,
+    env.T3CODE_CLERK_PASSKEY_RP_DOMAINS,
+  ].some((value) => value?.trim());
+  return configured ? resolveMacPasskeySigningConfiguration(env) : undefined;
+}
+
 export function resolveMacPasskeySigningConfiguration(
   env: Readonly<Record<string, string | undefined>>,
 ): MacPasskeySigningConfiguration {
@@ -3620,7 +3633,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const configuredMacPasskeySigning =
     options.platform === "mac" && options.signed
       ? yield* Effect.try({
-          try: () => resolveMacPasskeySigningConfiguration(loadRepoEnv({ repoRoot })),
+          try: () => resolveOptionalMacPasskeySigningConfiguration(loadRepoEnv({ repoRoot })),
           catch: MacPasskeySigningConfigurationResolutionError.fromCause,
         })
       : undefined;

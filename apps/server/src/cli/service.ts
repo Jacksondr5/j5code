@@ -62,10 +62,10 @@ export function formatServiceStatus(
   cliVersion: string,
 ): string {
   if (!status.supported) {
-    return "T3 Code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd";
+    return "J5 Code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd";
   }
   if (!status.installed) {
-    return "T3 Code service\n  Status: not installed\n  Next: Run `t3 service install`.";
+    return "J5 Code service\n  Status: not installed\n  Next: Run `j5code service install`.";
   }
   const installedVersion = status.installedVersion ?? cliVersion;
   const problems = (status.problems ?? []).map(
@@ -77,21 +77,21 @@ export function formatServiceStatus(
     compareExactServiceVersions(status.installedVersion, cliVersion) > 0
   ) {
     return [
-      "T3 Code service",
-      `  Status: installed · t3@${installedVersion} (newer than this t3@${cliVersion} CLI)`,
+      "J5 Code service",
+      `  Status: installed · j5code@${installedVersion} (newer than this j5code@${cliVersion} CLI)`,
       `  Unit: ${status.unitPath}`,
       `  Logs: ${status.logPath}`,
       ...problems,
-      `  Next: Use \`npx t3@${installedVersion} service update\` to repair it, or pass \`--allow-downgrade\` explicitly.`,
+      `  Next: Use \`npx j5code@${installedVersion} service update\` to repair it, or pass \`--allow-downgrade\` explicitly.`,
     ].join("\n");
   }
   return [
-    "T3 Code service",
-    `  Status: ${status.current ? `installed · t3@${installedVersion}` : "needs an update or repair"}`,
+    "J5 Code service",
+    `  Status: ${status.current ? `installed · j5code@${installedVersion}` : "needs an update or repair"}`,
     `  Unit: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
     ...problems,
-    ...(status.current ? [] : [`  Next: Run \`npx t3@${cliVersion} service update\`.`]),
+    ...(status.current ? [] : [`  Next: Run \`npx j5code@${cliVersion} service update\`.`]),
   ].join("\n");
 }
 
@@ -113,7 +113,7 @@ const serviceReconcileFlags = {
 };
 
 const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pipe(
-  Command.withDescription("Install T3 Code as a background service for this user."),
+  Command.withDescription("Install J5 Code as a background service for this user."),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
@@ -121,12 +121,12 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
         const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
         if (!result.changed) {
           yield* Console.log(
-            `T3 Code service is already installed with t3@${packageJson.version}.`,
+            `J5 Code service is already installed with j5code@${packageJson.version}.`,
           );
           return;
         }
         yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+          `${result.previouslyInstalled ? "Updated" : "Installed"} J5 Code service with j5code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
         );
       }),
     ),
@@ -135,7 +135,7 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
 
 const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
   Command.withDescription(
-    "Update or repair the background service using this CLI version. Use `npx t3@latest service update` for the latest release.",
+    "Update or repair the background service using this CLI version. Use `npx j5code@latest service update` for the latest release.",
   ),
   Command.withHandler((flags) =>
     runServiceCommand(
@@ -143,11 +143,11 @@ const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
       Effect.gen(function* () {
         const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
         if (!result.changed) {
-          yield* Console.log(`T3 Code service is already using t3@${packageJson.version}.`);
+          yield* Console.log(`J5 Code service is already using j5code@${packageJson.version}.`);
           return;
         }
         yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+          `${result.previouslyInstalled ? "Updated" : "Installed"} J5 Code service with j5code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
         );
       }),
     ),
@@ -155,7 +155,7 @@ const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
 );
 
 const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).pipe(
-  Command.withDescription("Stop and remove the T3 Code background service."),
+  Command.withDescription("Stop and remove the J5 Code background service."),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
@@ -163,7 +163,7 @@ const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).
         const service = yield* BootService.BootService;
         const removed = yield* service.uninstall;
         yield* Console.log(
-          removed ? "Removed the T3 Code service." : "T3 Code service is not installed.",
+          removed ? "Removed the J5 Code service." : "J5 Code service is not installed.",
         );
       }),
     ),
@@ -171,7 +171,7 @@ const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).
 );
 
 const serviceStatusCommand = Command.make("status", projectLocationFlags).pipe(
-  Command.withDescription("Show whether the T3 Code background service is installed."),
+  Command.withDescription("Show whether the J5 Code background service is installed."),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
@@ -191,7 +191,7 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
     return false;
   }
   if (installed && current) {
-    yield* Console.log("T3 Code is already set up to run in the background on this machine.");
+    yield* Console.log("J5 Code is already set up to run in the background on this machine.");
     return true;
   }
   for (const problem of status.problems ?? []) {
@@ -203,7 +203,7 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
     compareExactServiceVersions(status.installedVersion, packageJson.version) > 0
   ) {
     yield* Console.log(
-      `A newer t3@${status.installedVersion} background service is installed. Leaving it unchanged.`,
+      `A newer j5code@${status.installedVersion} background service is installed. Leaving it unchanged.`,
     );
     // This CLI cannot verify the newer service. Keep the manual fallback available.
     return false;
@@ -214,11 +214,11 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
   const wanted = yield* Prompt.run(
     Prompt.confirm({
       message: installed
-        ? "The installed T3 Code service needs an update or repair. Update it now?"
+        ? "The installed J5 Code service needs an update or repair. Update it now?"
         : platform === "darwin"
-          ? "Run T3 Code in the background whenever you log in to this Mac? " +
+          ? "Run J5 Code in the background whenever you log in to this Mac? " +
             "It stays reachable through T3 Connect while you are logged in."
-          : "Run T3 Code in the background whenever this machine boots? " +
+          : "Run J5 Code in the background whenever this machine boots? " +
             "It stays reachable through T3 Connect even after you log out.",
       initial: true,
     }),
@@ -257,7 +257,7 @@ export const recoverServiceOnboardingOffer = <R>(
   );
 
 export const serviceCommand = Command.make("service").pipe(
-  Command.withDescription("Manage the T3 Code background service."),
+  Command.withDescription("Manage the J5 Code background service."),
   Command.withSubcommands([
     serviceInstallCommand,
     serviceUninstallCommand,

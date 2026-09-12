@@ -1,14 +1,15 @@
 {
   "name": "t3",
   "version": "0.0.38",
+  "private": true,
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pingdotgg/t3code",
+    "url": "https://github.com/Jacksondr5/j5code",
     "directory": "apps/server"
   },
   "bin": {
-    "t3": "./dist/bin.mjs"
+    "j5code": "./dist/bin.mjs"
   },
   "files": [
     "dist"
