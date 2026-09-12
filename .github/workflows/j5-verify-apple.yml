@@ -1,0 +1,97 @@
+name: J5 Verify Apple Credentials
+
+on:
+  push:
+    branches: [verify/apple-signing-20260912]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify Developer ID signing and notarization access
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - name: Check Apple credentials
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER APPLE_TEAM_ID; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing $name."
+              exit 1
+            fi
+          done
+
+          umask 077
+          credential_dir="$(mktemp -d "$RUNNER_TEMP/j5-apple-check.XXXXXX")"
+          keychain_path="$credential_dir/signing.keychain-db"
+          cleanup() {
+            security delete-keychain "$keychain_path" >/dev/null 2>&1 || true
+            rm -rf "$credential_dir"
+          }
+          trap cleanup EXIT
+
+          if ! printf '%s' "$CSC_LINK" | base64 -D > "$credential_dir/certificate.p12" 2>/dev/null; then
+            echo "::error::CSC_LINK is not a valid base64-encoded P12."
+            exit 1
+          fi
+          keychain_password="$(uuidgen)"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          if ! security import "$credential_dir/certificate.p12" -k "$keychain_path" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign > "$credential_dir/import.log" 2>&1; then
+            echo "::error::Could not import the P12. Check the certificate file and CSC_KEY_PASSWORD."
+            exit 1
+          fi
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain_path" >/dev/null 2>&1
+          security find-identity -v -p codesigning "$keychain_path" > "$credential_dir/identities.txt"
+          signing_identity="$(python3 - "$credential_dir/identities.txt" <<'PY'
+          import os, re, sys
+          identities = open(sys.argv[1]).read()
+          team = re.escape(os.environ['APPLE_TEAM_ID'])
+          match = re.search(r'([A-F0-9]{40}) "Developer ID Application: [^"\n]+ \(' + team + r'\)"', identities)
+          if not match:
+              sys.exit('::error::No valid Developer ID Application identity for APPLE_TEAM_ID. Check certificate type, team, expiry, and included private key.')
+          print(match.group(1))
+          PY
+          )"
+          echo "Developer ID Application certificate and private key imported for the configured team."
+
+          printf 'int main(void) { return 0; }\n' > "$credential_dir/probe.c"
+          clang "$credential_dir/probe.c" -o "$credential_dir/probe"
+          if ! codesign --force --timestamp --options runtime --keychain "$keychain_path" --sign "$signing_identity" --identifier codes.jackson.j5code.signing-check "$credential_dir/probe" > "$credential_dir/sign.log" 2>&1; then
+            echo "::error::Developer ID signing or Apple timestamping failed."
+            exit 1
+          fi
+          codesign --verify --strict "$credential_dir/probe"
+          echo "Developer ID signing, timestamping, and signature verification passed."
+
+          key_path="$credential_dir/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "$APPLE_API_KEY" > "$key_path"
+          if ! openssl pkey -in "$key_path" -noout > /dev/null 2>&1; then
+            echo "::error::APPLE_API_KEY must contain the PEM contents of the downloaded P8 file."
+            exit 1
+          fi
+          if ! xcrun notarytool history --key "$key_path" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --output-format json > "$credential_dir/notary-history.json" 2> "$credential_dir/notary-error.log"; then
+            echo "::error::Notarization API authentication failed. Check the team API key, Key ID, Issuer ID, and account access."
+            exit 1
+          fi
+          echo "Notarization API authentication passed."
+          {
+            echo '### Apple credentials verified'
+            echo '- Developer ID Application certificate matches the configured Apple team.'
+            echo '- P12 password and private key work.'
+            echo '- Signing, Apple timestamping, and signature verification passed.'
+            echo '- App Store Connect API key authenticated to the notarization service.'
+            echo '- No release was published or application submitted for notarization.'
+          } >> "$GITHUB_STEP_SUMMARY"
