@@ -201,6 +201,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "list_artifacts",
         "list_participants",
         "list_scheduled_tasks",
+        "load_workspace_dependencies",
         "orchestrator_capabilities",
         "preview_click",
         "preview_evaluate",
