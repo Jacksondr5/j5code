@@ -1,8 +1,9 @@
 # Build and install J5 Code for macOS
 
-J5 Code's personal-use build is ad-hoc signed. It has a valid local code signature but no Apple
+The local personal-use build below is ad-hoc signed. It has a valid local code signature but no Apple
 Developer ID certificate or notarization ticket, so macOS may require a one-time manual approval.
-The build contains no configured update feed unless you explicitly provide one.
+Local builds omit the update feed unless `T3CODE_DESKTOP_UPDATE_REPOSITORY` or `GITHUB_REPOSITORY`
+is configured. GitHub Actions builds use the J5 repository.
 
 ## Prerequisites
 
@@ -62,6 +63,25 @@ J5 Code uses `~/.j5code` and J5-specific Application Support paths, so it can re
 T3 Code.
 
 ## GitHub Actions
+
+For a public release, run `J5 Signed macOS Build` on the intended source commit. After it passes,
+run `J5 Release` with that build's numeric run ID. The release workflow builds native resource
+monitors, publishes the matching CLI through npm trusted publishing, then publishes the verified
+DMG, ZIP, blockmaps, and update manifest to a GitHub Release. It uses GitHub-hosted runners and
+does not deploy relay or Vercel services.
+
+Both package manifests must have the same stable version. Bump them before a new release; an
+existing npm version can only be reused when its `gitHead` matches the selected build's commit.
+The npm trusted publisher for `j5code` must authorize repository `Jacksondr5/j5code` and workflow
+`j5-release.yml` with publishing enabled. The first npm publication requires the package owner's
+login before that trusted publisher can be registered.
+
+`J5 Signed macOS Build` builds an Apple Silicon DMG and ZIP on a GitHub-hosted macOS runner,
+signs with Developer ID, and notarizes the app. It verifies the mounted app's identity, signature,
+notarization ticket, and Gatekeeper assessment before uploading artifacts for 30 days. It does not
+publish to npm or create a GitHub Release. The workflow uses the Apple signing secrets and
+`APPLE_TEAM_ID` repository variable; it converts the P12 export to a Keychain-compatible format.
+Clerk passkey provisioning is only required when Clerk/passkey configuration is supplied.
 
 The CLI is published as `j5code`, with the `j5code` executable. Its workspace name remains `t3`
 to preserve upstream task references and Effect service identifiers. Build with

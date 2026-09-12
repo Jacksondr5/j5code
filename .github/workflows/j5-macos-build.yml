@@ -2,8 +2,6 @@ name: J5 Signed macOS Build
 
 on:
   workflow_dispatch:
-  push:
-    branches: [build/j5-macos-20260912]
 
 permissions:
   contents: read
