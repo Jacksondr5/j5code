@@ -47,7 +47,7 @@ export class A2AHomeNotFoundError extends Schema.TaggedErrorClass<A2AHomeNotFoun
   { threadId: Schema.String },
 ) {
   override get message(): string {
-    return `Thread ${this.threadId} has no registered home squadron and is not an A2A participant. Provision it through a sanctioned creation wrapper or controlled test seed before retrying.`;
+    return `Thread ${this.threadId} has no registered home squadron and is not an A2A participant. Call list_squadrons, then join_squadron with the exact squadron_id that references this thread's project, before retrying.`;
   }
 }
 

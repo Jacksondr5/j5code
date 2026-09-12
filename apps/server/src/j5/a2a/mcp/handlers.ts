@@ -26,6 +26,8 @@ import { A2ALedger } from "../LedgerService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
+import { SquadronJoinService } from "../SquadronJoinService.ts";
+import { SquadronProjectReferences } from "../SquadronProjectReferences.ts";
 import {
   CommCommandId,
   type LedgerCursor,
@@ -161,6 +163,17 @@ const spawnPlacementCommandId = (input: {
   readonly requestKey: string;
 }) =>
   PlacementCommandId.make(lifecycleId({ kind: "command", operation: "spawn-placement", ...input }));
+
+const joinHomeCommandId = (input: {
+  readonly providerSessionId: string;
+  readonly requestKey: string;
+}) => CommCommandId.make(lifecycleId({ kind: "command", operation: "join-home", ...input }));
+
+const joinPlacementCommandId = (input: {
+  readonly providerSessionId: string;
+  readonly requestKey: string;
+}) =>
+  PlacementCommandId.make(lifecycleId({ kind: "command", operation: "join-placement", ...input }));
 
 export const commandIdForRequest = (input: {
   readonly toolName: "send_message" | "clear_own_ask";
@@ -520,6 +533,80 @@ const handlers = {
                 : null,
           };
         }),
+      };
+    }).pipe(Effect.mapError(failure)),
+  list_squadrons: () =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
+      const ledger = yield* A2ALedger;
+      const references = yield* SquadronProjectReferences;
+      const threadManagement = yield* ThreadManagementService;
+      const callerProjectId = yield* threadManagement.getThreadProjection(scope.threadId).pipe(
+        Effect.map((projection) => projection.thread.projectId),
+        Effect.option,
+        Effect.map(Option.getOrNull),
+      );
+      const squadrons = yield* ledger.listSquadrons();
+      const rows = yield* Effect.forEach(
+        squadrons,
+        (squadron) =>
+          references.listForSquadron(squadron.id).pipe(
+            Effect.map((projectReferences) => ({
+              squadron_id: squadron.id,
+              name: squadron.name,
+              project_ids: projectReferences.map((reference) => reference.projectId),
+            })),
+          ),
+        { concurrency: 1 },
+      );
+      return { caller_project_id: callerProjectId, squadrons: rows };
+    }).pipe(Effect.mapError(failure)),
+  join_squadron: (input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
+      const crypto = yield* Crypto.Crypto;
+      const threadManagement = yield* ThreadManagementService;
+      const projection = yield* threadManagement
+        .getThreadProjection(scope.threadId)
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              `Caller thread ${scope.threadId} cannot be read for join_squadron: ${error.message}.`,
+              "Retry join_squadron once the caller thread is readable.",
+            ),
+          ),
+        );
+      if (projection.thread.deletedAt !== null) {
+        return yield* stateError(
+          `Caller thread ${scope.threadId} is deleted and cannot join a Squadron.`,
+          "The operation is refused.",
+        );
+      }
+      if (projection.thread.archivedAt !== null) {
+        return yield* stateError(
+          `Caller thread ${scope.threadId} is archived and cannot join a Squadron.`,
+          "Ask the human to unarchive the thread, then retry join_squadron.",
+        );
+      }
+      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
+      const stableInput = { providerSessionId: scope.providerSessionId, requestKey };
+      const joinedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+      const joined = yield* (yield* SquadronJoinService).joinExistingThread({
+        homeCommandId: joinHomeCommandId(stableInput),
+        placementCommandId: joinPlacementCommandId(stableInput),
+        squadronId: input.squadron_id,
+        threadId: scope.threadId,
+        projectId: projection.thread.projectId,
+        joinedAt,
+      });
+      return {
+        squadron_id: joined.home.squadronId,
+        participant_id: joined.home.participantId,
+        thread_id: scope.threadId,
+        placement: {
+          placement_parent_id: joined.placement.placementParentId,
+          provenance: projectProvenance(joined.placement.provenance),
+        },
       };
     }).pipe(Effect.mapError(failure)),
   spawn_agent: (input) =>
