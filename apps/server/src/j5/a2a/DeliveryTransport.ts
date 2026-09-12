@@ -61,6 +61,11 @@ export interface HumanDeliveryInput extends AgentDeliveryInput {
 }
 
 export interface A2ADeliveryTransportShape {
+  /** Withdraw an accepted queue entry, or prove that delivery already reached its run/provider. */
+  readonly cancelAgent: (input: {
+    readonly receiverId: ParticipantId;
+    readonly messageId: LedgerMessageId;
+  }) => Effect.Effect<"cancelled" | "delivered", A2ADeliveryTransportError>;
   readonly deliverAgent: (
     input: AgentDeliveryInput,
   ) => Effect.Effect<void, A2ADeliveryTransportError>;
@@ -192,6 +197,61 @@ export const live: Layer.Layer<
     const sql = yield* SqlClient.SqlClient;
 
     return A2ADeliveryTransport.of({
+      cancelAgent: (input) =>
+        Effect.gen(function* () {
+          const rows =
+            yield* sql<MembershipRow>`SELECT json_extract(payload, '$.participant') AS payload
+          FROM j5_a2a_comm_event WHERE kind = 'participant.joined'
+            AND json_extract(payload, '$.participant.id') = ${input.receiverId}`;
+          if (rows.length !== 1)
+            return yield* new A2ADeliveryTargetError({
+              participantId: input.receiverId,
+              state: "missing immutable delivery identity",
+            });
+          const participant = yield* decodeParticipant(rows[0]!.payload);
+          if (participant.kind !== "agent")
+            return yield* new A2ADeliveryTargetError({
+              participantId: input.receiverId,
+              state: "not an agent",
+            });
+          const priorEffects = yield* outbox.listByCommandId(deliveryCommandId(input.messageId));
+          const steer = priorEffects.find(
+            (effect) => effect.request.type === "provider-turn.steer",
+          );
+          if (steer !== undefined) {
+            const outcome = yield* outbox.awaitSettled(steer.id).pipe(Effect.timeout("30 seconds"));
+            return outcome.status === "succeeded" ? ("delivered" as const) : ("cancelled" as const);
+          }
+          const projection = yield* threads.getThreadProjection(participant.threadId);
+          const message = projection.messages.find(
+            (entry) => entry.id === deliveryMessageId(input.messageId),
+          );
+          if (message === undefined) return "cancelled" as const;
+          const run = projection.runs.find((entry) => entry.id === message.runId);
+          if (run === undefined)
+            return yield* new A2ADeliveryTargetError({
+              participantId: input.receiverId,
+              state: "accepted message has no run",
+            });
+          if (run.status === "queued") {
+            // The orchestrator serializes this cancellation with queue promotion.
+            // If promotion won, retry observes the accepted run rather than claiming cancellation.
+            yield* orchestrator.dispatch({
+              type: "queued-run.cancel",
+              commandId: CommandId.make(
+                `command:j5:a2a:cancel-delivery:${stablePart(input.messageId)}`,
+              ),
+              threadId: participant.threadId,
+              runId: run.id,
+            });
+            return "cancelled" as const;
+          }
+          return run.status === "cancelled" ? ("cancelled" as const) : ("delivered" as const);
+        }).pipe(
+          Effect.mapError(
+            (cause) => new A2ADeliveryTransportError({ operation: "cancel agent delivery", cause }),
+          ),
+        ),
       deliverAgent: (input) =>
         Effect.gen(function* () {
           const rows = yield* sql<MembershipRow>`

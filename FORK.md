@@ -177,7 +177,7 @@ the target and rejects malformed, unknown-version, target-mismatched, or stale
 tokens before mutation. Thread archive and A9 lifecycle closure are separate
 durable commits: failures recover forward with the same request key, and
 `already_archived` is returned only after the thread is archived, a
-`participant.left` timestamp exists, no open Exchange remains, and every dropped
+`participant.archived` timestamp exists (or `participant.left` for a legacy retirement), no open Exchange remains, and every dropped
 Exchange has its terminal lifecycle notice. Completion reads durable events from
 all existing Squadrons because A9 writes a dropped cross-Squadron Exchange and
 its notice to that Exchange's owning ledger, which may differ from the retired

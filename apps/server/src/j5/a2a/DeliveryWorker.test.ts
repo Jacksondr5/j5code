@@ -154,6 +154,7 @@ const crashWindowScenario = (poisonIds: boolean, crossSquadron: boolean) =>
             (cause) => new A2ADeliveryTransportError({ operation: "test delivery", cause }),
           ),
         ),
+      cancelAgent: () => Effect.succeed("cancelled" as const),
       deliverHuman: () => Effect.void,
     };
     const hooks = A2ADeliveryHooks.of({
@@ -253,6 +254,7 @@ it.effect("serializes manual runOnce calls against a concurrent drain", () =>
               : Effect.void,
           ),
         ),
+      cancelAgent: () => Effect.succeed("cancelled" as const),
       deliverHuman: () => Effect.void,
     };
 
@@ -287,6 +289,7 @@ it.effect("refuses a cross-squadron reply before delivery or closure", () =>
     const injections = yield* Ref.make(0);
     const transport: A2ADeliveryTransportShape = {
       deliverAgent: () => Ref.update(injections, (count) => count + 1),
+      cancelAgent: () => Effect.succeed("cancelled" as const),
       deliverHuman: () => Effect.void,
     };
     yield* Effect.gen(function* () {
@@ -405,6 +408,7 @@ it.effect("startup reconciliation drains a persisted cross-squadron half-write a
       const releaseTransport = yield* Deferred.make<void>();
       const transport: A2ADeliveryTransportShape = {
         deliverAgent: () => Ref.update(injectionCount, (count) => count + 1),
+        cancelAgent: () => Effect.succeed("cancelled" as const),
         deliverHuman: () => Effect.void,
       };
       const secondDatabase = NodeSqliteClient.layer({ filename });
@@ -470,6 +474,7 @@ it.effect("forces repeated delivery failure into a visible alarm", () =>
     });
     const transport: A2ADeliveryTransportShape = {
       deliverAgent: () => Effect.fail(failure),
+      cancelAgent: () => Effect.succeed("cancelled" as const),
       deliverHuman: () => Effect.fail(failure),
     };
     yield* Effect.gen(function* () {
@@ -853,59 +858,67 @@ for (const deliveredBeforeClosure of [true, false]) {
   );
 }
 
-it.effect("does not report success when archive commits after transport acceptance", () =>
-  Effect.gen(function* () {
-    const afterTransport = yield* Ref.make<Effect.Effect<void, A2ADeliveryHookError>>(Effect.void);
-    yield* Effect.gen(function* () {
-      const { senderSquadronId, sent } = yield* seedSend(false);
-      const ledger = yield* A2ALedger;
-      yield* Ref.set(
-        afterTransport,
-        ledger
-          .append({
-            commandId: CommCommandId.make("delivery:concurrent-archive"),
-            squadronId: senderSquadronId,
-            acceptedAt: timestamp,
-            event: {
-              kind: "participant.archived",
-              sender: null,
-              receiver: receiver.id,
-              exchangeId: null,
-              correlationId: null,
-              payload: { participant: receiver },
-              createdAt: timestamp,
+for (const outcome of ["cancelled", "delivered"] as const) {
+  it.effect(`reports the confirmed transport outcome after concurrent archive (${outcome})`, () =>
+    Effect.gen(function* () {
+      const afterTransport = yield* Ref.make<Effect.Effect<void, A2ADeliveryHookError>>(
+        Effect.void,
+      );
+      yield* Effect.gen(function* () {
+        const { senderSquadronId, sent } = yield* seedSend(false);
+        const ledger = yield* A2ALedger;
+        yield* Ref.set(
+          afterTransport,
+          ledger
+            .append({
+              commandId: CommCommandId.make("delivery:concurrent-archive"),
+              squadronId: senderSquadronId,
+              acceptedAt: timestamp,
+              event: {
+                kind: "participant.archived",
+                sender: null,
+                receiver: receiver.id,
+                exchangeId: null,
+                correlationId: null,
+                payload: { participant: receiver },
+                createdAt: timestamp,
+              },
+            })
+            .pipe(
+              Effect.asVoid,
+              Effect.mapError((cause) => new A2ADeliveryHookError({ cause })),
+            ),
+        );
+        const milestones = yield* (yield* A2ADeliveryWorker).drain;
+        assert.deepStrictEqual(
+          milestones.map((entry) => entry.state),
+          [outcome],
+        );
+        const sql = yield* SqlClient.SqlClient;
+        assert.deepStrictEqual(
+          yield* sql`SELECT status, next_attempt_at FROM j5_a2a_delivery WHERE message_id = ${sent.messageId}`,
+          [{ status: outcome, next_attempt_at: null }],
+        );
+        assert.deepStrictEqual(
+          yield* sql`SELECT kind FROM j5_a2a_comm_event WHERE kind IN ('message.delivered', 'message.cancelled')`,
+          [{ kind: `message.${outcome}` }],
+        );
+        assert.lengthOf(yield* (yield* A2ADeliveryWorker).drain, 0);
+      }).pipe(
+        Effect.provide(
+          makeTestLayer(
+            {
+              deliverAgent: () => Effect.void,
+              cancelAgent: () => Effect.succeed(outcome),
+              deliverHuman: () => Effect.void,
             },
-          })
-          .pipe(
-            Effect.asVoid,
-            Effect.mapError((cause) => new A2ADeliveryHookError({ cause })),
+            {
+              afterTransportSuccess: () =>
+                Ref.get(afterTransport).pipe(Effect.flatMap((effect) => effect)),
+            },
           ),
-      );
-      const milestones = yield* (yield* A2ADeliveryWorker).drain;
-      assert.deepStrictEqual(
-        milestones.map((entry) => entry.state),
-        ["cancelled"],
-      );
-      const sql = yield* SqlClient.SqlClient;
-      assert.deepStrictEqual(
-        yield* sql`SELECT status, next_attempt_at FROM j5_a2a_delivery WHERE message_id = ${sent.messageId}`,
-        [{ status: "cancelled", next_attempt_at: null }],
-      );
-      assert.lengthOf(
-        yield* sql`SELECT 1 FROM j5_a2a_comm_event WHERE kind = 'message.delivered'`,
-        0,
-      );
-      assert.lengthOf(yield* (yield* A2ADeliveryWorker).drain, 0);
-    }).pipe(
-      Effect.provide(
-        makeTestLayer(
-          { deliverAgent: () => Effect.void, deliverHuman: () => Effect.void },
-          {
-            afterTransportSuccess: () =>
-              Ref.get(afterTransport).pipe(Effect.flatMap((effect) => effect)),
-          },
         ),
-      ),
-    );
-  }),
-);
+      );
+    }),
+  );
+}

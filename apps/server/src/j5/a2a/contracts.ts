@@ -135,7 +135,7 @@ const ParticipantJoinedCommEvent = Schema.Struct({
   payload: Schema.Struct({ participant: Participant }),
 });
 
-const ParticipantLeftCommEvent = Schema.Struct({
+const ParticipantMembershipCommEvent = Schema.Struct({
   ...eventAddressFields,
   kind: Schema.Literals([
     "participant.left",
@@ -150,7 +150,7 @@ export const CommEvent = Schema.Union([
   NonMembershipCommEvent,
   MessageReceivedCommEvent,
   ParticipantJoinedCommEvent,
-  ParticipantLeftCommEvent,
+  ParticipantMembershipCommEvent,
 ]);
 export type CommEvent = typeof CommEvent.Type;
 
@@ -163,7 +163,7 @@ export const StoredCommEvent = Schema.Union([
   Schema.Struct({ ...storedFields, ...NonMembershipCommEvent.fields }),
   Schema.Struct({ ...storedFields, ...MessageReceivedCommEvent.fields }),
   Schema.Struct({ ...storedFields, ...ParticipantJoinedCommEvent.fields }),
-  Schema.Struct({ ...storedFields, ...ParticipantLeftCommEvent.fields }),
+  Schema.Struct({ ...storedFields, ...ParticipantMembershipCommEvent.fields }),
 ]);
 export type StoredCommEvent = typeof StoredCommEvent.Type;
 

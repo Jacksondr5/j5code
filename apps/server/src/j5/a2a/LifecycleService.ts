@@ -11,7 +11,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
-import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
+import { A2ADeliveryWorker, type A2ADeliveryWorkerError } from "./DeliveryWorker.ts";
 import {
   type ArchiveParticipantInput,
   CommCommandId,
@@ -77,6 +77,7 @@ export class A2ALifecycleBridgeError extends Schema.TaggedErrorClass<A2ALifecycl
 ) {}
 
 export type A2ALifecycleError =
+  | A2ADeliveryWorkerError
   | A2ALedgerError
   | Schema.SchemaError
   | SqlError
@@ -327,7 +328,6 @@ const makeLayer = (daemon: boolean) =>
         function* (
           input: ArchiveParticipantInput,
           operation: "archived" | "unarchived" | "deleted" = "archived",
-          eventKey?: string,
         ) {
           const rows = yield* historicalParticipantRows(input.participantId);
           if (rows.length === 0) {
@@ -363,16 +363,20 @@ const makeLayer = (daemon: boolean) =>
             return { archived: false, droppedExchangeIds: [] };
           }
           const archived = operation === "archived" && membership?.archived_at === null;
+          const hasPlacement =
+            operation === "deleted" &&
+            (yield* sql`SELECT 1 FROM j5_a2a_participant_placement WHERE participant_id = ${input.participantId}`)
+              .length !== 0;
           const changesState =
-            operation === "deleted" ||
+            (operation === "deleted" && (membership !== undefined || hasPlacement)) ||
             (membership !== undefined &&
               (operation === "archived"
                 ? membership.archived_at === null
                 : membership.archived_at !== null));
-          if (changesState || eventKey !== undefined) {
+          if (changesState) {
             yield* ledger.append({
               commandId: CommCommandId.make(
-                `${participantArchiveCommandId(squadronId, input.participantId)}:${operation}:${eventKey ?? membership?.updated_seq ?? "absent"}`,
+                `${participantArchiveCommandId(squadronId, input.participantId)}:${operation}:${membership?.updated_seq ?? "absent"}`,
               ),
               squadronId,
               acceptedAt: input.archivedAt,
@@ -399,32 +403,7 @@ const makeLayer = (daemon: boolean) =>
             archivedAt: input.archivedAt,
             operation,
           });
-          const pending = yield* sql<{ readonly squadron_id: string; readonly message_id: string }>`
-            SELECT squadron_id, message_id FROM j5_a2a_delivery
-            WHERE status IN ('pending', 'retry_scheduled', 'alarmed')
-              AND (receiver_id = ${input.participantId} OR sender_id = ${input.participantId})
-          `;
-          for (const delivery of pending) {
-            yield* ledger.append({
-              commandId: CommCommandId.make(
-                `command:j5:a2a:lifecycle:cancel:${stablePart(delivery.squadron_id)}:${stablePart(delivery.message_id)}`,
-              ),
-              squadronId: SquadronId.make(delivery.squadron_id),
-              acceptedAt: input.archivedAt,
-              event: {
-                kind: "message.cancelled",
-                sender: null,
-                receiver: input.participantId,
-                exchangeId: null,
-                correlationId: null,
-                createdAt: input.archivedAt,
-                payload: {
-                  messageId: delivery.message_id,
-                  reason: `Participant ${input.participantId} was ${operation}.`,
-                },
-              },
-            });
-          }
+          yield* worker.cancelParticipantDeliveries(input.participantId);
           return { archived, droppedExchangeIds } satisfies LifecycleArchiveResult;
         },
       );
@@ -466,7 +445,6 @@ const makeLayer = (daemon: boolean) =>
             : stored.event.type === "thread.unarchived"
               ? "unarchived"
               : "archived",
-          stored.event.id,
         );
         yield* sql`INSERT INTO j5_a2a_lifecycle_processed (event_id) VALUES (${stored.event.id}) ON CONFLICT DO NOTHING`;
         yield* worker.notify;

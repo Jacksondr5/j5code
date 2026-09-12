@@ -317,6 +317,7 @@ it.effect("waits for a DeliveryWorker ledger permit before entering the spawn tr
       });
       const transport: A2ADeliveryTransportShape = {
         deliverAgent: () => Effect.void,
+        cancelAgent: () => Effect.succeed("cancelled" as const),
         deliverHuman: () => Effect.void,
       };
       const workerContext = yield* Layer.build(

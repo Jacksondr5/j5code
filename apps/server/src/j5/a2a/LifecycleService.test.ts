@@ -80,6 +80,7 @@ const makeTestLayer = (
               }),
             )
           : Ref.update(notices, (current) => [...current, { channel: "agent" as const, input }]),
+      cancelAgent: () => Effect.succeed("cancelled" as const),
       deliverHuman: (input) =>
         Ref.update(notices, (current) => [...current, { channel: "human" as const, input }]),
     }),
@@ -849,3 +850,51 @@ it.effect(
       }).pipe(Effect.provide(makeTestLayer(notices, Stream.never, true)));
     }),
 );
+
+for (const directFirst of [true, false]) {
+  it.effect(
+    `records one archive fact per transition in both entry-point orders (direct first=${directFirst})`,
+    () =>
+      Effect.gen(function* () {
+        const notices = yield* Ref.make<ReadonlyArray<DeliveredNotice>>([]);
+        yield* Effect.gen(function* () {
+          yield* runJ5A2AMigrations();
+          const squadronId = SquadronId.make(`squadron:archive-order:${directFirst}`);
+          yield* createSquadron(squadronId, "Archive order");
+          yield* join(squadronId, sender, "order:sender");
+          const lifecycle = yield* A2ALifecycleService;
+          const sql = yield* SqlClient.SqlClient;
+          for (const cycle of [0, 1]) {
+            const event = retiredThreadEvent("thread.archived", sender.threadId, cycle * 2 + 1);
+            const direct = lifecycle.archiveParticipant({ participantId: sender.id, archivedAt });
+            if (directFirst) {
+              yield* direct;
+              yield* lifecycle.handleStoredEvent(event);
+            } else {
+              yield* lifecycle.handleStoredEvent(event);
+              yield* direct;
+            }
+            yield* direct;
+            yield* lifecycle.handleStoredEvent(event);
+            assert.deepStrictEqual(
+              yield* sql`SELECT count(*) AS count FROM j5_a2a_comm_event WHERE kind = 'participant.archived'`,
+              [{ count: cycle + 1 }],
+            );
+            yield* lifecycle.handleStoredEvent(
+              retiredThreadEvent("thread.unarchived", sender.threadId, cycle * 2 + 2),
+            );
+            yield* lifecycle.handleStoredEvent(event);
+            assert.deepStrictEqual(
+              yield* sql`SELECT archived_at FROM j5_a2a_squadron_membership WHERE participant_id = ${sender.id}`,
+              [{ archived_at: null }],
+            );
+          }
+          yield* (yield* A2ALedger).rebuildMembership(squadronId);
+          assert.deepStrictEqual(
+            yield* sql`SELECT archived_at FROM j5_a2a_squadron_membership WHERE participant_id = ${sender.id}`,
+            [{ archived_at: null }],
+          );
+        }).pipe(Effect.provide(makeTestLayer(notices)));
+      }),
+  );
+}

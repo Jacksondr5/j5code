@@ -108,6 +108,7 @@ const makeTestLayer = () => {
     A2ADeliveryTransport,
     A2ADeliveryTransport.of({
       deliverAgent: () => Effect.void,
+      cancelAgent: () => Effect.succeed("cancelled" as const),
       deliverHuman: () => Effect.void,
     } satisfies A2ADeliveryTransportShape),
   );
@@ -175,6 +176,7 @@ const makeDaemonTestLayer = (
     A2ADeliveryTransport,
     A2ADeliveryTransport.of({
       deliverAgent: () => Effect.void,
+      cancelAgent: () => Effect.succeed("cancelled" as const),
       deliverHuman: () => Effect.void,
     } satisfies A2ADeliveryTransportShape),
   );
