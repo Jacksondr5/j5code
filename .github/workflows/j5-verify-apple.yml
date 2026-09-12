@@ -52,15 +52,24 @@ jobs:
           if ! security import "$credential_dir/certificate.p12" -k "$keychain_path" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign > "$credential_dir/import.log" 2>&1; then
             sed -n 's/^security: /Certificate import: /p' "$credential_dir/import.log"
             if openssl pkcs12 -in "$credential_dir/certificate.p12" -passin env:CSC_KEY_PASSWORD -noout > "$credential_dir/p12-check.log" 2>&1; then
-              echo "::error::OpenSSL can read the P12 with this password, but macOS Keychain cannot import it. Re-export it from Keychain Access or use a compatible legacy P12 encryption format."
+              echo "P12 password is valid; converting to a macOS-compatible PKCS12 format."
+              openssl pkcs12 -in "$credential_dir/certificate.p12" -passin env:CSC_KEY_PASSWORD -nodes -out "$credential_dir/signing.pem" > "$credential_dir/convert.log" 2>&1
+              openssl pkcs12 -export -in "$credential_dir/signing.pem" -out "$credential_dir/compatible.p12" -passout env:CSC_KEY_PASSWORD -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 >> "$credential_dir/convert.log" 2>&1
+              rm -f "$credential_dir/signing.pem"
+              if ! security import "$credential_dir/compatible.p12" -k "$keychain_path" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign > "$credential_dir/import-compatible.log" 2>&1; then
+                sed -n 's/^security: /Certificate import: /p' "$credential_dir/import-compatible.log"
+                echo "::error::macOS could not import the compatible P12."
+                exit 1
+              fi
+              echo '- P12 requires a compatibility conversion before macOS Keychain import.' >> "$GITHUB_STEP_SUMMARY"
             else
               if grep -Eiq 'mac verify|mac verification|invalid password' "$credential_dir/p12-check.log"; then
                 echo "::error::The P12 password check failed. CSC_KEY_PASSWORD does not match CSC_LINK, or the P12 is damaged."
               else
                 echo "::error::The certificate is not a readable P12 with the supplied password. Check the export format and CSC_KEY_PASSWORD."
               fi
+              exit 1
             fi
-            exit 1
           fi
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain_path" >/dev/null 2>&1
           security find-identity -v -p codesigning "$keychain_path" > "$credential_dir/identities.txt"
