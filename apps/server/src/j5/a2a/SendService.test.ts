@@ -601,11 +601,9 @@ it.effect("fails closed when a native thread has no provisioned squadron members
     assert.equal(listError._tag, "A2ASenderNotJoinedError");
     assert.include(listError.message, "native thread");
     assert.include(listError.message, "no registered home squadron");
-    assert.include(listError.message, "No native user-created-thread hook");
-    assert.include(listError.message, "internal registrar");
-    assert.include(listError.message, "A6 creation wrapper");
-    assert.include(listError.message, "controlled tests may seed membership directly");
-    assert.include(listError.message, "Stop this messaging attempt");
+    assert.include(listError.message, "list_squadrons");
+    assert.include(listError.message, "join_squadron");
+    assert.include(listError.message, "stop this messaging attempt");
     assert.notMatch(listError.message, /ask the user|product workflow|list_participants again/i);
 
     const sendError = yield* Effect.flip(

@@ -20,6 +20,7 @@ import { layer as squadronProjectReferencesLayer } from "./SquadronProjectRefere
 import { layer as squadronThreadCreationServiceLayer } from "./SquadronThreadCreationService.ts";
 import { layer as threadHomesServiceLayer } from "./ThreadHomesService.ts";
 import { layer as spawnCompositionLayer } from "./SpawnCompositionService.ts";
+import { layer as squadronJoinLayer } from "./SquadronJoinService.ts";
 
 /**
  * The durable launch engine needs this subset before it can start preparing a
@@ -60,6 +61,9 @@ export const makeJ5A2AAuxiliaryLayer = (
   const spawnCompositionProvided = spawnCompositionLayer.pipe(
     Layer.provideMerge(homeRegistrationTransactionLayer),
   );
+  const squadronJoinProvided = squadronJoinLayer.pipe(
+    Layer.provideMerge(homeRegistrationTransactionLayer),
+  );
   const runtimeWithoutClientReads = Layer.mergeAll(
     humanPersonRegistryLayer,
     sendServiceLayer,
@@ -71,6 +75,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     archiveAgentProvided,
     threadHomesServiceLayer,
     spawnCompositionProvided,
+    squadronJoinProvided,
   ).pipe(Layer.provideMerge(participantPlacementLayer));
   return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };

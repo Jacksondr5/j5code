@@ -32,7 +32,7 @@ export class A2ASenderNotJoinedError extends Schema.TaggedErrorClass<A2ASenderNo
   { threadId: Schema.String },
 ) {
   override get message(): string {
-    return `Cross-agent messaging is unavailable for native thread ${this.threadId} because it has no registered home squadron. No native user-created-thread hook consumes the internal registrar at this head. The sanctioned future production path is the A6 creation wrapper; controlled tests may seed membership directly. Stop this messaging attempt.`;
+    return `Cross-agent messaging is unavailable for native thread ${this.threadId} because it has no registered home squadron. Call list_squadrons to find the Squadron that references this thread's project, then join_squadron with that exact squadron_id. Until that succeeds, stop this messaging attempt.`;
   }
 }
 

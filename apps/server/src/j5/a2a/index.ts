@@ -76,6 +76,19 @@ export {
   layer as squadronThreadCreationServiceLayer,
 } from "./SquadronThreadCreationService.ts";
 export {
+  SquadronJoinHomeStateError,
+  SquadronJoinProjectReferenceError,
+  SquadronJoinRetiredError,
+  SquadronJoinService,
+  layer as squadronJoinServiceLayer,
+} from "./SquadronJoinService.ts";
+export type {
+  JoinSquadronInput,
+  JoinSquadronResult,
+  SquadronJoinError,
+  SquadronJoinServiceShape,
+} from "./SquadronJoinService.ts";
+export {
   SquadronManagementService,
   SquadronNameRequiredError,
   SquadronProjectNotFoundError,

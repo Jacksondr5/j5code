@@ -43,6 +43,8 @@ import { A2ALedger } from "../LedgerService.ts";
 import { ParticipantPlacementService, PlacementStorageError } from "../PlacementService.ts";
 import { A2AHomeMembershipStateError, A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
+import { SquadronJoinService } from "../SquadronJoinService.ts";
+import { SquadronProjectReferences } from "../SquadronProjectReferences.ts";
 import {
   type ClearOwnAskInput,
   ExchangeId,
@@ -120,6 +122,8 @@ const unusedLifecycleDependencies = Layer.mergeAll(
   Layer.mock(ThreadManagementService)({}),
   Layer.mock(OrchestratorMcpService)({}),
   Layer.mock(ArchiveAgentService)({}),
+  Layer.mock(SquadronJoinService)({}),
+  Layer.mock(SquadronProjectReferences)({}),
 );
 
 it.effect("refuses self-target archive before target resolution or archive side effects", () =>
@@ -169,6 +173,8 @@ it.effect("refuses self-target archive before target resolution or archive side 
       Layer.mock(ThreadManagementService)({}),
       Layer.mock(OrchestratorMcpService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      Layer.mock(SquadronJoinService)({}),
+      Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
@@ -279,6 +285,8 @@ it.effect("projects a consequential archive refusal for exactly one active parti
       Layer.mock(ThreadManagementService)({}),
       Layer.mock(OrchestratorMcpService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      Layer.mock(SquadronJoinService)({}),
+      Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
@@ -389,6 +397,8 @@ it.effect("uses consume-only history only after the active archive row is absent
       Layer.mock(ThreadManagementService)({}),
       Layer.mock(OrchestratorMcpService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      Layer.mock(SquadronJoinService)({}),
+      Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
@@ -476,6 +486,8 @@ it.effect("refuses ambiguous historical archive identities without invoking the 
       Layer.mock(ThreadManagementService)({}),
       Layer.mock(OrchestratorMcpService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      Layer.mock(SquadronJoinService)({}),
+      Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
@@ -508,7 +520,9 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
     assert.deepStrictEqual(Object.keys(J5Toolkit.tools).sort(), [
       "archive_agent",
       "clear_own_ask",
+      "join_squadron",
       "list_participants",
+      "list_squadrons",
       "send_message",
       "spawn_agent",
       "stop_agent",
@@ -558,6 +572,8 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(OrchestratorV2)({}),
       unusedLifecycleDependencies,
+      Layer.mock(SquadronJoinService)({}),
+      Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
@@ -749,6 +765,8 @@ it.effect("keeps participant listing placement-read-only", () =>
           Effect.fail(new OrchestratorProjectionError({ threadId: invocation.threadId })),
       }),
       unusedLifecycleDependencies,
+      Layer.mock(SquadronJoinService)({}),
+      Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
@@ -902,6 +920,8 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
           }),
           Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
           unusedLifecycleDependencies,
+          Layer.mock(SquadronJoinService)({}),
+          Layer.mock(SquadronProjectReferences)({}),
           NodeServices.layer,
         ),
       ),
@@ -1035,6 +1055,8 @@ it.effect("returns null display names when the ambient shell snapshot fails", ()
           }),
           Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
           unusedLifecycleDependencies,
+          Layer.mock(SquadronJoinService)({}),
+          Layer.mock(SquadronProjectReferences)({}),
           NodeServices.layer,
         ),
       ),
@@ -1229,6 +1251,8 @@ it.effect("preflights home before creation and records facts before the one stab
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(ArchiveAgentService)({}),
+      Layer.mock(SquadronJoinService)({}),
+      Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
@@ -1372,6 +1396,8 @@ it.effect("refuses spawn before thread creation when the caller has no home", ()
       }),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(ArchiveAgentService)({}),
+      Layer.mock(SquadronJoinService)({}),
+      Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
@@ -1496,6 +1522,8 @@ it.effect("stops exactly one placed agent without consulting or touching descend
       Layer.mock(OrchestratorMcpService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(ArchiveAgentService)({}),
+      Layer.mock(SquadronJoinService)({}),
+      Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));

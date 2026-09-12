@@ -278,6 +278,50 @@ withdrawal honestly.
 
 ---
 
+## `list_squadrons` — built (`j5/main`, 2026-09-12, #129); read-only Squadron directory
+
+**Description (contract):** "The Squadron directory for this environment: every Squadron's
+squadron_id, name, and the project ids it references, plus your own thread's project id so you can
+see which Squadron can home you. Use it to obtain the exact squadron_id before join_squadron; it
+works even when you have no Squadron home yet. Read-only."
+
+No inputs. Result: `caller_project_id` (null only when the caller thread cannot be read) and
+`squadrons[]` rows of `squadron_id`, `name`, `project_ids`. The server states facts and never
+picks: the caller compares `project_ids` against `caller_project_id` itself. Exists because
+`list_participants` refuses unregistered callers and so cannot bootstrap `join_squadron`. No events.
+
+## `join_squadron` — built (`j5/main`, 2026-09-12, #129); original-home repair for native threads
+
+**Description (contract):** "Join the Squadron the human selected for you when your thread has no
+Squadron home yet — the state where list_participants and send_message refuse you. Pass the exact
+squadron_id, taken from list_squadrons or from the human; that Squadron must reference your
+thread's project. Your thread, conversation, worktree, and running work stay exactly as they are —
+only your participant registration is added, placed at the Squadron root with no invented spawner.
+Calling it again for the Squadron you already belong to returns your existing registration; a
+thread that already has a different home is refused, because this is not a move. Reuse
+client_request_id to retry safely."
+
+| Input               | Type              | Required | Meaning                                                |
+| ------------------- | ----------------- | -------- | ------------------------------------------------------ |
+| `squadron_id`       | SquadronId        | yes      | Explicit existing Squadron; never inferred from folder |
+| `client_request_id` | string, non-empty | no       | Supply and reuse to make retries safe                  |
+
+Result: `squadron_id`, `participant_id`, `thread_id`, `placement` (`placement_parent_id` null =
+root; `provenance` `unknown` / `native_or_unobserved` for a previously native thread). Semantics:
+acts on the authenticated calling thread only. Refuses before any write when the thread is archived
+or deleted, when it already has a home in a different Squadron (`A2AHomeConflictError`), when its
+identity was retired (`SquadronJoinRetiredError`), or when the Squadron does not reference exactly
+the thread's project (`SquadronJoinProjectReferenceError`). A thread already homed in the requested
+Squadron gets its existing registration back, gaining a root placement only if it had none. Fresh
+joins compose the Registrar's original-home registration with the placement write in one
+transaction under the ledger append permit, so replays with the same `client_request_id` and
+concurrent retries with different ids both commit exactly one `participant.joined`. The thread,
+provider session, worktree, and any running turn are untouched: no new thread, no injected task, no
+interrupt. Events: `participant.joined`, `participant.placement_created`.
+
+This amends the Squadron ruling "there is no join, no leave, no move" for exactly one case — a
+native thread that never received a home — and preserves the rest of it.
+
 ## Kept upstream tools (via `J5OrchestratorSurface`)
 
 - **`orchestrator_capabilities`** — handler overridden. Response contract: providers and models

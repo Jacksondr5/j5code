@@ -1,7 +1,13 @@
 import { Tool, Toolkit } from "effect/unstable/ai";
 import * as Schema from "effect/Schema";
 
-import { OrchestrationV2RunStatus, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
+import {
+  OrchestrationV2RunStatus,
+  ProjectId,
+  ProviderInstanceId,
+  RunId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as McpInvocationContext from "../../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
@@ -19,6 +25,8 @@ import { A2ALedger } from "../LedgerService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
+import { SquadronJoinService } from "../SquadronJoinService.ts";
+import { SquadronProjectReferences } from "../SquadronProjectReferences.ts";
 import {
   AgentParticipant,
   ClearOwnAskResult,
@@ -175,6 +183,41 @@ export const J5ArchiveAgentFailure = Schema.Struct({
 });
 export type J5ArchiveAgentFailure = typeof J5ArchiveAgentFailure.Type;
 
+export const J5JoinSquadronInput = Schema.Struct({
+  squadron_id: SquadronId,
+  client_request_id: Schema.optional(NonEmptyString),
+});
+export type J5JoinSquadronInput = typeof J5JoinSquadronInput.Type;
+
+export const J5JoinSquadronResult = Schema.Struct({
+  squadron_id: SquadronId,
+  participant_id: ParticipantId,
+  thread_id: ThreadId,
+  placement: Schema.Struct({
+    placement_parent_id: Schema.NullOr(ParticipantId),
+    provenance: J5ParticipantProvenanceView,
+  }),
+});
+export type J5JoinSquadronResult = typeof J5JoinSquadronResult.Type;
+
+export const J5SquadronDirectoryRow = Schema.Struct({
+  squadron_id: SquadronId,
+  name: Schema.String,
+  project_ids: Schema.Array(ProjectId),
+});
+
+export const J5ListSquadronsResult = Schema.Struct({
+  caller_project_id: Schema.NullOr(ProjectId),
+  squadrons: Schema.Array(J5SquadronDirectoryRow),
+});
+export type J5ListSquadronsResult = typeof J5ListSquadronsResult.Type;
+
+export const J5_JOIN_SQUADRON_DESCRIPTION =
+  "Join the Squadron the human selected for you when your thread has no Squadron home yet — the state where list_participants and send_message refuse you. Pass the exact squadron_id, taken from list_squadrons or from the human; that Squadron must reference your thread's project. Your thread, conversation, worktree, and running work stay exactly as they are — only your participant registration is added, placed at the Squadron root with no invented spawner. Calling it again for the Squadron you already belong to returns your existing registration; a thread that already has a different home is refused, because this is not a move. Reuse client_request_id to retry safely.";
+
+export const J5_LIST_SQUADRONS_DESCRIPTION =
+  "The Squadron directory for this environment: every Squadron's squadron_id, name, and the project ids it references, plus your own thread's project id so you can see which Squadron can home you. Use it to obtain the exact squadron_id before join_squadron; it works even when you have no Squadron home yet. Read-only.";
+
 export const J5_SPAWN_AGENT_DESCRIPTION =
   "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. Reuse client_request_id to retry the same spawn safely.";
 
@@ -209,6 +252,20 @@ const spawnDependencies = [
   SpawnCompositionService,
   ThreadManagementService,
   OrchestratorMcpService,
+];
+
+const joinDependencies = [
+  McpInvocationContext.McpInvocationContext,
+  Crypto.Crypto,
+  SquadronJoinService,
+  ThreadManagementService,
+];
+
+const listSquadronsDependencies = [
+  McpInvocationContext.McpInvocationContext,
+  A2ALedger,
+  SquadronProjectReferences,
+  ThreadManagementService,
 ];
 
 const stopDependencies = [
@@ -269,6 +326,33 @@ export const J5SpawnAgentTool = Tool.make("spawn_agent", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, true);
 
+export const J5JoinSquadronTool = Tool.make("join_squadron", {
+  description: J5_JOIN_SQUADRON_DESCRIPTION,
+  parameters: J5JoinSquadronInput,
+  success: J5JoinSquadronResult,
+  failure: J5McpFailure,
+  failureMode: "return",
+  dependencies: joinDependencies,
+})
+  .annotate(Tool.Title, "Join a Squadron")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true)
+  .annotate(Tool.OpenWorld, false);
+
+export const J5ListSquadronsTool = Tool.make("list_squadrons", {
+  description: J5_LIST_SQUADRONS_DESCRIPTION,
+  success: J5ListSquadronsResult,
+  failure: J5McpFailure,
+  failureMode: "return",
+  dependencies: listSquadronsDependencies,
+})
+  .annotate(Tool.Title, "List Squadrons")
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true)
+  .annotate(Tool.OpenWorld, false);
+
 export const J5StopAgentTool = Tool.make("stop_agent", {
   description: J5_STOP_AGENT_DESCRIPTION,
   parameters: J5StopAgentInput,
@@ -315,6 +399,8 @@ export const J5ClearOwnAskTool = Tool.make("clear_own_ask", {
 export const J5Toolkit = Toolkit.make(
   J5SendMessageTool,
   J5ListParticipantsTool,
+  J5ListSquadronsTool,
+  J5JoinSquadronTool,
   J5SpawnAgentTool,
   J5StopAgentTool,
   J5ArchiveAgentTool,

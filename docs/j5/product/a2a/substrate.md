@@ -107,7 +107,9 @@ approximately nothing — the `unknown`-provenance cohort loses both of its sour
 ### The J5 verb surface — including needed-but-unbuilt
 
 The J5 toolkit carries the verbs that wear the law: `send_message`, `list_participants`,
-`spawn_agent`, `stop_agent`, `archive_agent`. One verb is **ruled but unbuilt** and is recorded here
+`spawn_agent`, `stop_agent`, `archive_agent`, plus the home-repair pair `list_squadrons` and
+`join_squadron` (added 2026-09-12, #129: the only verbs an unregistered native thread can use, and
+`join_squadron` establishes an original home only — never a move). One verb is **ruled but unbuilt** and is recorded here
 so it gets an A-series home rather than living only in a feature doc:
 
 - **`clear_own_ask`** (working name) — a sender closes its **own** open Exchange without a reply

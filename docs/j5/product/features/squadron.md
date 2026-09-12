@@ -22,7 +22,7 @@ A **grouping, not a boundary** — the way sets of agents, artifacts, PRs, human
 
 ## Consequences for the build (the A2 fix)
 
-- **`join_epic` as an agent-facing tool should not exist.** Membership is fixed at creation: a user-created agent gets the epic the user chose; an agent-spawned agent inherits its spawner's epic (E2 + E4 + E5 compose to: agents always spawn within their own epic). There is no join, no leave, no move.
+- **`join_epic` as an agent-facing tool should not exist.** Membership is fixed at creation: a user-created agent gets the epic the user chose; an agent-spawned agent inherits its spawner's epic (E2 + E4 + E5 compose to: agents always spawn within their own epic). There is no join, no leave, no move. _Amended 2026-09-12 (#129):_ `join_squadron` is the one narrow exception — a native thread that was created with **no** home (the mobile creation gap, #128) may establish its _original_ home in an explicitly selected Squadron that references its project. It is still not a join-elsewhere, leave, move, or revival: any thread with an existing home is refused, and the registration is as loud and evented as creation-time registration.
 - The ledger's `participant.joined/left` events become **lifecycle events only**: `joined` at agent creation/registration, `left` at archive/retirement. Neither is agent-invocable.
 - Exclusive-join's worst property — _silently_ leaving other epics — is moot under no-movement, but the principle it violated stands recorded: membership changes, were they ever to exist, must be loud and evented.
 - D3/D8 unchanged: per-epic ledger as storage/replication unit; cross-epic exchanges via double-entry.
