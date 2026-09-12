@@ -49,6 +49,7 @@ jobs:
           security create-keychain -p "$keychain_password" "$keychain_path"
           security set-keychain-settings -lut 600 "$keychain_path"
           security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" "$HOME/Library/Keychains/login.keychain-db"
           if ! security import "$credential_dir/certificate.p12" -k "$keychain_path" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign > "$credential_dir/import.log" 2>&1; then
             sed -n 's/^security: /Certificate import: /p' "$credential_dir/import.log"
             if openssl pkcs12 -in "$credential_dir/certificate.p12" -passin env:CSC_KEY_PASSWORD -noout > "$credential_dir/p12-check.log" 2>&1; then
@@ -88,6 +89,7 @@ jobs:
           printf 'int main(void) { return 0; }\n' > "$credential_dir/probe.c"
           clang "$credential_dir/probe.c" -o "$credential_dir/probe"
           if ! codesign --force --timestamp --options runtime --keychain "$keychain_path" --sign "$signing_identity" --identifier codes.jackson.j5code.signing-check "$credential_dir/probe" > "$credential_dir/sign.log" 2>&1; then
+            cat "$credential_dir/sign.log"
             echo "::error::Developer ID signing or Apple timestamping failed."
             exit 1
           fi
