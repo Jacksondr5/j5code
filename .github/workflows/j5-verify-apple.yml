@@ -50,7 +50,16 @@ jobs:
           security set-keychain-settings -lut 600 "$keychain_path"
           security unlock-keychain -p "$keychain_password" "$keychain_path"
           if ! security import "$credential_dir/certificate.p12" -k "$keychain_path" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign > "$credential_dir/import.log" 2>&1; then
-            echo "::error::Could not import the P12. Check the certificate file and CSC_KEY_PASSWORD."
+            sed -n 's/^security: /Certificate import: /p' "$credential_dir/import.log"
+            if openssl pkcs12 -in "$credential_dir/certificate.p12" -passin env:CSC_KEY_PASSWORD -noout > "$credential_dir/p12-check.log" 2>&1; then
+              echo "::error::OpenSSL can read the P12 with this password, but macOS Keychain cannot import it. Re-export it from Keychain Access or use a compatible legacy P12 encryption format."
+            else
+              if grep -Eiq 'mac verify|mac verification|invalid password' "$credential_dir/p12-check.log"; then
+                echo "::error::The P12 password check failed. CSC_KEY_PASSWORD does not match CSC_LINK, or the P12 is damaged."
+              else
+                echo "::error::The certificate is not a readable P12 with the supplied password. Check the export format and CSC_KEY_PASSWORD."
+              fi
+            fi
             exit 1
           fi
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain_path" >/dev/null 2>&1
@@ -76,6 +85,25 @@ jobs:
           codesign --verify --strict "$credential_dir/probe"
           echo "Developer ID signing, timestamping, and signature verification passed."
 
+          {
+            echo '### Developer ID signing verified'
+            echo '- Certificate matches the configured Apple team.'
+            echo '- P12 password and private key work.'
+            echo '- Signing, Apple timestamping, and signature verification passed.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check notarization API credentials independently
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          umask 077
+          credential_dir="$(mktemp -d "$RUNNER_TEMP/j5-notary-check.XXXXXX")"
+          trap 'rm -rf "$credential_dir"' EXIT
           key_path="$credential_dir/AuthKey_${APPLE_API_KEY_ID}.p8"
           printf '%s' "$APPLE_API_KEY" > "$key_path"
           if ! openssl pkey -in "$key_path" -noout > /dev/null 2>&1; then
@@ -88,10 +116,7 @@ jobs:
           fi
           echo "Notarization API authentication passed."
           {
-            echo '### Apple credentials verified'
-            echo '- Developer ID Application certificate matches the configured Apple team.'
-            echo '- P12 password and private key work.'
-            echo '- Signing, Apple timestamping, and signature verification passed.'
+            echo '### Notarization API verified'
             echo '- App Store Connect API key authenticated to the notarization service.'
             echo '- No release was published or application submitted for notarization.'
           } >> "$GITHUB_STEP_SUMMARY"
