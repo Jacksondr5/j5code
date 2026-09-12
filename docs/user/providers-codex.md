@@ -69,3 +69,22 @@ In an existing Codex thread, send `/feedback` with an optional description, for
 example `/feedback The agent stopped before finishing the tests`. This uploads
 the conversation and Codex logs to OpenAI. The returned thread ID can be shared
 with OpenAI support.
+
+## Use document and presentation skills
+
+When an OpenAI skill asks for `load_workspace_dependencies`, J5 provides that
+MCP tool for an existing OpenAI primary runtime on the server's machine. The tool
+returns validated Node, package, binary and Python paths. It does not install a
+runtime or provide OpenAI's artifact template picker.
+
+By default, J5 looks in `~/.cache/codex-runtimes/codex-primary-runtime` under the
+server user's home. For a different installation location, set
+`J5CODE_PRIMARY_RUNTIME_DIR` to the absolute bundle directory in the **J5 server's
+environment**, then restart the server. The directory must contain `runtime.json`
+and its matching dependencies. Setting this variable only on a provider subprocess
+will not configure the loader.
+
+For a remote J5 environment, the runtime must be installed on that remote server;
+a runtime on your laptop cannot serve it. If the tool reports an incompatible or
+incomplete bundle, repair the OpenAI runtime installation on that host. Restart
+the provider session if an existing session has cached an older MCP tool list.

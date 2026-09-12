@@ -1,6 +1,7 @@
 import * as Layer from "effect/Layer";
 import { McpServer } from "effect/unstable/ai";
 
+import { WorkspaceDependenciesRegistrationLive } from "../../codex/WorkspaceDependenciesToolkit.ts";
 import * as OrchestratorMcpService from "../../../mcp/OrchestratorMcpService.ts";
 import { J5ToolkitHandlersLive } from "./handlers.ts";
 import { J5OrchestratorSurface } from "./orchestratorSurface.ts";
@@ -20,4 +21,7 @@ export const J5OrchestratorSurfaceRegistrationLive = McpServer.toolkit(J5Orchest
 );
 
 /** Authenticated toolkit; the server route graph provides the shared A2A runtime once. */
-export const J5McpIntegrationLive = J5ToolkitRegistrationLive;
+export const J5McpIntegrationLive = Layer.mergeAll(
+  J5ToolkitRegistrationLive,
+  WorkspaceDependenciesRegistrationLive,
+);
