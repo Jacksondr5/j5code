@@ -26,6 +26,7 @@ it("returns the pre-archive facts without turning a failed read into a clean arc
             squadronId: "squadron:pre-archive-http" as never,
             participantId: "agent:pre-archive-http" as never,
             retired: false,
+            archived: false,
             openExchanges: [],
             placementSubtree: {
               state: "unknown" as const,
@@ -66,6 +67,7 @@ it("returns the pre-archive facts without turning a failed read into a clean arc
       squadronId: "squadron:pre-archive-http",
       participantId: "agent:pre-archive-http",
       retired: false,
+      archived: false,
       openExchanges: [],
       placementSubtree: { state: "unknown", reason: "placement-query-failed" },
     });

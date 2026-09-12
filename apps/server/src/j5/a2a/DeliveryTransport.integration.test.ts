@@ -1151,7 +1151,7 @@ it.effect("routes real archive and delete commands through lifecycle closure exa
         readonly status: string;
         readonly dropped_events: number;
         readonly terminal_notices: number;
-        readonly participant_left_events: number;
+        readonly participant_deleted_events: number;
       }>`
         SELECT
           exchange.status,
@@ -1168,8 +1168,8 @@ it.effect("routes real archive and delete commands through lifecycle closure exa
           (
             SELECT COUNT(*)
             FROM j5_a2a_comm_event
-            WHERE kind = 'participant.left' AND receiver = ${receiver.id}
-          ) AS participant_left_events
+            WHERE kind = 'participant.deleted' AND receiver = ${receiver.id}
+          ) AS participant_deleted_events
         FROM j5_a2a_exchange AS exchange
         WHERE exchange.exchange_id = ${opened.exchangeId}
       `;
@@ -1178,7 +1178,7 @@ it.effect("routes real archive and delete commands through lifecycle closure exa
           status: "dropped",
           dropped_events: 1,
           terminal_notices: 1,
-          participant_left_events: 1,
+          participant_deleted_events: 1,
         },
       ]);
       assert.deepStrictEqual(yield* ledger.listMembership(squadronId), [
@@ -2174,7 +2174,7 @@ it.effect(
         for (const target of [first, second]) {
           assert.isNotNull((yield* threads.getThreadProjection(target.threadId)).thread.deletedAt);
           assert.deepStrictEqual(
-            yield* sql`SELECT COUNT(*) AS count FROM j5_a2a_comm_event WHERE kind = 'participant.left' AND receiver = ${target.receiverId}`,
+            yield* sql`SELECT COUNT(*) AS count FROM j5_a2a_comm_event WHERE kind = 'participant.deleted' AND receiver = ${target.receiverId}`,
             [{ count: 1 }],
           );
         }

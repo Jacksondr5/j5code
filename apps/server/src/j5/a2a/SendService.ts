@@ -1,3 +1,4 @@
+import type { StoredCommEvent } from "./contracts.ts";
 import type { ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -25,7 +26,7 @@ import {
 } from "./contracts.ts";
 import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { isRegisteredHumanPerson, listRegisteredHumanPersonIds } from "./HumanPersonRegistry.ts";
-import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
+import { A2ALedgerTransactionWriter, A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 
 export class A2ASenderNotJoinedError extends Schema.TaggedErrorClass<A2ASenderNotJoinedError>()(
   "A2ASenderNotJoinedError",
@@ -90,7 +91,7 @@ export class A2AParticipantArchivedError extends Schema.TaggedErrorClass<A2APart
   },
 ) {
   override get message(): string {
-    return `Participant ${this.participantId} is A2A-retired from immutable home ${this.squadronId} by participant.left and cannot receive new messages. Upstream thread unarchive does not revive A2A participation; choose an active participant or wait for a ratified re-entry policy.`;
+    return `Participant ${this.participantId} is archived or permanently retired from home ${this.squadronId} and cannot send or receive messages. Choose an active participant. Unarchive restores only reversibly archived identities.`;
   }
 }
 
@@ -265,6 +266,7 @@ interface MembershipRow {
   readonly squadron_id: string;
   readonly participant_id: string;
   readonly payload: string;
+  readonly archived_at: string | null;
 }
 
 interface RetiredParticipantRow {
@@ -309,6 +311,7 @@ export interface A2ASendServiceShape {
   readonly clearOwnAsk: (input: ClearOwnAskInput) => Effect.Effect<ClearOwnAskResult, A2ASendError>;
   readonly listParticipants: (
     senderThreadId: ThreadId,
+    includeArchived?: boolean,
   ) => Effect.Effect<ReadonlyArray<ParticipantDirectoryRow>, A2ASendError>;
 }
 
@@ -316,16 +319,19 @@ export class A2ASendService extends Context.Service<A2ASendService, A2ASendServi
   "t3/j5/a2a/SendService/A2ASendService",
 ) {}
 
-export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.SqlClient> =
+type A2ASendServiceLayerDependencies = A2ALedger | A2ALedgerTransactionWriter | SqlClient.SqlClient;
+
+export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDependencies> =
   Layer.effect(
     A2ASendService,
     Effect.gen(function* () {
       const ledger = yield* A2ALedger;
+      const writer = yield* A2ALedgerTransactionWriter;
       const sql = yield* SqlClient.SqlClient;
 
       const membershipRows = Effect.fn("j5.a2a.send.membershipRows")(function* () {
         return yield* sql<MembershipRow>`
-          SELECT squadron_id, participant_id, payload
+          SELECT squadron_id, participant_id, payload, archived_at
           FROM j5_a2a_squadron_membership
           ORDER BY squadron_id, participant_id
         `;
@@ -345,7 +351,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
               FROM j5_a2a_comm_event AS retirement
               WHERE retirement.squadron_id = joined.squadron_id
                 AND retirement.seq > joined.seq
-                AND retirement.kind = 'participant.left'
+                AND retirement.kind IN ('participant.left', 'participant.deleted')
                 AND json_extract(retirement.payload, '$.participant.kind') = 'agent'
                 AND json_extract(retirement.payload, '$.participant.id') = ${id}
                 AND json_extract(retirement.payload, '$.participant.threadId') =
@@ -390,6 +396,15 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
             ),
           });
         }
+        const membership = (yield* sql<{
+          readonly archived_at: string | null;
+        }>`SELECT archived_at FROM j5_a2a_squadron_membership WHERE participant_id = ${resolution.home.participantId}`)[0];
+        if (membership?.archived_at != null) {
+          return yield* new A2AParticipantArchivedError({
+            participantId: resolution.home.participantId,
+            squadronId: resolution.home.squadronId,
+          });
+        }
         return resolution.home;
       });
 
@@ -423,13 +438,22 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
         if (matches.length > 1) {
           return yield* new A2AAmbiguousParticipantError({ participantId: id });
         }
+        if (matches[0]!.archived_at !== null) {
+          return yield* new A2AParticipantArchivedError({
+            participantId: id,
+            squadronId: matches[0]!.squadron_id,
+          });
+        }
         return {
           squadronId: SquadronId.make(matches[0]!.squadron_id),
           participant: yield* decodeParticipant(matches[0]!.payload),
         };
       });
 
-      const listParticipants: A2ASendServiceShape["listParticipants"] = (senderThreadId) =>
+      const listParticipants: A2ASendServiceShape["listParticipants"] = (
+        senderThreadId,
+        includeArchived = false,
+      ) =>
         Effect.gen(function* () {
           const sender = yield* senderMembership(senderThreadId);
           const rows = yield* membershipRows();
@@ -442,16 +466,17 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
             );
           }
           const agents = yield* Effect.forEach(
-            rows,
+            rows.filter((row) => includeArchived || row.archived_at === null),
             (row) =>
               decodeParticipant(row.payload).pipe(
                 Effect.map((participant) => {
                   const id = participantId(participant);
-                  const addressable = membershipCounts.get(id) === 1;
+                  const addressable = membershipCounts.get(id) === 1 && row.archived_at === null;
                   return {
                     squadronId: SquadronId.make(row.squadron_id),
                     participantId: id,
                     participant,
+                    archived: row.archived_at !== null,
                     canReceiveMessage: addressable,
                     canOpenExchange: addressable,
                     acceptsUrgency: false,
@@ -468,6 +493,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
                   squadronId: sender.squadronId,
                   participantId: personId,
                   participant: { kind: "human", id: personId },
+                  archived: false,
                   canReceiveMessage: false,
                   canOpenExchange: true,
                   acceptsUrgency: true,
@@ -531,90 +557,92 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
         } satisfies SendMessageResult;
       });
 
-      const send: A2ASendServiceShape["send"] = (input) =>
-        Effect.gen(function* () {
-          const messageId = messageIdFor(input.commandId);
-          const sender = yield* senderMembership(input.senderThreadId);
-          const replay = yield* replayedSend(messageId, sender.participantId);
-          if (replay !== null) return replay;
+      const sendInternal = Effect.fn("j5.a2a.send.inTransaction")(function* (
+        input: SendMessageInput,
+        committed: Array<StoredCommEvent>,
+      ) {
+        const messageId = messageIdFor(input.commandId);
+        const sender = yield* senderMembership(input.senderThreadId);
+        const replay = yield* replayedSend(messageId, sender.participantId);
+        if (replay !== null) return replay;
 
-          const receiver = yield* participantMembership(input.to, sender.squadronId);
-          const receiverId = participantId(receiver.participant);
-          if (
-            receiver.participant.kind === "human" &&
-            input.expectReply !== true &&
-            input.exchangeId === undefined
-          ) {
-            return yield* new A2AHumanAskOrReplyRequiredError({ participantId: receiverId });
+        const receiver = yield* participantMembership(input.to, sender.squadronId);
+        const receiverId = participantId(receiver.participant);
+        if (
+          receiver.participant.kind === "human" &&
+          input.expectReply !== true &&
+          input.exchangeId === undefined
+        ) {
+          return yield* new A2AHumanAskOrReplyRequiredError({ participantId: receiverId });
+        }
+        let exchangeId: ExchangeId | null = null;
+        let exchangeState: SendMessageResult["exchangeState"] = "none";
+        let exchangeRole: "none" | "ask" | "followup" | "reply" = "none";
+        let joinedExistingExchange = false;
+        let openEvent: CommEvent | undefined;
+        let closeEvent: CommEvent | undefined;
+
+        if (input.exchangeId !== undefined) {
+          if (input.urgency !== undefined) {
+            return yield* new A2AUrgencyRequiresExchangeError();
           }
-          let exchangeId: ExchangeId | null = null;
-          let exchangeState: SendMessageResult["exchangeState"] = "none";
-          let exchangeRole: "none" | "ask" | "followup" | "reply" = "none";
-          let joinedExistingExchange = false;
-          let openEvent: CommEvent | undefined;
-          let closeEvent: CommEvent | undefined;
-
-          if (input.exchangeId !== undefined) {
-            if (input.urgency !== undefined) {
-              return yield* new A2AUrgencyRequiresExchangeError();
-            }
-            const rows = yield* sql<ExchangeRow>`
+          const rows = yield* sql<ExchangeRow>`
               SELECT squadron_id, exchange_id, sender_id, receiver_id, status
               FROM j5_a2a_exchange
               WHERE exchange_id = ${input.exchangeId}
               LIMIT 2
             `;
-            const exchange = rows.length === 1 ? rows[0] : undefined;
-            if (exchange === undefined || exchange.status !== "open") {
-              return yield* new A2AExchangeNotOpenError({ exchangeId: input.exchangeId });
-            }
-            const isFollowup =
-              exchange.sender_id === sender.participantId && exchange.receiver_id === receiverId;
-            const isReply =
-              exchange.receiver_id === sender.participantId && exchange.sender_id === receiverId;
-            if (!isFollowup && !isReply) {
-              return yield* new A2AExchangeParticipantMismatchError({
-                exchangeId: input.exchangeId,
-                senderId: sender.participantId,
-                receiverId,
+          const exchange = rows.length === 1 ? rows[0] : undefined;
+          if (exchange === undefined || exchange.status !== "open") {
+            return yield* new A2AExchangeNotOpenError({ exchangeId: input.exchangeId });
+          }
+          const isFollowup =
+            exchange.sender_id === sender.participantId && exchange.receiver_id === receiverId;
+          const isReply =
+            exchange.receiver_id === sender.participantId && exchange.sender_id === receiverId;
+          if (!isFollowup && !isReply) {
+            return yield* new A2AExchangeParticipantMismatchError({
+              exchangeId: input.exchangeId,
+              senderId: sender.participantId,
+              receiverId,
+            });
+          }
+          exchangeId = input.exchangeId;
+          joinedExistingExchange = isFollowup;
+          if (isReply) {
+            if (exchange.squadron_id !== sender.squadronId) {
+              return yield* new A2ACrossSquadronReplyInvariantError({
+                exchangeId,
+                exchangeSquadronId: exchange.squadron_id,
+                senderSquadronId: sender.squadronId,
+                replyPersisted: false,
               });
             }
-            exchangeId = input.exchangeId;
-            joinedExistingExchange = isFollowup;
-            if (isReply) {
-              if (exchange.squadron_id !== sender.squadronId) {
-                return yield* new A2ACrossSquadronReplyInvariantError({
-                  exchangeId,
-                  exchangeSquadronId: exchange.squadron_id,
-                  senderSquadronId: sender.squadronId,
-                  replyPersisted: false,
-                });
-              }
-              const acceptedReplies = yield* sql<{ readonly count: number }>`
+            const acceptedReplies = yield* sql<{ readonly count: number }>`
                 SELECT COUNT(*) AS count
                 FROM j5_a2a_delivery
                 WHERE exchange_id = ${exchangeId} AND exchange_role = 'reply'
               `;
-              if ((acceptedReplies[0]?.count ?? 0) > 0) {
-                return yield* new A2AExchangeAlreadyAnsweredError({ exchangeId });
-              }
-              exchangeRole = "reply";
-              exchangeState = "closed";
-              closeEvent = {
-                kind: "exchange.closed",
-                sender: sender.participantId,
-                receiver: receiverId,
-                exchangeId,
-                correlationId: correlationIdFor(input.commandId),
-                payload: { replyMessageId: messageId },
-                createdAt: input.acceptedAt,
-              };
-            } else {
-              exchangeRole = "followup";
-              exchangeState = "open";
+            if ((acceptedReplies[0]?.count ?? 0) > 0) {
+              return yield* new A2AExchangeAlreadyAnsweredError({ exchangeId });
             }
-          } else if (input.expectReply === true) {
-            const existing = yield* sql<ExchangeRow>`
+            exchangeRole = "reply";
+            exchangeState = "closed";
+            closeEvent = {
+              kind: "exchange.closed",
+              sender: sender.participantId,
+              receiver: receiverId,
+              exchangeId,
+              correlationId: correlationIdFor(input.commandId),
+              payload: { replyMessageId: messageId },
+              createdAt: input.acceptedAt,
+            };
+          } else {
+            exchangeRole = "followup";
+            exchangeState = "open";
+          }
+        } else if (input.expectReply === true) {
+          const existing = yield* sql<ExchangeRow>`
               SELECT squadron_id, exchange_id, sender_id, receiver_id, status
               FROM j5_a2a_exchange
               WHERE squadron_id = ${sender.squadronId}
@@ -623,82 +651,93 @@ export const layer: Layer.Layer<A2ASendService, never, A2ALedger | SqlClient.Sql
                 AND status = 'open'
               LIMIT 1
             `;
-            if (existing[0] !== undefined) {
-              exchangeId = ExchangeId.make(existing[0].exchange_id);
-              joinedExistingExchange = true;
-              exchangeRole = "followup";
-            } else {
-              if (input.intent === undefined) return yield* new A2AIntentRequiredError();
-              if (receiver.participant.kind === "human" && input.urgency === undefined) {
-                return yield* new A2AUrgencyRequiredError();
-              }
-              if (receiver.participant.kind !== "human" && input.urgency !== undefined) {
-                return yield* new A2AUrgencyNotAcceptedError({ participantId: receiverId });
-              }
-              exchangeId = exchangeIdFor(input.commandId);
-              exchangeRole = "ask";
-              openEvent = {
-                kind: "exchange.opened",
-                sender: sender.participantId,
-                receiver: receiverId,
-                exchangeId,
-                correlationId: correlationIdFor(input.commandId),
-                payload: {
-                  intent: input.intent,
-                  urgency: input.urgency ?? null,
-                },
-                createdAt: input.acceptedAt,
-              };
+          if (existing[0] !== undefined) {
+            exchangeId = ExchangeId.make(existing[0].exchange_id);
+            joinedExistingExchange = true;
+            exchangeRole = "followup";
+          } else {
+            if (input.intent === undefined) return yield* new A2AIntentRequiredError();
+            if (receiver.participant.kind === "human" && input.urgency === undefined) {
+              return yield* new A2AUrgencyRequiredError();
             }
-            exchangeState = "open";
-          } else if (input.urgency !== undefined) {
-            return yield* new A2AUrgencyRequiresExchangeError();
-          }
-
-          if (receiver.participant.kind === "human" && exchangeRole === "followup") {
-            return yield* new A2AHumanFollowupNotAllowedError({ participantId: receiverId });
-          }
-
-          const correlationId = correlationIdFor(input.commandId);
-          const result = yield* ledger.appendEvents({
-            commandId: input.commandId,
-            squadronId: sender.squadronId,
-            acceptedAt: input.acceptedAt,
-            events: [
-              ...(openEvent === undefined ? [] : [openEvent]),
-              {
-                kind: "message.sent",
-                sender: sender.participantId,
-                receiver: receiverId,
-                exchangeId,
-                correlationId,
-                payload: {
-                  messageId,
-                  text: input.message,
-                  originSquadronId: sender.squadronId,
-                  receiverSquadronId: receiver.squadronId,
-                  exchangeRole,
-                  envelopeChannel: "peer",
-                },
-                createdAt: input.acceptedAt,
+            if (receiver.participant.kind !== "human" && input.urgency !== undefined) {
+              return yield* new A2AUrgencyNotAcceptedError({ participantId: receiverId });
+            }
+            exchangeId = exchangeIdFor(input.commandId);
+            exchangeRole = "ask";
+            openEvent = {
+              kind: "exchange.opened",
+              sender: sender.participantId,
+              receiver: receiverId,
+              exchangeId,
+              correlationId: correlationIdFor(input.commandId),
+              payload: {
+                intent: input.intent,
+                urgency: input.urgency ?? null,
               },
-              ...(closeEvent === undefined ? [] : [closeEvent]),
-            ],
-          });
-          const sent = result.events.find((event) => event.kind === "message.sent");
-          if (sent === undefined) {
-            return yield* new A2AParticipantNotFoundError({ participantId: receiverId });
+              createdAt: input.acceptedAt,
+            };
           }
-          const opened = result.events.some((event) => event.kind === "exchange.opened");
-          const closed = result.events.some((event) => event.kind === "exchange.closed");
-          return {
-            messageId,
-            exchangeId,
-            exchangeState: closed ? "closed" : exchangeState,
-            joinedExistingExchange:
-              exchangeId !== null && !opened && !closed ? joinedExistingExchange : false,
-            durableAtSeq: sent.seq,
-          } satisfies SendMessageResult;
+          exchangeState = "open";
+        } else if (input.urgency !== undefined) {
+          return yield* new A2AUrgencyRequiresExchangeError();
+        }
+
+        if (receiver.participant.kind === "human" && exchangeRole === "followup") {
+          return yield* new A2AHumanFollowupNotAllowedError({ participantId: receiverId });
+        }
+
+        const correlationId = correlationIdFor(input.commandId);
+        const result = yield* writer.appendEventsInTransaction({
+          commandId: input.commandId,
+          squadronId: sender.squadronId,
+          acceptedAt: input.acceptedAt,
+          events: [
+            ...(openEvent === undefined ? [] : [openEvent]),
+            {
+              kind: "message.sent",
+              sender: sender.participantId,
+              receiver: receiverId,
+              exchangeId,
+              correlationId,
+              payload: {
+                messageId,
+                text: input.message,
+                originSquadronId: sender.squadronId,
+                receiverSquadronId: receiver.squadronId,
+                exchangeRole,
+                envelopeChannel: "peer",
+              },
+              createdAt: input.acceptedAt,
+            },
+            ...(closeEvent === undefined ? [] : [closeEvent]),
+          ],
+        });
+        if (result.committed) committed.push(...result.events);
+        const sent = result.events.find((event) => event.kind === "message.sent");
+        if (sent === undefined) {
+          return yield* new A2AParticipantNotFoundError({ participantId: receiverId });
+        }
+        const opened = result.events.some((event) => event.kind === "exchange.opened");
+        const closed = result.events.some((event) => event.kind === "exchange.closed");
+        return {
+          messageId,
+          exchangeId,
+          exchangeState: closed ? "closed" : exchangeState,
+          joinedExistingExchange:
+            exchangeId !== null && !opened && !closed ? joinedExistingExchange : false,
+          durableAtSeq: sent.seq,
+        } satisfies SendMessageResult;
+      });
+
+      const send: A2ASendServiceShape["send"] = (input) =>
+        Effect.gen(function* () {
+          const committed: Array<StoredCommEvent> = [];
+          const result = yield* writer.withPermit(
+            sql.withTransaction(sendInternal(input, committed)),
+          );
+          yield* writer.publishCommitted(committed);
+          return result;
         });
 
       const clearOwnAsk: A2ASendServiceShape["clearOwnAsk"] = (input) =>

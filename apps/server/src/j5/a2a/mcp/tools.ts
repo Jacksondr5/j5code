@@ -96,6 +96,7 @@ export const J5ParticipantDirectoryRow = Schema.Struct({
   participant_id: ParticipantId,
   participant: J5Participant,
   self: Schema.Boolean,
+  archived: Schema.Boolean,
   can_receive_message: Schema.Boolean,
   can_open_exchange: Schema.Boolean,
   accepts_urgency: Schema.Boolean,
@@ -179,6 +180,7 @@ export const J5ArchiveAgentFailure = Schema.Struct({
   interrupt_requested: Schema.optional(Schema.Boolean),
   thread_archive_committed: Schema.optional(Schema.Boolean),
   participant_retired: Schema.optional(Schema.Boolean),
+  participant_archived: Schema.optional(Schema.Boolean),
   pending_exchange_ids: Schema.optional(Schema.Array(ExchangeId)),
 });
 export type J5ArchiveAgentFailure = typeof J5ArchiveAgentFailure.Type;
@@ -225,7 +227,7 @@ export const J5_STOP_AGENT_DESCRIPTION =
   "Stop one Peer Agent: interrupts its running turn now. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. Requires your current squadron_id. Reuse client_request_id to retry safely.";
 
 export const J5_ARCHIVE_AGENT_DESCRIPTION =
-  "Retire one Peer Agent for good. A clean archive — no open exchanges, no running turn — completes immediately. Otherwise the call refuses and lists exactly what archiving ends — the asks that will close, the turn that will stop — along with a confirmation_token; call again with that token to proceed. The archived agent leaves the active roster; its ledger and conversation stay readable forever. Requires your current squadron_id. Reuse client_request_id to retry safely.";
+  "Archive one Peer Agent reversibly. Unarchive restores the same identity, but does not reopen Exchanges or replay cancelled messages. A clean archive — no open exchanges, no running turn — completes immediately. Otherwise the call refuses and lists exactly what archiving ends — the asks that will close, the turn that will stop — along with a confirmation_token; call again with that token to proceed. The archived agent leaves the active roster; its ledger and conversation stay readable forever. Requires your current squadron_id. Reuse client_request_id to retry safely.";
 
 const sendDependencies = [
   McpInvocationContext.McpInvocationContext,
@@ -301,6 +303,7 @@ export const J5SendMessageTool = Tool.make("send_message", {
 
 export const J5ListParticipantsTool = Tool.make("list_participants", {
   description: A2A_LIST_TOOL_DESCRIPTION,
+  parameters: Schema.Struct({ include_archived: Schema.optional(Schema.Boolean) }),
   success: J5ListParticipantsResult,
   failure: J5McpFailure,
   failureMode: "return",

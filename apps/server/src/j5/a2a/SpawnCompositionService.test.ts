@@ -268,9 +268,7 @@ it.effect("waits for a DeliveryWorker ledger permit before entering the spawn tr
       );
       const homeTransaction = Context.get(homeTransactionContext, A2AHomeRegistrationTransaction);
       const sendContext = yield* Layer.build(
-        sendServiceLayer.pipe(
-          Layer.provide(Layer.mergeAll(Layer.succeed(A2ALedger, ledgerService), databaseLayer)),
-        ),
+        sendServiceLayer.pipe(Layer.provide(Layer.mergeAll(ledgerServices, databaseLayer))),
       );
       const sendService = Context.get(sendContext, A2ASendService);
 
@@ -307,20 +305,13 @@ it.effect("waits for a DeliveryWorker ledger permit before entering the spawn tr
 
       const deliveryPermitHeld = yield* Deferred.make<void>();
       const releaseDelivery = yield* Deferred.make<void>();
-      const blockedLedger = A2ALedger.of({
-        ...ledgerService,
-        appendEvents: (command) =>
+      const blockedWriter = A2ALedgerTransactionWriter.of({
+        ...ledgerWriter,
+        withPermit: (effect) =>
           ledgerWriter.withPermit(
             Deferred.succeed(deliveryPermitHeld, undefined).pipe(
               Effect.andThen(Deferred.await(releaseDelivery)),
-              Effect.andThen(
-                sql.withTransaction(ledgerWriter.appendEventsInTransaction(command)).pipe(
-                  Effect.tap((result) =>
-                    result.committed ? ledgerWriter.publishCommitted(result.events) : Effect.void,
-                  ),
-                  Effect.orDie,
-                ),
-              ),
+              Effect.andThen(effect),
             ),
           ),
       });
@@ -332,7 +323,8 @@ it.effect("waits for a DeliveryWorker ledger permit before entering the spawn tr
         deliveryWorkerLayer.pipe(
           Layer.provide(
             Layer.mergeAll(
-              Layer.succeed(A2ALedger, blockedLedger),
+              Layer.succeed(A2ALedger, ledgerService),
+              Layer.succeed(A2ALedgerTransactionWriter, blockedWriter),
               Layer.succeed(A2ADeliveryTransport, A2ADeliveryTransport.of(transport)),
               databaseLayer,
             ),

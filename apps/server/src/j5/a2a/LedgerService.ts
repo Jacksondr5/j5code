@@ -196,6 +196,9 @@ const decodeMembership = Schema.decodeUnknownEffect(Membership);
 const decodeExchangeOpened = Schema.decodeUnknownEffect(ExchangeOpenedPayload);
 const decodeExchangeClosed = Schema.decodeUnknownEffect(ExchangeClosedPayload);
 const decodeExchangeDropped = Schema.decodeUnknownEffect(ExchangeDroppedPayload);
+const decodeMessageCancelled = Schema.decodeUnknownEffect(
+  Schema.Struct({ messageId: Schema.String, reason: Schema.String }),
+);
 const decodeMessageSent = Schema.decodeUnknownEffect(MessageSentPayload);
 const decodeMessageDelivered = Schema.decodeUnknownEffect(MessageDeliveredPayload);
 const decodeMessageDeliveryFailed = Schema.decodeUnknownEffect(MessageDeliveryFailedPayload);
@@ -266,13 +269,29 @@ export const layer: Layer.Layer<
     });
 
     const applyMembership = Effect.fn("j5.a2a.applyMembership")(function* (event: StoredCommEvent) {
-      if (event.kind !== "participant.joined" && event.kind !== "participant.left") return;
+      if (
+        event.kind !== "participant.joined" &&
+        event.kind !== "participant.left" &&
+        event.kind !== "participant.archived" &&
+        event.kind !== "participant.unarchived" &&
+        event.kind !== "participant.deleted"
+      )
+        return;
       const participant = event.payload.participant;
       // Historical human membership events remain readable ledger facts. New
       // person addressability is host registry state, never Squadron membership.
       if (participant.kind === "human") return;
       const id = participantId(participant);
-      if (event.kind === "participant.left") {
+      if (event.kind === "participant.archived" || event.kind === "participant.unarchived") {
+        yield* sql`UPDATE j5_a2a_squadron_membership
+          SET archived_at = ${event.kind === "participant.archived" ? event.createdAt : null}, updated_seq = ${event.seq}
+          WHERE squadron_id = ${event.squadronId} AND participant_id = ${id}`;
+        return;
+      }
+      if (event.kind === "participant.left" || event.kind === "participant.deleted") {
+        if (event.kind === "participant.deleted") {
+          yield* sql`DELETE FROM j5_a2a_participant_placement WHERE squadron_id = ${event.squadronId} AND participant_id = ${id}`;
+        }
         yield* sql`
           DELETE FROM j5_a2a_squadron_membership
           WHERE squadron_id = ${event.squadronId} AND participant_id = ${id}
@@ -404,6 +423,18 @@ export const layer: Layer.Layer<
           }
           const terminalCause = yield* encodeJson(dropped.cause);
           const terminalFacts = yield* encodeJson(dropped.facts);
+          // An undelivered human ask still needs a visible terminal history row.
+          // Preserve the original ask rather than treating a no-op transport as notice delivery.
+          yield* sql`INSERT INTO j5_a2a_human_inbox (
+            person_id, squadron_id, exchange_id, sender_id, intent, urgency,
+            latest_message_id, latest_message, opened_seq, opened_at, status)
+            SELECT e.receiver_id, e.squadron_id, e.exchange_id, e.sender_id, e.intent, e.urgency,
+              d.message_id, d.message_text, e.opened_seq, e.created_at, 'open'
+            FROM j5_a2a_exchange e JOIN j5_a2a_delivery d
+              ON d.squadron_id = e.squadron_id AND d.exchange_id = e.exchange_id AND d.exchange_role = 'ask'
+            WHERE e.squadron_id = ${event.squadronId} AND e.exchange_id = ${event.exchangeId}
+              AND e.receiver_id LIKE 'human:%'
+            ON CONFLICT(person_id, squadron_id, exchange_id) DO NOTHING`;
           // A4 owns this retained projection; the ledger applies its terminal
           // state from the ordinary exchange.dropped fact in the same commit.
           yield* sql`
@@ -483,11 +514,14 @@ export const layer: Layer.Layer<
               next_attempt_at = NULL,
               delivered_seq = ${event.seq},
               updated_at = ${event.createdAt}
-            WHERE squadron_id = ${event.squadronId} AND message_id = ${payload.messageId}
+            WHERE squadron_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status <> 'cancelled'
             RETURNING message_id
           `;
           if (rows[0] === undefined) {
-            return yield* new A2AStorageError({ operation: "project delivered message" });
+            const cancelled =
+              yield* sql`SELECT 1 FROM j5_a2a_delivery WHERE squadron_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status = 'cancelled'`;
+            if (cancelled.length === 0)
+              return yield* new A2AStorageError({ operation: "project message delivery outcome" });
           }
           return;
         }
@@ -501,18 +535,30 @@ export const layer: Layer.Layer<
               last_error = ${payload.error},
               next_attempt_at = ${payload.nextAttemptAt},
               updated_at = ${event.createdAt}
-            WHERE squadron_id = ${event.squadronId} AND message_id = ${payload.messageId}
+            WHERE squadron_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status <> 'cancelled'
             RETURNING message_id
           `;
           if (rows[0] === undefined) {
-            return yield* new A2AStorageError({ operation: "project failed message delivery" });
+            const cancelled =
+              yield* sql`SELECT 1 FROM j5_a2a_delivery WHERE squadron_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status = 'cancelled'`;
+            if (cancelled.length === 0)
+              return yield* new A2AStorageError({ operation: "project message delivery outcome" });
           }
+          return;
+        }
+        case "message.cancelled": {
+          const payload = yield* decodeMessageCancelled(event.payload);
+          yield* sql`UPDATE j5_a2a_delivery SET status = 'cancelled', next_attempt_at = NULL, last_error = ${payload.reason}, updated_at = ${event.createdAt}
+            WHERE squadron_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status <> 'delivered'`;
           return;
         }
         case "message.received":
         case "silence.notice":
         case "participant.joined":
         case "participant.left":
+        case "participant.archived":
+        case "participant.unarchived":
+        case "participant.deleted":
           return;
       }
     });
@@ -904,7 +950,7 @@ export const layer: Layer.Layer<
                     created_at
                   FROM j5_a2a_comm_event
                   WHERE squadron_id = ${squadronId}
-                    AND kind IN ('participant.joined', 'participant.left')
+                    AND kind IN ('participant.joined', 'participant.left', 'participant.archived', 'participant.unarchived', 'participant.deleted')
                   ORDER BY seq
                 `;
                 for (const row of rows) {

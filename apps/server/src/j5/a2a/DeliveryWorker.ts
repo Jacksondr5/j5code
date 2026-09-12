@@ -27,7 +27,7 @@ import {
   type DeliveryAlarm,
   type DeliveryMilestone,
 } from "./contracts.ts";
-import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
+import { A2ALedgerTransactionWriter, A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 
 export const A2A_DELIVERY_CONFIG_VERSION = config.version;
 
@@ -125,6 +125,7 @@ const makeLayer = (daemon: boolean) =>
     A2ADeliveryWorker,
     Effect.gen(function* () {
       const ledger = yield* A2ALedger;
+      const writer = yield* A2ALedgerTransactionWriter;
       const transport = yield* A2ADeliveryTransport;
       const hooks = yield* A2ADeliveryHooks;
       const sql = yield* SqlClient.SqlClient;
@@ -230,27 +231,36 @@ const makeLayer = (daemon: boolean) =>
           });
         }
         yield* hooks.afterTransportSuccess({ squadronId: originSquadronId, messageId, attempt });
-        const deliveredAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
-        yield* ledger.appendEvents({
-          commandId: commandId("delivered", messageId),
-          squadronId: originSquadronId,
-          acceptedAt: deliveredAt,
-          events: [
-            {
-              kind: "message.delivered",
-              sender: senderId,
-              receiver: receiverId,
-              exchangeId,
-              correlationId: CorrelationId.make(row.correlation_id),
-              payload: {
-                messageId,
-                attempt,
-                channel: isHumanParticipantId(receiverId) ? "human" : "agent",
-              },
-              createdAt: deliveredAt,
-            },
-          ],
-        });
+        const outcome = yield* writer.withPermit(
+          sql.withTransaction(
+            Effect.gen(function* () {
+              if (yield* deliveryUnavailable(row)) return null;
+
+              const deliveredAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+              return yield* writer.appendEventsInTransaction({
+                commandId: commandId("delivered", messageId),
+                squadronId: originSquadronId,
+                acceptedAt: deliveredAt,
+                events: [
+                  {
+                    kind: "message.delivered",
+                    sender: senderId,
+                    receiver: receiverId,
+                    exchangeId,
+                    correlationId: CorrelationId.make(row.correlation_id),
+                    payload: {
+                      messageId,
+                      attempt,
+                      channel: isHumanParticipantId(receiverId) ? "human" : "agent",
+                    },
+                    createdAt: deliveredAt,
+                  },
+                ],
+              });
+            }),
+          ),
+        );
+        if (outcome?.committed) yield* writer.publishCommitted(outcome.events);
       });
 
       const recordFailure = Effect.fn("j5.a2a.delivery.recordFailure")(function* (
@@ -265,32 +275,88 @@ const makeLayer = (daemon: boolean) =>
           ? null
           : DateTime.formatIso(DateTime.add(failedAtDate, { milliseconds: backoffMs(attempt) }));
         const messageId = LedgerMessageId.make(row.message_id);
-        yield* ledger.appendEvents({
-          commandId: commandId("failed", messageId, attempt),
-          squadronId: SquadronId.make(row.squadron_id),
-          acceptedAt: failedAt,
-          events: [
-            {
-              kind: "message.delivery_failed",
-              sender: ParticipantId.make(row.sender_id),
-              receiver: ParticipantId.make(row.receiver_id),
-              exchangeId: row.exchange_id === null ? null : ExchangeId.make(row.exchange_id),
-              correlationId: CorrelationId.make(row.correlation_id),
-              payload: {
-                messageId,
-                attempt,
-                error: errorText(cause),
-                nextAttemptAt,
-                alarmed,
-              },
-              createdAt: failedAt,
-            },
-          ],
-        });
+        const outcome = yield* writer.withPermit(
+          sql.withTransaction(
+            Effect.gen(function* () {
+              if (yield* deliveryUnavailable(row)) return null;
+              return yield* writer.appendEventsInTransaction({
+                commandId: commandId("failed", messageId, attempt),
+                squadronId: SquadronId.make(row.squadron_id),
+                acceptedAt: failedAt,
+                events: [
+                  {
+                    kind: "message.delivery_failed",
+                    sender: ParticipantId.make(row.sender_id),
+                    receiver: ParticipantId.make(row.receiver_id),
+                    exchangeId: row.exchange_id === null ? null : ExchangeId.make(row.exchange_id),
+                    correlationId: CorrelationId.make(row.correlation_id),
+                    payload: {
+                      messageId,
+                      attempt,
+                      error: errorText(cause),
+                      nextAttemptAt,
+                      alarmed,
+                    },
+                    createdAt: failedAt,
+                  },
+                ],
+              });
+            }),
+          ),
+        );
+        if (outcome === null) return yield* cancelDelivery(row, attempt);
+        if (outcome.committed) yield* writer.publishCommitted(outcome.events);
         return {
           squadronId: SquadronId.make(row.squadron_id),
           messageId,
           state: alarmed ? ("alarmed" as const) : ("retry_scheduled" as const),
+          attempt,
+        } satisfies DeliveryMilestone;
+      });
+
+      const deliveryUnavailable = Effect.fn("j5.a2a.delivery.unavailable")(function* (
+        row: DeliveryRow,
+      ) {
+        const state = yield* sql<{ readonly status: string }>`SELECT status FROM j5_a2a_delivery
+          WHERE squadron_id = ${row.squadron_id} AND message_id = ${row.message_id}`;
+        if (state[0]?.status === "cancelled") return true;
+        if (state[0]?.status === "delivered") return false;
+        const ids =
+          row.envelope_channel === "peer" ? [row.sender_id, row.receiver_id] : [row.receiver_id];
+        for (const id of ids) {
+          if (isHumanParticipantId(ParticipantId.make(id))) continue;
+          const membership =
+            yield* sql`SELECT 1 FROM j5_a2a_squadron_membership WHERE participant_id = ${id} AND archived_at IS NULL`;
+          if (membership.length !== 1) return true;
+        }
+        return false;
+      });
+      const cancelDelivery = Effect.fn("j5.a2a.delivery.cancel")(function* (
+        row: DeliveryRow,
+        attempt: number,
+      ) {
+        const now = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+        yield* ledger.append({
+          commandId: commandId("cancelled", LedgerMessageId.make(row.message_id)),
+          squadronId: SquadronId.make(row.squadron_id),
+          acceptedAt: now,
+          event: {
+            kind: "message.cancelled",
+            sender: null,
+            receiver: ParticipantId.make(row.receiver_id),
+            exchangeId: null,
+            correlationId: null,
+            createdAt: now,
+            payload: {
+              messageId: row.message_id,
+              reason: "Participant is archived, deleted, or retired.",
+            },
+          },
+        });
+        return {
+          squadronId: SquadronId.make(row.squadron_id),
+          messageId: LedgerMessageId.make(row.message_id),
+          state: "cancelled",
           attempt,
         } satisfies DeliveryMilestone;
       });
@@ -322,7 +388,17 @@ const makeLayer = (daemon: boolean) =>
         const row = rows[0];
         if (row === undefined) return null;
         const attempt = row.attempts + 1;
+        if (yield* deliveryUnavailable(row)) {
+          const milestone = yield* cancelDelivery(row, attempt);
+          yield* PubSub.publish(milestones, milestone);
+          return milestone;
+        }
         const exit = yield* Effect.exit(attemptDelivery(row, attempt));
+        if (yield* deliveryUnavailable(row)) {
+          const milestone = yield* cancelDelivery(row, attempt);
+          yield* PubSub.publish(milestones, milestone);
+          return milestone;
+        }
         const milestone =
           exit._tag === "Success"
             ? ({

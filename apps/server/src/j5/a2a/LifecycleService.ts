@@ -148,14 +148,15 @@ export const formatLifecycleNotice = (input: {
   readonly exchangeId: ExchangeId;
   readonly retiredParticipantId: ParticipantId;
   readonly disposition: ExchangeDropDisposition;
+  readonly operation?: "archived" | "deleted";
 }): string => {
   const consequence =
     input.disposition === "receiver-retired"
-      ? "The receiver can no longer answer. Do not retry this exchange and do not replace the retired participant."
+      ? "The receiver will not answer this Exchange. Do not retry it."
       : "The asker is gone. Your reply obligation has ended; do not send a replacement reply.";
   return [
     `[Cross-agent messaging system notice: exchange dropped]`,
-    `Exchange ${input.exchangeId} ended because ${input.retiredParticipantId} was retired from A2A (${input.disposition}).`,
+    `Exchange ${input.exchangeId} ended because ${input.retiredParticipantId} was ${input.operation ?? "archived"} (${input.disposition}).`,
     consequence,
     "Facts: replyRequired=false; retryAllowed=false; replacementRequired=false.",
     "This is a platform-authored terminal notice, not a peer reply.",
@@ -199,7 +200,7 @@ const makeLayer = (daemon: boolean) =>
               FROM j5_a2a_comm_event AS retirement
               WHERE retirement.squadron_id = joined.squadron_id
                 AND retirement.seq > joined.seq
-                AND retirement.kind = 'participant.left'
+                AND retirement.kind IN ('participant.left', 'participant.deleted')
                 AND json_extract(retirement.payload, '$.participant.kind') = 'agent'
                 AND json_extract(retirement.payload, '$.participant.id') = ${participantId}
                 AND json_extract(retirement.payload, '$.participant.threadId') =
@@ -243,6 +244,7 @@ const makeLayer = (daemon: boolean) =>
           readonly participantId: ParticipantId;
           readonly squadronId: SquadronId;
           readonly archivedAt: string;
+          readonly operation: "archived" | "deleted";
         }) {
           const exchanges = yield* sql<ExchangeRow>`
           SELECT squadron_id, exchange_id, sender_id, receiver_id
@@ -276,7 +278,10 @@ const makeLayer = (daemon: boolean) =>
                   payload: {
                     disposition,
                     cause: {
-                      kind: "participant-archived",
+                      kind:
+                        input.operation === "deleted"
+                          ? "participant-deleted"
+                          : "participant-archived",
                       participantId: input.participantId,
                       squadronId: input.squadronId,
                     },
@@ -300,6 +305,7 @@ const makeLayer = (daemon: boolean) =>
                     text: formatLifecycleNotice({
                       exchangeId,
                       retiredParticipantId: input.participantId,
+                      operation: input.operation,
                       disposition,
                     }),
                     originSquadronId: SquadronId.make(exchange.squadron_id),
@@ -318,7 +324,11 @@ const makeLayer = (daemon: boolean) =>
       );
 
       const archiveParticipantInternal = Effect.fn("j5.a2a.lifecycle.archiveParticipantInternal")(
-        function* (input: ArchiveParticipantInput) {
+        function* (
+          input: ArchiveParticipantInput,
+          operation: "archived" | "unarchived" | "deleted" = "archived",
+          eventKey?: string,
+        ) {
           const rows = yield* historicalParticipantRows(input.participantId);
           if (rows.length === 0) {
             return yield* new A2ALifecycleParticipantNotFoundError({
@@ -339,26 +349,82 @@ const makeLayer = (daemon: boolean) =>
               participantId: input.participantId,
             });
           }
-          const archived = row.retired === 0;
-          yield* ledger.append({
-            commandId: participantArchiveCommandId(squadronId, input.participantId),
-            squadronId,
-            acceptedAt: input.archivedAt,
-            event: {
-              kind: "participant.left",
-              sender: null,
-              receiver: input.participantId,
-              exchangeId: null,
-              correlationId: null,
-              payload: { participant },
-              createdAt: input.archivedAt,
-            },
-          });
+          const memberships = yield* sql<{
+            readonly archived_at: string | null;
+            readonly updated_seq: number;
+          }>`
+            SELECT archived_at, updated_seq FROM j5_a2a_squadron_membership
+            WHERE squadron_id = ${squadronId} AND participant_id = ${input.participantId}
+          `;
+          const membership = memberships[0];
+          // A historical departure is permanent. Unarchive must never recreate a
+          // retired identity, including when old thread events are replayed.
+          if (operation !== "deleted" && row.retired !== 0) {
+            return { archived: false, droppedExchangeIds: [] };
+          }
+          const archived = operation === "archived" && membership?.archived_at === null;
+          const changesState =
+            operation === "deleted" ||
+            (membership !== undefined &&
+              (operation === "archived"
+                ? membership.archived_at === null
+                : membership.archived_at !== null));
+          if (changesState || eventKey !== undefined) {
+            yield* ledger.append({
+              commandId: CommCommandId.make(
+                `${participantArchiveCommandId(squadronId, input.participantId)}:${operation}:${eventKey ?? membership?.updated_seq ?? "absent"}`,
+              ),
+              squadronId,
+              acceptedAt: input.archivedAt,
+              event: {
+                kind:
+                  operation === "deleted"
+                    ? "participant.deleted"
+                    : operation === "unarchived"
+                      ? "participant.unarchived"
+                      : "participant.archived",
+                sender: null,
+                receiver: input.participantId,
+                exchangeId: null,
+                correlationId: null,
+                payload: { participant },
+                createdAt: input.archivedAt,
+              },
+            });
+          }
+          if (operation === "unarchived") return { archived: false, droppedExchangeIds: [] };
           const droppedExchangeIds = yield* dropParticipantExchanges({
             participantId: input.participantId,
             squadronId,
             archivedAt: input.archivedAt,
+            operation,
           });
+          const pending = yield* sql<{ readonly squadron_id: string; readonly message_id: string }>`
+            SELECT squadron_id, message_id FROM j5_a2a_delivery
+            WHERE status IN ('pending', 'retry_scheduled', 'alarmed')
+              AND (receiver_id = ${input.participantId} OR sender_id = ${input.participantId})
+          `;
+          for (const delivery of pending) {
+            yield* ledger.append({
+              commandId: CommCommandId.make(
+                `command:j5:a2a:lifecycle:cancel:${stablePart(delivery.squadron_id)}:${stablePart(delivery.message_id)}`,
+              ),
+              squadronId: SquadronId.make(delivery.squadron_id),
+              acceptedAt: input.archivedAt,
+              event: {
+                kind: "message.cancelled",
+                sender: null,
+                receiver: input.participantId,
+                exchangeId: null,
+                correlationId: null,
+                createdAt: input.archivedAt,
+                payload: {
+                  messageId: delivery.message_id,
+                  reason: `Participant ${input.participantId} was ${operation}.`,
+                },
+              },
+            });
+          }
           return { archived, droppedExchangeIds } satisfies LifecycleArchiveResult;
         },
       );
@@ -373,22 +439,42 @@ const makeLayer = (daemon: boolean) =>
       const archiveParticipant: A2ALifecycleServiceShape["archiveParticipant"] = (input) =>
         lifecyclePermit.withPermit(archiveParticipantRaw(input));
 
-      const handleStoredEventRaw = Effect.fn("j5.a2a.lifecycle.handleStoredEvent")(function* (
+      const handleStoredEventInternal = Effect.fn("j5.a2a.lifecycle.handleStoredEvent")(function* (
         stored: OrchestrationV2StoredEvent,
       ) {
-        if (stored.event.type !== "thread.archived" && stored.event.type !== "thread.deleted") {
+        if (
+          stored.event.type !== "thread.archived" &&
+          stored.event.type !== "thread.deleted" &&
+          stored.event.type !== "thread.unarchived"
+        ) {
           return false;
         }
+        const processed =
+          yield* sql`SELECT 1 FROM j5_a2a_lifecycle_processed WHERE event_id = ${stored.event.id}`;
+        if (processed.length !== 0) return true;
         const resolution = yield* resolveThreadHome(sql, stored.event.threadId).pipe(
           Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)),
         );
         if (resolution === null) return false;
-        yield* archiveParticipant({
-          participantId: resolution.home.participantId,
-          archivedAt: DateTime.formatIso(stored.event.occurredAt),
-        });
+        yield* archiveParticipantInternal(
+          {
+            participantId: resolution.home.participantId,
+            archivedAt: DateTime.formatIso(stored.event.occurredAt),
+          },
+          stored.event.type === "thread.deleted"
+            ? "deleted"
+            : stored.event.type === "thread.unarchived"
+              ? "unarchived"
+              : "archived",
+          stored.event.id,
+        );
+        yield* sql`INSERT INTO j5_a2a_lifecycle_processed (event_id) VALUES (${stored.event.id}) ON CONFLICT DO NOTHING`;
+        yield* worker.notify;
         return true;
       });
+
+      const handleStoredEventRaw = (stored: OrchestrationV2StoredEvent) =>
+        lifecyclePermit.withPermit(handleStoredEventInternal(stored));
 
       const readCursor = Effect.fn("j5.a2a.lifecycle.readCursor")(function* () {
         const rows = yield* sql<CursorRow>`

@@ -12,19 +12,18 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import {
   A2ADeliveryTransport,
+  A2ADeliveryTransportError,
   type AgentDeliveryInput,
   type HumanDeliveryInput,
 } from "./DeliveryTransport.ts";
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { A2ALifecycleService, manualLayer as lifecycleLayer } from "./LifecycleService.ts";
+import { resolveThreadHome } from "./HomeRegistrar.ts";
+import { ParticipantPlacementService, layer as placementLayer } from "./PlacementService.ts";
+import { PlacementCommandId } from "./placementContracts.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
-import {
-  A2AParticipantArchivedError,
-  A2ASenderRetiredError,
-  A2ASendService,
-  layer as sendLayer,
-} from "./SendService.ts";
+import { A2AParticipantArchivedError, A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
   CommCommandId,
   ExchangeDroppedPayload,
@@ -63,15 +62,24 @@ interface DeliveredNotice {
 const makeTestLayer = (
   notices: Ref.Ref<ReadonlyArray<DeliveredNotice>>,
   storedEvents: Stream.Stream<OrchestrationV2StoredEvent> = Stream.never,
+  failPeerDeliveries = false,
 ) => {
   const database = NodeSqliteClient.layerMemory();
   const ledger = ledgerLayer.pipe(Layer.provide(database));
+  const placements = placementLayer.pipe(Layer.provide(database));
   const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   const transport = Layer.succeed(
     A2ADeliveryTransport,
     A2ADeliveryTransport.of({
       deliverAgent: (input) =>
-        Ref.update(notices, (current) => [...current, { channel: "agent" as const, input }]),
+        failPeerDeliveries && input.envelopeChannel === "peer"
+          ? Effect.fail(
+              new A2ADeliveryTransportError({
+                operation: "test unavailable provider",
+                cause: "offline",
+              }),
+            )
+          : Ref.update(notices, (current) => [...current, { channel: "agent" as const, input }]),
       deliverHuman: (input) =>
         Ref.update(notices, (current) => [...current, { channel: "human" as const, input }]),
     }),
@@ -91,11 +99,20 @@ const makeTestLayer = (
     Layer.provide(database),
     Layer.provide(threadManagement),
   );
-  return Layer.mergeAll(database, ledger, send, transport, worker, threadManagement, lifecycle);
+  return Layer.mergeAll(
+    database,
+    ledger,
+    send,
+    transport,
+    worker,
+    threadManagement,
+    lifecycle,
+    placements,
+  );
 };
 
 const retiredThreadEvent = (
-  type: "thread.archived" | "thread.deleted",
+  type: "thread.archived" | "thread.deleted" | "thread.unarchived",
   threadId: ThreadId,
   sequence: number,
 ): OrchestrationV2StoredEvent =>
@@ -232,7 +249,7 @@ it.effect("drops a receiver-retired exchange loudly and rejects new sends to the
           json_extract(payload, '$.participant.kind') AS participant_kind,
           json_extract(payload, '$.participant.threadId') AS thread_id
         FROM j5_a2a_comm_event
-        WHERE kind = 'participant.left' AND receiver = ${receiver.id}
+        WHERE kind = 'participant.archived' AND receiver = ${receiver.id}
       `;
       const joinedSequence = yield* sql<{ readonly seq: number }>`
         SELECT seq
@@ -241,7 +258,7 @@ it.effect("drops a receiver-retired exchange loudly and rejects new sends to the
       `;
       assert.lengthOf(retirement, 1);
       assert.deepInclude(retirement[0]!, {
-        kind: "participant.left",
+        kind: "participant.archived",
         squadron_id: squadronId,
         participant_id: receiver.id,
         participant_kind: "agent",
@@ -259,7 +276,7 @@ it.effect("drops a receiver-retired exchange loudly and rejects new sends to the
         }),
       );
       assert.instanceOf(error, A2AParticipantArchivedError);
-      assert.include(error.message, "A2A-retired");
+      assert.include(error.message, "archived");
 
       const milestones = yield* (yield* A2ADeliveryWorker).drain;
       assert.isTrue(milestones.some((milestone) => milestone.state === "delivered"));
@@ -311,8 +328,8 @@ it.effect("drops a sender-retired person exchange so the active inbox source is 
           acceptedAt: archivedAt,
         }),
       );
-      assert.instanceOf(retiredError, A2ASenderRetiredError);
-      assert.include(retiredError.message, "participant.left");
+      assert.instanceOf(retiredError, A2AParticipantArchivedError);
+      assert.include(retiredError.message, "archived");
       const source = yield* (yield* SqlClient.SqlClient)<{
         readonly status: string;
         readonly disposition: string;
@@ -550,4 +567,285 @@ it.effect("drops a reply-owing participant exactly once from committed thread de
       ]);
     }).pipe(Effect.provide(makeTestLayer(notices, storedEvents)));
   }),
+);
+
+it.effect(
+  "preserves identity and home through archive cycles and ignores replayed old lifecycle events",
+  () =>
+    Effect.gen(function* () {
+      const notices = yield* Ref.make<ReadonlyArray<DeliveredNotice>>([]);
+      yield* Effect.gen(function* () {
+        yield* runJ5A2AMigrations();
+        const squadronId = SquadronId.make("squadron:lifecycle:cycles");
+        yield* createSquadron(squadronId, "Cycles");
+        yield* join(squadronId, sender, "cycles:sender");
+        yield* join(squadronId, receiver, "cycles:receiver");
+        const lifecycle = yield* A2ALifecycleService;
+        const ledger = yield* A2ALedger;
+        const send = yield* A2ASendService;
+        const sql = yield* SqlClient.SqlClient;
+        const ask = yield* send.send({
+          commandId: CommCommandId.make("cycles:ask"),
+          senderThreadId: sender.threadId,
+          to: receiver.id,
+          message: "Old obligation",
+          expectReply: true,
+          intent: "Check closure",
+          acceptedAt: openedAt,
+        });
+        const archive = retiredThreadEvent("thread.archived", receiver.threadId, 1);
+        yield* lifecycle.handleStoredEvent(archive);
+        assert.isFalse(
+          (yield* send.listParticipants(sender.threadId)).some(
+            (row) => row.participantId === receiver.id,
+          ),
+        );
+        const hidden = (yield* send.listParticipants(sender.threadId, true)).find(
+          (row) => row.participantId === receiver.id,
+        )!;
+        assert.isTrue(hidden.archived);
+        assert.isFalse(hidden.canReceiveMessage);
+        assert.isFalse(hidden.canOpenExchange);
+        yield* ledger.rebuildMembership(squadronId);
+        assert.isFalse((yield* resolveThreadHome(sql, receiver.threadId)).retired);
+        yield* lifecycle.handleStoredEvent(
+          retiredThreadEvent("thread.unarchived", receiver.threadId, 2),
+        );
+        const restored = (yield* send.listParticipants(sender.threadId)).find(
+          (row) => row.participantId === receiver.id,
+        )!;
+        assert.equal(restored.squadronId, squadronId);
+        assert.isFalse(restored.archived);
+        assert.isTrue(restored.canReceiveMessage);
+        const next = yield* send.send({
+          commandId: CommCommandId.make("cycles:new-ask"),
+          senderThreadId: sender.threadId,
+          to: receiver.id,
+          message: "New obligation",
+          expectReply: true,
+          intent: "New cycle",
+          acceptedAt: archivedAt,
+        });
+        yield* lifecycle.handleStoredEvent(archive);
+        const state = yield* sql<{
+          status: string;
+        }>`SELECT status FROM j5_a2a_exchange WHERE exchange_id = ${next.exchangeId}`;
+        assert.equal(state[0]?.status, "open");
+        yield* lifecycle.handleStoredEvent(
+          retiredThreadEvent("thread.archived", receiver.threadId, 3),
+        );
+        yield* ledger.rebuildMembership(squadronId);
+        const events = yield* sql<{
+          kind: string;
+          count: number;
+        }>`SELECT kind, count(*) AS count FROM j5_a2a_comm_event
+        WHERE receiver = ${receiver.id} AND kind IN ('participant.joined', 'participant.archived') GROUP BY kind`;
+        assert.deepStrictEqual(events, [
+          { kind: "participant.archived", count: 2 },
+          { kind: "participant.joined", count: 1 },
+        ]);
+        const cancelled = yield* sql<{
+          status: string;
+        }>`SELECT status FROM j5_a2a_delivery WHERE message_id = ${ask.messageId}`;
+        assert.equal(cancelled[0]?.status, "cancelled");
+        yield* (yield* A2ADeliveryWorker).drain;
+        assert.isFalse(
+          (yield* Ref.get(notices)).some((entry) => entry.input.messageId === ask.messageId),
+        );
+      }).pipe(Effect.provide(makeTestLayer(notices)));
+    }),
+);
+
+it.effect(
+  "deletes registry and live placement while preserving children, provenance, and peer history",
+  () =>
+    Effect.gen(function* () {
+      const notices = yield* Ref.make<ReadonlyArray<DeliveredNotice>>([]);
+      yield* Effect.gen(function* () {
+        yield* runJ5A2AMigrations();
+        const squadronId = SquadronId.make("squadron:lifecycle:delete");
+        yield* createSquadron(squadronId, "Delete");
+        yield* join(squadronId, sender, "delete:sender");
+        yield* join(squadronId, receiver, "delete:receiver");
+        const placements = yield* ParticipantPlacementService;
+        yield* placements.recordCreation({
+          commandId: PlacementCommandId.make("delete:parent"),
+          squadronId,
+          participantId: sender.id,
+          actor: "platform",
+          provenance: { kind: "unknown", source: "native_or_unobserved" },
+          createdAt: openedAt,
+        });
+        const provenance = {
+          kind: "spawned-by",
+          spawnedByParticipantId: sender.id,
+          source: "j5_spawn",
+        } as const;
+        yield* placements.recordCreation({
+          commandId: PlacementCommandId.make("delete:child"),
+          squadronId,
+          participantId: receiver.id,
+          actor: "platform",
+          provenance,
+          createdAt: openedAt,
+        });
+        const send = yield* A2ASendService;
+        const message = yield* send.send({
+          commandId: CommCommandId.make("delete:ask"),
+          senderThreadId: receiver.threadId,
+          to: sender.id,
+          message: "Retain my history",
+          expectReply: true,
+          intent: "Direct deletion",
+          acceptedAt: openedAt,
+        });
+        const lifecycle = yield* A2ALifecycleService;
+        yield* lifecycle.handleStoredEvent(
+          retiredThreadEvent("thread.deleted", sender.threadId, 1),
+        );
+        const rows = yield* placements.listParticipants(squadronId);
+        assert.lengthOf(rows, 1);
+        assert.equal(rows[0]?.participantId, receiver.id);
+        assert.isNull(rows[0]?.placementParentId);
+        assert.deepStrictEqual(rows[0]?.provenance, provenance);
+        const sql = yield* SqlClient.SqlClient;
+        assert.lengthOf(
+          yield* sql`SELECT 1 FROM j5_a2a_participant_placement WHERE participant_id = ${sender.id}`,
+          0,
+        );
+        assert.lengthOf(
+          yield* sql`SELECT 1 FROM j5_a2a_placement_event WHERE participant_id = ${sender.id}`,
+          1,
+        );
+        assert.lengthOf(
+          yield* sql`SELECT 1 FROM j5_a2a_placement_event WHERE kind = 'participant.reparented'`,
+          0,
+        );
+        assert.lengthOf(
+          yield* sql`SELECT 1 FROM j5_a2a_comm_event WHERE kind = 'message.sent' AND json_extract(payload, '$.messageId') = ${message.messageId}`,
+          1,
+        );
+        yield* (yield* A2ALedger).rebuildMembership(squadronId);
+        yield* lifecycle.handleStoredEvent(
+          retiredThreadEvent("thread.unarchived", sender.threadId, 2),
+        );
+        assert.isTrue((yield* resolveThreadHome(sql, sender.threadId)).retired);
+        assert.lengthOf(yield* send.listParticipants(receiver.threadId, true), 1);
+        yield* (yield* A2ADeliveryWorker).drain;
+        assert.isTrue(
+          (yield* Ref.get(notices)).some((entry) => entry.input.message.includes("was deleted")),
+        );
+      }).pipe(Effect.provide(makeTestLayer(notices)));
+    }),
+);
+
+it.effect(
+  "keeps pre-upgrade retired identities dead across migration, unarchive and membership replay",
+  () =>
+    Effect.gen(function* () {
+      const notices = yield* Ref.make<ReadonlyArray<DeliveredNotice>>([]);
+      yield* Effect.gen(function* () {
+        yield* runJ5A2AMigrations({ toMigrationInclusive: 10 });
+        const squadronId = SquadronId.make("squadron:lifecycle:legacy");
+        yield* createSquadron(squadronId, "Legacy");
+        yield* join(squadronId, sender, "legacy:sender");
+        yield* join(squadronId, receiver, "legacy:receiver");
+        const ledger = yield* A2ALedger;
+        yield* ledger.append({
+          commandId: CommCommandId.make("legacy:retirement"),
+          squadronId,
+          acceptedAt: archivedAt,
+          event: {
+            kind: "participant.left",
+            sender: null,
+            receiver: receiver.id,
+            exchangeId: null,
+            correlationId: null,
+            payload: { participant: receiver },
+            createdAt: archivedAt,
+          },
+        });
+        yield* runJ5A2AMigrations();
+        yield* (yield* A2ALifecycleService).handleStoredEvent(
+          retiredThreadEvent("thread.unarchived", receiver.threadId, 1),
+        );
+        yield* ledger.rebuildMembership(squadronId);
+        yield* runJ5A2AMigrations();
+        const sql = yield* SqlClient.SqlClient;
+        assert.isTrue((yield* resolveThreadHome(sql, receiver.threadId)).retired);
+        assert.lengthOf(yield* (yield* A2ASendService).listParticipants(sender.threadId, true), 1);
+        assert.lengthOf(
+          yield* sql`SELECT 1 FROM j5_a2a_comm_event WHERE kind = 'participant.unarchived'`,
+          0,
+        );
+      }).pipe(Effect.provide(makeTestLayer(notices)));
+    }),
+);
+
+it.effect(
+  "cancels scheduled retries permanently and retains terminal human history before first delivery",
+  () =>
+    Effect.gen(function* () {
+      const notices = yield* Ref.make<ReadonlyArray<DeliveredNotice>>([]);
+      yield* Effect.gen(function* () {
+        yield* runJ5A2AMigrations();
+        const squadronId = SquadronId.make("squadron:lifecycle:retry");
+        yield* createSquadron(squadronId, "Retry closure");
+        yield* join(squadronId, sender, "retry:sender");
+        yield* join(squadronId, receiver, "retry:receiver");
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at) VALUES (${human.id}, 1, ${openedAt})`;
+        const send = yield* A2ASendService;
+        const peer = yield* send.send({
+          commandId: CommCommandId.make("retry:peer"),
+          senderThreadId: sender.threadId,
+          to: receiver.id,
+          message: "Retry me",
+          acceptedAt: openedAt,
+        });
+        const worker = yield* A2ADeliveryWorker;
+        assert.equal((yield* worker.runOnce)?.state, "retry_scheduled");
+        const ask = yield* send.send({
+          commandId: CommCommandId.make("retry:human"),
+          senderThreadId: sender.threadId,
+          to: human.id,
+          message: "Retain this ask",
+          expectReply: true,
+          intent: "Retained human history",
+          urgency: "blocking",
+          acceptedAt: openedAt,
+        });
+        const lifecycle = yield* A2ALifecycleService;
+        yield* lifecycle.archiveParticipant({ participantId: sender.id, archivedAt });
+        yield* lifecycle.handleStoredEvent(
+          retiredThreadEvent("thread.unarchived", sender.threadId, 1),
+        );
+        const deliveries =
+          yield* sql`SELECT status, next_attempt_at FROM j5_a2a_delivery WHERE message_id IN (${peer.messageId}, ${ask.messageId})`;
+        assert.deepStrictEqual(deliveries, [
+          { status: "cancelled", next_attempt_at: null },
+          { status: "cancelled", next_attempt_at: null },
+        ]);
+        assert.deepStrictEqual(
+          yield* sql`SELECT status, latest_message FROM j5_a2a_human_inbox WHERE exchange_id = ${ask.exchangeId}`,
+          [{ status: "dropped", latest_message: "Retain this ask" }],
+        );
+        yield* worker.drain;
+        assert.isFalse(
+          (yield* Ref.get(notices)).some(
+            (notice) =>
+              notice.input.messageId === peer.messageId || notice.input.messageId === ask.messageId,
+          ),
+        );
+        assert.lengthOf(
+          yield* sql`SELECT 1 FROM j5_a2a_human_person WHERE person_id = ${human.id}`,
+          1,
+        );
+        assert.isTrue(
+          (yield* send.listParticipants(receiver.threadId)).some(
+            (row) => row.participantId === human.id && !row.archived,
+          ),
+        );
+      }).pipe(Effect.provide(makeTestLayer(notices, Stream.never, true)));
+    }),
 );

@@ -731,7 +731,9 @@ export const layer: Layer.Layer<
               p.provenance_kind,
               p.provenance_participant_id,
               p.provenance_source,
-              p.placement_parent_id
+              CASE WHEN EXISTS (SELECT 1 FROM j5_a2a_squadron_membership parent
+                WHERE parent.squadron_id = m.squadron_id AND parent.participant_id = p.placement_parent_id)
+                THEN p.placement_parent_id ELSE NULL END AS placement_parent_id
             FROM j5_a2a_squadron_membership m
             LEFT JOIN j5_a2a_participant_placement p
               ON p.squadron_id = m.squadron_id AND p.participant_id = m.participant_id

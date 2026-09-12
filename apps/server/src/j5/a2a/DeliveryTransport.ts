@@ -199,6 +199,7 @@ export const live: Layer.Layer<
             FROM j5_a2a_squadron_membership
             WHERE squadron_id = ${input.receiverSquadronId}
               AND participant_id = ${input.receiverId}
+              AND archived_at IS NULL
             LIMIT 1
           `;
           const row = rows[0];
@@ -215,6 +216,13 @@ export const live: Layer.Layer<
               state: "participant is not an addressable agent thread",
             });
           }
+          const target = yield* threads.getThreadProjection(participant.threadId);
+          if (target.thread.archivedAt !== null) {
+            return yield* new A2ADeliveryTargetError({
+              participantId: input.receiverId,
+              state: "thread is archived",
+            });
+          }
           // A retry must observe the original steer even if its run has ended.
           // Re-dispatching the stable command as a queue request cannot prove delivery.
           const priorEffects = yield* outbox.listByCommandId(deliveryCommandId(input.messageId));
@@ -222,7 +230,6 @@ export const live: Layer.Layer<
             (effect) => effect.request.type === "provider-turn.steer",
           );
           if (priorSteer !== undefined) return yield* awaitSteeringOutcome(priorSteer.id);
-          const target = yield* threads.getThreadProjection(participant.threadId);
           // Astra can receive peer updates during its long turns. Other models
           // and platform notices retain QS1's queue policy (Claude issue #73).
           const alreadyAccepted = target.messages.some(
@@ -287,7 +294,25 @@ export const live: Layer.Layer<
         ),
       deliverHuman: (input) =>
         input.envelopeChannel === "lifecycle_notice"
-          ? Effect.void
+          ? Effect.gen(function* () {
+              const terminal = yield* sql`SELECT 1 FROM j5_a2a_human_inbox
+                WHERE person_id = ${input.receiverId} AND squadron_id = ${input.originSquadronId}
+                  AND exchange_id = ${input.exchangeId} AND status = 'dropped'
+                  AND terminal_notice_message_id = ${input.messageId}`;
+              if (terminal.length !== 1)
+                return yield* new A2ADeliveryTransportError({
+                  operation: "deliver human lifecycle notice",
+                  cause: "Terminal human inbox notice is not projected.",
+                });
+            }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new A2ADeliveryTransportError({
+                    operation: "deliver human lifecycle notice",
+                    cause,
+                  }),
+              ),
+            )
           : Effect.gen(function* () {
               yield* sql`
             INSERT INTO j5_a2a_human_inbox_data (

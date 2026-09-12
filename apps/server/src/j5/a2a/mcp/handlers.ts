@@ -90,6 +90,7 @@ const archiveFailure = (error: unknown): J5ArchiveAgentFailure => {
       interrupt_requested: error.interruptRequested,
       thread_archive_committed: error.threadArchived,
       participant_retired: error.participantRetired,
+      participant_archived: error.participantArchived,
       pending_exchange_ids: [...error.pendingExchangeIds],
       running_turn:
         error.runningTurn === null
@@ -473,12 +474,15 @@ const handlers = {
         acceptedAt,
       });
     }).pipe(Effect.mapError(failure)),
-  list_participants: () =>
+  list_participants: (input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
       const service = yield* A2ASendService;
       const orchestrator = yield* OrchestratorV2;
-      const directory = yield* service.listParticipants(scope.threadId);
+      const directory = yield* service.listParticipants(
+        scope.threadId,
+        input.include_archived ?? false,
+      );
       const placements = yield* ParticipantPlacementService;
       const squadronIds = [...new Set(directory.map((row) => row.squadronId))];
       const placementRows = (yield* Effect.forEach(
@@ -516,6 +520,7 @@ const handlers = {
                   }
                 : row.participant,
             self,
+            archived: row.archived,
             can_receive_message: !self && row.canReceiveMessage,
             can_open_exchange: !self && row.canOpenExchange,
             accepts_urgency: row.acceptsUrgency,
