@@ -54,6 +54,7 @@ const makeTestLayer = (deliveries: Ref.Ref<ReadonlyArray<AgentDeliveryInput>>) =
       const production = yield* A2ADeliveryTransport;
       return A2ADeliveryTransport.of({
         deliverAgent: (input) => Ref.update(deliveries, (current) => [...current, input]),
+        cancelAgent: production.cancelAgent,
         deliverHuman: production.deliverHuman,
       });
     }),

@@ -115,8 +115,9 @@ with the display name to recognize them by, the participant_id to address them w
 accepts (messages, exchanges, urgency). When you're told to message someone by name or role, resolve
 them here first. Your own row is marked self=true; it cannot receive messages or open exchanges from
 you — use schedule_task if you need a future trigger for yourself. Native threads that never
-received a Squadron home do not appear here and cannot be messaged. The roster changes — after you
-spawn an agent, or when a participant retires, call this again instead of reusing a stale listing."
+received a Squadron home do not appear here and cannot be messaged. Archived agents are hidden by
+default; set include_archived=true to see them with archived=true. They cannot receive messages or
+open Exchanges. Refresh the roster after spawning, archiving, unarchiving, or deleting an agent."
 
 **Contract revision (found 2026-08-29):** rows carry no display name today
 (`AgentParticipant = {kind, id, threadId}`), which defeats the address-book purpose — "message the
@@ -217,7 +218,7 @@ survives as their engine (a cascade of one is its degenerate case).
 
 ## `archive_agent` — single-target, refuse-when-consequential with confirmation token
 
-**Description (contract):** "Retire one Peer Agent for good. A clean archive — no open exchanges,
+**Description (contract):** "Archive one Peer Agent reversibly. Unarchive restores the same identity, but does not reopen Exchanges or replay cancelled messages. A clean archive — no open exchanges,
 no running turn — completes immediately. Otherwise the call refuses and lists exactly what
 archiving ends — the asks that will close, the turn that will stop — along with a
 confirmation_token; call again with that token to proceed. The archived agent leaves the active
@@ -249,8 +250,8 @@ ended exchange (loud in the ledger, not just the dialog).
 single-target and never consumes the placement cascade. An interrupt acknowledgement and an
 observed terminal run state are separate facts; the tool does not claim a turn stopped merely
 because interruption was requested. Cross-store partial failure is forward-only: committed thread
-archive and ledger retirement/terminal-notice facts are re-read on retry, and `already_archived`
-requires the participant-left timestamp plus completion of every terminal lifecycle notice. When
+archive and ledger archive/terminal-notice facts are re-read on retry, and `already_archived`
+requires the archive timestamp (or legacy departure timestamp) plus completion of every terminal lifecycle notice. When
 an already-retired participant is absent from the active directory, the authorized Squadron's
 ledger is used only as a consume-only replay fallback and must contain exactly one matching
 `participant.joined` agent identity. Malformed or unknown-version confirmation tokens fail closed

@@ -174,7 +174,7 @@ export const resolveThreadHome = Effect.fn("j5.a2a.resolveThreadHome")(function*
         FROM j5_a2a_comm_event AS retirement
         WHERE retirement.squadron_id = event.squadron_id
           AND retirement.seq > event.seq
-          AND retirement.kind = 'participant.left'
+          AND retirement.kind IN ('participant.left', 'participant.deleted')
           AND json_extract(retirement.payload, '$.participant.kind') = 'agent'
           AND json_extract(retirement.payload, '$.participant.id') =
             json_extract(event.payload, '$.participant.id')

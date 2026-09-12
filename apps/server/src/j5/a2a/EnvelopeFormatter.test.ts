@@ -48,7 +48,7 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
     message: "Please verify the worker.",
   });
 
-  assert.equal(A2A_ENVELOPE_VERSION, 16);
+  assert.equal(A2A_ENVELOPE_VERSION, 17);
   assert.include(rendered, "Cross-agent message");
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
   assert.include(rendered, "agent:sender");
@@ -128,13 +128,13 @@ it("keeps the tool descriptions on their documented contracts", () => {
   assert.include(A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION, "client_request_id");
   assert.equal(
     A2A_LIST_TOOL_DESCRIPTION,
-    "Your address book: the participants around you — agents and the human — with the display name to recognize them by, the participant_id to address them with, and what each accepts (messages, exchanges, urgency). When you're told to message someone by name or role, resolve them here first. Your own row is marked self=true; it cannot receive messages or open exchanges from you — use schedule_task if you need a future trigger for yourself. Native threads that never received a Squadron home do not appear here and cannot be messaged. The roster changes — after you spawn an agent, or when a participant retires, call this again instead of reusing a stale listing.",
+    "Your address book: the participants around you — agents and the human — with the display name to recognize them by, the participant_id to address them with, and what each accepts (messages, exchanges, urgency). When you're told to message someone by name or role, resolve them here first. Your own row is marked self=true; it cannot receive messages or open exchanges from you — use schedule_task if you need a future trigger for yourself. Native threads that never received a Squadron home do not appear here and cannot be messaged. Archived agents are hidden by default; set include_archived=true to see them with archived=true. They cannot receive messages or open Exchanges. The roster changes — after you spawn, archive, unarchive, or delete an agent, call this again instead of reusing a stale listing.",
   );
   for (const clause of [
     "Your own row is marked self=true",
     "use schedule_task if you need a future trigger for yourself",
     "Native threads that never received a Squadron home do not appear here and cannot be messaged.",
-    "The roster changes — after you spawn an agent, or when a participant retires, call this again instead of reusing a stale listing.",
+    "Archived agents are hidden by default; set include_archived=true to see them with archived=true. They cannot receive messages or open Exchanges. The roster changes — after you spawn, archive, unarchive, or delete an agent, call this again instead of reusing a stale listing.",
   ]) {
     assert.include(A2A_LIST_TOOL_DESCRIPTION, clause);
   }
@@ -144,10 +144,7 @@ it("keeps the tool descriptions on their documented contracts", () => {
   }
   assert.include(A2A_SEND_TOOL_DESCRIPTION, "participants already returned by list_participants");
   assert.include(A2A_SEND_TOOL_DESCRIPTION, "reply expectation in spawn_agent's brief");
-  assert.notMatch(
-    A2A_LIST_TOOL_DESCRIPTION,
-    /consult.*(?:spawn|archive)|(?:spawn|archive).*changes/i,
-  );
+  assert.notMatch(A2A_LIST_TOOL_DESCRIPTION, /consult.*(?:spawn|archive)/i);
   assert.notMatch(
     [A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION].join("\n"),
     /\b(?:J5|A2A)\b/,

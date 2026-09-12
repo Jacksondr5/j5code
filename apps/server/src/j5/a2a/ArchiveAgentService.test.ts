@@ -74,7 +74,7 @@ interface HarnessOptions {
 
 const makeHarness = (options: HarnessOptions = {}) => {
   let archived = false;
-  let retired = false;
+  let participantArchived = false;
   let open = options.openExchange ?? false;
   let runStatus = options.runStatus;
   let lifecycleCalls = 0;
@@ -107,11 +107,11 @@ const makeHarness = (options: HarnessOptions = {}) => {
     }) as unknown as OrchestrationV2ThreadProjection;
 
   const appendParticipantLeft = () => {
-    if (events.some((event) => event.kind === "participant.left")) return;
+    if (events.some((event) => event.kind === "participant.archived")) return;
     events.push({
       seq: nextSeq(squadronId),
       squadronId,
-      kind: "participant.left",
+      kind: "participant.archived",
       sender: null,
       receiver: participantId,
       exchangeId: null,
@@ -181,7 +181,8 @@ const makeHarness = (options: HarnessOptions = {}) => {
             threadId,
             squadronId,
             participantId: options.mismatchParticipantId ?? participantId,
-            retired,
+            retired: false,
+            archived: participantArchived,
             openExchanges: open
               ? [
                   {
@@ -241,7 +242,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
     Layer.mock(A2ALifecycleService)({
       archiveParticipant: () => {
         lifecycleCalls += 1;
-        retired = true;
+        participantArchived = true;
         appendParticipantLeft();
         if (options.failLifecycleOnce === true && lifecycleCalls === 1) {
           return Effect.fail(
@@ -266,7 +267,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
     layer: archiveAgentLayer.pipe(Layer.provide(dependencies)),
     snapshot: () => ({
       archived,
-      retired,
+      participantArchived,
       open,
       runStatus,
       lifecycleCalls,
@@ -289,10 +290,10 @@ it.effect("archives a clean exact target and proves terminal ledger facts on rep
     assert.equal(yield* service.archive(archiveInput()), "already_archived");
     const state = harness.snapshot();
     assert.isTrue(state.archived);
-    assert.isTrue(state.retired);
+    assert.isTrue(state.participantArchived);
     assert.equal(state.archiveCalls, 1);
     assert.equal(state.lifecycleCalls, 1);
-    assert.isTrue(state.events.some((event) => event.kind === "participant.left"));
+    assert.isTrue(state.events.some((event) => event.kind === "participant.archived"));
   }).pipe(Effect.provide(harness.layer));
 });
 
@@ -424,7 +425,8 @@ it.effect("recovers forward after a committed thread archive and incomplete noti
     if (partial instanceof ArchiveAgentPartialFailureError) {
       assert.isTrue(partial.interruptRequested);
       assert.isTrue(partial.threadArchived);
-      assert.isTrue(partial.participantRetired);
+      assert.isFalse(partial.participantRetired);
+      assert.isTrue(partial.participantArchived);
       assert.deepStrictEqual(partial.pendingExchangeIds, [exchangeId]);
       assert.deepStrictEqual(partial.runningTurn, { runId, status: "running" });
     }

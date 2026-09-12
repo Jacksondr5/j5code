@@ -10,6 +10,7 @@ import Migration0006 from "./migrations/006_HumanNode.ts";
 import Migration0007 from "./migrations/007_ParticipantPlacement.ts";
 import Migration0008 from "./migrations/008_LifecycleClosure.ts";
 import Migration0009 from "./migrations/009_SquadronProjectReferences.ts";
+import Migration0011 from "./migrations/011_ReversibleLifecycle.ts";
 import Migration0010 from "./migrations/010_OpenInboxCountIndex.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
@@ -27,6 +28,7 @@ export const migrationEntries = [
   [8, "LifecycleClosure", Migration0008],
   [9, "SquadronProjectReferences", Migration0009],
   [10, "OpenInboxCountIndex", Migration0010],
+  [11, "ReversibleLifecycle", Migration0011],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>

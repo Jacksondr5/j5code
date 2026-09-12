@@ -1151,7 +1151,7 @@ it.effect("routes real archive and delete commands through lifecycle closure exa
         readonly status: string;
         readonly dropped_events: number;
         readonly terminal_notices: number;
-        readonly participant_left_events: number;
+        readonly participant_deleted_events: number;
       }>`
         SELECT
           exchange.status,
@@ -1168,8 +1168,8 @@ it.effect("routes real archive and delete commands through lifecycle closure exa
           (
             SELECT COUNT(*)
             FROM j5_a2a_comm_event
-            WHERE kind = 'participant.left' AND receiver = ${receiver.id}
-          ) AS participant_left_events
+            WHERE kind = 'participant.deleted' AND receiver = ${receiver.id}
+          ) AS participant_deleted_events
         FROM j5_a2a_exchange AS exchange
         WHERE exchange.exchange_id = ${opened.exchangeId}
       `;
@@ -1178,7 +1178,7 @@ it.effect("routes real archive and delete commands through lifecycle closure exa
           status: "dropped",
           dropped_events: 1,
           terminal_notices: 1,
-          participant_left_events: 1,
+          participant_deleted_events: 1,
         },
       ]);
       assert.deepStrictEqual(yield* ledger.listMembership(squadronId), [
@@ -2174,7 +2174,7 @@ it.effect(
         for (const target of [first, second]) {
           assert.isNotNull((yield* threads.getThreadProjection(target.threadId)).thread.deletedAt);
           assert.deepStrictEqual(
-            yield* sql`SELECT COUNT(*) AS count FROM j5_a2a_comm_event WHERE kind = 'participant.left' AND receiver = ${target.receiverId}`,
+            yield* sql`SELECT COUNT(*) AS count FROM j5_a2a_comm_event WHERE kind = 'participant.deleted' AND receiver = ${target.receiverId}`,
             [{ count: 1 }],
           );
         }
@@ -2234,4 +2234,148 @@ it.effect("observes a real overdue queued delivery without terminalizing or rein
       assert.lengthOf(yield* Ref.get(harness.startedInputs), 0);
     }).pipe(Effect.provide(layer));
   }),
+);
+
+for (const archiveSender of [false, true]) {
+  it.effect(
+    `cancels accepted queued delivery permanently across archive/unarchive (sender archived=${archiveSender})`,
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness;
+        yield* Effect.gen(function* () {
+          const source = yield* seedTarget("cancel-source");
+          const target = yield* seedTarget("cancel-target");
+          const threads = yield* ThreadManagementService;
+          const lifecycle = yield* A2ALifecycleService;
+          const threadLifecycle = yield* ThreadLifecycleService;
+          yield* threads.sendToThread({
+            projectId: target.projectId,
+            threadId: target.threadId,
+            commandId: CommandId.make("cancel:active"),
+            messageId: MessageId.make("cancel:active"),
+            text: "Existing work",
+            attachments: [],
+            mode: "auto",
+            createdBy: "user",
+            creationSource: "web",
+          });
+          yield* startPendingTestTurn(target.threadId);
+          const sent = yield* (yield* A2ASendService).send({
+            commandId: CommCommandId.make("cancel:send"),
+            senderThreadId: source.threadId,
+            to: target.receiverId,
+            message: "Must not execute if cancelled",
+            acceptedAt: "2026-09-12T00:00:00.000Z",
+          });
+          // A real dispatch receipt exists, but the process has not yet committed its A2A outcome.
+          yield* (yield* A2ADeliveryTransport).deliverAgent({
+            ...target.delivery,
+            originSquadronId: source.squadronId,
+            senderId: source.receiverId,
+            messageId: sent.messageId,
+            exchangeId: null,
+            exchangeRole: "none",
+            message: "Must not execute if cancelled",
+          });
+          const queued = (yield* threads.getThreadProjection(target.threadId)).runs.find(
+            (run) => run.userMessageId === deliveryMessageId(sent.messageId),
+          )!;
+          assert.equal(queued.status, "queued");
+          const archived = archiveSender ? source : target;
+          yield* threadLifecycle.archive({
+            commandId: CommandId.make("cancel:archive"),
+            threadId: archived.threadId,
+          });
+          // Upstream archive cancels the recipient's queue, but cannot withdraw outgoing work.
+          assert.equal(
+            (yield* threads.getThreadProjection(target.threadId)).runs.find(
+              (run) => run.id === queued.id,
+            )?.status,
+            archiveSender ? "queued" : "cancelled",
+          );
+          yield* lifecycle.archiveParticipant({
+            participantId: archived.receiverId,
+            archivedAt: "2026-09-12T00:01:00.000Z",
+          });
+          const sql = yield* SqlClient.SqlClient;
+          assert.deepStrictEqual(
+            yield* sql`SELECT status FROM j5_a2a_delivery WHERE message_id = ${sent.messageId}`,
+            [{ status: "cancelled" }],
+          );
+          yield* threadLifecycle.unarchive({
+            commandId: CommandId.make("cancel:unarchive"),
+            threadId: archived.threadId,
+          });
+          yield* finishTestTurn(harness, target.threadId);
+          assert.equal(yield* (yield* OrchestratorV2).resumeQueuedRuns, 0);
+          yield* (yield* OrchestrationEffectWorkerV2).drain();
+          const after = yield* threads.getThreadProjection(target.threadId);
+          assert.equal(after.runs.find((run) => run.id === queued.id)?.status, "cancelled");
+          assert.lengthOf(
+            (yield* Ref.get(harness.startedInputs)).filter((input) => input.runId === queued.id),
+            0,
+          );
+          assert.lengthOf(yield* (yield* A2ADeliveryWorker).drain, 0);
+        }).pipe(Effect.provide(makeMessageLifecycleLayer(harness)));
+      }),
+  );
+}
+
+it.effect(
+  "records an already accepted idle-target run as delivered when archive leaves it executing",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const source = yield* seedTarget("accepted-source");
+        const target = yield* seedTarget("accepted-idle");
+        const sent = yield* (yield* A2ASendService).send({
+          commandId: CommCommandId.make("accepted:send"),
+          senderThreadId: source.threadId,
+          to: target.receiverId,
+          message: "Accepted immediate work",
+          acceptedAt: "2026-09-12T00:00:00.000Z",
+        });
+        yield* (yield* A2ADeliveryTransport).deliverAgent({
+          ...target.delivery,
+          originSquadronId: source.squadronId,
+          senderId: source.receiverId,
+          messageId: sent.messageId,
+          exchangeId: null,
+          exchangeRole: "none",
+          message: "Accepted immediate work",
+        });
+        yield* startPendingTestTurn(target.threadId);
+        const threads = yield* ThreadManagementService;
+        const run = (yield* threads.getThreadProjection(target.threadId)).runs.find(
+          (entry) => entry.userMessageId === deliveryMessageId(sent.messageId),
+        )!;
+        assert.equal(run.status, "running");
+        yield* (yield* ThreadLifecycleService).archive({
+          commandId: CommandId.make("accepted:archive"),
+          threadId: target.threadId,
+        });
+        yield* (yield* A2ALifecycleService).archiveParticipant({
+          participantId: target.receiverId,
+          archivedAt: "2026-09-12T00:01:00.000Z",
+        });
+        const sql = yield* SqlClient.SqlClient;
+        assert.deepStrictEqual(
+          yield* sql`SELECT status FROM j5_a2a_delivery WHERE message_id = ${sent.messageId}`,
+          [{ status: "delivered" }],
+        );
+        assert.equal(
+          (yield* threads.getThreadProjection(target.threadId)).runs.find(
+            (entry) => entry.id === run.id,
+          )?.status,
+          "running",
+        );
+        assert.lengthOf(
+          yield* sql`SELECT 1 FROM j5_a2a_comm_event WHERE kind = 'message.cancelled' AND json_extract(payload, '$.messageId') = ${sent.messageId}`,
+          0,
+        );
+        yield* finishTestTurn(harness, target.threadId);
+        assert.lengthOf(yield* Ref.get(harness.startedInputs), 1);
+      }).pipe(Effect.provide(makeMessageLifecycleLayer(harness)));
+    }),
 );

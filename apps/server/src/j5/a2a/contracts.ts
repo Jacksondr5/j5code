@@ -82,11 +82,15 @@ export const CommEventKind = Schema.Literals([
   "message.received",
   "message.delivered",
   "message.delivery_failed",
+  "message.cancelled",
   "exchange.closed",
   "exchange.dropped",
   "silence.notice",
   "participant.joined",
   "participant.left",
+  "participant.archived",
+  "participant.unarchived",
+  "participant.deleted",
 ]);
 export type CommEventKind = typeof CommEventKind.Type;
 
@@ -95,6 +99,7 @@ const NonMembershipEventKind = Schema.Literals([
   "message.sent",
   "message.delivered",
   "message.delivery_failed",
+  "message.cancelled",
   "exchange.closed",
   "exchange.dropped",
   "silence.notice",
@@ -130,9 +135,14 @@ const ParticipantJoinedCommEvent = Schema.Struct({
   payload: Schema.Struct({ participant: Participant }),
 });
 
-const ParticipantLeftCommEvent = Schema.Struct({
+const ParticipantMembershipCommEvent = Schema.Struct({
   ...eventAddressFields,
-  kind: Schema.Literal("participant.left"),
+  kind: Schema.Literals([
+    "participant.left",
+    "participant.archived",
+    "participant.unarchived",
+    "participant.deleted",
+  ]),
   payload: Schema.Struct({ participant: Participant }),
 });
 
@@ -140,7 +150,7 @@ export const CommEvent = Schema.Union([
   NonMembershipCommEvent,
   MessageReceivedCommEvent,
   ParticipantJoinedCommEvent,
-  ParticipantLeftCommEvent,
+  ParticipantMembershipCommEvent,
 ]);
 export type CommEvent = typeof CommEvent.Type;
 
@@ -153,7 +163,7 @@ export const StoredCommEvent = Schema.Union([
   Schema.Struct({ ...storedFields, ...NonMembershipCommEvent.fields }),
   Schema.Struct({ ...storedFields, ...MessageReceivedCommEvent.fields }),
   Schema.Struct({ ...storedFields, ...ParticipantJoinedCommEvent.fields }),
-  Schema.Struct({ ...storedFields, ...ParticipantLeftCommEvent.fields }),
+  Schema.Struct({ ...storedFields, ...ParticipantMembershipCommEvent.fields }),
 ]);
 export type StoredCommEvent = typeof StoredCommEvent.Type;
 
@@ -231,7 +241,7 @@ export type ExchangeDropDisposition = typeof ExchangeDropDisposition.Type;
 export const ExchangeDroppedPayload = Schema.Struct({
   disposition: ExchangeDropDisposition,
   cause: Schema.Struct({
-    kind: Schema.Literal("participant-archived"),
+    kind: Schema.Literals(["participant-archived", "participant-deleted"]),
     participantId: ParticipantId,
     squadronId: SquadronId,
   }),
@@ -285,6 +295,7 @@ export const ParticipantDirectoryRow = Schema.Struct({
   squadronId: SquadronId,
   participantId: ParticipantId,
   participant: Participant,
+  archived: Schema.Boolean,
   canReceiveMessage: Schema.Boolean,
   canOpenExchange: Schema.Boolean,
   acceptsUrgency: Schema.Boolean,
@@ -302,7 +313,7 @@ export type DeliveryAlarm = typeof DeliveryAlarm.Type;
 export const DeliveryMilestone = Schema.Struct({
   squadronId: SquadronId,
   messageId: LedgerMessageId,
-  state: Schema.Literals(["delivered", "retry_scheduled", "alarmed"]),
+  state: Schema.Literals(["delivered", "retry_scheduled", "alarmed", "cancelled"]),
   attempt: PositiveInt,
 });
 export type DeliveryMilestone = typeof DeliveryMilestone.Type;

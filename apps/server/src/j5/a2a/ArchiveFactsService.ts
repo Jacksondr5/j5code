@@ -96,6 +96,7 @@ export type ThreadPreArchiveFacts =
       readonly squadronId: SquadronId;
       readonly participantId: ParticipantId;
       readonly retired: boolean;
+      readonly archived: boolean;
       readonly openExchanges: ReadonlyArray<OpenExchangeArchiveFact>;
       readonly placementSubtree: ArchivePlacementSubtree;
     };
@@ -199,6 +200,11 @@ export const layer = Layer.effect(
           squadronId: resolution.home.squadronId,
           participantId,
           retired: resolution.retired,
+          archived:
+            (yield* sql<{
+              readonly archived_at: string | null;
+            }>`SELECT archived_at FROM j5_a2a_squadron_membership WHERE participant_id = ${participantId}`)[0]
+              ?.archived_at != null,
           openExchanges,
           placementSubtree,
         } as const;

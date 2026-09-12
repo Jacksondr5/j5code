@@ -14,7 +14,7 @@ import {
   migrationManifest,
   runMigrations,
 } from "../../persistence/Migrations.ts";
-import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
+import { migrationEntries as j5MigrationEntries, runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { makeSqlitePersistenceLive } from "../../persistence/Layers/Sqlite.ts";
 import { runJ5CompatibleUpstreamMigrations } from "./UpstreamMigrationCompatibility.ts";
 
@@ -103,9 +103,13 @@ it.effect("bridges a legacy file through persistence startup before running the 
           migrationManifest,
         );
         const j5 = yield* sql<{
-          readonly count: number;
-        }>`SELECT COUNT(*) AS count FROM j5_a2a_migrations`;
-        assert.equal(j5[0]?.count, 10);
+          readonly migration_id: number;
+          readonly name: string;
+        }>`SELECT migration_id, name FROM j5_a2a_migrations ORDER BY migration_id`;
+        assert.deepStrictEqual(
+          j5.map(({ migration_id, name }) => [migration_id, name]),
+          j5MigrationEntries.map(([id, name]) => [id, name]),
+        );
       }).pipe(Effect.provide(makeSqlitePersistenceLive(filename)));
     }
   }).pipe(Effect.provide(NodeServices.layer)),

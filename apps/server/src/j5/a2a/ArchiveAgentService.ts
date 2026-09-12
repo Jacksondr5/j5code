@@ -144,6 +144,7 @@ export class ArchiveAgentPartialFailureError extends Data.TaggedError(
   readonly interruptRequested: boolean;
   readonly threadArchived: boolean;
   readonly participantRetired: boolean;
+  readonly participantArchived: boolean;
   readonly pendingExchangeIds: ReadonlyArray<ExchangeId>;
   readonly runningTurn: ArchiveAgentRunningTurnFact | null;
   readonly cause: unknown;
@@ -154,7 +155,7 @@ export class ArchiveAgentPartialFailureError extends Data.TaggedError(
         ? "No active run is currently observed."
         : `Run ${this.runningTurn.runId} is still observed as ${this.runningTurn.status}; an interrupt may have been requested, but terminal state is not yet observed.`;
     return [
-      `archive_agent committed thread archive=${this.threadArchived}, participant retirement=${this.participantRetired}.`,
+      `archive_agent committed thread archive=${this.threadArchived}, participant archived=${this.participantArchived}, legacy retirement=${this.participantRetired}.`,
       this.pendingExchangeIds.length === 0
         ? "All observed lifecycle obligation events are committed."
         : `Lifecycle obligation events remain in flight for exchanges ${this.pendingExchangeIds.join(", ")}.`,
@@ -207,11 +208,13 @@ const decodeMessageSentOption = Schema.decodeUnknownOption(MessageSentPayload);
 interface ReadState {
   readonly projection: OrchestrationV2ThreadProjection;
   readonly retired: boolean;
+  readonly archived: boolean;
   readonly facts: ArchiveAgentConsequenceFacts;
 }
 
 interface ClosureStatus {
   readonly participantRetired: boolean;
+  readonly participantArchived: boolean;
   readonly participantLeftAt: string | null;
   readonly pendingExchangeIds: ReadonlyArray<ExchangeId>;
   readonly complete: boolean;
@@ -353,6 +356,7 @@ export const layer = Layer.effect(
       return {
         projection,
         retired: facts.retired,
+        archived: facts.archived,
         facts: {
           openExchanges: canonicalExchanges(facts.openExchanges.map(projectExchange)),
           runningTurn:
@@ -451,7 +455,7 @@ export const layer = Layer.effect(
       const participantLeftAt =
         events.findLast(
           (event) =>
-            event.kind === "participant.left" &&
+            (event.kind === "participant.archived" || event.kind === "participant.left") &&
             event.receiver === target.participantId &&
             event.payload.participant.kind === "agent" &&
             event.payload.participant.id === target.participantId &&
@@ -490,10 +494,11 @@ export const layer = Layer.effect(
       }
       return {
         participantRetired: post.retired,
+        participantArchived: post.archived,
         participantLeftAt,
         pendingExchangeIds: pending,
         complete:
-          post.retired &&
+          (post.archived || post.retired) &&
           participantLeftAt !== null &&
           post.facts.openExchanges.length === 0 &&
           pending.length === 0,
@@ -512,6 +517,7 @@ export const layer = Layer.effect(
         interruptRequested,
         threadArchived: post.projection.thread.archivedAt !== null,
         participantRetired: closure.participantRetired,
+        participantArchived: closure.participantArchived,
         pendingExchangeIds: closure.pendingExchangeIds,
         runningTurn: post.facts.runningTurn,
         cause,
@@ -525,7 +531,7 @@ export const layer = Layer.effect(
             ? undefined
             : yield* parseToken(input.confirmationToken);
         const before = yield* readState(input.target);
-        if (before.projection.thread.archivedAt !== null && before.retired) {
+        if (before.projection.thread.archivedAt !== null && (before.archived || before.retired)) {
           const closure = yield* readClosureStatus(input.target, []);
           if (closure.complete) return "already_archived" as const;
         }
