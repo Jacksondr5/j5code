@@ -40,6 +40,7 @@ interface PackageJson {
   bin: Record<string, string>;
   type: string;
   version: string;
+  gitHead: string;
   engines: Record<string, string>;
   files: string[];
   dependencies: Record<string, string>;
@@ -242,6 +243,17 @@ const publishCmd = Command.make(
           const workspaceConfig = yield* readWorkspaceConfig();
           const workspaceCatalog = workspaceConfig.catalog ?? {};
           const workspaceOverrides = workspaceConfig.overrides ?? {};
+          // pnpm's native publisher does not add gitHead; release retries use it
+          // to verify that an existing npm version came from the selected commit.
+          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+          const gitHead = yield* spawner
+            .string(ChildProcess.make("git", ["rev-parse", "HEAD"], { cwd: repoRoot }))
+            .pipe(
+              Effect.map((output) => output.trim()),
+              Effect.flatMap(
+                Schema.decodeEffect(Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/))),
+              ),
+            );
           const pkg: PackageJson = {
             // Keep upstream workspace names and Effect service keys internal.
             // The published manifest owns the public npm identity.
@@ -250,6 +262,7 @@ const publishCmd = Command.make(
             bin: serverPackageJson.bin,
             type: serverPackageJson.type,
             version,
+            gitHead,
             engines: serverPackageJson.engines,
             files: serverPackageJson.files,
             dependencies: resolveCatalogDependencies(
