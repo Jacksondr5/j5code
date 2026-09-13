@@ -56,7 +56,7 @@ jobs:
   publish_cli:
     needs: [resolve, monitors]
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 45
     permissions:
       contents: read
       actions: read
@@ -138,7 +138,18 @@ jobs:
         run: GITHUB_SHA="$RELEASE_SHA" pnpm exec node apps/server/scripts/cli.ts publish --app-version "$RELEASE_VERSION" --provenance --verbose
 
       - name: Confirm npm version is available before desktop publication
-        run: test "$(npm view "@jacksondr5/j5code@$RELEASE_VERSION" version --prefer-online)" = "$RELEASE_VERSION"
+        # npm's publish-time scan can hold a successful publish for several minutes.
+        run: |
+          for attempt in $(seq 1 40); do
+            if published_version="$(npm view "@jacksondr5/j5code@$RELEASE_VERSION" version --prefer-online --fetch-retries=0 --fetch-timeout=10000)" &&
+              [[ "$published_version" = "$RELEASE_VERSION" ]]; then
+              exit 0
+            fi
+            echo "Waiting for npm to make $RELEASE_VERSION available ($attempt/40)."
+            sleep 30
+          done
+          echo "::error::The npm version is still unavailable. Check its publication status before retrying this release."
+          exit 1
 
   release:
     needs: [resolve, publish_cli]
