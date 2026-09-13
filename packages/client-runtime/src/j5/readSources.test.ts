@@ -9,7 +9,7 @@ import * as Option from "effect/Option";
 import { AsyncResult } from "effect/unstable/reactivity";
 
 import { J5HttpError } from "./http.ts";
-import { resolveJ5ReadSource } from "./readSources.ts";
+import { resolveJ5ReadSource, spansMultipleEnvironments } from "./readSources.ts";
 
 const session: AuthSessionState = {
   authenticated: true,
@@ -71,4 +71,12 @@ it("keeps unsupported, authentication failure, and not-yet-connected states dist
     resolveJ5ReadSource({ ...source, phase: "connecting", result: AsyncResult.initial(false) })
       .status,
   ).toBe("loading");
+});
+
+it("shows environment labels only once items span more than one environment", () => {
+  const alpha = { environmentId: EnvironmentId.make("alpha") };
+  const bravo = { environmentId: EnvironmentId.make("bravo") };
+  expect(spansMultipleEnvironments([])).toBe(false);
+  expect(spansMultipleEnvironments([alpha, alpha])).toBe(false);
+  expect(spansMultipleEnvironments([alpha, bravo])).toBe(true);
 });

@@ -12,6 +12,11 @@ import type { SupervisorConnectionState } from "../connection/model.ts";
 import type { EnvironmentCatalogState } from "../state/connections.ts";
 import { isJ5UnsupportedError } from "./http.ts";
 
+/** Environment labels are noise until a read model actually spans more than one environment. */
+export const spansMultipleEnvironments = (
+  items: ReadonlyArray<{ readonly environmentId: EnvironmentId }>,
+): boolean => new Set(items.map((item) => item.environmentId)).size > 1;
+
 export interface J5ReadSource<A> {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;

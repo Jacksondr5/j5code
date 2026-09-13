@@ -70,7 +70,7 @@ export async function refreshJ5Sources<A>(
         (options.environmentId !== undefined && source.environmentId !== options.environmentId)
       )
         return [];
-      if (options.force !== true && (source.status === "unsupported" || source.refreshing))
+      if (source.status === "unsupported" || (options.force !== true && source.refreshing))
         return [];
       const atom = queryAtom(source.environmentId);
       appAtomRegistry.refresh(atom);

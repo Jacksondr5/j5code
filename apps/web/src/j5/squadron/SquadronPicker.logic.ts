@@ -1,4 +1,5 @@
 import type { Project } from "../../types";
+import { spansMultipleEnvironments } from "@t3tools/client-runtime/j5/readSources";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { SquadronDirectoryState } from "./SquadronDirectory";
@@ -8,6 +9,8 @@ import type { ScopedManagedSquadron } from "./SquadronDirectory";
 export type SquadronPickerEntry = {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
+  /** Rows name their environment only once the directory spans more than one. */
+  readonly showEnvironment: boolean;
   readonly available: boolean;
   readonly squadronId: string;
   readonly name: string;
@@ -28,7 +31,7 @@ export const buildSquadronPickerRow = (entry: SquadronPickerEntry) => ({
     entry.folder?.title ?? "",
     entry.folder?.workspaceRoot ?? "",
   ],
-  description: entry.environmentLabel,
+  ...(entry.showEnvironment ? { description: entry.environmentLabel } : {}),
   title: entry.name,
   ...(entry.folder === null || !entry.available ? { disabled: true } : {}),
 });
@@ -109,6 +112,7 @@ export function buildSquadronPickerEntries(input: {
     Pick<Project, "environmentId" | "id" | "title" | "workspaceRoot">
   >;
 }): ReadonlyArray<SquadronPickerEntry> {
+  const showEnvironment = spansMultipleEnvironments(input.squadrons);
   return input.squadrons.map(
     ({ squadron, projectIds, environmentId, environmentLabel, available }) => {
       const projectId = projectIds[0];
@@ -121,6 +125,7 @@ export function buildSquadronPickerEntries(input: {
       return {
         environmentId,
         environmentLabel,
+        showEnvironment,
         available,
         squadronId: squadron.id,
         name: squadron.name,

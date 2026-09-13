@@ -53,6 +53,6 @@ export function j5SourceNotice(source: J5ReadSource<unknown>): string | null {
     case "unsupported":
       return `${source.environmentLabel}: this server does not provide this J5 feature.`;
     case "error":
-      return `${source.environmentLabel}: ${source.error ?? "could not refresh"}${source.data === null ? "" : " Showing saved results."}`;
+      return `${source.environmentLabel}: ${source.error ?? "could not refresh"}${source.data === null ? "" : " — showing saved results."}`;
   }
 }

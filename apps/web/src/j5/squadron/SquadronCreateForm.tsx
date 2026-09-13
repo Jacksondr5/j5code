@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { openCommandPalette, type CommandPaletteProjectSelection } from "../../commandPaletteBus";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { spansMultipleEnvironments } from "@t3tools/client-runtime/j5/readSources";
 import { formatSquadronFolder, resolveSquadronCreationState } from "./SquadronCreate.logic";
 import { createSquadron } from "./squadronClient";
 import { refreshSquadronDirectory, useSquadronDirectory } from "./SquadronDirectory";
@@ -89,7 +90,7 @@ export function SquadronCreateForm({ onCreated }: { readonly onCreated?: () => v
           ) : (
             <p className="text-sm font-normal text-muted-foreground">
               {formatSquadronFolder(selectedProject)}
-              {source !== undefined ? (
+              {source !== undefined && spansMultipleEnvironments(sources) ? (
                 <span className="mt-1 block text-xs">{source.environmentLabel}</span>
               ) : null}
             </p>

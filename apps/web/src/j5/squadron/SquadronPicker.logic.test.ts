@@ -24,6 +24,7 @@ const sharedFolder = {
 const environmentScope = {
   environmentId: sharedFolder.environmentId,
   environmentLabel: "Primary",
+  showEnvironment: false,
   available: true,
 };
 const squadronRef = (squadronId: string) => ({
@@ -34,7 +35,7 @@ const homeKey = (threadId: string) =>
   scopedThreadKey(scopeThreadRef(sharedFolder.environmentId, ThreadId.make(threadId)));
 
 describe("Squadron picker", () => {
-  it("labels the Squadron picker row with its environment", () => {
+  it("renders a single-environment Squadron picker row as the name alone", () => {
     const [entry] = buildSquadronPickerEntries({
       squadrons: [
         {
@@ -49,9 +50,37 @@ describe("Squadron picker", () => {
     const row = buildSquadronPickerRow(entry!);
     expect(row).toEqual({
       searchTerms: ["Alpha", "Primary", "Shared folder", "/work/shared"],
-      description: "Primary",
       title: "Alpha",
     });
+    expect(row).not.toHaveProperty("description");
+  });
+
+  it("names each row's environment once Squadrons span more than one environment", () => {
+    const remoteScope = {
+      environmentId: EnvironmentId.make("environment:remote"),
+      environmentLabel: "Build box",
+      available: true,
+    };
+    const entries = buildSquadronPickerEntries({
+      squadrons: [
+        {
+          ...environmentScope,
+          squadron: { id: "squadron:alpha", name: "Alpha", createdAt: "2026-08-31T00:00:00Z" },
+          projectIds: [sharedFolder.id],
+        },
+        {
+          ...remoteScope,
+          squadron: { id: "squadron:alpha", name: "Alpha", createdAt: "2026-08-31T00:00:00Z" },
+          projectIds: [],
+        },
+      ],
+      projects: [sharedFolder],
+    });
+
+    expect(entries.map((entry) => buildSquadronPickerRow(entry).description)).toEqual([
+      "Primary",
+      "Build box",
+    ]);
   });
 
   it("keys Squadron draft state by immutable returned thread id, never local draft id", () => {

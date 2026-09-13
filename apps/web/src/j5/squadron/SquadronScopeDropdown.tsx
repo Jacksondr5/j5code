@@ -1,3 +1,4 @@
+import { spansMultipleEnvironments } from "@t3tools/client-runtime/j5/readSources";
 import { scopedSquadronKey } from "@t3tools/contracts/j5";
 import { PlusIcon, RadioIcon } from "lucide-react";
 import { useState } from "react";
@@ -48,6 +49,7 @@ export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
     id: squadron.id,
     name: squadron.name,
   }));
+  const showEnvironment = spansMultipleEnvironments(choices);
   const selected = resolveSquadronScope(choices, selectedId);
 
   return (
@@ -108,9 +110,14 @@ export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
               >
                 <span className="min-w-0 truncate">
                   {choice.name}
-                  <span className="ms-2 text-xs text-muted-foreground">
-                    {choice.environmentLabel}
-                  </span>
+                  {showEnvironment ? (
+                    <>
+                      {" "}
+                      <span className="ms-1 text-xs text-muted-foreground">
+                        {choice.environmentLabel}
+                      </span>
+                    </>
+                  ) : null}
                 </span>
               </MenuRadioItem>
             ))}

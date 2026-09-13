@@ -17,7 +17,7 @@ import {
   resolveIndexDraftDestination,
   startSquadronDraft,
 } from "../j5/squadron/SquadronPicker.logic";
-import { useProjects } from "../state/entities";
+import { useAllEnvironmentShellsBootstrapped, useProjects } from "../state/entities";
 import { useEnvironments } from "../state/environments";
 import { APP_DISPLAY_NAME } from "~/branding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
@@ -56,6 +56,7 @@ function SquadronFirstRunGateLive() {
 /** Landing creates only where the selected or sole Registrar home is determinate. */
 function IndexDraftLanding() {
   const projects = useProjects();
+  const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const handleNewThread = useNewThreadHandler();
   const { status: squadronDirectoryStatus, squadrons } = useSquadronDirectory();
   const ambientSquadronId = useSquadronAmbientScope();
@@ -72,6 +73,7 @@ function IndexDraftLanding() {
 
   useEffect(() => {
     if (
+      !bootstrapped ||
       destination.kind !== "single-squadron" ||
       destination.entry.folder === null ||
       startingRef.current
@@ -98,8 +100,14 @@ function IndexDraftLanding() {
         startingRef.current = false;
         setStartState((state) => ({ ...state, failed: true }));
       });
-  }, [destination, handleNewThread, startState.retryRequest]);
+  }, [bootstrapped, destination, handleNewThread, startState.retryRequest]);
 
+  // Wait for each reachable environment's project list before judging a
+  // Squadron's folder missing: the directory read can land before the shell
+  // snapshot, and a missing folder is otherwise presented as permanent.
+  if (!bootstrapped) {
+    return null;
+  }
   if (destination.kind === "single-squadron") {
     if (destination.entry.folder === null) {
       return <SquadronFolderUnavailable />;

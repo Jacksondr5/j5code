@@ -7,6 +7,7 @@ import {
   mergeHumanInboxSources,
   type PresentedHumanInboxItem as HumanInboxItem,
 } from "@t3tools/client-runtime/j5/inbox";
+import { spansMultipleEnvironments } from "@t3tools/client-runtime/j5/readSources";
 import * as Cause from "effect/Cause";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -163,11 +164,13 @@ function OpenInboxItem({
   pendingExchangeId,
   setAnswers,
   onOpenThread,
+  showEnvironment,
 }: {
   readonly item: HumanInboxItem;
   readonly answer: (item: HumanInboxItem) => void;
   readonly answerText: string;
   readonly pendingExchangeId: string | null;
+  readonly showEnvironment: boolean;
   readonly setAnswers: (update: (current: HumanInboxAnswers) => HumanInboxAnswers) => void;
   readonly onOpenThread: (item: HumanInboxItem) => void;
 }) {
@@ -187,11 +190,15 @@ function OpenInboxItem({
               </span>
               <span aria-hidden>·</span>
               <span className="truncate">{item.squadronName}</span>
-              <span aria-hidden>·</span>
-              <span className="truncate">
-                {item.environmentLabel}
-                {item.connected ? "" : " (offline)"}
-              </span>
+              {showEnvironment || !item.connected ? (
+                <>
+                  <span aria-hidden>·</span>
+                  <span className="truncate">
+                    {showEnvironment ? item.environmentLabel : ""}
+                    {item.connected ? "" : showEnvironment ? " (offline)" : "offline"}
+                  </span>
+                </>
+              ) : null}
               {openDuration ? (
                 <>
                   <span aria-hidden>·</span>
@@ -253,9 +260,11 @@ function OpenInboxItem({
 function AnsweredShelf({
   items,
   onOpenThread,
+  showEnvironment,
 }: {
   readonly items: ReadonlyArray<HumanInboxItem>;
   readonly onOpenThread: (item: HumanInboxItem) => void;
+  readonly showEnvironment: boolean;
 }) {
   if (items.length === 0) return null;
   return (
@@ -279,7 +288,8 @@ function AnsweredShelf({
               <div className="min-w-0 flex-1">
                 <p className="break-words text-sm font-medium text-foreground/80">{item.intent}</p>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {item.senderId} · {item.squadronName} · {item.environmentLabel}
+                  {item.senderId} · {item.squadronName}
+                  {showEnvironment ? ` · ${item.environmentLabel}` : ""}
                   {` · ${formatAnsweredAgeLabel(answeredDuration)}`}
                 </p>
               </div>
@@ -316,6 +326,7 @@ export function HumanInboxPage() {
   const answeredSources = useAtomValue(answeredInboxSourcesAtom);
   const items = useMemo(() => mergeHumanInboxSources(openSources), [openSources]);
   const answeredItems = useMemo(() => mergeHumanInboxSources(answeredSources), [answeredSources]);
+  const showEnvironment = spansMultipleEnvironments([...items, ...answeredItems]);
   const [answers, setAnswers] = useState<HumanInboxAnswers>({});
   const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -509,12 +520,17 @@ export function HumanInboxPage() {
                     onOpenThread={openThread}
                     pendingExchangeId={pendingExchangeId}
                     setAnswers={setAnswers}
+                    showEnvironment={showEnvironment}
                   />
                 ))}
               </ol>
             )}
 
-            <AnsweredShelf items={answeredItems} onOpenThread={openThread} />
+            <AnsweredShelf
+              items={answeredItems}
+              onOpenThread={openThread}
+              showEnvironment={showEnvironment}
+            />
           </main>
         </ScrollArea>
       </div>

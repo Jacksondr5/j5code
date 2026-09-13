@@ -44,7 +44,8 @@ PR #23 review). The page starts full-width;
 iterate smaller as the product matures. The inbox is **person-scoped**
 (R9/R29 — never assume one human) and **not Squadron-scoped**: obligations
 are global to the person; each item wears its Squadron; the rail's scope
-dropdown governs the thread list only (IB7).
+dropdown governs the thread list only (IB7). Since 2026-09-12 the page and bell merge every
+connected environment's inbox; see [cross-device](../cross-device.md#landed-cross-environment-reads-for-squadrons-and-the-inbox-2026-09-12-125-issue-105).
 
 ## The item
 
