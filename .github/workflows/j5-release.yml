@@ -133,7 +133,9 @@ jobs:
 
       - name: Publish through npm trusted publishing
         if: steps.existing.outputs.published != 'true'
-        run: pnpm exec node apps/server/scripts/cli.ts publish --app-version "$RELEASE_VERSION" --provenance --verbose
+        # npm provenance must describe the checked-out build source, which may
+        # precede the commit used to dispatch this release workflow.
+        run: GITHUB_SHA="$RELEASE_SHA" pnpm exec node apps/server/scripts/cli.ts publish --app-version "$RELEASE_VERSION" --provenance --verbose
 
       - name: Confirm npm version is available before desktop publication
         run: test "$(npm view "@jacksondr5/j5code@$RELEASE_VERSION" version --prefer-online)" = "$RELEASE_VERSION"
