@@ -81,6 +81,10 @@ export const ServerSelfUpdateCapability = Schema.Literals([
 export type ServerSelfUpdateCapability = typeof ServerSelfUpdateCapability.Type;
 
 export const ExecutionEnvironmentCapabilities = Schema.Struct({
+  /** J5 read and creation routes. Missing on older servers; clients may probe the read route. */
+  j5Squadrons: Schema.optionalKey(Schema.Boolean),
+  /** J5 person-scoped inbox, count, and answer routes. */
+  j5HumanInbox: Schema.optionalKey(Schema.Boolean),
   repositoryIdentity: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   connectionProbe: Schema.optionalKey(Schema.Boolean),
   /** Missing on older servers, which still accept inline image attachments. */

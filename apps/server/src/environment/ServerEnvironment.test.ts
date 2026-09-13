@@ -165,6 +165,8 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       expect(second.capabilities.connectionProbe).toBe(true);
       expect(second.capabilities.attachmentUploads).toBe(true);
       expect(second.capabilities.fileAttachments).toEqual({ maxUploadBytes: 50 * 1024 * 1024 });
+      expect(second.capabilities.j5Squadrons).toBe(true);
+      expect(second.capabilities.j5HumanInbox).toBe(true);
       expect(second.capabilities.pullRequests).toBe(true);
       expect(second.capabilities.usagePriceOverrides).toBe(true);
       expect(second.capabilities.threadTitleRegeneration).toBe(true);

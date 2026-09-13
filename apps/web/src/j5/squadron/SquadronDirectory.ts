@@ -1,66 +1,30 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useAtomValue } from "@effect/atom-react";
+import { mergeSquadronSources } from "@t3tools/client-runtime/j5/squadrons";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { Atom } from "effect/unstable/reactivity";
 
-import { listSquadrons, type ManagedSquadron } from "./squadronClient";
+import { refreshJ5Sources, squadronQueryAtom, squadronSourcesAtom } from "../state";
+import { createVisibleRefreshHook } from "../useVisibleRefresh";
 
-export type SquadronDirectoryState =
-  | { readonly status: "loading"; readonly squadrons: ReadonlyArray<ManagedSquadron> }
-  | { readonly status: "ready"; readonly squadrons: ReadonlyArray<ManagedSquadron> }
-  | { readonly status: "error"; readonly squadrons: ReadonlyArray<ManagedSquadron> };
+export type {
+  SquadronDirectoryState,
+  ScopedManagedSquadron,
+} from "@t3tools/client-runtime/j5/squadrons";
+export { mergeSquadronSources } from "@t3tools/client-runtime/j5/squadrons";
 
-let snapshot: SquadronDirectoryState = { status: "loading", squadrons: [] };
-const listeners = new Set<() => void>();
-let loading: Promise<void> | null = null;
-let queuedForceRefresh: Promise<void> | null = null;
-let hasLoaded = false;
+const directoryAtom = Atom.make((get) => mergeSquadronSources(get(squadronSourcesAtom)));
 
-const notify = () => listeners.forEach((listener) => listener());
-const subscribe = (listener: () => void) => {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-};
-const getSnapshot = () => snapshot;
+export const refreshSquadronDirectory = (
+  options: { readonly environmentId?: EnvironmentId; readonly force?: boolean } = {},
+) => refreshJ5Sources(squadronSourcesAtom, squadronQueryAtom, options);
 
-export const refreshSquadronDirectory = (options: { readonly force?: boolean } = {}) => {
-  if (options.force === true && queuedForceRefresh !== null) return queuedForceRefresh;
-  if (loading !== null) {
-    if (options.force !== true) return loading;
-    const queuedRefresh: Promise<void> = loading.then(() => {
-      // Clear before starting the queued read so it cannot return itself when
-      // it re-enters this single-flight function.
-      if (queuedForceRefresh === queuedRefresh) {
-        queuedForceRefresh = null;
-      }
-      return refreshSquadronDirectory({ force: true });
-    });
-    queuedForceRefresh = queuedRefresh;
-    return queuedForceRefresh;
-  }
-  if (hasLoaded && options.force !== true) return Promise.resolve();
-  snapshot = { status: "loading", squadrons: snapshot.squadrons };
-  notify();
-  loading = listSquadrons()
-    .then((squadrons) => {
-      snapshot = { status: "ready", squadrons };
-      hasLoaded = true;
-    })
-    .catch(() => {
-      // Keep the selected scope resolvable on a transient failure; clearing
-      // this list would silently turn a selected Squadron into zoom-out.
-      snapshot = { status: "error", squadrons: snapshot.squadrons };
-      hasLoaded = false;
-    })
-    .finally(() => {
-      loading = null;
-      notify();
-    });
-  return loading;
-};
+const useDirectoryRefresh = createVisibleRefreshHook(() => {
+  void refreshSquadronDirectory();
+}, 30_000);
 
-/** One authenticated directory read is shared by the gate and visible scope controls. */
+/** One registry-backed read per environment is shared by the gate and every scope control. */
 export function useSquadronDirectory() {
-  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  useEffect(() => {
-    void refreshSquadronDirectory();
-  }, []);
+  const state = useAtomValue(directoryAtom);
+  useDirectoryRefresh();
   return { ...state, refresh: refreshSquadronDirectory };
 }

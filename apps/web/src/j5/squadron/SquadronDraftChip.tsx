@@ -1,9 +1,10 @@
 import type { DraftId } from "../../composerDraftStore";
 import { useProjects } from "../../state/entities";
-import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useClientSettings } from "../../hooks/useSettings";
 import { selectProjectGroupingSettings } from "../../logicalProject";
 import { retargetSquadronDraft } from "./retargetSquadronDraft";
+import type { EnvironmentId } from "@t3tools/contracts";
+import type { ScopedSquadronRef } from "@t3tools/contracts/j5";
 import { RadioIcon } from "lucide-react";
 
 import {
@@ -16,37 +17,45 @@ import {
 import { Button } from "../../components/ui/button";
 import { useSquadronDirectory } from "./SquadronDirectory";
 import { selectDraftSquadron, useSquadronDraftScope } from "./SquadronDraftState";
-import { type DurableSquadronHome, resolveSquadronScope } from "./SquadronScope.logic";
+import { type DurableSquadronHome } from "./SquadronScope.logic";
 
 /** The only draft-local mutable Squadron control; its owner freezes it at first send. */
 export function SquadronDraftChip({
   draftKey,
   draftId,
-  ambientSquadronId,
+  environmentId,
+  ambientSquadronScope,
   durableHome,
   frozen,
 }: {
   readonly draftKey: string;
   readonly draftId: DraftId | null;
-  readonly ambientSquadronId: string | null;
+  readonly environmentId: EnvironmentId;
+  readonly ambientSquadronScope: ScopedSquadronRef | null;
   readonly durableHome: DurableSquadronHome | null;
   readonly frozen: boolean;
 }) {
-  const { status, squadrons } = useSquadronDirectory();
+  const { sources, squadrons } = useSquadronDirectory();
   const draft = useSquadronDraftScope(draftKey);
   const projects = useProjects();
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const groupingSettings = useClientSettings(selectProjectGroupingSettings);
-  const choices = squadrons.map(({ squadron, projectIds }) => ({
-    id: squadron.id,
-    name: squadron.name,
-    project:
-      projects.find(
-        (project) => project.environmentId === primaryEnvironmentId && project.id === projectIds[0],
-      ) ?? null,
-  }));
-  const selected =
-    durableHome ?? resolveSquadronScope(choices, draft.squadronId ?? ambientSquadronId);
+  const source = sources.find((source) => source.environmentId === environmentId);
+  const choices = squadrons
+    .filter((entry) => entry.environmentId === environmentId)
+    .map(({ squadron, projectIds }) => ({
+      id: squadron.id,
+      name: squadron.name,
+      project:
+        projects.find(
+          (project) => project.environmentId === environmentId && project.id === projectIds[0],
+        ) ?? null,
+    }));
+  const selectedId =
+    draft.squadronId ??
+    (ambientSquadronScope?.environmentId === environmentId
+      ? ambientSquadronScope.squadronId
+      : null);
+  const selected = durableHome ?? choices.find((choice) => choice.id === selectedId);
 
   return (
     <Menu>
@@ -55,7 +64,7 @@ export function SquadronDraftChip({
           <Button
             aria-label="Choose Squadron for this draft"
             className="h-7 max-w-56 gap-1.5 px-2 text-xs"
-            disabled={frozen || status !== "ready"}
+            disabled={frozen || source?.status !== "ready" || !source.canOperate}
             size="sm"
             type="button"
             variant="ghost-muted"

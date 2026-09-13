@@ -1,3 +1,6 @@
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { ThreadId, type EnvironmentId } from "@t3tools/contracts";
+import type { ScopedSquadronRef } from "@t3tools/contracts/j5";
 import {
   type FilesystemBrowseEntry,
   type KeybindingCommand,
@@ -390,9 +393,13 @@ export function filterCommandPaletteGroups(input: {
  * navigation is keyed exclusively by the immutable Registrar home.
  */
 export function resolveSquadronPickerDestination<
-  T extends { readonly id: string; readonly archivedAt: string | null } & ThreadSortInput,
+  T extends {
+    readonly id: string;
+    readonly environmentId: EnvironmentId;
+    readonly archivedAt: string | null;
+  } & ThreadSortInput,
 >(input: {
-  readonly squadronId: string;
+  readonly squadron: ScopedSquadronRef;
   readonly threads: ReadonlyArray<T>;
   readonly homesByThreadId: ReadonlyMap<
     string,
@@ -403,11 +410,14 @@ export function resolveSquadronPickerDestination<
 }): { readonly kind: "navigate"; readonly thread: T } | { readonly kind: "create-draft" } {
   const match = sortThreads(
     input.threads.filter((thread) => {
-      const home = input.homesByThreadId.get(thread.id);
+      const home = input.homesByThreadId.get(
+        scopedThreadKey(scopeThreadRef(thread.environmentId, ThreadId.make(thread.id))),
+      );
       return (
         thread.archivedAt === null &&
         home?.kind === "known" &&
-        home.squadron.id === input.squadronId
+        thread.environmentId === input.squadron.environmentId &&
+        home.squadron.id === input.squadron.squadronId
       );
     }),
     input.sortOrder,

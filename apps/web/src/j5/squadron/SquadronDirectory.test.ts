@@ -1,67 +1,80 @@
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
+import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import type { ManagedSquadron } from "@t3tools/contracts/j5";
+import type { J5ReadSource } from "@t3tools/client-runtime/j5/readSources";
+import { mergeSquadronSources } from "@t3tools/client-runtime/j5/squadrons";
 
-const alpha = {
+const alpha: ManagedSquadron = {
   squadron: { id: "squadron:alpha", name: "Alpha", createdAt: "2026-08-30T00:00:00Z" },
-  projectIds: ["project:alpha"],
+  projectIds: [ProjectId.make("project:alpha")],
 };
-const bravo = {
-  squadron: { id: "squadron:bravo", name: "Bravo", createdAt: "2026-08-30T00:00:00Z" },
-  projectIds: ["project:bravo"],
-};
-
-afterEach(() => {
-  vi.doUnmock("react");
-  vi.doUnmock("./squadronClient");
-  vi.resetModules();
+const source = (
+  id: string,
+  data: ReadonlyArray<ManagedSquadron>,
+  overrides: Partial<J5ReadSource<ReadonlyArray<ManagedSquadron>>> = {},
+): J5ReadSource<ReadonlyArray<ManagedSquadron>> => ({
+  environmentId: EnvironmentId.make(id),
+  environmentLabel: id,
+  connected: true,
+  canOperate: true,
+  status: "ready",
+  data,
+  error: null,
+  refreshing: false,
+  ...overrides,
 });
 
-describe("Squadron directory refresh", () => {
-  it("runs one trailing forced read when creation refreshes during an in-flight directory read", async () => {
-    let resolveInitial: ((squadrons: ReadonlyArray<typeof alpha>) => void) | undefined;
-    const listSquadrons = vi
-      .fn()
-      .mockImplementationOnce(
-        () =>
-          new Promise<ReadonlyArray<typeof alpha>>((resolve) => {
-            resolveInitial = resolve;
-          }),
-      )
-      .mockResolvedValueOnce([alpha, bravo]);
-    vi.doMock("./squadronClient", () => ({ listSquadrons }));
-
-    const { refreshSquadronDirectory } = await import("./SquadronDirectory");
-    const initialRead = refreshSquadronDirectory();
-    const forcedRead = refreshSquadronDirectory({ force: true });
-    resolveInitial?.([alpha]);
-
-    await Promise.all([initialRead, forcedRead]);
-    expect(listSquadrons).toHaveBeenCalledTimes(2);
+describe("Squadron directory across environments", () => {
+  it("uses remote Squadrons when the primary server has none", () => {
+    const result = mergeSquadronSources({
+      isReady: true,
+      sources: [source("primary", []), source("remote", [alpha])],
+    });
+    expect(result.status).toBe("ready");
+    expect(result.squadrons).toMatchObject([
+      { environmentId: "remote", available: true, squadron: { id: alpha.squadron.id } },
+    ]);
   });
 
-  it("keeps the last-known directory and permits a later retry after a failed refresh", async () => {
-    let readSnapshot: (() => unknown) | undefined;
-    const listSquadrons = vi
-      .fn()
-      .mockResolvedValueOnce([alpha])
-      .mockRejectedValueOnce(new Error("temporary directory failure"))
-      .mockResolvedValueOnce([alpha, bravo]);
-    vi.doMock("react", () => ({
-      useEffect: () => undefined,
-      useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => {
-        readSnapshot = getSnapshot;
-        return getSnapshot();
-      },
-    }));
-    vi.doMock("./squadronClient", () => ({ listSquadrons }));
+  it("keeps the selected directory during an outage while another environment remains usable", () => {
+    const result = mergeSquadronSources({
+      isReady: true,
+      sources: [
+        source("primary", [alpha], { status: "offline", connected: false, canOperate: false }),
+        source("remote", [alpha]),
+      ],
+    });
+    expect(result.status).toBe("partial");
+    expect(result.squadrons.map((entry) => [entry.environmentId, entry.available])).toEqual([
+      ["primary", false],
+      ["remote", true],
+    ]);
+  });
 
-    const { refreshSquadronDirectory, useSquadronDirectory } = await import("./SquadronDirectory");
-    await refreshSquadronDirectory();
-    useSquadronDirectory();
-    await refreshSquadronDirectory({ force: true });
+  it("does not declare the only loaded Squadron to be the only Squadron while a source is pending", () => {
+    const result = mergeSquadronSources({
+      isReady: true,
+      sources: [
+        source("primary", [], { status: "loading", data: null }),
+        source("remote", [alpha]),
+      ],
+    });
+    expect(result.status).toBe("partial");
+    expect(result.squadrons).toHaveLength(1);
+  });
 
-    expect(readSnapshot?.()).toEqual({ status: "error", squadrons: [alpha] });
-
-    await refreshSquadronDirectory();
-    expect(listSquadrons).toHaveBeenCalledTimes(3);
+  it("does not turn failed or unsupported reads into first-run creation", () => {
+    expect(
+      mergeSquadronSources({
+        isReady: true,
+        sources: [source("remote", [], { status: "error", data: null })],
+      }).status,
+    ).toBe("error");
+    expect(
+      mergeSquadronSources({
+        isReady: true,
+        sources: [source("remote", [], { status: "unsupported", data: null })],
+      }).status,
+    ).toBe("error");
   });
 });

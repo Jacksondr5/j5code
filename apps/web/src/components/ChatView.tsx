@@ -1843,7 +1843,9 @@ export default function ChatView(props: ChatViewProps) {
     [draftThread, fallbackDraftProject?.defaultModelSelection, threadId],
   );
   const isServerThread = serverThread !== null;
-  const activeThreadHomes = useThreadHomes(serverThread === null ? [] : [serverThread.id]);
+  const activeThreadHomes = useThreadHomes(
+    serverThread === null ? [] : [scopeThreadRef(environmentId, serverThread.id)],
+  );
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const serverLatestRun = useMemo(
     () => (serverProjection === null ? null : deriveLatestThreadRun(serverProjection)),
@@ -2140,10 +2142,14 @@ export default function ChatView(props: ChatViewProps) {
   );
   const activeProject = useProject(activeProjectRef);
   const { status: squadronDirectoryStatus, squadrons } = useSquadronDirectory();
-  const ambientSquadronId = useSquadronAmbientScope();
+  const ambientSquadronScope = useSquadronAmbientScope();
+  const ambientSquadronId =
+    ambientSquadronScope?.environmentId === environmentId ? ambientSquadronScope.squadronId : null;
   const draftSquadron = useSquadronDraftScope(routeThreadKey);
   const activeThreadHome =
-    serverThread === null ? undefined : activeThreadHomes.get(serverThread.id);
+    serverThread === null
+      ? undefined
+      : activeThreadHomes.get(scopedThreadKey(scopeThreadRef(environmentId, serverThread.id)));
   const durableSquadronHome = activeThreadHome?.kind === "known" ? activeThreadHome.squadron : null;
   const effectiveSquadronId = resolveEffectiveSquadronId({
     durableHome: durableSquadronHome,
@@ -2151,7 +2157,9 @@ export default function ChatView(props: ChatViewProps) {
     ambientSquadronId,
   });
   const effectiveSquadronName =
-    squadrons.find(({ squadron }) => squadron.id === effectiveSquadronId)?.squadron.name ?? null;
+    squadrons.find(
+      (entry) => entry.environmentId === environmentId && entry.squadron.id === effectiveSquadronId,
+    )?.squadron.name ?? null;
   const isFirstMessageForActiveThread = !isServerThread || activeMessageCount === 0;
   const squadronDraftChip = resolveSquadronDraftChipState({
     durableHome: durableSquadronHome,
@@ -2164,18 +2172,17 @@ export default function ChatView(props: ChatViewProps) {
       buildSquadronPickerEntries({
         squadrons,
         projects: allProjects,
-        primaryEnvironmentId: primaryEnvironment?.environmentId ?? null,
       }),
-    [allProjects, primaryEnvironment?.environmentId, squadrons],
+    [allProjects, squadrons],
   );
   const newThreadDestination = useMemo(
     () =>
       resolveCurrentThreadNewThreadDestination(
-        durableSquadronHome?.id ?? null,
+        durableSquadronHome === null ? null : { environmentId, squadronId: durableSquadronHome.id },
         squadronDirectoryStatus,
         squadronPickerEntries,
       ),
-    [durableSquadronHome?.id, squadronDirectoryStatus, squadronPickerEntries],
+    [environmentId, durableSquadronHome?.id, squadronDirectoryStatus, squadronPickerEntries],
   );
   const handleNewThreadInActiveProject = useCallback(() => {
     if (newThreadDestination.kind === "picker") {
@@ -7317,7 +7324,8 @@ export default function ChatView(props: ChatViewProps) {
           releaseDraftAttachments(composerAttachmentsSnapshot);
         }
         acknowledgeActiveThreadWoke();
-        if (squadronIdForLaunch !== undefined) refreshThreadHomes([threadIdForSend]);
+        if (squadronIdForLaunch !== undefined)
+          refreshThreadHomes([scopeThreadRef(environmentId, threadIdForSend)]);
       }
     }
 
@@ -8534,7 +8542,8 @@ export default function ChatView(props: ChatViewProps) {
                           {squadronDraftChip.visible ? (
                             <div className="flex px-3 pt-2">
                               <SquadronDraftChip
-                                ambientSquadronId={ambientSquadronId}
+                                ambientSquadronScope={ambientSquadronScope}
+                                environmentId={environmentId}
                                 draftKey={routeThreadKey}
                                 draftId={draftId}
                                 durableHome={durableSquadronHome}

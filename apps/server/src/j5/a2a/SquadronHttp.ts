@@ -1,8 +1,10 @@
+import { AuthOrchestrationOperateScope, AuthOrchestrationReadScope } from "@t3tools/contracts";
 import {
-  AuthOrchestrationOperateScope,
-  AuthOrchestrationReadScope,
-  ProjectId,
-} from "@t3tools/contracts";
+  CreateSquadronRequest,
+  J5_API_PATHS,
+  type SquadronListResponse,
+  type CreateSquadronResponse,
+} from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
@@ -23,12 +25,7 @@ import {
 } from "../../auth/http.ts";
 import { SquadronManagementService } from "./SquadronManagementService.ts";
 
-const SQUADRONS_PATH = "/api/j5/squadrons";
-
-const CreateSquadronRequest = Schema.Struct({
-  name: Schema.String,
-  projectId: ProjectId,
-});
+const SQUADRONS_PATH = J5_API_PATHS.squadrons;
 const decodeCreateSquadronRequest = Schema.decodeUnknownEffect(CreateSquadronRequest);
 
 const authenticate = (
@@ -95,7 +92,9 @@ export const squadronHttpRouteLayer = Layer.unwrap(
         yield* authenticate(AuthOrchestrationReadScope);
         const result = yield* Effect.result(management.list());
         if (Result.isSuccess(result)) {
-          return HttpServerResponse.jsonUnsafe({ squadrons: result.success });
+          return HttpServerResponse.jsonUnsafe({
+            squadrons: result.success,
+          } satisfies typeof SquadronListResponse.Type);
         }
         return yield* operationFailure(result.failure);
       }).pipe(
@@ -121,7 +120,10 @@ export const squadronHttpRouteLayer = Layer.unwrap(
         }
         const result = yield* Effect.result(management.create(decoded.success));
         if (Result.isSuccess(result)) {
-          return HttpServerResponse.jsonUnsafe({ squadron: result.success }, { status: 201 });
+          return HttpServerResponse.jsonUnsafe(
+            { squadron: result.success } satisfies typeof CreateSquadronResponse.Type,
+            { status: 201 },
+          );
         }
         return yield* operationFailure(result.failure);
       }).pipe(

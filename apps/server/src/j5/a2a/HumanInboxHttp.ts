@@ -22,17 +22,16 @@ import {
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { A2AHumanInbox } from "./HumanInboxService.ts";
 import { CommCommandId, ExchangeId, ParticipantId } from "./contracts.ts";
+import {
+  AnswerHumanExchangeRequest,
+  J5_API_PATHS,
+  type HumanInboxResponse,
+  type AnswerHumanExchangeResponse,
+} from "@t3tools/contracts/j5";
 
-const INBOX_PATH = "/api/j5/a2a/inbox";
-const ANSWER_PATH = "/api/j5/a2a/inbox/answer";
-
-const AnswerRequest = Schema.Struct({
-  personId: ParticipantId,
-  exchangeId: ExchangeId,
-  message: Schema.String.check(Schema.isNonEmpty()),
-  clientRequestId: Schema.String.check(Schema.isNonEmpty()),
-});
-const decodeAnswerRequest = Schema.decodeUnknownEffect(AnswerRequest);
+const INBOX_PATH = J5_API_PATHS.inbox;
+const ANSWER_PATH = J5_API_PATHS.answer;
+const decodeAnswerRequest = Schema.decodeUnknownEffect(AnswerHumanExchangeRequest);
 
 const authenticate = (
   scope: typeof AuthOrchestrationReadScope | typeof AuthOrchestrationOperateScope,
@@ -103,7 +102,7 @@ export const humanInboxHttpRouteLayer = Layer.unwrap(
           }),
         );
         return Result.isSuccess(result)
-          ? HttpServerResponse.jsonUnsafe(result.success)
+          ? HttpServerResponse.jsonUnsafe(result.success satisfies HumanInboxResponse)
           : operationFailure(result.failure);
       }).pipe(
         Effect.catchTags({
@@ -135,15 +134,17 @@ export const humanInboxHttpRouteLayer = Layer.unwrap(
               commandId: CommCommandId.make(
                 `command:j5:a2a:human:${encodeURIComponent(decoded.success.personId)}:${encodeURIComponent(decoded.success.exchangeId)}:${encodeURIComponent(decoded.success.clientRequestId)}`,
               ),
-              personId: decoded.success.personId,
-              exchangeId: decoded.success.exchangeId,
+              personId: ParticipantId.make(decoded.success.personId),
+              exchangeId: ExchangeId.make(decoded.success.exchangeId),
               message: decoded.success.message,
               acceptedAt,
             })
             .pipe(Effect.tap(() => worker.notify)),
         );
         return Result.isSuccess(result)
-          ? HttpServerResponse.jsonUnsafe({ result: result.success })
+          ? HttpServerResponse.jsonUnsafe({
+              result: result.success,
+            } satisfies typeof AnswerHumanExchangeResponse.Type)
           : operationFailure(result.failure);
       }).pipe(
         Effect.catchTags({

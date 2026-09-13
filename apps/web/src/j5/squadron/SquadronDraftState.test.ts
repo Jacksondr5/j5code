@@ -1,3 +1,4 @@
+import { EnvironmentId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 afterEach(() => {
@@ -21,7 +22,7 @@ describe("ambient Squadron scope selection", () => {
     }));
 
     const {
-      setAmbientSquadronId,
+      setAmbientSquadronScope,
       useSquadronAmbientScope,
       useSquadronAmbientScopeSelectionGeneration,
     } = await import("./SquadronDraftState");
@@ -30,11 +31,23 @@ describe("ambient Squadron scope selection", () => {
     const onChange = vi.fn();
     subscription?.(onChange);
 
-    setAmbientSquadronId("squadron:alpha");
-    expect(snapshots.map((snapshot) => snapshot())).toEqual(["squadron:alpha", 1]);
-    setAmbientSquadronId("squadron:alpha");
+    setAmbientSquadronScope({
+      environmentId: EnvironmentId.make("remote"),
+      squadronId: "squadron:alpha",
+    });
+    expect(snapshots.map((snapshot) => snapshot())).toEqual([
+      { environmentId: "remote", squadronId: "squadron:alpha" },
+      1,
+    ]);
+    setAmbientSquadronScope({
+      environmentId: EnvironmentId.make("remote"),
+      squadronId: "squadron:alpha",
+    });
 
-    expect(snapshots.map((snapshot) => snapshot())).toEqual(["squadron:alpha", 2]);
+    expect(snapshots.map((snapshot) => snapshot())).toEqual([
+      { environmentId: "remote", squadronId: "squadron:alpha" },
+      2,
+    ]);
     expect(onChange).toHaveBeenCalledTimes(2);
   });
 });
@@ -45,14 +58,17 @@ describe("draft environment retarget", () => {
       copyDraftSquadronScope,
       selectDraftSquadron,
       freezeDraftSquadronAtFirstSend,
-      setAmbientSquadronId,
+      setAmbientSquadronScope,
     } = await import("./SquadronDraftState");
     selectDraftSquadron("local:reserved-retarget", "squadron:chosen");
     freezeDraftSquadronAtFirstSend("local:reserved-retarget");
     copyDraftSquadronScope("local:reserved-retarget", "remote:reserved-retarget");
     selectDraftSquadron("remote:reserved-retarget", "squadron:wrong");
     expect(freezeDraftSquadronAtFirstSend("remote:reserved-retarget")).toBe("squadron:chosen");
-    setAmbientSquadronId("squadron:ambient");
+    setAmbientSquadronScope({
+      environmentId: EnvironmentId.make("local"),
+      squadronId: "squadron:ambient",
+    });
     copyDraftSquadronScope("local:unselected-retarget", "remote:unselected-retarget");
     expect(freezeDraftSquadronAtFirstSend("remote:unselected-retarget")).toBeNull();
   });

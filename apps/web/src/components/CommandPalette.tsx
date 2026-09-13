@@ -1,5 +1,7 @@
 "use client";
 
+import { scopedSquadronKey } from "@t3tools/contracts/j5";
+
 import {
   scopedThreadKey,
   scopeProjectRef,
@@ -678,7 +680,9 @@ function OpenCommandPaletteDialog(props: {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
   const { squadrons } = useSquadronDirectory();
-  const threadHomes = useThreadHomes(threads.map((thread) => thread.id));
+  const threadHomes = useThreadHomes(
+    threads.map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
+  );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme } = useTheme();
   const providers = useAtomValue(primaryServerProvidersAtom);
@@ -1032,8 +1036,8 @@ function OpenCommandPaletteDialog(props: {
   );
 
   const squadronPickerEntries = useMemo(
-    () => buildSquadronPickerEntries({ squadrons, projects, primaryEnvironmentId }),
-    [primaryEnvironmentId, projects, squadrons],
+    () => buildSquadronPickerEntries({ squadrons, projects }),
+    [projects, squadrons],
   );
   const startSquadronThread = useCallback(
     async (entry: SquadronPickerEntry) =>
@@ -1048,7 +1052,7 @@ function OpenCommandPaletteDialog(props: {
   const openSquadronFromSearch = useCallback(
     async (entry: SquadronPickerEntry) => {
       const destination = resolveSquadronPickerDestination({
-        squadronId: entry.squadronId,
+        squadron: { environmentId: entry.environmentId, squadronId: entry.squadronId },
         threads,
         homesByThreadId: threadHomes,
         sortOrder: clientSettings.sidebarThreadSortOrder,
@@ -1074,11 +1078,11 @@ function OpenCommandPaletteDialog(props: {
     ): CommandPaletteActionItem[] =>
       entries.map((entry) => ({
         kind: "action",
-        value: `${valuePrefix}:${entry.squadronId}`,
+        value: `${valuePrefix}:${scopedSquadronKey(entry)}`,
         ...buildSquadronPickerRow(entry),
         icon: <RadioIcon className={ITEM_ICON_CLASS} />,
         run: async () => {
-          if (entry.folder !== null) await run(entry);
+          if (entry.folder !== null && entry.available) await run(entry);
         },
       })),
     [],
@@ -1495,11 +1499,18 @@ function OpenCommandPaletteDialog(props: {
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (squadronPickerEntries.length > 0) {
-    const activeHome = activeThread ? threadHomes.get(activeThread.id) : undefined;
+    const activeHome = activeThread
+      ? threadHomes.get(
+          scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id)),
+        )
+      : undefined;
     const activeSquadron =
       activeHome?.kind === "known"
-        ? (squadronPickerEntries.find((entry) => entry.squadronId === activeHome.squadron.id) ??
-          null)
+        ? (squadronPickerEntries.find(
+            (entry) =>
+              entry.environmentId === activeThread?.environmentId &&
+              entry.squadronId === activeHome.squadron.id,
+          ) ?? null)
         : null;
 
     if (activeSquadron !== null) {

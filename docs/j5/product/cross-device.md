@@ -47,3 +47,31 @@ flowchart LR
 ## What this deliberately does not do
 
 No CRDTs anywhere. No multi-master. No squadron migration between servers. No global agent registry (peering is pairwise). No relay dependency (direct HTTPS peering; a relay could later be _one transport option_ for NAT-crossed personal boxes, never a required service).
+
+## Landed: cross-environment reads for Squadrons and the inbox (2026-09-12, #125, issue #105)
+
+The read-model-merge half of the position above is now built for the web and desktop client. The
+Squadron picker, the sidebar scope dropdown, and the inbox combine results from every connected
+environment; each server keeps its own Squadrons, threads, ledgers, and inbox identity, and no data
+moves between servers. Creation, thread launch, inbox navigation, and replies all carry the owning
+environment with the item (`ScopedSquadronRef`, `ScopedThreadRef`) rather than routing through the
+primary environment.
+
+Behavior worth knowing:
+
+- **Labels appear only when needed.** Environment labels show on picker rows, scope choices, inbox
+  items, and the create form only once results actually span more than one environment; a
+  single-environment client looks exactly as it did before.
+- **Read-only connections read but cannot act.** A connection without the operate scope displays
+  that environment's Squadrons and questions but cannot create a Squadron, launch into one, or send
+  an answer; the controls say so.
+- **Disconnected sources keep their last results.** An environment that drops or fails to refresh
+  keeps its loaded items visible with a per-environment notice; an asterisk on the inbox count
+  means the total is incomplete, and a question mark means no positive count is available while
+  some environment cannot be refreshed. Servers without the J5 routes are reported as unsupported
+  rather than empty.
+- **Mobile is deferred.** The native app does not yet include these screens.
+
+FORK case 34 records the upstream-owned files this touches (two optional capability keys, the
+contracts and client-runtime export entries) and the shared authenticated transport the client
+reads reuse.

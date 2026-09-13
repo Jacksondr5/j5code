@@ -250,6 +250,30 @@
     "./work-log/scroll-anchor": {
       "types": "./src/work-log/scrollAnchor.ts",
       "default": "./src/work-log/scrollAnchor.ts"
+    },
+    "./j5/http": {
+      "types": "./src/j5/http.ts",
+      "default": "./src/j5/http.ts"
+    },
+    "./j5/state": {
+      "types": "./src/j5/state.ts",
+      "default": "./src/j5/state.ts"
+    },
+    "./j5/readSources": {
+      "types": "./src/j5/readSources.ts",
+      "default": "./src/j5/readSources.ts"
+    },
+    "./j5/threadHomes": {
+      "types": "./src/j5/threadHomes.ts",
+      "default": "./src/j5/threadHomes.ts"
+    },
+    "./j5/inbox": {
+      "types": "./src/j5/inbox.ts",
+      "default": "./src/j5/inbox.ts"
+    },
+    "./j5/squadrons": {
+      "types": "./src/j5/squadrons.ts",
+      "default": "./src/j5/squadrons.ts"
     }
   },
   "scripts": {

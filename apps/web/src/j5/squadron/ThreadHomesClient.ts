@@ -1,222 +1,91 @@
-import { ThreadId } from "@t3tools/contracts";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as ManagedRuntime from "effect/ManagedRuntime";
+import { useAtomValue } from "@effect/atom-react";
+import type { PreparedConnection } from "@t3tools/client-runtime/connection";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { listThreadHomes as listThreadHomesEffect } from "@t3tools/client-runtime/j5/http";
+import { createThreadHomesStore } from "@t3tools/client-runtime/j5/threadHomes";
+import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import type { ScopedSquadronRef } from "@t3tools/contracts/j5";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
-import { useEffect, useMemo, useSyncExternalStore } from "react";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
-import { browserCryptoLayer } from "../../cloud/dpop";
-import { primaryEnvironmentHttpLayer } from "../../environments/primary/httpLayer";
-import { resolvePrimaryEnvironmentHttpUrl } from "../../environments/primary/target";
+import { environmentCatalog } from "../../connection/catalog";
+import { runtime } from "../../lib/runtime";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { environmentSession } from "../../state/session";
 
-const SquadronHome = Schema.Struct({ id: Schema.String, name: Schema.String });
-const ThreadHome = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("known"), squadron: SquadronHome }),
-  Schema.Struct({ kind: Schema.Literal("unknown") }),
-]);
-const ThreadHomeEntry = Schema.Struct({ threadId: ThreadId, home: ThreadHome });
-const ThreadHomesResponse = Schema.Struct({ entries: Schema.Array(ThreadHomeEntry) });
+export type { ThreadHome, ThreadHomeEntry } from "@t3tools/contracts/j5";
+export type { ThreadHomesScopeReadState } from "@t3tools/client-runtime/j5/threadHomes";
+export { replaceThreadHomeEntries } from "@t3tools/client-runtime/j5/threadHomes";
+export {
+  J5HttpError as ThreadHomesHttpError,
+  listThreadHomes as listThreadHomesEffect,
+} from "@t3tools/client-runtime/j5/http";
 
-export type ThreadHome = typeof ThreadHome.Type;
-export type ThreadHomeEntry = { readonly threadId: ThreadId; readonly home: ThreadHome };
-export type ThreadHomesScopeReadState = "ready" | "failed";
-
-const runtime = ManagedRuntime.make(Layer.merge(primaryEnvironmentHttpLayer, browserCryptoLayer));
-const ErrorResponse = Schema.Struct({ message: Schema.String });
-const decodeErrorResponse = Schema.decodeUnknownOption(ErrorResponse);
-
-export class ThreadHomesHttpError extends Schema.TaggedErrorClass<ThreadHomesHttpError>()(
-  "ThreadHomesHttpError",
-  { status: Schema.Number, detail: Schema.String },
-) {
-  override get message(): string {
-    return this.detail;
+const connectionsAtom = Atom.make((get) => {
+  const connections = new Map<EnvironmentId, PreparedConnection | null>();
+  for (const id of get(environmentCatalog.catalogValueAtom).entries.keys()) {
+    const state = Option.getOrNull(AsyncResult.value(get(environmentCatalog.stateAtom(id))));
+    const prepared = get(environmentSession.preparedConnectionValueAtom(id));
+    connections.set(id, state?.phase === "connected" ? Option.getOrNull(prepared) : null);
   }
-}
-
-const requireThreadHomesSuccess = Effect.fn("j5.threadHomesClient.requireSuccess")(function* (
-  response: HttpClientResponse.HttpClientResponse,
-) {
-  if (response.status >= 200 && response.status < 300) return response;
-  const body = yield* response.json.pipe(Effect.orElseSucceed(() => null));
-  const decoded = Option.getOrUndefined(decodeErrorResponse(body));
-  return yield* new ThreadHomesHttpError({
-    status: response.status,
-    detail: decoded?.message ?? `Could not read thread homes (HTTP ${response.status}).`,
-  });
+  return connections;
 });
 
-export const listThreadHomesEffect = Effect.fn("j5.threadHomesClient.list")(function* (
-  threadIds: ReadonlyArray<ThreadId>,
-) {
-  const client = yield* HttpClient.HttpClient;
-  const uniqueThreadIds = Array.from(new Set(threadIds));
-  const request = yield* HttpClientRequest.post(
-    resolvePrimaryEnvironmentHttpUrl("/api/j5/a2a/client-reads/participant-homes"),
-  ).pipe(HttpClientRequest.bodyJson({ threadIds: uniqueThreadIds }));
-  const response = yield* client.execute(request);
-  const success = yield* requireThreadHomesSuccess(response);
-  const decoded = yield* HttpClientResponse.schemaBodyJson(ThreadHomesResponse)(success);
-  return decoded.entries;
-});
+const store = createThreadHomesStore((prepared, ids) =>
+  runtime.runPromise(listThreadHomesEffect(prepared, ids)),
+);
 
-const listThreadHomes = (threadIds: ReadonlyArray<ThreadId>) =>
-  runtime.runPromise(listThreadHomesEffect(threadIds));
-
-interface ThreadHomesStore {
-  /**
-   * The React external-store snapshot. Replacing, rather than mutating, this
-   * map keeps the value React observes identical to the data Sidebar renders.
-   */
-  homesByThreadId: ReadonlyMap<string, ThreadHome>;
-  readonly listeners: Set<() => void>;
-  readonly pendingThreadIds: Set<ThreadId>;
-  pendingScopeRead: boolean;
-  reading: boolean;
-  scopeReadState: ThreadHomesScopeReadState;
-}
-
-const threadHomesStoreKey = "__t3J5ThreadHomesStore";
-
-const threadHomesStore = (() => {
-  const target = globalThis as typeof globalThis & {
-    __t3J5ThreadHomesStore?: ThreadHomesStore;
-  };
-  if (target[threadHomesStoreKey] !== undefined) return target[threadHomesStoreKey];
-  const created: ThreadHomesStore = {
-    homesByThreadId: new Map(),
-    listeners: new Set(),
-    pendingThreadIds: new Set(),
-    pendingScopeRead: false,
-    reading: false,
-    scopeReadState: "ready",
-  };
-  target[threadHomesStoreKey] = created;
-  return created;
-})();
-
-const subscribe = (listener: () => void) => {
-  threadHomesStore.listeners.add(listener);
-  return () => threadHomesStore.listeners.delete(listener);
-};
-const getSnapshot = () => threadHomesStore.homesByThreadId;
-const getScopeReadStateSnapshot = () => threadHomesStore.scopeReadState;
-const notify = () => {
-  threadHomesStore.listeners.forEach((listener) => listener());
+const requestThreadHomes = (refs: ReadonlyArray<ScopedThreadRef>, force = false) => {
+  store.setConnections(appAtomRegistry.get(connectionsAtom));
+  store.request(refs, force);
 };
 
-const readPendingThreadHomes = () => {
-  if (threadHomesStore.reading || threadHomesStore.pendingThreadIds.size === 0) return;
-  threadHomesStore.reading = true;
-  const threadIds = Array.from(threadHomesStore.pendingThreadIds);
-  const isScopeRead = threadHomesStore.pendingScopeRead;
-  threadHomesStore.pendingThreadIds.clear();
-  threadHomesStore.pendingScopeRead = false;
-  void listThreadHomes(threadIds)
-    .then((entries) => {
-      threadHomesStore.homesByThreadId = replaceThreadHomeEntries(
-        threadHomesStore.homesByThreadId,
-        entries,
-      );
-      if (isScopeRead) threadHomesStore.scopeReadState = "ready";
-    })
-    // Under a selected scope, an unreadable home remains excluded rather than
-    // being guessed from a project. The Sidebar names this state and can retry.
-    .catch(() => {
-      if (isScopeRead) threadHomesStore.scopeReadState = "failed";
-    })
-    .finally(() => {
-      threadHomesStore.reading = false;
-      notify();
-      readPendingThreadHomes();
-    });
-};
-
-/** A successful reread replaces a transient unknown with its Registrar home. */
-export const mergeThreadHomeEntries = (
-  homes: Map<string, ThreadHome>,
-  entries: ReadonlyArray<ThreadHomeEntry>,
-) => {
-  for (const entry of entries) homes.set(entry.threadId, entry.home);
-  return homes;
-};
-
-/** Replaces the rendered cache snapshot so receipt updates cannot retain a stale projection. */
-export const replaceThreadHomeEntries = (
-  homes: ReadonlyMap<string, ThreadHome>,
-  entries: ReadonlyArray<ThreadHomeEntry>,
-) => mergeThreadHomeEntries(new Map(homes), entries);
-
-export const shouldRequestThreadHome = (home: ThreadHome | undefined, force: boolean) =>
+export const refreshThreadHomes = (refs: ReadonlyArray<ScopedThreadRef>) =>
+  requestThreadHomes(refs, true);
+export const retryScopedThreadHomes = refreshThreadHomes;
+export const shouldRequestThreadHome = (home: unknown, force: boolean) =>
   force || home === undefined;
+export const shouldForceThreadHomesForScope = (scope: ScopedSquadronRef | null) => scope !== null;
 
-/** A named scope must re-read its visible rows; zoom-out does not force a read. */
-export const shouldForceThreadHomesForScope = (selectedSquadronId: string | null) =>
-  selectedSquadronId !== null;
-
-const requestThreadHomes = (
-  threadIds: ReadonlyArray<ThreadId>,
-  force = false,
-  isScopeRead = false,
-) => {
-  let resetScopeReadState = false;
-  for (const threadId of threadIds) {
-    if (shouldRequestThreadHome(threadHomesStore.homesByThreadId.get(threadId), force))
-      threadHomesStore.pendingThreadIds.add(threadId);
-  }
-  if (isScopeRead && threadHomesStore.pendingThreadIds.size > 0) {
-    threadHomesStore.pendingScopeRead = true;
-    if (threadHomesStore.scopeReadState !== "ready") {
-      threadHomesStore.scopeReadState = "ready";
-      resetScopeReadState = true;
-    }
-  }
-  if (resetScopeReadState) notify();
-  readPendingThreadHomes();
-};
-
-/**
- * Interactive J5 creation calls this after its launch succeeds: a row may have
- * reached the Sidebar while its durable Registrar attachment was still pending.
- */
-export const refreshThreadHomes = (threadIds: ReadonlyArray<ThreadId>) =>
-  requestThreadHomes(threadIds, true);
-
-/** The scoped Sidebar retries the same opaque home read without a reload. */
-export const retryScopedThreadHomes = (threadIds: ReadonlyArray<ThreadId>) =>
-  requestThreadHomes(threadIds, true, true);
-
-/** Only a named Sidebar scope turns a failed Registrar-home read into visible state. */
-export function useThreadHomesScopeReadState(): ThreadHomesScopeReadState {
-  return useSyncExternalStore(subscribe, getScopeReadStateSnapshot, getScopeReadStateSnapshot);
+export function useThreadHomesScopeReadState(scope: ScopedSquadronRef | null = null) {
+  return useSyncExternalStore(store.subscribe, () =>
+    store.getScopeReadState(scope?.environmentId ?? null),
+  );
 }
 
-/** Immutable Registrar-home cache for Sidebar rows; never derives a home from project metadata. */
+/** Incremental home reads follow the thread's environment; existing shared thread state is unchanged. */
 export function useThreadHomes(
-  threadIds: ReadonlyArray<ThreadId>,
-  selectedSquadronId: string | null = null,
+  refs: ReadonlyArray<ScopedThreadRef>,
+  scope: ScopedSquadronRef | null = null,
   scopeSelectionGeneration = 0,
 ) {
-  const key = Array.from(new Set(threadIds)).join("\0");
-  const requestedThreadIds = useMemo(
-    () => (key === "" ? [] : key.split("\0").map((threadId) => ThreadId.make(threadId))),
-    [key],
-  );
-  const homesSnapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const key = JSON.stringify(refs);
+  const requested = useMemo(() => JSON.parse(key) as ReadonlyArray<ScopedThreadRef>, [key]);
+  const requestedRef = useRef(requested);
+  requestedRef.current = requested;
+  const connections = useAtomValue(connectionsAtom);
+  const homes = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   useEffect(() => {
-    const isScopeRead = shouldForceThreadHomesForScope(selectedSquadronId);
-    requestThreadHomes(requestedThreadIds, isScopeRead, isScopeRead);
-  }, [requestedThreadIds, selectedSquadronId, scopeSelectionGeneration]);
+    store.setConnections(connections);
+    store.request(requested);
+  }, [connections, requested]);
+  useEffect(() => {
+    if (scope !== null)
+      store.request(
+        requestedRef.current.filter((ref) => ref.environmentId === scope.environmentId),
+        true,
+      );
+  }, [scope, scopeSelectionGeneration]);
   return useMemo(
     () =>
       new Map(
-        requestedThreadIds.flatMap((threadId) => {
-          const home = homesSnapshot.get(threadId);
-          return home === undefined ? [] : [[threadId, home] as const];
+        requested.flatMap((ref) => {
+          const key = scopedThreadKey(ref);
+          const home = homes.get(key);
+          return home === undefined ? [] : [[key, home] as const];
         }),
       ),
-    [homesSnapshot, requestedThreadIds],
+    [homes, requested],
   );
 }

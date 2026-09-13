@@ -1,4 +1,9 @@
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { ThreadId, type EnvironmentId } from "@t3tools/contracts";
+import type { ScopedSquadronRef } from "@t3tools/contracts/j5";
+
 export interface SquadronChoice {
+  readonly environmentId: EnvironmentId;
   readonly id: string;
   readonly name: string;
 }
@@ -12,11 +17,17 @@ export interface SquadronDraftState<TContent = unknown> {
 /** The sidebar can set ambient context, but it must never manufacture a choice. */
 export const resolveSquadronScope = (
   choices: ReadonlyArray<SquadronChoice>,
-  selectedId: string | null,
-) => choices.find((choice) => choice.id === selectedId) ?? null;
+  selected: ScopedSquadronRef | null,
+) =>
+  choices.find(
+    (choice) =>
+      choice.id === selected?.squadronId && choice.environmentId === selected.environmentId,
+  ) ?? null;
 
 /** Selected scope admits only that Squadron's immutable, known Registrar homes. */
-export const filterThreadsForSquadronScope = <T extends { readonly id: string }>(
+export const filterThreadsForSquadronScope = <
+  T extends { readonly id: string; readonly environmentId: EnvironmentId },
+>(
   threads: ReadonlyArray<T>,
   scope: SquadronChoice | null,
   homesByThreadId: ReadonlyMap<
@@ -27,8 +38,14 @@ export const filterThreadsForSquadronScope = <T extends { readonly id: string }>
 ) => {
   if (scope === null) return [...threads];
   return threads.filter((thread) => {
-    const home = homesByThreadId.get(thread.id);
-    return home?.kind === "known" && home.squadron.id === scope.id;
+    const home = homesByThreadId.get(
+      scopedThreadKey(scopeThreadRef(thread.environmentId, ThreadId.make(thread.id))),
+    );
+    return (
+      thread.environmentId === scope.environmentId &&
+      home?.kind === "known" &&
+      home.squadron.id === scope.id
+    );
   });
 };
 

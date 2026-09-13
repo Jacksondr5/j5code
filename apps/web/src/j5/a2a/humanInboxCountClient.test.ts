@@ -1,3 +1,4 @@
+import { testPreparedConnection } from "../../../test/j5";
 import { assert, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
@@ -21,7 +22,7 @@ it.effect("reads the B6 open-count slot without inventing another route", () =>
       );
     });
 
-    const result = yield* readOpenInboxCountEffect().pipe(
+    const result = yield* readOpenInboxCountEffect(testPreparedConnection()).pipe(
       Effect.provideService(HttpClient.HttpClient, client),
     );
 
@@ -47,7 +48,9 @@ it.effect("rejects an impossible negative count instead of displaying a fake val
     );
 
     yield* Effect.flip(
-      readOpenInboxCountEffect().pipe(Effect.provideService(HttpClient.HttpClient, client)),
+      readOpenInboxCountEffect(testPreparedConnection()).pipe(
+        Effect.provideService(HttpClient.HttpClient, client),
+      ),
     );
   }),
 );

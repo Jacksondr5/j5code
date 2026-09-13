@@ -1,77 +1,32 @@
 import { Link } from "@tanstack/react-router";
 import { BellIcon } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
+import { useAtomValue } from "@effect/atom-react";
+import { mergeOpenInboxCounts } from "@t3tools/client-runtime/j5/inbox";
 
 import { useSidebar } from "../../components/ui/sidebar";
 import { cn } from "../../lib/utils";
-import { readOpenInboxCount } from "./humanInboxCountClient";
-import { HUMAN_INBOX_REFRESH_EVENT } from "./humanInboxRefresh";
+import { inboxCountQueryAtom, inboxCountSourcesAtom, refreshJ5Sources } from "../state";
+import { createVisibleRefreshHook } from "../useVisibleRefresh";
 
 export const COUNT_POLL_INTERVAL_MS = 7_500;
+const useCountRefresh = createVisibleRefreshHook(() => {
+  void refreshJ5Sources(inboxCountSourcesAtom, inboxCountQueryAtom);
+}, COUNT_POLL_INTERVAL_MS);
 
 export const shouldShowOpenInboxCount = (count: number | null) => count !== null && count > 0;
 
 export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean }) {
   const { isMobile, setOpenMobile } = useSidebar();
-  const [count, setCount] = useState<number | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    let inFlight = false;
-    let refreshQueued = false;
-    let interval: number | undefined;
-    const refresh = () => {
-      if (!active) return;
-      if (inFlight) {
-        refreshQueued = true;
-        return;
-      }
-      inFlight = true;
-      void readOpenInboxCount()
-        .then((response) => {
-          if (active) setCount(response.count);
-        })
-        .catch(() => {
-          if (active) setCount(null);
-        })
-        .finally(() => {
-          inFlight = false;
-          if (active && refreshQueued) {
-            refreshQueued = false;
-            refresh();
-          }
-        });
-    };
-    const syncInterval = () => {
-      window.clearInterval(interval);
-      interval =
-        document.visibilityState === "visible"
-          ? window.setInterval(refresh, COUNT_POLL_INTERVAL_MS)
-          : undefined;
-    };
-    const refreshVisibleWindow = () => {
-      if (document.visibilityState === "visible") refresh();
-      syncInterval();
-    };
-    refresh();
-    syncInterval();
-    window.addEventListener("focus", refreshVisibleWindow);
-    window.addEventListener(HUMAN_INBOX_REFRESH_EVENT, refresh);
-    document.addEventListener("visibilitychange", refreshVisibleWindow);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-      window.removeEventListener("focus", refreshVisibleWindow);
-      window.removeEventListener(HUMAN_INBOX_REFRESH_EVENT, refresh);
-      document.removeEventListener("visibilitychange", refreshVisibleWindow);
-    };
-  }, []);
+  const sources = useAtomValue(inboxCountSourcesAtom);
+  const { count, incomplete } = mergeOpenInboxCounts(sources);
+  useCountRefresh();
 
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) setOpenMobile(false);
   }, [isMobile, setOpenMobile]);
 
-  const label = count === null ? "Open inbox" : `Open inbox, ${count} open`;
+  const label = `${count === null ? "Open inbox" : `Open inbox, ${incomplete ? "last known " : ""}${count} open`}${incomplete ? "; some environments could not be refreshed" : ""}`;
   return (
     <Link
       aria-label={label}
@@ -86,9 +41,9 @@ export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean })
       to="/inbox"
     >
       <BellIcon aria-hidden className="size-4" />
-      {shouldShowOpenInboxCount(count) ? (
+      {shouldShowOpenInboxCount(count) || incomplete ? (
         <span className="absolute -end-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] font-semibold leading-none text-primary-foreground tabular-nums ring-2 ring-sidebar">
-          {count}
+          {incomplete ? (count !== null && count > 0 ? `${count}*` : "?") : count}
         </span>
       ) : null}
     </Link>

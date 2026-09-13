@@ -18,6 +18,42 @@ import { SquadronId } from "./contracts.ts";
 const projectId = ProjectId.make("project:squadron-http");
 const squadronId = SquadronId.make("squadron:squadron-http");
 
+it("allows read-only connections to list Squadrons but rejects creation", async () => {
+  const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+    authenticateHttpRequest: () =>
+      Effect.succeed({
+        sessionId: AuthSessionId.make("auth-session:readonly-squadrons"),
+        subject: "read-only-test",
+        method: "bearer-access-token",
+        scopes: [AuthOrchestrationReadScope],
+      }),
+  });
+  const routes = squadronHttpRouteLayer.pipe(
+    Layer.provide(
+      Layer.mock(SquadronManagementService)({
+        list: () => Effect.succeed([]),
+        create: () => Effect.die("Read-only creation reached the service"),
+      }),
+    ),
+    Layer.provideMerge(auth),
+    Layer.provide(HttpServer.layerServices),
+  );
+  const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
+  try {
+    assert.equal((await handler(new Request("http://remote.test/api/j5/squadrons"))).status, 200);
+    const created = await handler(
+      new Request("http://remote.test/api/j5/squadrons", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Operations", projectId }),
+      }),
+    );
+    assert.equal(created.status, 403);
+  } finally {
+    await dispose();
+  }
+});
+
 it("lists and creates explicit Squadron project references", async () => {
   const createInputs: Array<{ readonly name: string; readonly projectId: ProjectId }> = [];
   const management = Layer.mock(SquadronManagementService)({

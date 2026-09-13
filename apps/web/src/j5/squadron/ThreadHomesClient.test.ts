@@ -1,11 +1,12 @@
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { testPreparedConnection } from "../../../test/j5";
 import { assert, expect, it, vi } from "@effect/vitest";
-import { ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import {
   listThreadHomesEffect,
-  mergeThreadHomeEntries,
   replaceThreadHomeEntries,
   shouldForceThreadHomesForScope,
   shouldRequestThreadHome,
@@ -13,6 +14,10 @@ import {
   ThreadHomesHttpError,
 } from "./ThreadHomesClient";
 import { filterThreadsForSquadronScope } from "./SquadronScope.logic";
+
+const environmentId = EnvironmentId.make("remote");
+const homeKey = (threadId: string) =>
+  scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(threadId)));
 
 vi.stubGlobal("window", { location: new URL("http://environment.test/") });
 
@@ -37,7 +42,7 @@ it.effect("reads B6's thread-home batch without client-side participant-id deriv
       );
     });
 
-    const entries = yield* listThreadHomesEffect([
+    const entries = yield* listThreadHomesEffect(testPreparedConnection(), [
       ThreadId.make("thread:alpha"),
       ThreadId.make("thread:native"),
     ]).pipe(Effect.provideService(HttpClient.HttpClient, client));
@@ -69,7 +74,7 @@ it.effect("preserves an authenticated thread-home read failure", () =>
       ),
     );
     const error = yield* Effect.flip(
-      listThreadHomesEffect([ThreadId.make("thread:alpha")]).pipe(
+      listThreadHomesEffect(testPreparedConnection(), [ThreadId.make("thread:alpha")]).pipe(
         Effect.provideService(HttpClient.HttpClient, client),
       ),
     );
@@ -79,40 +84,45 @@ it.effect("preserves an authenticated thread-home read failure", () =>
 );
 
 it("replaces a missing or stale home in the exact cache map read by Squadron filtering", () => {
-  const threads = [{ id: "thread:alpha" }, { id: "thread:native" }];
-  const alphaScope = { id: "squadron:alpha", name: "Alpha" };
-  const homes = new Map<string, ThreadHome>();
+  const threads = [
+    { environmentId, id: "thread:alpha" },
+    { environmentId, id: "thread:native" },
+  ];
+  const alphaScope = { environmentId, id: "squadron:alpha", name: "Alpha" };
+  let homes: ReadonlyMap<string, ThreadHome> = new Map();
   expect(filterThreadsForSquadronScope(threads, alphaScope, homes)).toEqual([]);
-  mergeThreadHomeEntries(homes, [
+  homes = replaceThreadHomeEntries(homes, environmentId, [
     { threadId: ThreadId.make("thread:alpha"), home: { kind: "unknown" } },
     { threadId: ThreadId.make("thread:native"), home: { kind: "unknown" } },
   ]);
 
-  expect(shouldRequestThreadHome(homes.get("thread:alpha"), false)).toBe(false);
+  expect(shouldRequestThreadHome(homes.get(homeKey("thread:alpha")), false)).toBe(false);
   expect(shouldForceThreadHomesForScope(null)).toBe(false);
-  expect(shouldForceThreadHomesForScope(alphaScope.id)).toBe(true);
+  expect(shouldForceThreadHomesForScope({ environmentId, squadronId: alphaScope.id })).toBe(true);
   // A failed or not-yet-completed prior read is likewise retried under an
   // explicit scope; no missing home is inferred from the current project.
-  expect(shouldRequestThreadHome(undefined, shouldForceThreadHomesForScope(alphaScope.id))).toBe(
-    true,
-  );
   expect(
     shouldRequestThreadHome(
-      homes.get("thread:alpha"),
-      shouldForceThreadHomesForScope(alphaScope.id),
+      undefined,
+      shouldForceThreadHomesForScope({ environmentId, squadronId: alphaScope.id }),
+    ),
+  ).toBe(true);
+  expect(
+    shouldRequestThreadHome(
+      homes.get(homeKey("thread:alpha")),
+      shouldForceThreadHomesForScope({ environmentId, squadronId: alphaScope.id }),
     ),
   ).toBe(true);
   expect(filterThreadsForSquadronScope(threads, alphaScope, homes)).toEqual([]);
 
-  // The receipt must overwrite the same map instance consumed by the Sidebar
-  // predicate, not a separate HMR-era module cache.
-  mergeThreadHomeEntries(homes, [
+  // The refreshed snapshot is the one consumed by the Sidebar predicate.
+  homes = replaceThreadHomeEntries(homes, environmentId, [
     {
       threadId: ThreadId.make("thread:alpha"),
       home: { kind: "known", squadron: { id: "squadron:alpha", name: "Alpha" } },
     },
   ]);
-  expect(homes.get("thread:alpha")).toEqual({
+  expect(homes.get(homeKey("thread:alpha"))).toEqual({
     kind: "known",
     squadron: { id: "squadron:alpha", name: "Alpha" },
   });
@@ -120,13 +130,15 @@ it("replaces a missing or stale home in the exact cache map read by Squadron fil
 });
 
 it("publishes a new rendered snapshot when a receipt replaces an initial unknown home", () => {
-  const threads = [{ id: "thread:alpha" }];
-  const alphaScope = { id: "squadron:alpha", name: "Alpha" };
-  const initialSnapshot = new Map<string, ThreadHome>([["thread:alpha", { kind: "unknown" }]]);
+  const threads = [{ environmentId, id: "thread:alpha" }];
+  const alphaScope = { environmentId, id: "squadron:alpha", name: "Alpha" };
+  const initialSnapshot = new Map<string, ThreadHome>([
+    [homeKey("thread:alpha"), { kind: "unknown" }],
+  ]);
 
   expect(filterThreadsForSquadronScope(threads, alphaScope, initialSnapshot)).toEqual([]);
 
-  const receiptSnapshot = replaceThreadHomeEntries(initialSnapshot, [
+  const receiptSnapshot = replaceThreadHomeEntries(initialSnapshot, environmentId, [
     {
       threadId: ThreadId.make("thread:alpha"),
       home: { kind: "known", squadron: { id: "squadron:alpha", name: "Alpha" } },
@@ -136,6 +148,6 @@ it("publishes a new rendered snapshot when a receipt replaces an initial unknown
   // React observes this reference as its external-store snapshot. A new
   // reference is therefore as important as the known-home contents.
   expect(receiptSnapshot).not.toBe(initialSnapshot);
-  expect(initialSnapshot.get("thread:alpha")).toEqual({ kind: "unknown" });
+  expect(initialSnapshot.get(homeKey("thread:alpha"))).toEqual({ kind: "unknown" });
   expect(filterThreadsForSquadronScope(threads, alphaScope, receiptSnapshot)).toEqual(threads);
 });

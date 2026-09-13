@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo } from "react";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { openCommandPalette } from "../commandPaletteBus";
 import { useProjects } from "../state/entities";
-import { usePrimaryEnvironmentId } from "../state/environments";
 import { dispatchPreviewAction } from "../components/preview/previewActionBus";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { isPreviewFocused } from "../lib/previewFocus";
@@ -32,11 +31,10 @@ function ChatRouteGlobalShortcuts() {
   const { handleNewThread, routeThreadRef } = useHandleNewThread();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const projects = useProjects();
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { status: squadronDirectoryStatus, squadrons } = useSquadronDirectory();
   const squadronEntries = useMemo(
-    () => buildSquadronPickerEntries({ squadrons, projects, primaryEnvironmentId }),
-    [primaryEnvironmentId, projects, squadrons],
+    () => buildSquadronPickerEntries({ squadrons, projects }),
+    [projects, squadrons],
   );
   const startShortcutThread = useCallback(
     (entry: (typeof squadronEntries)[number]) =>

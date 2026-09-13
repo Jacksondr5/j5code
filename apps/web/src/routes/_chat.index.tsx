@@ -18,7 +18,7 @@ import {
   startSquadronDraft,
 } from "../j5/squadron/SquadronPicker.logic";
 import { useAllEnvironmentShellsBootstrapped, useProjects } from "../state/entities";
-import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
+import { useEnvironments } from "../state/environments";
 import { APP_DISPLAY_NAME } from "~/branding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 
@@ -36,8 +36,9 @@ function ChatIndexRouteView() {
 function SquadronFirstRunGateLive() {
   const { status, squadrons, refresh } = useSquadronDirectory();
   const state = resolveSquadronFirstRunGateState({
-    authenticatedRouteAvailable: status !== "error",
-    squadronCount: status === "loading" ? null : squadrons.length,
+    authenticatedRouteAvailable:
+      status !== "error" && (status !== "partial" || squadrons.length > 0),
+    squadronCount: squadrons.length > 0 ? squadrons.length : status === "loading" ? null : 0,
   });
 
   return (
@@ -59,12 +60,11 @@ function IndexDraftLanding() {
   const handleNewThread = useNewThreadHandler();
   const { status: squadronDirectoryStatus, squadrons } = useSquadronDirectory();
   const ambientSquadronId = useSquadronAmbientScope();
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const startingRef = useRef(false);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
   const squadronEntries = useMemo(
-    () => buildSquadronPickerEntries({ squadrons, projects, primaryEnvironmentId }),
-    [primaryEnvironmentId, projects, squadrons],
+    () => buildSquadronPickerEntries({ squadrons, projects }),
+    [projects, squadrons],
   );
   const destination = useMemo(
     () => resolveIndexDraftDestination(ambientSquadronId, squadronDirectoryStatus, squadronEntries),
@@ -102,6 +102,9 @@ function IndexDraftLanding() {
       });
   }, [bootstrapped, destination, handleNewThread, startState.retryRequest]);
 
+  // Wait for each reachable environment's project list before judging a
+  // Squadron's folder missing: the directory read can land before the shell
+  // snapshot, and a missing folder is otherwise presented as permanent.
   if (!bootstrapped) {
     return null;
   }
