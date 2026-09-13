@@ -158,7 +158,7 @@ const withWorkingDirectory = <A, E, R>(cwd: string, effect: Effect.Effect<A, E, 
     (previous) => Effect.sync(() => process.chdir(previous)),
   );
 
-describe("j5code pair", () => {
+describe("j5 pair", () => {
   it.effect("mints a token and prints a QR pairing URL for a live server", () =>
     withDescriptorServer((origin) =>
       Effect.gen(function* () {
@@ -191,7 +191,7 @@ describe("j5code pair", () => {
         // @effect-diagnostics-next-line preferSchemaOverJson:off - CLI JSON output is decoded as a presentation DTO.
         const credentials = JSON.parse(listed) as ReadonlyArray<{ readonly label?: string }>;
         assert.equal(credentials.length, 1);
-        assert.equal(credentials[0]?.label, "j5code pair");
+        assert.equal(credentials[0]?.label, "j5 pair");
       }),
     ).pipe(
       Effect.provide(NodeServices.layer),

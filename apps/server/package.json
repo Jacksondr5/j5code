@@ -9,7 +9,7 @@
     "directory": "apps/server"
   },
   "bin": {
-    "j5code": "./dist/bin.mjs"
+    "j5": "./dist/bin.mjs"
   },
   "files": [
     "dist"

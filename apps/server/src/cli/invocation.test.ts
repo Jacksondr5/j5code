@@ -4,77 +4,81 @@ import { detectCliRunner, formatCliCommand, suggestedPackageSpec } from "./invoc
 
 it("detects package runners from their cache entry paths", () => {
   assert.equal(
-    detectCliRunner("/home/theo/.npm/_npx/abc123/node_modules/j5code/dist/bin.mjs"),
+    detectCliRunner("/home/theo/.npm/_npx/abc123/node_modules/@jacksondr5/j5code/dist/bin.mjs"),
     "npx",
   );
   assert.equal(
     detectCliRunner(
-      "C:\\Users\\theo\\AppData\\Local\\npm-cache\\_npx\\abc\\node_modules\\j5code\\dist\\bin.mjs",
+      "C:\\Users\\theo\\AppData\\Local\\npm-cache\\_npx\\abc\\node_modules\\@jacksondr5\\j5code\\dist\\bin.mjs",
     ),
     "npx",
   );
   assert.equal(
-    detectCliRunner("/home/theo/.cache/pnpm/dlx/abc/node_modules/j5code/dist/bin.mjs"),
-    "pnpm dlx",
-  );
-  assert.equal(
-    detectCliRunner("/home/theo/.local/share/pnpm/.pnpm/dlx/abc/node_modules/j5code/dist/bin.mjs"),
+    detectCliRunner("/home/theo/.cache/pnpm/dlx/abc/node_modules/@jacksondr5/j5code/dist/bin.mjs"),
     "pnpm dlx",
   );
   assert.equal(
     detectCliRunner(
-      "C:\\Users\\theo\\AppData\\Local\\pnpm-cache\\dlx\\abc\\node_modules\\j5code\\dist\\bin.mjs",
+      "/home/theo/.local/share/pnpm/.pnpm/dlx/abc/node_modules/@jacksondr5/j5code/dist/bin.mjs",
+    ),
+    "pnpm dlx",
+  );
+  assert.equal(
+    detectCliRunner(
+      "C:\\Users\\theo\\AppData\\Local\\pnpm-cache\\dlx\\abc\\node_modules\\@jacksondr5\\j5code\\dist\\bin.mjs",
     ),
     "pnpm dlx",
   );
   assert.equal(detectCliRunner("/home/theo/.bun/install/cache/j5code@0.0.31/dist/bin.mjs"), "bunx");
   assert.equal(
-    detectCliRunner("/tmp/bunx-1000-j5code@latest/node_modules/j5code/dist/bin.mjs"),
+    detectCliRunner("/tmp/bunx-1000-j5code@latest/node_modules/@jacksondr5/j5code/dist/bin.mjs"),
     "bunx",
   );
   assert.equal(
     detectCliRunner(
-      "C:\\Users\\theo\\AppData\\Local\\Temp\\bunx-0-j5code@latest\\node_modules\\j5code\\dist\\bin.mjs",
+      "C:\\Users\\theo\\AppData\\Local\\Temp\\bunx-0-j5code@latest\\node_modules\\@jacksondr5\\j5code\\dist\\bin.mjs",
     ),
     "bunx",
   );
 });
 
 it("treats stable installs as direct invocations", () => {
-  assert.isNull(detectCliRunner("/usr/local/lib/node_modules/j5code/dist/bin.mjs"));
+  assert.isNull(detectCliRunner("/usr/local/lib/node_modules/@jacksondr5/j5code/dist/bin.mjs"));
   assert.isNull(detectCliRunner("/home/theo/Code/work/t3code/apps/server/dist/bin.mjs"));
-  assert.isNull(detectCliRunner("/home/theo/.t3/runtime/0.0.31/node_modules/j5code/dist/bin.mjs"));
+  assert.isNull(
+    detectCliRunner("/home/theo/.t3/runtime/0.0.31/node_modules/@jacksondr5/j5code/dist/bin.mjs"),
+  );
   assert.isNull(detectCliRunner(""));
 });
 
 it("re-suggests the nightly channel only for nightly builds", () => {
-  assert.equal(suggestedPackageSpec("0.0.31-nightly.20260729"), "j5code@nightly");
-  assert.equal(suggestedPackageSpec("0.0.31"), "j5code");
+  assert.equal(suggestedPackageSpec("0.0.31-nightly.20260729"), "@jacksondr5/j5code@nightly");
+  assert.equal(suggestedPackageSpec("0.0.31"), "@jacksondr5/j5code");
 });
 
 it("formats serve suggestions to match the launching command", () => {
   assert.equal(
     formatCliCommand({
       subcommand: "serve",
-      entryPath: "/home/theo/.npm/_npx/abc/node_modules/j5code/dist/bin.mjs",
+      entryPath: "/home/theo/.npm/_npx/abc/node_modules/@jacksondr5/j5code/dist/bin.mjs",
       version: "0.0.31-nightly.20260729",
     }),
-    "npx j5code@nightly serve",
+    "npx @jacksondr5/j5code@nightly serve",
   );
   assert.equal(
     formatCliCommand({
       subcommand: "serve",
-      entryPath: "/tmp/bunx-1000-j5code@latest/node_modules/j5code/dist/bin.mjs",
+      entryPath: "/tmp/bunx-1000-j5code@latest/node_modules/@jacksondr5/j5code/dist/bin.mjs",
       version: "0.0.31",
     }),
-    "bunx j5code serve",
+    "bunx @jacksondr5/j5code serve",
   );
   assert.equal(
     formatCliCommand({
       subcommand: "serve",
-      entryPath: "/usr/local/lib/node_modules/j5code/dist/bin.mjs",
+      entryPath: "/usr/local/lib/node_modules/@jacksondr5/j5code/dist/bin.mjs",
       version: "0.0.31-nightly.20260729",
     }),
-    "j5code serve",
+    "j5 serve",
   );
 });

@@ -14,11 +14,18 @@ launch T3 Code and configure providers afterwards.
 ## Run without installing
 
 ```bash
-npx j5code@latest
+npx @jacksondr5/j5code@latest
 ```
 
 This starts the server and opens the local web app. Run
-`npx j5code@latest --help` for command-line options.
+`npx @jacksondr5/j5code@latest --help` for command-line options.
+
+To install the `j5` command for regular use:
+
+```sh
+npm install -g @jacksondr5/j5code
+j5
+```
 
 ## Desktop app
 
@@ -44,11 +51,11 @@ update can take longer.
 With the desktop app already running on the same machine:
 
 ```bash
-npx j5code app
+npx @jacksondr5/j5code app
 ```
 
 This opens a new thread for the current directory, adding the project if needed.
-Pass a path, such as `npx j5code app ../my-project`, to open another directory. It requires
+Pass a path, such as `npx @jacksondr5/j5code app ../my-project`, to open another directory. It requires
 the desktop app, so a standalone server or an SSH session is not enough. If the
 command cannot reach the app, start or update the desktop app and try again.
 

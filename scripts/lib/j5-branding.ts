@@ -7,7 +7,7 @@
  */
 export const J5_BRANDING = {
   cli: {
-    packageName: "j5code",
+    packageName: "@jacksondr5/j5code",
   },
   desktop: {
     baseName: "J5 Code",

@@ -106,14 +106,14 @@ describe("ssh command", () => {
           appVersion: "0.0.17",
           updateChannel: "latest",
         }),
-        "j5code@0.0.17",
+        "@jacksondr5/j5code@0.0.17",
       );
       assert.equal(
         resolveRemoteT3CliPackageSpec({
           appVersion: "0.0.17-nightly.20260415.44",
           updateChannel: "nightly",
         }),
-        "j5code@0.0.17-nightly.20260415.44",
+        "@jacksondr5/j5code@0.0.17-nightly.20260415.44",
       );
       assert.equal(
         resolveRemoteT3CliPackageSpec({
@@ -121,7 +121,7 @@ describe("ssh command", () => {
           updateChannel: "nightly",
           isDevelopment: true,
         }),
-        "j5code@nightly",
+        "@jacksondr5/j5code@nightly",
       );
       assert.equal(
         resolveRemoteT3CliPackageSpec({
@@ -129,7 +129,7 @@ describe("ssh command", () => {
           updateChannel: "latest",
           isDevelopment: true,
         }),
-        "j5code@nightly",
+        "@jacksondr5/j5code@nightly",
       );
     }),
   );

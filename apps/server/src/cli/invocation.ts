@@ -16,7 +16,7 @@ export type CliRunner = "npx" | "pnpm dlx" | "bunx";
  *   bunx     ~/.bun/install/cache/... or $TMPDIR/bunx-<uid>-<spec>/...
  *
  * Global installs and repo checkouts match none of these and return null.
- * Detection is best-effort; callers must fail closed to a plain `j5code` command.
+ * Detection is best-effort; callers must fail closed to a plain `j5` command.
  */
 export function detectCliRunner(entryPath: string): CliRunner | null {
   const path = entryPath.replaceAll("\\", "/");
@@ -37,19 +37,19 @@ export function detectCliRunner(entryPath: string): CliRunner | null {
 }
 
 /**
- * The `j5code` package spec to suggest. The literal spec the user typed (e.g.
- * `j5code@nightly`) is resolved away before our process starts, so re-derive it
+ * The `@jacksondr5/j5code` package spec to suggest. The literal spec the user typed (e.g.
+ * `@jacksondr5/j5code@nightly`) is resolved away before our process starts, so re-derive it
  * from the running version: nightly builds re-suggest the nightly channel,
  * anything else suggests the bare package.
  */
 export function suggestedPackageSpec(version: string): string {
-  return version.includes("-nightly.") ? "j5code@nightly" : "j5code";
+  return version.includes("-nightly.") ? "@jacksondr5/j5code@nightly" : "@jacksondr5/j5code";
 }
 
 /**
- * Render a `j5code <subcommand>` suggestion that matches how this process was
- * launched, so copy/pasting it actually works: `npx j5code connect` suggests
- * `npx j5code serve`, a global install suggests `j5code serve`, and a nightly build
+ * Render a `j5 <subcommand>` suggestion that matches how this process was
+ * launched, so copy/pasting it actually works: `npx @jacksondr5/j5code connect` suggests
+ * `npx @jacksondr5/j5code serve`, a global install suggests `j5 serve`, and a nightly build
  * keeps the `@nightly` tag.
  */
 export function formatCliCommand(input: {
@@ -59,7 +59,7 @@ export function formatCliCommand(input: {
 }): string {
   const runner = detectCliRunner(input.entryPath);
   if (runner === null) {
-    return `j5code ${input.subcommand}`;
+    return `j5 ${input.subcommand}`;
   }
   return `${runner} ${suggestedPackageSpec(input.version)} ${input.subcommand}`;
 }

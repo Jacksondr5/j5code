@@ -1,5 +1,5 @@
 /**
- * `j5code triage` - hand a misbehaving install to the user's own coding agent.
+ * `j5 triage` - hand a misbehaving install to the user's own coding agent.
  *
  * The command is deliberately thin: it writes a `context.md` with machine facts
  * (version, paths, server liveness), then launches claude or codex
@@ -167,7 +167,7 @@ export const triageCommand = Command.make("triage", {
 
       // Triage is a user-facing feature: always the userdata state, never dev.
       // --base-dir wins; J5CODE_HOME is its documented env equivalent (same
-      // precedence as `j5code pair`).
+      // precedence as `j5 pair`).
       const explicitBaseDir = Option.getOrUndefined(flags.baseDir);
       const envHome = yield* Config.string("J5CODE_HOME").pipe(Config.option);
       const baseDir = yield* resolveBaseDir(explicitBaseDir ?? Option.getOrUndefined(envHome));

@@ -93,7 +93,7 @@ export class ServerUpdateResumeTimeoutError extends Schema.TaggedErrorClass<Serv
   },
 ) {
   override get message(): string {
-    return `The server did not resume on j5code@${this.targetVersion}.`;
+    return `The server did not resume on @jacksondr5/j5code@${this.targetVersion}.`;
   }
 }
 
@@ -104,7 +104,7 @@ export class ServerUpdateProgressIncompleteError extends Schema.TaggedErrorClass
   },
 ) {
   override get message(): string {
-    return `The j5code@${this.targetVersion} update ended before the server accepted the restart.`;
+    return `The @jacksondr5/j5code@${this.targetVersion} update ended before the server accepted the restart.`;
   }
 }
 
@@ -117,7 +117,7 @@ export class ServerUpdateTerminalError extends Schema.TaggedErrorClass<ServerUpd
   },
 ) {
   override get message(): string {
-    return this.reason ?? `The j5code@${this.targetVersion} update ${this.status}.`;
+    return this.reason ?? `The @jacksondr5/j5code@${this.targetVersion} update ${this.status}.`;
   }
 }
 

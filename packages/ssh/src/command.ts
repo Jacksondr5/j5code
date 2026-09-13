@@ -371,12 +371,14 @@ export function resolveRemoteT3CliPackageSpec(input: {
 }): string {
   const appVersion = input.appVersion.trim();
   if (!input.isDevelopment && PUBLISHABLE_T3_VERSION_PATTERN.test(appVersion)) {
-    return `j5code@${appVersion}`;
+    return `@jacksondr5/j5code@${appVersion}`;
   }
 
   if (input.isDevelopment) {
-    return "j5code@nightly";
+    return "@jacksondr5/j5code@nightly";
   }
 
-  return input.updateChannel === "nightly" ? "j5code@nightly" : "j5code@latest";
+  return input.updateChannel === "nightly"
+    ? "@jacksondr5/j5code@nightly"
+    : "@jacksondr5/j5code@latest";
 }

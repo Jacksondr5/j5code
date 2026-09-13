@@ -72,7 +72,7 @@ does not deploy relay or Vercel services.
 
 Both package manifests must have the same stable version. Bump them before a new release; an
 existing npm version can only be reused when its `gitHead` matches the selected build's commit.
-The npm trusted publisher for `j5code` must authorize repository `Jacksondr5/j5code` and workflow
+The npm trusted publisher for `@jacksondr5/j5code` must authorize repository `Jacksondr5/j5code` and workflow
 `j5-release.yml` with publishing enabled. The first npm publication requires the package owner's
 login before that trusted publisher can be registered.
 
@@ -83,12 +83,12 @@ publish to npm or create a GitHub Release. The workflow uses the Apple signing s
 `APPLE_TEAM_ID` repository variable; it converts the P12 export to a Keychain-compatible format.
 Clerk passkey provisioning is only required when Clerk/passkey configuration is supplied.
 
-The CLI is published as `j5code`, with the `j5code` executable. Its workspace name remains `t3`
+The CLI is published as `@jacksondr5/j5code`, with the `j5` executable. Its workspace name remains `t3`
 to preserve upstream task references and Effect service identifiers. Build with
 `vp run --filter t3 build`, then preview publication with
 `node apps/server/scripts/cli.ts publish --dry-run`. The publish script prepares the public
 manifest and restores the private workspace manifest afterward; use that script for publication.
-Desktop releases must wait until the matching `j5code@<version>` is available on npm so remote
+Desktop releases must wait until the matching `@jacksondr5/j5code@<version>` is available on npm so remote
 server updates can install the same version.
 
 - `J5 CI` runs formatting, lint, typecheck, and unit-test gates on every `j5/**` push and PR.

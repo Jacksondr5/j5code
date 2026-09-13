@@ -65,7 +65,7 @@ export function formatServiceStatus(
     return "J5 Code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd";
   }
   if (!status.installed) {
-    return "J5 Code service\n  Status: not installed\n  Next: Run `j5code service install`.";
+    return "J5 Code service\n  Status: not installed\n  Next: Run `j5 service install`.";
   }
   const installedVersion = status.installedVersion ?? cliVersion;
   const problems = (status.problems ?? []).map(
@@ -78,20 +78,22 @@ export function formatServiceStatus(
   ) {
     return [
       "J5 Code service",
-      `  Status: installed · j5code@${installedVersion} (newer than this j5code@${cliVersion} CLI)`,
+      `  Status: installed · @jacksondr5/j5code@${installedVersion} (newer than this @jacksondr5/j5code@${cliVersion} CLI)`,
       `  Unit: ${status.unitPath}`,
       `  Logs: ${status.logPath}`,
       ...problems,
-      `  Next: Use \`npx j5code@${installedVersion} service update\` to repair it, or pass \`--allow-downgrade\` explicitly.`,
+      `  Next: Use \`npx @jacksondr5/j5code@${installedVersion} service update\` to repair it, or pass \`--allow-downgrade\` explicitly.`,
     ].join("\n");
   }
   return [
     "J5 Code service",
-    `  Status: ${status.current ? `installed · j5code@${installedVersion}` : "needs an update or repair"}`,
+    `  Status: ${status.current ? `installed · @jacksondr5/j5code@${installedVersion}` : "needs an update or repair"}`,
     `  Unit: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
     ...problems,
-    ...(status.current ? [] : [`  Next: Run \`npx j5code@${cliVersion} service update\`.`]),
+    ...(status.current
+      ? []
+      : [`  Next: Run \`npx @jacksondr5/j5code@${cliVersion} service update\`.`]),
   ].join("\n");
 }
 
@@ -121,12 +123,12 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
         const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
         if (!result.changed) {
           yield* Console.log(
-            `J5 Code service is already installed with j5code@${packageJson.version}.`,
+            `J5 Code service is already installed with @jacksondr5/j5code@${packageJson.version}.`,
           );
           return;
         }
         yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} J5 Code service with j5code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+          `${result.previouslyInstalled ? "Updated" : "Installed"} J5 Code service with @jacksondr5/j5code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
         );
       }),
     ),
@@ -135,7 +137,7 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
 
 const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
   Command.withDescription(
-    "Update or repair the background service using this CLI version. Use `npx j5code@latest service update` for the latest release.",
+    "Update or repair the background service using this CLI version. Use `npx @jacksondr5/j5code@latest service update` for the latest release.",
   ),
   Command.withHandler((flags) =>
     runServiceCommand(
@@ -143,11 +145,13 @@ const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
       Effect.gen(function* () {
         const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
         if (!result.changed) {
-          yield* Console.log(`J5 Code service is already using j5code@${packageJson.version}.`);
+          yield* Console.log(
+            `J5 Code service is already using @jacksondr5/j5code@${packageJson.version}.`,
+          );
           return;
         }
         yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} J5 Code service with j5code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+          `${result.previouslyInstalled ? "Updated" : "Installed"} J5 Code service with @jacksondr5/j5code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
         );
       }),
     ),
@@ -203,7 +207,7 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
     compareExactServiceVersions(status.installedVersion, packageJson.version) > 0
   ) {
     yield* Console.log(
-      `A newer j5code@${status.installedVersion} background service is installed. Leaving it unchanged.`,
+      `A newer @jacksondr5/j5code@${status.installedVersion} background service is installed. Leaving it unchanged.`,
     );
     // This CLI cannot verify the newer service. Keep the manual fallback available.
     return false;

@@ -40,7 +40,7 @@ const connectUnavailableCommand = Command.make("connect", {
   Command.withHandler(() =>
     Effect.fail(
       new CliError.ShowHelp({
-        commandPath: ["j5code", "connect"],
+        commandPath: ["j5", "connect"],
         errors: [new ConnectPublicConfigMissingError({ cause: connectPublicConfigMissingMessage })],
       }),
     ),
@@ -48,7 +48,7 @@ const connectUnavailableCommand = Command.make("connect", {
 );
 
 export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
-  Command.make("j5code", { ...sharedServerCommandFlags }).pipe(
+  Command.make("j5", { ...sharedServerCommandFlags }).pipe(
     Command.withDescription("Run the J5 Code server."),
     Command.withHandler((flags) => runServerCommand(flags)),
     Command.withSubcommands([
