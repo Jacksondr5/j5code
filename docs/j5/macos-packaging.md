@@ -64,8 +64,12 @@ T3 Code.
 
 ## GitHub Actions
 
-For a public release, run `J5 Signed macOS Build` on the intended source commit. After it passes,
-run `J5 Release` with that build's numeric run ID. The release workflow builds native resource
+For a public release, bump the release versions with
+`node scripts/update-release-package-versions.ts <version>`, commit the change, and push a release
+branch such as `j5/release-<version>` at that commit. Run `J5 Signed macOS Build` on that branch.
+Keep the branch at the same commit until publication: GitHub restricts release creation with the
+standard Actions token when the target commit is no longer a branch head or tag. After CI and the
+signed build pass, run `J5 Release` with that build's numeric run ID. The release workflow builds native resource
 monitors, publishes the matching CLI through npm trusted publishing, then publishes the verified
 DMG, ZIP, blockmaps, and update manifest to a GitHub Release. It uses GitHub-hosted runners and
 does not deploy relay or Vercel services.
@@ -89,7 +93,9 @@ to preserve upstream task references and Effect service identifiers. Build with
 `node apps/server/scripts/cli.ts publish --dry-run`. The publish script prepares the public
 manifest and restores the private workspace manifest afterward; use that script for publication.
 Desktop releases must wait until the matching `@jacksondr5/j5code@<version>` is available on npm so remote
-server updates can install the same version.
+server updates can install the same version. npm's publish-time scanning can delay availability after
+a successful publish; the release workflow waits before exposing the desktop update. If that wait
+expires, check npm's publication status and wait for the version to become available before retrying.
 
 - `J5 CI` runs formatting, lint, typecheck, and unit-test gates on every `j5/**` push and PR.
 - `J5 Weekly Full Build` runs Mondays at 08:23 UTC and on manual dispatch. It runs the full suite,
