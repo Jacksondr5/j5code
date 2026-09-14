@@ -1,3 +1,5 @@
+import { useAgentMentionPicker } from "../../j5/agents/useAgentMentionPicker";
+import { agentMentionReplacement } from "@t3tools/shared/j5/agentMention";
 import type { EnvironmentId, ProviderInteractionMode, ServerProvider } from "@t3tools/contracts";
 import {
   detectComposerTrigger,
@@ -119,7 +121,9 @@ export function resolveComposerCommandSelection(input: {
   }
 
   let replacement = "";
-  if (item.type === "path") {
+  if (item.type === "agent") {
+    replacement = agentMentionReplacement(item.personaId);
+  } else if (item.type === "path") {
     replacement = `${serializeComposerFileLink(item.path)} `;
   } else if (item.type === "skill") {
     replacement = `$${item.skill.name} `;
@@ -257,8 +261,10 @@ export function useComposerCommandMenu({
     query: trigger?.kind === "path" ? trigger.query : null,
   });
 
+  const agentPicker = useAgentMentionPicker(environmentId, selectedProviderStatus?.driver, trigger);
   const items = useMemo<ComposerCommandItem[]>(() => {
     if (!trigger) return [];
+    if (trigger.kind === "agent") return agentPicker.items;
 
     if (trigger.kind === "slash-command") {
       const q = trigger.query.toLowerCase();
@@ -383,6 +389,7 @@ export function useComposerCommandMenu({
 
     return [];
   }, [
+    agentPicker.items,
     hasThread,
     hasCompactableConversation,
     onUpdateInteractionMode,
@@ -425,7 +432,7 @@ export function useComposerCommandMenu({
     trigger,
     items,
     skills,
-    isLoading: pathSearch.isPending,
+    isLoading: pathSearch.isPending || (trigger?.kind === "agent" && agentPicker.isPending),
     onSelect,
   };
 }

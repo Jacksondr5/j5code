@@ -175,6 +175,10 @@
       "types": "./src/threadReference.ts",
       "import": "./src/threadReference.ts"
     },
+    "./j5/agentMention": {
+      "types": "./src/j5/agentMention.ts",
+      "import": "./src/j5/agentMention.ts"
+    },
     "./composerTrigger": {
       "types": "./src/composerTrigger.ts",
       "import": "./src/composerTrigger.ts"

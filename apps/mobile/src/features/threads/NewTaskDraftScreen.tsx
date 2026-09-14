@@ -50,6 +50,10 @@ import { ProviderIcon } from "../../components/ProviderIcon";
 import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
 import { COMPOSER_LAYOUT_TRANSITION, ComposerSurface } from "./ThreadComposer";
+import { AgentDraftPicker } from "../../j5/agents/AgentDraftPicker";
+import { AgentPersonaAssignmentControls } from "../../j5/agents/AgentPersonaAssignmentControls";
+import { clearDraftAgent, readDraftAgentPersonaId } from "../../j5/agents/agentDraftState";
+import { useDraftAgentAssignment } from "../../j5/agents/useDraftAgentAssignment";
 import { ShimmeringWorkContent } from "./thread-work-log";
 import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
 import { ComposerCommandPopover } from "./ComposerCommandPopover";
@@ -279,6 +283,10 @@ export function NewTaskDraftScreen(props: {
   const shareImportDraftBackupRef = useRef(new Map<string, ComposerDraft>());
   const activeShareImportTokenRef = useRef<symbol | null>(null);
   const shareImportMountedRef = useRef(true);
+  const draftAgent = useDraftAgentAssignment(
+    flow.draftKey,
+    flow.selectedProject?.environmentId ?? null,
+  );
   const latestDraftKeyRef = useRef(flow.draftKey);
   const latestIncomingShareIdRef = useRef(props.incomingShareId);
   latestDraftKeyRef.current = flow.draftKey;
@@ -981,9 +989,11 @@ export function NewTaskDraftScreen(props: {
       selectedBranch: selectedBranchName,
       currentCheckoutBranch: flow.currentCheckoutBranchName,
     });
+    const draftAgentPersonaId = readDraftAgentPersonaId(draftKey);
     const result = await createProjectThread({
       project: selectedProject,
       modelSelection,
+      ...(draftAgentPersonaId === null ? {} : { agentPersonaId: draftAgentPersonaId }),
       envMode: workspaceMode,
       branch: creationBranch,
       worktreePath: workspaceMode === "worktree" ? null : selectedWorktreePath,
@@ -1009,6 +1019,7 @@ export function NewTaskDraftScreen(props: {
     });
     flow.setSubmitting(false);
 
+    if (result._tag !== "Failure") clearDraftAgent(draftKey);
     if (result._tag === "Failure") {
       if (!isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
@@ -1329,20 +1340,37 @@ export function NewTaskDraftScreen(props: {
                     onPickFiles={handlePickFiles}
                   />
                   <ComposerToolbarScroller align="end" contentPaddingRight={0} fadeSurface="sheet">
-                    <ComposerInlineControl
-                      accessibilityLabel="Model and reasoning settings"
-                      disabled={isComposerInteractionLocked}
-                      emphasized
-                      iconNode={
-                        <ProviderIcon
-                          provider={flow.selectedModelOption?.providerDriver}
-                          size={16}
+                    {draftAgent.assignment && flow.selectedProject ? (
+                      <AgentPersonaAssignmentControls
+                        assignment={draftAgent.assignment}
+                        environmentId={flow.selectedProject.environmentId}
+                        onClear={draftAgent.clear}
+                      />
+                    ) : (
+                      <>
+                        {flow.draftKey && flow.selectedProject ? (
+                          <AgentDraftPicker
+                            environmentId={flow.selectedProject.environmentId}
+                            draftKey={flow.draftKey}
+                            disabled={isComposerInteractionLocked}
+                          />
+                        ) : null}
+                        <ComposerInlineControl
+                          accessibilityLabel="Model and reasoning settings"
+                          disabled={isComposerInteractionLocked}
+                          emphasized
+                          iconNode={
+                            <ProviderIcon
+                              provider={flow.selectedModelOption?.providerDriver}
+                              size={16}
+                            />
+                          }
+                          label={flow.selectedModelOption?.label ?? "Choose model"}
+                          maxWidth={152}
+                          onPress={settingsSheetPresentation.open}
                         />
-                      }
-                      label={flow.selectedModelOption?.label ?? "Choose model"}
-                      maxWidth={152}
-                      onPress={settingsSheetPresentation.open}
-                    />
+                      </>
+                    )}
                     {flow.planModeEnabled ? (
                       <ComposerInlineControl
                         accessibilityHint={`Switches to ${flow.interactionMode === "plan" ? "Build" : "Plan"} mode`}

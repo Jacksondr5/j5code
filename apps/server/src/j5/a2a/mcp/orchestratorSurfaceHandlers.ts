@@ -1,3 +1,4 @@
+import { invokeAgent } from "../../agents/agentInvocation.ts";
 import * as Effect from "effect/Effect";
 
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
@@ -5,6 +6,7 @@ import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { J5OrchestratorSurface, mapJ5OrchestratorCapabilities } from "./orchestratorSurface.ts";
 
 const handlers = {
+  invoke_agent: invokeAgent,
   orchestrator_capabilities: () =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;

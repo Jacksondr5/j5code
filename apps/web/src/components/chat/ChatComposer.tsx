@@ -1,3 +1,5 @@
+import { useAgentMentionPicker } from "../../j5/agents/useAgentMentionPicker";
+import { applyAgentMentionSelection } from "@t3tools/client-runtime/j5/agent-mentions";
 import type { SteerState } from "@t3tools/client-runtime/j5/steer-state";
 import type {
   AssistantCitation,
@@ -778,6 +780,8 @@ import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AgentPersonaAssignmentControl } from "../../j5/agents/AgentPersonaAssignmentControl";
+import { AgentDraftPicker } from "../../j5/agents/AgentDraftPicker";
+import { useDraftAgentAssignment } from "../../j5/agents/useDraftAgentAssignment";
 import { toastManager } from "../ui/toast";
 import {
   BotIcon,
@@ -1932,8 +1936,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerPreviewAnnotations.length === 0 &&
     composerReviewComments.length === 0;
 
+  const agentPicker = useAgentMentionPicker(environmentId, selectedProvider, composerTrigger);
+  const draftAgent = useDraftAgentAssignment(
+    props.routeThreadRef,
+    environmentId,
+    props.isLocalDraftThread,
+  );
+  const effectiveAgentAssignment = agentPersonaAssignment ?? draftAgent.assignment ?? undefined;
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
+    if (composerTrigger.kind === "agent") return agentPicker.items;
     if (composerTrigger.kind === "path") {
       return workspaceEntries.entries.map((entry) => ({
         id: `path:${entry.kind}:${entry.path}`,
@@ -2023,6 +2035,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     return [];
   }, [
+    agentPicker.items,
     compactSlashCommandAvailable,
     composerTrigger,
     planModeUiEnabled,
@@ -2098,15 +2111,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ]);
 
   const isComposerMenuLoading =
-    composerTriggerKind === "path" && pathTriggerQuery.length > 0 && workspaceEntries.isPending;
+    (composerTriggerKind === "agent" && agentPicker.isPending) ||
+    (composerTriggerKind === "path" && pathTriggerQuery.length > 0 && workspaceEntries.isPending);
   const composerMenuEmptyState = useMemo(() => {
+    if (composerTriggerKind === "agent") return agentPicker.error ?? "No available agents found.";
     if (composerTriggerKind === "skill") {
       return "No skills found. Try / to browse provider commands.";
     }
     return composerTriggerKind === "path"
       ? "No matching files or folders."
       : "No matching command.";
-  }, [composerTriggerKind]);
+  }, [composerTriggerKind, agentPicker.error]);
 
   // ------------------------------------------------------------------
   // Provider traits UI
@@ -2708,6 +2723,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       });
       const { snapshot, trigger } = resolveActiveComposerTrigger();
       if (!trigger) return;
+      if (item.type === "agent") {
+        if (applyAgentMentionSelection(item, trigger, snapshot.value, applyPromptReplacement))
+          setComposerHighlightedItemId(null);
+        return;
+      }
       if (item.type === "path") {
         const replacement = `${serializeComposerFileLink(item.path)} `;
         const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
@@ -3887,10 +3907,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const hiddenRestingBlockIds = restingBlockDefs
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
     .map((def) => def.id);
-  const composerControls = agentPersonaAssignment ? (
+  const composerControls = effectiveAgentAssignment ? (
     <AgentPersonaAssignmentControl
-      assignment={agentPersonaAssignment}
+      assignment={effectiveAgentAssignment}
       environmentId={environmentId}
+      {...(agentPersonaAssignment ? {} : { onClear: draftAgent.clear })}
     />
   ) : noProviderAvailable ? (
     <Button
@@ -3916,6 +3937,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           size="xs"
           className="@max-[400px]/composer-surface:hidden"
           data-resting-controls-separator="true"
+        />
+      ) : null}
+      {draftAgent.enabled ? (
+        <AgentDraftPicker
+          environmentId={environmentId}
+          draftKey={draftAgent.draftKey}
+          size={composerControlsInStrip ? "xs" : "sm"}
         />
       ) : null}
       <ProviderModelPicker

@@ -223,6 +223,10 @@
       "types": "./src/j5/agentPersonaAtoms.ts",
       "default": "./src/j5/agentPersonaAtoms.ts"
     },
+    "./j5/agent-mentions": {
+      "types": "./src/j5/agentMentions.ts",
+      "default": "./src/j5/agentMentions.ts"
+    },
     "./j5/steer-state": {
       "types": "./src/j5/steerState.ts",
       "default": "./src/j5/steerState.ts"

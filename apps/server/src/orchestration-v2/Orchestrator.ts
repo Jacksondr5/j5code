@@ -4606,6 +4606,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ),
       );
 
+      yield* personaGuards.subagent(command, targetAdapter.driver);
+
       const now = command.createdAt ?? (yield* DateTime.now);
       const taskNodeId = idAllocator.derive.delegatedTaskNode({
         commandId: command.commandId,
@@ -4640,6 +4642,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }),
         runtimeMode: command.runtimeMode,
         interactionMode: command.interactionMode,
+        ...(command.agentPersonaAssignment === undefined
+          ? {}
+          : { agentPersonaAssignment: command.agentPersonaAssignment }),
       };
       const task: OrchestrationV2Subagent = {
         id: taskNodeId,

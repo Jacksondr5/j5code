@@ -11,6 +11,12 @@ Agent definitions are separate from runtime activity, so only agents and workflo
 
 The right-panel view is available in the web and desktop clients.
 
+## Starting a task as an agent
+
+In a new task, the composer offers an **Agent** control beside the model picker whenever the selected environment has launchable agents. Choose one and the model and reasoning controls are replaced by the agent's name and its fixed route; use the **×** control to go back to a regular task before sending. On send, the server resolves the agent's route and pins it to the thread, so the thread shows the same agent chip afterwards. If the agent's definition changes later, the chip shows **Changed**; the running task keeps the definition it started with, and a new task uses the current one.
+
+Threads launched as an agent show the agent beside their home in the thread list, and delegated children in the Agents panel show which saved agent ran them.
+
 ## Persona library
 
 Open **Settings → Agents** on web, desktop, or mobile to see reusable personas in a connected environment. Select an environment to inspect its library and available model routes. Personas can be authored in folders and shared through git; supplied examples are starting points you can customize.
@@ -33,7 +39,9 @@ Use the trash icon to remove an agent whether it is on or off. Removal deletes i
 
 Use the **pencil icon** on an imported or personal agent to edit its **Name**, **Description**, **Instructions**, **Runtime policy**, and **Primary/Fallback models** with their reasoning settings. Each row also has a **more** menu with **Duplicate as personal agent**, which opens the create dialog prefilled from that agent with a fresh ID (the way to build on a bundled example), **Export YAML**, which downloads or shares the definition as a file another environment or teammate can import, and, when more than one environment is connected, **Copy to environment**, which imports the same definition into the environment you pick. Copying uses the ordinary import path, so an existing agent with the same ID in the target asks for confirmation before it is replaced. Open the model menu to see signed-in providers. Hover over a provider to open its models in a side submenu (tap on mobile). Reasoning stays in a separate control showing all options supported by the selected model. Model choices come from the selected environment. Previously configured values are retained until you change them, including unavailable models and other reasoning levels. Save updates only the imported copy and preserves its on/off setting. Cancel discards the draft. Changes affect future launches; the original file and existing tasks stay unchanged. Import a copy first to edit a folder-loaded agent or example. Instructions and the agent ID are not editable in this form.
 
-Orchestrators activate personas in this version. Selecting a persona directly when creating a task is planned. A task keeps the definition and model route it launched with, even when the library changes.
+To invoke an agent in Codex or Claude, type **@** in the composer and select an agent, or type `@agent:<id>` directly. For example: `@agent:scout review the authentication flow`. Available agents come from the current environment. You can remove a selection by deleting its mention before sending.
+
+The selected agent runs as a subagent under the current conversation and returns its result there. It uses its saved instructions, primary/fallback model, reasoning, and runtime policy, even if its model uses a different provider from the parent. It cannot broaden the parent’s permissions. Running subagents keep their saved definition when the library changes. Crews and new-task crew launches are not part of agent invocation.
 
 Persona instructions describe intended behavior. They do not grant permissions or guarantee that an agent obeys them. The displayed runtime policy reflects supported provider controls; unsupported modes appear as **Blocked**.
 

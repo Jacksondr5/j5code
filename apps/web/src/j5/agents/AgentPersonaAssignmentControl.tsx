@@ -4,7 +4,7 @@ import {
   presentAgentPersonaAssignment,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import type { EnvironmentId, OrchestrationV2AgentPersonaAssignment } from "@t3tools/contracts";
-import { BotIcon, TriangleAlertIcon } from "lucide-react";
+import { BotIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 
 import { ComposerControl, ComposerControlIcon } from "../../components/chat/ComposerControl";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
@@ -16,6 +16,8 @@ export function AgentPersonaAssignmentControl(props: {
   readonly assignment: OrchestrationV2AgentPersonaAssignment;
   /** When known, the current library is compared with the launch snapshot to show drift. */
   readonly environmentId?: EnvironmentId;
+  /** Present only for an unsent draft, where the choice can still be undone. */
+  readonly onClear?: () => void;
 }) {
   const presentation = presentAgentPersonaAssignment(props.assignment);
   const catalog = useEnvironmentQuery(
@@ -59,6 +61,18 @@ export function AgentPersonaAssignmentControl(props: {
         </TooltipTrigger>
         <TooltipPopup side="top">This persona's model route is fixed for this task.</TooltipPopup>
       </Tooltip>
+      {props.onClear ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <ComposerControl type="button" aria-label="Remove agent" onClick={props.onClear} />
+            }
+          >
+            <ComposerControlIcon icon={XIcon} />
+          </TooltipTrigger>
+          <TooltipPopup side="top">Start as a regular task instead.</TooltipPopup>
+        </Tooltip>
+      ) : null}
       {drift === "changed" ? (
         <Tooltip>
           <TooltipTrigger

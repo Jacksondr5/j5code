@@ -1,4 +1,7 @@
+import type { OrchestrationV2AgentPersonaAssignment } from "@t3tools/contracts";
+
 import type { ThreadHome } from "./ThreadHomesClient";
+import { AgentIdentityChip } from "../agents/AgentIdentityChip";
 
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 
@@ -10,14 +13,20 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/toolt
 export function ThreadCardIdentity(props: {
   readonly home: ThreadHome | undefined;
   readonly fallbackFolder: string | null;
+  /** Threads launched as a saved agent show the agent beside their home. */
+  readonly agentPersonaAssignment?: OrchestrationV2AgentPersonaAssignment | undefined;
 }) {
   const label = props.home?.kind === "known" ? props.home.squadron.name : props.fallbackFolder;
+  const agent = <AgentIdentityChip assignment={props.agentPersonaAssignment} />;
   return label === null ? (
-    <span className="flex-1" />
+    <span className="flex flex-1 items-center gap-1">{agent}</span>
   ) : (
-    <Tooltip>
-      <TooltipTrigger render={<span className="block truncate">{label}</span>} />
-      <TooltipPopup>{label}</TooltipPopup>
-    </Tooltip>
+    <span className="flex min-w-0 items-center gap-1">
+      {agent}
+      <Tooltip>
+        <TooltipTrigger render={<span className="block min-w-0 truncate">{label}</span>} />
+        <TooltipPopup>{label}</TooltipPopup>
+      </Tooltip>
+    </span>
   );
 }
