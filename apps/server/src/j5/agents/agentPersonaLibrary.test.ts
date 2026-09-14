@@ -1133,3 +1133,47 @@ describe("nested source folders", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
+
+describe("switching source and bundled agents off", () => {
+  it.effect("disables a folder agent without an import, survives restarts, and re-enables", () =>
+    Effect.gen(function* () {
+      const { library, write, fs, path, stateDir } = yield* fixture;
+      yield* write("researcher.yaml", custom);
+      yield* library.setEnabled(custom.id, false);
+      assert.deepEqual((yield* library.catalog()).disabledIds, [custom.id]);
+      assert.deepEqual(yield* library.load(), []);
+      // The exclusion is a file, so a fresh library over the same state directory sees it.
+      const reopened = createAgentPersonaLibrary({ fs, path, stateDir });
+      assert.deepEqual((yield* reopened.catalog()).disabledIds, [custom.id]);
+      yield* reopened.setEnabled(custom.id, true);
+      assert.deepEqual((yield* library.catalog()).disabledIds, []);
+      assert.deepEqual(yield* library.load(), [custom]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("disables a bundled example and lets an imported copy carry its own flag", () =>
+    Effect.gen(function* () {
+      const { library } = yield* fixture;
+      yield* library.setEnabled("scout", false);
+      assert.include((yield* library.catalog()).disabledIds, "scout");
+      assert.notInclude(
+        (yield* library.load()).map(({ id }) => id),
+        "scout",
+      );
+      // Importing a copy overrides the source; the copy starts enabled and is toggled on its own record.
+      yield* library.importFiles({
+        files: [
+          { name: "scout.yaml", content: yaml({ ...BUILT_IN_AGENT_PERSONAS.scout, version: 2 }) },
+        ],
+        replaceExisting: true,
+      });
+      assert.notInclude((yield* library.catalog()).disabledIds, "scout");
+      yield* library.setEnabled("scout", false);
+      assert.include((yield* library.catalog()).disabledIds, "scout");
+      assert.include(
+        String(yield* library.setEnabled("no-such-agent", false).pipe(Effect.flip)),
+        "no longer exists",
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});

@@ -64,6 +64,8 @@ const encodeImports = Schema.encodeEffect(Schema.fromJsonString(ImportedDefiniti
 const RemovedSourceIds = Schema.Array(AgentPersonaId);
 const decodeRemovedSourceIds = Schema.decodeUnknownEffect(Schema.fromJsonString(RemovedSourceIds));
 const encodeRemovedSourceIds = Schema.encodeEffect(Schema.fromJsonString(RemovedSourceIds));
+/** Source and bundled agents switched off in this environment; imported copies carry their own flag. */
+const DISABLED_SOURCES_FILE = "disabled-source-agent-personas.json";
 // RPC layers are session-local; serialize library mutations across all sessions in this process.
 const importPermit = Semaphore.makeUnsafe(1);
 const encodeDefinition = Schema.encodeEffect(Schema.fromJsonString(AgentPersonaDefinition));
@@ -291,10 +293,41 @@ export function createAgentPersonaLibrary(storage?: {
     return yield* decodeRemovedSourceIds(text);
   });
 
+  const readDisabledSourceIds = Effect.fn("AgentPersonaLibrary.readDisabledSourceIds")(
+    function* () {
+      if (storage === undefined) return [];
+      const text = yield* storage.fs
+        .readFileString(storage.path.join(storage.stateDir, DISABLED_SOURCES_FILE))
+        .pipe(
+          Effect.catch((error) =>
+            error.reason._tag === "NotFound" ? Effect.succeed("[]") : Effect.fail(error),
+          ),
+        );
+      return yield* decodeRemovedSourceIds(text);
+    },
+  );
+
+  const writeDisabledSourceIds = Effect.fn("AgentPersonaLibrary.writeDisabledSourceIds")(function* (
+    ids: ReadonlyArray<string>,
+  ) {
+    if (storage === undefined)
+      return yield* new AgentPersonaLibraryError({
+        message: "Persona library storage is unavailable.",
+      });
+    yield* writeFileStringAtomically({
+      filePath: storage.path.join(storage.stateDir, DISABLED_SOURCES_FILE),
+      contents: yield* encodeRemovedSourceIds([...ids]),
+    }).pipe(
+      Effect.provideService(FileSystem.FileSystem, storage.fs),
+      Effect.provideService(Path.Path, storage.path),
+    );
+  });
+
   const catalog = Effect.fn("AgentPersonaLibrary.catalog")(function* () {
     const loaded = yield* loadSources();
     const imported = yield* readImports();
     const removed = new Set(yield* readRemovedSourceIds());
+    const disabledSources = new Set(yield* readDisabledSourceIds());
     const definitions = new Map(
       loaded.definitions
         .filter(({ id }) => !removed.has(id))
@@ -302,10 +335,15 @@ export function createAgentPersonaLibrary(storage?: {
     );
     for (const { enabled: _enabled, ...definition } of imported)
       definitions.set(definition.id, definition);
+    const importedIds = new Set(imported.map(({ id }) => id));
     return {
       definitions: [...definitions.values()],
-      importedIds: imported.map(({ id }) => id),
-      disabledIds: imported.filter(({ enabled }) => enabled === false).map(({ id }) => id),
+      importedIds: [...importedIds],
+      disabledIds: [
+        ...imported.filter(({ enabled }) => enabled === false).map(({ id }) => id),
+        // An imported copy overrides its source, so only sources without one honor the disabled list.
+        ...[...definitions.keys()].filter((id) => disabledSources.has(id) && !importedIds.has(id)),
+      ],
       /** Excluded source definitions with no imported override; listed so they can be restored. */
       removedSources: loaded.definitions.filter(
         ({ id }) => removed.has(id) && !definitions.has(id),
@@ -514,6 +552,31 @@ export function createAgentPersonaLibrary(storage?: {
     );
   }, importPermit.withPermit);
 
+  /** On/off for any listed agent. Imported copies keep their own flag; other ids use the disabled list. */
+  const setEnabled = Effect.fn("AgentPersonaLibrary.setEnabled")(function* (
+    id: string,
+    enabled: boolean,
+  ) {
+    const imported = yield* readImports();
+    if (imported.some((definition) => definition.id === id)) {
+      yield* writeImports(
+        imported.map((definition) =>
+          definition.id === id ? { ...definition, enabled } : definition,
+        ),
+      );
+      return;
+    }
+    const current = yield* catalog();
+    if (!current.definitions.some((definition) => definition.id === id))
+      return yield* new AgentPersonaLibraryError({
+        message: "Agent no longer exists in this environment. Refresh the library.",
+      });
+    const disabled = new Set(yield* readDisabledSourceIds());
+    if (enabled) disabled.delete(id);
+    else disabled.add(id);
+    yield* writeDisabledSourceIds([...disabled]);
+  }, importPermit.withPermit);
+
   const removeImported = Effect.fn("AgentPersonaLibrary.removeImported")(function* (id: string) {
     const imported = yield* readImports();
     yield* writeImports(imported.filter((definition) => definition.id !== id));
@@ -643,6 +706,7 @@ export function createAgentPersonaLibrary(storage?: {
     read,
     editImported,
     setImportedEnabled,
+    setEnabled,
     removeImported,
     removeSource,
     removeAgent,

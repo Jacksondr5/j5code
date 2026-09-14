@@ -35,6 +35,7 @@ export const AGENT_PERSONA_RPC_SCOPES = {
   [METHODS.getAgentPersonaUsage]: AuthOrchestrationReadScope,
   [METHODS.getAgentPersonaLibrarySources]: AuthOrchestrationReadScope,
   [METHODS.setAgentPersonaLibraryFolders]: AuthOrchestrationOperateScope,
+  [METHODS.setAgentPersonaEnabled]: AuthOrchestrationOperateScope,
 } as const;
 
 /** Matches the per-session `observeRpcEffect` closure in ws.ts (instrumentation plus scope check). */
@@ -210,6 +211,12 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
             );
             return { ...current, folders };
           }),
+          TRACE,
+        ),
+      [METHODS.setAgentPersonaEnabled]: (input: Input<"setAgentPersonaEnabled">) =>
+        observe(
+          METHODS.setAgentPersonaEnabled,
+          library.setEnabled(input.personaId, input.enabled).pipe(Effect.mapError(catalogError)),
           TRACE,
         ),
       [METHODS.setAgentPersonaLibraryFolders]: (input: Input<"setAgentPersonaLibraryFolders">) =>

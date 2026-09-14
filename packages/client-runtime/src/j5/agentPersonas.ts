@@ -10,6 +10,8 @@ import type {
   AgentPersonaFolderGitStatus,
   AgentPersonaLibraryFolder,
   AgentPersonaOrigin,
+  AgentPersonaRouteAttempt,
+  AgentPersonaRouteFailureCode,
   AgentPersonaUsage,
   AgentPersonaUsageEntry,
   AgentPersonaImportInput,
@@ -51,6 +53,8 @@ export interface AgentPersonaCatalogRow {
   readonly availability: "available" | "blocked" | "disabled" | "removed";
   readonly availabilityLabel: "Available" | "Blocked" | "Disabled" | "Removed";
   readonly route: string;
+  /** One line per rejected route explaining a Blocked badge; empty unless blocked. */
+  readonly blockedReasons: ReadonlyArray<string>;
 }
 
 export interface AgentPersonaAssignmentPresentation {
@@ -58,7 +62,7 @@ export interface AgentPersonaAssignmentPresentation {
   readonly routeLabel: string;
 }
 
-function providerLabel(driver: OrchestrationV2AgentPersonaAssignment["resolvedDriver"]): string {
+function providerLabel(driver: string): string {
   return driver === "claudeAgent" ? "Claude" : "Codex";
 }
 
@@ -138,6 +142,10 @@ export function presentAgentPersonaCatalog(
           : available
             ? "Available"
             : "Blocked",
+      blockedReasons:
+        persona.availability.status === "unavailable" && !disabled && !removed
+          ? agentPersonaBlockedReasons(persona.availability.attempts ?? [])
+          : [],
       route: available
         ? `${providerLabel(persona.availability.resolvedDriver)} · ${persona.availability.resolvedModelSelection.model} · ${persona.availability.resolvedRoute}`
         : persona.availability.reason === "authority-not-enforceable"
@@ -148,6 +156,29 @@ export function presentAgentPersonaCatalog(
               ? "Disabled for new launches"
               : "Primary and fallback models unavailable",
     };
+  });
+}
+
+const ROUTE_FAILURE_TEXT: Readonly<Record<AgentPersonaRouteFailureCode, string>> = {
+  "provider-not-configured": "provider is not configured on this environment",
+  "provider-unavailable": "provider is unavailable",
+  "provider-disabled": "provider is disabled",
+  "provider-not-installed": "provider is not installed",
+  "provider-error": "provider reported an error",
+  "provider-unauthenticated": "provider is not signed in",
+  "model-not-advertised": "model is not offered by the signed-in provider",
+  "reasoning-effort-not-advertised": "reasoning effort is not offered for this model",
+  "authority-not-enforceable": "runtime policy is not enforceable on this provider yet",
+};
+
+/** "Primary · Codex gpt-5.6-terra: model is not offered…" for each rejected route. */
+export function agentPersonaBlockedReasons(
+  attempts: ReadonlyArray<AgentPersonaRouteAttempt>,
+): ReadonlyArray<string> {
+  return attempts.map((attempt) => {
+    const label = attempt.route === "primary" ? "Primary" : "Fallback";
+    const reasons = attempt.failures.map((code) => ROUTE_FAILURE_TEXT[code]).join("; ");
+    return `${label} · ${providerLabel(attempt.driver)} ${attempt.model} (${attempt.reasoningEffort}): ${reasons === "" ? "unavailable" : reasons}`;
   });
 }
 
@@ -443,8 +474,16 @@ export function agentPersonaFolderNudges(
   return nudges;
 }
 
-export function agentPersonaFolderStatusLabel(folder: AgentPersonaLibraryFolder): string {
-  if (!folder.exists) return "Missing";
+/**
+ * A missing folder is an error once the user configured it, but the unconfigured default
+ * folder is simply absent while the bundled examples fill in.
+ */
+export function agentPersonaFolderStatusLabel(
+  folder: AgentPersonaLibraryFolder,
+  configured: boolean | undefined = true,
+): string {
+  if (!folder.exists)
+    return configured ? "Missing" : "Default · not created; bundled examples in use";
   return `${folder.definitionCount} ${folder.definitionCount === 1 ? "definition" : "definitions"}`;
 }
 

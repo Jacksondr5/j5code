@@ -9,15 +9,23 @@ export function useAgentMentionPicker(
   provider: string | undefined,
   trigger: { kind: string; query: string } | null,
 ) {
-  const enabled = (provider === "codex" || provider === "claudeAgent") && trigger?.kind === "agent";
+  const supported = provider === "codex" || provider === "claudeAgent";
+  // Explicit `@agent:` lists every launchable agent; a bare `@name` adds only prefix matches
+  // above the file results so `@scout` finds Scout without hiding paths.
+  const enabled = supported && (trigger?.kind === "agent" || trigger?.kind === "path");
   const catalog = useEnvironmentQuery(
     enabled && environmentId !== null
       ? agentPersonaEnvironment.catalog({ environmentId, input: {} })
       : null,
   );
   const items = useMemo(
-    () => (enabled ? agentPersonaMentionItems(catalog.data, trigger?.query ?? "") : []),
-    [catalog.data, enabled, trigger?.query],
+    () =>
+      enabled
+        ? agentPersonaMentionItems(catalog.data, trigger?.query ?? "", {
+            matchPrefixOnly: trigger?.kind === "path",
+          })
+        : [],
+    [catalog.data, enabled, trigger?.kind, trigger?.query],
   );
   return { items, isPending: catalog.isPending, error: catalog.error };
 }

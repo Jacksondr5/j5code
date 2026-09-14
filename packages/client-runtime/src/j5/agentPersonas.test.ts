@@ -682,3 +682,59 @@ it("previews a draft launch from the catalog route and refuses unavailable agent
   expect(draftAgentAssignmentPreview("missing", catalog)).toBeNull();
   expect(draftAgentAssignmentPreview(available.personaId, null)).toBeNull();
 });
+
+describe("blocked reasons and folder status", () => {
+  it("names the missing model or provider for each rejected route", () => {
+    const rows = presentAgentPersonaCatalog({
+      personas: [
+        {
+          ...catalog.personas[1]!,
+          availability: {
+            status: "unavailable",
+            reason: "routes-unavailable",
+            attempts: [
+              {
+                route: "primary",
+                driver: "codex",
+                model: "gpt-5.6-terra",
+                reasoningEffort: "high",
+                failures: ["model-not-advertised"],
+              },
+              {
+                route: "fallback",
+                driver: "claudeAgent",
+                model: "claude-opus-5",
+                reasoningEffort: "high",
+                failures: ["provider-unauthenticated"],
+              },
+            ],
+          },
+        },
+        {
+          ...catalog.personas[2]!,
+          availability: { status: "unavailable", reason: "disabled" },
+        },
+      ],
+    });
+    expect(rows[0]?.blockedReasons).toEqual([
+      "Primary · Codex gpt-5.6-terra (high): model is not offered by the signed-in provider",
+      "Fallback · Claude claude-opus-5 (high): provider is not signed in",
+    ]);
+    expect(rows[1]?.blockedReasons).toEqual([]);
+    expect(rows[1]?.enabled).toBe(false);
+  });
+
+  it("treats the unconfigured default folder as absent rather than missing", () => {
+    const folder = {
+      configuredPath: "personas",
+      path: "/s/personas",
+      exists: false,
+      definitionCount: 0,
+      git: null,
+    };
+    expect(agentPersonaFolderStatusLabel(folder, false)).toBe(
+      "Default · not created; bundled examples in use",
+    );
+    expect(agentPersonaFolderStatusLabel(folder, true)).toBe("Missing");
+  });
+});

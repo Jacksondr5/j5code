@@ -195,7 +195,7 @@ export function AgentLibrarySettingsScreen() {
       setBusy(false);
     }
   }
-  const setAgentEnabled = useAtomCommand(agentPersonaEnvironment.setImportedAgentPersonaEnabled, {
+  const setAgentEnabled = useAtomCommand(agentPersonaEnvironment.setAgentPersonaEnabled, {
     reportFailure: false,
   });
   async function toggleAgent(personaId: string, enabled: boolean) {
@@ -342,7 +342,8 @@ export function AgentLibrarySettingsScreen() {
         <SettingsSection title="Agent library">
           <View className="rounded-2xl bg-card px-4 py-3">
             <Text className="text-base text-foreground">
-              Mention agents with @ in Codex or Claude. Edit imported agents here.
+              In a Codex or Claude conversation, type @agent:id, or @ and the start of an agent’s
+              name, to run a saved agent as a subagent. Edit imported agents here.
             </Text>
           </View>
         </SettingsSection>
@@ -501,16 +502,14 @@ export function AgentLibrarySettingsScreen() {
                           </Pressable>
                         ) : (
                           <>
-                            {persona.imported ? (
-                              <Switch
-                                value={persona.enabled}
-                                disabled={busy}
-                                accessibilityLabel={`Enable ${persona.displayName}`}
-                                onValueChange={(enabled) =>
-                                  void toggleAgent(persona.personaId, enabled)
-                                }
-                              />
-                            ) : null}
+                            <Switch
+                              value={persona.enabled}
+                              disabled={busy}
+                              accessibilityLabel={`Enable ${persona.displayName}`}
+                              onValueChange={(enabled) =>
+                                void toggleAgent(persona.personaId, enabled)
+                              }
+                            />
                             <Pressable
                               accessibilityRole="button"
                               accessibilityLabel={`Edit ${persona.displayName}`}
@@ -614,6 +613,11 @@ export function AgentLibrarySettingsScreen() {
                       </View>
                     </View>
                     <Text className="text-sm text-foreground-muted">{persona.description}</Text>
+                    {persona.blockedReasons.map((reason) => (
+                      <Text key={reason} className="text-xs text-foreground-muted">
+                        {reason}
+                      </Text>
+                    ))}
                     {(() => {
                       const entry = usageById.get(persona.personaId);
                       if (entry === undefined) return null;
@@ -671,16 +675,23 @@ export function AgentLibrarySettingsScreen() {
                           <View
                             className={cn(
                               "rounded-full border px-2 py-0.5",
-                              folder.exists ? "border-border" : "border-danger-foreground/30",
+                              folder.exists || !librarySources.data?.configured
+                                ? "border-border"
+                                : "border-danger-foreground/30",
                             )}
                           >
                             <Text
                               className={cn(
                                 "text-xs font-t3-medium",
-                                folder.exists ? "text-foreground-muted" : "text-danger-foreground",
+                                folder.exists || !librarySources.data?.configured
+                                  ? "text-foreground-muted"
+                                  : "text-danger-foreground",
                               )}
                             >
-                              {agentPersonaFolderStatusLabel(folder)}
+                              {agentPersonaFolderStatusLabel(
+                                folder,
+                                librarySources.data?.configured,
+                              )}
                             </Text>
                           </View>
                           <Pressable

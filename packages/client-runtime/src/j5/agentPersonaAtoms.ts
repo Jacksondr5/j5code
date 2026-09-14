@@ -63,6 +63,10 @@ export function createAgentPersonaEnvironmentAtoms<R, E>(
       tag: J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaLibrarySources,
       staleTimeMs: 0,
     }),
+    setAgentPersonaEnabled: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:j5-agent-personas:set-enabled",
+      tag: J5_AGENT_PERSONA_WS_METHODS.setAgentPersonaEnabled,
+    }),
     setLibraryFolders: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:j5-agent-personas:set-library-folders",
       tag: J5_AGENT_PERSONA_WS_METHODS.setAgentPersonaLibraryFolders,

@@ -270,7 +270,7 @@ export function AgentLibrarySettings() {
       setBusy(false);
     }
   }
-  const setAgentEnabled = useAtomCommand(agentPersonaEnvironment.setImportedAgentPersonaEnabled, {
+  const setAgentEnabled = useAtomCommand(agentPersonaEnvironment.setAgentPersonaEnabled, {
     reportFailure: false,
   });
   async function toggleAgent(personaId: string, enabled: boolean) {
@@ -389,7 +389,7 @@ export function AgentLibrarySettings() {
       <SettingsSection title="Agents">
         <SettingsRow
           title="Agent library"
-          description="Mention agents with @ in Codex or Claude. Edit imported agents here."
+          description="In a Codex or Claude conversation, type @agent:id, or @ and the start of an agent’s name, to run a saved agent as a subagent. Edit imported agents here."
         />
         {orderedEnvironments.length > 1 ? (
           <SettingsRow
@@ -506,9 +506,24 @@ export function AgentLibrarySettings() {
               title={
                 <span className="inline-flex flex-wrap items-center gap-2">
                   <span>{persona.displayName}</span>
-                  <Badge variant={persona.availability === "available" ? "success" : "outline"}>
-                    {persona.availabilityLabel}
-                  </Badge>
+                  {persona.blockedReasons.length > 0 ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={<Badge variant="warning">{persona.availabilityLabel}</Badge>}
+                      />
+                      <TooltipPopup className="max-w-sm">
+                        {persona.blockedReasons.map((reason) => (
+                          <span key={reason} className="block">
+                            {reason}
+                          </span>
+                        ))}
+                      </TooltipPopup>
+                    </Tooltip>
+                  ) : (
+                    <Badge variant={persona.availability === "available" ? "success" : "outline"}>
+                      {persona.availabilityLabel}
+                    </Badge>
+                  )}
                   {persona.originLabel ? (
                     persona.origin?.kind === "folder" ? (
                       <Tooltip>
@@ -567,16 +582,12 @@ export function AgentLibrarySettings() {
                     </Button>
                   ) : (
                     <>
-                      {persona.imported ? (
-                        <Switch
-                          checked={persona.enabled}
-                          disabled={busy}
-                          aria-label={`Enable ${persona.displayName}`}
-                          onCheckedChange={(enabled) =>
-                            void toggleAgent(persona.personaId, enabled)
-                          }
-                        />
-                      ) : null}
+                      <Switch
+                        checked={persona.enabled}
+                        disabled={busy}
+                        aria-label={`Enable ${persona.displayName}`}
+                        onCheckedChange={(enabled) => void toggleAgent(persona.personaId, enabled)}
+                      />
                       <Button
                         variant="ghost"
                         size="icon-sm"
@@ -680,8 +691,12 @@ export function AgentLibrarySettings() {
                     title={
                       <span className="inline-flex flex-wrap items-center gap-2">
                         <span className="font-mono text-sm">{folder.configuredPath}</span>
-                        <Badge variant={folder.exists ? "outline" : "error"}>
-                          {agentPersonaFolderStatusLabel(folder)}
+                        <Badge
+                          variant={
+                            folder.exists || !librarySources.data?.configured ? "outline" : "error"
+                          }
+                        >
+                          {agentPersonaFolderStatusLabel(folder, librarySources.data?.configured)}
                         </Badge>
                       </span>
                     }
