@@ -11,6 +11,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as ProjectionProjects from "../persistence/Services/ProjectionProjects.ts";
+import { getBuiltInAgentPersonaInstructions } from "../j5/agents/agentPersonaPrompts.ts";
 import { translateAgentPersonaProviderPolicy } from "../j5/agents/agentPersonaProviderPolicy.ts";
 import {
   ProviderAdapterV2RuntimePolicy,
@@ -62,7 +63,8 @@ function runtimePolicyForThread(input: {
   readonly thread: OrchestrationV2AppThread;
   readonly cwd: string | null;
 }): ProviderAdapterV2RuntimePolicyType {
-  const authorityPolicy = input.thread.agentPersonaAssignment?.authorityPolicy;
+  const assignment = input.thread.agentPersonaAssignment;
+  const authorityPolicy = assignment?.authorityPolicy;
   const providerPolicy =
     authorityPolicy === undefined
       ? { runtimeMode: input.thread.runtimeMode }
@@ -70,10 +72,18 @@ function runtimePolicyForThread(input: {
           authorityPolicy,
           input.thread.agentPersonaAssignment!.resolvedDriver,
         );
+  const agentPersonaInstructions =
+    assignment === undefined
+      ? undefined
+      : getBuiltInAgentPersonaInstructions({
+          personaId: assignment.personaId,
+          definitionVersion: assignment.definitionVersion,
+        });
   return ProviderAdapterV2RuntimePolicy.make({
     ...providerPolicy,
     interactionMode: input.thread.interactionMode,
     cwd: input.cwd,
+    ...(agentPersonaInstructions === undefined ? {} : { agentPersonaInstructions }),
   });
 }
 
