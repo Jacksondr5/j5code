@@ -1,6 +1,7 @@
 ---
-kind: spec
 title: "Remote hosting review — J5 server on corporate Azure"
+kind: research
+as_of: 2026-08-23
 ---
 
 # Remote hosting review — J5 server on corporate Azure

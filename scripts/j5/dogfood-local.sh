@@ -5,7 +5,7 @@
 #   scripts/j5/dogfood-local.sh --no-update  # serve the already-built runtime (fast restart)
 #   scripts/j5/dogfood-local.sh --fresh      # set the state dir aside (renamed, not deleted) and start clean
 #
-# This is the local-first counterpart of the Linux runbook (docs/j5/dogfood-runtime.md):
+# This is the local-first counterpart of the Linux runbook (docs/j5/runbooks/dogfood-runtime.md):
 # same layout, same state dir, same snapshot-before-update rule, minus systemd/Tailscale.
 #
 #   runtime checkout : ~/.j5code-runtime/src   (detached at origin/j5/main — the server's own

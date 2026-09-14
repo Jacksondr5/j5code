@@ -1,3 +1,8 @@
+---
+title: 'Upstream research: "settled" vs "archived" (2026-08-29)'
+kind: record
+---
+
 # Upstream research: "settled" vs "archived" (2026-08-29)
 
 Commissioned by Jackson; code inventory of the upstream orchestration-v2 pin with file:line evidence (full detail in the research transcript; this records the essence + J5 implications). Directly relevant to A9 (lifecycle-closure), the Crews archive machinery (R1/R2/R19), and the glossary.

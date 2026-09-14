@@ -1,6 +1,6 @@
 ---
 title: "A6 integration review — verdict at d44fad9ad (changes requested)"
-kind: review
+kind: record
 ---
 
 > **Terminology note (post-E6):** the grouping concept was renamed **epic → squadron** on 2026-08-17 (definition: `../../../product/features/squadron.md`); the code rename landed in PR #8. "Epic" below is preserved as dated historical record — read it as "squadron." Filesystem paths are literal.

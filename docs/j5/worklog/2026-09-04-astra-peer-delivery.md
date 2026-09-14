@@ -1,3 +1,8 @@
+---
+title: "Astra peer delivery — September 4, 2026"
+kind: record
+---
+
 # Astra peer delivery — September 4, 2026
 
 Jackson authorized an Astra-only QS1 exception and direct implementation by the coordinator. No peer or subagent was staffed or contacted. Base: `9209e0b3b53fb98591b958077848ffdabee07b49`; branch: `j5/astra-peer-delivery`.

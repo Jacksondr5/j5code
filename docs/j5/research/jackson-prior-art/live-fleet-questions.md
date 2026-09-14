@@ -1,6 +1,7 @@
 ---
 title: "Questions for the live PR-Group fleet (forward via Jackson)"
-kind: spec
+kind: research
+as_of: 2026-08-23
 ---
 
 # Questions for the live fleet

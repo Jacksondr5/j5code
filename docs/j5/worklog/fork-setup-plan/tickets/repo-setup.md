@@ -1,7 +1,6 @@
 ---
 title: "T1 — Repo setup: fork, pin, FORK.md"
-kind: ticket
-status: 2
+kind: record
 ---
 
 # T1 — Repo setup

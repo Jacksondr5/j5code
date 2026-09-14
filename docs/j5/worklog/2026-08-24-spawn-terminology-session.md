@@ -1,3 +1,8 @@
+---
+title: "Spawn terminology session — rulings record (2026-08-24)"
+kind: record
+---
+
 # Spawn terminology session — rulings record (2026-08-24)
 
 Jackson + Product lead. Origin: the "may Crew members spawn solo helpers?" question exposed that "spawn" was covering several different contracts with the human. Method: three-source inventory — the Product lead's first-hand tools (Claude Code `Agent`/`Workflow`, Traycer `create_agent`/`fork_agent`), a **live Codex agent probe** (spawned on the Codex harness and interviewed about its own tools), and a **code inventory of upstream T3's spawn surfaces** with file:line evidence (orchestrator MCP toolkit, provider-native subagent paths for Claude/Codex/Cursor/ACP, scheduled tasks). An upstream terminology check preceded naming, per Jackson: adopt over redefine.

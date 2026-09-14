@@ -1,8 +1,9 @@
 ---
 title: "A5 — Graph projection + read API (M5)"
-kind: ticket
-status: 0
+kind: record
 ---
+
+> **Record.** The work item of record is [issue #31](https://github.com/Jacksondr5/j5code/issues/31); this ticket text is the history behind it and is not maintained.
 
 # A5 — Graph projection + read API
 
@@ -11,9 +12,9 @@ status: 0
 > 1. **Person-keyed human nodes (R9/R29):** graph nodes for humans are person-scoped (`human:<person-id>`), never a singleton.
 > 2. **Labels derive in the projection (R4):** edge states (`open | stalled(reason, trust) | answered | dropped`) are computed at projection time from ledger fact bundles (A3 notices + lifecycle facts) — never read from a write-time-chosen label as authoritative. Consumes A10's fact-bundle shape + label function once landed.
 > 3. **`regarding` linkage (R10):** where an Exchange carries the nullable `regarding` field (ships with A8), expose it as edge metadata for survives-from chains. Optional — degrade gracefully, no dependency on A8.
-> 4. Base SHA is whatever `j5/main` resolves to at staffing. Staffing is opportunistic per the Dogfood v0 plan (`../dogfood-v0.md`).
+> 4. Base SHA is whatever `j5/main` resolves to at staffing. Staffing is opportunistic per the Dogfood v0 plan (`../../plans/dogfood-v0.md`).
 
-**Governing artifacts:** `../../product/a2a/plan.md` (§Graph projection + read API), `../../product/a2a/plan.md` (D1, D8; grounding §Projections). Base: historical, see amendment.
+**Governing artifacts:** `../../plans/a2a.md` (§Graph projection + read API), `../../plans/a2a.md` (D1, D8; grounding §Projections). Base: historical, see amendment.
 
 ## Goal
 

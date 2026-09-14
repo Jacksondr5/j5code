@@ -1,6 +1,6 @@
 ---
 title: "A2 live proof — real Codex to Claude exchange"
-kind: spec
+kind: record
 ---
 
 # A2 live proof — historical pipeline PASS

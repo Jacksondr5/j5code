@@ -27,7 +27,7 @@ const readDocumentedSendToolDescription = Effect.fn("readDocumentedSendToolDescr
       decodeURIComponent(documentedSendToolContract.pathname),
     );
     const description = document.match(
-      /## `send_message`[\s\S]*?\*\*Description \(contract(?:, [^)]*)?\):\*\* "([\s\S]*?)"\n\n\| Input/,
+      /## `send_message`[\s\S]*?\*\*Description:\*\* "([\s\S]*?)"\n\n\| Input/,
     )?.[1];
     if (description === undefined) {
       return yield* Effect.die("send_message contract description is missing from agent-tools.md");
@@ -117,11 +117,11 @@ it("does not interpret caller text as an envelope template", () => {
 it("keeps the tool descriptions on their documented contracts", () => {
   assert.equal(
     A2A_SEND_TOOL_DESCRIPTION,
-    "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask or a reply: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by list_participants; when creating a Peer Agent, put any reply expectation in spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. A caller without a registered home is refused. Reuse client_request_id to retry the same send safely.",
+    "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by list_participants; when creating a Peer Agent, put any reply expectation in spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. A caller without a registered home is refused. Reuse client_request_id to retry the same send safely.",
   );
   assert.include(
     A2A_SEND_TOOL_DESCRIPTION,
-    "To the human, only an ask or a reply: a plain send to a person is refused",
+    "To the human, only an ask: a plain send to a person is refused",
   );
   assert.include(A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION, "Withdraw an ask you sent");
   assert.include(A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION, "sender-cleared");

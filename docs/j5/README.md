@@ -1,69 +1,27 @@
-# J5 design docs — mirrored from the design workspace
+# J5 documentation
 
-This tree mirrors the durable product, research, and planning documents for the
-J5 fleet-management effort. They were authored in the team's agent design
-workspace (Traycer epic artifacts) and are mirrored here so anyone working in
-this repo — human or agent — can read the reasoning behind the build without
-access to that workspace.
+Everything about J5 Code — the product built on this fork of T3 Code — lives under `docs/j5/`. Upstream's own documentation (`docs/user/`, `docs/internals/`, `docs/operations/`) is left as upstream wrote it; J5 never edits it.
 
-**The mirror is a snapshot, not the working medium.** Design sessions continue
-in the workspace; settled changes land here through docs PRs. Each document
-describes the codebase and decisions _as of when it was written_ — check dates
-before treating details as current. Documents carry YAML frontmatter from the
-source system (`kind`: spec = durable context, ticket/story = work items with
-`status` 0/1/2 = todo/in-progress/done); it is preserved for fidelity.
-Note: this tree was reorganized 2026-08-23 (single-doc folders flattened to
-`topic.md`, feature docs grouped under `features/`), so its layout no longer
-matches the workspace's folder structure — content, not paths, is what mirrors.
+Every document here is one of five kinds, and the kind tells you how far to trust it: **definitions** describe the product and are kept true; **plans** sequence work and are history once executed; **research** reports what we learned as of a date; **records** say what happened on a day; **runbooks** tell an operator what to do. The kinds, their lifetimes, the identifier scheme, and the rules for changing a definition are in [how the docs are organized](process/docs.md) — read it before writing anything here.
 
 ## Reading order for newcomers
 
-1. `product/problems.md` — what hurts and what's wanted: the problem statement
-   and goals, in Jackson's voice.
-2. `product/fleet-vision.md` — why this exists: the operating model and thesis.
-3. `product/principles.md` — the beliefs, lenses, and principles: the machine
-   that turns the problems and goals into product.
-4. `product/use-cases.md` — the concrete fleets every feature is tested
-   against.
-5. `research/synthesis.md` — what we learned from T3 Code and Traycer, and the
-   engineering principles adopted from each.
-6. `research/jackson-prior-art/fleet-interviews-synthesis.md` — field lessons
-   from a real production agent fleet, and the platform/non-platform boundary
-   that governs scope decisions.
-7. `product/decision-log.md` — every settled product decision, one row each.
-8. `product/a2a/` — the A2A (agent-to-agent communication) design: decision
-   register, grounding model, and `plan.md` with the milestone plan.
-9. `product/features/` — the feature definitions of record: Squadrons, Crews,
-   Roles, Playbooks, Memos, Shared Squadrons, and the PR pane.
+1. [Problems and goals](product/problems.md) — what hurts and what is wanted, in Jackson's voice.
+2. [Fleet vision](product/fleet-vision.md) — why this exists: the operating model and the thesis.
+3. [Principles](product/principles.md) — the beliefs, lenses and principles that turn the problems into product.
+4. [Use cases](product/use-cases.md) — the concrete fleets every feature is tested against.
+5. [Glossary](product/glossary.md) — the vocabulary; every name in these docs resolves here.
+6. [Agent-to-agent communication](product/a2a/index.md), then [Squadron](product/features/squadron.md) — the two definitions everything else stands on.
+7. The rest of [`product/features/`](product/features/) — the feature definitions of record.
+8. [Research synthesis](research/synthesis.md) — what we learned from T3 Code and Traycer.
 
 ## Contents
 
-- `backlog.md` — the prioritized roadmap.
-- `product/features/` — feature definitions of record: `squadron.md`,
-  `crews.md`, `roles.md`, `playbooks.md`, `memos.md`, `shared-squadrons.md`,
-  `pr-pane.md`.
-- `product/` — product designs and decisions: problems & goals, the
-  beliefs/lenses/principles machine, use cases, decision log, fleet vision,
-  glossary, the A2A design + plan, communication graph, cross-device position,
-  and the 2026-08-21 design-review register that defined Crews/Roles/Captains.
-- `research/` — the studies behind the decisions: T3 Code deep dives (the
-  upstream this repo forks), Traycer's A2A/organization model, and the
-  prior-art fleet studies. A quarantined, superseded early T3 snapshot was
-  deliberately not mirrored.
-- `process/` — contributor-facing rules for working in this repository. How the
-  agent fleet is run is Jackson's personal practice and lives outside the product
-  repo, in his playbooks.
-- `worklog/` — build-time records, kept out of the evergreen docs: the A2A
-  implementation tickets with their reviews and retros (`a2a-tickets/`), how
-  this fork was established (`fork-setup-plan/` — base pin, rebrand, CI,
-  load-test baseline), and PR triage reviews. Historical by nature; read the
-  product docs for current truth.
+- **`product/`** — definitions: the core documents above, the [A2A trio](product/a2a/) (the communication protocol, the upstream substrate, the agent tool contracts), and [`features/`](product/features/) (Squadron, inbox, thread rendering, archive flow, Roles, Crews, Memos, Playbooks, Spawning Guide, sidebar and roster, PR pane, Shared Squadrons).
+- **`plans/`** — the [dogfood v0 plan](plans/dogfood-v0.md) and the [A2A plan](plans/a2a.md). Build status against a definition's criteria lives only here. The backlog beyond these is the repository's GitHub milestones, in outcome order.
+- **`research/`** — the studies behind the decisions: T3 Code, Traycer, the prior-art fleets, remote hosting. Each carries an `as_of` date; none is a source of truth about the product.
+- **`worklog/`** — records, named date-first: design sessions and rulings, the tickets and reviews of the A2A build and the dogfood queue, how the fork was set up, the phase-3 friction list.
+- **`runbooks/`** — operating the software: the [dogfood runtime](runbooks/dogfood-runtime.md), [agent migration](runbooks/agent-migration.md), [macOS packaging](runbooks/macos-packaging.md).
+- **`process/`** — rules for working in this repository: [how the docs are organized](process/docs.md) and [working in the repo](process/working-in-the-repo.md). How the fleet is run day to day is the operator's own practice and lives outside the repository.
 
-Cross-references between documents use relative paths and survive within this
-tree. References to `interviews/` point at the public
-`Jacksondr5/pr-group` repository.
-
-## Not part of the mirror
-
-Hand-written fork docs coexist in this directory (currently `macos-packaging.md`).
-Mirror refreshes must exclude them — they are owned in-repo, not in the workspace.
+Cross-references are relative paths and survive within this tree.

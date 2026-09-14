@@ -1,6 +1,6 @@
 ---
 title: "Working in the repo — tool traps, repo facts, and contributor rules"
-kind: spec
+kind: process
 ---
 
 # Working in the repo

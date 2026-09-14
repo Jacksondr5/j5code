@@ -1,7 +1,6 @@
 ---
 title: "A1 — Epic entity + communication ledger (M1)"
-kind: ticket
-status: 2
+kind: record
 ---
 
 > **Terminology note (post-E6):** the grouping concept was renamed **epic → squadron** on 2026-08-17 (definition: `../../../product/features/squadron.md`); the code rename landed in PR #8. "Epic" below is preserved as dated historical record — read it as "squadron." Filesystem paths are literal.
@@ -10,7 +9,7 @@ status: 2
 
 # A1 — Epic entity + communication ledger
 
-**Governing artifacts (read first):** `../../../product/a2a/plan.md` (the plan — esp. §Epic entity, §Ledger, §Base), `../../../product/a2a/index.md` (decision register D1–D10), `FORK.md` in the repo. Base: `j5/main` @ `e7597dac8`, clone at `/Users/jackson/repos/jacksondr5/j5code`.
+**Governing artifacts (read first):** `../../../plans/a2a.md` (the plan — esp. §Epic entity, §Ledger, §Base), `../../../product/a2a/index.md` (decision register D1–D10), `FORK.md` in the repo. Base: `j5/main` @ `e7597dac8`, clone at `/Users/jackson/repos/jacksondr5/j5code`.
 
 ## Goal
 

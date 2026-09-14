@@ -1,6 +1,6 @@
 ---
 title: "PR #8 CodeRabbit triage — independent verification"
-kind: review
+kind: record
 ---
 
 Independent review of PR #8 (`refactor(j5): rename A2A epics to squadrons`) at head `48e66c932a03a216a0f25d27d8a76b342f739489`. Scope: verify the two open CodeRabbit findings and judge whether the drafted refutations are truthful and sufficient to post. No source, test, or GitHub state was changed.
