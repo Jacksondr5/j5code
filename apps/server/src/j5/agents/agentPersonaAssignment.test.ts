@@ -2,8 +2,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 
 import {
-  buildBuiltInAgentPersonaAssignment,
-  validateBuiltInAgentPersonaAssignment,
+  buildAgentPersonaAssignment,
+  validateAgentPersonaAssignment,
 } from "./agentPersonaAssignment.ts";
 
 const criticRoute = {
@@ -22,7 +22,7 @@ const criticRoute = {
 
 describe("agent persona assignment", () => {
   it("snapshots the default authority and resolved route", () => {
-    const result = buildBuiltInAgentPersonaAssignment({ resolution: criticRoute });
+    const result = buildAgentPersonaAssignment({ resolution: criticRoute });
     assert.equal(result.status, "assigned");
     if (result.status !== "assigned") return;
     assert.deepEqual(result.assignment, {
@@ -36,7 +36,7 @@ describe("agent persona assignment", () => {
   });
 
   it("blocks Critic Fix Mode on a provider that cannot enforce workspace authority", () => {
-    const result = buildBuiltInAgentPersonaAssignment({
+    const result = buildAgentPersonaAssignment({
       resolution: criticRoute,
       authorityPolicy: "critic-fix",
     });
@@ -49,7 +49,7 @@ describe("agent persona assignment", () => {
   });
 
   it("rejects an authority policy outside the persona contract", () => {
-    const result = buildBuiltInAgentPersonaAssignment({
+    const result = buildAgentPersonaAssignment({
       resolution: criticRoute,
       authorityPolicy: "workspace-write",
     });
@@ -63,7 +63,7 @@ describe("agent persona assignment", () => {
 
   it("rejects forged assignments that combine a persona with elevated authority", () => {
     assert.equal(
-      validateBuiltInAgentPersonaAssignment({
+      validateAgentPersonaAssignment({
         personaId: "scout",
         definitionVersion: 1,
         authorityPolicy: "publish-only",
@@ -80,9 +80,9 @@ describe("agent persona assignment", () => {
   });
 
   it("accepts a server-built assignment that matches the declared route", () => {
-    const result = buildBuiltInAgentPersonaAssignment({ resolution: criticRoute });
+    const result = buildAgentPersonaAssignment({ resolution: criticRoute });
     assert.equal(result.status, "assigned");
     if (result.status !== "assigned") return;
-    assert.isUndefined(validateBuiltInAgentPersonaAssignment(result.assignment));
+    assert.isUndefined(validateAgentPersonaAssignment(result.assignment));
   });
 });

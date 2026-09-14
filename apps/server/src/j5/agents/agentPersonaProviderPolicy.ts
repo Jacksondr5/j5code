@@ -30,6 +30,7 @@ const WORKSPACE_WRITE_POLICY = {
   sandboxPolicy: { type: "workspaceWrite", networkAccess: false },
 } as const satisfies AgentPersonaProviderPolicy;
 
+/** Tests the supported sandbox/tool policy, not prose promises such as no-commit or targeted edits. */
 export function providerCanEnforceAgentPersonaAuthority(
   driver: string,
   authorityPolicy: AgentPersonaAuthorityPolicy,
