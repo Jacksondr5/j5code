@@ -6,6 +6,7 @@ import {
   type AgentPersonaCreateDraft,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import { AgentEditorModal } from "./AgentEditorModal";
+import { AgentFolderPickerModal } from "./AgentFolderPickerModal";
 import { ControlPillMenu } from "../../components/ControlPill";
 import { SymbolView } from "../../components/AppSymbol";
 import {
@@ -31,7 +32,7 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import { pickAgentDefinitions } from "./pickAgentDefinitions";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
-import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
+import { AppText as Text } from "../../components/AppText";
 import { cn } from "../../lib/cn";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
@@ -74,7 +75,7 @@ export function AgentLibrarySettingsScreen() {
   const setLibraryFolders = useAtomCommand(agentPersonaEnvironment.setLibraryFolders, {
     reportFailure: false,
   });
-  const [newFolder, setNewFolder] = useState("");
+  const [pickingFolder, setPickingFolder] = useState(false);
   const otherEnvironments = connectedEnvironments.filter(
     (environment) => environment.environmentId !== effectiveEnvironmentId,
   );
@@ -150,7 +151,6 @@ export function AgentLibrarySettingsScreen() {
     try {
       const result = await setLibraryFolders({ environmentId, input: { folders } });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-      setNewFolder("");
       librarySources.refresh();
       catalog.refresh();
     } catch (error) {
@@ -719,30 +719,20 @@ export function AgentLibrarySettingsScreen() {
                         ? "Files are read on every catalog request, so edits and git pulls apply without a restart."
                         : "Bundled examples appear until a folder is configured or the default folder exists. Adding a folder writes agent-personas.json."}
                     </Text>
-                    <TextInput
-                      accessibilityLabel="Folder path"
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      placeholder="/path/to/team-library"
-                      value={newFolder}
-                      editable={!busy}
-                      onChangeText={setNewFolder}
-                    />
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel="Add folder"
-                      accessibilityState={{ disabled: busy || newFolder.trim() === "" }}
-                      disabled={busy || newFolder.trim() === ""}
-                      className="self-start rounded-lg border border-border px-4 py-3 disabled:opacity-40"
-                      onPress={() =>
-                        void saveFolders([
-                          ...(librarySources.data?.folders ?? []).map(
-                            ({ configuredPath }) => configuredPath,
-                          ),
-                          newFolder.trim(),
-                        ])
-                      }
+                      accessibilityState={{ disabled: busy }}
+                      disabled={busy}
+                      className="flex-row items-center gap-2 self-start rounded-lg border border-border px-4 py-3 disabled:opacity-40"
+                      onPress={() => setPickingFolder(true)}
                     >
+                      <SymbolView
+                        name="folder"
+                        size={14}
+                        tintColorClassName="accent-icon"
+                        type="monochrome"
+                      />
                       <Text className="text-sm text-foreground">Add folder</Text>
                     </Pressable>
                   </View>
@@ -754,6 +744,24 @@ export function AgentLibrarySettingsScreen() {
       </ScrollView>
       {notification ? (
         <AgentLibraryToast notification={notification} onDismiss={dismissNotification} />
+      ) : null}
+      {pickingFolder && effectiveEnvironmentId ? (
+        <AgentFolderPickerModal
+          environmentId={effectiveEnvironmentId}
+          environmentLabel={
+            connectedEnvironments.find(
+              (environment) => environment.environmentId === effectiveEnvironmentId,
+            )?.environmentLabel ?? "this environment"
+          }
+          onClose={() => setPickingFolder(false)}
+          onSelect={(path) => {
+            setPickingFolder(false);
+            void saveFolders([
+              ...(librarySources.data?.folders ?? []).map(({ configuredPath }) => configuredPath),
+              path,
+            ]);
+          }}
+        />
       ) : null}
       {creating && effectiveEnvironmentId ? (
         <AgentCreateModal
