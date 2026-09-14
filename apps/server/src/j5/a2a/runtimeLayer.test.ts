@@ -24,7 +24,7 @@ import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { layer as outboxLayer } from "../../orchestration-v2/EffectOutbox.ts";
 import { A2ADeliveryTransport, live as deliveryTransportLayer } from "./DeliveryTransport.ts";
-import { WorkflowService } from "../workflow-definitions/Service.ts";
+import { PlaybookService } from "../playbook-definitions/Service.ts";
 import { j5AuthenticatedRouteRegistration as j5AuthenticatedRoutesLayer } from "./J5AuthenticatedRoutes.ts";
 
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
@@ -140,7 +140,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
         HttpRouter.serve(
           Layer.mergeAll(
             j5AuthenticatedRoutesLayer.pipe(
-              Layer.provide(Layer.mock(WorkflowService)({ definitions: [] })),
+              Layer.provide(Layer.mock(PlaybookService)({ definitions: [] })),
             ),
             McpHttpServer.layer,
             ledgerConsumer,

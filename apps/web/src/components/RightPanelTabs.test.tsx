@@ -120,7 +120,7 @@ function renderTabs(
       onAddDiff={() => undefined}
       onAddFiles={() => undefined}
       onAddAgents={() => undefined}
-      onAddWorkflows={() => undefined}
+      onAddPlaybooks={() => undefined}
       liveAgentCount={0}
       browserAvailable
       terminalAvailable={false}
@@ -128,7 +128,7 @@ function renderTabs(
       filesAvailable={false}
       pullRequestAvailable={false}
       agentsAvailable={false}
-      workflowsAvailable={false}
+      playbooksAvailable={false}
     >
       <div>content</div>
     </RightPanelTabs>,

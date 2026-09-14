@@ -24,8 +24,8 @@ import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { answerHumanExchange, listHumanInbox, type HumanInboxItem } from "./humanInboxClient";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
-import { phaseLabel, statusPresentation } from "../workflow/presentation";
-import { useWorkflowQuery, workflowListAtom } from "../workflow/queries";
+import { phaseLabel, statusPresentation } from "../playbook/presentation";
+import { usePlaybookQuery, playbookListAtom } from "../playbook/queries";
 import { useSquadronDirectory } from "../squadron/SquadronDirectory";
 
 interface HumanInboxAnswerAttempt {
@@ -293,16 +293,16 @@ export function HumanInboxPage() {
   const [personId, setPersonId] = useState<string | null>(null);
   const [items, setItems] = useState<ReadonlyArray<HumanInboxItem>>([]);
   const [answeredItems, setAnsweredItems] = useState<ReadonlyArray<HumanInboxItem>>([]);
-  const workflowQuery = useWorkflowQuery(
+  const playbookQuery = usePlaybookQuery(
     primaryEnvironmentId === null
       ? null
-      : workflowListAtom({
+      : playbookListAtom({
           environmentId: primaryEnvironmentId,
           input: { squadronId: "", search: "", status: "waiting_approval", page: 0, pageSize: 100 },
         }),
   );
-  const workflowItems = workflowQuery.data?.runs ?? [];
-  const workflowCount = workflowQuery.data?.total ?? 0;
+  const playbookItems = playbookQuery.data?.runs ?? [];
+  const playbookCount = playbookQuery.data?.total ?? 0;
   const [answers, setAnswers] = useState<HumanInboxAnswers>({});
   const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -389,7 +389,7 @@ export function HumanInboxPage() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   {loading && personId === null
                     ? "Loading questions waiting on you…"
-                    : `${items.length + workflowCount} open ${items.length + workflowCount === 1 ? "item" : "items"}`}
+                    : `${items.length + playbookCount} open ${items.length + playbookCount === 1 ? "item" : "items"}`}
                 </p>
               </div>
               <Button
@@ -422,7 +422,7 @@ export function HumanInboxPage() {
               </div>
             ) : null}
 
-            {!loading && error === null && items.length === 0 && workflowCount === 0 ? (
+            {!loading && error === null && items.length === 0 && playbookCount === 0 ? (
               <div className="mt-12 flex flex-col items-center justify-center rounded-xl border border-dashed border-border/80 p-12 text-center">
                 <span className="flex size-11 items-center justify-center rounded-full bg-success/10 text-success">
                   <InboxIcon aria-hidden className="size-5" />
@@ -436,24 +436,24 @@ export function HumanInboxPage() {
               </div>
             ) : (
               <div className="mt-6 space-y-8">
-                {workflowItems.length > 0 && (
-                  <section aria-labelledby="workflow-approvals-heading">
+                {playbookItems.length > 0 && (
+                  <section aria-labelledby="playbook-approvals-heading">
                     <div className="flex items-center justify-between gap-2 pb-2.5">
                       <div className="flex items-center gap-2">
                         <h2
                           className="text-sm font-semibold tracking-tight text-foreground"
-                          id="workflow-approvals-heading"
+                          id="playbook-approvals-heading"
                         >
                           Playbook approvals
                         </h2>
                         <Badge size="sm" variant="secondary" className="tabular-nums">
-                          {workflowCount}
+                          {playbookCount}
                         </Badge>
                       </div>
                     </div>
                     <div className="overflow-hidden rounded-xl border border-border/70 bg-card/40 shadow-xs">
                       <ol className="divide-y divide-border/60">
-                        {workflowItems.map((item) => {
+                        {playbookItems.map((item) => {
                           const elapsed = formatElapsedDurationLabel(item.updatedAt);
                           const squadron = squadrons.find((s) => s.squadron.id === item.squadronId);
                           const squadronName = squadron?.squadron.name;
@@ -504,7 +504,7 @@ export function HumanInboxPage() {
                                       squadronId: item.squadronId,
                                       tab: "overview",
                                     }}
-                                    hash="workflow-approval"
+                                    hash="playbook-approval"
                                   />
                                 }
                                 size="sm"
@@ -521,10 +521,10 @@ export function HumanInboxPage() {
                           );
                         })}
                       </ol>
-                      {workflowCount > workflowItems.length && (
+                      {playbookCount > playbookItems.length && (
                         <div className="flex items-center justify-between border-t border-border/50 bg-muted/20 px-4 py-2.5 text-xs text-muted-foreground">
                           <span>
-                            Showing {workflowItems.length} of {workflowCount} playbook approvals.
+                            Showing {playbookItems.length} of {playbookCount} playbook approvals.
                           </span>
                           <Link
                             to="/runs"

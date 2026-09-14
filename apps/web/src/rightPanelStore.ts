@@ -23,7 +23,7 @@ export const RIGHT_PANEL_KINDS = [
   "terminal",
   "pull-request",
   "agents",
-  "workflows",
+  "playbooks",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -69,13 +69,14 @@ export type RightPanelSurface =
       number: number;
     }
   | { id: "agents"; kind: "agents" }
-  | { id: "workflows"; kind: "workflows" };
+  | { id: "playbooks"; kind: "playbooks" };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 // v9 removed the "plan" surface kind (plans render inline in the transcript).
 // v10 keys pull-request surfaces by reference instead of a singleton tab.
 // v11 stops persisting the pull-request list's shared panel, so a restart opens the page fresh.
-const RIGHT_PANEL_STORAGE_VERSION = 11;
+// v12 drops surface kinds that are no longer supported, including workflows.
+const RIGHT_PANEL_STORAGE_VERSION = 12;
 
 /**
  * The pull-request list's shared panel (see PULL_REQUESTS_PANEL_ID in the route) is session
@@ -161,8 +162,8 @@ const singletonSurface = (
       return { id: "files", kind };
     case "agents":
       return { id: "agents", kind };
-    case "workflows":
-      return { id: "workflows", kind };
+    case "playbooks":
+      return { id: "playbooks", kind };
   }
 };
 
@@ -342,7 +343,12 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                 ? validThreadState.surfaces.flatMap<RightPanelSurface>((surface) => {
                     // Dropped surface kind: plans now render inline in the
                     // transcript (v9).
-                    if ((surface as { kind?: string }).kind === "plan") return [];
+                    const kind = (surface as { kind?: unknown }).kind;
+                    if (
+                      typeof kind !== "string" ||
+                      !RIGHT_PANEL_KINDS.includes(kind as RightPanelKind)
+                    )
+                      return [];
                     if (surface.kind === "file") {
                       const revealLine =
                         typeof surface.revealLine === "number" &&

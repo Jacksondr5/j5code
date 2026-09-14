@@ -1,0 +1,187 @@
+import { Artifact, RunDetail, PlaybookDefinitionPresentation } from "@j5/playbook-contracts";
+import {
+  PlaybookApprovalCount,
+  PlaybookEntries,
+  PlaybookThreadParent,
+} from "@j5/playbook-contracts/sidebar";
+import { BoardPage, TimelinePage } from "@j5/playbook-contracts/observability";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as Schema from "effect/Schema";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+
+import { browserCryptoLayer } from "../../cloud/dpop";
+import { primaryEnvironmentHttpLayer } from "../../environments/primary/httpLayer";
+import { resolvePrimaryEnvironmentHttpUrl } from "../../environments/primary/target";
+
+const runtime = ManagedRuntime.make(Layer.merge(primaryEnvironmentHttpLayer, browserCryptoLayer));
+const RunResponse = Schema.Struct({ run: RunDetail });
+const ArtifactResponse = Schema.Struct({ artifact: Artifact });
+
+export class PlaybookHttpError extends Schema.TaggedErrorClass<PlaybookHttpError>()(
+  "PlaybookHttpError",
+  {
+    status: Schema.Number,
+    code: Schema.optional(Schema.String),
+    detail: Schema.String,
+  },
+) {
+  override get message() {
+    return this.detail;
+  }
+}
+
+const ErrorResponse = Schema.Struct({
+  message: Schema.String,
+  error: Schema.optional(
+    Schema.Struct({
+      code: Schema.String,
+      detail: Schema.String,
+    }),
+  ),
+});
+
+const request = Effect.fn("playbook.request")(function* (path: string, body?: unknown) {
+  const client = yield* HttpClient.HttpClient;
+  const [pathname, query] = path.split("?");
+  const target = new URL(resolvePrimaryEnvironmentHttpUrl(`/api/j5/playbooks${pathname}`));
+  target.search = query ?? "";
+  const response =
+    body === undefined
+      ? yield* client.get(target.toString())
+      : yield* client.execute(
+          yield* HttpClientRequest.post(target.toString()).pipe(HttpClientRequest.bodyJson(body)),
+        );
+  if (response.status === 304) return response;
+  if (response.status < 200 || response.status >= 300) {
+    const error = yield* HttpClientResponse.schemaBodyJson(ErrorResponse)(response);
+    return yield* new PlaybookHttpError({
+      status: response.status,
+      ...(error.error?.code === undefined ? {} : { code: error.error.code }),
+      detail: error.error?.detail ?? error.message,
+    });
+  }
+  return response;
+});
+
+export const readRun = (id: string, ifReadVersion?: number) =>
+  runtime.runPromise(
+    request(
+      `/${encodeURIComponent(id)}${ifReadVersion === undefined ? "" : `?ifReadVersion=${ifReadVersion}`}`,
+    ).pipe(
+      Effect.flatMap((response) =>
+        response.status === 304
+          ? Effect.succeed(null)
+          : HttpClientResponse.schemaBodyJson(RunResponse)(response).pipe(
+              Effect.map((result) => result.run),
+            ),
+      ),
+    ),
+  );
+
+export const readArtifact = (runId: string, artifactId: string) =>
+  runtime.runPromise(
+    request(`/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}`).pipe(
+      Effect.flatMap(HttpClientResponse.schemaBodyJson(ArtifactResponse)),
+      Effect.map((result) => result.artifact),
+    ),
+  );
+
+export const mutateRun = async (path: string, body: unknown) => {
+  const run = await runtime.runPromise(
+    request(path, body).pipe(
+      Effect.flatMap(HttpClientResponse.schemaBodyJson(RunResponse)),
+      Effect.map((result) => result.run),
+    ),
+  );
+  window.dispatchEvent(new Event("j5-playbooks-changed"));
+  return run;
+};
+
+export const listPlaybookEntries = (
+  squadronId: string,
+  query = "",
+  status = "",
+  offset = 0,
+  limit = 50,
+) =>
+  runtime.runPromise(
+    request(
+      `/sidebar?squadronId=${encodeURIComponent(squadronId)}&q=${encodeURIComponent(query)}&status=${encodeURIComponent(status)}&offset=${offset}&limit=${limit}`,
+    ).pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(PlaybookEntries))),
+  );
+
+export const listPlaybookBoard = (
+  squadronId: string,
+  query = "",
+  status = "",
+  offset = 0,
+  limit = 24,
+) =>
+  runtime.runPromise(
+    request(
+      `/board?squadronId=${encodeURIComponent(squadronId)}&q=${encodeURIComponent(query)}&status=${encodeURIComponent(status)}&offset=${offset}&limit=${limit}`,
+    ).pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(BoardPage))),
+  );
+
+export const readPlaybookTimeline = (runId: string, before: number | null, limit = 50) =>
+  runtime.runPromise(
+    request(
+      `/${encodeURIComponent(runId)}/timeline?${before === null ? "" : `before=${before}&`}limit=${limit}`,
+    ).pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(TimelinePage))),
+  );
+
+export const readPlaybookApprovalCount = () =>
+  runtime.runPromise(
+    request("/approval-count").pipe(
+      Effect.flatMap(HttpClientResponse.schemaBodyJson(PlaybookApprovalCount)),
+    ),
+  );
+
+export const listPlaybookDefinitions = () =>
+  runtime.runPromise(
+    request("/definitions").pipe(
+      Effect.flatMap(
+        HttpClientResponse.schemaBodyJson(
+          Schema.Struct({ definitions: Schema.Array(PlaybookDefinitionPresentation) }),
+        ),
+      ),
+      Effect.map((result) => result.definitions),
+    ),
+  );
+
+const definitionsResponse = (path: string, body: unknown) =>
+  runtime.runPromise(
+    request(`/definitions/${path}`, body).pipe(
+      Effect.flatMap(
+        HttpClientResponse.schemaBodyJson(
+          Schema.Struct({ definitions: Schema.Array(PlaybookDefinitionPresentation) }),
+        ),
+      ),
+      Effect.map((result) => result.definitions),
+    ),
+  );
+
+export const importPlaybookDefinitions = (
+  files: readonly { readonly name: string; readonly content: string }[],
+  confirmConflicts = false,
+) => definitionsResponse("import", { files, confirmConflicts });
+
+export const setPlaybookDefinitionEnabled = (id: string, enabled: boolean) =>
+  definitionsResponse("state", { id, enabled });
+
+export const removePlaybookDefinition = (id: string) =>
+  definitionsResponse("remove", { id, enabled: false });
+
+export const readPlaybookThreadParent = (threadId: string) =>
+  runtime.runPromise(
+    request(`/thread-parent?threadId=${encodeURIComponent(threadId)}`).pipe(
+      Effect.flatMap(
+        HttpClientResponse.schemaBodyJson(
+          Schema.Struct({ parent: Schema.NullOr(PlaybookThreadParent) }),
+        ),
+      ),
+      Effect.map((result) => result.parent),
+    ),
+  );

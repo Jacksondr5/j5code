@@ -7,7 +7,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import { runJ5CompatibleUpstreamMigrations } from "../../j5/persistence/UpstreamMigrationCompatibility.ts";
 import { runJ5A2AMigrations } from "../../j5/a2a/Migrations.ts";
-import { runWorkflowMigrations } from "../../j5/workflow/Migrations.ts";
+import { runPlaybookMigrations } from "../../j5/playbook/Migrations.ts";
 import { ServerConfig } from "../../config.ts";
 
 type RuntimeSqliteLayerConfig = {
@@ -41,7 +41,7 @@ const setup = Layer.effectDiscard(
     yield* sql`PRAGMA journal_mode = WAL;`;
     yield* runJ5CompatibleUpstreamMigrations();
     yield* runJ5A2AMigrations();
-    yield* runWorkflowMigrations();
+    yield* runPlaybookMigrations();
   }),
 );
 

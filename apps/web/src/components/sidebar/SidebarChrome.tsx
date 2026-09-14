@@ -3,7 +3,7 @@ import {
   ChartNoAxesColumnIcon,
   GitPullRequestIcon,
   SettingsIcon,
-  WorkflowIcon,
+  BookOpenIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
@@ -84,7 +84,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           render={
             <Link
               to="/runs"
-              search={{ runId: undefined, squadronId: undefined, newWorkflow: undefined }}
+              search={{ runId: undefined, squadronId: undefined, newPlaybook: undefined }}
               className={cn(
                 "relative z-10 ms-auto flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs [-webkit-app-region:no-drag] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 backdropVariant
@@ -95,7 +95,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
             />
           }
         >
-          <WorkflowIcon aria-hidden className="size-4" />
+          <BookOpenIcon aria-hidden className="size-4" />
           <span className="hidden @[24rem]/sidebar-header:inline">Playbooks</span>
         </TooltipTrigger>
         <TooltipPopup>Playbooks</TooltipPopup>

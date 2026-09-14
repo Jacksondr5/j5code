@@ -1,6 +1,6 @@
 import * as Layer from "effect/Layer";
-import { workflowLayer } from "../workflow-definitions/Service.ts";
-import { workflowHttpLayer } from "../workflow/Http.ts";
+import { playbookLayer } from "../playbook-definitions/Service.ts";
+import { playbookHttpLayer } from "../playbook/Http.ts";
 
 import {
   CLIENT_READS_OPEN_COUNT_PATH,
@@ -19,7 +19,7 @@ import { threadHomesHttpRouteLayer } from "./ThreadHomesHttp.ts";
  * rather than adding another upstream server composition seam.
  */
 export const j5AuthenticatedRouteRegistration = Layer.mergeAll(
-  workflowHttpLayer,
+  playbookHttpLayer,
   humanInboxHttpRouteLayer,
   preArchiveFactsHttpRouteLayer,
   squadronHttpRouteLayer,
@@ -32,5 +32,5 @@ export const j5AuthenticatedRouteRegistration = Layer.mergeAll(
 ).pipe(Layer.provide(squadronManagementServiceLayer));
 
 export const j5AuthenticatedRoutesLayer = j5AuthenticatedRouteRegistration.pipe(
-  Layer.provide(workflowLayer),
+  Layer.provide(playbookLayer),
 );

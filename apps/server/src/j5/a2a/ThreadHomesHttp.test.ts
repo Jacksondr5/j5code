@@ -12,7 +12,7 @@ import { ClientReadsService } from "./ClientReadsService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { A2AHumanInbox } from "./HumanInboxService.ts";
-import { WorkflowService } from "../workflow-definitions/Service.ts";
+import { PlaybookService } from "../playbook-definitions/Service.ts";
 import { j5AuthenticatedRouteRegistration as j5AuthenticatedRoutesLayer } from "./J5AuthenticatedRoutes.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { SquadronProjectReferences } from "./SquadronProjectReferences.ts";
@@ -70,7 +70,7 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
     },
   });
   const routes = j5AuthenticatedRoutesLayer.pipe(
-    Layer.provide(Layer.mock(WorkflowService)({ definitions: [] })),
+    Layer.provide(Layer.mock(PlaybookService)({ definitions: [] })),
     Layer.provide(homes),
     Layer.provide(
       Layer.mock(A2AArchiveFacts)({

@@ -6,7 +6,7 @@ export type SettingsPath =
   | "/settings/appearance"
   | "/settings/keybindings"
   | "/settings/agents"
-  | "/settings/workflows"
+  | "/settings/playbooks"
   | "/settings/providers"
   | "/settings/integrations"
   | "/settings/scheduled-tasks"
@@ -54,7 +54,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/agents": "Agents",
-  "/settings/workflows": "Playbooks",
+  "/settings/playbooks": "Playbooks",
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
   "/settings/scheduled-tasks": "Schedule Tasks",
@@ -335,9 +335,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/agents",
   },
   {
-    id: "workflows",
+    id: "playbooks",
     title: "Playbooks",
-    to: "/settings/workflows",
+    to: "/settings/playbooks",
     searchTerms: ["yaml definitions import automation playbooks"],
   },
   {

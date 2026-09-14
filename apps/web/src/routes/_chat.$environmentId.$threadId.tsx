@@ -9,7 +9,7 @@ import { SidebarInset } from "~/components/ui/sidebar";
 import { useEnvironmentThreadRefs, useThreadShell } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { environmentShell } from "../state/shell";
-import { WorkflowThreadBanner } from "../j5/workflow/WorkflowThreadBanner";
+import { PlaybookThreadBanner } from "../j5/playbook/PlaybookThreadBanner";
 
 function ChatThreadRouteView() {
   const navigate = useNavigate();
@@ -68,7 +68,7 @@ function ChatThreadRouteView() {
   return (
     <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
       <div className="flex min-h-0 flex-1 flex-col">
-        <WorkflowThreadBanner
+        <PlaybookThreadBanner
           environmentId={threadRef.environmentId}
           threadId={threadRef.threadId}
         />

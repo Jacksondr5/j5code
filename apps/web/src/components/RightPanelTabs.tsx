@@ -16,7 +16,7 @@ import {
   GitPullRequest,
   Globe2,
   Plus,
-  Workflow,
+  BookOpen,
   TerminalSquare,
   Volume2,
   VolumeOff,
@@ -108,14 +108,14 @@ interface RightPanelTabsProps {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddAgents: () => void;
-  onAddWorkflows: () => void;
+  onAddPlaybooks: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
   pullRequestAvailable: boolean;
   agentsAvailable: boolean;
-  workflowsAvailable: boolean;
+  playbooksAvailable: boolean;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
   /** Running + waiting subagents; badges the Agents card in the empty state. */
   liveAgentCount: number;
@@ -145,7 +145,7 @@ const SURFACE_DISABLED_REASONS = {
   diff: "Diff is only available for server threads in Git repositories.",
   pullRequest: "This thread's branch has no pull request yet.",
   agents: "Agents are only available from a thread.",
-  workflows: "Playbooks are only available from a thread.",
+  playbooks: "Playbooks are only available from a thread.",
 } as const;
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -168,7 +168,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   diff: "Available for Git repositories.",
   pullRequest: "No pull request on this branch yet.",
   agents: "Available from a thread.",
-  workflows: "Available from a thread.",
+  playbooks: "Available from a thread.",
 } as const;
 
 type TabContextMenuAction =
@@ -306,14 +306,14 @@ function RightPanelEmptyState(props: {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddAgents: () => void;
-  onAddWorkflows: () => void;
+  onAddPlaybooks: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
   pullRequestAvailable: boolean;
   agentsAvailable: boolean;
-  workflowsAvailable: boolean;
+  playbooksAvailable: boolean;
   liveAgentCount: number;
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
@@ -373,11 +373,11 @@ function RightPanelEmptyState(props: {
     {
       label: "Playbooks",
       description: "Review runs and resolve approvals.",
-      icon: Workflow,
+      icon: BookOpen,
       shortcut: "W",
-      available: props.workflowsAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.workflows,
-      onClick: props.onAddWorkflows,
+      available: props.playbooksAvailable,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.playbooks,
+      onClick: props.onAddPlaybooks,
       badgeCount: 0,
     },
     {
@@ -623,7 +623,7 @@ function surfaceTitle(
       return `#${surface.number}`;
     case "agents":
       return "Agents";
-    case "workflows":
+    case "playbooks":
       return "Playbooks";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
@@ -706,8 +706,8 @@ function SurfaceIcon({
       );
     case "agents":
       return <Bot className="size-3 shrink-0" />;
-    case "workflows":
-      return <Workflow className="size-3 shrink-0" />;
+    case "playbooks":
+      return <BookOpen className="size-3 shrink-0" />;
   }
 }
 
@@ -831,11 +831,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     },
     {
       label: "Playbooks",
-      icon: Workflow,
+      icon: BookOpen,
       shortcut: "W",
-      available: props.workflowsAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.workflows,
-      onClick: props.onAddWorkflows,
+      available: props.playbooksAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.playbooks,
+      onClick: props.onAddPlaybooks,
     },
     {
       label: "Agents",
@@ -1283,14 +1283,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddFiles={props.onAddFiles}
             onAddPullRequest={props.onAddPullRequest}
             onAddAgents={props.onAddAgents}
-            onAddWorkflows={props.onAddWorkflows}
+            onAddPlaybooks={props.onAddPlaybooks}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}
             pullRequestAvailable={props.pullRequestAvailable}
             agentsAvailable={props.agentsAvailable}
-            workflowsAvailable={props.workflowsAvailable}
+            playbooksAvailable={props.playbooksAvailable}
             liveAgentCount={props.liveAgentCount}
           />
         ) : (

@@ -22,31 +22,31 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
-  it("opens and toggles the workflows singleton", () => {
-    useRightPanelStore.getState().open(refA, "workflows");
+  it("opens and toggles the playbooks singleton", () => {
+    useRightPanelStore.getState().open(refA, "playbooks");
     expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
       isOpen: true,
-      activeSurfaceId: "workflows",
-      surfaces: [{ id: "workflows", kind: "workflows" }],
+      activeSurfaceId: "playbooks",
+      surfaces: [{ id: "playbooks", kind: "playbooks" }],
     });
-    useRightPanelStore.getState().toggle(refA, "workflows");
+    useRightPanelStore.getState().toggle(refA, "playbooks");
     expect(
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).isOpen,
     ).toBe(false);
-    useRightPanelStore.getState().open(refA, "workflows");
+    useRightPanelStore.getState().open(refA, "playbooks");
     expect(
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
     ).toHaveLength(1);
   });
 
-  it("preserves workflows surfaces when migrating the existing storage version", () => {
+  it("preserves playbooks surfaces when migrating the existing storage version", () => {
     expect(
       migratePersistedRightPanelState({
         byThreadKey: {
           "env-1:thread-A": {
             isOpen: true,
-            activeSurfaceId: "workflows",
-            surfaces: [{ id: "workflows", kind: "workflows" }],
+            activeSurfaceId: "playbooks",
+            surfaces: [{ id: "playbooks", kind: "playbooks" }],
           },
         },
       }),
@@ -54,8 +54,33 @@ describe("rightPanelStore", () => {
       byThreadKey: {
         "env-1:thread-A": {
           isOpen: true,
-          activeSurfaceId: "workflows",
-          surfaces: [{ id: "workflows", kind: "workflows" }],
+          activeSurfaceId: "playbooks",
+          surfaces: [{ id: "playbooks", kind: "playbooks" }],
+        },
+      },
+      threadPanelVisibilityByThreadKey: {},
+    });
+  });
+  it("drops unsupported workflow surfaces without translating them", () => {
+    expect(
+      migratePersistedRightPanelState({
+        byThreadKey: {
+          "env-1:thread-A": {
+            isOpen: true,
+            activeSurfaceId: "workflows",
+            surfaces: [
+              { id: "workflows", kind: "workflows" },
+              { id: "agents", kind: "agents" },
+            ],
+          },
+        },
+      }),
+    ).toEqual({
+      byThreadKey: {
+        "env-1:thread-A": {
+          isOpen: true,
+          activeSurfaceId: "agents",
+          surfaces: [{ id: "agents", kind: "agents" }],
         },
       },
       threadPanelVisibilityByThreadKey: {},

@@ -1,4 +1,4 @@
-import { isWorkflowThread } from "@j5/workflow-contracts/sidebar";
+import { isPlaybookThread } from "@j5/playbook-contracts/sidebar";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
@@ -2172,7 +2172,7 @@ export default function Sidebar() {
     // sidebar roster (v2 models them as real threads with lineage).
     const visible = filterThreadsForSquadronScope(
       filterSidebarV2VisibleThreads(threads, null).filter(
-        (thread) => thread.environmentId !== primaryEnvironmentId || !isWorkflowThread(thread.id),
+        (thread) => thread.environmentId !== primaryEnvironmentId || !isPlaybookThread(thread.id),
       ),
       squadronScope,
       threadHomes,

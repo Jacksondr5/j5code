@@ -7,7 +7,7 @@ import { cn } from "../../lib/utils";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { readOpenInboxCount } from "./humanInboxCountClient";
 import { HUMAN_INBOX_REFRESH_EVENT } from "./humanInboxRefresh";
-import { useWorkflowQuery, workflowApprovalCountQuery } from "../workflow/queries";
+import { usePlaybookQuery, playbookApprovalCountQuery } from "../playbook/queries";
 
 export const COUNT_POLL_INTERVAL_MS = 7_500;
 
@@ -16,8 +16,8 @@ export const shouldShowOpenInboxCount = (count: number | null) => count !== null
 export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean }) {
   const { isMobile, setOpenMobile } = useSidebar();
   const environmentId = usePrimaryEnvironmentId();
-  const workflowCount = useWorkflowQuery(
-    environmentId === null ? null : workflowApprovalCountQuery(environmentId),
+  const playbookCount = usePlaybookQuery(
+    environmentId === null ? null : playbookApprovalCountQuery(environmentId),
   );
   const [humanCount, setHumanCount] = useState<number | null>(null);
 
@@ -74,9 +74,9 @@ export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean })
   }, []);
 
   const count =
-    humanCount === null || workflowCount.data == null
+    humanCount === null || playbookCount.data == null
       ? null
-      : humanCount + workflowCount.data.count;
+      : humanCount + playbookCount.data.count;
 
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) setOpenMobile(false);

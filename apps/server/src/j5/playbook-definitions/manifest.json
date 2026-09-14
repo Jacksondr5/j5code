@@ -1,0 +1,26 @@
+{
+  "version": 3,
+  "files": [
+    "apps/server/src/j5/playbook/Definition.ts",
+    "apps/server/src/j5/playbook/Execution.ts",
+    "apps/server/src/j5/playbook/Worker.ts",
+    "apps/server/src/j5/playbook/AgentAdapter.ts",
+    "apps/server/src/j5/playbook/Store.ts",
+    "apps/server/src/j5/playbook/Migrations.ts",
+    "apps/server/src/j5/playbook-definitions/Service.ts",
+    "apps/server/src/j5/playbook-definitions/manifest.ts",
+    "packages/j5-playbook-contracts/src/index.ts",
+    "apps/server/src/j5/playbook/decider.ts",
+    "apps/server/src/j5/playbook-definitions/fh/development.ts",
+    "apps/server/src/j5/playbook-definitions/fh/CodeAdapters.ts",
+    "apps/server/src/j5/playbook-definitions/fh/GitWorkspace.ts",
+    "apps/server/src/j5/playbook-definitions/fh/Publication.ts",
+    "packages/j5-playbook-contracts/src/fh.ts",
+    "apps/server/src/j5/playbook-definitions/Yaml.ts",
+    "apps/server/src/j5/playbook-definitions/Library.ts",
+    "apps/server/src/j5/playbook-definitions/research-review.yaml",
+    "apps/server/src/j5/playbook-definitions/fh/development.yaml",
+    "apps/server/scripts/copy-playbook-yaml.mjs"
+  ],
+  "hash": "00e0c60d1823da32e4d5526a8dffb670a51d74176e0b4c217ba7c50b3e669d81"
+}

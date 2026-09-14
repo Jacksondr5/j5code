@@ -1,4 +1,4 @@
-import { useWorkflowVisibleThreads } from "../j5/workflow/useWorkflowVisibleThreads";
+import { usePlaybookVisibleThreads } from "../j5/playbook/usePlaybookVisibleThreads";
 import {
   ArchiveIcon,
   ArrowUpDownIcon,
@@ -1227,7 +1227,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     },
   });
   const openPrLink = useOpenPrLink();
-  const sidebarThreads = useWorkflowVisibleThreads(
+  const sidebarThreads = usePlaybookVisibleThreads(
     useThreadShellsForProjectRefs(project.memberProjectRefs),
   );
   const sidebarThreadByKey = useMemo(
@@ -3135,7 +3135,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 
 export default function LegacySidebar() {
   const projects = useProjects();
-  const sidebarThreads = useWorkflowVisibleThreads(useThreadShells());
+  const sidebarThreads = usePlaybookVisibleThreads(useThreadShells());
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);
