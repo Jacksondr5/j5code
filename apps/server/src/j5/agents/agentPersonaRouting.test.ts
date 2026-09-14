@@ -159,6 +159,37 @@ describe("agent persona routing", () => {
     }
   });
 
+  it("reports each rejected route with its target and failure codes in the catalog", () => {
+    const scout = listBuiltInAgentPersonas().find(({ id }) => id === "scout")!;
+    const [primary, fallback] = scout.modelRoute;
+    const catalog = buildAgentPersonaCatalog(
+      [
+        providerForTarget(primary, { enabled: false }),
+        providerForTarget({ ...fallback, model: "some-other-model" }),
+      ],
+      [scout],
+    );
+    const availability = catalog.personas[0]!.availability;
+    assert.equal(availability.status, "unavailable");
+    if (availability.status === "available") return;
+    assert.deepEqual(availability.attempts, [
+      {
+        route: "primary",
+        driver: primary.driver,
+        model: primary.model,
+        reasoningEffort: primary.reasoningEffort,
+        failures: ["provider-disabled"],
+      },
+      {
+        route: "fallback",
+        driver: fallback.driver,
+        model: fallback.model,
+        reasoningEffort: fallback.reasoningEffort,
+        failures: ["model-not-advertised"],
+      },
+    ]);
+  });
+
   it("blocks every persona when both declared routes are unavailable", () => {
     for (const definition of listBuiltInAgentPersonas()) {
       const resolution = resolveAgentPersonaRoute({
@@ -318,10 +349,15 @@ describe("agent persona routing", () => {
       catalog.personas.find(({ personaId }) => personaId === "builder")?.availability.status,
       "unavailable",
     );
-    assert.deepEqual(
-      catalog.personas.find(({ personaId }) => personaId === "publisher")?.availability,
-      { status: "unavailable", reason: "authority-not-enforceable" },
-    );
+    const publisher = catalog.personas.find(({ personaId }) => personaId === "publisher")!;
+    assert.equal(publisher.availability.status, "unavailable");
+    if (publisher.availability.status === "unavailable") {
+      assert.equal(publisher.availability.reason, "authority-not-enforceable");
+      assert.deepEqual(
+        publisher.availability.attempts?.map(({ failures }) => failures),
+        [["authority-not-enforceable"], ["authority-not-enforceable"]],
+      );
+    }
   });
 });
 

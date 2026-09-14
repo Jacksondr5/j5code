@@ -3,6 +3,7 @@ import {
   isProviderAvailable,
   ProviderDriverKind,
   type AgentPersonaAuthorityPolicy,
+  type AgentPersonaRouteFailureCode as ContractRouteFailureCode,
   type ModelSelection,
   type OrchestrationV2AgentPersonaCatalog,
   type ProviderInstanceId,
@@ -18,16 +19,7 @@ import {
 } from "./agentPersonas.ts";
 import { providerCanEnforceAgentPersonaAuthority } from "./agentPersonaProviderPolicy.ts";
 
-export type AgentPersonaRouteFailureCode =
-  | "provider-not-configured"
-  | "provider-unavailable"
-  | "provider-disabled"
-  | "provider-not-installed"
-  | "provider-error"
-  | "provider-unauthenticated"
-  | "model-not-advertised"
-  | "reasoning-effort-not-advertised"
-  | "authority-not-enforceable";
+export type AgentPersonaRouteFailureCode = ContractRouteFailureCode;
 
 export interface AgentPersonaRouteFailure {
   readonly code: AgentPersonaRouteFailureCode;
@@ -207,6 +199,14 @@ export function buildAgentPersonaCatalog(
             : {
                 status: "unavailable" as const,
                 reason: unavailableAgentPersonaReason(resolution),
+                // Settings shows these so a blocked badge names the missing model or provider.
+                attempts: resolution.attempts.map((attempt) => ({
+                  route: attempt.route,
+                  driver: attempt.target.driver,
+                  model: attempt.target.model,
+                  reasoningEffort: attempt.target.reasoningEffort,
+                  failures: [...new Set(attempt.failures.map(({ code }) => code))],
+                })),
               },
       };
     }),

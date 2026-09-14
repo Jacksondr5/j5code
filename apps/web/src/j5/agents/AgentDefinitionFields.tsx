@@ -136,7 +136,13 @@ export function AgentRoutePolicyFields(props: {
                           }}
                         >
                           {harness.models.map(({ id, modelLabel, efforts }) => (
-                            <MenuRadioItem key={id} value={id} disabled={efforts.length === 0}>
+                            <MenuRadioItem
+                              key={id}
+                              value={id}
+                              disabled={efforts.length === 0}
+                              // Base UI radio items stay open by default; a model pick is a one-shot choice.
+                              closeOnClick
+                            >
                               {modelLabel}
                             </MenuRadioItem>
                           ))}

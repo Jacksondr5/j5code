@@ -59,6 +59,18 @@ describe("agent picker", () => {
   it("does not reuse another environment's results before a catalog loads", () => {
     expect(agentPersonaMentionItems(null, "")).toEqual([]);
   });
+  it("adds only id or name prefix matches to a bare @ query and nothing to an empty one", () => {
+    const prefix = { matchPrefixOnly: true };
+    expect(agentPersonaMentionItems(catalog, "", prefix)).toEqual([]);
+    expect(agentPersonaMentionItems(catalog, "evidence", prefix)).toEqual([]);
+    expect(agentPersonaMentionItems(catalog, "res", prefix).map((item) => item.personaId)).toEqual([
+      "team-researcher",
+      "other-researcher",
+    ]);
+    expect(agentPersonaMentionItems(catalog, "team", prefix).map((item) => item.personaId)).toEqual(
+      ["team-researcher"],
+    );
+  });
 });
 
 describe("agent mention selection", () => {

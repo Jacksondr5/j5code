@@ -79,6 +79,30 @@ export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
 export type OrchestrationV2AgentPersonaAssignment =
   typeof OrchestrationV2AgentPersonaAssignment.Type;
 
+/** Why one route of a definition could not be used in this environment. */
+export const AgentPersonaRouteFailureCode = Schema.Literals([
+  "provider-not-configured",
+  "provider-unavailable",
+  "provider-disabled",
+  "provider-not-installed",
+  "provider-error",
+  "provider-unauthenticated",
+  "model-not-advertised",
+  "reasoning-effort-not-advertised",
+  "authority-not-enforceable",
+]);
+export type AgentPersonaRouteFailureCode = typeof AgentPersonaRouteFailureCode.Type;
+
+/** One rejected route with the reasons every candidate provider gave. */
+export const AgentPersonaRouteAttempt = Schema.Struct({
+  route: Schema.Literals(["primary", "fallback"]),
+  driver: Schema.Literals(["codex", "claudeAgent"]),
+  model: TrimmedNonEmptyString,
+  reasoningEffort: TrimmedNonEmptyString,
+  failures: Schema.Array(AgentPersonaRouteFailureCode),
+});
+export type AgentPersonaRouteAttempt = typeof AgentPersonaRouteAttempt.Type;
+
 export const OrchestrationV2AgentPersonaAvailability = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("available"),
@@ -94,6 +118,8 @@ export const OrchestrationV2AgentPersonaAvailability = Schema.Union([
       "disabled",
       "removed",
     ]),
+    /** Per-route detail behind a blocked reason; absent for disabled and removed entries. */
+    attempts: Schema.optional(Schema.Array(AgentPersonaRouteAttempt)),
   }),
 ]);
 export type OrchestrationV2AgentPersonaAvailability =
@@ -312,6 +338,7 @@ export const J5_AGENT_PERSONA_WS_METHODS = {
   getAgentPersonaUsage: "j5.agentPersonas.getUsage",
   getAgentPersonaLibrarySources: "j5.agentPersonas.getLibrarySources",
   setAgentPersonaLibraryFolders: "j5.agentPersonas.setLibraryFolders",
+  setAgentPersonaEnabled: "j5.agentPersonas.setEnabled",
 } as const;
 
 export const J5AgentPersonaRpcSchemas = {
@@ -369,6 +396,11 @@ export const J5AgentPersonaRpcSchemas = {
   },
   setAgentPersonaLibraryFolders: {
     input: AgentPersonaLibraryFoldersInput,
+    output: Schema.Void,
+  },
+  /** On/off for any listed agent: imported copies keep their flag, source and bundled ids join a disabled list. */
+  setAgentPersonaEnabled: {
+    input: Schema.Struct({ personaId: AgentPersonaId, enabled: Schema.Boolean }),
     output: Schema.Void,
   },
 } as const;
@@ -480,6 +512,15 @@ export const WsJ5SetAgentPersonaLibraryFoldersRpc = Rpc.make(
   },
 );
 
+export const WsJ5SetAgentPersonaEnabledRpc = Rpc.make(
+  J5_AGENT_PERSONA_WS_METHODS.setAgentPersonaEnabled,
+  {
+    payload: J5AgentPersonaRpcSchemas.setAgentPersonaEnabled.input,
+    success: J5AgentPersonaRpcSchemas.setAgentPersonaEnabled.output,
+    error: catalogErrors,
+  },
+);
+
 /** Merged into `WsRpcGroup` by one appended call; no other upstream registration exists. */
 export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5GetAgentPersonaCatalogRpc,
@@ -495,4 +536,5 @@ export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5GetAgentPersonaUsageRpc,
   WsJ5GetAgentPersonaLibrarySourcesRpc,
   WsJ5SetAgentPersonaLibraryFoldersRpc,
+  WsJ5SetAgentPersonaEnabledRpc,
 );
