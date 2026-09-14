@@ -1,6 +1,8 @@
 import * as React from "react";
 import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { ContextMenuItem } from "@t3tools/contracts";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import { effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import {
   activeThreadAnchorTimestampMs,
@@ -740,6 +742,36 @@ export function firstValidTimestamp(
     if (!Number.isNaN(Date.parse(candidate))) return candidate;
   }
   return null;
+}
+
+/** Partition visible shells before applying each section's existing sort. */
+export function partitionSidebarThreads(
+  threads: readonly EnvironmentThreadShell[],
+  capabilitiesForEnvironment: (
+    environmentId: EnvironmentThreadShell["environmentId"],
+  ) => { readonly threadSettlement?: boolean; readonly threadSnooze?: boolean } | undefined,
+  now: string,
+) {
+  const pinned: EnvironmentThreadShell[] = [];
+  const active: EnvironmentThreadShell[] = [];
+  const snoozed: EnvironmentThreadShell[] = [];
+  const settled: EnvironmentThreadShell[] = [];
+  for (const thread of threads) {
+    // Missing capabilities must not strand a row on a shelf the server
+    // cannot bring it back from.
+    const capabilities = capabilitiesForEnvironment(thread.environmentId);
+    // Snooze outranks settlement and pinning until the thread wakes.
+    if (capabilities?.threadSnooze === true && effectiveSnoozed(thread, { now })) {
+      snoozed.push(thread);
+    } else if (capabilities?.threadSettlement === true && thread.settledOverride === "settled") {
+      settled.push(thread);
+    } else if (thread.pinnedAt != null) {
+      pinned.push(thread);
+    } else {
+      active.push(thread);
+    }
+  }
+  return { pinned, active, snoozed, settled };
 }
 
 // Sidebar sort: static order, newest anchor on top. Activity NEVER reorders
