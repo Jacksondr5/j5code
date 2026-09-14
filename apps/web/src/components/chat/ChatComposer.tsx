@@ -5,6 +5,7 @@ import type {
   ChatFileAttachment,
   EnvironmentId,
   ModelSelection,
+  OrchestrationV2AgentPersonaAssignment,
   PreviewAnnotationPayload,
   ProviderApprovalDecision,
   ProviderInteractionMode,
@@ -776,6 +777,7 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { AgentPersonaAssignmentControl } from "../../j5/agents/AgentPersonaAssignmentControl";
 import { toastManager } from "../ui/toast";
 import {
   BotIcon,
@@ -1232,6 +1234,7 @@ export interface ChatComposerProps {
   // Mode
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
+  agentPersonaAssignment?: OrchestrationV2AgentPersonaAssignment;
 
   // Provider / model
   lockedProvider: ProviderDriverKind | null;
@@ -1358,6 +1361,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProposedPlan,
     runtimeMode,
     interactionMode: requestedInteractionMode,
+    agentPersonaAssignment,
     lockedProvider,
     providerStatuses,
     activeProjectDefaultModelSelection,
@@ -3883,7 +3887,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const hiddenRestingBlockIds = restingBlockDefs
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
     .map((def) => def.id);
-  const composerControls = noProviderAvailable ? (
+  const composerControls = agentPersonaAssignment ? (
+    <AgentPersonaAssignmentControl
+      assignment={agentPersonaAssignment}
+      environmentId={environmentId}
+    />
+  ) : noProviderAvailable ? (
     <Button
       type="button"
       size="sm"

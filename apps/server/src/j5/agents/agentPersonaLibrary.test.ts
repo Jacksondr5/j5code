@@ -480,6 +480,7 @@ describe("editing imported agents", () => {
     personaId: definition.id,
     expectedDigest: definitionDigest(definition),
     displayName: definition.displayName,
+    instructions: definition.instructions,
     description: definition.description,
     authorityPolicy: definition.authority.defaultPolicy,
     modelRoute: definition.modelRoute,
@@ -660,6 +661,7 @@ describe("confirmed import replacement", () => {
         expectedDigest: definitionDigest(custom),
         displayName: "Concurrent edit",
         description: custom.description,
+        instructions: custom.instructions,
         authorityPolicy: custom.authority.defaultPolicy,
         modelRoute: custom.modelRoute,
       });
@@ -871,6 +873,220 @@ describe("YAML agent definitions", () => {
         (yield* library.load()).map(({ id }) => id),
         ["kept"],
       );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("restoring removed agents", () => {
+  it.effect("lists removed bundled and folder agents for restore and brings them back", () =>
+    Effect.gen(function* () {
+      const { library, write, fs, path, stateDir } = yield* fixture;
+      yield* write("agent.yaml", custom);
+      yield* library.removeAgent(custom.id);
+      const removedCatalog = yield* library.catalog();
+      assert.deepEqual(
+        removedCatalog.removedSources.map(({ id }) => id),
+        [custom.id],
+      );
+      assert.isFalse(removedCatalog.definitions.some(({ id }) => id === custom.id));
+      assert.isFalse((yield* library.load()).some(({ id }) => id === custom.id));
+      yield* library.restoreSource(custom.id);
+      const restarted = createAgentPersonaLibrary({ fs, path, stateDir });
+      const restored = yield* restarted.catalog();
+      assert.deepEqual(restored.removedSources, []);
+      assert.isTrue(restored.definitions.some(({ id }) => id === custom.id));
+      assert.include(
+        String(yield* restarted.restoreSource(custom.id).pipe(Effect.flip)),
+        "not removed",
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("does not list a removed source while an imported copy overrides it", () =>
+    Effect.gen(function* () {
+      const { library, write } = yield* fixture;
+      yield* write("agent.yaml", custom);
+      yield* library.removeSource(custom.id);
+      yield* library.importFiles({
+        files: [{ name: "agent.yaml", content: yaml({ ...custom, version: 9 }) }],
+        replaceExisting: false,
+      });
+      const catalog = yield* library.catalog();
+      assert.deepEqual(catalog.removedSources, []);
+      assert.equal(catalog.definitions.find(({ id }) => id === custom.id)?.version, 9);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("personal agents", () => {
+  it.effect(
+    "creates an enabled imported agent from Settings details and rejects duplicate IDs",
+    () =>
+      Effect.gen(function* () {
+        const { library, fs, path, stateDir } = yield* fixture;
+        const created = yield* library.createPersona({
+          id: "my-reviewer",
+          displayName: "My Reviewer",
+          description: "Reviews my changes.",
+          instructions: "# My Reviewer\n\nReview carefully.",
+          authorityPolicy: "read-only",
+          modelRoute: custom.modelRoute,
+        });
+        assert.equal(created.personaId, "my-reviewer");
+        const restarted = createAgentPersonaLibrary({ fs, path, stateDir });
+        const catalog = yield* restarted.catalog();
+        const definition = catalog.definitions.find(({ id }) => id === "my-reviewer");
+        assert.isTrue(catalog.importedIds.includes("my-reviewer"));
+        assert.isFalse(catalog.disabledIds.includes("my-reviewer"));
+        assert.deepEqual(definition?.authority, {
+          defaultPolicy: "read-only",
+          allowedPolicies: ["read-only"],
+        });
+        assert.equal(definition?.outputArtifact, undefined);
+        assert.equal(definition?.acceptedInput, undefined);
+        assert.equal(definition?.version, 1);
+        assert.isTrue((yield* restarted.load()).some(({ id }) => id === "my-reviewer"));
+        const duplicate = yield* restarted
+          .createPersona({
+            id: "my-reviewer",
+            displayName: "Again",
+            description: "Again.",
+            instructions: "Again.",
+            authorityPolicy: "read-only",
+            modelRoute: custom.modelRoute,
+          })
+          .pipe(Effect.flip);
+        assert.include(String(duplicate), "already exists");
+        const bundled = yield* restarted
+          .createPersona({
+            id: "scout",
+            displayName: "Scout",
+            description: "Clash.",
+            instructions: "Clash.",
+            authorityPolicy: "read-only",
+            modelRoute: custom.modelRoute,
+          })
+          .pipe(Effect.flip);
+        assert.include(String(bundled), "already exists");
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("reading and editing definitions", () => {
+  it.effect("reads any listed definition, including removed sources, and edits instructions", () =>
+    Effect.gen(function* () {
+      const { library, write } = yield* fixture;
+      yield* write("agent.yaml", custom);
+      assert.deepEqual(yield* library.read(custom.id), custom);
+      yield* library.removeSource(custom.id);
+      assert.deepEqual(yield* library.read(custom.id), custom);
+      assert.include(
+        String(yield* library.read("missing-agent").pipe(Effect.flip)),
+        "Unknown agent",
+      );
+      const created = yield* library.createPersona({
+        id: "my-reviewer",
+        displayName: "My Reviewer",
+        description: "Reviews my changes.",
+        instructions: "Review carefully.",
+        authorityPolicy: "read-only",
+        modelRoute: custom.modelRoute,
+      });
+      const before = yield* library.read(created.personaId);
+      yield* library.editImported({
+        personaId: created.personaId,
+        expectedDigest: definitionDigest(before),
+        displayName: before.displayName,
+        description: before.description,
+        instructions: "Review carefully.\n\nAlways cite file paths.",
+        authorityPolicy: "read-only",
+        modelRoute: before.modelRoute,
+      });
+      const after = yield* library.read(created.personaId);
+      assert.equal(after.version, before.version + 1);
+      assert.include(after.instructions, "Always cite file paths.");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("library sources", () => {
+  it.effect("reports the default folder, its file count, and every folder-loaded origin", () =>
+    Effect.gen(function* () {
+      const { library, write, stateDir, path, fs } = yield* fixture;
+      const before = yield* library.sources();
+      assert.equal(before.configured, false);
+      assert.equal(before.configPath, path.join(stateDir, "agent-personas.json"));
+      assert.deepEqual(before.folders, [
+        {
+          configuredPath: "personas",
+          path: path.join(stateDir, "personas"),
+          exists: false,
+          definitionCount: 0,
+        },
+      ]);
+      assert.equal((yield* library.catalog()).sourcePaths.size, 0);
+
+      yield* write("researcher.yaml", custom);
+      yield* fs.writeFileString(path.join(stateDir, "personas", "notes.md"), "ignored");
+      const after = yield* library.sources();
+      assert.deepEqual(
+        after.folders.map(({ exists, definitionCount }) => ({ exists, definitionCount })),
+        [{ exists: true, definitionCount: 1 }],
+      );
+      assert.equal(
+        (yield* library.catalog()).sourcePaths.get(custom.id),
+        path.join(stateDir, "personas", "researcher.yaml"),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("writes the folder configuration, creating state-directory folders on demand", () =>
+    Effect.gen(function* () {
+      const { library, fs, path, stateDir } = yield* fixture;
+      const team = path.join(stateDir, "..", `${path.basename(stateDir)}-team`);
+      yield* fs.makeDirectory(team);
+      yield* fs.writeFileString(path.join(team, "a.yaml"), yaml({ ...custom, id: "another" }));
+      yield* library.setFolders({ folders: ["personas", team, "personas"] });
+      const sources = yield* library.sources();
+      assert.equal(sources.configured, true);
+      assert.deepEqual(
+        sources.folders.map(({ configuredPath, exists, definitionCount }) => ({
+          configuredPath,
+          exists,
+          definitionCount,
+        })),
+        [
+          { configuredPath: "personas", exists: true, definitionCount: 0 },
+          { configuredPath: team, exists: true, definitionCount: 1 },
+        ],
+      );
+      assert.deepEqual(
+        (yield* library.load()).map(({ id }) => id),
+        ["another"],
+      );
+
+      yield* library.setFolders({ folders: [] });
+      assert.deepEqual(yield* library.load(), []);
+      assert.deepEqual((yield* library.sources()).folders, []);
+      yield* fs.remove(team, { recursive: true });
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects folders that do not exist outside the state directory and non-folders", () =>
+    Effect.gen(function* () {
+      const { library, fs, path, stateDir } = yield* fixture;
+      const missing = path.join(stateDir, "..", `${path.basename(stateDir)}-missing`);
+      assert.include(
+        String(yield* library.setFolders({ folders: [missing] }).pipe(Effect.flip)),
+        "does not exist",
+      );
+      yield* fs.writeFileString(path.join(stateDir, "file.yaml"), yaml(custom));
+      assert.include(
+        String(yield* library.setFolders({ folders: ["file.yaml"] }).pipe(Effect.flip)),
+        "Not a folder",
+      );
+      // A rejected update leaves the configuration untouched.
+      assert.equal((yield* library.sources()).configured, false);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

@@ -3,7 +3,7 @@ import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 import { EnvironmentAuthorizationError } from "../auth.ts";
-import { PositiveInt, TrimmedNonEmptyString } from "../baseSchemas.ts";
+import { NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from "../baseSchemas.ts";
 import { ModelSelection } from "../modelSelection.ts";
 import { ProviderDriverKind } from "../providerInstance.ts";
 
@@ -88,7 +88,12 @@ export const OrchestrationV2AgentPersonaAvailability = Schema.Union([
   }),
   Schema.Struct({
     status: Schema.Literal("unavailable"),
-    reason: Schema.Literals(["routes-unavailable", "authority-not-enforceable", "disabled"]),
+    reason: Schema.Literals([
+      "routes-unavailable",
+      "authority-not-enforceable",
+      "disabled",
+      "removed",
+    ]),
   }),
 ]);
 export type OrchestrationV2AgentPersonaAvailability =
@@ -104,26 +109,75 @@ export const AgentPersonaEditableDetails = Schema.Struct({
   definitionDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
 });
+export const AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH = 32768;
+const AgentPersonaInstructions = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH),
+);
 export const AgentPersonaEditInput = Schema.Struct({
   personaId: AgentPersonaId,
   expectedDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   description: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
+  instructions: AgentPersonaInstructions,
   authorityPolicy: AgentPersonaAuthorityPolicy,
   modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
 });
 export type AgentPersonaEditInput = typeof AgentPersonaEditInput.Type;
 
+/** The full definition as stored; the catalog omits instructions to keep lists small. */
+export const AgentPersonaDefinitionView = Schema.Struct({
+  id: AgentPersonaId,
+  version: PositiveInt,
+  displayName: TrimmedNonEmptyString,
+  description: TrimmedNonEmptyString,
+  instructions: AgentPersonaInstructions,
+  acceptedInput: Schema.optional(TrimmedNonEmptyString),
+  artifacts: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  inputArtifacts: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  outputArtifact: Schema.optional(TrimmedNonEmptyString),
+  authority: Schema.Struct({
+    defaultPolicy: AgentPersonaAuthorityPolicy,
+    allowedPolicies: Schema.Array(AgentPersonaAuthorityPolicy),
+  }),
+  modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+});
+export type AgentPersonaDefinitionView = typeof AgentPersonaDefinitionView.Type;
+
+/** A personal agent authored in Settings; the server fills the remaining definition fields. */
+export const AgentPersonaCreateInput = Schema.Struct({
+  id: AgentPersonaId,
+  displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
+  description: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
+  instructions: AgentPersonaInstructions,
+  authorityPolicy: AgentPersonaAuthorityPolicy,
+  modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+});
+export type AgentPersonaCreateInput = typeof AgentPersonaCreateInput.Type;
+
+/** Where the definition in effect came from; folder paths are server paths shown for orientation only. */
+export const AgentPersonaOrigin = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("bundled") }),
+  Schema.Struct({ kind: Schema.Literal("imported") }),
+  Schema.Struct({ kind: Schema.Literal("folder"), path: TrimmedNonEmptyString }),
+]);
+export type AgentPersonaOrigin = typeof AgentPersonaOrigin.Type;
+
 /** Environment-specific, presentation-safe view of one library persona. */
 export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
   personaId: AgentPersonaId,
   imported: Schema.optional(Schema.Boolean),
+  origin: Schema.optional(AgentPersonaOrigin),
+  /** A source or bundled definition the user removed; it stays listed so it can be restored. */
+  removed: Schema.optional(Schema.Boolean),
+  /** Content digest of the current definition; compared with launch snapshots to show drift. */
+  definitionDigest: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
   editable: Schema.optional(AgentPersonaEditableDetails),
   definitionVersion: PositiveInt,
   displayName: TrimmedNonEmptyString,
   description: TrimmedNonEmptyString,
-  acceptedInput: TrimmedNonEmptyString,
-  outputArtifact: TrimmedNonEmptyString,
+  acceptedInput: Schema.optional(TrimmedNonEmptyString),
+  outputArtifact: Schema.optional(TrimmedNonEmptyString),
   defaultAuthorityPolicy: AgentPersonaAuthorityPolicy,
   allowedAuthorityPolicies: Schema.Array(AgentPersonaAuthorityPolicy),
   availability: OrchestrationV2AgentPersonaAvailability,
@@ -176,6 +230,68 @@ export const AgentPersonaImportInput = Schema.Struct({
 });
 export type AgentPersonaImportInput = typeof AgentPersonaImportInput.Type;
 
+/**
+ * Per-agent usage aggregated from the environment's thread, run, and provider-turn
+ * projections at request time; nothing new is persisted. Token totals sum the
+ * per-turn figures providers report and are absent when none were reported.
+ */
+export const AgentPersonaUsageEntry = Schema.Struct({
+  personaId: AgentPersonaId,
+  threads: NonNegativeInt,
+  runs: NonNegativeInt,
+  completedRuns: NonNegativeInt,
+  failedRuns: NonNegativeInt,
+  /** Mean wall-clock time of completed runs in milliseconds. */
+  averageRunDurationMs: Schema.NullOr(NonNegativeInt),
+  lastLaunchedAt: Schema.NullOr(Schema.String),
+  inputTokens: Schema.NullOr(NonNegativeInt),
+  outputTokens: Schema.NullOr(NonNegativeInt),
+  /** Which pinned routes tasks actually resolved to, most used first. */
+  routes: Schema.Array(
+    Schema.Struct({
+      driver: ProviderDriverKind,
+      model: TrimmedNonEmptyString,
+      threads: NonNegativeInt,
+    }),
+  ),
+});
+export type AgentPersonaUsageEntry = typeof AgentPersonaUsageEntry.Type;
+export const AgentPersonaUsage = Schema.Struct({ personas: Schema.Array(AgentPersonaUsageEntry) });
+export type AgentPersonaUsage = typeof AgentPersonaUsage.Type;
+
+/** Read-only git signals for a source folder; the server never fetches, pulls, or commits. */
+export const AgentPersonaFolderGitStatus = Schema.Struct({
+  repositoryRoot: TrimmedNonEmptyString,
+  /** Uncommitted changes within this folder. */
+  uncommittedChanges: Schema.Boolean,
+  /** Commits on the tracked remote branch not yet pulled; null without an upstream. */
+  remoteAhead: Schema.NullOr(NonNegativeInt),
+});
+export type AgentPersonaFolderGitStatus = typeof AgentPersonaFolderGitStatus.Type;
+export const AgentPersonaLibraryFolder = Schema.Struct({
+  /** The entry as written in agent-personas.json (relative paths resolve from the state directory). */
+  configuredPath: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+  exists: Schema.Boolean,
+  definitionCount: NonNegativeInt,
+  git: Schema.NullOr(AgentPersonaFolderGitStatus),
+});
+export type AgentPersonaLibraryFolder = typeof AgentPersonaLibraryFolder.Type;
+export const AgentPersonaLibrarySources = Schema.Struct({
+  configPath: TrimmedNonEmptyString,
+  /** False while the default folder applies and bundled examples fill in for a missing one. */
+  configured: Schema.Boolean,
+  folders: Schema.Array(AgentPersonaLibraryFolder),
+});
+export type AgentPersonaLibrarySources = typeof AgentPersonaLibrarySources.Type;
+export const AGENT_PERSONA_LIBRARY_MAX_FOLDERS = 32;
+export const AgentPersonaLibraryFoldersInput = Schema.Struct({
+  folders: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(4096))).check(
+    Schema.isMaxLength(AGENT_PERSONA_LIBRARY_MAX_FOLDERS),
+  ),
+});
+export type AgentPersonaLibraryFoldersInput = typeof AgentPersonaLibraryFoldersInput.Type;
+
 // ---------------------------------------------------------------------------
 // Library management RPCs. These ride the upstream WebSocket RPC transport via one
 // `WsRpcGroup.merge(...)` call so environment scoping, remote connections, and
@@ -190,6 +306,12 @@ export const J5_AGENT_PERSONA_WS_METHODS = {
   removeImportedAgentPersona: "j5.agentPersonas.removeImported",
   removeSourceAgentPersona: "j5.agentPersonas.removeSource",
   removeAgentPersona: "j5.agentPersonas.remove",
+  restoreSourceAgentPersona: "j5.agentPersonas.restoreSource",
+  createAgentPersona: "j5.agentPersonas.create",
+  readAgentPersona: "j5.agentPersonas.read",
+  getAgentPersonaUsage: "j5.agentPersonas.getUsage",
+  getAgentPersonaLibrarySources: "j5.agentPersonas.getLibrarySources",
+  setAgentPersonaLibraryFolders: "j5.agentPersonas.setLibraryFolders",
 } as const;
 
 export const J5AgentPersonaRpcSchemas = {
@@ -219,6 +341,34 @@ export const J5AgentPersonaRpcSchemas = {
   },
   removeAgentPersona: {
     input: Schema.Struct({ personaId: AgentPersonaId }),
+    output: Schema.Void,
+  },
+  restoreSourceAgentPersona: {
+    input: Schema.Struct({ personaId: AgentPersonaId }),
+    output: Schema.Void,
+  },
+  createAgentPersona: {
+    input: AgentPersonaCreateInput,
+    output: Schema.Struct({ personaId: AgentPersonaId }),
+  },
+  readAgentPersona: {
+    input: Schema.Struct({ personaId: AgentPersonaId }),
+    output: Schema.Struct({
+      definition: AgentPersonaDefinitionView,
+      fileName: TrimmedNonEmptyString,
+      yaml: Schema.String,
+    }),
+  },
+  getAgentPersonaUsage: {
+    input: Schema.Struct({}),
+    output: AgentPersonaUsage,
+  },
+  getAgentPersonaLibrarySources: {
+    input: Schema.Struct({}),
+    output: AgentPersonaLibrarySources,
+  },
+  setAgentPersonaLibraryFolders: {
+    input: AgentPersonaLibraryFoldersInput,
     output: Schema.Void,
   },
 } as const;
@@ -282,6 +432,53 @@ export const WsJ5RemoveAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.re
   success: J5AgentPersonaRpcSchemas.removeAgentPersona.output,
   error: catalogErrors,
 });
+export const WsJ5RestoreSourceAgentPersonaRpc = Rpc.make(
+  J5_AGENT_PERSONA_WS_METHODS.restoreSourceAgentPersona,
+  {
+    payload: J5AgentPersonaRpcSchemas.restoreSourceAgentPersona.input,
+    success: J5AgentPersonaRpcSchemas.restoreSourceAgentPersona.output,
+    error: catalogErrors,
+  },
+);
+
+export const WsJ5CreateAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.createAgentPersona, {
+  payload: J5AgentPersonaRpcSchemas.createAgentPersona.input,
+  success: J5AgentPersonaRpcSchemas.createAgentPersona.output,
+  error: catalogErrors,
+});
+
+export const WsJ5ReadAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.readAgentPersona, {
+  payload: J5AgentPersonaRpcSchemas.readAgentPersona.input,
+  success: J5AgentPersonaRpcSchemas.readAgentPersona.output,
+  error: catalogErrors,
+});
+
+export const WsJ5GetAgentPersonaUsageRpc = Rpc.make(
+  J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaUsage,
+  {
+    payload: J5AgentPersonaRpcSchemas.getAgentPersonaUsage.input,
+    success: J5AgentPersonaRpcSchemas.getAgentPersonaUsage.output,
+    error: catalogErrors,
+  },
+);
+
+export const WsJ5GetAgentPersonaLibrarySourcesRpc = Rpc.make(
+  J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaLibrarySources,
+  {
+    payload: J5AgentPersonaRpcSchemas.getAgentPersonaLibrarySources.input,
+    success: J5AgentPersonaRpcSchemas.getAgentPersonaLibrarySources.output,
+    error: catalogErrors,
+  },
+);
+
+export const WsJ5SetAgentPersonaLibraryFoldersRpc = Rpc.make(
+  J5_AGENT_PERSONA_WS_METHODS.setAgentPersonaLibraryFolders,
+  {
+    payload: J5AgentPersonaRpcSchemas.setAgentPersonaLibraryFolders.input,
+    success: J5AgentPersonaRpcSchemas.setAgentPersonaLibraryFolders.output,
+    error: catalogErrors,
+  },
+);
 
 /** Merged into `WsRpcGroup` by one appended call; no other upstream registration exists. */
 export const J5AgentPersonaRpcGroup = RpcGroup.make(
@@ -292,4 +489,10 @@ export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5RemoveImportedAgentPersonaRpc,
   WsJ5RemoveSourceAgentPersonaRpc,
   WsJ5RemoveAgentPersonaRpc,
+  WsJ5RestoreSourceAgentPersonaRpc,
+  WsJ5CreateAgentPersonaRpc,
+  WsJ5ReadAgentPersonaRpc,
+  WsJ5GetAgentPersonaUsageRpc,
+  WsJ5GetAgentPersonaLibrarySourcesRpc,
+  WsJ5SetAgentPersonaLibraryFoldersRpc,
 );
