@@ -15,7 +15,7 @@ A **Squadron** is the user-created grouping of agents, their work — artifacts 
 
 A Squadron is **a grouping, never a boundary**. It organizes; it never isolates. It carries no visibility or permission semantics: any agent can message any participant in any Squadron, people are global rather than per-Squadron, the Fleet page reads across Squadrons, and the filesystem is readable regardless of Squadron.
 
-Every agent has exactly one **Squadron home**, recorded by the **Registrar** when the agent is created and never changed afterward. A user-created agent gets the Squadron the user chose; a Peer Agent inherits its spawner's. There is no joining, leaving, or moving between Squadrons; the placement tree of a Squadron lives entirely inside it.
+Every agent has exactly one **Squadron home**, recorded by the **Registrar** when the agent is created and never changed afterward. A user-created agent gets the Squadron the user chose; a Peer Agent inherits its spawner's. There is no joining, leaving, or moving between Squadrons; the placement tree of a Squadron lives entirely inside it. The one exception is a thread that was created with no home at all: it may establish its original home once, in a Squadron it chooses explicitly, and from then on the rule applies to it like any other agent.
 
 Only a person creates a Squadron. Agents never do, and the platform never creates one automatically — an unnamed default container is the junk drawer that defeats the concept. Creating one is deliberately small: a name and one folder are required; a description and further folders can be added later. First run begins by creating the first Squadron, because agents need a home.
 
@@ -25,12 +25,12 @@ The Squadron is **the unit of user choice**. Every surface where a person choose
 
 Within a Squadron, agents are organized in a **placement tree**. An agent's **placement** is where it sits in that tree: under its spawner, unless a person moves it. Whoever briefs an agent commands it, so the tree shows who is running what. An agent's **provenance** is the recorded fact of how it came to exist — created by a person, spawned by a named agent, forked from another, or unrecorded — written once and never changed. Neither placement nor provenance restricts who may message whom; the tree carries decisions, never messages.
 
-End of life is archive; its details arrive with the container's growth.
+End of life is archive; its details arrive with the container's growth. What a Squadron never is: it never targets a folder on another environment, it never carries a boundary, and it never exists without a folder.
 
 ## Acceptance criteria
 
 1. A Squadron never restricts visibility or messaging: an agent in one Squadron can message any participant in any Squadron, and a message that crosses Squadrons is recorded in both Squadrons' ledgers.
-2. Every agent has exactly one Squadron home, recorded at creation and never changed: a user-created agent gets the Squadron the user chose, a Peer Agent gets its spawner's, and no tool or interface joins, leaves, or moves an agent between Squadrons.
+2. Every agent has exactly one Squadron home, recorded at creation and never changed: a user-created agent gets the Squadron the user chose, a Peer Agent gets its spawner's, and no tool or interface moves an agent between Squadrons or lets one leave.
 3. Only a person can create a Squadron; none is ever created automatically; first run cannot proceed to creating an agent until a Squadron exists.
 4. Creating a Squadron requires a name and at least one folder; a description and further folders can be added at creation or later.
 5. A Squadron targets one or more folders on one environment, and the same folder can be targeted by several Squadrons that remain distinct in every list and picker.
@@ -39,9 +39,10 @@ End of life is archive; its details arrive with the container's growth.
 8. The composer shows the Squadron the agent will be created in, in its heading and as a chip, taking its default from the sidebar's Squadron scope; it can be changed until send and not after.
 9. Agents never see a Squadron picker; a spawned Peer Agent inherits its spawner's Squadron.
 10. The placement tree lives entirely within one Squadron.
-11. Membership is recorded in the ledger as lifecycle events only — joined at creation, left at archive — and neither is agent-invocable.
+11. Membership is recorded in the ledger as lifecycle events only: joined at registration; archived and unarchived, which change visibility and never identity or home; deleted, which removes membership. No agent appends any of them except joined, through its own home join.
 12. An agent's placement equals its spawner at creation and changes only by a person's action; an agent is never placed outside its Squadron.
 13. An agent's provenance is recorded at creation and never changes.
+14. A thread created with no Squadron home may establish its original home once, in an explicitly chosen Squadron that references the thread's project; a thread that already has a home is refused, and the thread and its running work are untouched by joining.
 
 ## Scenarios
 
@@ -49,11 +50,8 @@ End of life is archive; its details arrive with the container's growth.
 - **First run.** A new install opens on "Create your first Squadron"; the user names it "Billing Migration" and picks the app repository; only then can an agent be created. (AC3, AC4)
 - **An agent spawns a helper.** A Peer Agent spawned by an agent in "Billing Migration" has Squadron home "Billing Migration", with no picker shown to the spawner. (AC2, AC9)
 - **A message crosses Squadrons.** An agent in "Billing Migration" asks an agent in "Support Rotation" a question; both Squadrons' ledgers carry the Exchange, and nothing about either Squadron blocked it. (AC1)
+- **A thread born without a home.** A thread created from the mobile app before it offered Squadrons has no home; its agent lists the Squadrons, sees that Billing Migration references its repository, and joins it; the conversation and its running turn continue unchanged, and a later attempt to join Website Redesign is refused. (AC11, AC14)
 - **Picking where to work.** Starting a new task from the command palette offers Squadrons; the user picks one and the composer shows it, changeable until send. (AC7, AC8)
-
-## Scope
-
-The current build ([dogfood v0](../../plans/dogfood-v0.md)) narrows this definition in three places: a Squadron has exactly one folder (AC5 narrowed, stored ready to become a list); "Browse elsewhere" may be absent (AC6 narrowed); and the surfaces converted to Squadron choice are the new-thread flow and the command palette first, with the remaining pickers converted by inventory (AC7 in progress). Later: multi-folder targeting, Squadron archive, colors and avatars, migration of pre-Squadron projects. Never: cross-machine targeting; anything boundary-shaped; a Squadron with no folder.
 
 ## History
 
@@ -62,4 +60,6 @@ The current build ([dogfood v0](../../plans/dogfood-v0.md)) narrows this definit
 - 2026-08-29 — sidebar scope replaces Squadron grouping in the sidebar; former SB3 ([record](../../worklog/2026-08-29-sidebar-roster-session.md)).
 - 2026-08-31 — the Squadron is the unit of user choice; former E7 ([record](../../worklog/2026-08-31-picker-and-self-messaging-rulings.md)).
 - 2026-09-07 — placement and provenance moved here from the A2A definition (former D10 and R21): they are organization, not communication.
+- 2026-09-13 — the Scope section moved out: the build's narrowings live in the dogfood v0 plan, and the nevers are stated in the Definition.
+- 2026-09-12 — a thread born without a home may establish its original home once, AC14 (issue #129, PR #131); archive became reversible and deletion a separate act, so the lifecycle events in AC11 are joined, archived, unarchived and deleted (PR #132).
 - 2026-09-05 — rewritten into the definition shape. Two changes of substance: a Squadron targets one or more folders, so a folder is required at creation (the name-only Squadron is no longer planned — it would complicate upstream integration) and the folder-required v0 override becomes end-state truth; messages to people are no longer listed as Squadron contents (they belong to the inbox, which is person-scoped, not Squadron-scoped). Former identifiers: E1 → AC1; E2 → AC2; E3 → Definition; E4 → AC3; E5 → AC10; E6 → Definition; E7 → AC7; SC1 → AC5, AC6; SC2 → AC3, AC4; SC3 → AC8, AC9; SC4 → Scope; the A2 `join_epic` consequences → AC2, AC11.

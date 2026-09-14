@@ -44,11 +44,15 @@ An agent learns what it can do from its tools, and it reads a tool's description
 
 ### `list_participants`
 
-**Description:** "Your address book: the participants around you — agents and the human — with the display name to recognize them by, the participant_id to address them with, and what each accepts (messages, exchanges, urgency). When you're told to message someone by name or role, resolve them here first. Your own row is marked self=true; it cannot receive messages or open exchanges from you — use schedule_task if you need a future trigger for yourself. Native threads that never received a Squadron home do not appear here and cannot be messaged. The roster changes — after you spawn an agent, or when a participant retires, call this again instead of reusing a stale listing."
+**Description:** "Your address book: the participants around you — agents and the human — with the display name to recognize them by, the participant_id to address them with, and what each accepts (messages, exchanges, urgency). When you're told to message someone by name or role, resolve them here first. Your own row is marked self=true; it cannot receive messages or open exchanges from you — use schedule_task if you need a future trigger for yourself. Native threads that never received a Squadron home do not appear here and cannot be messaged. Archived agents are hidden by default; set include_archived=true to see them with archived=true. They cannot receive messages or open Exchanges. The roster changes — after you spawn, archive, unarchive, or delete an agent, call this again instead of reusing a stale listing."
 
-No inputs. Read-only; no events.
+| Input              | Type    | Required | Meaning                                                        |
+| ------------------ | ------- | -------- | -------------------------------------------------------------- |
+| `include_archived` | boolean | no       | Also list archived agents, each marked `archived`; default off |
 
-**Result rows:** `display_name` (the agent's thread title, or the Role name once Roles exist), `squadron_id`, `participant_id`, the participant kind, `self`, `can_receive_message`, `can_open_exchange`, `accepts_urgency`, plus `provenance` (spawned by whom, forked from what, unrecorded, or not applicable for a person) and `placement_parent_id`. A person's row reports that it cannot receive a plain message and can be asked. Provenance and placement are carried for callers and the UI; they are not part of the description's pitch.
+Read-only; no events.
+
+**Result rows:** `display_name` (the agent's thread title, or the Role name once Roles exist), `squadron_id`, `participant_id`, the participant kind, `self`, `archived`, `can_receive_message`, `can_open_exchange`, `accepts_urgency`, plus `provenance` (spawned by whom, forked from what, unrecorded, or not applicable for a person) and `placement_parent_id`. A person's row reports that it cannot receive a plain message and can be asked. An archived agent's row, when requested, reports that it can receive nothing. Provenance and placement are carried for callers and the UI; they are not part of the description's pitch.
 
 ### `spawn_agent`
 
@@ -87,7 +91,7 @@ No inputs. Read-only; no events.
 
 ### `archive_agent`
 
-**Description:** "Retire one Peer Agent for good. A clean archive — no open exchanges, no running turn — completes immediately. Otherwise the call refuses and lists exactly what archiving ends — the asks that will close, the turn that will stop — along with a confirmation_token; call again with that token to proceed. The archived agent leaves the active roster; its ledger and conversation stay readable forever. Requires your current squadron_id. Reuse client_request_id to retry safely."
+**Description:** "Archive one Peer Agent reversibly. Unarchive restores the same identity, but does not reopen Exchanges or replay cancelled messages. A clean archive — no open exchanges, no running turn — completes immediately. Otherwise the call refuses and lists exactly what archiving ends — the asks that will close, the turn that will stop — along with a confirmation_token; call again with that token to proceed. The archived agent leaves the active roster; its ledger and conversation stay readable forever. Requires your current squadron_id. Reuse client_request_id to retry safely."
 
 | Input                | Type          | Required                       |
 | -------------------- | ------------- | ------------------------------ |
@@ -98,7 +102,9 @@ No inputs. Read-only; no events.
 
 **Result:** exactly one of `archived` or `already_archived` (no side effect). A consequential target yields a refusal — an error carrying the list of consequences and a `confirmation_token` — never a partial outcome.
 
-**Rules.** The quiet path archives immediately when nothing would be cut short. The loud path is a refusal listing the concrete consequences — the open Exchanges that will close as dropped, the running turn that will be interrupted — plus a token bound to that list: it proves the caller saw the consequences, so a preemptive flag on the first call cannot short-circuit the confirmation. If the target's state changed since the refusal, the stale token is rejected and a fresh refusal lists the current facts. A malformed or unknown token fails closed without disclosing the target's facts, and a token for one target never authorizes another. A partial failure across stores is forward-only: committed archive and ledger facts are re-read on retry, and `already_archived` requires both the participant's departure and completion of every terminal notice. The caller cannot archive itself.
+**Rules.** The quiet path archives immediately when nothing would be cut short. The loud path is a refusal listing the concrete consequences — the open Exchanges that will close as dropped, the running turn that will be interrupted — plus a token bound to that list: it proves the caller saw the consequences, so a preemptive flag on the first call cannot short-circuit the confirmation. If the target's state changed since the refusal, the stale token is rejected and a fresh refusal lists the current facts. A malformed or unknown token fails closed without disclosing the target's facts, and a token for one target never authorizes another. A partial failure across stores is forward-only: committed archive and ledger facts are re-read on retry, and `already_archived` requires both the archive fact and completion of every terminal notice. The caller cannot archive itself.
+
+Archiving is reversible and deletion is not. A person can unarchive an archived agent, which restores the same participant id, Squadron home, placement and provenance and makes it addressable again; the Exchanges that archiving closed stay closed, and deliveries that archiving cancelled are not replayed. Deleting an agent is a separate, permanent act that only a person performs; no agent verb deletes.
 
 **Errors**, each naming state and next command: not the caller's Squadron; unknown participant; consequential without a token (the refusal); stale or invalid token; self-target.
 
@@ -118,6 +124,31 @@ No inputs. Read-only; no events.
 **Errors**, each naming state and next command: the caller is not the Exchange's sender; the Exchange is already closed; unknown Exchange.
 
 **Events:** an Exchange-closure event distinguishable from a reply's closure, so the inbox, the Exchange projections and the communication graph render the withdrawal honestly.
+
+### `list_squadrons`
+
+**Description:** "The Squadron directory for this environment: every Squadron's squadron_id, name, and the project ids it references, plus your own thread's project id so you can see which Squadron can home you. Use it to obtain the exact squadron_id before join_squadron. Read-only."
+
+No inputs. Read-only; no events. Callable by a thread that has no Squadron home — the one listing verb that is, because it exists to bootstrap `join_squadron`.
+
+**Result:** `caller_project_id` and `squadrons[]`, each with `squadron_id`, `name` and `project_ids`. The verb states facts and never picks: the caller compares the project ids against its own.
+
+### `join_squadron`
+
+**Description:** "Join a Squadron when your thread has no Squadron home yet. Pass the exact squadron_id, taken from list_squadrons; that Squadron must reference your thread's project. Your thread, conversation, worktree, and running work stay exactly as they are. Calling it again for the Squadron you already belong to returns your existing registration. Reuse client_request_id to retry safely. Warning: you cannot switch Squadrons once you're assigned, be sure you're joining the right one."
+
+| Input               | Type       | Required | Meaning                                                               |
+| ------------------- | ---------- | -------- | --------------------------------------------------------------------- |
+| `squadron_id`       | SquadronId | yes      | An existing Squadron, chosen explicitly; never inferred from a folder |
+| `client_request_id` | string     | no       | Reuse to retry safely                                                 |
+
+**Result:** `squadron_id`, `participant_id`, `thread_id`, and the placement: at the Squadron root, with provenance recorded as unrecorded, because nothing spawned or forked a native thread.
+
+**Rules.** The verb acts on the calling thread only and exists for exactly one case: a native thread that was created with no Squadron home ([Squadron](../features/squadron.md)). It establishes an original home; it is never a move, a leave, or a revival. The thread, its provider session, its worktree and any running turn are untouched — no new thread, no injected task, no interrupt. A thread already homed in the requested Squadron gets its existing registration back. Registration and placement commit in one transaction, and a retry with the same `client_request_id`, or concurrent retries with different ids, commit exactly one joined event.
+
+**Errors**, each naming state and next command: the thread is archived or deleted; the thread already has a home in a different Squadron; the thread's identity was retired; the Squadron does not reference the thread's project; unknown Squadron.
+
+**Events:** participant joined, placement created.
 
 ### Kept upstream tools
 
@@ -139,6 +170,10 @@ No inputs. Read-only; no events.
 10. `archive_agent` on a target with open Exchanges or a running turn refuses with the list of consequences and a token; the same call with that token archives; a stale token is refused with fresh facts.
 11. `clear_own_ask` closes only an Exchange the caller opened and records the closure as sender-cleared.
 12. Every error from every verb names the actual state and the next command.
+13. `list_participants` omits archived agents unless `include_archived` is set, and then marks each one `archived` and unable to receive a message or an ask.
+14. Unarchiving an archived agent restores the same participant id, Squadron home, placement and provenance and makes it addressable again; the Exchanges archiving closed stay closed and no cancelled delivery is replayed.
+15. `list_squadrons` can be called by a thread with no Squadron home and returns every Squadron with its project ids and the caller's own project id.
+16. `join_squadron` establishes a home only for a thread that has none, only in a Squadron that references the thread's project, leaves the thread and its running work untouched, returns the existing registration when the thread is already homed there, and refuses a thread homed elsewhere, an archived or deleted thread, and a retired identity.
 
 ## History
 
@@ -149,4 +184,6 @@ No inputs. Read-only; no events.
 - 2026-09-08 — a person receives asks only; the reply form toward a person is retired with the person-originated ask.
 - 2026-09-05 — several open asks per person, with explicit follow-ups through `regarding`, replacing the one-ask-per-person refusal of 2026-09-02 (issue #111).
 - 2026-09-05 — a committed stop wins over restart continuation (upstream integration, PR #112).
+- 2026-09-12 — archiving is reversible: unarchive restores the same identity without reopening Exchanges; deletion is a separate permanent act for people only; the address book hides archived agents unless asked (PR #132).
+- 2026-09-12 — `list_squadrons` and `join_squadron` added for the one case of a native thread with no home (issue #129, PR #131).
 - 2026-09-07 — rewritten from a stack of dated contract revisions into current-state contracts; every verb's build state true as of this date (all six verbs shipped; `regarding` and the person follow-up rule are issue #111).

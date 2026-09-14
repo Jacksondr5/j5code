@@ -37,13 +37,22 @@ What this never does: no replicated state, no multi-master, no Squadron migratio
 5. Nothing that is server-local by design — worktrees, provider credentials, settings, schedules, cost meters — is synchronized between servers.
 6. Server-to-server Exchange delivery, when built, goes through a pairwise peer registry, and the receiving server records its own received row.
 
+### Merged surfaces
+
+7. Environment labels appear on merged items and choices only when the results span more than one environment; a single-environment client shows none.
+8. A connection that can only read shows that environment's Squadrons and asks and refuses to create, launch or answer there, with the control saying why.
+9. A count over merged environments is marked incomplete when any environment could not be refreshed, and shows no number when none could be.
+10. An environment whose server lacks the fleet features is reported as unsupported, never as empty.
+
 ## Scenarios
 
 - **Two servers, one inbox.** The user's client connects to the work server and the home server. An ask from an agent in Billing Migration (work) and one from Support Rotation (home) appear in one inbox, each tagged with its environment; answering each reaches the right server. (AC2, AC3)
 - **A server goes dark.** The home server is asleep; its rows stay on the Fleet page with "as of 40m ago" and never vanish. (AC4)
+- **One server is read-only.** The user's connection to the home server has no operate scope: its Squadrons and asks appear in the merged lists, and the answer box for a home-server ask explains that this connection cannot reply. (AC8)
 - **A Mac-only job.** An agent that must run on a Mac gets its own Squadron homed on the Mac server; it is asked for results by a Squadron elsewhere through a cross-server Exchange, once peering exists. (AC1, AC6)
 
 ## History
 
 - 2026-08-19 — the position settled with Jackson: authority never replicates; former X1–X5 (this file's earlier form was the register). Grounded in the remote-hosting research and the A2A design.
+- 2026-09-12 — the Squadron picker, the sidebar's Squadron scope and the inbox merge every connected environment on web and desktop, with labels only when needed, read-only connections, incomplete counts and unsupported servers stated (PR #125, issue #105); AC7–AC10 added.
 - 2026-09-10 — rewritten into the definition shape. Former identifiers: X1 → AC1; X2 → AC2; X3 → the sequencing sentence in the first capability row; X4 → the peer-registry paragraph, AC6; X5 → the client-pulled backup paragraph. Personal deployment details (which server is where) removed from the definition.

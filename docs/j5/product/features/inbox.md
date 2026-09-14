@@ -13,7 +13,7 @@ The inbox is the one place a person looks to find everything that is waiting on 
 
 ## Definition
 
-The **inbox** is a person's queue of open asks addressed to them. It is **person-scoped, not Squadron-scoped**: a person has one inbox for the whole server, every item wears the Squadron it came from, and no Squadron selection elsewhere in the app hides an item.
+The **inbox** is a person's queue of open asks addressed to them. It is **person-scoped, not Squadron-scoped**: a person has one inbox across every environment the client connects to, every item wears the Squadron it came from and, when more than one environment is connected, its environment, and no Squadron selection elsewhere in the app hides an item.
 
 The inbox is **pure**. It holds only asks that agents deliberately sent to the person — nothing inferred, no automatically promoted stalls, no plain messages, no platform alerts. Every item blocks a sender, so the count on the bell means exactly "things waiting on me." The purity has a sender-side mirror: an agent can send a person only an ask; a plain message to a person is refused, because if the person must see something then seeing it is the obligation. The person, in turn, never opens an ask through the platform — their channel to any agent is that agent's thread — and their only act on the ledger is the answer that closes an Exchange.
 
@@ -33,7 +33,7 @@ The inbox is **not** a backlog (a non-blocking note an agent wants to keep is a 
 
 ### Contents
 
-1. The inbox lists every open ask addressed to the person from every Squadron on the server, and nothing else: no plain messages, no inferred items, no promoted stalls, no platform alerts.
+1. The inbox lists every open ask addressed to the person from every Squadron on every connected environment, and nothing else: no plain messages, no inferred items, no promoted stalls, no platform alerts.
 2. A plain message from an agent to a person is refused at the tool; the person's row in the address book says it cannot receive one.
 3. Several open asks from the same agent to the same person appear as separate items; a follow-up that references an open ask by its Exchange id appears beneath that ask's original text in the same item.
 4. The bell's count equals the number of open items.
@@ -53,7 +53,7 @@ The inbox is **not** a backlog (a non-blocking note an agent wants to keep is a 
 
 ### Placement
 
-12. The inbox is not filtered by the sidebar's Squadron scope; each item names its Squadron.
+12. The inbox is not filtered by the sidebar's Squadron scope; each item names its Squadron, and its environment when more than one is connected; an answer reaches the environment the ask came from.
 13. The bell with its count is present in the rail on every page and opens the inbox page.
 
 ## Scenarios
@@ -69,4 +69,5 @@ The inbox is **not** a backlog (a non-blocking note an agent wants to keep is a 
 - 2026-08-31 — the bell moves to the rail header (Jackson's review of the inbox build).
 - 2026-09-02 — a person receives only asks and replies ([record](../../worklog/2026-09-02-human-addressed-sends-ruling.md)).
 - 2026-09-05 — several open asks per agent and person, with follow-ups shown beneath the original (issue #111); the shelf is named "Replied", the one word for a closed Exchange on every surface (glossary).
+- 2026-09-12 — the inbox merges every connected environment (PR #125; the merge rules are the cross-device definition's).
 - 2026-09-08 — rewritten into the definition shape. Former identifiers: IB1 → Answering, AC8–AC9; IB2 → AC13; IB3–IB4 → AC5–AC6; IB5 → AC10; IB6 → AC11; IB7 → AC12. The "clear-own-ask has no build ticket" note is gone: the verb shipped. The deferred items that lived here (a platform-alerts lane, the asker's current state on items, smaller inbox forms) are backlog candidates, not part of this definition.

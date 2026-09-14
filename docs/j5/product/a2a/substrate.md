@@ -36,7 +36,7 @@ Delivery to a busy agent queues behind the active turn; steering is the person's
 
 **Upstream owns existence and lifecycle state; J5 tables overlay only organization facts** — Squadron home, placement, provenance, Exchange obligations. J5 writes flow through upstream's public command seams, never into its projections; J5 reads either join upstream state or say explicitly that they may be stale.
 
-**Participanthood is granted only by J5's registration surfaces** — the spawn verb, the composer's Squadron chip, or a controlled seed — and never inferred from a thread's existence or addressability. The case that forces this: Codex-native Subagents get real shadow threads holding live, resumable provider references; they are thread-having and send-capable, and they are still Subagents. Any sweep that absorbs threads into the roster excludes provider-created and Subagent-lineage threads.
+**Participanthood is granted only by J5's registration surfaces** — the spawn verb, the composer's Squadron chip, a controlled seed, or the home-join verb for a native thread that never received a home — and never inferred from a thread's existence or addressability. The case that forces this: Codex-native Subagents get real shadow threads holding live, resumable provider references; they are thread-having and send-capable, and they are still Subagents. Any sweep that absorbs threads into the roster excludes provider-created and Subagent-lineage threads.
 
 ### The agent tool surface
 
@@ -51,7 +51,7 @@ J5 replaces upstream's orchestrator toolkit registration with its own subset: a 
 
 Upstream's orchestration prompt text steered agents toward delegation and away from thread creation; J5 carries a small tracked edit to it, recorded in the fork inventory.
 
-The J5 verbs themselves — `send_message`, `list_participants`, `spawn_agent`, `stop_agent`, `archive_agent`, `clear_own_ask` — are defined in [agent-tools](agent-tools.md).
+The J5 verbs themselves — `send_message`, `list_participants`, `spawn_agent`, `stop_agent`, `archive_agent`, `clear_own_ask`, and the home-repair pair `list_squadrons` and `join_squadron` — are defined in [agent-tools](agent-tools.md). The pair is the only part of the surface an unregistered native thread can use, and it establishes an original home only, never a move.
 
 ### The legacy cohort
 
@@ -62,7 +62,7 @@ Agents spawned through upstream's delegation path before the spawn verb existed 
 1. No J5 code writes into an upstream projection; every J5 mutation goes through an upstream public command seam or a J5-owned table.
 2. The agent surface exposes exactly the J5 verbs and the kept upstream tools listed above; every other upstream tool is absent by construction, and a new upstream tool arriving in a rebase is absent until admitted through a contract change.
 3. An agent-to-agent message sent through the platform always has a ledger row, an envelope, and a delivery outcome; no raw thread-send is reachable from the agent surface.
-4. A thread becomes a participant only through the spawn verb, the composer's Squadron chip, or a controlled seed; a provider-created thread or a Subagent-lineage thread never becomes one by any sweep.
+4. A thread becomes a participant only through the spawn verb, the composer's Squadron chip, a controlled seed, or its own explicit home join when it has no home; a provider-created thread or a Subagent-lineage thread never becomes one by any sweep.
 5. A Peer Agent created through the spawn verb has root lineage; nothing about it is derived from upstream's lineage record.
 
 ## History
@@ -71,4 +71,5 @@ Agents spawned through upstream's delegation path before the spawn verb existed 
 - 2026-08-29 — the substrate line drawn: the four dispositions, the ownership rule, the fail-closed tool subset ([record](../../worklog/2026-08-29-substrate-session.md)).
 - 2026-08-31 — `create_threads` and `t3_thread_start` omitted; `clear_own_ask` built.
 - 2026-09-03 — delivery queues behind an active turn; steering is the person's act ([record](../../worklog/2026-09-03-queue-vs-steer-ruling.md)); 2026-09-04 — the Codex Astra exception ([record](../../worklog/2026-09-04-astra-peer-delivery.md)).
+- 2026-09-12 — `list_squadrons` and `join_squadron` admitted to the surface (issue #129, PR #131).
 - 2026-09-07 — rewritten into the definition shape; stale rows (the open `create_threads` row, "needed-but-unbuilt" `clear_own_ask`, the pending prompt-text edit, Squadron creation as "nothing exists") corrected to the current state.
