@@ -18,6 +18,7 @@ import {
   agentPersonaOriginLabel,
   agentPersonaUsageById,
   formatAgentPersonaDuration,
+  presentAgentHandoff,
   presentAgentPersonaUsage,
   draftAgentAssignmentPreview,
   agentPersonaDuplicateDraft,
@@ -736,5 +737,28 @@ describe("blocked reasons and folder status", () => {
       "Default · not created; bundled examples in use",
     );
     expect(agentPersonaFolderStatusLabel(folder, true)).toBe("Missing");
+  });
+});
+
+describe("handoff artifacts", () => {
+  it("presents written, pending, and missing handoffs with the logical artifact path", () => {
+    const base = {
+      threadId: "8f3a2c1d-0000-4000-8000-000000000000",
+      projectId: "project",
+      personaId: "critic",
+      artifact: "ReviewHandoff",
+      path: "handoffs/critic/ReviewHandoff-8f3a2c1d.md",
+      runId: null,
+      checkedAt: "2026-09-14T00:00:00.000Z",
+    } as const;
+    const written = presentAgentHandoff({ ...base, status: "written" } as never);
+    expect(written.tone).toBe("success");
+    expect(written.logicalPath).toBe("artifacts/handoffs/critic/ReviewHandoff-8f3a2c1d.md");
+    expect(presentAgentHandoff({ ...base, status: "nudged" } as never).label).toBe(
+      "ReviewHandoff pending",
+    );
+    const missing = presentAgentHandoff({ ...base, status: "missing" } as never);
+    expect(missing.tone).toBe("error");
+    expect(missing.detail).toContain("incomplete");
   });
 });

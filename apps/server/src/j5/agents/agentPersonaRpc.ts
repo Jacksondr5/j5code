@@ -14,6 +14,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { stringify as toYaml } from "yaml";
 
 import { definitionDigest, makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
+import { makeAgentHandoffStore } from "./agentHandoffStore.ts";
 import { agentPersonaFolderGitStatus } from "./agentPersonaLibraryGit.ts";
 import { buildAgentPersonaCatalog } from "./agentPersonaRouting.ts";
 import { agentPersonaUsage } from "./agentPersonaUsage.ts";
@@ -36,6 +37,7 @@ export const AGENT_PERSONA_RPC_SCOPES = {
   [METHODS.getAgentPersonaLibrarySources]: AuthOrchestrationReadScope,
   [METHODS.setAgentPersonaLibraryFolders]: AuthOrchestrationOperateScope,
   [METHODS.setAgentPersonaEnabled]: AuthOrchestrationOperateScope,
+  [METHODS.getAgentHandoffs]: AuthOrchestrationReadScope,
 } as const;
 
 /** Matches the per-session `observeRpcEffect` closure in ws.ts (instrumentation plus scope check). */
@@ -63,6 +65,9 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
     // Usage reads the projections through the session's SqlClient, captured once here.
     const sql = yield* SqlClient.SqlClient;
     const usage = () => agentPersonaUsage().pipe(Effect.provideService(SqlClient.SqlClient, sql));
+    const handoffs = yield* makeAgentHandoffStore.pipe(
+      Effect.provideService(SqlClient.SqlClient, sql),
+    );
     return {
       [METHODS.getAgentPersonaCatalog]: (_input: Input<"getAgentPersonaCatalog">) =>
         observe(
@@ -211,6 +216,15 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
             );
             return { ...current, folders };
           }),
+          TRACE,
+        ),
+      [METHODS.getAgentHandoffs]: (input: Input<"getAgentHandoffs">) =>
+        observe(
+          METHODS.getAgentHandoffs,
+          handoffs.list({ threadIds: input.threadIds }).pipe(
+            Effect.map((list) => ({ handoffs: list })),
+            Effect.mapError(catalogError),
+          ),
           TRACE,
         ),
       [METHODS.setAgentPersonaEnabled]: (input: Input<"setAgentPersonaEnabled">) =>

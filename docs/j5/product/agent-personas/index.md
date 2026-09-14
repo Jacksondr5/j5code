@@ -78,7 +78,7 @@ No model spelling is silently rewritten. Persona threads keep their selected pro
 
 ## Artifact contracts
 
-The following names describe minimum handoff contents. They are not workflow engines or evidence that runtime output validation exists. Only `inputArtifacts` and `outputArtifact` are structured references; `acceptedInput`, ordinary prompts, evidence, and prose counterpart references are not parsed as artifacts.
+Handoffs are files in the project's shared artifacts (see the Artifacts feature), not transcript prose. A definition's `outputArtifact` is written by the agent with `write_artifact` to `handoffs/<agent id>/<Artifact>-<task>.md`; the persona instructions name that exact path and the checklist below, and declared `inputArtifacts` are read with `list_artifacts` and `read_artifact` from the same folder. At the end of each completed run the server checks for the file and records the task's handoff as written, or asks once and then records it missing; the status shows on the task's persona control and its Agents-panel row, and the chip opens the artifact. The lists below are the minimum contents the instructions demand. They are prompt templates: the server verifies that the file exists, not what it says. Only `inputArtifacts` and `outputArtifact` are structured references; `acceptedInput`, ordinary prompts, evidence, and prose counterpart references are not parsed as artifacts.
 
 ### `ContextBrief`
 
@@ -205,4 +205,4 @@ Activation continues through the existing orchestrator launch contract. No direc
 
 Focused verification covers imported ids and custom artifacts, malformed and missing sources, duplicates, route eligibility, unsupported policies, snapshot integrity, source edits/removal, launch receipts, compatibility with old assignments, and shared client presentation. Server, contracts, and affected client typechecks accompany the focused tests. Browser and simulator verification require an explicit request.
 
-Follow-up work: in-app git commit/push/pull (status nudges and open-in-editor ship; write operations are deliberately out of scope), skill and model allowlists beyond this slice, posture visibility, richer artifact schemas and output validation, and supported diagnostic/publication operations. None is marked complete by this contract.
+Follow-up work: in-app git commit/push/pull (status nudges and open-in-editor ship; write operations are deliberately out of scope), skill and model allowlists beyond this slice, posture visibility, validation of handoff contents beyond existence, and supported diagnostic/publication operations. None is marked complete by this contract.

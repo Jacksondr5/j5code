@@ -6,6 +6,8 @@ import { ArtifactsPage } from "../j5/artifacts/ArtifactsPage";
 export interface ArtifactsSearch {
   readonly environmentId?: EnvironmentId;
   readonly projectId?: ProjectId;
+  /** Artifact path to open, relative to the project's artifacts directory. */
+  readonly path?: string;
 }
 
 export const Route = createFileRoute("/artifacts")({
@@ -16,6 +18,7 @@ export const Route = createFileRoute("/artifacts")({
     ...(typeof raw.projectId === "string" && raw.projectId
       ? { projectId: raw.projectId as ProjectId }
       : {}),
+    ...(typeof raw.path === "string" && raw.path ? { path: raw.path } : {}),
   }),
   component: ArtifactsRouteView,
 });
@@ -28,6 +31,7 @@ function ArtifactsRouteView() {
         ? {}
         : { initialEnvironmentId: search.environmentId })}
       {...(search.projectId === undefined ? {} : { initialProjectId: search.projectId })}
+      {...(search.path === undefined ? {} : { initialPath: search.path })}
     />
   );
 }

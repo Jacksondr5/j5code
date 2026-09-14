@@ -797,6 +797,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                         <AgentPersonaAssignmentControls
                           assignment={agentPersonaAssignment}
                           environmentId={props.environmentId}
+                          threadId={props.selectedThread.id}
                         />
                       ) : (
                         <ComposerInlineControl

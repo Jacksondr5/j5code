@@ -1,9 +1,14 @@
 import {
   AGENT_PERSONA_DRIFT_MESSAGE,
   agentPersonaDrift,
+  presentAgentHandoff,
   presentAgentPersonaAssignment,
 } from "@t3tools/client-runtime/j5/agent-personas";
-import type { EnvironmentId, OrchestrationV2AgentPersonaAssignment } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  OrchestrationV2AgentPersonaAssignment,
+  ThreadId,
+} from "@t3tools/contracts";
 
 import { ComposerInlineControl } from "../../components/ComposerToolbar";
 import { useEnvironmentQuery } from "../../state/query";
@@ -16,8 +21,20 @@ export function AgentPersonaAssignmentControls(props: {
   readonly environmentId?: EnvironmentId;
   /** Present only for an unsent draft, where the choice can still be undone. */
   readonly onClear?: () => void;
+  /** The server thread this control belongs to; enables the handoff artifact status. */
+  readonly threadId?: ThreadId;
 }) {
   const presentation = presentAgentPersonaAssignment(props.assignment);
+  const handoffs = useEnvironmentQuery(
+    props.environmentId === undefined || props.threadId === undefined
+      ? null
+      : agentPersonaEnvironment.handoffs({
+          environmentId: props.environmentId,
+          input: { threadIds: [props.threadId] },
+        }),
+  );
+  const handoff = handoffs.data?.handoffs.find((entry) => entry.threadId === props.threadId);
+  const handoffPresentation = handoff === undefined ? null : presentAgentHandoff(handoff);
   const catalog = useEnvironmentQuery(
     props.environmentId === undefined
       ? null
@@ -48,6 +65,16 @@ export function AgentPersonaAssignmentControls(props: {
           label=""
           maxWidth={44}
           onPress={props.onClear}
+        />
+      ) : null}
+      {handoffPresentation ? (
+        <ComposerInlineControl
+          accessibilityLabel={`Handoff artifact: ${handoffPresentation.label}`}
+          accessibilityHint={handoffPresentation.detail}
+          icon={handoffPresentation.tone === "success" ? "doc.text" : "exclamationmark.triangle"}
+          label={handoffPresentation.label}
+          maxWidth={200}
+          static
         />
       ) : null}
       {drift === "changed" ? (

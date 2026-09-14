@@ -12,10 +12,12 @@ import {
   providerCanEnforceAgentPersonaAuthority,
   translateAgentPersonaProviderPolicy,
 } from "./agentPersonaProviderPolicy.ts";
+import { agentPersonaArtifactInstructions } from "./agentPersonaArtifacts.ts";
 
 /** Persona instructions express behavior; the translated sandbox supplies the actual runtime boundary. */
 export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime")(function* (
-  thread: Pick<OrchestrationV2AppThread, "agentPersonaAssignment" | "runtimeMode">,
+  thread: Pick<OrchestrationV2AppThread, "agentPersonaAssignment" | "runtimeMode"> &
+    Partial<Pick<OrchestrationV2AppThread, "id">>,
   library: ReturnType<typeof createAgentPersonaLibrary>,
 ) {
   const assignment = thread.agentPersonaAssignment;
@@ -46,6 +48,10 @@ export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime"
         ? "Edit only to address the requested review findings."
         : ""
     }`;
+    // Declared handoffs bind to the shared artifacts system; the section names the exact path.
+    const artifactSection =
+      thread.id === undefined ? undefined : agentPersonaArtifactInstructions(definition, thread.id);
+    if (artifactSection !== undefined) instructions = `${instructions}\n\n${artifactSection}`;
   }
   return {
     ...translateAgentPersonaProviderPolicy(assignment.authorityPolicy, assignment.resolvedDriver),

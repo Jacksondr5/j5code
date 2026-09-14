@@ -3,7 +3,14 @@ import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 import { EnvironmentAuthorizationError } from "../auth.ts";
-import { NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from "../baseSchemas.ts";
+import {
+  NonNegativeInt,
+  PositiveInt,
+  ProjectId,
+  RunId,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "../baseSchemas.ts";
 import { ModelSelection } from "../modelSelection.ts";
 import { ProviderDriverKind } from "../providerInstance.ts";
 
@@ -318,6 +325,26 @@ export const AgentPersonaLibraryFoldersInput = Schema.Struct({
 });
 export type AgentPersonaLibraryFoldersInput = typeof AgentPersonaLibraryFoldersInput.Type;
 
+/**
+ * A saved agent's declared output artifact, tracked per task. The agent writes it to the
+ * project's shared artifacts through write_artifact; the server checks at run end, asks once
+ * when it is missing (`nudged`), and marks it `missing` if the follow-up ends without it.
+ */
+export const AgentHandoffStatus = Schema.Literals(["written", "nudged", "missing"]);
+export type AgentHandoffStatus = typeof AgentHandoffStatus.Type;
+export const AgentHandoff = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  personaId: AgentPersonaId,
+  artifact: TrimmedNonEmptyString,
+  /** Path relative to the project's artifacts directory, e.g. handoffs/critic/ReviewHandoff-8f3a2c1d.md. */
+  path: TrimmedNonEmptyString,
+  status: AgentHandoffStatus,
+  runId: Schema.NullOr(RunId),
+  checkedAt: Schema.String,
+});
+export type AgentHandoff = typeof AgentHandoff.Type;
+
 // ---------------------------------------------------------------------------
 // Library management RPCs. These ride the upstream WebSocket RPC transport via one
 // `WsRpcGroup.merge(...)` call so environment scoping, remote connections, and
@@ -339,6 +366,7 @@ export const J5_AGENT_PERSONA_WS_METHODS = {
   getAgentPersonaLibrarySources: "j5.agentPersonas.getLibrarySources",
   setAgentPersonaLibraryFolders: "j5.agentPersonas.setLibraryFolders",
   setAgentPersonaEnabled: "j5.agentPersonas.setEnabled",
+  getAgentHandoffs: "j5.agentPersonas.getHandoffs",
 } as const;
 
 export const J5AgentPersonaRpcSchemas = {
@@ -402,6 +430,12 @@ export const J5AgentPersonaRpcSchemas = {
   setAgentPersonaEnabled: {
     input: Schema.Struct({ personaId: AgentPersonaId, enabled: Schema.Boolean }),
     output: Schema.Void,
+  },
+  getAgentHandoffs: {
+    input: Schema.Struct({
+      threadIds: Schema.optional(Schema.Array(ThreadId).check(Schema.isMaxLength(200))),
+    }),
+    output: Schema.Struct({ handoffs: Schema.Array(AgentHandoff) }),
   },
 } as const;
 
@@ -521,6 +555,12 @@ export const WsJ5SetAgentPersonaEnabledRpc = Rpc.make(
   },
 );
 
+export const WsJ5GetAgentHandoffsRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.getAgentHandoffs, {
+  payload: J5AgentPersonaRpcSchemas.getAgentHandoffs.input,
+  success: J5AgentPersonaRpcSchemas.getAgentHandoffs.output,
+  error: catalogErrors,
+});
+
 /** Merged into `WsRpcGroup` by one appended call; no other upstream registration exists. */
 export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5GetAgentPersonaCatalogRpc,
@@ -537,4 +577,5 @@ export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5GetAgentPersonaLibrarySourcesRpc,
   WsJ5SetAgentPersonaLibraryFoldersRpc,
   WsJ5SetAgentPersonaEnabledRpc,
+  WsJ5GetAgentHandoffsRpc,
 );

@@ -55,6 +55,12 @@ The **Library sources** section below the agent list shows the folders the selec
 
 When a folder lives in a git checkout, the row notes uncommitted changes in that folder and how many commits the remote is ahead. T3 Code only reads git status; commit, push, and pull with your usual tools. On web and desktop an **open in editor** action opens the folder in your preferred editor when one is available on that environment.
 
+### Handoff artifacts
+
+A saved agent whose definition declares an output artifact (for example the bundled Critic's `ReviewHandoff`) writes it as a shared project artifact instead of leaving it in the transcript. The agent's instructions name the exact file, `handoffs/<agent>/<Artifact>-<task>.md` under the project's artifacts, and the required contents. When a run ends without that file, the agent is asked once to write it; if the follow-up also ends without it, the handoff is recorded as **missing** and the task should be treated as incomplete.
+
+The task's persona control (web, desktop, and mobile) and its row in the Agents right panel show the handoff status: the artifact name when written, **pending** after the reminder, or **missing**. On web and desktop the chip opens the file in the Artifacts page. Declared input artifacts are read the same way, so a Builder started after a Navigator finds the `PlanHandoff` under `handoffs/`.
+
 The persona library is separate from the task's Agents right panel, which shows runtime activity.
 
 For environment setup, see [Configure a persona library](../operations/persona-library.md).

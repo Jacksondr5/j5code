@@ -6,6 +6,7 @@ import {
   AGENT_PERSONA_IMPORT_MAX_FILES,
 } from "@t3tools/contracts";
 import type {
+  AgentHandoff,
   AgentPersonaAuthorityPolicy,
   AgentPersonaFolderGitStatus,
   AgentPersonaLibraryFolder,
@@ -509,4 +510,40 @@ export function draftAgentAssignmentPreview(
     resolvedDriver: persona.availability.resolvedDriver,
     resolvedModelSelection: persona.availability.resolvedModelSelection,
   };
+}
+
+export interface AgentHandoffPresentation {
+  readonly label: string;
+  readonly detail: string;
+  readonly tone: "success" | "warning" | "error";
+  /** The logical path agents and the Artifacts panel use. */
+  readonly logicalPath: string;
+}
+
+/** Status text for a saved-agent task's declared handoff artifact. */
+export function presentAgentHandoff(handoff: AgentHandoff): AgentHandoffPresentation {
+  const logicalPath = `artifacts/${handoff.path}`;
+  switch (handoff.status) {
+    case "written":
+      return {
+        label: handoff.artifact,
+        detail: `${handoff.artifact} written to ${logicalPath}`,
+        tone: "success",
+        logicalPath,
+      };
+    case "nudged":
+      return {
+        label: `${handoff.artifact} pending`,
+        detail: `The run ended without ${handoff.artifact}; the agent was asked once to write ${logicalPath}.`,
+        tone: "warning",
+        logicalPath,
+      };
+    case "missing":
+      return {
+        label: `${handoff.artifact} missing`,
+        detail: `The agent finished without writing ${logicalPath}. Treat the task as incomplete.`,
+        tone: "error",
+        logicalPath,
+      };
+  }
 }
