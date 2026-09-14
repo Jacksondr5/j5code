@@ -15,8 +15,11 @@ export function canonical(value: unknown): string {
     .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
     .join(",")}}`;
 }
-export const hash = (value: unknown): string =>
-  NodeCrypto.createHash("sha256").update(canonical(value)).digest("hex");
+export const serialize = (value: unknown): { readonly payload: string; readonly hash: string } => {
+  const payload = canonical(value);
+  return { payload, hash: NodeCrypto.createHash("sha256").update(payload).digest("hex") };
+};
+export const hash = (value: unknown): string => serialize(value).hash;
 
 export interface Task {
   readonly id: string;
@@ -65,6 +68,59 @@ export function phaseById(definition: Definition, id: string): Phase {
   if (!phase) throw new Error(`Unknown phase ${id}`);
   return phase;
 }
+
+export type RestartEligibilityReason =
+  | "available"
+  | "definition_mismatch"
+  | "unsupported_phase"
+  | "not_timed_out"
+  | "visit_budget_exhausted";
+
+export const restartEligibility = (
+  run: Pick<
+    Run,
+    | "definitionId"
+    | "definitionVersion"
+    | "definitionHash"
+    | "phase"
+    | "status"
+    | "failureCategory"
+    | "visits"
+  >,
+  definition: Definition | undefined,
+): {
+  readonly eligible: boolean;
+  readonly reason: RestartEligibilityReason;
+  readonly nextVisit: number | null;
+  readonly maxVisits: number | null;
+} => {
+  if (
+    !definition ||
+    definition.id !== run.definitionId ||
+    definition.version !== run.definitionVersion ||
+    definition.hash !== run.definitionHash
+  )
+    return { eligible: false, reason: "definition_mismatch", nextVisit: null, maxVisits: null };
+  const phase = definition.phases.find((item) => item.id === run.phase);
+  if (!phase?.capabilities?.includes("restart"))
+    return {
+      eligible: false,
+      reason: "unsupported_phase",
+      nextVisit: null,
+      maxVisits: phase?.maxVisits ?? null,
+    };
+  const nextVisit = (run.visits[run.phase] ?? 0) + 1;
+  if (run.status !== "blocked" || run.failureCategory !== "action_deadline_expired")
+    return { eligible: false, reason: "not_timed_out", nextVisit, maxVisits: phase.maxVisits };
+  if (nextVisit > phase.maxVisits)
+    return {
+      eligible: false,
+      reason: "visit_budget_exhausted",
+      nextVisit,
+      maxVisits: phase.maxVisits,
+    };
+  return { eligible: true, reason: "available", nextVisit, maxVisits: phase.maxVisits };
+};
 
 export function validateDefinition(definition: Definition): void {
   const ids = new Set(definition.phases.map((phase) => phase.id));

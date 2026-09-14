@@ -35,6 +35,14 @@ for that task. The same named agent cannot run twice in one phase. Built-in outp
 and `review`; review verdicts must agree with blocking findings and identify selected evidence.
 Phase visits default to one, so add `visitLimit` to every phase that a transition can revisit.
 
+### Validation
+
+Generic YAML transitions use `approve`/`request_changes` for gates, `completed` (and `revise`
+for review aggregation) for agent phases, and `pass` (and `revise` for validation aggregation)
+for code phases. `changed` is reserved for invalidation. Evidence references must name a phase
+(or `__workspace`) and approval references must name a gate; import diagnostics identify the
+source file and field.
+
 ```yaml
 schema: t3-playbook/v1
 id: focused-research

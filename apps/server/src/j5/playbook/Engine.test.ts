@@ -3,6 +3,7 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Tracer from "effect/Tracer";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import type { Run } from "@j5/playbook-contracts";
 import { decide } from "./decider.ts";
@@ -10,6 +11,7 @@ import { hash, type Definition } from "./Definition.ts";
 import { runPlaybookMigrations } from "./Migrations.ts";
 import { makeStore, PlaybookError } from "./Store.ts";
 import { makeWorker, type Adapter } from "./Worker.ts";
+import { restartPresentation } from "../playbook-definitions/Service.ts";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -102,6 +104,97 @@ const reviewInitial: Run = {
   phase: "plan_review",
   definitionHash: reviewDefinition.hash,
 };
+
+it("keeps restart decisions aligned with their service presentation", () => {
+  const eligible = {
+    ...decide(reviewInitial, { type: "enter" }, reviewDefinition, 0),
+    status: "blocked" as const,
+    failureCategory: "action_deadline_expired" as const,
+  };
+  const cases: ReadonlyArray<{
+    name: string;
+    run: Run;
+    definitions: ReadonlyArray<Definition>;
+    decisionDefinition: Definition | undefined;
+    available: boolean;
+  }> = [
+    {
+      name: "eligible",
+      run: eligible,
+      definitions: [reviewDefinition],
+      decisionDefinition: reviewDefinition,
+      available: true,
+    },
+    {
+      name: "wrong status",
+      run: { ...eligible, status: "running" },
+      definitions: [reviewDefinition],
+      decisionDefinition: reviewDefinition,
+      available: false,
+    },
+    {
+      name: "wrong failure",
+      run: { ...eligible, failureCategory: "action_failed" },
+      definitions: [reviewDefinition],
+      decisionDefinition: reviewDefinition,
+      available: false,
+    },
+    {
+      name: "missing definition",
+      run: eligible,
+      definitions: [],
+      decisionDefinition: undefined,
+      available: false,
+    },
+    {
+      name: "changed definition",
+      run: eligible,
+      definitions: [],
+      decisionDefinition: { ...reviewDefinition, hash: "changed" },
+      available: false,
+    },
+    {
+      name: "unsupported phase",
+      run: {
+        ...eligible,
+        definitionHash: definition.hash,
+        phase: "agent",
+      },
+      definitions: [definition],
+      decisionDefinition: definition,
+      available: false,
+    },
+    {
+      name: "exhausted budget",
+      run: { ...eligible, visits: { plan_review: 3 } },
+      definitions: [reviewDefinition],
+      decisionDefinition: reviewDefinition,
+      available: false,
+    },
+  ];
+
+  for (const testCase of cases) {
+    const presentation = restartPresentation(testCase.run, testCase.definitions);
+    assert.equal(presentation.available, testCase.available, testCase.name);
+    let restarted = false;
+    try {
+      restarted =
+        decide(
+          testCase.run,
+          {
+            type: "restart_phase",
+            targetDefinitionHash: testCase.run.definitionHash,
+            actor: "human",
+          },
+          testCase.decisionDefinition,
+          1,
+        ).status === "restarting";
+    } catch {
+      restarted = false;
+    }
+    assert.equal(restarted, presentation.available, testCase.name);
+  }
+});
 
 it("restarts timed-out reviewers with fresh identities and preserves prior evidence", () => {
   let run = decide(reviewInitial, { type: "enter" }, reviewDefinition, 0);
@@ -385,6 +478,287 @@ it.effect("reopens a populated database with the same pending intent and start r
   }),
 );
 
+it.effect("writes only the changed result state regardless of persisted action history", () =>
+  Effect.gen(function* () {
+    yield* runPlaybookMigrations();
+    const store = yield* makeStore;
+    const sql = yield* SqlClient.SqlClient;
+    const measuredDefinition: Definition = {
+      ...definition,
+      phases: [
+        {
+          id: "agent",
+          kind: "agent",
+          tasks: [
+            { id: "measured", adapter: "scripted" },
+            { id: "pending", adapter: "scripted" },
+          ],
+          transitions: { ok: "$complete" },
+          maxVisits: 1,
+        },
+      ],
+    };
+
+    for (const count of [10, 30, 100]) {
+      const id = `history-${count}`;
+      const historicalArtifacts = Array.from({ length: count }, (_, index) => {
+        const content = { historical: index };
+        return {
+          id: `${id}:artifact:${index}`,
+          hash: hash(content),
+          content,
+          producer: "history",
+          phase: "history",
+          revision: index,
+          attempt: 1,
+          governs: [],
+        };
+      });
+      const historicalActions = historicalArtifacts.map((artifact, index) => ({
+        id: `${id}:action:${index}`,
+        runId: id,
+        phase: "history",
+        revision: index,
+        task: `history-${index}`,
+        attempt: 1,
+        kind: "agent" as const,
+        adapter: "scripted",
+        status: "completed" as const,
+        deadline: 10_000,
+        input: { historicalInput: index },
+        resultArtifactId: artifact.id,
+      }));
+      const fixture = {
+        ...initial,
+        id,
+        actions: historicalActions,
+        artifacts: historicalArtifacts,
+      } satisfies Run;
+      const started = yield* store.command(
+        {
+          commandId: `${id}:start`,
+          runId: id,
+          expectedRevision: 0,
+          initial: fixture,
+          event: { type: "enter" },
+          now: 0,
+        },
+        measuredDefinition,
+      );
+      assert.lengthOf(started.actions, count + 2);
+      assert.lengthOf(started.artifacts, count);
+
+      const statements: string[] = [];
+      const tracer = Tracer.make({
+        span(options) {
+          const span = new Tracer.NativeSpan(options);
+          const end = span.end.bind(span);
+          span.end = (endTime, exit) => {
+            end(endTime, exit);
+            const query = span.attributes.get("db.query.text");
+            if (typeof query === "string") statements.push(query.trim());
+          };
+          return span;
+        },
+      });
+      const command = {
+        commandId: `${id}:result`,
+        runId: id,
+        expectedRevision: started.revision,
+        event: {
+          type: "result" as const,
+          actionId: started.actions.at(-2)!.id,
+          output: "measured",
+        },
+        now: 1,
+      };
+      const result = yield* store
+        .command(command, measuredDefinition)
+        .pipe(Effect.withTracer(tracer));
+
+      const countStatements = (prefix: string) =>
+        statements.filter((statement) => statement.startsWith(prefix)).length;
+      assert.equal(countStatements("INSERT OR IGNORE INTO j5_playbook_values"), 1, `${count}`);
+      assert.equal(countStatements("INSERT INTO j5_playbook_actions"), 1, `${count}`);
+      assert.equal(countStatements("INSERT OR IGNORE INTO j5_playbook_artifacts"), 1, `${count}`);
+      assert.deepEqual(yield* store.get(id), result);
+      assert.deepEqual(
+        yield* sql`SELECT revision, read_version AS readVersion FROM j5_playbook_runs WHERE id=${id}`,
+        [{ revision: 2, readVersion: 2 }],
+      );
+      assert.deepEqual(
+        yield* sql`SELECT count(*) AS count FROM j5_playbook_history WHERE run_id=${id}`,
+        [{ count: 2 }],
+      );
+      assert.deepEqual(
+        yield* sql`SELECT count(*) AS count FROM j5_playbook_receipts WHERE run_id=${id}`,
+        [{ count: 2 }],
+      );
+      assert.deepEqual(
+        yield* sql`SELECT count(*) AS count FROM j5_playbook_observations WHERE run_id=${id}`,
+        [{ count: 2 }],
+      );
+    }
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect("persists successor scheduling, gate edits, approval, and stale gate rejection", () =>
+  Effect.gen(function* () {
+    yield* runPlaybookMigrations();
+    const store = yield* makeStore;
+    const editableDefinition: Definition = {
+      ...definition,
+      editGate: (run, content) => ({ artifact: run.artifacts.at(-1)!, content }),
+    };
+    const started = yield* store.command(
+      {
+        commandId: "editable-start",
+        runId: initial.id,
+        expectedRevision: 0,
+        initial,
+        event: { type: "enter" },
+        now: 0,
+      },
+      editableDefinition,
+    );
+    const planned = yield* store.command(
+      {
+        commandId: "editable-plan",
+        runId: initial.id,
+        expectedRevision: started.revision,
+        event: { type: "result", actionId: started.actions[0]!.id, output: "plan" },
+        now: 1,
+      },
+      editableDefinition,
+    );
+    assert.equal(planned.phase, "code");
+    assert.lengthOf(planned.actions, 2);
+    assert.lengthOf(planned.artifacts, 1);
+    const waiting = yield* store.command(
+      {
+        commandId: "editable-check",
+        runId: initial.id,
+        expectedRevision: planned.revision,
+        event: { type: "result", actionId: planned.actions[1]!.id, output: "passed" },
+        now: 2,
+      },
+      editableDefinition,
+    );
+    const edited = yield* store.command(
+      {
+        commandId: "editable-gate",
+        runId: initial.id,
+        expectedRevision: waiting.revision,
+        event: {
+          type: "edit_gate",
+          gateRevision: waiting.gate!.revision,
+          artifactHash: waiting.gate!.artifactHash,
+          content: "edited",
+          actor: "human",
+        },
+        now: 3,
+      },
+      editableDefinition,
+    );
+    assert.lengthOf(edited.artifacts, 3);
+    assert.notEqual(edited.gate!.artifactHash, waiting.gate!.artifactHash);
+    const stale = yield* Effect.exit(
+      store.command(
+        {
+          commandId: "stale-edit",
+          runId: initial.id,
+          expectedRevision: waiting.revision,
+          event: {
+            type: "edit_gate",
+            gateRevision: waiting.gate!.revision,
+            artifactHash: waiting.gate!.artifactHash,
+            content: "stale",
+            actor: "human",
+          },
+          now: 4,
+        },
+        editableDefinition,
+      ),
+    );
+    assert.isTrue(Exit.isFailure(stale));
+    const approval = {
+      commandId: "editable-approve",
+      runId: initial.id,
+      expectedRevision: edited.revision,
+      event: {
+        type: "decision" as const,
+        decision: {
+          gateRevision: edited.gate!.revision,
+          artifactHash: edited.gate!.artifactHash,
+          decision: "approve" as const,
+          feedback: "",
+          actor: "human",
+        },
+      },
+      now: 5,
+    };
+    const completed = yield* store.command(approval, editableDefinition);
+    assert.equal(completed.status, "completed");
+    assert.deepEqual(yield* store.command(approval, editableDefinition), completed);
+    assert.deepEqual(yield* store.get(initial.id), completed);
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect("persists correction and multi-action cancellation", () =>
+  Effect.gen(function* () {
+    yield* runPlaybookMigrations();
+    const store = yield* makeStore;
+    const started = yield* store.command(
+      {
+        commandId: "correction-start",
+        runId: reviewInitial.id,
+        expectedRevision: 0,
+        initial: reviewInitial,
+        event: { type: "enter" },
+        now: 0,
+      },
+      reviewDefinition,
+    );
+    const corrected = yield* store.command(
+      {
+        commandId: "correction-invalid",
+        runId: reviewInitial.id,
+        expectedRevision: started.revision,
+        event: { type: "result", actionId: started.actions[0]!.id, output: 42 },
+        now: 1,
+      },
+      reviewDefinition,
+    );
+    assert.lengthOf(corrected.actions, 3);
+    assert.equal(corrected.actions[0]!.status, "cancelled");
+    assert.equal(corrected.actions.at(-1)!.attempt, 2);
+    const cancelling = yield* store.command(
+      {
+        commandId: "correction-cancel",
+        runId: reviewInitial.id,
+        expectedRevision: corrected.revision,
+        event: { type: "cancel" },
+        now: 2,
+      },
+      reviewDefinition,
+    );
+    assert.equal(cancelling.status, "cancelling");
+    assert.isTrue(cancelling.actions.every((action) => action.status === "cancelled"));
+    const cancelled = yield* store.command(
+      {
+        commandId: "correction-cancelled",
+        runId: reviewInitial.id,
+        expectedRevision: cancelling.revision,
+        event: { type: "cancelled" },
+        now: 3,
+      },
+      undefined,
+    );
+    assert.equal(cancelled.status, "cancelled");
+    assert.deepEqual(yield* store.get(reviewInitial.id), cancelled);
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
 it("replays deterministic transitions and invalidates approval on requested changes", () => {
   const first = decide(initial, { type: "enter" }, definition, 0);
   assert.deepStrictEqual(first, decide(initial, { type: "enter" }, definition, 0));
@@ -519,6 +893,7 @@ it.effect("migrates twice and recovers state, command receipts and fenced claims
       definition,
     );
     assert.equal(finished.phase, "code");
+    assert.equal(finished.actions[0]!.externalIdentity, "thread:pb:identity");
     const duplicate = yield* restarted.command(
       {
         commandId: "duplicate-result",
@@ -563,6 +938,7 @@ it.effect("migrates twice and recovers state, command receipts and fenced claims
     assert.deepStrictEqual(yield* restarted.get(run.id), finished);
     yield* sql`DROP TRIGGER fail_playbook_receipt`;
     const detail = yield* restarted.detail(run.id);
+    assert.equal(detail.actions[0]!.externalIdentity, "thread:pb:identity");
     assert.notProperty(detail.actions[0]!, "input");
     assert.notProperty(detail.artifacts[0]!, "content");
     // A replay is the original response, including its then-pending action state.
@@ -574,10 +950,13 @@ it.effect("migrates twice and recovers state, command receipts and fenced claims
     const observations = yield* sql<{
       count: number;
     }>`SELECT count(*) AS count FROM j5_playbook_observations WHERE run_id=${run.id}`;
+    const history = yield* sql<{ count: number }>`SELECT count(*) AS count
+      FROM j5_playbook_history WHERE run_id=${run.id}`;
     assert.isAbove(values[0]!.count, 0);
     assert.equal(activeArtifacts[0]!.count, finished.artifacts.length);
     // Replay, no-op, revision, stale-claim, command-id, and receipt failures add no evidence.
     assert.equal(observations[0]!.count, 2);
+    assert.equal(history[0]!.count, 2);
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
 

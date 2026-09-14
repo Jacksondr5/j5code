@@ -149,6 +149,75 @@ export function compileYamlPlaybook(
       }),
     };
   }
+  const phaseIds = new Set(source.phases.map((phase) => phase.id));
+  const gateIds = new Set(
+    source.phases.filter((phase) => phase.kind === "gate").map((phase) => phase.id),
+  );
+  for (const phase of source.phases) {
+    for (const evidence of phase.evidence ?? [])
+      if (evidence !== "__workspace" && !phaseIds.has(evidence))
+        throw new PlaybookDefinitionSourceError(
+          file,
+          `phases.${phase.id}.evidence`,
+          `unknown evidence phase ${evidence}`,
+        );
+    for (const approval of phase.approvals ?? [])
+      if (!gateIds.has(approval))
+        throw new PlaybookDefinitionSourceError(
+          file,
+          `phases.${phase.id}.approvals`,
+          `unknown approval gate ${approval}`,
+        );
+    if (phase.kind === "gate" && phase.outcome !== undefined)
+      throw new PlaybookDefinitionSourceError(
+        file,
+        `phases.${phase.id}.outcome`,
+        "gates cannot declare outcome aggregation",
+      );
+    if (
+      phase.outcome === "review" &&
+      (phase.kind !== "agent" ||
+        !(phase.tasks?.length && phase.tasks.every((task) => task.output === "review")))
+    )
+      throw new PlaybookDefinitionSourceError(
+        file,
+        `phases.${phase.id}.outcome`,
+        "review aggregation requires agent tasks with review output",
+      );
+    if (
+      phase.outcome === "validation" &&
+      (phase.kind !== "code" || phase.tasks?.[0]?.operation !== "validation")
+    )
+      throw new PlaybookDefinitionSourceError(
+        file,
+        `phases.${phase.id}.outcome`,
+        "validation aggregation requires validation as the first code task",
+      );
+    const allowed =
+      phase.kind === "gate"
+        ? ["approve", "request_changes"]
+        : phase.kind === "agent"
+          ? phase.outcome === "review"
+            ? ["completed", "revise"]
+            : ["completed"]
+          : phase.outcome === "validation"
+            ? ["pass", "revise"]
+            : ["pass"];
+    for (const outcome of Object.keys(phase.transitions))
+      if (outcome !== "changed" && !allowed.includes(outcome))
+        throw new PlaybookDefinitionSourceError(
+          file,
+          `phases.${phase.id}.transitions.${outcome}`,
+          `outcome ${outcome} is not valid for this ${phase.kind} phase`,
+        );
+    for (const [outcome, target] of Object.entries(phase.transitions))
+      if (target !== "$complete" && !phaseIds.has(target))
+        throw new PlaybookDefinitionSourceError(
+          file,
+          `phases.${phase.id}.transitions.${outcome}`,
+          `unknown phase ${target}`,
+        );
+  }
   const agents = source.agents ?? {};
   const assignments: Record<string, { persona: string; authority: Authority }> = { ...agents };
   for (const phase of source.phases)
@@ -300,9 +369,6 @@ export function compileYamlPlaybook(
         return (artifacts[0]?.content as { passed?: unknown } | undefined)?.passed
           ? "pass"
           : "revise";
-      const operationOutcome = (artifacts[0]?.content as { outcome?: unknown } | undefined)
-        ?.outcome;
-      if (typeof operationOutcome === "string") return operationOutcome;
       return phase.kind === "code" ? "pass" : "completed";
     },
     gateArtifacts: (run, phase) => {

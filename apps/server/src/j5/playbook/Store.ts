@@ -13,7 +13,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { decide, Conflict, type Event } from "./decider.ts";
-import { canonical, hash, type Definition } from "./Definition.ts";
+import { canonical, hash, serialize, type Definition } from "./Definition.ts";
 
 export class PlaybookError extends Schema.TaggedErrorClass<PlaybookError>()("PlaybookError", {
   code: Schema.Literals(["conflict", "not_found", "storage", "invalid"]),
@@ -106,15 +106,18 @@ const requestTitle = (inputs: unknown): string => {
   }
   return "Development playbook";
 };
-const storedAction = (action: Action): StoredAction => {
-  const { input, ...metadata } = action;
-  return { ...metadata, inputHash: hash(input) };
-};
 const storedArtifact = (artifact: Artifact): StoredArtifact => {
   const { content: _content, ...metadata } = artifact;
   return metadata;
 };
-const snapshotOf = (run: Run): RunSnapshot => ({
+const snapshotOf = (
+  run: Run,
+  hashes: {
+    readonly inputs: string;
+    readonly execution: string;
+    readonly actionInputs: ReadonlyMap<string, string>;
+  },
+): RunSnapshot => ({
   id: run.id,
   definitionId: run.definitionId,
   definitionVersion: run.definitionVersion,
@@ -123,8 +126,8 @@ const snapshotOf = (run: Run): RunSnapshot => ({
   projectId: run.projectId,
   repository: run.repository,
   baseCommit: run.baseCommit,
-  inputsHash: hash(run.inputs),
-  executionHash: hash(run.execution),
+  inputsHash: hashes.inputs,
+  executionHash: hashes.execution,
   phase: run.phase,
   revision: run.revision,
   status: run.status,
@@ -134,7 +137,10 @@ const snapshotOf = (run: Run): RunSnapshot => ({
   recovery: run.recovery,
   ...(run.restart === undefined ? {} : { restart: run.restart }),
   gate: run.gate,
-  actions: run.actions.map(storedAction),
+  actions: run.actions.map((action) => {
+    const { input: _input, ...metadata } = action;
+    return { ...metadata, inputHash: hashes.actionInputs.get(action.id)! };
+  }),
   artifacts: run.artifacts.map(storedArtifact),
   approvals: run.approvals,
   visits: run.visits,
@@ -190,13 +196,18 @@ export const makeStore = Effect.gen(function* () {
     return yield* decodeRun(hydrated);
   });
 
-  const get = Effect.fn("PlaybookStore.get")(function* (id: string) {
+  const load = Effect.fn("PlaybookStore.load")(function* (id: string) {
     const rows = yield* sql<{ payload: string; readVersion: number }>`SELECT payload,
       read_version AS readVersion FROM j5_playbook_runs WHERE id=${id}`;
     if (!rows[0])
       return yield* new PlaybookError({ code: "not_found", detail: `Unknown playbook ${id}` });
-    const run = yield* hydrate(parseSnapshot(rows[0].payload), true);
-    return { ...run, readVersion: rows[0].readVersion };
+    const snapshot = parseSnapshot(rows[0].payload);
+    const run = yield* hydrate(snapshot, true);
+    return { run: { ...run, readVersion: rows[0].readVersion }, snapshot };
+  });
+
+  const get = Effect.fn("PlaybookStore.get")(function* (id: string) {
+    return (yield* load(id)).run;
   });
 
   const detail = Effect.fn("PlaybookStore.detail")(function* (id: string) {
@@ -291,10 +302,9 @@ export const makeStore = Effect.gen(function* () {
     });
   });
 
-  const putValue = (value: unknown) => {
-    const valueHash = hash(value);
+  const putValue = (value: { readonly hash: string; readonly payload: string }) => {
     return sql`INSERT OR IGNORE INTO j5_playbook_values(hash, payload)
-      VALUES (${valueHash}, ${canonical(value)})`;
+      VALUES (${value.hash}, ${value.payload})`;
   };
 
   const present = Effect.fn("PlaybookStore.present")(function* (run: Run) {
@@ -336,21 +346,51 @@ export const makeStore = Effect.gen(function* () {
 
   const save = Effect.fn("PlaybookStore.save")(function* (
     run: Run,
+    previous: Run | undefined,
+    previousSnapshot: RunSnapshot | undefined,
     commandId: string,
     event: Event,
     now: number,
     definition: Definition | undefined,
   ) {
-    for (const value of [
-      run.inputs,
-      run.execution,
-      ...run.actions.map((action) => action.input),
-      ...run.artifacts.map((item) => item.content),
-    ]) {
-      yield* putValue(value);
-    }
+    const known = new Set(
+      previousSnapshot
+        ? [
+            previousSnapshot.inputsHash,
+            previousSnapshot.executionHash,
+            ...previousSnapshot.actions.map((item) => item.inputHash),
+            ...previousSnapshot.artifacts.map((item) => item.hash),
+          ]
+        : [],
+    );
+    const persistValue = function* (value: unknown) {
+      const encoded = serialize(value);
+      if (!known.has(encoded.hash)) {
+        yield* putValue(encoded);
+        known.add(encoded.hash);
+      }
+      return encoded.hash;
+    };
+    const inputsHash = previousSnapshot?.inputsHash ?? (yield* persistValue(run.inputs));
+    const executionHash = previousSnapshot?.executionHash ?? (yield* persistValue(run.execution));
+    const priorActions = new Map(previous?.actions.map((action) => [action.id, action]));
+    const actionInputHashes = new Map(
+      previousSnapshot?.actions.map((item) => [item.id, item.inputHash]),
+    );
     for (const action of run.actions) {
-      const inputHash = hash(action.input);
+      const prior = priorActions.get(action.id);
+      let inputHash = actionInputHashes.get(action.id);
+      if (inputHash === undefined) {
+        inputHash = yield* persistValue(action.input);
+        actionInputHashes.set(action.id, inputHash);
+      }
+      if (
+        prior &&
+        prior.status === action.status &&
+        prior.resultArtifactId === action.resultArtifactId &&
+        prior.externalIdentity === action.externalIdentity
+      )
+        continue;
       yield* sql`INSERT INTO j5_playbook_actions(
           id, run_id, phase, revision, task, attempt, kind, adapter, status,
           deadline, input_hash, result_artifact_id, identity
@@ -367,7 +407,10 @@ export const makeStore = Effect.gen(function* () {
           OR j5_playbook_actions.result_artifact_id IS NOT excluded.result_artifact_id
           OR (j5_playbook_actions.identity IS NULL AND excluded.identity IS NOT NULL)`;
     }
+    const priorArtifacts = new Set(previous?.artifacts.map((item) => item.id));
     for (const item of run.artifacts) {
+      if (priorArtifacts.has(item.id)) continue;
+      yield* persistValue(item.content);
       yield* sql`INSERT OR IGNORE INTO j5_playbook_artifacts(
           id, run_id, hash, producer, phase, revision, attempt, governs_json
         ) VALUES (
@@ -375,11 +418,13 @@ export const makeStore = Effect.gen(function* () {
           ${item.revision}, ${item.attempt}, ${canonical(item.governs)}
         )`;
     }
-    const priorVersions = yield* sql<{ readVersion: number }>`SELECT read_version AS readVersion
-      FROM j5_playbook_runs WHERE id=${run.id}`;
-    const readVersion = (priorVersions[0]?.readVersion ?? 0) + 1;
+    const readVersion = (previous?.readVersion ?? 0) + 1;
     const responseRun = { ...run, readVersion };
-    const snapshot = snapshotOf(responseRun);
+    const snapshot = snapshotOf(responseRun, {
+      inputs: inputsHash,
+      execution: executionHash,
+      actionInputs: actionInputHashes,
+    });
     const payload = canonical(snapshot);
     const watchCandidate =
       definition?.phases
@@ -454,13 +499,16 @@ export const makeStore = Effect.gen(function* () {
             });
         }
         let previous: Run;
+        let previousSnapshot: RunSnapshot | undefined;
         if (input.initial) {
           const exists = yield* sql`SELECT id FROM j5_playbook_runs WHERE id=${input.runId}`;
           if (exists.length)
             return yield* new PlaybookError({ code: "conflict", detail: "Run already exists" });
           previous = input.initial;
         } else {
-          previous = yield* get(input.runId);
+          const loaded = yield* load(input.runId);
+          previous = loaded.run;
+          previousSnapshot = loaded.snapshot;
         }
         if (previous.revision !== input.expectedRevision)
           return yield* new PlaybookError({ code: "conflict", detail: "Run revision changed" });
@@ -477,9 +525,28 @@ export const makeStore = Effect.gen(function* () {
             ? previous
             : { ...next, updatedAt: DateTime.formatIso(DateTime.makeUnsafe(input.now)) };
         const saved =
-          next === previous
-            ? { payload: canonical(snapshotOf(previous)), run: previous }
-            : yield* save(persisted, input.commandId, input.event, input.now, definition);
+          next === previous && previousSnapshot
+            ? {
+                payload: canonical(
+                  snapshotOf(previous, {
+                    inputs: previousSnapshot.inputsHash,
+                    execution: previousSnapshot.executionHash,
+                    actionInputs: new Map(
+                      previousSnapshot.actions.map((action) => [action.id, action.inputHash]),
+                    ),
+                  }),
+                ),
+                run: previous,
+              }
+            : yield* save(
+                persisted,
+                input.initial ? undefined : previous,
+                previousSnapshot,
+                input.commandId,
+                input.event,
+                input.now,
+                definition,
+              );
         yield* sql`INSERT INTO j5_playbook_receipts(command_id, input_hash, run_id, payload)
           VALUES (${input.commandId}, ${inputHash}, ${next.id}, ${saved.payload})`;
         return saved.run;

@@ -3,6 +3,7 @@ import {
   hash,
   gateHash,
   phaseById,
+  restartEligibility,
   selectedEvidenceHashes,
   type Definition,
 } from "./Definition.ts";
@@ -220,17 +221,15 @@ export function decide(
     };
   }
   if (event.type === "restart_phase") {
-    if (
-      previous.status !== "blocked" ||
-      previous.failureCategory !== "action_deadline_expired" ||
-      !phaseById(definition, previous.phase).capabilities?.includes("restart")
-    )
+    const eligibility = restartEligibility(previous, definition);
+    if (!eligibility.eligible) {
+      if (eligibility.reason === "visit_budget_exhausted")
+        throw new Conflict("Review phase attempt budget is exhausted");
       throw new Conflict("Only a timed-out review phase can be restarted");
+    }
     if (event.targetDefinitionHash !== definition.hash)
       throw new Conflict("Displayed playbook definition has changed");
-    const phase = phaseById(definition, previous.phase);
-    const visit = (previous.visits[previous.phase] ?? 0) + 1;
-    if (visit > phase.maxVisits) throw new Conflict("Review phase attempt budget is exhausted");
+    const visit = eligibility.nextVisit!;
     const cleanupActionIds = previous.actions
       .filter(
         (action) =>

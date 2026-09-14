@@ -29,7 +29,12 @@ import { development, latest } from "./fh/development.ts";
 import { makeCodeAdapters } from "./fh/CodeAdapters.ts";
 import { resolveBase } from "./fh/GitWorkspace.ts";
 import { makeAgentAdapter } from "../playbook/AgentAdapter.ts";
-import { hash, validateDefinition } from "../playbook/Definition.ts";
+import {
+  hash,
+  restartEligibility,
+  validateDefinition,
+  type Definition,
+} from "../playbook/Definition.ts";
 import type { Event } from "../playbook/decider.ts";
 import { makeStore, PlaybookError } from "../playbook/Store.ts";
 import { makeWorker, type Adapter } from "../playbook/Worker.ts";
@@ -52,6 +57,43 @@ const decodeWorkspaceEffect = Schema.decodeUnknownEffect(Handoff.Workspace);
 const isPlaybookError = Schema.is(PlaybookError);
 const failure = (error: unknown) =>
   isPlaybookError(error) ? error : new PlaybookError({ code: "storage", detail: String(error) });
+
+export const restartPresentation = (
+  run: Pick<
+    RunDetail,
+    | "definitionId"
+    | "definitionVersion"
+    | "definitionHash"
+    | "phase"
+    | "status"
+    | "failureCategory"
+    | "visits"
+  >,
+  definitions: ReadonlyArray<Definition>,
+) => {
+  const pinnedDefinition = definitions.find(
+    (item) =>
+      item.id === run.definitionId &&
+      item.version === run.definitionVersion &&
+      item.hash === run.definitionHash,
+  );
+  const eligibility = restartEligibility(run, pinnedDefinition);
+  const reasons = {
+    definition_mismatch: "The pinned playbook definition is not compatible with restart recovery.",
+    unsupported_phase: "Only plan and code review timeouts can be restarted.",
+    not_timed_out: "This review did not stop because its deadline elapsed.",
+    visit_budget_exhausted: `All ${eligibility.maxVisits} review attempts have been used.`,
+    available: "Restart is available.",
+  } as const;
+  return {
+    available: eligibility.eligible,
+    reason: reasons[eligibility.reason],
+    targetDefinitionHash: pinnedDefinition?.hash ?? run.definitionHash,
+    nextVisit: eligibility.nextVisit,
+    maxVisits: eligibility.maxVisits,
+  };
+};
+
 export const makeService = Effect.gen(function* () {
   const store = yield* makeStore;
   const library = yield* makeAgentPersonaLibrary;
@@ -116,75 +158,13 @@ export const makeService = Effect.gen(function* () {
   const wake = yield* Queue.dropping<void>(1);
   const candidateWake = yield* Queue.dropping<void>(1);
   const notify = Queue.offer(wake, undefined).pipe(Effect.asVoid);
-  const restartAvailability = (
-    run: Pick<
-      RunDetail,
-      | "definitionId"
-      | "definitionVersion"
-      | "definitionHash"
-      | "phase"
-      | "status"
-      | "failureCategory"
-      | "visits"
-    >,
-  ) => {
-    const pinnedDefinition = definitions.find(
-      (item) =>
-        item.id === run.definitionId &&
-        item.version === run.definitionVersion &&
-        item.hash === run.definitionHash,
-    );
-    const definition = pinnedDefinition;
-    const phase = definition?.phases.find((item) => item.id === run.phase);
-    const targetDefinitionHash = definition?.hash ?? run.definitionHash;
-    if (!phase?.capabilities?.includes("restart"))
-      return {
-        available: false,
-        reason: "Only plan and code review timeouts can be restarted.",
-        targetDefinitionHash,
-        nextVisit: null,
-        maxVisits: phase?.maxVisits ?? null,
-      };
-    const nextVisit = (run.visits[run.phase] ?? 0) + 1;
-    if (run.status !== "blocked" || run.failureCategory !== "action_deadline_expired")
-      return {
-        available: false,
-        reason: "This review did not stop because its deadline elapsed.",
-        targetDefinitionHash,
-        nextVisit,
-        maxVisits: phase?.maxVisits ?? null,
-      };
-    if (!definition || !phase)
-      return {
-        available: false,
-        reason: "The pinned playbook definition is not compatible with restart recovery.",
-        targetDefinitionHash,
-        nextVisit,
-        maxVisits: phase?.maxVisits ?? null,
-      };
-    if (nextVisit > phase.maxVisits)
-      return {
-        available: false,
-        reason: `All ${phase.maxVisits} review attempts have been used.`,
-        targetDefinitionHash,
-        nextVisit,
-        maxVisits: phase.maxVisits,
-      };
-    return {
-      available: true,
-      reason: "Restart is available.",
-      targetDefinitionHash,
-      nextVisit,
-      maxVisits: phase.maxVisits,
-    };
-  };
   const present = Effect.fn("PlaybookService.present")(function* (run: Run) {
     const detail = yield* store.present(run);
-    return { ...detail, restartAvailability: restartAvailability(detail) };
+    return { ...detail, restartAvailability: restartPresentation(detail, definitions) };
   });
   const detail = Effect.fn("PlaybookService.detail")(function* (id: string) {
     const run = yield* store.detail(id);
-    return { ...run, restartAvailability: restartAvailability(run) };
+    return { ...run, restartAvailability: restartPresentation(run, definitions) };
   });
   const startPermit = yield* Semaphore.make(1);
   const start = Effect.fn("PlaybookService.start")(
@@ -335,7 +315,7 @@ export const makeService = Effect.gen(function* () {
           });
         commandEvent = { type: "retry_restart" };
       } else {
-        const availability = restartAvailability(run);
+        const availability = restartPresentation(run, definitions);
         if (!availability.available)
           return yield* new PlaybookError({ code: "conflict", detail: availability.reason });
         if (event.targetDefinitionHash !== availability.targetDefinitionHash)

@@ -88,7 +88,165 @@ it("reports source files and fields for invalid references", () => {
   assert.throws(
     () =>
       compileYamlPlaybook(source.replace("completed: review", "completed: nowhere"), "team.yaml"),
-    /team\.yaml:phases: Error: Unknown transition nowhere/,
+    /team\.yaml:phases\.research\.transitions\.completed: unknown phase nowhere/,
+  );
+  assert.throws(
+    () =>
+      compileYamlPlaybook(
+        source.replace("evidence: [research]", "evidence: [missing]"),
+        "team.yaml",
+      ),
+    /team\.yaml:phases\.review\.evidence: unknown evidence phase missing/,
+  );
+  assert.throws(
+    () =>
+      compileYamlPlaybook(
+        source.replace("approvals: [approval]", "approvals: [missing]"),
+        "team.yaml",
+      ),
+    /team\.yaml:phases\.research\.approvals: unknown approval gate missing/,
+  );
+});
+
+it("rejects generic outcomes that the selected aggregation cannot produce", () => {
+  assert.throws(
+    () => compileYamlPlaybook(source.replace("completed: review", "pass: review"), "team.yaml"),
+    /team\.yaml:phases\.research\.transitions\.pass: outcome pass is not valid/,
+  );
+  assert.throws(
+    () =>
+      compileYamlPlaybook(
+        source
+          .replace("outcome: review", "outcome: validation")
+          .replace("      revise: research\n", ""),
+        "team.yaml",
+      ),
+    /team\.yaml:phases\.review\.outcome: validation aggregation requires validation as the first code task/,
+  );
+  assert.throws(
+    () =>
+      compileYamlPlaybook(
+        source.replace(
+          "    label: Report approval\n    kind: gate",
+          "    label: Report approval\n    kind: gate\n    outcome: completion",
+        ),
+        "team.yaml",
+      ),
+    /team\.yaml:phases\.approval\.outcome: gates cannot declare outcome aggregation/,
+  );
+  assert.throws(
+    () =>
+      compileYamlPlaybook(source.replace("outcome: completion", "outcome: review"), "team.yaml"),
+    /team\.yaml:phases\.research\.outcome: review aggregation requires agent tasks with review output/,
+  );
+});
+
+it("accepts bounded generic graphs and supported optional bindings", () => {
+  const laterEvidence = compileYamlPlaybook(
+    source.replace(
+      "approvals: [approval]",
+      "evidence: [review, __workspace]\n    approvals: [approval]",
+    ),
+    "later.yaml",
+  );
+  assert.equal(laterEvidence.phases[1]!.maxVisits, 3);
+  const evidence = [
+    {
+      id: "workspace",
+      hash: "workspace-hash",
+      content: { worktree: "/test", branch: "branch" },
+      producer: "workspace",
+      phase: "__workspace",
+      revision: 1,
+      attempt: 1,
+      governs: [],
+    },
+    {
+      id: "later",
+      hash: "later-hash",
+      content: { summary: "later" },
+      producer: "review",
+      phase: "review",
+      revision: 2,
+      attempt: 1,
+      governs: [],
+    },
+  ] satisfies Run["artifacts"];
+  const boundInput = laterEvidence.input(
+    {
+      id: "bindings",
+      definitionId: laterEvidence.id,
+      definitionVersion: laterEvidence.version,
+      definitionHash: laterEvidence.hash,
+      squadronId: "squadron",
+      projectId: "project",
+      repository: "/test",
+      baseCommit: "main",
+      inputs: { request: "test" },
+      execution: {
+        ...testExecution,
+        personas: { ...testExecution.personas, researcher: testExecution.personas.scout },
+      },
+      phase: "research",
+      revision: 3,
+      status: "running",
+      cause: null,
+      recovery: null,
+      gate: null,
+      actions: [],
+      artifacts: evidence,
+      approvals: [],
+      visits: { research: 1 },
+    },
+    laterEvidence.phases[1]!,
+    laterEvidence.phases[1]!.tasks[0]!,
+  ) as { selectedEvidenceHashes: readonly string[] };
+  assert.deepEqual(boundInput.selectedEvidenceHashes, ["later-hash", "workspace-hash"]);
+
+  const multipleTasks = compileYamlPlaybook(
+    source.replace(
+      "    outcome: completion",
+      "      - id: corroborate\n        persona: scout\n        instructions: Corroborate the research.\n        output: report\n    outcome: completion",
+    ),
+    "multiple.yaml",
+  );
+  assert.lengthOf(multipleTasks.phases[1]!.tasks, 2);
+
+  assert.doesNotThrow(() =>
+    compileYamlPlaybook(source.replace("    outcome: completion\n", ""), "omitted.yaml"),
+  );
+  assert.doesNotThrow(() =>
+    compileYamlPlaybook(
+      source.replace(
+        "      approve: $complete\n      request_changes: research",
+        "      approve: $complete",
+      ),
+      "subset.yaml",
+    ),
+  );
+  assert.doesNotThrow(() =>
+    compileYamlPlaybook(
+      source.replace(
+        "    transitions:\n      approve: $complete\n      request_changes: research",
+        "    transitions: {}",
+      ),
+      "empty.yaml",
+    ),
+  );
+  assert.doesNotThrow(() =>
+    compileYamlPlaybook(
+      source.replace("      completed: review", "      completed: review\n      changed: research"),
+      "changed.yaml",
+    ),
+  );
+  assert.doesNotThrow(() =>
+    compileYamlPlaybook(
+      source.replace(
+        "      approve: $complete\n      request_changes: research",
+        "      approve: $complete\n      request_changes: research\n      changed: research",
+      ),
+      "gate-changed.yaml",
+    ),
   );
 });
 
