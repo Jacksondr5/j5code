@@ -6,7 +6,6 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { Tool } from "effect/unstable/ai";
 import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
@@ -16,28 +15,17 @@ import { makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
 import { translateAgentPersonaProviderPolicy } from "./agentPersonaProviderPolicy.ts";
 
+const {
+  target: _target,
+  runtimeMode: _runtimeMode,
+  ...delegateFields
+} = OrchestratorMcpDelegateTaskInput.fields;
+
+/** A saved agent pins provider, model, reasoning, and runtime mode, so those fields are not accepted. */
 export const InvokeAgentInput = Schema.Struct({
   personaId: AgentPersonaId,
-  task: OrchestratorMcpDelegateTaskInput.fields.task,
-  clientRequestId: OrchestratorMcpDelegateTaskInput.fields.clientRequestId,
+  ...delegateFields,
 });
-
-export const InvokeAgentTool = Tool.make("invoke_agent", {
-  description:
-    "Invoke a saved agent as a subagent of this conversation. When the user writes @agent:ID, use ID as personaId and provide a self-contained task describing the requested work. The server applies the saved instructions, model route, reasoning and runtime policy. The child remains under this conversation; it is not a new top-level task or a crew. Its completion returns to the parent. Reuse clientRequestId when retrying. Do not substitute a generic native subagent if this call fails; report the error.",
-  parameters: InvokeAgentInput,
-  success: OrchestratorMcpDelegateTaskResult,
-  failure: OrchestratorMcpFailure,
-  failureMode: "return",
-  dependencies: [
-    McpInvocationContext,
-    OrchestratorMcpService,
-    ThreadManagementService,
-    ProviderRegistry,
-  ],
-})
-  .annotate(Tool.Title, "Invoke saved agent")
-  .annotate(Tool.Destructive, true);
 
 /** Resolve a saved persona at the fork boundary; the upstream engine owns child lifecycle. */
 export const invokeAgent = Effect.fn("j5.invokeAgent")(function* (
@@ -91,11 +79,11 @@ export const invokeAgent = Effect.fn("j5.invokeAgent")(function* (
       message: "A read-only agent cannot invoke an agent with write access.",
     });
   }
+  const { personaId: _personaId, ...delegate } = input;
   return yield* service.delegateTask(scope, {
-    task: input.task,
-    title: assignment.displayName ?? input.personaId,
-    ...(input.clientRequestId === undefined ? {} : { clientRequestId: input.clientRequestId }),
-    mode: "async",
+    ...delegate,
+    title: input.title ?? assignment.displayName ?? input.personaId,
+    mode: input.mode ?? "async",
     runtimeMode: policy.runtimeMode,
     target: {
       providerInstanceId: assignment.resolvedModelSelection.instanceId,

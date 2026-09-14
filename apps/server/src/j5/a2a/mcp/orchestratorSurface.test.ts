@@ -106,14 +106,16 @@ it.effect("registers the exact fail-closed orchestration surface with factual de
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
     expect(server.tools.map(({ tool }) => tool.name).sort()).toEqual([
+      "delegate_task",
       "delete_scheduled_task",
-      "invoke_agent",
       "list_scheduled_tasks",
       "orchestrator_capabilities",
       "schedule_task",
       "t3_thread_list",
       "t3_thread_read",
       "t3_thread_wait",
+      "task_cancel",
+      "task_status",
       "update_scheduled_task",
     ]);
 

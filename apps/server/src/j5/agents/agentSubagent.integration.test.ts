@@ -29,6 +29,7 @@ import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { ScheduledTaskService } from "../../scheduledTasks/ScheduledTaskService.ts";
 import { BUILT_IN_AGENT_PERSONAS } from "./agentPersonas.ts";
+import { delegateTask } from "./agentDelegation.ts";
 import { invokeAgent } from "./agentInvocation.ts";
 
 const modelSelection = {
@@ -163,20 +164,19 @@ it.effect("persists the saved persona on a nested child and reuses that child on
         completedAt: null,
       },
     });
+    const scope = {
+      environmentId: EnvironmentId.make("environment"),
+      threadId,
+      providerInstanceId: modelSelection.instanceId,
+      providerSessionId: "session",
+      capabilities: new Set(["orchestration" as const]),
+      issuedAt: 1,
+    };
     const request = invokeAgent({
       personaId: "scout",
       task: "Return a short evidence brief.",
       clientRequestId: "same-request",
-    }).pipe(
-      Effect.provideService(McpInvocationContext, {
-        environmentId: EnvironmentId.make("environment"),
-        threadId,
-        providerInstanceId: modelSelection.instanceId,
-        providerSessionId: "session",
-        capabilities: new Set(["orchestration" as const]),
-        issuedAt: 1,
-      }),
-    );
+    }).pipe(Effect.provideService(McpInvocationContext, scope));
     const first = yield* request;
     const repeated = yield* request;
     assert.equal(first.childThreadId, repeated.childThreadId);
@@ -191,5 +191,30 @@ it.effect("persists the saved persona on a nested child and reuses that child on
     assert.equal(child.thread.runtimeMode, "approval-required");
     assert.equal(child.messages[0]?.text, "Return a short evidence brief.");
     assert.lengthOf(child.runs, 1);
+
+    // delegate_task with agent takes the same path; target or runtimeMode alongside it is refused.
+    const viaDelegate = yield* delegateTask({
+      task: "Return a short evidence brief.",
+      agent: "scout",
+      clientRequestId: "delegate-request",
+    }).pipe(Effect.provideService(McpInvocationContext, scope));
+    assert.equal(
+      (yield* orchestrator.getThreadProjection(viaDelegate.childThreadId)).thread
+        .agentPersonaAssignment?.personaId,
+      "scout",
+    );
+    const rejected = yield* delegateTask({
+      task: "Return a short evidence brief.",
+      agent: "scout",
+      runtimeMode: "full-access",
+    }).pipe(Effect.provideService(McpInvocationContext, scope), Effect.flip);
+    assert.equal(rejected.code, "invalid_request");
+    // Without agent it is upstream's plain child: no pinned assignment.
+    const plain = yield* delegateTask({ task: "Plain child work.", clientRequestId: "plain" }).pipe(
+      Effect.provideService(McpInvocationContext, scope),
+    );
+    const plainChild = yield* orchestrator.getThreadProjection(plain.childThreadId);
+    assert.equal(plainChild.thread.agentPersonaAssignment, undefined);
+    assert.equal(plainChild.thread.lineage.relationshipToParent, "subagent");
   }).pipe(Effect.provide(testLayer)),
 );

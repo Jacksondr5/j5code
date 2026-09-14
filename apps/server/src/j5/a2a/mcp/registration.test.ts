@@ -51,8 +51,8 @@ it.effect("registers the exact composed production J5 orchestration surface", ()
     assert.deepStrictEqual(server.tools.map(({ tool }) => tool.name).toSorted(), [
       "archive_agent",
       "clear_own_ask",
+      "delegate_task",
       "delete_scheduled_task",
-      "invoke_agent",
       "join_squadron",
       "list_participants",
       "list_scheduled_tasks",
@@ -65,6 +65,8 @@ it.effect("registers the exact composed production J5 orchestration surface", ()
       "t3_thread_list",
       "t3_thread_read",
       "t3_thread_wait",
+      "task_cancel",
+      "task_status",
       "update_scheduled_task",
     ]);
     const sendTool = server.tools.find(({ tool }) => tool.name === "send_message")?.tool;

@@ -20,8 +20,9 @@ describe("T3 orchestration provider instructions", () => {
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "expect_reply=true");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "open an Exchange");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "continue with other work");
+    // J5 re-declares delegate_task for saved agents; only its saved-agent use is advertised.
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`delegate_task` with agent=ID");
     for (const excluded of [
-      "delegate_task",
       "task_status",
       "task_cancel",
       "create_threads",
