@@ -50,6 +50,13 @@ export function createJ5EnvironmentAtoms<R, E>(
           Effect.flatMap((prepared) => J5Http.readOpenInboxCount(prepared, input.personId)),
         ),
     }),
+    // The Fleet page reads every connected environment's roster; it changes on the scale of turns.
+    fleet: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:fleet",
+      staleTimeMs: 30_000,
+      execute: (_input: Record<string, never>) =>
+        preparedConnection.pipe(Effect.flatMap(J5Http.readFleet)),
+    }),
     // Crew gates are read per environment like the inbox; a Captain on any connected server
     // reaches the human's bell and thread.
     crewProposals: createEnvironmentQueryAtomFamily(runtime, {

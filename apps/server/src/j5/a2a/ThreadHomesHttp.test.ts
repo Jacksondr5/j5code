@@ -9,6 +9,7 @@ import { ConnectionError, SqlError } from "effect/unstable/sql/SqlError";
 import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
 import { AgentCrewProposalService } from "./AgentCrewProposalService.ts";
 import { CrewProposalService } from "./CrewProposalService.ts";
+import { ParticipantPlacementService } from "./PlacementService.ts";
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as ServerConfig from "../../config.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -114,6 +115,7 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
         Layer.mock(AgentCrewInstanceService)({}),
         Layer.mock(AgentCrewProposalService)({}),
         Layer.mock(CrewProposalService)({}),
+        Layer.mock(ParticipantPlacementService)({}),
       ),
     ),
     Layer.provide(Layer.mock(ProjectService.ProjectService)({})),

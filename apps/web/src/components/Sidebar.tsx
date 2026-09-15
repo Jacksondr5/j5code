@@ -172,6 +172,7 @@ import {
   useThreadHomesScopeReadState,
   type ThreadHome,
 } from "../j5/squadron/ThreadHomesClient";
+import { SpawnedChildren } from "../j5/squadron/SpawnedChildren";
 import { ThreadCardIdentity } from "../j5/squadron/ThreadCardIdentity";
 import {
   ThreadWorktreeIndicator,
@@ -1709,6 +1710,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         </TooltipTrigger>
         {detailsTooltip}
       </Tooltip>
+      <SpawnedChildren thread={thread} />
     </li>
   );
 });
