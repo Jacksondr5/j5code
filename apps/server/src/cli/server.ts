@@ -2,7 +2,9 @@ import * as Effect from "effect/Effect";
 import { Command, GlobalFlag } from "effect/unstable/cli";
 
 import { ServerConfig, type StartupPresentation } from "../config.ts";
+import { resolveServiceLauncherMode } from "../cloud/serviceLauncherClient.ts";
 import { runServer } from "../server.ts";
+import { assertStateDirectoryAvailable } from "../serverRuntimeState.ts";
 import { type CliServerFlags, resolveServerConfig, sharedServerCommandFlags } from "./config.ts";
 
 export const runServerCommand = (
@@ -15,6 +17,10 @@ export const runServerCommand = (
   Effect.gen(function* () {
     const logLevel = yield* GlobalFlag.LogLevel;
     const config = yield* resolveServerConfig(flags, logLevel, options);
+    const launcher = yield* resolveServiceLauncherMode();
+    yield* assertStateDirectoryAvailable(config.serverRuntimeStatePath, {
+      launcherManaged: launcher.managed,
+    });
     return yield* runServer.pipe(Effect.provideService(ServerConfig, config));
   });
 

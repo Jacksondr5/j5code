@@ -2,6 +2,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import { writeFileStringAtomically } from "./atomicWrite.ts";
@@ -31,6 +32,18 @@ export class ServerRuntimeStateError extends Schema.TaggedErrorClass<ServerRunti
 ) {
   override get message(): string {
     return `Failed to ${this.operation} server runtime state at ${this.statePath}.`;
+  }
+}
+
+export class StateDirectoryAlreadyInUseError extends Schema.TaggedErrorClass<StateDirectoryAlreadyInUseError>()(
+  "StateDirectoryAlreadyInUseError",
+  {
+    stateDir: Schema.String,
+    pid: Schema.Int,
+  },
+) {
+  override get message(): string {
+    return `State directory '${this.stateDir}' is already in use by server pid ${this.pid}. Stop that server or pass a different --base-dir.`;
   }
 }
 
@@ -79,9 +92,13 @@ export const persistServerRuntimeState = (input: {
     ),
   );
 
-export const clearPersistedServerRuntimeState = (path: string) =>
+export const clearPersistedServerRuntimeState = (path: string, ownerPid?: number) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
+    if (ownerPid !== undefined) {
+      const state = yield* readPersistedServerRuntimeState(path);
+      if (Option.isNone(state) || state.value.pid !== ownerPid) return;
+    }
     yield* fs.remove(path, { force: true }).pipe(
       Effect.mapError(
         (cause) =>
@@ -170,3 +187,23 @@ export const readPersistedServerRuntimeState = (path: string) =>
         ),
     }),
   );
+
+export const assertStateDirectoryAvailable = (
+  statePath: string,
+  options: { readonly launcherManaged?: boolean } = {},
+) =>
+  Effect.gen(function* () {
+    if (options.launcherManaged) return;
+    const state = yield* readPersistedServerRuntimeState(statePath);
+    if (
+      Option.isSome(state) &&
+      state.value.pid !== process.pid &&
+      isProcessAlive(state.value.pid)
+    ) {
+      const path = yield* Path.Path;
+      return yield* new StateDirectoryAlreadyInUseError({
+        stateDir: path.dirname(statePath),
+        pid: state.value.pid,
+      });
+    }
+  });

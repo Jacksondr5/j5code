@@ -12,6 +12,9 @@ import * as Schema from "effect/Schema";
 import * as ServerRuntimeState from "./serverRuntimeState.ts";
 
 const isServerRuntimeStateError = Schema.is(ServerRuntimeState.ServerRuntimeStateError);
+const isStateDirectoryAlreadyInUseError = Schema.is(
+  ServerRuntimeState.StateDirectoryAlreadyInUseError,
+);
 
 interface CapturedLog {
   readonly message: unknown;
@@ -181,6 +184,69 @@ describe("serverRuntimeState", () => {
         assert.equal(error.message, `Failed to persist server runtime state at ${statePath}.`);
         assert.deepInclude(error.cause, { _tag: "PlatformError" });
       }
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("blocks live unmanaged owners but allows managed takeover and stale state", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-runtime-state-test-",
+      });
+      const statePath = path.join(root, "owned", "server-runtime.json");
+      const otherStatePath = path.join(root, "other", "server-runtime.json");
+      const liveState: ServerRuntimeState.PersistedServerRuntimeState = {
+        version: 1,
+        pid: 1,
+        port: 4_971,
+        origin: "http://127.0.0.1:4971",
+        startedAt: "2026-06-20T00:00:00.000Z",
+      };
+      yield* ServerRuntimeState.persistServerRuntimeState({ path: statePath, state: liveState });
+
+      const blocked = yield* ServerRuntimeState.assertStateDirectoryAvailable(statePath).pipe(
+        Effect.flip,
+      );
+      assert.isTrue(isStateDirectoryAlreadyInUseError(blocked));
+      assert.include(blocked.message, "pid 1");
+      assert.include(blocked.message, "--base-dir");
+
+      yield* ServerRuntimeState.assertStateDirectoryAvailable(statePath, {
+        launcherManaged: true,
+      });
+      yield* ServerRuntimeState.assertStateDirectoryAvailable(otherStatePath);
+      yield* ServerRuntimeState.persistServerRuntimeState({
+        path: statePath,
+        state: { ...liveState, pid: 2_147_483_647 },
+      });
+      yield* ServerRuntimeState.assertStateDirectoryAvailable(statePath);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("only clears runtime state owned by the releasing process", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-runtime-state-test-",
+      });
+      const statePath = path.join(root, "server-runtime.json");
+      yield* ServerRuntimeState.persistServerRuntimeState({
+        path: statePath,
+        state: {
+          version: 1,
+          pid: 123,
+          port: 4_971,
+          origin: "http://127.0.0.1:4971",
+          startedAt: "2026-06-20T00:00:00.000Z",
+        },
+      });
+
+      yield* ServerRuntimeState.clearPersistedServerRuntimeState(statePath, 456);
+      assert.isTrue(yield* fileSystem.exists(statePath));
+      yield* ServerRuntimeState.clearPersistedServerRuntimeState(statePath, 123);
+      assert.isFalse(yield* fileSystem.exists(statePath));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });
