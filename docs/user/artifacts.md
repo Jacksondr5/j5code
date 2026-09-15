@@ -23,7 +23,8 @@ an agent creates, edits, or removes a project artifact.
 
 When a provider emits a structured proposed plan, J5 Code saves the completed plan automatically as
 the shared `artifacts/plan.md`. Agents use J5 Code's artifact tools to create and read other planning
-documents. Artifacts are shared by every agent working in the project rather than partitioned by
+documents. Files under `handoffs/` are saved-agent handoffs and keep every version inside the one
+file, newest first, when an agent rewrites them; every other artifact is replaced on write. Artifacts are shared by every agent working in the project rather than partitioned by
 thread. The `artifacts/` prefix shown in chat is a logical path and does not create a directory in
 the repository, so no Git ignore rule is needed.
 

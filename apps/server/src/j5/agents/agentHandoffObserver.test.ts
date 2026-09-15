@@ -61,6 +61,7 @@ const fakeArtifacts = Layer.effect(
       list: () => Ref.get(entries),
       read: () => unsupported,
       write: () => unsupported,
+      writeVersioned: () => unsupported,
       exportPlan: () => unsupported,
       watch: () => {
         throw new Error("not used");
