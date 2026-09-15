@@ -13,10 +13,24 @@ describe("artifact previews", () => {
   it("refreshes the file list and selected content when the artifact watcher emits", () => {
     expect(source).toContain("artifactEnvironment.changes");
     expect(source).toContain("setRefreshGeneration((generation) => generation + 1)");
-    expect(source).toContain("[refreshGeneration, selectedEnvironmentId, selectedProjectId]");
     expect(source).toContain(
-      "[refreshGeneration, selectedEnvironmentId, selectedPath, selectedProjectId]",
+      "[connected, refreshGeneration, selectedEnvironmentId, selectedProjectId]",
     );
+    // The body re-reads on its own file's size or mtime, not on every directory change.
+    expect(source).toContain(
+      "[connected, selectedEnvironmentId, selectedPath, selectedProjectId, selectedRevision]",
+    );
+    expect(source).not.toContain(
+      "[connected, refreshGeneration, selectedEnvironmentId, selectedPath",
+    );
+  });
+
+  it("holds the environment connection itself and waits for it before fetching", () => {
+    // Without a subscriber the prepared-connection atom reads as none, so the standalone route
+    // failed every list with "The project environment is not connected."
+    expect(source).toContain("usePreparedConnection(selectedEnvironmentId)");
+    expect(source).toContain("if (!connected) {");
+    expect(source).toContain("Connecting to the environment…");
   });
 
   it("renders HTML in an isolated transparent iframe", () => {

@@ -59,7 +59,8 @@ const operationFailure = (cause: unknown) => {
   const status =
     tag === "ArtifactProjectUnavailableError"
       ? 404
-      : tag === "ArtifactWorkspaceError" && detail.includes("does not exist")
+      : tag === "ArtifactWorkspaceError" &&
+          (cause as { readonly reason?: string }).reason === "not_found"
         ? 404
         : tag === "ArtifactWorkspaceError"
           ? 409

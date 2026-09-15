@@ -7,6 +7,7 @@ import {
   FolderArchiveIcon,
   RefreshCwIcon,
 } from "lucide-react";
+import * as Option from "effect/Option";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import ChatMarkdown from "../../components/ChatMarkdown";
@@ -18,9 +19,10 @@ import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
 import { useProjects } from "../../state/entities";
-import { artifactEnvironment } from "../../state/artifacts";
 import { useEnvironmentQuery } from "../../state/query";
+import { usePreparedConnection } from "../../state/session";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
+import { artifactEnvironment } from "./artifactChanges";
 import { listArtifacts, readArtifact } from "./artifactClient";
 import { nextArtifactRefreshGeneration } from "./artifactRefresh";
 
@@ -93,6 +95,17 @@ export function ArtifactsPage({
   const selectedProjectId = selectedProject?.id ?? null;
   const selectedWorkspaceRoot = selectedProject?.workspaceRoot;
   const selectedKey = selectedProject === null ? null : projectKey(selectedProject);
+  // The artifact client reads the environment's prepared connection from an atom that only holds
+  // a value while something subscribes to it. Inside a thread the chat surface keeps it mounted;
+  // on the standalone route this page is the only subscriber, so it must hold the subscription
+  // itself and wait for the connection before fetching, or every read fails as "not connected".
+  const connected = Option.isSome(usePreparedConnection(selectedEnvironmentId));
+  // The preview re-reads only when its own file changed: any other artifact's edit refreshes the
+  // list, and the list carries each file's size and mtime, so those two fields are the signal.
+  const selectedEntry = entries.find((entry) => entry.path === selectedPath);
+  // Re-read the body when its own file changed, or when the person asks; modifiedAt may be null
+  // and a same-size rewrite is invisible to the size, so the refresh button must still reach here.
+  const selectedRevision = `${selectedEntry?.modifiedAt ?? ""}:${selectedEntry?.byteLength ?? ""}:${refreshGeneration}`;
   const artifactChange = useEnvironmentQuery(
     selectedEnvironmentId !== null && selectedProjectId !== null && listedProjectKey === selectedKey
       ? artifactEnvironment.changes({
@@ -115,6 +128,11 @@ export function ArtifactsPage({
       setSelectedPath(null);
       setListedProjectKey(null);
       setListState("ready");
+      return;
+    }
+    if (!connected) {
+      setListState("loading");
+      setError(null);
       return;
     }
     let current = true;
@@ -146,7 +164,7 @@ export function ArtifactsPage({
     return () => {
       current = false;
     };
-  }, [refreshGeneration, selectedEnvironmentId, selectedProjectId]);
+  }, [connected, refreshGeneration, selectedEnvironmentId, selectedProjectId]);
 
   useEffect(() => {
     setRefreshGeneration((generation) =>
@@ -155,7 +173,12 @@ export function ArtifactsPage({
   }, [artifactChange.data]);
 
   useEffect(() => {
-    if (selectedEnvironmentId === null || selectedProjectId === null || selectedPath === null) {
+    if (
+      !connected ||
+      selectedEnvironmentId === null ||
+      selectedProjectId === null ||
+      selectedPath === null
+    ) {
       setContent(null);
       setContentState("idle");
       return;
@@ -182,7 +205,7 @@ export function ArtifactsPage({
     return () => {
       current = false;
     };
-  }, [refreshGeneration, selectedEnvironmentId, selectedPath, selectedProjectId]);
+  }, [connected, selectedEnvironmentId, selectedPath, selectedProjectId, selectedRevision]);
 
   const refresh = useCallback(() => setRefreshGeneration((generation) => generation + 1), []);
   const selectedExtension = selectedPath === null ? "" : extensionOf(selectedPath);
@@ -314,6 +337,11 @@ export function ArtifactsPage({
                   </button>
                 );
               })}
+              {listState === "loading" && !connected && selectedProject !== null ? (
+                <p className="px-2 py-6 text-sm text-muted-foreground">
+                  Connecting to the environment…
+                </p>
+              ) : null}
               {listState === "ready" && entries.length === 0 && selectedProject !== null ? (
                 <p className="px-2 py-6 text-sm text-muted-foreground">
                   Planning documents created in <code>artifacts/</code> will appear here.
