@@ -1,9 +1,13 @@
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { writeFileStringAtomically } from "./atomicWrite.ts";
 import type * as ServerConfig from "./config.ts";
@@ -39,11 +43,11 @@ export class StateDirectoryAlreadyInUseError extends Schema.TaggedErrorClass<Sta
   "StateDirectoryAlreadyInUseError",
   {
     stateDir: Schema.String,
-    pid: Schema.Int,
+    pid: Schema.optional(Schema.Int),
   },
 ) {
   override get message(): string {
-    return `State directory '${this.stateDir}' is already in use by server pid ${this.pid}. Stop that server or pass a different --base-dir.`;
+    return `State directory '${this.stateDir}' is already in use by ${this.pid === undefined ? "another server (PID not yet available)" : `server pid ${this.pid}`}. Stop that server or pass a different --base-dir.`;
   }
 }
 
@@ -136,7 +140,7 @@ export const isProcessAlive = (pid: number): boolean => {
   }
 };
 
-export const readPersistedServerRuntimeState = (path: string) =>
+const readServerRuntimeState = (path: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const raw = yield* fs.readFileString(path).pipe(
@@ -174,7 +178,10 @@ export const readPersistedServerRuntimeState = (path: string) =>
           }),
       ),
     );
-  }).pipe(
+  });
+
+export const readPersistedServerRuntimeState = (path: string) =>
+  readServerRuntimeState(path).pipe(
     Effect.catchTags({
       ServerRuntimeStateError: (error) =>
         Effect.logWarning(error.message).pipe(
@@ -188,22 +195,46 @@ export const readPersistedServerRuntimeState = (path: string) =>
     }),
   );
 
-export const assertStateDirectoryAvailable = (
-  statePath: string,
-  options: { readonly launcherManaged?: boolean } = {},
-) =>
-  Effect.gen(function* () {
-    if (options.launcherManaged) return;
-    const state = yield* readPersistedServerRuntimeState(statePath);
-    if (
-      Option.isSome(state) &&
-      state.value.pid !== process.pid &&
-      isProcessAlive(state.value.pid)
-    ) {
-      const path = yield* Path.Path;
-      return yield* new StateDirectoryAlreadyInUseError({
-        stateDir: path.dirname(statePath),
-        pid: state.value.pid,
-      });
-    }
-  });
+/** Hold ownership until the enclosing server scope has finished shutting down. */
+export const claimStateDirectory = Effect.fn("claimStateDirectory")(function* (statePath: string) {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  const stateDir = path.dirname(statePath);
+  yield* fs.makeDirectory(stateDir, { recursive: true });
+  const filename = path.join(stateDir, "server-ownership.sqlite");
+  const clientLayer =
+    process.versions.bun !== undefined
+      ? (yield* Effect.promise(() => import("@effect/sql-sqlite-bun/SqliteClient"))).layer({
+          filename,
+          disableWAL: true,
+        })
+      : (yield* Effect.promise(() => import("@t3tools/shared/nodeSqliteClient"))).layer({
+          filename,
+        });
+  const context = yield* Layer.build(clientLayer);
+  const sql = Context.get(context, SqlClient.SqlClient);
+  yield* Effect.gen(function* () {
+    yield* sql`PRAGMA busy_timeout = 0`;
+    yield* sql`PRAGMA journal_mode = DELETE`;
+    // Closing this dedicated connection releases the transaction, including on startup failure.
+    // Keep the file: unlinking it could let another process lock a different inode.
+    yield* sql`BEGIN EXCLUSIVE`;
+  }).pipe(
+    Effect.mapError((error) => {
+      // node:sqlite exposes errcode; the shared classifier currently only reads errno/code.
+      const cause = error.reason.cause;
+      const code =
+        Predicate.hasProperty(cause, "errcode") && typeof cause.errcode === "number"
+          ? cause.errcode & 0xff
+          : undefined;
+      return error.reason._tag === "LockTimeoutError" || code === 5 || code === 6
+        ? new StateDirectoryAlreadyInUseError({ stateDir })
+        : error;
+    }),
+  );
+  // Older servers do not claim the SQLite lock, so retain their runtime PID guard.
+  const state = yield* readServerRuntimeState(statePath);
+  if (Option.isSome(state) && state.value.pid !== process.pid && isProcessAlive(state.value.pid)) {
+    return yield* new StateDirectoryAlreadyInUseError({ stateDir, pid: state.value.pid });
+  }
+});

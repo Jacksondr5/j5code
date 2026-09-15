@@ -26,7 +26,12 @@ export async function launchCreatePlaybook(input: {
   readonly project: PlaybookProject | null;
   readonly openThread: (
     projectRef: ReturnType<typeof scopeProjectRef>,
-    options: { readonly envMode: DraftThreadEnvMode },
+    options: {
+      readonly envMode: DraftThreadEnvMode;
+      readonly branch: null;
+      readonly worktreePath: null;
+      readonly startFromOrigin: false;
+    },
   ) => Promise<{ readonly draftId: DraftId } | null>;
   readonly draftHasUserContent: (draftId: DraftId) => boolean;
   readonly setPrompt: (draftId: DraftId, prompt: string) => void;
@@ -35,7 +40,7 @@ export async function launchCreatePlaybook(input: {
 
   const opened = await input.openThread(
     scopeProjectRef(input.project.environmentId, input.project.id),
-    { envMode: "local" },
+    { envMode: "local", branch: null, worktreePath: null, startFromOrigin: false },
   );
   if (opened !== null && !input.draftHasUserContent(opened.draftId)) {
     input.setPrompt(opened.draftId, CREATE_PLAYBOOK_PROMPT);

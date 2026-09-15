@@ -44,7 +44,7 @@ describe("Create Playbook launcher", () => {
 
     expect(openThread).toHaveBeenCalledWith(
       { environmentId: localEnvironmentId, projectId: ProjectId.make("j5code") },
-      { envMode: "local" },
+      { envMode: "local", branch: null, worktreePath: null, startFromOrigin: false },
     );
     expect(setPrompt).toHaveBeenCalledWith(draftId, CREATE_PLAYBOOK_PROMPT);
   });

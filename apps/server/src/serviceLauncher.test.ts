@@ -122,7 +122,7 @@ it.layer(NodeServices.layer)("service state persistence", (it) => {
     }),
   );
 
-  it.effect("commits only after the trial reports prepared", () =>
+  it.effect("serializes managed ownership through trial commit", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -134,6 +134,10 @@ it.layer(NodeServices.layer)("service state persistence", (it) => {
       // @effect-diagnostics-next-line preferSchemaOverJson:off - embeds a path in fake child source.
       const encodedDatabasePath = JSON.stringify(databasePath);
       const childSource = `
+import { DatabaseSync } from "node:sqlite";
+import { dirname, join } from "node:path";
+const ownership = new DatabaseSync(join(dirname(${encodedDatabasePath}), "server-ownership.sqlite"));
+ownership.exec("PRAGMA busy_timeout = 0; PRAGMA journal_mode = DELETE; BEGIN EXCLUSIVE");
 const context = JSON.parse(process.env.T3_SERVICE_LAUNCHER_CONTEXT);
 if (context.update?.status === "pending") {
   process.send({ type: "prepared", updateId: context.update.id });
