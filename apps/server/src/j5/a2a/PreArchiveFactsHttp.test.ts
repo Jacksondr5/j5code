@@ -5,6 +5,8 @@ import * as Layer from "effect/Layer";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
+import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
+import { ArchiveCrewService } from "./ArchiveCrewService.ts";
 import { A2AArchiveFacts, A2AArchiveFactsError } from "./ArchiveFactsService.ts";
 import { PRE_ARCHIVE_FACTS_PATH, preArchiveFactsHttpRouteLayer } from "./PreArchiveFactsHttp.ts";
 
@@ -43,8 +45,46 @@ it("returns the pre-archive facts without turning a failed read into a clean arc
         scopes: [AuthOrchestrationReadScope],
       }),
   });
+  const archiveCrews = Layer.mock(ArchiveCrewService)({
+    readCaptainFacts: (input) =>
+      Effect.succeed([
+        {
+          instance: {
+            id: "crew:pre-archive-http",
+            squadronId: input.squadronId,
+            captainParticipantId: input.captainParticipantId,
+            captainThreadId: threadId,
+            displayName: "Review Pair",
+            brief: "Review the release.",
+            version: 1,
+            createdAt: "2026-09-14T10:00:00.000Z",
+            archivedAt: null,
+            members: [],
+          },
+          facts: {
+            members: [
+              {
+                seatName: "critic",
+                participantId: "agent:critic" as never,
+                threadId: ThreadId.make("thread:critic"),
+                alreadyArchived: false,
+                facts: {
+                  openExchanges: [],
+                  runningTurn: { runId: "run:critic" as never, status: "running" },
+                },
+              },
+            ],
+          },
+        },
+      ]),
+  });
+  const crewInstances = Layer.mock(AgentCrewInstanceService)({
+    findMembership: () => Effect.succeed(null),
+  });
   const routes = preArchiveFactsHttpRouteLayer.pipe(
     Layer.provide(archiveFacts),
+    Layer.provide(archiveCrews),
+    Layer.provide(crewInstances),
     Layer.provideMerge(auth),
     Layer.provide(HttpServer.layerServices),
   );
@@ -70,6 +110,17 @@ it("returns the pre-archive facts without turning a failed read into a clean arc
       archived: false,
       openExchanges: [],
       placementSubtree: { state: "unknown", reason: "placement-query-failed" },
+      // A Captain's live Crews ride along seat by seat: the Captain is never archived alone.
+      liveCrews: [
+        {
+          crewInstanceId: "crew:pre-archive-http",
+          crewName: "Review Pair",
+          seats: [
+            { seat: "critic", participantId: "agent:critic", runningTurn: true, openAsks: 0 },
+          ],
+        },
+      ],
+      crewSeat: null,
     });
 
     failRead = true;

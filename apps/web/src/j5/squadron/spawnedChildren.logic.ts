@@ -1,4 +1,9 @@
-import { formatCrewStateSummary, summarizeCrewState, type CrewSeatThread } from "../crew/crewState";
+import {
+  crewHasRunningSeat,
+  formatCrewStateSummary,
+  summarizeCrewState,
+  type CrewSeatThread,
+} from "../crew/crewState";
 import type { SpawnedChild } from "./SpawnedChildrenClient";
 
 export interface SpawnedChildThread extends CrewSeatThread {
@@ -42,6 +47,21 @@ export const spawnedChildrenSummary = <T extends SpawnedChildThread>(
   if (!allSeats) return `${count} ${count === 1 ? "agent" : "agents"}`;
   const state = formatCrewStateSummary(summarizeCrewState(rows.map(({ thread }) => thread)));
   return state === null ? `${count} crew` : `${count} crew · ${state}`;
+};
+
+/**
+ * The Crew a Stop control on this row would stop: every live child is a seat of the same Crew
+ * and at least one has a turn to interrupt. Mixed rows and idle Crews offer nothing.
+ */
+export const stoppableCrew = <T extends SpawnedChildThread>(
+  rows: ReadonlyArray<SpawnedChildRow<T>>,
+): { readonly crewInstanceId: string; readonly crewName: string } | null => {
+  const first = rows[0]?.child.seat;
+  if (first === undefined || first === null) return null;
+  if (!rows.every(({ child }) => child.seat?.crewInstanceId === first.crewInstanceId)) return null;
+  return crewHasRunningSeat(summarizeCrewState(rows.map(({ thread }) => thread)))
+    ? { crewInstanceId: first.crewInstanceId, crewName: first.crewName }
+    : null;
 };
 
 const STORAGE_KEY = "j5:sidebar:spawned-children:expanded";

@@ -2,7 +2,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 
 import { resolveThreadStatusPill } from "../../components/Sidebar.logic";
 import { Badge } from "../../components/ui/badge";
@@ -10,12 +10,14 @@ import { cn } from "../../lib/utils";
 import { useThreadShells } from "../../state/entities";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
+import { stopCrew } from "../crew/crewStopClient";
 import { useSpawnedChildren, type SpawnedChild } from "./SpawnedChildrenClient";
 import {
   readExpandedSpawnParents,
   selectSpawnedChildRows,
   spawnedChildrenNeedAttention,
   spawnedChildrenSummary,
+  stoppableCrew,
   writeExpandedSpawnParents,
 } from "./spawnedChildren.logic";
 
@@ -84,6 +86,8 @@ function SpawnedChildrenRows(props: {
     [navigate],
   );
   const summary = spawnedChildrenSummary(rows);
+  const stoppable = stoppableCrew(rows);
+  const [stopping, setStopping] = useState(false);
   if (summary === null) return null;
   const isOpen = expandedSet.has(props.thread.id);
   const attention = spawnedChildrenNeedAttention(rows);
@@ -111,6 +115,24 @@ function SpawnedChildrenRows(props: {
             />
           ) : null}
         </button>
+        {stoppable !== null ? (
+          // The person's Stop: interrupts every running seat of this Crew, retires nothing.
+          <button
+            type="button"
+            aria-label={`Stop crew ${stoppable.crewName}`}
+            disabled={stopping}
+            className="shrink-0 rounded border border-border/60 px-1.5 py-px text-[10px] leading-4 text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            onClick={(event) => {
+              event.stopPropagation();
+              setStopping(true);
+              void stopCrew(props.thread.environmentId, stoppable.crewInstanceId)
+                .catch(() => undefined)
+                .finally(() => setStopping(false));
+            }}
+          >
+            Stop
+          </button>
+        ) : null}
       </div>
       {isOpen ? (
         <ul className="mt-0.5 flex flex-col gap-0.5 border-s border-border/60 ps-2">

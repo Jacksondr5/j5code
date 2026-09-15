@@ -1,7 +1,9 @@
 import * as Layer from "effect/Layer";
 
 import { agentCrewReadsHttpRouteLayer } from "./AgentCrewReadsHttp.ts";
+import { crewArchiveHttpRouteLayer } from "./CrewArchiveHttp.ts";
 import { crewProposalsHttpRouteLayer } from "./CrewProposalsHttp.ts";
+import { crewStopHttpRouteLayer } from "./CrewStopHttp.ts";
 import { fleetReadsHttpRouteLayer } from "./FleetReadsHttp.ts";
 import { spawnedChildrenHttpRouteLayer } from "./SpawnedChildrenHttp.ts";
 import {
@@ -25,7 +27,9 @@ import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.
  */
 export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
   agentCrewReadsHttpRouteLayer,
+  crewArchiveHttpRouteLayer,
   crewProposalsHttpRouteLayer,
+  crewStopHttpRouteLayer,
   fleetReadsHttpRouteLayer,
   spawnedChildrenHttpRouteLayer,
   artifactHttpRouteLayer,

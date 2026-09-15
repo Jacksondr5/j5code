@@ -198,6 +198,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(toolNames).toContain("list_participants");
       expect(toolNames.toSorted()).toEqual([
         "archive_agent",
+        "archive_crew",
         "clear_own_ask",
         "delegate_task",
         "delete_scheduled_task",
@@ -229,6 +230,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "send_message",
         "spawn_agent",
         "stop_agent",
+        "stop_crew",
         "t3_thread_list",
         "t3_thread_read",
         "t3_worktree_handoff",

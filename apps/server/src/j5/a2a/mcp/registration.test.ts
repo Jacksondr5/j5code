@@ -10,6 +10,8 @@ import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts
 import { ScheduledTaskService } from "../../../scheduledTasks/ScheduledTaskService.ts";
 import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
 import { ArchiveAgentService } from "../ArchiveAgentService.ts";
+import { ArchiveCrewService } from "../ArchiveCrewService.ts";
+import { CrewStopService } from "../CrewStopService.ts";
 import { CrewProposalService } from "../CrewProposalService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
@@ -40,6 +42,8 @@ const Dependencies = Layer.mergeAll(
   Layer.mock(ArchiveAgentService)({}),
   Layer.mock(SquadronJoinService)({}),
   Layer.mock(SquadronProjectReferences)({}),
+  Layer.mock(ArchiveCrewService)({}),
+  Layer.mock(CrewStopService)({}),
   Layer.mock(CrewProposalService)({}),
   NodeServices.layer,
 );
@@ -54,6 +58,7 @@ it.effect("registers the exact composed production J5 orchestration surface", ()
     const server = yield* McpServer.McpServer;
     assert.deepStrictEqual(server.tools.map(({ tool }) => tool.name).toSorted(), [
       "archive_agent",
+      "archive_crew",
       "clear_own_ask",
       "delegate_task",
       "delete_scheduled_task",
@@ -69,6 +74,7 @@ it.effect("registers the exact composed production J5 orchestration surface", ()
       "send_message",
       "spawn_agent",
       "stop_agent",
+      "stop_crew",
       "t3_thread_list",
       "t3_thread_read",
       "task_cancel",

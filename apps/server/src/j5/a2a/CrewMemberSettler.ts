@@ -22,6 +22,7 @@ import {
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { ArtifactWorkspace } from "../artifacts/ArtifactWorkspace.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
+import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
 
@@ -153,6 +154,7 @@ const makeLayer = (daemon: boolean) =>
     Effect.gen(function* () {
       const threads = yield* ThreadManagement.ThreadManagementService;
       const crews = yield* AgentCrewInstanceService;
+      const cascade = yield* CrewCaptainArchiveCascade;
       const workspace = yield* ArtifactWorkspace;
       const agents = yield* makeAgentPersonaLibrary;
       const sql = yield* SqlClient.SqlClient;
@@ -315,8 +317,11 @@ const makeLayer = (daemon: boolean) =>
           // sequence rather than from the daemon's start.
           return yield* Effect.forever(
             Stream.suspend(() => threads.streamStoredEventsFrom({ afterSequence })).pipe(
+              // One stream serves both Crew reactions: seats settling, and a Captain's archive
+              // retiring its Crews (CrewCaptainArchiveCascade).
               Stream.runForEach((event) =>
                 handleStoredEvent(event).pipe(
+                  Effect.andThen(cascade.handleStoredEvent(event)),
                   Effect.tap(() => Effect.sync(() => (afterSequence = event.sequence))),
                 ),
               ),

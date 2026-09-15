@@ -4,7 +4,13 @@ import type { FleetResponse, FleetSquadron } from "@t3tools/contracts/j5";
 
 import { refreshCrewMemberships } from "../squadron/CrewMembershipsClient";
 import { refreshSpawnedChildren } from "../squadron/SpawnedChildrenClient";
-import { fleetQueryAtom, fleetSourcesAtom, refreshJ5Sources } from "../state";
+import {
+  fleetDetailQueryAtom,
+  fleetDetailSourcesAtom,
+  fleetQueryAtom,
+  fleetSourcesAtom,
+  refreshJ5Sources,
+} from "../state";
 import { createVisibleRefreshHook } from "../useVisibleRefresh";
 
 export type { FleetAgent, FleetCrew, FleetResponse, FleetSquadron } from "@t3tools/contracts/j5";
@@ -29,16 +35,22 @@ export const mergeFleetSources = (
     })),
   );
 
+/** The page's read, retired Crews and rosters included. */
 export const refreshFleet = () =>
-  refreshJ5Sources(fleetSourcesAtom, fleetQueryAtom, { force: true });
+  refreshJ5Sources(fleetDetailSourcesAtom, fleetDetailQueryAtom, { force: true });
 
 /**
- * The rail badge and the page share this one foreground poll; the sidebar's Crew chips and
- * children re-read on the same cadence, so a Crew change reaches every
+ * The always-mounted rail badge polls the live roster only (no retired Crews, no rosters); the
+ * sidebar's Crew chips and children re-read on the same cadence, so a Crew change reaches every
  * surface within one poll without a full re-read on each shells change.
  */
 export const useFleetRefresh = createVisibleRefreshHook(() => {
   void refreshJ5Sources(fleetSourcesAtom, fleetQueryAtom);
   refreshCrewMemberships();
   refreshSpawnedChildren();
+}, FLEET_POLL_INTERVAL_MS);
+
+/** The Fleet page's own poll while it is open; retired Crews ride only here. */
+export const useFleetDetailRefresh = createVisibleRefreshHook(() => {
+  void refreshJ5Sources(fleetDetailSourcesAtom, fleetDetailQueryAtom);
 }, FLEET_POLL_INTERVAL_MS);

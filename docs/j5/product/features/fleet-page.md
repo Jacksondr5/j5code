@@ -89,6 +89,11 @@ The Fleet page is **not** the inbox: it never demands a reply. It is **not** a p
 
 26. The Squadron list shows each Squadron's measured cost, and a Squadron's page shows what each of its agents contributed.
 
+### Crews
+
+27. A Crew's header offers Stop crew while a seat is running and Archive crew always; Archive crew shows the seats with their running turns and open asks before retiring the Crew as a unit ([Crews](crews.md) AC17, AC21).
+28. A Squadron's retired Crews are listed, collapsed, beneath its agents with the brief, the roster snapshot (seat, agent, who approved it and why, the version it joined at), when it retired, and a way to the Captain's thread; nothing about a retired Crew is inferred ([Crews](crews.md) AC20).
+
 ## Scenarios
 
 - **Reading one Squadron.** The user selects Billing Migration on the page's Squadron list. The coordinator agent is the first row; the two builders it spawned sit indented beneath it in the order they were created, each showing status, owed and awaited asks, and last activity. Clicking a builder opens its thread. (AC6, AC8, AC9, AC12, AC14)

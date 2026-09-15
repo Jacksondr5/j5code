@@ -1,4 +1,4 @@
-import type { FleetAgent, FleetSquadron } from "./fleetClient";
+import type { FleetAgent, FleetCrew, FleetSquadron } from "./fleetClient";
 
 /** One rendered row of the Roster tree. Crew members hang under their Captain as one unit. */
 export interface FleetRow {
@@ -86,6 +86,15 @@ export function buildFleetTree(squadron: FleetSquadron): ReadonlyArray<FleetNode
   }
   return roots;
 }
+
+/**
+ * Retired Crews of a Squadron, newest retirement first. Their roster snapshot stays readable so
+ * whoever proposes a successor can start from the brief and the approved seats (Crews AC20).
+ */
+export const retiredCrews = (squadron: FleetSquadron): ReadonlyArray<FleetCrew> =>
+  squadron.crews
+    .filter((crew) => crew.archivedAt !== null)
+    .toSorted((left, right) => (right.archivedAt ?? "").localeCompare(left.archivedAt ?? ""));
 
 /** Roster alert badge: measured "needs a human" facts only, so nothing here is guessed. */
 export const countFleetAlerts = (squadrons: ReadonlyArray<FleetSquadron>) =>
