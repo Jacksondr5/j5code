@@ -1,6 +1,6 @@
 import type { PlaybookEntry } from "@j5/playbook-contracts/sidebar";
 import { Link, useLocation, useNavigate, useSearch } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -24,8 +24,20 @@ function PlaybookSearchInput({
   readonly onCommit: (value: string) => void;
 }) {
   const [value, setValue] = useState(initialValue);
+  const lastCommitted = useRef(initialValue);
+
   useEffect(() => {
-    const timeout = window.setTimeout(() => onCommit(value.trim()), 200);
+    if (initialValue !== lastCommitted.current) {
+      lastCommitted.current = initialValue;
+      setValue(initialValue);
+    }
+  }, [initialValue]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      lastCommitted.current = value.trim();
+      onCommit(value.trim());
+    }, 200);
     return () => window.clearTimeout(timeout);
   }, [onCommit, value]);
   return (
@@ -173,11 +185,7 @@ export function RunsPage() {
           </label>
           <label className="min-w-48 flex-1 text-sm">
             Search
-            <PlaybookSearchInput
-              initialValue={search.q ?? ""}
-              key={search.q ?? ""}
-              onCommit={setQuery}
-            />
+            <PlaybookSearchInput initialValue={search.q ?? ""} onCommit={setQuery} />
           </label>
           <label className="text-sm">
             Status
