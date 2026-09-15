@@ -527,7 +527,7 @@ const handlers = {
             thread_id: row.participant.kind === "agent" ? row.participant.threadId : null,
             provenance: projectProvenance(
               placement?.provenance ??
-                (row.participant.kind === "human"
+                (row.participant.kind !== "agent"
                   ? ({ kind: "not-applicable" } as const)
                   : ({ kind: "unrecorded" } as const)),
             ),
@@ -535,7 +535,9 @@ const handlers = {
             display_name:
               row.participant.kind === "agent"
                 ? (titleByThreadId.get(row.participant.threadId) ?? null)
-                : null,
+                : row.participant.kind === "machine"
+                  ? row.participant.name
+                  : null,
           };
         }),
       };

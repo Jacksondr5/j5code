@@ -20,6 +20,9 @@ import {
   makeClientReadsHttpRouteLayer,
 } from "./ClientReadsHttp.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
+import { MachineParticipantService } from "./MachineParticipantService.ts";
+import { RosterService } from "./RosterService.ts";
+import { A2ASendService } from "./SendService.ts";
 import { A2AHumanPersonIdError } from "./HumanInboxService.ts";
 import { A2AHumanInbox } from "./HumanInboxService.ts";
 import { A2ALocalOperatorNotFoundError } from "./HumanPersonRegistry.ts";
@@ -331,6 +334,9 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
     ),
     Layer.provide(Layer.mock(A2AHumanInbox)({})),
     Layer.provide(Layer.mock(A2ADeliveryWorker)({})),
+    Layer.provide(Layer.mock(A2ASendService)({})),
+    Layer.provide(Layer.mock(MachineParticipantService)({})),
+    Layer.provide(Layer.mock(RosterService)({})),
     Layer.provide(Layer.mock(A2ALedger)({})),
     Layer.provide(Layer.mock(SquadronProjectReferences)({})),
     Layer.provide(Layer.mock(ProjectService.ProjectService)({})),

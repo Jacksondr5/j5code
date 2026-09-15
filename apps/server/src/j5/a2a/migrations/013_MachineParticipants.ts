@@ -1,0 +1,27 @@
+import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+
+// A machine participant is a registered non-agent sender (a cron job, a
+// watchdog, a shell script) homed in one Squadron. It sends plain messages and
+// never receives; it has no thread, so it never enters the agent-only
+// membership projection. The ledger's `participant.joined` event stays the
+// source of truth; this table is the projection the send path reads.
+export default Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+
+  yield* sql`
+    CREATE TABLE j5_a2a_machine_participant (
+      participant_id TEXT PRIMARY KEY CHECK (participant_id LIKE 'machine:%'),
+      squadron_id TEXT NOT NULL,
+      name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+      joined_seq INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (squadron_id) REFERENCES j5_a2a_squadron(id) ON DELETE CASCADE
+    )
+  `;
+
+  yield* sql`
+    CREATE INDEX j5_a2a_machine_participant_squadron_idx
+    ON j5_a2a_machine_participant(squadron_id, participant_id)
+  `;
+});

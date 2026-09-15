@@ -57,9 +57,11 @@ There are three kinds of message.
 
 ## Participants
 
-A participant is anything that can send and receive over the ledger: an agent with a Squadron home, or a person. People are global — one person id, known across every Squadron on the server — and nothing anywhere may assume there is exactly one of them. Provider-native Subagents are never participants.
+A participant is anything that takes part over the ledger: an agent with a Squadron home, a person, or a machine participant. People are global — one person id, known across every Squadron on the server — and nothing anywhere may assume there is exactly one of them. Provider-native Subagents are never participants.
 
-Every participant can message every other participant. No Squadron, no placement in a tree and no Role restricts who may talk to whom; the hierarchy carries decisions, never messages, and a Captain commands its Crews by briefing them, never by routing their messages. An agent cannot message itself. The platform states identity facts wherever it speaks: the envelope names the sender, the address book marks the caller's own row, and a spawned agent's first turn tells it who it is.
+A **machine participant** is a registered non-agent sender — a scheduled scraper, a watchdog, a shell script — and is how machine events enter the fleet as first-class work sources. Like an agent it has one immutable Squadron home and a server-unique name; unlike an agent it has no thread. It sends plain messages only, and nothing can be delivered to it, so no Exchange is ever open with it and no silence is measured about it. It acts only through a token bound to its own participant id; nothing else can send as it.
+
+Every participant can message every other participant that can receive: an agent receives from anyone, a person receives only asks, and a machine participant receives nothing. No Squadron, no placement in a tree and no Role restricts who may talk to whom; the hierarchy carries decisions, never messages, and a Captain commands its Crews by briefing them, never by routing their messages. An agent cannot message itself. The platform states identity facts wherever it speaks: the envelope names the sender, the address book marks the caller's own row, and a spawned agent's first turn tells it who it is.
 
 ## Delivery
 
@@ -87,11 +89,11 @@ The platform names five kinds of silence: the turn ended without the owed reply;
 
 ## Envelopes
 
-Every delivered message is wrapped in an **envelope**: the platform's wrapper that tells the receiving agent who sent this and from which Squadron, what it now owes and how to discharge it, and the measured time. Envelope wording is versioned configuration rendered from one place, so the channels never drift, and it is written in plain words for an agent reading it in the middle of its work. People reading the app see the letter, not the envelope.
+Every delivered message is wrapped in an **envelope**: the platform's wrapper that tells the receiving agent who sent this and from which Squadron, what it now owes and how to discharge it, and the measured time. A machine participant's envelope says that the sender is automated and cannot receive a reply, so the agent acts on the message directly and takes any question to a person or a peer. Envelope wording is versioned configuration rendered from one place, so the channels never drift, and it is written in plain words for an agent reading it in the middle of its work. People reading the app see the letter, not the envelope.
 
 ## Vocabulary this definition owns
 
-message, ask, reply, plain message, Exchange, intent, urgency, obligation, envelope, communication ledger, projection, delivery receipt, delivery alarm, silence notice, queue and steer. The [glossary](../glossary.md) points here for each of them. Provenance and placement are Squadron concepts and live in the [Squadron definition](../features/squadron.md).
+message, ask, reply, plain message, Exchange, intent, urgency, obligation, envelope, communication ledger, projection, delivery receipt, delivery alarm, silence notice, queue and steer, machine participant. The [glossary](../glossary.md) points here for each of them. Provenance and placement are Squadron concepts and live in the [Squadron definition](../features/squadron.md).
 
 ## Acceptance criteria
 
@@ -136,6 +138,14 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 22. Every delivered message carries an envelope naming the sender, the sender's Squadron, what is owed, and the measured time.
 23. The answer a person gives in the inbox reaches the agent wrapped in an envelope that says the Exchange is closed and no further reply is owed.
 
+### Machine participants
+
+24. A machine participant is registered in exactly one Squadron under a server-unique name, its id is `machine:` followed by that name, and registering the same name again returns the existing participant rather than a second one.
+25. A machine participant sends plain messages only, through the same command path and replay rules as an agent's send; a send from an unregistered machine is refused with an error naming the registration command.
+26. A message addressed to a machine participant is refused with an error naming the legal move, and the address book lists every machine participant as unable to receive a message or open an Exchange.
+27. A machine participant's message is delivered wrapped in an envelope that names the sender as automated and states that no reply can reach it; the thread view attributes the card to the machine's name and marks it as automation.
+28. A machine participant acts only through a token whose scope is `a2a:send` and whose subject is its own participant id; a token with any other subject, or without that scope, is refused.
+
 ## Scenarios
 
 - **An ask and its answer.** An agent in Billing Migration asks its Captain "which schema version do we target?" with intent "schema target". The Captain's turn ends without replying; the platform records a silence notice and delivers it to the asker, whose next turn sees that the Captain's turn ended without replying. The Captain's next turn replies; the Exchange closes; the asker sees the answer. (AC5, AC9, AC20, AC21)
@@ -143,6 +153,7 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 - **A busy receiver.** An agent in Website Redesign sends a plain message to a peer whose turn is running a long shell command. The message queues; the peer's turn finishes normally; the message starts its next turn. The user, watching the peer, chooses to steer instead — the control says "Steer now" on this provider — and their text is injected into the running turn. (AC13, AC14)
 - **A failed delivery.** An agent asks a peer that has been archived. The delivery fails, the alarm is attributed to the asker and shown on its Fleet page row; the asker withdraws its ask; the alarm remains a fact but no longer counts as a problem. (AC9, AC12)
 - **Across Squadrons.** An agent in Billing Migration asks an agent in Support Rotation for an incident's status; both Squadrons' ledgers carry the Exchange under one correlation id; the Fleet page of either Squadron shows it as an open ask. (AC3)
+- **A scraper wakes an agent.** The observability scraper of L2 Support Rotation, registered as the machine participant `machine:watchdog`, runs on a schedule and sends "canary 42" to the triage agent from a shell script with a client request id. The agent's thread shows a card from watchdog marked as automation; the agent acts on it and cannot reply to the watchdog. The script retries with the same id after a network blip and gets the original receipt back; nothing is delivered twice. (AC24, AC25, AC26, AC27)
 
 ## History
 
@@ -155,3 +166,4 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 - 2026-09-03 — agent deliveries queue; only the person steers; former QS1–QS4 ([record](../../worklog/2026-09-03-queue-vs-steer-ruling.md)). 2026-09-05 — the person-side default returns to upstream's (steer on send, an explicit queue shortcut) with the upstream integration (PR #112); the agent-side queue policy, the Astra exception and the truthful-steer guard stand, and the two policies are recorded as independent.
 - 2026-09-04 — the Codex Astra exception ([record](../../worklog/2026-09-04-astra-peer-delivery.md)); 2026-09-08 — a person never opens an ask through the platform; their only ledger act is the closing answer (the 2026-08-14 design's person-as-sender is dropped; the unused person-origin envelope channel goes with it, issue #119). Same day, the delivery guidance that path appended ("continue the unfinished task… change course only when the user's instructions require it") is removed: an agent told by a peer that it should change course should not wait for a user who may never come; the model's behavior is observed instead (issue filed).
 - 2026-09-05 — rewritten into the definition shape; 2026-09-07 — provenance and placement moved to the Squadron definition (they are organization, not communication). One change of substance: an agent may hold several open asks to a person, with explicit follow-ups shown in the inbox — reversing the one-ask-per-person rule of 2026-09-02 (issue #111). Former identifiers: D1 → Participants (delegation half retired); D2 → Participants; D3, D8 → The ledger, AC3; D4 → AC5; D5 → Delivery, AC1; D6 → Silence, AC20; D7 → the A2A plan; D9 → The Exchange; D10 → the Squadron definition (placement and provenance), with its obligation half being the Exchange; R3 → How an Exchange works, AC9; R4 → Silence; R21 → the Squadron definition; R22 → Participants; R25 → Envelopes, AC22; QS1–QS4 → Delivery, AC13–AC15.
+- 2026-09-15 — machine participants: registered non-agent senders with an immutable Squadron home and no thread, plain sends only, never receive, token-bound identity through the `a2a:send` scope; AC24–AC28 and the scraper scenario (issue #74).

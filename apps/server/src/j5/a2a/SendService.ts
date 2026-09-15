@@ -16,10 +16,12 @@ import {
   SquadronId,
   ExchangeId,
   isHumanParticipantId,
+  isMachineParticipantId,
   LedgerMessageId,
   Participant,
   type ParticipantDirectoryRow,
   ParticipantId,
+  type SendAsMachineInput,
   type SendMessageInput,
   type SendMessageResult,
   participantId,
@@ -237,10 +239,30 @@ export class A2AClearOwnAskCommandConflictError extends Schema.TaggedErrorClass<
   }
 }
 
+export class A2AMachineCannotReceiveError extends Schema.TaggedErrorClass<A2AMachineCannotReceiveError>()(
+  "A2AMachineCannotReceiveError",
+  { participantId: Schema.String },
+) {
+  override get message(): string {
+    return `Participant ${this.participantId} is an automated sender with no thread and cannot receive messages. Call list_participants and choose a row with canReceiveMessage=true.`;
+  }
+}
+
+export class A2AMachineSenderNotRegisteredError extends Schema.TaggedErrorClass<A2AMachineSenderNotRegisteredError>()(
+  "A2AMachineSenderNotRegisteredError",
+  { participantId: Schema.String },
+) {
+  override get message(): string {
+    return `Machine participant ${this.participantId} is not registered in any Squadron. Register it with \`j5 a2a participant create\` before sending.`;
+  }
+}
+
 export type A2ASendError =
   | A2ALedgerError
   | Schema.SchemaError
   | SqlError
+  | A2AMachineCannotReceiveError
+  | A2AMachineSenderNotRegisteredError
   | A2ASenderNotJoinedError
   | A2ASenderRetiredError
   | A2AHomeMembershipStateError
@@ -271,6 +293,12 @@ interface MembershipRow {
 
 interface RetiredParticipantRow {
   readonly squadron_id: string;
+}
+
+interface MachineRow {
+  readonly participant_id: string;
+  readonly squadron_id: string;
+  readonly name: string;
 }
 
 interface ExchangeRow {
@@ -306,8 +334,20 @@ const exchangeIdFor = (commandId: CommCommandId) =>
 const correlationIdFor = (commandId: CommCommandId) =>
   CorrelationId.make(`correlation:j5:a2a:${encodeURIComponent(commandId)}`);
 
+interface ResolvedSender {
+  readonly squadronId: SquadronId;
+  readonly participantId: ParticipantId;
+}
+
+/** The send body once the sender is resolved; agents and machines share it. */
+type ResolvedSendInput = Omit<SendMessageInput, "senderThreadId">;
+
 export interface A2ASendServiceShape {
   readonly send: (input: SendMessageInput) => Effect.Effect<SendMessageResult, A2ASendError>;
+  /** A registered machine participant commits a plain message through the same path an agent uses. */
+  readonly sendAsMachine: (
+    input: SendAsMachineInput,
+  ) => Effect.Effect<SendMessageResult, A2ASendError>;
   readonly clearOwnAsk: (input: ClearOwnAskInput) => Effect.Effect<ClearOwnAskResult, A2ASendError>;
   readonly listParticipants: (
     senderThreadId: ThreadId,
@@ -408,6 +448,31 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
         return resolution.home;
       });
 
+      const machineRows = Effect.fn("j5.a2a.send.machineRows")(function* (id?: ParticipantId) {
+        return yield* id === undefined
+          ? sql<MachineRow>`
+              SELECT participant_id, squadron_id, name
+              FROM j5_a2a_machine_participant
+              ORDER BY squadron_id, participant_id
+            `
+          : sql<MachineRow>`
+              SELECT participant_id, squadron_id, name
+              FROM j5_a2a_machine_participant
+              WHERE participant_id = ${id}
+              LIMIT 1
+            `;
+      });
+
+      const machineSender = Effect.fn("j5.a2a.send.machineSender")(function* (
+        id: ParticipantId,
+      ): Effect.fn.Return<ResolvedSender, A2AMachineSenderNotRegisteredError | SqlError> {
+        const row = (yield* machineRows(id))[0];
+        if (row === undefined) {
+          return yield* new A2AMachineSenderNotRegisteredError({ participantId: id });
+        }
+        return { squadronId: SquadronId.make(row.squadron_id), participantId: id };
+      });
+
       const participantMembership = Effect.fn("j5.a2a.send.participantMembership")(function* (
         id: ParticipantId,
         senderSquadronId: SquadronId,
@@ -420,6 +485,12 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
             squadronId: senderSquadronId,
             participant: { kind: "human" as const, id },
           };
+        }
+        if (isMachineParticipantId(id)) {
+          const machine = yield* machineRows(id);
+          return machine[0] === undefined
+            ? yield* new A2AParticipantNotFoundError({ participantId: id })
+            : yield* new A2AMachineCannotReceiveError({ participantId: id });
         }
         const matches = (yield* membershipRows()).filter((row) => row.participant_id === id);
         if (matches.length === 0) {
@@ -499,6 +570,23 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
                   acceptsUrgency: true,
                 }) satisfies ParticipantDirectoryRow,
             ),
+            // Machines are listed so an agent can recognize a sender by name; nothing reaches them.
+            ...(yield* machineRows()).map(
+              (row) =>
+                ({
+                  squadronId: SquadronId.make(row.squadron_id),
+                  participantId: ParticipantId.make(row.participant_id),
+                  participant: {
+                    kind: "machine",
+                    id: ParticipantId.make(row.participant_id),
+                    name: row.name,
+                  },
+                  archived: false,
+                  canReceiveMessage: false,
+                  canOpenExchange: false,
+                  acceptsUrgency: false,
+                }) satisfies ParticipantDirectoryRow,
+            ),
           ];
         });
 
@@ -558,11 +646,11 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
       });
 
       const sendInternal = Effect.fn("j5.a2a.send.inTransaction")(function* (
-        input: SendMessageInput,
+        input: ResolvedSendInput,
+        sender: ResolvedSender,
         committed: Array<StoredCommEvent>,
       ) {
         const messageId = messageIdFor(input.commandId);
-        const sender = yield* senderMembership(input.senderThreadId);
         const replay = yield* replayedSend(messageId, sender.participantId);
         if (replay !== null) return replay;
 
@@ -734,7 +822,36 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
         Effect.gen(function* () {
           const committed: Array<StoredCommEvent> = [];
           const result = yield* writer.withPermit(
-            sql.withTransaction(sendInternal(input, committed)),
+            sql.withTransaction(
+              Effect.gen(function* () {
+                const sender = yield* senderMembership(input.senderThreadId);
+                return yield* sendInternal(input, sender, committed);
+              }),
+            ),
+          );
+          yield* writer.publishCommitted(committed);
+          return result;
+        });
+
+      const sendAsMachine: A2ASendServiceShape["sendAsMachine"] = (input) =>
+        Effect.gen(function* () {
+          const committed: Array<StoredCommEvent> = [];
+          const result = yield* writer.withPermit(
+            sql.withTransaction(
+              Effect.gen(function* () {
+                const sender = yield* machineSender(input.senderParticipantId);
+                return yield* sendInternal(
+                  {
+                    commandId: input.commandId,
+                    to: input.to,
+                    message: input.message,
+                    acceptedAt: input.acceptedAt,
+                  },
+                  sender,
+                  committed,
+                );
+              }),
+            ),
           );
           yield* writer.publishCommitted(committed);
           return result;
@@ -824,6 +941,6 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
           return clearResult;
         });
 
-      return A2ASendService.of({ send, clearOwnAsk, listParticipants });
+      return A2ASendService.of({ send, sendAsMachine, clearOwnAsk, listParticipants });
     }),
   );
