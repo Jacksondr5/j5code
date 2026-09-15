@@ -3915,7 +3915,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     <AgentPersonaAssignmentControl
       assignment={effectiveAgentAssignment}
       environmentId={environmentId}
-      {...(agentPersonaAssignment ? {} : { onClear: draftAgent.clear })}
+      {...(agentPersonaAssignment
+        ? { threadId: props.routeThreadRef.threadId }
+        : { onClear: draftAgent.clear })}
     />
   ) : noProviderAvailable ? (
     <Button

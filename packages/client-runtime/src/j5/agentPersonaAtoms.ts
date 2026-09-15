@@ -5,12 +5,19 @@ import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
+  createEnvironmentRpcSubscriptionAtomFamily,
 } from "../state/runtime.ts";
 
 /** Environment-scoped atoms for the J5 agent persona library RPCs; web and mobile each build one. */
 export function createAgentPersonaEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {
+  // The server signals after every handoff row write, so the environment-wide handoff query below
+  // is fetched once per environment (not once per chip) and refetched only on a real change.
+  const handoffRefreshes = createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+    label: "environment-data:j5-agent-personas:handoff-refreshes",
+    tag: J5_AGENT_PERSONA_WS_METHODS.subscribeAgentHandoffRefreshes,
+  });
   return {
     catalog: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:j5-agent-personas:catalog",
@@ -66,6 +73,14 @@ export function createAgentPersonaEnvironmentAtoms<R, E>(
     setAgentPersonaEnabled: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:j5-agent-personas:set-enabled",
       tag: J5_AGENT_PERSONA_WS_METHODS.setAgentPersonaEnabled,
+    }),
+    handoffRefreshes,
+    /** Read with `input: {}` so every chip in an environment shares one query. */
+    handoffs: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:j5-agent-personas:handoffs",
+      tag: J5_AGENT_PERSONA_WS_METHODS.getAgentHandoffs,
+      staleTimeMs: 30_000,
+      refreshTrigger: ({ environmentId }) => handoffRefreshes({ environmentId, input: {} }),
     }),
     setLibraryFolders: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:j5-agent-personas:set-library-folders",

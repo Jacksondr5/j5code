@@ -1,6 +1,7 @@
 import type { ArtifactContent, ArtifactEntry, ProjectId } from "@t3tools/contracts";
 import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -48,6 +49,15 @@ export interface ArtifactWorkspaceShape {
     readonly relativePath: string;
     readonly content: string;
   }) => Effect.Effect<ArtifactEntry, ArtifactWorkspaceError>;
+  /**
+   * Like `write`, but every earlier body of the file is kept inside it, newest first, so a
+   * reviewer can compare a revised handoff with the one before it. Used for `handoffs/` paths.
+   */
+  readonly writeVersioned: (input: {
+    readonly projectId: ProjectId;
+    readonly relativePath: string;
+    readonly content: string;
+  }) => Effect.Effect<ArtifactEntry, ArtifactWorkspaceError>;
   readonly exportPlan: (input: {
     readonly projectId: ProjectId;
     readonly markdown: string;
@@ -86,6 +96,155 @@ const looksBinary = (bytes: Uint8Array) => {
   const inspected = bytes.subarray(0, Math.min(bytes.byteLength, 8_192));
   return inspected.some((byte) => byte === 0);
 };
+
+// ---------------------------------------------------------------------------
+// Versioned files. The whole file is rendered from the versions it holds, so a retried write
+// converges and a hand-edited or pre-existing file is simply treated as version 1. The marker on
+// the first line lists every kept version as `<number>@<timestamp>`, and the parser only treats a
+// line as a boundary when it equals the heading rendered for one of those entries. Bodies are
+// never trimmed of separators, so a handoff may quote an earlier heading or end with `---`.
+// ---------------------------------------------------------------------------
+
+const VERSIONED_MARKER = /^<!-- j5-artifact-versions: .*?; (.*?) -->\s*$/;
+
+export interface ArtifactVersion {
+  readonly number: number;
+  readonly timestamp: string;
+  readonly content: string;
+}
+
+export const artifactVersionedMarker = (
+  relativePath: string,
+  versions: ReadonlyArray<Pick<ArtifactVersion, "number" | "timestamp">>,
+) =>
+  `<!-- j5-artifact-versions: ${relativePath}; ${versions
+    .map((version) => `${version.number}@${version.timestamp}`)
+    .join(" ")} -->`;
+
+const artifactVersionHeading = (
+  version: Pick<ArtifactVersion, "number" | "timestamp">,
+  current: boolean,
+) => `## Version ${version.number} · ${version.timestamp}${current ? " · current" : ""}`;
+
+/**
+ * Versions newest first. A file without the marker, or one whose marker and headings no longer
+ * agree (hand-edited), is one unnumbered version of everything it holds; nothing is discarded.
+ */
+export function parseArtifactVersions(
+  existing: string | null,
+  now: string,
+): ReadonlyArray<ArtifactVersion> {
+  if (existing === null || existing.trim() === "") return [];
+  const adopt = [{ number: 1, timestamp: now, content: existing.trim() }];
+  const lines = existing.split("\n");
+  const marker = VERSIONED_MARKER.exec(lines[0] ?? "");
+  if (marker === null) return adopt;
+  const boundaries = marker[1]!
+    .split(" ")
+    .filter((entry) => entry.length > 0)
+    .map((entry) => {
+      const at = entry.indexOf("@");
+      return { number: Number(entry.slice(0, at)), timestamp: entry.slice(at + 1) };
+    });
+  if (
+    boundaries.length === 0 ||
+    boundaries.some((boundary) => !Number.isInteger(boundary.number) || boundary.timestamp === "")
+  ) {
+    return adopt;
+  }
+  // Locate headings from the oldest (bottom) upward. A body can only quote a heading that already
+  // existed when it was written, so a quoted heading always sits above the real one; the last
+  // matching line in the remaining region is therefore the boundary.
+  const versions: Array<ArtifactVersion> = [];
+  let end = lines.length;
+  for (let index = boundaries.length - 1; index >= 0; index -= 1) {
+    const boundary = boundaries[index]!;
+    const heading = artifactVersionHeading(boundary, index === 0);
+    let at = -1;
+    for (let line = end - 1; line > 0; line -= 1) {
+      if (lines[line] === heading) {
+        at = line;
+        break;
+      }
+    }
+    if (at === -1) return adopt;
+    versions.unshift({
+      ...boundary,
+      content: lines
+        .slice(at + 1, end)
+        .join("\n")
+        .trim(),
+    });
+    end = at;
+  }
+  return versions;
+}
+
+const artifactNameFromPath = (relativePath: string) => {
+  const file = relativePath.split("/").at(-1) ?? relativePath;
+  const stem = file.replace(/\.md$/i, "");
+  const dash = stem.lastIndexOf("-");
+  return dash > 0 ? stem.slice(0, dash) : stem;
+};
+
+const firstHeading = (content: string) =>
+  content
+    .split("\n")
+    .map((line) => /^#\s+(.+?)\s*$/.exec(line)?.[1])
+    .find((title): title is string => title !== undefined);
+
+/** Render the file from its versions, newest first. */
+export function renderArtifactVersions(input: {
+  readonly relativePath: string;
+  readonly versions: ReadonlyArray<ArtifactVersion>;
+  readonly dropped: number;
+}): string {
+  const newest = input.versions[0];
+  const title =
+    (newest && firstHeading(newest.content)) ?? artifactNameFromPath(input.relativePath);
+  const count = input.versions.length;
+  const summary =
+    `${count} ${count === 1 ? "version" : "versions"}, newest first` +
+    (input.dropped > 0
+      ? `; ${input.dropped} older ${input.dropped === 1 ? "version" : "versions"} dropped to stay under the size limit`
+      : "");
+  const sections = input.versions.map(
+    (version, index) => `${artifactVersionHeading(version, index === 0)}\n\n${version.content}\n`,
+  );
+  return `${artifactVersionedMarker(input.relativePath, input.versions)}\n# ${title}\n\n${summary}\n\n${sections.join("\n")}`;
+}
+
+/**
+ * Stack `content` on top of the versions already in `existing`. An identical newest body leaves
+ * the file untouched; oldest versions drop until the rendering fits the artifact size limit.
+ */
+export function stackArtifactVersion(input: {
+  readonly relativePath: string;
+  readonly existing: string | null;
+  readonly content: string;
+  readonly now: string;
+  readonly maxBytes: number;
+}): { readonly rendered: string; readonly changed: boolean } {
+  const previous = parseArtifactVersions(input.existing, input.now);
+  const body = input.content.trim();
+  if (previous[0] !== undefined && previous[0].content === body && input.existing !== null) {
+    return { rendered: input.existing, changed: false };
+  }
+  const next = (previous[0]?.number ?? 0) + 1;
+  let versions: ReadonlyArray<ArtifactVersion> = [
+    { number: next, timestamp: input.now, content: body },
+    ...previous,
+  ];
+  let dropped = 0;
+  const encoder = new TextEncoder();
+  let rendered = renderArtifactVersions({ relativePath: input.relativePath, versions, dropped });
+  while (encoder.encode(rendered).byteLength > input.maxBytes && versions.length > 1) {
+    versions = versions.slice(0, -1);
+    dropped += 1;
+    rendered = renderArtifactVersions({ relativePath: input.relativePath, versions, dropped });
+  }
+  return { rendered, changed: true };
+}
 
 export const layer = Layer.effect(
   ArtifactWorkspace,
@@ -405,6 +564,30 @@ export const layer = Layer.effect(
       },
     );
 
+    const writeVersioned: ArtifactWorkspaceShape["writeVersioned"] = Effect.fn(
+      "ArtifactWorkspace.writeVersioned",
+    )(function* (input) {
+      const relativePath = normalizeArtifactRelativePath(input.relativePath);
+      const existing = yield* Effect.result(read({ projectId: input.projectId, relativePath }));
+      const existingText =
+        Result.isSuccess(existing) && existing.success.encoding === "utf8"
+          ? existing.success.content
+          : null;
+      const now = DateTime.formatIso(yield* DateTime.now);
+      const stacked = stackArtifactVersion({
+        relativePath,
+        existing: existingText,
+        content: input.content,
+        now,
+        maxBytes: MAX_ARTIFACT_BYTES,
+      });
+      return yield* write({
+        projectId: input.projectId,
+        relativePath,
+        content: stacked.changed ? stacked.rendered : (existingText ?? stacked.rendered),
+      });
+    });
+
     const exportPlan: ArtifactWorkspaceShape["exportPlan"] = Effect.fn(
       "ArtifactWorkspace.exportPlan",
     )(function* (input) {
@@ -470,6 +653,6 @@ export const layer = Layer.effect(
         ),
       );
 
-    return ArtifactWorkspace.of({ prepare, list, read, write, exportPlan, watch });
+    return ArtifactWorkspace.of({ prepare, list, read, write, writeVersioned, exportPlan, watch });
   }),
 );

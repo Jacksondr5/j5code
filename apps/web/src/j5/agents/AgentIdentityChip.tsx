@@ -7,6 +7,7 @@ import type {
 import { BotIcon } from "lucide-react";
 
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
+import { AgentHandoffChip } from "./AgentHandoffChip";
 import { useThreadShell } from "../../state/entities";
 
 /** Compact "which saved agent is this" chip for thread cards and runtime rows. */
@@ -49,5 +50,17 @@ export function AgentRowIdentity(props: {
       ? { environmentId: props.environmentId, threadId: props.childThreadId as ThreadId }
       : null,
   );
-  return <AgentIdentityChip assignment={shell?.agentPersonaAssignment} />;
+  return (
+    <>
+      <AgentIdentityChip assignment={shell?.agentPersonaAssignment} />
+      {shell?.agentPersonaAssignment !== undefined &&
+      props.environmentId !== null &&
+      props.childThreadId !== null ? (
+        <AgentHandoffChip
+          environmentId={props.environmentId}
+          threadId={props.childThreadId as ThreadId}
+        />
+      ) : null}
+    </>
+  );
 }

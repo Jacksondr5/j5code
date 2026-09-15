@@ -51,5 +51,8 @@ describe("agent persona RPC scopes", () => {
     expect(requiredScopeForRpcMethod(J5_AGENT_PERSONA_WS_METHODS.setAgentPersonaEnabled)).toBe(
       AuthOrchestrationOperateScope,
     );
+    expect(requiredScopeForRpcMethod(J5_AGENT_PERSONA_WS_METHODS.getAgentHandoffs)).toBe(
+      AuthOrchestrationReadScope,
+    );
   });
 });

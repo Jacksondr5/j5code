@@ -21,6 +21,9 @@ import { layer as squadronThreadCreationServiceLayer } from "./SquadronThreadCre
 import { layer as threadHomesServiceLayer } from "./ThreadHomesService.ts";
 import { layer as spawnCompositionLayer } from "./SpawnCompositionService.ts";
 import { layer as squadronJoinLayer } from "./SquadronJoinService.ts";
+import { layer as agentHandoffNudgeQueueLayer } from "../agents/agentHandoffNudgeQueue.ts";
+import { layer as agentHandoffNudgeWorkerLayer } from "../agents/agentHandoffNudgeWorker.ts";
+import { layer as agentHandoffRefreshesLayer } from "../agents/agentHandoffRefreshes.ts";
 
 /**
  * The durable launch engine needs this subset before it can start preparing a
@@ -64,7 +67,16 @@ export const makeJ5A2AAuxiliaryLayer = (
   const squadronJoinProvided = squadronJoinLayer.pipe(
     Layer.provideMerge(homeRegistrationTransactionLayer),
   );
+  // The saved-agent handoff worker drains the queue the run-finalization observer fills; the
+  // queue layer is the same instance server.ts provides to that observer.
+  const agentHandoffNudgeWorkerProvided = agentHandoffNudgeWorkerLayer.pipe(
+    Layer.provide(agentHandoffNudgeQueueLayer),
+  );
   const runtimeWithoutClientReads = Layer.mergeAll(
+    agentHandoffNudgeWorkerProvided,
+    // Exported to the routes so the J5 WebSocket handler streams the same revision counter the
+    // observer bumps (server.ts provides this layer object to the observer; Effect memoizes it).
+    agentHandoffRefreshesLayer,
     humanPersonRegistryLayer,
     sendServiceLayer,
     deliveryWorkerProvided,

@@ -84,9 +84,15 @@ const make = Effect.gen(function* () {
     write: (scope, input) =>
       Effect.gen(function* () {
         const projectId = yield* projectIdFor(scope);
-        const artifact = yield* artifacts
-          .write({ projectId, relativePath: input.path, content: input.content })
-          .pipe(mapWorkspaceError);
+        // J5: saved-agent handoffs keep every version inside the one file; other artifacts overwrite.
+        const writeArtifact = input.path.replaceAll("\\", "/").startsWith("handoffs/")
+          ? artifacts.writeVersioned
+          : artifacts.write;
+        const artifact = yield* writeArtifact({
+          projectId,
+          relativePath: input.path,
+          content: input.content,
+        }).pipe(mapWorkspaceError);
         return { artifact, logicalPath: `artifacts/${artifact.path}` };
       }),
   });

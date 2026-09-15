@@ -171,6 +171,7 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as ArtifactWorkspace from "./j5/artifacts/ArtifactWorkspace.ts";
+import { AgentHandoffRefreshes } from "./j5/agents/agentHandoffRefreshes.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
@@ -1316,6 +1317,7 @@ const makeWsRpcLayer = (
       const agentPersonaRpcHandlers = yield* makeAgentPersonaRpcHandlers({
         providers: providerRegistry.getProviders,
         observe: observeRpcEffect,
+        observeStream: observeRpcStream,
       });
       const handlers = ServerWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
@@ -2759,6 +2761,8 @@ export const websocketRpcRouteLayer = Layer.unwrap(
     const artifactWorkspace = yield* ArtifactWorkspace.ArtifactWorkspace;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
+    // J5: the revision counter the saved-agent handoff observer bumps; one instance per server.
+    const agentHandoffRefreshes = yield* AgentHandoffRefreshes;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -2810,6 +2814,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               // One server-lifetime service means clients share the same PR caches, and a WS
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
+              Layer.provide(Layer.succeed(AgentHandoffRefreshes, agentHandoffRefreshes)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

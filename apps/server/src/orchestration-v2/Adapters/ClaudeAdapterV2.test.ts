@@ -82,6 +82,7 @@ import {
   type ClaudeAgentSdkQueryOptions,
   type ClaudeAgentSdkQueryOpenInput,
 } from "./ClaudeAdapterV2.ts";
+import { J5_CLAUDE_MCP_ALLOWED_TOOLS } from "../../j5/a2a/mcp/claudeAllowedTools.ts";
 import { layer as idAllocatorLayer, IdAllocatorV2 } from "../IdAllocator.ts";
 
 const DEFAULT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({});
@@ -500,7 +501,11 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       });
 
       assert.deepEqual(overrides, {
-        allowedTools: [...CLAUDE_READ_ONLY_ALLOWED_TOOLS, ...CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS],
+        allowedTools: [
+          ...CLAUDE_READ_ONLY_ALLOWED_TOOLS,
+          ...CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
+          ...J5_CLAUDE_MCP_ALLOWED_TOOLS,
+        ],
         mcpServers: T3_MCP_SERVERS,
       });
       assert.isFalse(overrides.allowedTools?.includes(CLAUDE_T3_MCP_TOOL_WILDCARD));
@@ -512,7 +517,10 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     withMcpSession(threadId, () => {
       const overrides = claudeMcpQueryOverrides({ threadId, readOnlySandbox: true });
 
-      assert.deepEqual(overrides.allowedTools, [...CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS]);
+      assert.deepEqual(overrides.allowedTools, [
+        ...CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
+        ...J5_CLAUDE_MCP_ALLOWED_TOOLS,
+      ]);
     });
   });
 

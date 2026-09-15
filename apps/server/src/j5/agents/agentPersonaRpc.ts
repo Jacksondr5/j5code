@@ -10,10 +10,13 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import type * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { stringify as toYaml } from "yaml";
 
 import { definitionDigest, makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
+import { AgentHandoffRefreshes, agentHandoffRefreshChanges } from "./agentHandoffRefreshes.ts";
+import { makeAgentHandoffStore } from "./agentHandoffStore.ts";
 import { agentPersonaFolderGitStatus } from "./agentPersonaLibraryGit.ts";
 import { buildAgentPersonaCatalog } from "./agentPersonaRouting.ts";
 import { agentPersonaUsage } from "./agentPersonaUsage.ts";
@@ -36,6 +39,8 @@ export const AGENT_PERSONA_RPC_SCOPES = {
   [METHODS.getAgentPersonaLibrarySources]: AuthOrchestrationReadScope,
   [METHODS.setAgentPersonaLibraryFolders]: AuthOrchestrationOperateScope,
   [METHODS.setAgentPersonaEnabled]: AuthOrchestrationOperateScope,
+  [METHODS.getAgentHandoffs]: AuthOrchestrationReadScope,
+  [METHODS.subscribeAgentHandoffRefreshes]: AuthOrchestrationReadScope,
 } as const;
 
 /** Matches the per-session `observeRpcEffect` closure in ws.ts (instrumentation plus scope check). */
@@ -44,6 +49,13 @@ export type ObserveRpcEffect = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   traceAttributes?: Readonly<Record<string, unknown>>,
 ) => Effect.Effect<A, E | EnvironmentAuthorizationError, R>;
+
+/** Matches the per-session `observeRpcStream` closure in ws.ts. */
+export type ObserveRpcStream = <A, E, R>(
+  method: string,
+  stream: Stream.Stream<A, E, R>,
+  traceAttributes?: Readonly<Record<string, unknown>>,
+) => Stream.Stream<A, E | EnvironmentAuthorizationError, R>;
 
 type Input<K extends keyof typeof J5AgentPersonaRpcSchemas> =
   (typeof J5AgentPersonaRpcSchemas)[K]["input"]["Type"];
@@ -57,12 +69,18 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
   function* (deps: {
     readonly providers: Effect.Effect<ReadonlyArray<ServerProvider>>;
     readonly observe: ObserveRpcEffect;
+    readonly observeStream: ObserveRpcStream;
   }) {
     const library = yield* makeAgentPersonaLibrary;
+    // Bumped by the run-finalization observer; the same layer instance server.ts gives it.
+    const handoffRefreshes = yield* AgentHandoffRefreshes;
     const { observe } = deps;
     // Usage reads the projections through the session's SqlClient, captured once here.
     const sql = yield* SqlClient.SqlClient;
     const usage = () => agentPersonaUsage().pipe(Effect.provideService(SqlClient.SqlClient, sql));
+    const handoffs = yield* makeAgentHandoffStore.pipe(
+      Effect.provideService(SqlClient.SqlClient, sql),
+    );
     return {
       [METHODS.getAgentPersonaCatalog]: (_input: Input<"getAgentPersonaCatalog">) =>
         observe(
@@ -211,6 +229,21 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
             );
             return { ...current, folders };
           }),
+          TRACE,
+        ),
+      [METHODS.getAgentHandoffs]: (input: Input<"getAgentHandoffs">) =>
+        observe(
+          METHODS.getAgentHandoffs,
+          handoffs.list({ threadIds: input.threadIds }).pipe(
+            Effect.map((list) => ({ handoffs: list })),
+            Effect.mapError(catalogError),
+          ),
+          TRACE,
+        ),
+      [METHODS.subscribeAgentHandoffRefreshes]: (_input: Input<"subscribeAgentHandoffRefreshes">) =>
+        deps.observeStream(
+          METHODS.subscribeAgentHandoffRefreshes,
+          agentHandoffRefreshChanges(handoffRefreshes),
           TRACE,
         ),
       [METHODS.setAgentPersonaEnabled]: (input: Input<"setAgentPersonaEnabled">) =>

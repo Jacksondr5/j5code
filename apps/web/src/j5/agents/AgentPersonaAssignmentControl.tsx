@@ -3,12 +3,17 @@ import {
   agentPersonaDrift,
   presentAgentPersonaAssignment,
 } from "@t3tools/client-runtime/j5/agent-personas";
-import type { EnvironmentId, OrchestrationV2AgentPersonaAssignment } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  OrchestrationV2AgentPersonaAssignment,
+  ThreadId,
+} from "@t3tools/contracts";
 import { BotIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 
 import { ComposerControl, ComposerControlIcon } from "../../components/chat/ComposerControl";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { useEnvironmentQuery } from "../../state/query";
+import { AgentHandoffChip } from "./AgentHandoffChip";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 
 /** Replaces the model and mode controls for a persona thread: the launch route is fixed. */
@@ -18,6 +23,8 @@ export function AgentPersonaAssignmentControl(props: {
   readonly environmentId?: EnvironmentId;
   /** Present only for an unsent draft, where the choice can still be undone. */
   readonly onClear?: () => void;
+  /** The server thread this control belongs to; enables the handoff artifact status. */
+  readonly threadId?: ThreadId;
 }) {
   const presentation = presentAgentPersonaAssignment(props.assignment);
   const catalog = useEnvironmentQuery(
@@ -72,6 +79,13 @@ export function AgentPersonaAssignmentControl(props: {
           </TooltipTrigger>
           <TooltipPopup side="top">Start as a regular task instead.</TooltipPopup>
         </Tooltip>
+      ) : null}
+      {props.threadId !== undefined && props.environmentId !== undefined ? (
+        <AgentHandoffChip
+          environmentId={props.environmentId}
+          threadId={props.threadId}
+          className="inline-flex items-center"
+        />
       ) : null}
       {drift === "changed" ? (
         <Tooltip>
