@@ -10,6 +10,7 @@ import {
   A2A_SEND_TOOL_DESCRIPTION,
   formatClosedHumanEnvelope,
   formatClosedPeerEnvelope,
+  formatMachineEnvelope,
   formatPeerEnvelope,
   formatSilenceNoticeEnvelope,
 } from "./EnvelopeFormatter.ts";
@@ -48,7 +49,7 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
     message: "Please verify the worker.",
   });
 
-  assert.equal(A2A_ENVELOPE_VERSION, 17);
+  assert.equal(A2A_ENVELOPE_VERSION, 18);
   assert.include(rendered, "Cross-agent message");
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
   assert.include(rendered, "agent:sender");
@@ -149,4 +150,21 @@ it("keeps the tool descriptions on their documented contracts", () => {
     [A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION].join("\n"),
     /\b(?:J5|A2A)\b/,
   );
+});
+
+it("renders the machine envelope as a plain send that names the sender as automation", () => {
+  const rendered = formatMachineEnvelope({
+    senderId: ParticipantId.make("machine:watchdog"),
+    originSquadronId: SquadronId.make("squadron:monitoring"),
+    message: "canary 42",
+  });
+
+  assert.match(
+    rendered,
+    /^\[Message from automation machine:watchdog in squadron squadron:monitoring\]\n\n/,
+  );
+  assert.include(rendered, "canary 42");
+  assert.include(rendered, "cannot receive a reply");
+  assert.notInclude(rendered, "Reply once");
+  assert.notInclude(rendered, "{{");
 });

@@ -12,6 +12,8 @@ import { humanPersonRegistryLayer } from "./HumanPersonRegistry.ts";
 import { layer as ledgerLayer } from "./LedgerService.ts";
 import { layer as participantPlacementLayer } from "./PlacementService.ts";
 import { layer as lifecycleServiceLayer } from "./LifecycleService.ts";
+import { layer as machineParticipantLayer } from "./MachineParticipantService.ts";
+import { layer as rosterLayer } from "./RosterService.ts";
 import { layer as sendServiceLayer } from "./SendService.ts";
 import { layer as silenceDetectorLayer } from "./SilenceDetector.ts";
 import { layer as humanInboxLayer } from "./HumanInboxService.ts";
@@ -78,6 +80,8 @@ export const makeJ5A2AAuxiliaryLayer = (
     // observer bumps (server.ts provides this layer object to the observer; Effect memoizes it).
     agentHandoffRefreshesLayer,
     humanPersonRegistryLayer,
+    machineParticipantLayer,
+    rosterLayer,
     sendServiceLayer,
     deliveryWorkerProvided,
     silenceDetectorProvided,

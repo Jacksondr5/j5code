@@ -243,6 +243,14 @@ export const layer: Layer.Layer<ClientReadsService, never, A2AHumanInbox | SqlCl
           const rows: Array<IdentityRow> = [];
           for (const participantIdBatch of batchesOf(uniqueParticipantIds)) {
             rows.push(...(yield* participantIdentityRows(sql, participantIdBatch)));
+            // Machine senders have no thread; their display name is their registered name.
+            rows.push(
+              ...(yield* sql<IdentityRow>`
+                SELECT participant_id, name AS display_name
+                FROM j5_a2a_machine_participant
+                WHERE participant_id IN ${sql.in(participantIdBatch)}
+              `),
+            );
           }
           const rowsByParticipant = Map.groupBy(rows, (row) => row.participant_id);
           return {

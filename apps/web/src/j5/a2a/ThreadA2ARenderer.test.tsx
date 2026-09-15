@@ -581,3 +581,60 @@ describe("ThreadA2ADeliveryRenderer", () => {
     expect(markup).not.toContain("data-j5-a2a-renderer");
   });
 });
+
+const machineInstruction =
+  "This message came from an automated sender outside any agent session. It cannot receive a reply; act on it directly, and take any question to a person or a peer agent with send_message.";
+
+const machineRaw = [
+  "[Message from automation machine:watchdog in squadron squadron:monitoring]",
+  "",
+  "canary 42",
+  "",
+  machineInstruction,
+].join("\n");
+
+describe("ThreadA2ADeliveryRenderer machine senders", () => {
+  it("presents a machine envelope as an automated plain card named after the sender", () => {
+    const presentation = presentThreadA2ADelivery({
+      message: message({ text: machineRaw }),
+      participantLabels: new Map([["machine:watchdog", "watchdog"]]),
+    });
+    expect(presentation).toEqual({
+      kind: "peer",
+      rawEnvelope: machineRaw,
+      senderId: "machine:watchdog",
+      senderLabel: "watchdog",
+      senderTooltipParticipantId: null,
+      squadronId: "squadron:monitoring",
+      body: "canary 42",
+      exchange: "plain",
+      exchangeId: null,
+      automated: true,
+    });
+
+    const html = renderToStaticMarkup(
+      <ThreadA2ADeliveryRenderer
+        message={message({ text: machineRaw })}
+        participantLabels={new Map([["machine:watchdog", "watchdog"]])}
+        now={Date.parse(CREATED_AT) + 120_000}
+      />,
+    );
+    expect(html).toContain("watchdog");
+    expect(html).toContain("data-j5-a2a-automated");
+    expect(html).toContain("Automation");
+    expect(html).not.toContain("Expects reply");
+    expect(html).not.toContain(machineInstruction);
+  });
+
+  it("raw-renders a machine envelope whose instruction was altered", () => {
+    const tampered = machineRaw.replace("cannot receive a reply", "can receive a reply");
+    const presentation = presentThreadA2ADelivery({ message: message({ text: tampered }) });
+    expect(presentation?.kind).toBe("raw");
+  });
+
+  it("labels a queued machine delivery and reports its sender id for the identity read", () => {
+    expect(
+      formatThreadA2AQueuedDelivery(machineRaw, new Map([["machine:watchdog", "watchdog"]])),
+    ).toEqual({ label: "From watchdog — canary 42", tooltipParticipantId: null });
+  });
+});

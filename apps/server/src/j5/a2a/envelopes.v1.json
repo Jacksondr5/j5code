@@ -1,6 +1,8 @@
 {
-  "version": 17,
+  "version": 18,
   "peerMessage": "[Cross-agent message from {{senderId}} in squadron {{originSquadronId}}]\n\n{{message}}\n\n{{exchangeInstruction}}",
+  "machineMessage": "[Message from automation {{senderId}} in squadron {{originSquadronId}}]\n\n{{message}}\n\n{{machineInstruction}}",
+  "machineInstruction": "This message came from an automated sender outside any agent session. It cannot receive a reply; act on it directly, and take any question to a person or a peer agent with send_message.",
   "peerClosedMessage": "[Cross-agent message from {{senderId}} in squadron {{originSquadronId}}]\n\n{{message}}\n\n{{closedExchangeInstruction}}",
   "humanClosedMessage": "[Message from {{senderId}}]\n\n{{message}}\n\n{{closedExchangeInstruction}}",
   "silenceNotice": "[Cross-agent messaging system notice: {{noticeType}}]\n\n{{message}}\n\nThis is a platform-authored delivery signal, not a peer reply.",

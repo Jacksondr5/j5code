@@ -23,6 +23,8 @@ const HUMAN_DELIVERY_MARKER =
   "\n\nThis person is not watching this chat. They see only what you send back on this exchange.\n\n";
 const SILENCE_DELIVERY_SUFFIX =
   "\n\nThis is a platform-authored delivery signal, not a peer reply.";
+const MACHINE_DELIVERY_INSTRUCTION =
+  "This message came from an automated sender outside any agent session. It cannot receive a reply; act on it directly, and take any question to a person or a peer agent with send_message.";
 
 export interface ThreadA2ADeliveryCompositionInput {
   readonly message: ChatMessage;
@@ -54,6 +56,8 @@ export type ThreadA2ADeliveryPresentation =
       readonly exchange: "expects-reply" | "plain" | "closed";
       /** Kept as a pairing fact only; protocol identifiers never render. */
       readonly exchangeId: string | null;
+      /** A registered machine sender (script, watchdog) rather than an agent. */
+      readonly automated: boolean;
     }
   | {
       readonly kind: "human";
@@ -125,7 +129,32 @@ function parsePeerEnvelope(rawEnvelope: string) {
     senderId,
     instruction: content.slice(divider + 2),
   });
-  return instruction === null ? null : { senderId, squadronId, body, ...instruction };
+  return instruction === null
+    ? null
+    : { senderId, squadronId, body, automated: false as const, ...instruction };
+}
+
+/** The machine template: a plain send from a registered script, never an exchange. */
+function parseMachineEnvelope(rawEnvelope: string) {
+  const header = /^\[Message from automation ([^\]\n]+) in squadron ([^\]\n]+)\]\n\n/.exec(
+    rawEnvelope,
+  );
+  if (!header) return null;
+  const content = rawEnvelope.slice(header[0].length);
+  const divider = content.lastIndexOf("\n\n");
+  if (divider <= 0 || content.slice(divider + 2) !== MACHINE_DELIVERY_INSTRUCTION) return null;
+  return {
+    senderId: header[1]!,
+    squadronId: header[2]!,
+    body: content.slice(0, divider),
+    exchange: "plain" as const,
+    exchangeId: null,
+    automated: true as const,
+  };
+}
+
+function parsePeerOrMachineEnvelope(rawEnvelope: string) {
+  return parsePeerEnvelope(rawEnvelope) ?? parseMachineEnvelope(rawEnvelope);
 }
 
 function parseHumanEnvelope(rawEnvelope: string) {
@@ -226,7 +255,7 @@ export function presentThreadA2ADelivery(
   if (!isThreadA2ADeliveryMessage(message)) return null;
 
   if (message.createdBy === "agent") {
-    const peer = parsePeerEnvelope(message.text);
+    const peer = parsePeerOrMachineEnvelope(message.text);
     if (peer) {
       const sender = presentParticipantIdentity({
         participantId: peer.senderId,
@@ -242,6 +271,7 @@ export function presentThreadA2ADelivery(
         body: peer.body,
         exchange: peer.exchange,
         exchangeId: peer.exchangeId,
+        automated: peer.automated,
       };
     }
   } else if (message.createdBy === "user") {
@@ -278,7 +308,7 @@ export function formatThreadA2AQueuedDelivery(
   text: string,
   participantLabels: ReadonlyMap<string, string>,
 ): { readonly label: string; readonly tooltipParticipantId: string | null } | null {
-  const peer = parsePeerEnvelope(text);
+  const peer = parsePeerOrMachineEnvelope(text);
   if (peer === null) return null;
   const sender = presentParticipantIdentity({ participantId: peer.senderId, participantLabels });
   const firstLine = peer.body.split("\n")[0]?.trim() ?? "";
@@ -289,7 +319,7 @@ export function formatThreadA2AQueuedDelivery(
 }
 
 export function participantIdsForThreadA2AEnvelope(text: string): ReadonlyArray<string> {
-  const peer = parsePeerEnvelope(text);
+  const peer = parsePeerOrMachineEnvelope(text);
   return peer === null ? [] : [peer.senderId];
 }
 
@@ -381,6 +411,7 @@ function A2ABodyClamp({ body }: { readonly body: string }) {
 }
 
 function PeerDeliveryCard({
+  automated = false,
   body,
   exchange,
   now,
@@ -388,6 +419,7 @@ function PeerDeliveryCard({
   senderTooltipParticipantId,
   sentAt,
 }: {
+  readonly automated?: boolean | undefined;
   readonly body: string;
   readonly exchange: "expects-reply" | "plain" | "closed";
   readonly now?: number | undefined;
@@ -419,6 +451,14 @@ function PeerDeliveryCard({
             <TooltipPopup>{senderTooltipParticipantId}</TooltipPopup>
           </Tooltip>
         )}
+        {automated ? (
+          <span
+            className="rounded-md border border-border/70 px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground"
+            data-j5-a2a-automated
+          >
+            Automation
+          </span>
+        ) : null}
         {isOpen ? (
           <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
             Expects reply
@@ -590,6 +630,7 @@ export function renderThreadA2ADelivery(props: ThreadA2ADeliveryCompositionInput
   if (presentation.kind === "peer") {
     return (
       <PeerDeliveryCard
+        automated={presentation.automated}
         body={presentation.body}
         exchange={presentation.exchange}
         now={props.now}

@@ -282,6 +282,19 @@ export const layer: Layer.Layer<
       // person addressability is host registry state, never Squadron membership.
       if (participant.kind === "human") return;
       const id = participantId(participant);
+      // A machine participant has no thread and never enters the agent-only
+      // membership projection; its join projects into its own table. It has no
+      // lifecycle events yet, so nothing else about it is projected here.
+      if (participant.kind === "machine") {
+        if (event.kind !== "participant.joined") return;
+        yield* sql`
+          INSERT INTO j5_a2a_machine_participant (
+            participant_id, squadron_id, name, joined_seq, created_at
+          ) VALUES (${id}, ${event.squadronId}, ${participant.name}, ${event.seq}, ${event.createdAt})
+          ON CONFLICT(participant_id) DO NOTHING
+        `;
+        return;
+      }
       if (event.kind === "participant.archived" || event.kind === "participant.unarchived") {
         yield* sql`UPDATE j5_a2a_squadron_membership
           SET archived_at = ${event.kind === "participant.archived" ? event.createdAt : null}, updated_seq = ${event.seq}
