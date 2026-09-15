@@ -4,6 +4,8 @@ import {
   CrewMembershipsResponse,
   CrewProposalResolveResponse,
   CrewProposalsResponse,
+  FleetResponse,
+  SpawnedChildrenResponse,
   HumanInboxResponse,
   J5_API_PATHS,
   OpenInboxCountResponse,
@@ -200,4 +202,23 @@ export const listCrewMemberships = Effect.fn("j5.http.listCrewMemberships")(func
   );
   const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
   return (yield* HttpClientResponse.schemaBodyJson(CrewMembershipsResponse)(response)).entries;
+});
+
+export const readFleet = Effect.fn("j5.http.readFleet")(function* (prepared: PreparedConnection) {
+  const request = yield* HttpClientRequest.post(J5_API_PATHS.fleet).pipe(
+    HttpClientRequest.bodyJson({}),
+  );
+  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(FleetResponse)(response);
+});
+
+export const listSpawnedChildren = Effect.fn("j5.http.listSpawnedChildren")(function* (
+  prepared: PreparedConnection,
+  threadIds: ReadonlyArray<ThreadId>,
+) {
+  const request = yield* HttpClientRequest.post(J5_API_PATHS.spawnedChildren).pipe(
+    HttpClientRequest.bodyJson({ threadIds: [...new Set(threadIds)] }),
+  );
+  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
+  return (yield* HttpClientResponse.schemaBodyJson(SpawnedChildrenResponse)(response)).entries;
 });

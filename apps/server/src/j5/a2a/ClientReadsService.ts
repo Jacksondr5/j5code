@@ -17,7 +17,15 @@ const SquadronRead = Schema.Struct({
 });
 
 export const ParticipantHome = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("known"), squadron: SquadronRead }),
+  Schema.Struct({
+    kind: Schema.Literal("known"),
+    squadron: SquadronRead,
+    /**
+     * SB5 sidebar membership: `agent` means an agent spawned this participant (placement
+     * provenance `spawned-by`), so it is roster-only unless pinned; absent or `human` shows.
+     */
+    origin: Schema.optional(Schema.Literals(["human", "agent"])),
+  }),
   Schema.Struct({ kind: Schema.Literal("unknown") }),
 ]);
 export type ParticipantHome = typeof ParticipantHome.Type;
@@ -81,6 +89,11 @@ interface IdentityRow {
   readonly display_name: string | null;
 }
 
+interface ProvenanceRow {
+  readonly participant_id: string;
+  readonly provenance_kind: string;
+}
+
 interface OpenInboxCountRow {
   readonly count: number;
 }
@@ -104,6 +117,12 @@ const batchesOf = <Value>(values: ReadonlyArray<Value>) => {
 };
 
 const unknownHome = (): ParticipantHome => ({ kind: "unknown" });
+
+/** Origin is stated only when a placement row exists; older homes without placement stay silent. */
+const originFor = (provenanceKind: string | undefined) =>
+  provenanceKind === undefined
+    ? {}
+    : { origin: provenanceKind === "spawned-by" ? ("agent" as const) : ("human" as const) };
 const unknownIdentity = (): DisplayIdentity => ({ kind: "unknown" });
 
 const toIdentity = (row: IdentityRow | undefined): DisplayIdentity => {
@@ -134,6 +153,13 @@ const threadHomeRows = (sql: SqlClient.SqlClient, threadIds: ReadonlyArray<Threa
     SELECT thread_id, squadron_id, squadron_name
     FROM ranked_homes
     WHERE home_rank = 1
+  `;
+
+const provenanceRows = (sql: SqlClient.SqlClient, participantIds: ReadonlyArray<string>) =>
+  sql<ProvenanceRow>`
+    SELECT participant_id, provenance_kind
+    FROM j5_a2a_participant_placement
+    WHERE participant_id IN ${sql.in(participantIds)}
   `;
 
 const participantIdentityRows = (
@@ -218,6 +244,13 @@ export const layer: Layer.Layer<ClientReadsService, never, A2AHumanInbox | SqlCl
             rows.push(...(yield* threadHomeRows(sql, threadIdBatch)));
           }
           const rowsByThread = Map.groupBy(rows, (row) => row.thread_id);
+          const provenance = new Map<string, string>();
+          for (const participantBatch of batchesOf(
+            uniqueThreadIds.map((threadId) => `agent:j5:a2a:${threadId}`),
+          )) {
+            for (const row of yield* provenanceRows(sql, participantBatch))
+              provenance.set(row.participant_id, row.provenance_kind);
+          }
           return uniqueThreadIds.map((threadId) => {
             const row = rowsByThread.get(threadId)?.[0];
             return {
@@ -231,6 +264,7 @@ export const layer: Layer.Layer<ClientReadsService, never, A2AHumanInbox | SqlCl
                         id: SquadronId.make(row.squadron_id),
                         name: row.squadron_name,
                       },
+                      ...originFor(provenance.get(`agent:j5:a2a:${threadId}`)),
                     },
             } satisfies ThreadHomeEntry;
           });
