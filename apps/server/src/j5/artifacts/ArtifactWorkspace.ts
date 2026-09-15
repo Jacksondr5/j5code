@@ -27,6 +27,8 @@ export class ArtifactWorkspaceError extends Schema.TaggedErrorClass<ArtifactWork
   {
     operation: Schema.String,
     detail: Schema.String,
+    /** Set when the failure is the caller's target, not the workspace: routes map it to 404. */
+    reason: Schema.optional(Schema.Literal("not_found")),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -371,13 +373,14 @@ export const layer = Layer.effect(
               workspaceError("list-artifacts", "The artifacts directory could not be listed."),
             ),
           );
+        // Fail fast on an absurd directory rather than stat and sort tens of thousands of entries
+        // for a 500-row page; the cap below still sorts before it truncates.
         if (names.length > MAX_ARTIFACT_COUNT * 4) {
           return yield* new ArtifactWorkspaceError({
             operation: "list-artifacts",
             detail: `The artifacts directory is too large to browse (maximum ${MAX_ARTIFACT_COUNT} files).`,
           });
         }
-
         const entries = yield* Effect.forEach(
           names,
           (name) =>
@@ -403,10 +406,12 @@ export const layer = Layer.effect(
             }),
           { concurrency: 16 },
         );
+        // Sort first so a directory past the cap shows its first entries by path, not whichever
+        // files the filesystem happened to enumerate first.
         return entries
           .filter((entry): entry is ArtifactEntry => entry !== null)
-          .slice(0, MAX_ARTIFACT_COUNT)
-          .toSorted((left, right) => left.path.localeCompare(right.path));
+          .toSorted((left, right) => left.path.localeCompare(right.path))
+          .slice(0, MAX_ARTIFACT_COUNT);
       },
     );
 
@@ -417,6 +422,7 @@ export const layer = Layer.effect(
           return yield* new ArtifactWorkspaceError({
             operation: "read-artifact",
             detail: "The artifact does not exist.",
+            reason: "not_found",
           });
         }
         const relativePath = normalizeArtifactRelativePath(input.relativePath);
@@ -433,9 +439,17 @@ export const layer = Layer.effect(
             detail: "Artifact paths cannot leave the artifacts directory.",
           });
         }
-        const realPath = yield* fileSystem
-          .realPath(requestedPath)
-          .pipe(Effect.mapError(workspaceError("read-artifact", "The artifact does not exist.")));
+        const realPath = yield* fileSystem.realPath(requestedPath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ArtifactWorkspaceError({
+                operation: "read-artifact",
+                detail: "The artifact does not exist.",
+                reason: "not_found",
+                cause,
+              }),
+          ),
+        );
         if (!isPathWithin(path, workspace.realArtifactRoot, realPath)) {
           return yield* new ArtifactWorkspaceError({
             operation: "read-artifact",
@@ -646,6 +660,7 @@ export const layer = Layer.effect(
                   new ArtifactWorkspaceError({
                     operation: "watch-artifacts",
                     detail: "The artifacts directory does not exist.",
+                    reason: "not_found",
                   }),
                 )
               : Effect.succeed(watchArtifactDirectory(fileSystem, workspace.realArtifactRoot)),
