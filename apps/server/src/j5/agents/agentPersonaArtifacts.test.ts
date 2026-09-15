@@ -4,6 +4,7 @@ import { ThreadId } from "@t3tools/contracts";
 import {
   AGENT_ARTIFACT_TEMPLATES,
   agentHandoffArtifactPath,
+  agentHandoffTaskSegment,
   agentPersonaArtifactInstructions,
 } from "./agentPersonaArtifacts.ts";
 import { BUILT_IN_AGENT_PERSONAS } from "./agentPersonas.ts";
@@ -15,6 +16,27 @@ describe("saved-agent handoff artifacts", () => {
     expect(
       agentHandoffArtifactPath({ personaId: "critic", artifact: "ReviewHandoff", threadId }),
     ).toBe("handoffs/critic/ReviewHandoff-8f3a2c1d.md");
+  });
+
+  it("hashes deterministic platform thread ids so seats get distinct, colon-free file names", () => {
+    const seatA = ThreadId.make("thread:j5:a2a:mcp:j5-crew-proposal:spawn:seat-a");
+    const seatB = ThreadId.make("thread:j5:a2a:mcp:j5-crew-proposal:spawn:seat-b");
+    const a = agentHandoffArtifactPath({
+      personaId: "critic",
+      artifact: "ReviewHandoff",
+      threadId: seatA,
+    });
+    const b = agentHandoffArtifactPath({
+      personaId: "critic",
+      artifact: "ReviewHandoff",
+      threadId: seatB,
+    });
+    expect(a).toMatch(/^handoffs\/critic\/ReviewHandoff-[0-9a-f]{8}\.md$/);
+    expect(b).toMatch(/^handoffs\/critic\/ReviewHandoff-[0-9a-f]{8}\.md$/);
+    expect(a).not.toBe(b);
+    expect(a).not.toContain(":");
+    expect(agentHandoffTaskSegment(seatA)).toBe(agentHandoffTaskSegment(seatA));
+    expect(agentHandoffTaskSegment(threadId)).toBe("8f3a2c1d");
   });
 
   it("tells a persona where to write its declared output and what it must contain", () => {

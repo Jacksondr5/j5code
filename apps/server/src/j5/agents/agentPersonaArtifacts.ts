@@ -1,4 +1,5 @@
 import type { ThreadId } from "@t3tools/contracts";
+import * as NodeCrypto from "node:crypto";
 
 import type { AgentPersonaDefinition } from "./agentPersonas.ts";
 
@@ -85,13 +86,27 @@ const GENERIC_TEMPLATE: ReadonlyArray<string> = [
 
 export const AGENT_HANDOFF_ROOT = "handoffs";
 
+const LEADING_HEX8 = /^[0-9a-f]{8}/i;
+
+/**
+ * The task segment of a handoff file name. Human-created threads have uuid ids, whose first
+ * eight hex characters are readable and unique enough. Platform-spawned threads (crew seats,
+ * spawned peers) have deterministic ids such as "thread:j5:a2a:mcp:…", which would all slice to
+ * the same colon-bearing prefix, so those hash to eight hex characters instead.
+ */
+export function agentHandoffTaskSegment(threadId: string): string {
+  return LEADING_HEX8.test(threadId)
+    ? threadId.slice(0, 8)
+    : NodeCrypto.createHash("sha256").update(threadId).digest("hex").slice(0, 8);
+}
+
 /** One file per task, grouped by agent, so a reviewer's outputs sit together and nothing is overwritten. */
 export function agentHandoffArtifactPath(input: {
   readonly personaId: string;
   readonly artifact: string;
   readonly threadId: ThreadId;
 }): string {
-  return `${AGENT_HANDOFF_ROOT}/${input.personaId}/${input.artifact}-${input.threadId.slice(0, 8)}.md`;
+  return `${AGENT_HANDOFF_ROOT}/${input.personaId}/${input.artifact}-${agentHandoffTaskSegment(input.threadId)}.md`;
 }
 
 /** The logical path agents see in chat and in the Artifacts panel. */

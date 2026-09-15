@@ -34,6 +34,7 @@ import { AgentHandoffNudgeQueue, layer as queueLayer } from "./agentHandoffNudge
 import { layer as observerLayer } from "./agentHandoffObserver.ts";
 import { makeAgentHandoffStore } from "./agentHandoffStore.ts";
 import { agentHandoffNudgeText } from "./agentHandoffNudgeWorker.ts";
+import { agentHandoffArtifactPath } from "./agentPersonaArtifacts.ts";
 import { createAgentPersonaLibrary, definitionDigest } from "./agentPersonaLibrary.ts";
 import { BUILT_IN_AGENT_PERSONAS } from "./agentPersonas.ts";
 
@@ -56,6 +57,7 @@ const fakeArtifacts = Layer.effect(
       list: () => Ref.get(entries),
       read: () => unsupported,
       write: () => unsupported,
+      writeVersioned: () => unsupported,
       exportPlan: () => unsupported,
       watch: () => {
         throw new Error("not used");
@@ -160,7 +162,11 @@ it.effect("records written handoffs, nudges once for a missing one, then marks i
     });
     const runId = RunId.make("critic-run-1");
     const refresh = { cwd: "/tmp", threadId, runId };
-    const expectedPath = "handoffs/critic/ReviewHandoff-critic-t.md";
+    const expectedPath = agentHandoffArtifactPath({
+      personaId: "critic",
+      artifact: "ReviewHandoff",
+      threadId,
+    });
 
     // First completion without the artifact: one nudge, status nudged.
     yield* observer.refresh(refresh);
