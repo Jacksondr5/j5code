@@ -96,6 +96,7 @@ import { layer as J5ArtifactRunFinalizationObserverLive } from "./j5/artifacts/A
 import { layer as J5ArtifactWorkspaceLive } from "./j5/artifacts/ArtifactWorkspace.ts";
 import { layer as J5AgentHandoffNudgeQueueLive } from "./j5/agents/agentHandoffNudgeQueue.ts";
 import { layer as J5AgentHandoffObserverLive } from "./j5/agents/agentHandoffObserver.ts";
+import { layer as J5AgentHandoffRefreshesLive } from "./j5/agents/agentHandoffRefreshes.ts";
 import {
   connectHttpApiLayer,
   pendingServiceUpdateExists,
@@ -408,6 +409,7 @@ const OrchestrationV2RuntimeLayerLive = OrchestrationV2ProductionLayerLive.pipe(
     // J5: the saved-agent handoff gate wraps the artifact observer, which wraps upstream's.
     J5AgentHandoffObserverLive.pipe(
       Layer.provide(J5AgentHandoffNudgeQueueLive),
+      Layer.provide(J5AgentHandoffRefreshesLive),
       Layer.provide(J5ArtifactWorkspaceLive),
       Layer.provide(ProjectionStoreV2.layer),
       Layer.provide(

@@ -3,7 +3,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   type ArtifactEntry,
   EventId,
+  MessageId,
   type ModelSelection,
+  NodeId,
   type OrchestrationV2AppThread,
   ProjectId,
   ProviderDriverKind,
@@ -19,6 +21,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import * as ServerConfig from "../../config.ts";
 import { EventSinkV2, layer as eventSinkLayer } from "../../orchestration-v2/EventSink.ts";
@@ -32,6 +35,7 @@ import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { ArtifactWorkspace } from "../artifacts/ArtifactWorkspace.ts";
 import { AgentHandoffNudgeQueue, layer as queueLayer } from "./agentHandoffNudgeQueue.ts";
 import { layer as observerLayer } from "./agentHandoffObserver.ts";
+import { AgentHandoffRefreshes, layer as refreshesLayer } from "./agentHandoffRefreshes.ts";
 import { makeAgentHandoffStore } from "./agentHandoffStore.ts";
 import { agentHandoffNudgeText } from "./agentHandoffNudgeWorker.ts";
 import { agentHandoffArtifactPath } from "./agentPersonaArtifacts.ts";
@@ -57,7 +61,6 @@ const fakeArtifacts = Layer.effect(
       list: () => Ref.get(entries),
       read: () => unsupported,
       write: () => unsupported,
-      writeVersioned: () => unsupported,
       exportPlan: () => unsupported,
       watch: () => {
         throw new Error("not used");
@@ -79,6 +82,7 @@ const config = ServerConfig.layerTest(process.cwd(), { prefix: "j5-agent-handoff
 // between the observer under test and the assertions.
 const infrastructure = Layer.mergeAll(
   queueLayer,
+  refreshesLayer,
   artifactEntriesLayer,
   stores,
   config,
@@ -96,7 +100,7 @@ const modelSelection = {
   model: "gpt-5.6-terra",
 } satisfies ModelSelection;
 
-it.effect("records written handoffs, nudges once for a missing one, then marks it missing", () =>
+it.effect("records written handoffs, nudges once for a missing one, then keeps it missing", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -110,6 +114,7 @@ it.effect("records written handoffs, nudges once for a missing one, then marks i
     const projections = yield* ProjectionStoreV2;
     const observer = yield* RunFinalization.RunFinalizationObserver;
     const nudges = yield* AgentHandoffNudgeQueue;
+    const refreshes = yield* AgentHandoffRefreshes;
     const entries = yield* ArtifactEntries;
     const store = yield* makeAgentHandoffStore;
     const now = yield* DateTime.now;
@@ -168,18 +173,69 @@ it.effect("records written handoffs, nudges once for a missing one, then marks i
       threadId,
     });
 
-    // First completion without the artifact: one nudge, status nudged.
+    // While the run is still waiting (checkpoint capture has not committed completion yet) the
+    // observer records nothing; this guard keeps the check off the pre-checkpoint path.
+    const run = {
+      id: runId,
+      threadId,
+      ordinal: 1,
+      providerInstanceId,
+      modelSelection,
+      providerThreadId: null,
+      userMessageId: MessageId.make("critic-message-1"),
+      rootNodeId: NodeId.make("critic-node-1"),
+      activeAttemptId: null,
+      status: "waiting" as const,
+      requestedAt: now,
+      startedAt: now,
+      completedAt: null,
+      checkpointId: null,
+      contextHandoffId: null,
+    };
+    const runEvent = (
+      id: string,
+      type: "run.created" | "run.updated",
+      status: "waiting" | "completed",
+    ) => ({
+      id: EventId.make(id),
+      type,
+      threadId,
+      runId,
+      nodeId: run.rootNodeId,
+      driver: ProviderDriverKind.make("codex"),
+      occurredAt: now,
+      payload: { ...run, status, completedAt: status === "completed" ? now : null },
+    });
+    yield* eventSink.write({
+      events: [runEvent("critic-run-1-created", "run.created", "waiting")],
+    });
+    yield* observer.refresh(refresh);
+    assert.isNull(yield* store.get(threadId));
+    assert.equal(yield* Queue.size(nudges), 0);
+    assert.equal(yield* SubscriptionRef.get(refreshes), 0);
+
+    // First completion without the artifact: one nudge, status nudged, one refresh signal.
+    yield* eventSink.write({
+      events: [runEvent("critic-run-1-completed", "run.updated", "completed")],
+    });
     yield* observer.refresh(refresh);
     assert.equal((yield* store.get(threadId))?.status, "nudged");
     assert.equal((yield* store.get(threadId))?.path, expectedPath);
     const nudge = yield* Queue.take(nudges);
     assert.equal(nudge.threadId, threadId);
     assert.include(agentHandoffNudgeText(nudge), `\`${expectedPath}\``);
+    assert.equal(yield* SubscriptionRef.get(refreshes), 1);
 
     // The follow-up run ends without it too: missing, and no second nudge.
     yield* observer.refresh({ ...refresh, runId: RunId.make("critic-run-2") });
     assert.equal((yield* store.get(threadId))?.status, "missing");
     assert.equal(yield* Queue.size(nudges), 0);
+
+    // Missing is terminal for reminders: a third empty run stays missing and is never re-nudged.
+    yield* observer.refresh({ ...refresh, runId: RunId.make("critic-run-2b") });
+    assert.equal((yield* store.get(threadId))?.status, "missing");
+    assert.equal(yield* Queue.size(nudges), 0);
+    assert.equal(yield* SubscriptionRef.get(refreshes), 3);
 
     // Once the file exists, the status flips to written.
     yield* Ref.set(entries, [{ path: expectedPath, byteLength: 12, modifiedAt: null }]);
@@ -213,6 +269,7 @@ it.effect("records written handoffs, nudges once for a missing one, then marks i
     });
     yield* observer.refresh({ cwd: "/tmp", threadId: plainId, runId: RunId.make("plain-run") });
     assert.isNull(yield* store.get(plainId));
+    assert.equal(yield* SubscriptionRef.get(refreshes), 4);
     assert.isNotNull(yield* projections.getThreadProjection(plainId));
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );

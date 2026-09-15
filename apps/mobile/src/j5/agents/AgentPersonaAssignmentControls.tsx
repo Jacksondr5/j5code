@@ -28,10 +28,8 @@ export function AgentPersonaAssignmentControls(props: {
   const handoffs = useEnvironmentQuery(
     props.environmentId === undefined || props.threadId === undefined
       ? null
-      : agentPersonaEnvironment.handoffs({
-          environmentId: props.environmentId,
-          input: { threadIds: [props.threadId] },
-        }),
+      : // Environment-wide and shared with every other handoff reader; refreshed by the server signal.
+        agentPersonaEnvironment.handoffs({ environmentId: props.environmentId, input: {} }),
   );
   const handoff = handoffs.data?.handoffs.find((entry) => entry.threadId === props.threadId);
   const handoffPresentation = handoff === undefined ? null : presentAgentHandoff(handoff);

@@ -9,8 +9,10 @@ import { useEnvironmentQuery } from "../../state/query";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 
 /**
- * The declared handoff artifact of a saved-agent task: written, pending after one reminder,
+ * The declared handoff artifact of a saved-agent task: written, pending after the one reminder,
  * or missing. Opens the Artifacts page at the file. Renders nothing until the first run ends.
+ * Every chip in an environment reads the same environment-wide query, which the server's handoff
+ * refresh signal keeps current.
  */
 export function AgentHandoffChip(props: {
   readonly environmentId: EnvironmentId;
@@ -18,10 +20,7 @@ export function AgentHandoffChip(props: {
   readonly className?: string;
 }) {
   const handoffs = useEnvironmentQuery(
-    agentPersonaEnvironment.handoffs({
-      environmentId: props.environmentId,
-      input: { threadIds: [props.threadId] },
-    }),
+    agentPersonaEnvironment.handoffs({ environmentId: props.environmentId, input: {} }),
   );
   const handoff = handoffs.data?.handoffs.find((entry) => entry.threadId === props.threadId);
   if (handoff === undefined) return null;

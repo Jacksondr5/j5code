@@ -1,9 +1,10 @@
 import type { ProviderAdapterV2RuntimePolicy } from "../../../orchestration-v2/ProviderAdapter.ts";
 
 /**
- * t3-code MCP tools pre-approved for Codex saved agents. Codex 0.153+ refuses any MCP tool that is
- * not annotated read-only under approval policy "never" ("MCP tool call requires approval, but
- * approval policy is never"), and every saved-agent runtime policy sends "never". `write_artifact`
+ * t3-code MCP tools pre-approved for every Codex thread running under approval policy "never".
+ * Codex 0.153+ refuses any MCP tool that is not annotated read-only under that policy ("MCP tool
+ * call requires approval, but approval policy is never"); every saved-agent runtime policy sends
+ * "never", and so does an ordinary full-access thread, so this is not persona-specific. `write_artifact`
  * is annotated destructive but writes only to server application storage, never the sandboxed
  * workspace, so pre-approving it keeps the workspace boundary intact while letting a saved agent
  * deliver its handoff. This is the per-tool form (`mcp_servers.<id>.tools.<tool>.approval_mode`),

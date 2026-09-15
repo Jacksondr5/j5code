@@ -8,16 +8,22 @@ import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as RunFinalization from "../../orchestration-v2/RunFinalizationService.ts";
 import { ArtifactWorkspace } from "../artifacts/ArtifactWorkspace.ts";
 import { AgentHandoffNudgeQueue } from "./agentHandoffNudgeQueue.ts";
+import { AgentHandoffRefreshes, bumpAgentHandoffRefreshes } from "./agentHandoffRefreshes.ts";
 import { makeAgentHandoffStore } from "./agentHandoffStore.ts";
 import { agentHandoffArtifactPath } from "./agentPersonaArtifacts.ts";
 import { makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 
 /**
- * The handoff gate. After each run of a saved-agent task whose definition declares an output
- * artifact, check the shared artifacts for the expected file. Present: record `written`.
- * Absent the first time: record `nudged` and queue one follow-up message asking the agent to
- * write it (the parent sees a pending child run instead of a clean completion). Absent again:
- * record `missing`. Wraps the upstream observer so the refresh behavior it owns is preserved.
+ * The handoff check. After each completed run of a saved-agent task whose definition declares an
+ * output artifact, look for the expected file in the shared artifacts. Present: record `written`.
+ * Absent the first time: record `nudged` and queue one follow-up message asking the agent to write
+ * it. Absent on any later run: record `missing`; the reminder is never repeated.
+ *
+ * This does not gate the parent. `RunFinalizationService.finalize` commits the run's completion,
+ * and with it the delegated completion that wakes the parent, before it calls this observer, so
+ * the parent has already been told the child finished when the reminder is queued. The reminder
+ * starts a follow-up run in the child's own thread; the recorded status is what the person sees.
+ * Wraps the upstream observer so the refresh behavior it owns is preserved.
  */
 export const layer = Layer.effect(
   RunFinalization.RunFinalizationObserver,
@@ -25,7 +31,10 @@ export const layer = Layer.effect(
     const artifacts = yield* ArtifactWorkspace;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     const nudges = yield* AgentHandoffNudgeQueue;
+    const refreshes = yield* AgentHandoffRefreshes;
     const store = yield* makeAgentHandoffStore;
+    const record = (handoff: Parameters<typeof store.upsert>[0]) =>
+      store.upsert(handoff).pipe(Effect.andThen(bumpAgentHandoffRefreshes(refreshes)));
     const library = yield* makeAgentPersonaLibrary;
     const upstream = yield* RunFinalization.RunFinalizationObserver;
 
@@ -59,12 +68,15 @@ export const layer = Layer.effect(
         runId: input.runId,
         checkedAt,
       };
-      if (written) return yield* store.upsert({ ...base, status: "written" });
-      if (previous?.status === "nudged") {
-        yield* Effect.logWarning("j5.agent-handoff.missing", { threadId: input.threadId, path });
-        return yield* store.upsert({ ...base, status: "missing" });
+      if (written) return yield* record({ ...base, status: "written" });
+      // One reminder per task: once nudged, every later run without the file stays missing.
+      if (previous?.status === "nudged" || previous?.status === "missing") {
+        if (previous.status === "nudged") {
+          yield* Effect.logWarning("j5.agent-handoff.missing", { threadId: input.threadId, path });
+        }
+        return yield* record({ ...base, status: "missing" });
       }
-      yield* store.upsert({ ...base, status: "nudged" });
+      yield* record({ ...base, status: "nudged" });
       yield* Queue.offer(nudges, {
         projectId,
         threadId: input.threadId,

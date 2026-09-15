@@ -27,7 +27,7 @@ const fromRow = (row: Row): AgentHandoff =>
     checkedAt: row.checked_at,
   });
 
-/** SQL access to `j5_agent_handoffs` (J5 migration 11); one row per saved-agent task. */
+/** SQL access to `j5_agent_handoffs` (J5 migration 12); one row per saved-agent task. */
 export const makeAgentHandoffStore = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   return {
