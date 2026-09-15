@@ -122,7 +122,7 @@ export function RunsPage() {
           input: {
             squadronId: scope,
             search: search.q ?? "",
-            status: search.status ?? "",
+            status: search.status === "all" ? "" : (search.status ?? ""),
             page,
             pageSize: 50,
           },
@@ -197,9 +197,10 @@ export function RunsPage() {
                   page: undefined,
                 })
               }
-              value={search.status ?? ""}
+              value={view === "list" && search.status === "all" ? "" : (search.status ?? "")}
             >
-              <option value="">All statuses</option>
+              <option value="">{view === "board" ? "Ongoing" : "All statuses"}</option>
+              {view === "board" ? <option value="all">All statuses</option> : null}
               {Object.keys(statusPresentation).map((status) => (
                 <option key={status} value={status}>
                   {statusPresentation[status as keyof typeof statusPresentation].label}
@@ -220,7 +221,12 @@ export function RunsPage() {
               aria-pressed={view === "list"}
               size="sm"
               variant={view === "list" ? "secondary" : "ghost"}
-              onClick={() => updateSearch({ view: "list" })}
+              onClick={() =>
+                updateSearch({
+                  view: "list",
+                  status: search.status === "all" ? undefined : search.status,
+                })
+              }
             >
               List
             </Button>

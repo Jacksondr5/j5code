@@ -402,7 +402,7 @@ it.effect("reads bounded board projections and revision-disjoint timeline pages"
         ${`Private ${index}`}, 'done', NULL, ${index}, 5, 1, 1, 'completed', ${payload})`;
     }
 
-    const board = yield* readBoard("scope", "private", 0, 24);
+    const board = yield* readBoard("scope", "private", 0, 24, "all");
     assert.equal(board.cards.length, 24);
     assert.equal(board.total, 25);
     assert.equal(board.hasMore, true);
@@ -423,7 +423,7 @@ it.effect("reads bounded board projections and revision-disjoint timeline pages"
       sessionStatus: null,
     });
     assert.isFalse(encodeJson(board).includes("secret-input"));
-    const nextBoard = yield* readBoard("scope", "private", 24, 24);
+    const nextBoard = yield* readBoard("scope", "private", 24, 24, "all");
     assert.equal(nextBoard.cards.length, 1);
     assert.equal(nextBoard.hasMore, false);
 
@@ -452,5 +452,66 @@ it.effect("reads bounded board projections and revision-disjoint timeline pages"
       ["timeline-run"],
     );
     assert.isTrue(actionPlan.some(({ detail }) => detail.includes("j5_playbook_actions_v2_run")));
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect("defaults the board to ongoing runs while preserving terminal filters", () =>
+  Effect.gen(function* () {
+    yield* runPlaybookMigrations();
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`CREATE TABLE orchestration_v2_projection_runs(
+      run_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, status TEXT NOT NULL,
+      requested_at TEXT NOT NULL, completed_at TEXT
+    )`;
+    const statuses = [
+      "running",
+      "restarting",
+      "waiting_approval",
+      "blocked",
+      "cancelling",
+      "cancelled",
+      "completed",
+      "failed",
+    ] as const;
+    for (const [index, status] of statuses.entries()) {
+      const payload = encodeJson({
+        id: `run-${status}`,
+        revision: 1,
+        phase: "build",
+        status,
+        visits: { build: 1 },
+        approvals: [],
+      });
+      yield* sql`INSERT INTO j5_playbook_runs(
+        id, definition_id, definition_version, definition_hash, squadron_id, project_id,
+        title, phase, gate_revision, activity_at, status_priority, revision, read_version, status, payload
+      ) VALUES (${`run-${status}`}, 'definition', 1, 'hash', 'scope', 'project',
+        ${status}, 'build', NULL, ${index}, ${index}, 1, 1, ${status}, ${payload})`;
+    }
+
+    const ongoing = yield* readBoard("scope", "", 0, 4);
+    assert.equal(ongoing.total, 5);
+    assert.equal(ongoing.cards.length, 4);
+    assert.equal(ongoing.hasMore, true);
+    assert.deepEqual(
+      new Set(ongoing.cards.map(({ status }) => status)),
+      new Set(["running", "restarting", "waiting_approval", "blocked"]),
+    );
+    const lastOngoing = yield* readBoard("scope", "", 4, 4);
+    assert.equal(lastOngoing.total, 5);
+    assert.equal(lastOngoing.cards.length, 1);
+    assert.equal(lastOngoing.cards[0]!.status, "cancelling");
+    assert.equal(lastOngoing.hasMore, false);
+
+    const cancelled = yield* readBoard("scope", "", 0, 24, "cancelled");
+    assert.equal(cancelled.total, 1);
+    assert.deepEqual(
+      cancelled.cards.map(({ status }) => status),
+      ["cancelled"],
+    );
+
+    const all = yield* readBoard("scope", "", 0, 24, "all");
+    assert.equal(all.total, 8);
+    assert.equal(all.cards.length, 8);
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );

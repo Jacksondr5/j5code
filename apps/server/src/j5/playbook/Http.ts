@@ -57,12 +57,13 @@ export function parseListParameters(
     readonly maximum: number;
     readonly cursor: "offset" | "before";
   },
+  allowAllStatuses = false,
 ) {
   const cursorValue = safeInteger(url.searchParams.get(defaults.cursor), 0, false);
   const limitValue = safeInteger(url.searchParams.get("limit"), defaults.limit, true);
   if (cursorValue === null || limitValue === null) return null;
   const status = url.searchParams.get("status") ?? "";
-  if (status !== "" && !isRunStatus(status)) return null;
+  if (status !== "" && !(allowAllStatuses && status === "all") && !isRunStatus(status)) return null;
   return {
     squadronId: url.searchParams.get("squadronId") ?? "",
     query: (url.searchParams.get("q") ?? "").slice(0, 240),
@@ -123,11 +124,15 @@ export const playbookHttpLayer = Layer.unwrap(
             );
           }
           if (id === "board") {
-            const parameters = parseListParameters(url, {
-              limit: 24,
-              maximum: 48,
-              cursor: "offset",
-            });
+            const parameters = parseListParameters(
+              url,
+              {
+                limit: 24,
+                maximum: 48,
+                cursor: "offset",
+              },
+              true,
+            );
             if (!parameters)
               return HttpServerResponse.jsonUnsafe(
                 { message: "Invalid list parameters" },
