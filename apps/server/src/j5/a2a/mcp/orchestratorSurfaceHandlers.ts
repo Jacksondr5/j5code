@@ -61,12 +61,6 @@ const handlers = {
       const service = yield* OrchestratorMcpService;
       return yield* service.readThread(scope, input);
     }),
-  t3_thread_wait: (input) =>
-    Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
-      const service = yield* OrchestratorMcpService;
-      return yield* service.waitForThread(scope, input);
-    }),
 } satisfies Parameters<typeof J5OrchestratorSurface.toLayer>[0];
 
 export const J5OrchestratorSurfaceHandlersLive = J5OrchestratorSurface.toLayer(handlers);
