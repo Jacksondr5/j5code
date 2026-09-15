@@ -24,6 +24,8 @@ export const J5_CLAUDE_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__t3-code__task_status",
   "mcp__t3-code__task_cancel",
   "mcp__t3-code__stop_agent",
+  "mcp__t3-code__stop_crew",
   "mcp__t3-code__archive_agent",
+  "mcp__t3-code__archive_crew",
   "mcp__t3-code__clear_own_ask",
 ];

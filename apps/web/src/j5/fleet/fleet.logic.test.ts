@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildFleetTree, countFleetAlerts, originLabel } from "./fleet.logic";
-import type { FleetAgent, FleetSquadron } from "./fleetClient";
+import { buildFleetTree, countFleetAlerts, originLabel, retiredCrews } from "./fleet.logic";
+import type { FleetAgent, FleetCrew, FleetSquadron } from "./fleetClient";
 
 const agent = (participantId: string, overrides: Partial<FleetAgent> = {}): FleetAgent => ({
   participantId,
@@ -78,5 +78,33 @@ describe("fleet tree", () => {
     expect(roots.map((node) => node.row.agent.participantId).length).toBeGreaterThan(0);
     expect(countFleetAlerts([squadron])).toBe(1);
     expect(originLabel("unknown")).toBe("?");
+  });
+});
+
+describe("retired crews", () => {
+  const crew = (id: string, archivedAt: string | null): FleetCrew => ({
+    crewInstanceId: id,
+    crewName: id,
+    captainParticipantId: "captain",
+    captainThreadId: "thread:captain",
+    brief: "Land the PR.",
+    version: 1,
+    createdAt: "2026-09-14T09:00:00.000Z",
+    archivedAt,
+    roster: [],
+  });
+
+  it("keeps only archived Crews, newest retirement first, so the snapshot stays readable", () => {
+    const squadron: FleetSquadron = {
+      id: "squadron:alpha",
+      name: "Alpha",
+      agents: [],
+      crews: [
+        crew("live", null),
+        crew("older", "2026-09-14T10:00:00.000Z"),
+        crew("newer", "2026-09-14T12:00:00.000Z"),
+      ],
+    };
+    expect(retiredCrews(squadron).map((entry) => entry.crewInstanceId)).toEqual(["newer", "older"]);
   });
 });

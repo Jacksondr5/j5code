@@ -8,7 +8,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { annotateEnvironmentRequest } from "../../auth/http.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
-import { authenticateClientRead } from "./ClientReadsHttp.ts";
+import { authenticateClientRead, jsonBody } from "./ClientReadsHttp.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { ParticipantPlacementService } from "./PlacementService.ts";
 import { SquadronId } from "./contracts.ts";
@@ -25,6 +25,7 @@ export type FleetAgent = J5Contracts.FleetAgent;
 export type FleetResponse = J5Contracts.FleetResponse;
 
 const encodeResponse = Schema.encodeEffect(FleetResponse);
+const decodeRequest = Schema.decodeUnknownEffect(J5Contracts.FleetReadRequest);
 
 /** Pure projection from placement rows, live Crews, and open-ask counts to one Squadron. */
 export const projectFleetSquadron = (input: {
@@ -159,7 +160,13 @@ export const makeFleetReadsHttpRouteLayer = (path: HttpRouter.PathInput) =>
         Effect.gen(function* () {
           yield* annotateEnvironmentRequest("j5.a2a.clientReads.fleet");
           yield* authenticateClientRead;
-          const read = yield* Effect.result(readFleet(false).pipe(Effect.flatMap(encodeResponse)));
+          const body = yield* jsonBody;
+          const decoded = Result.isFailure(body)
+            ? undefined
+            : Result.getOrUndefined(yield* Effect.result(decodeRequest(body.success)));
+          const read = yield* Effect.result(
+            readFleet(decoded?.includeRetired === true).pipe(Effect.flatMap(encodeResponse)),
+          );
           if (Result.isFailure(read)) {
             yield* Effect.logError("J5 fleet read failed", { cause: read.failure });
             return HttpServerResponse.jsonUnsafe(

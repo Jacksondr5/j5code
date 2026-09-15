@@ -34,6 +34,7 @@ import {
   seatNoticeSections,
   seatSettledNoticeText,
 } from "./CrewMemberSettler.ts";
+import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
@@ -224,6 +225,7 @@ it.effect("settles finished members and tells the Captain how each seat ended", 
             ).pipe(Effect.as({ events: [], effects: [] } as never)),
         }),
       ),
+      Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
       Layer.provideMerge(artifactWorkspaceLayer),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-settle-" })),
@@ -407,6 +409,7 @@ it.effect(
               ),
           }),
         ),
+        Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
         Layer.provideMerge(artifactWorkspaceLayer),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-fold-" })),

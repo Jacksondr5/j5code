@@ -9,6 +9,7 @@ import {
   selectSpawnedChildRows,
   spawnedChildrenNeedAttention,
   spawnedChildrenSummary,
+  stoppableCrew,
   writeExpandedSpawnParents,
 } from "./spawnedChildren.logic";
 
@@ -63,6 +64,25 @@ describe("spawned children under a sidebar row", () => {
     );
     expect(spawnedChildrenSummary(mixed)).toBe("2 agents");
     expect(spawnedChildrenSummary(mixed.slice(0, 1))).toBe("1 agent");
+  });
+
+  it("offers Stop only for one Crew with a seat still running", () => {
+    const running = new Map([
+      ["builder", thread("builder", "2026-09-09T10:00:00Z", { runtime: { status: "running" } })],
+      ["critic", thread("critic", "2026-09-09T11:00:00Z")],
+      ["solo", thread("solo", "2026-09-09T12:00:00Z")],
+    ]);
+    const crew = [child("builder", "builder"), child("critic", "critic")];
+    expect(stoppableCrew(selectSpawnedChildRows(crew, running))).toEqual({
+      crewInstanceId: "crew:1",
+      crewName: "Review Pair",
+    });
+    // Every seat idle: nothing to interrupt. A solo peer among the seats: not one Crew.
+    expect(stoppableCrew(selectSpawnedChildRows(crew, threads))).toBeNull();
+    expect(
+      stoppableCrew(selectSpawnedChildRows([...crew, child("solo", null)], running)),
+    ).toBeNull();
+    expect(stoppableCrew([])).toBeNull();
   });
 
   it("remembers expansion per parent and tolerates broken or missing storage", () => {

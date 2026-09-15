@@ -93,7 +93,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
             ),
           ),
           Layer.provide(database),
-          // The crew launcher reads the saved-agent library through the file system.
+          // The crew artifact writer reaches the project artifacts directory through the file system.
           Layer.provide(NodeServices.layer),
         ),
       );

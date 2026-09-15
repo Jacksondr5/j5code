@@ -45,7 +45,7 @@ To invoke an agent in Codex or Claude, type **@** in the composer and select an 
 
 The selected agent runs as a subagent under the current conversation and returns its result there. It uses its saved instructions, primary/fallback model, reasoning, and runtime policy, even if its model uses a different provider from the parent. It cannot broaden the parent’s permissions. Running subagents keep their saved definition when the library changes. Crews and new-task crew launches are not part of agent invocation.
 
-An agent can also start a saved agent as a peer with its own top-level task by naming it in a spawn. The peer keeps the saved instructions and runtime policy, and the spawning agent must choose one of the saved agent's declared provider, model, and reasoning combinations. A read-only agent cannot spawn a peer with write access, and a thread you run with approvals on cannot spawn a saved agent that would write with approvals off.
+An agent can also start a saved agent as a peer with its own top-level task by naming it in a spawn. The peer keeps the saved instructions and runtime policy, and the spawning agent must choose one of the saved agent's declared provider, model, and reasoning combinations. A read-only agent cannot spawn a peer with write access.
 
 ## Crews
 
@@ -62,6 +62,10 @@ While the crew works, the Captain may ask for one more agent. That request lands
 When a seat's agent is defined to return a report, such as a review handoff, it writes that report as a handoff artifact under `handoffs/` in the project's Artifacts page, exactly as the agent would when running on its own (see **Handoff artifacts** above). When a seat first finishes, and again whenever its result or report changes, the Captain gets a notice in its thread with the seat's result and its report inline when it is short; notices that arrive while the Captain is mid-turn are combined into one queued message. A seat that finishes without writing its report is reminded once, and the notice says the report is missing. Reports are never left in chat.
 
 Crews are a web and desktop feature; the mobile app shows crew members as ordinary agents and has no roster gate. Members stay out of the thread list so it shows the conversations you started; the Captain's row shows a Captain chip and a toggle that opens into its members with seat, status, and last activity. When a member finishes and owes no reply, its thread settles on its own. **Fleet**, from the icon beside the inbox bell, shows every agent by Squadron with each crew under its Captain.
+
+To stop a crew that is heading the wrong way, use **Stop crew** on the crew's row in Fleet or the small **Stop** beside the Captain's toggle in the thread list; both appear only while a member is running. Stopping interrupts every running member's turn and nothing else: members stay on the roster and can be messaged again. The Captain can do the same from its own tools.
+
+A crew is retired as a unit, by the Captain or by you. The Captain is shown exactly what will end, seat by seat, and asked to confirm; the guidance is to check with you first. You can retire a crew yourself with **Archive crew** on its row in Fleet, and archiving a Captain's thread retires its crews with it; from the thread list, a dialog first lists every member with any running turn or open ask. Individual crew members cannot be archived on their own. Archiving never deletes worktrees, branches, or conversation history, and a retired crew's brief and roster stay readable under **Retired crews** at the bottom of its Squadron in Fleet.
 
 A **Crew Captain** ships as a bundled example, so `/crew` works out of the box. To change how your Captain composes crews, duplicate it in Settings → Agents and edit the copy; see [Configure a persona library](../operations/persona-library.md).
 

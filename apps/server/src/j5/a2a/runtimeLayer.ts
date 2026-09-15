@@ -4,10 +4,13 @@ import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.
 import { layer as agentCrewInstanceLayer } from "./AgentCrewInstanceService.ts";
 import { layer as archiveFactsLayer, placementFactsLayer } from "./ArchiveFactsService.ts";
 import { layer as archiveAgentLayer } from "./ArchiveAgentService.ts";
+import { layer as archiveCrewLayer } from "./ArchiveCrewService.ts";
 import { layer as agentCrewProposalLayer } from "./AgentCrewProposalService.ts";
 import { layer as crewLaunchLayer } from "./CrewLaunchService.ts";
 import { layer as crewMemberSettlerLayer } from "./CrewMemberSettler.ts";
 import { layer as crewProposalLayer } from "./CrewProposalService.ts";
+import { layer as captainArchiveCascadeLayer } from "./CrewCaptainArchiveCascade.ts";
+import { layer as crewStopLayer } from "./CrewStopService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import {
@@ -80,16 +83,27 @@ export const makeJ5A2AAuxiliaryLayer = (
   const agentHandoffNudgeWorkerProvided = agentHandoffNudgeWorkerLayer.pipe(
     Layer.provide(agentHandoffNudgeQueueLayer),
   );
+  const archiveCrewProvided = archiveCrewLayer.pipe(
+    Layer.provideMerge(archiveAgentProvided),
+    Layer.provideMerge(agentCrewInstanceLayer),
+  );
   const crewLaunchProvided = crewLaunchLayer.pipe(
     Layer.provideMerge(spawnCompositionProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
   );
+  const crewStopProvided = crewStopLayer.pipe(Layer.provideMerge(agentCrewInstanceLayer));
   const crewProposalProvided = crewProposalLayer.pipe(
     Layer.provideMerge(crewLaunchProvided),
     Layer.provideMerge(agentCrewProposalLayer),
   );
+  // A person's archive of a Captain retires its Crews from the same event stream the settler reads.
+  const captainArchiveCascadeProvided = captainArchiveCascadeLayer.pipe(
+    Layer.provideMerge(archiveCrewProvided),
+    Layer.provideMerge(agentCrewInstanceLayer),
+  );
   // The settler tells a Captain when a seat's handoff file appears, so it reads the workspace.
   const crewMemberSettlerProvided = crewMemberSettlerLayer.pipe(
+    Layer.provideMerge(captainArchiveCascadeProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
     Layer.provide(artifactWorkspaceLayer),
   );
@@ -112,7 +126,9 @@ export const makeJ5A2AAuxiliaryLayer = (
     spawnCompositionProvided,
     squadronJoinProvided,
     agentCrewInstanceLayer,
+    archiveCrewProvided,
     crewProposalProvided,
+    crewStopProvided,
     crewMemberSettlerProvided,
   ).pipe(Layer.provideMerge(participantPlacementLayer));
   return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));

@@ -20,14 +20,26 @@ const registered = (overrides: Partial<client.PreArchiveFacts> = {}): client.Arc
     retired: false,
     openExchanges: [],
     placementSubtree: { state: "none" },
+    liveCrews: [],
+    crewSeat: null,
     ...overrides,
   } as Extract<client.PreArchiveFacts, { state: "registered" }>,
   participantLabels: new Map([
     ["agent:waiter", "Waiter"],
     ["agent:recipient", "Recipient"],
     ["agent:child", "Child"],
+    ["agent:critic", "Critic"],
   ]),
 });
+
+const reviewPair: client.LiveCrew = {
+  crewInstanceId: "crew:review-pair",
+  crewName: "Review Pair",
+  seats: [
+    { seat: "builder", participantId: "agent:builder", runningTurn: false, openAsks: 0 },
+    { seat: "critic", participantId: "agent:critic", runningTurn: true, openAsks: 1 },
+  ],
+};
 
 const archiveThreadRef = scopeThreadRef(
   "environment:archive-flow" as never,
@@ -86,6 +98,67 @@ describe("archive flow", () => {
     expect(markup).toContain("To");
     expect(markup).toContain("Recipient");
     expect(markup).toContain("Send the final note");
+  });
+
+  it("lists a Captain's live Crews seat by seat and leaves the retiring to the server", async () => {
+    const preflight = registered({ liveCrews: [reviewPair] });
+    expect(needsArchiveWarning(preflight)).toBe(true);
+    const warning = formatArchiveWarning({ threadTitle: "Captain", preflight });
+    const markup = renderToStaticMarkup(warning.content);
+    expect(warning.confirmLabel).toBe("Archive anyway");
+    expect(markup).toContain("A Captain is never archived alone.");
+    expect(markup).toContain("Review Pair");
+    expect(markup).toContain("Critic");
+    expect(markup).toContain("running turn, 1 open ask");
+
+    // The lifecycle cascade retires the Crews once the archive commits; the delegate only archives.
+    vi.spyOn(client, "readArchivePreflight").mockResolvedValue(preflight);
+    const archive = vi.fn(async () => "archived");
+    await expect(
+      archiveWithPreflight({
+        threadRef: archiveThreadRef,
+        threadTitle: "Captain",
+        confirm: async () => true,
+        archive,
+      }),
+    ).resolves.toBe("archived");
+    expect(archive).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to archive a Crew seat on its own, as archive_agent does for agents", async () => {
+    vi.spyOn(client, "readArchivePreflight").mockResolvedValue(
+      registered({
+        crewSeat: { crewInstanceId: "crew:review-pair", crewName: "Review Pair", seat: "critic" },
+      }),
+    );
+    const confirm = vi.fn(async () => true);
+    const archive = vi.fn(async () => "archived");
+    await expect(
+      archiveWithPreflight({
+        threadRef: archiveThreadRef,
+        threadTitle: "Critic",
+        confirm,
+        archive,
+      }),
+    ).resolves.toBeUndefined();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(archive).not.toHaveBeenCalled();
+  });
+
+  it("treats a missing or failed Crew read as a fact to warn about, not as no Crews", () => {
+    const failed = registered({ liveCrews: null });
+    expect(needsArchiveWarning(failed)).toBe(true);
+    expect(
+      renderToStaticMarkup(
+        formatArchiveWarning({ threadTitle: "Captain", preflight: failed }).content,
+      ),
+    ).toContain("Crews it commands: couldn&#x27;t check.");
+    const { liveCrews: _absent, ...older } = registered().facts as Extract<
+      client.PreArchiveFacts,
+      { state: "registered" }
+    >;
+    expect(needsArchiveWarning({ facts: older, participantLabels: new Map() })).toBe(true);
+    expect(needsArchiveWarning(registered({ liveCrews: [] }))).toBe(false);
   });
 
   it("never presents an unreadable preflight as an empty clean list", () => {
