@@ -179,10 +179,11 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(toolNames).toContain("t3_thread_list");
       expect(toolNames).toContain("t3_thread_read");
       expect(toolNames).toContain("t3_thread_wait");
+      // J5 re-declares delegate_task with a saved-agent parameter and keeps its status/cancel pair.
+      expect(toolNames).toContain("delegate_task");
+      expect(toolNames).toContain("task_status");
+      expect(toolNames).toContain("task_cancel");
       for (const excluded of [
-        "delegate_task",
-        "task_status",
-        "task_cancel",
         "create_threads",
         "t3_thread_start",
         "t3_thread_send",
@@ -197,8 +198,8 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(toolNames.toSorted()).toEqual([
         "archive_agent",
         "clear_own_ask",
+        "delegate_task",
         "delete_scheduled_task",
-        "invoke_agent",
         "join_squadron",
         "list_artifacts",
         "list_participants",
@@ -229,6 +230,8 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "t3_thread_wait",
         "t3_worktree_handoff",
         "t3_worktree_status",
+        "task_cancel",
+        "task_status",
         "update_scheduled_task",
         "write_artifact",
       ]);

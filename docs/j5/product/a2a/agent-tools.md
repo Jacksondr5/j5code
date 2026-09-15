@@ -152,7 +152,8 @@ No inputs. Read-only; no events. Callable by a thread that has no Squadron home 
 
 ### Kept upstream tools
 
-- `orchestrator_capabilities` — providers and models (ids, labels, option descriptors) for spawn targeting, plus runtime and interaction-mode facts. It no longer advertises app-owned subagents, child tasks, or delegation; J5 verbs are advertised by their own descriptions.
+- `orchestrator_capabilities` — providers and models (ids, labels, option descriptors) for spawn targeting, plus runtime and interaction-mode facts. It deliberately stays silent about delegation even though `delegate_task` is back on the surface: that tool's own description carries its saved-agent use, and J5 verbs are advertised by their own descriptions.
+- `delegate_task`, `task_status`, `task_cancel` — upstream's provider-owned child delegation. J5 re-declares `delegate_task` with its own description, which leads with the optional `agent` (a saved agent id from an `@agent:ID` mention or the Settings → Agents library) and presents the plain child as the fallback for cross-provider or T3-tracked work rather than the default for any subagent request. With `agent`, the server pins that agent's instructions, model route, reasoning, and runtime policy and refuses `target` and `runtimeMode`; without it, the child is upstream's plain subagent. The child is backing storage under the calling thread, not a Peer Agent; use `spawn_agent` for a participant.
 - `schedule_task`, `list_scheduled_tasks`, `update_scheduled_task`, `delete_scheduled_task` — consumed as-is.
 - `t3_thread_list`, `t3_thread_read`, `t3_thread_wait` — consumed as-is; if an upstream description mentions delegation, J5 re-declares that tool with corrected prose.
 
@@ -188,3 +189,4 @@ No inputs. Read-only; no events. Callable by a thread that has no Squadron home 
 - 2026-09-12 — archiving is reversible: unarchive restores the same identity without reopening Exchanges; deletion is a separate permanent act for people only; the address book hides archived agents unless asked (PR #132).
 - 2026-09-12 — `list_squadrons` and `join_squadron` added for the one case of a native thread with no home (issue #129, PR #131).
 - 2026-09-07 — rewritten from a stack of dated contract revisions into current-state contracts; every verb's build state true as of this date (all six verbs shipped; `regarding` and the person follow-up rule are issue #111).
+- 2026-09-14 — `delegate_task`, `task_status`, and `task_cancel` return to the J5 surface, with a saved-agent `agent` parameter on `delegate_task` replacing the J5-only `invoke_agent` ([review](https://github.com/Jacksondr5/j5code/pull/124#issuecomment-5663559782)).
