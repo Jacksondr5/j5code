@@ -781,6 +781,7 @@ import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AgentPersonaAssignmentControl } from "../../j5/agents/AgentPersonaAssignmentControl";
 import { AgentDraftPicker } from "../../j5/agents/AgentDraftPicker";
+import { composerModelSelectionForThread } from "../../j5/agents/personaComposerSelection";
 import { useDraftAgentAssignment } from "../../j5/agents/useDraftAgentAssignment";
 import { toastManager } from "../ui/toast";
 import {
@@ -1768,9 +1769,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     provider: selectedProviderStatus,
     interactionMode: requestedInteractionMode,
   });
+  // J5: a saved-agent thread always sends its immutable launch route (see personaComposerSelection).
   const selectedModelSelection = useMemo<ModelSelection>(
-    () => createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
-    [selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
+    () =>
+      composerModelSelectionForThread(
+        agentPersonaAssignment,
+        createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
+      ),
+    [agentPersonaAssignment, selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
   );
   const selectedModelForPicker = selectedModel;
   // Instance-keyed option list so the picker can show each configured

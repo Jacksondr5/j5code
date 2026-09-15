@@ -3,6 +3,7 @@ import * as Context from "effect/Context";
 import { Tool } from "effect/unstable/ai";
 
 import { A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
+import { J5_CLAUDE_MCP_ALLOWED_TOOLS } from "./claudeAllowedTools.ts";
 import {
   J5ArchiveAgentTool,
   J5SendMessageTool,
@@ -52,6 +53,8 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
   assert.sameMembers([...(stopSchema.required ?? [])], ["squadron_id", "participant_id"]);
   assert.sameMembers([...(archiveSchema.required ?? [])], ["squadron_id", "participant_id"]);
   assert.property(spawnSchema.properties ?? {}, "client_request_id");
+  assert.property(spawnSchema.properties ?? {}, "agent");
+  assert.include(J5SpawnAgentTool.description ?? "", "one of that agent's declared routes");
   assert.property(stopSchema.properties ?? {}, "client_request_id");
   assert.property(archiveSchema.properties ?? {}, "client_request_id");
   assert.property(archiveSchema.properties ?? {}, "confirmation_token");
@@ -65,6 +68,20 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
     "list_squadrons",
     "join_squadron",
   ]);
+  // Declared handoffs are written by the agent itself with the project write_artifact tool
+  // (artifacts live in application storage, not the sandboxed workspace), so a read-only Claude
+  // persona must have it pre-approved beside the J5 verbs, and the provider-native Subagent verbs
+  // ride along so a refused spawner still has a way to get help. The artifact reads are upstream's.
+  assert.sameMembers(
+    [...J5_CLAUDE_MCP_ALLOWED_TOOLS],
+    [
+      ...Object.keys(J5Toolkit.tools).map((name) => `mcp__t3-code__${name}`),
+      "mcp__t3-code__write_artifact",
+      "mcp__t3-code__delegate_task",
+      "mcp__t3-code__task_status",
+      "mcp__t3-code__task_cancel",
+    ],
+  );
   assert.isFalse(Context.get(J5ArchiveAgentTool.annotations, Tool.Idempotent));
   assert.isTrue(Context.get(J5ArchiveAgentTool.annotations, Tool.Destructive));
   assert.isFalse(Context.get(J5SpawnAgentTool.annotations, Tool.Idempotent));
