@@ -1,4 +1,11 @@
-import { CommandId, MessageId, ThreadId, type ModelSelection } from "@t3tools/contracts";
+import {
+  CommandId,
+  MessageId,
+  ThreadId,
+  type ModelSelection,
+  type OrchestrationV2AgentPersonaAssignment,
+  type RuntimeMode,
+} from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -12,6 +19,12 @@ import {
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
+import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
+import { makeAgentPersonaLibrary } from "../../agents/agentPersonaLibrary.ts";
+import {
+  prepareAgentPersonaPeerSpawn,
+  resolveAgentPersonaPeerSpawnPolicy,
+} from "../../agents/agentPersonaSpawn.ts";
 import {
   ArchiveAgentConfirmationRequiredError,
   ArchiveAgentConfirmationStaleError,
@@ -417,6 +430,57 @@ const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
   } satisfies ModelSelection;
 });
 
+/**
+ * A Role-ful spawn keeps the explicit provider/model/reasoning pick; the saved agent's declared
+ * routes constrain it and its authority policy becomes the child's runtime mode.
+ */
+const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function* (
+  input: {
+    readonly agent: string;
+    readonly provider: string;
+    readonly model: string;
+    readonly reasoning: string;
+  },
+  modelSelection: ModelSelection,
+  parent: {
+    readonly agentPersonaAssignment?: OrchestrationV2AgentPersonaAssignment | undefined;
+    readonly runtimeMode: RuntimeMode;
+  },
+) {
+  const library = yield* makeAgentPersonaLibrary;
+  const providers = yield* (yield* ProviderRegistry).getProviders;
+  const assignment = yield* prepareAgentPersonaPeerSpawn(
+    {
+      personaId: input.agent,
+      provider: providers.find((candidate) => candidate.instanceId === modelSelection.instanceId),
+      instanceId: modelSelection.instanceId,
+      model: input.model,
+      reasoning: input.reasoning,
+    },
+    library,
+  ).pipe(
+    Effect.mapError((error) =>
+      stateError(
+        `Saved agent ${input.agent} cannot be spawned as requested: ${error.message}`,
+        "Call orchestrator_capabilities, then retry spawn_agent with a provider, model, and reasoning from that agent's declared routes, or omit agent for a plain Peer Agent.",
+      ),
+    ),
+  );
+  const policy = yield* resolveAgentPersonaPeerSpawnPolicy(parent, assignment, library).pipe(
+    Effect.mapError((error) =>
+      stateError(
+        `Saved agent ${input.agent} cannot be spawned from this thread: ${error.message}`,
+        "Retry spawn_agent with a read-only saved agent, or ask the human to launch the agent directly.",
+      ),
+    ),
+  );
+  return {
+    assignment,
+    modelSelection: assignment.resolvedModelSelection,
+    runtimeMode: policy.runtimeMode,
+  };
+});
+
 const handlers = {
   send_message: (input) =>
     Effect.gen(function* () {
@@ -621,7 +685,7 @@ const handlers = {
       const scope = yield* McpInvocationContext;
       const crypto = yield* Crypto.Crypto;
       const caller = yield* preflightSpawnCaller(scope);
-      const modelSelection = yield* selectSpawnModel(scope, input);
+      const selected = yield* selectSpawnModel(scope, input);
       const threadManagement = yield* ThreadManagementService;
       const parent = yield* threadManagement
         .getThreadProjection(scope.threadId)
@@ -633,6 +697,11 @@ const handlers = {
             ),
           ),
         );
+      const persona =
+        input.agent === undefined
+          ? undefined
+          : yield* prepareSpawnPersona({ ...input, agent: input.agent }, selected, parent.thread);
+      const modelSelection = persona?.modelSelection ?? selected;
       const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
       const stableInput = {
         providerSessionId: scope.providerSessionId,
@@ -649,8 +718,9 @@ const handlers = {
           projectId: parent.thread.projectId,
           title: spawnTitle(input.brief, input.title),
           modelSelection,
-          runtimeMode: parent.thread.runtimeMode,
+          runtimeMode: persona?.runtimeMode ?? parent.thread.runtimeMode,
           interactionMode: parent.thread.interactionMode,
+          ...(persona === undefined ? {} : { agentPersonaAssignment: persona.assignment }),
           branch: parent.thread.branch,
           worktreePath: parent.thread.worktreePath,
         })

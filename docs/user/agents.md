@@ -45,6 +45,8 @@ To invoke an agent in Codex or Claude, type **@** in the composer and select an 
 
 The selected agent runs as a subagent under the current conversation and returns its result there. It uses its saved instructions, primary/fallback model, reasoning, and runtime policy, even if its model uses a different provider from the parent. It cannot broaden the parent’s permissions. Running subagents keep their saved definition when the library changes. Crews and new-task crew launches are not part of agent invocation.
 
+An agent can also start a saved agent as a peer with its own top-level task by naming it in a spawn. The peer keeps the saved instructions and runtime policy, and the spawning agent must choose one of the saved agent's declared provider, model, and reasoning combinations. A read-only agent cannot spawn a peer with write access, and a thread you run with approvals on cannot spawn a saved agent that would write with approvals off.
+
 Persona instructions describe intended behavior. They do not grant permissions or guarantee that an agent obeys them. The displayed runtime policy reflects supported provider controls; unsupported modes appear as **Blocked**.
 
 The trash action also works for folder-loaded agents and bundled examples. Source files remain unchanged, and removal survives restarts. A removed example or folder agent stays in the list marked **Removed** with a **Restore** action that brings it back; a removed imported copy is gone and must be imported again.

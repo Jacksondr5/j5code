@@ -83,6 +83,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
         ).pipe(
           Layer.provide(runtime),
           Layer.provide(threadManagement),
+          Layer.provide(Layer.mock(ProviderRegistry)({})),
           Layer.provide(Layer.mock(OrchestratorV2)({})),
           Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
           Layer.provide(archiveDependencies),
