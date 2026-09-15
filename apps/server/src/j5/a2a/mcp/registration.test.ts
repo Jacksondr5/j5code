@@ -71,7 +71,6 @@ it.effect("registers the exact composed production J5 orchestration surface", ()
       "stop_agent",
       "t3_thread_list",
       "t3_thread_read",
-      "t3_thread_wait",
       "task_cancel",
       "task_status",
       "update_scheduled_task",
