@@ -305,7 +305,9 @@ export function PlaybookRunOverview({
       ) : null}
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="min-w-0 break-words text-xl font-semibold">{run.request}</h2>
+          <h2 className="line-clamp-2 min-w-0 text-xl font-semibold [overflow-wrap:anywhere]">
+            {run.request}
+          </h2>
           <Status status={run.status} />
         </div>
         <details className="text-sm text-muted-foreground">

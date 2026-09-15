@@ -50,7 +50,9 @@ export const PlaybookBoardCard = memo(function PlaybookBoardCard({
       <span className="mb-2">
         <Status status={card.status} />
       </span>
-      <span className="line-clamp-2 text-sm font-semibold leading-relaxed">{card.title}</span>
+      <span className="line-clamp-2 min-w-0 text-sm font-semibold leading-relaxed [overflow-wrap:anywhere]">
+        {card.title}
+      </span>
       <span className="mt-2 text-sm">
         {phaseLabel(card.phase)}
         {currentDefinitionPhase && currentDefinitionPhase.maxVisits > 1

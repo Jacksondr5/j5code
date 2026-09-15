@@ -21,7 +21,7 @@ it("requires authentication and operate scope, validates gate input, and records
   const routes = playbookHttpLayer.pipe(
     Layer.provide(
       Layer.mock(PlaybookService)({
-        definitions: [],
+        definitions: Effect.succeed([]),
         mutate: (_id, _commandId, _revision, event) => {
           mutations++;
           if (event.type === "decision") actor = event.decision.actor;
@@ -87,7 +87,7 @@ it("protects observability reads and rejects malformed pagination before reading
   const routes = playbookHttpLayer.pipe(
     Layer.provide(
       Layer.mock(PlaybookService)({
-        definitions: [],
+        definitions: Effect.succeed([]),
       }),
     ),
     Layer.provideMerge(

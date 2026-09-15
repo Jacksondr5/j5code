@@ -8,6 +8,11 @@ const testState = vi.hoisted(() => {
     readonly environmentId: string;
     readonly promotedTo: null;
     readonly threadId: string;
+    text?: string;
+    branch?: string | null;
+    worktreePath?: string | null;
+    envMode?: string;
+    startFromOrigin?: boolean;
   } | null = null;
   const router = {
     state: {
@@ -19,12 +24,16 @@ const testState = vi.hoisted(() => {
     }),
   };
   const draftStore = {
-    getComposerDraft: vi.fn(() => ({})),
+    getComposerDraft: vi.fn((draftId: string) => ({
+      text: draftId === storedDraft?.draftId ? (storedDraft.text ?? "") : "",
+    })),
     getDraftSessionByLogicalProjectKey: vi.fn(() => storedDraft),
     getDraftSession: vi.fn(() => null),
     getDraftThread: vi.fn(() => null),
     applyStickyState: vi.fn(),
-    setDraftThreadContext: vi.fn(),
+    setDraftThreadContext: vi.fn((_draftId: string, context: object) => {
+      Object.assign(storedDraft ?? {}, context);
+    }),
     setLogicalProjectDraftThreadId: vi.fn(),
     setModelSelection: vi.fn(),
   };
@@ -77,7 +86,7 @@ vi.mock("../composerDraftStore", () => {
     getState: () => testState.draftStore,
   });
   return {
-    composerDraftHasUserContent: () => false,
+    composerDraftHasUserContent: (draft: { text?: string }) => Boolean(draft.text),
     markPromotedDraftThreadByRef: vi.fn(),
     useComposerDraftStore,
   };
@@ -121,9 +130,102 @@ vi.mock("../uiStateStore", () => ({
 }));
 vi.mock("./useSettings", () => ({ useClientSettings: () => ({}) }));
 
+import {
+  launchCreatePlaybook,
+  CREATE_PLAYBOOK_PROMPT,
+} from "../j5/playbook/CreatePlaybookLauncher.logic";
+
 import { useNewThreadHandler } from "./useHandleNewThread";
 
 describe("useNewThreadHandler", () => {
+  it("reuses an empty playbook draft in the selected checkout, clearing stale workspace context", async () => {
+    const draft = {
+      draftId: "draft-existing",
+      environmentId: "environment-ssh",
+      promotedTo: null,
+      threadId: "thread-existing",
+      branch: "old-branch",
+      worktreePath: "/old/worktree",
+      envMode: "worktree",
+      startFromOrigin: true,
+    };
+    testState.reset(draft);
+    const setPrompt = vi.fn();
+    const opened = await launchCreatePlaybook({
+      project: {
+        id: "project-remote",
+        environmentId: "environment-ssh",
+        title: "Remote project",
+        workspaceRoot: "/remote/project",
+      } as never,
+      openThread: useNewThreadHandler(),
+      draftHasUserContent: () => false,
+      setPrompt,
+    });
+    expect(opened?.draftId).toBe(draft.draftId);
+    expect(draft).toMatchObject({
+      branch: null,
+      worktreePath: null,
+      envMode: "local",
+      startFromOrigin: false,
+    });
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+      "remote-project",
+      { environmentId: "environment-ssh", projectId: "project-remote" },
+      draft.draftId,
+      expect.objectContaining({
+        branch: null,
+        worktreePath: null,
+        envMode: "local",
+        startFromOrigin: false,
+      }),
+    );
+    expect(setPrompt).toHaveBeenCalledWith(draft.draftId, CREATE_PLAYBOOK_PROMPT);
+  });
+
+  it("preserves an invested draft and creates a fresh playbook draft in the selected checkout", async () => {
+    const draft = {
+      draftId: "draft-invested",
+      environmentId: "environment-ssh",
+      promotedTo: null,
+      threadId: "thread-invested",
+      text: "Keep my work",
+      branch: "my-branch",
+      worktreePath: "/my/worktree",
+      envMode: "worktree",
+      startFromOrigin: true,
+    };
+    const before = { ...draft };
+    testState.reset(draft);
+    const setPrompt = vi.fn();
+    const opened = await launchCreatePlaybook({
+      project: {
+        id: "project-remote",
+        environmentId: "environment-ssh",
+        title: "Remote project",
+        workspaceRoot: "/remote/project",
+      } as never,
+      openThread: useNewThreadHandler(),
+      draftHasUserContent: (draftId) =>
+        Boolean(testState.draftStore.getComposerDraft(draftId).text),
+      setPrompt,
+    });
+    expect(opened?.draftId).toBe("draft-delayed");
+    expect(draft).toEqual(before);
+    expect(setPrompt).toHaveBeenCalledWith("draft-delayed", CREATE_PLAYBOOK_PROMPT);
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+      "remote-project",
+      { environmentId: "environment-ssh", projectId: "project-remote" },
+      "draft-delayed",
+      expect.objectContaining({
+        branch: null,
+        worktreePath: null,
+        envMode: "local",
+        startFromOrigin: false,
+      }),
+    );
+  });
+
   it.each([
     ["new", null],
     [

@@ -57,12 +57,13 @@ export function parseListParameters(
     readonly maximum: number;
     readonly cursor: "offset" | "before";
   },
+  allowAllStatuses = false,
 ) {
   const cursorValue = safeInteger(url.searchParams.get(defaults.cursor), 0, false);
   const limitValue = safeInteger(url.searchParams.get("limit"), defaults.limit, true);
   if (cursorValue === null || limitValue === null) return null;
   const status = url.searchParams.get("status") ?? "";
-  if (status !== "" && !isRunStatus(status)) return null;
+  if (status !== "" && !(allowAllStatuses && status === "all") && !isRunStatus(status)) return null;
   return {
     squadronId: url.searchParams.get("squadronId") ?? "",
     query: (url.searchParams.get("q") ?? "").slice(0, 240),
@@ -123,11 +124,15 @@ export const playbookHttpLayer = Layer.unwrap(
             );
           }
           if (id === "board") {
-            const parameters = parseListParameters(url, {
-              limit: 24,
-              maximum: 48,
-              cursor: "offset",
-            });
+            const parameters = parseListParameters(
+              url,
+              {
+                limit: 24,
+                maximum: 48,
+                cursor: "offset",
+              },
+              true,
+            );
             if (!parameters)
               return HttpServerResponse.jsonUnsafe(
                 { message: "Invalid list parameters" },
@@ -156,7 +161,7 @@ export const playbookHttpLayer = Layer.unwrap(
               ),
             });
           if (id === "definitions")
-            return HttpServerResponse.jsonUnsafe({ definitions: service.definitions });
+            return HttpServerResponse.jsonUnsafe({ definitions: yield* service.definitions });
           if (id && parts[4] === "artifacts" && parts[5])
             return HttpServerResponse.jsonUnsafe({
               artifact: yield* service.artifact(id, decodeURIComponent(parts[5])),
@@ -203,17 +208,17 @@ export const playbookHttpLayer = Layer.unwrap(
           if (action === "import") {
             const input = yield* decodeDefinitionImportEffect(body);
             yield* service.importDefinitions(input.files, input.confirmConflicts ?? false);
-            return HttpServerResponse.jsonUnsafe({ definitions: service.definitions });
+            return HttpServerResponse.jsonUnsafe({ definitions: yield* service.definitions });
           }
           if (action === "state") {
             const input = yield* decodeDefinitionStateEffect(body);
             yield* service.setDefinitionEnabled(input.id, input.enabled);
-            return HttpServerResponse.jsonUnsafe({ definitions: service.definitions });
+            return HttpServerResponse.jsonUnsafe({ definitions: yield* service.definitions });
           }
           if (action === "remove") {
             const input = yield* decodeDefinitionStateEffect(body);
             yield* service.removeDefinition(input.id);
-            return HttpServerResponse.jsonUnsafe({ definitions: service.definitions });
+            return HttpServerResponse.jsonUnsafe({ definitions: yield* service.definitions });
           }
           return HttpServerResponse.jsonUnsafe(
             { message: "Unknown definition action" },

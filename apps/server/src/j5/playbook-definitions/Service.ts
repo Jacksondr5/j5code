@@ -130,6 +130,20 @@ export const makeService = Effect.gen(function* () {
       .flatMap((entry) => (entry.enabled && entry.definition ? [entry.definition] : [])))
       if (!definitions.some((item) => item.hash === definition.hash)) definitions.push(definition);
   };
+  const definitionFor = (
+    run: Pick<Run, "definitionId" | "definitionVersion" | "definitionHash">,
+  ) => {
+    const current = definitions.find(
+      (item) =>
+        item.id === run.definitionId &&
+        item.version === run.definitionVersion &&
+        item.hash === run.definitionHash,
+    );
+    if (current) return current;
+    const snapshot = playbookLibrary.loadSnapshot(run);
+    if (snapshot) definitions.push(snapshot);
+    return snapshot;
+  };
   for (const definition of definitions) validateDefinition(definition);
   const adapters: Record<string, Adapter> = {
     ...makeCodeAdapters(`${config.stateDir}/playbook-runs`),
@@ -154,16 +168,19 @@ export const makeService = Effect.gen(function* () {
     adapters,
     `server:${yield* Clock.currentTimeMillis}`,
     candidateIsCurrent,
+    definitionFor,
   );
   const wake = yield* Queue.dropping<void>(1);
   const candidateWake = yield* Queue.dropping<void>(1);
   const notify = Queue.offer(wake, undefined).pipe(Effect.asVoid);
   const present = Effect.fn("PlaybookService.present")(function* (run: Run) {
     const detail = yield* store.present(run);
+    definitionFor(detail);
     return { ...detail, restartAvailability: restartPresentation(detail, definitions) };
   });
   const detail = Effect.fn("PlaybookService.detail")(function* (id: string) {
     const run = yield* store.detail(id);
+    definitionFor(run);
     return { ...run, restartAvailability: restartPresentation(run, definitions) };
   });
   const startPermit = yield* Semaphore.make(1);
@@ -298,12 +315,7 @@ export const makeService = Effect.gen(function* () {
     const run = yield* store.get(id);
     if (event.type !== "cancel" && !hasPlaybookSnapshots(run.execution))
       return yield* new PlaybookError({ code: "invalid", detail: legacyPlaybookMessage });
-    let definition = definitions.find(
-      (item) =>
-        item.id === run.definitionId &&
-        item.version === run.definitionVersion &&
-        item.hash === run.definitionHash,
-    );
+    const definition = definitionFor(run);
     const phase = definition?.phases.find((item) => item.id === run.phase);
     let commandEvent = event;
     if (event.type === "restart_phase") {
@@ -434,12 +446,7 @@ export const makeService = Effect.gen(function* () {
         if (checkedAt !== undefined && now - checkedAt < 30_000) continue;
         candidateCheckedAt.set(record.id, now);
         const run = yield* store.get(record.id);
-        const definition = definitions.find(
-          (item) =>
-            item.id === run.definitionId &&
-            item.version === run.definitionVersion &&
-            item.hash === run.definitionHash,
-        );
+        const definition = definitionFor(run);
         if (!definition || definition.hash !== run.definitionHash) {
           yield* store.command(
             {
@@ -499,91 +506,92 @@ export const makeService = Effect.gen(function* () {
       );
     }
   }).pipe(Effect.retry({ schedule: Schedule.spaced("1 second") }), Effect.forkScoped);
-  // Presentation prerequisites must not prevent saved commands from replaying when the
-  // mutable persona library is temporarily invalid. New starts still perform strict preflight.
-  const personaCatalog = yield* library
-    .catalog()
-    .pipe(Effect.orElseSucceed(() => ({ definitions: [], disabledIds: [] })));
-  const disabledPersonas = new Set(personaCatalog.disabledIds);
-  const availablePersonas = new Set(
-    personaCatalog.definitions
-      .filter((persona) => !disabledPersonas.has(persona.id))
-      .map((persona) => persona.id),
-  );
+  const presentationDefinitions = Effect.gen(function* () {
+    // Presentation prerequisites must not prevent saved commands from replaying when the
+    // mutable persona library is temporarily invalid. New starts still perform strict preflight.
+    const personaCatalog = yield* library
+      .catalog()
+      .pipe(Effect.orElseSucceed(() => ({ definitions: [], disabledIds: [] })));
+    const disabledPersonas = new Set(personaCatalog.disabledIds);
+    const availablePersonas = new Set(
+      personaCatalog.definitions
+        .filter((persona) => !disabledPersonas.has(persona.id))
+        .map((persona) => persona.id),
+    );
+    const current = playbookLibrary.catalog();
+    const presentations: PlaybookDefinitionPresentation[] = current.map((entry) => {
+      const definition = entry.definition;
+      const requiredPersonas = Object.values(
+        definition?.agents ??
+          Object.fromEntries(
+            Object.entries(playbookAuthorities).map(([persona, authority]) => [
+              persona,
+              { persona, authority },
+            ]),
+          ),
+      ).map((assignment) => assignment.persona);
+      const missingPersonas = [...new Set(requiredPersonas)].filter(
+        (persona) => !availablePersonas.has(persona),
+      );
+      const diagnostics = [
+        ...entry.diagnostics,
+        ...(missingPersonas.length
+          ? [`Missing or disabled agent personas: ${missingPersonas.join(", ")}`]
+          : []),
+      ];
+      return {
+        id: entry.id,
+        version: definition?.version ?? 0,
+        hash: definition?.hash ?? "",
+        initial: definition?.initial ?? "",
+        title: entry.title,
+        description: entry.description,
+        enabled: entry.enabled && diagnostics.length === 0,
+        source: entry.source,
+        diagnostics,
+        capabilities: [...(definition?.capabilities ?? [])],
+        phases: (definition?.phases ?? []).map(
+          ({ id: phaseId, label, kind, capabilities, maxVisits, transitions }) => ({
+            id: phaseId,
+            ...(label ? { label } : {}),
+            ...(capabilities ? { capabilities: [...capabilities] } : {}),
+            kind,
+            maxVisits,
+            transitions,
+          }),
+        ),
+      };
+    });
+    for (const definition of definitions) {
+      if (presentations.some((item) => item.hash === definition.hash)) continue;
+      presentations.push({
+        id: definition.id,
+        version: definition.version,
+        hash: definition.hash,
+        initial: definition.initial,
+        ...(definition.title === undefined ? {} : { title: definition.title }),
+        ...(definition.description === undefined ? {} : { description: definition.description }),
+        enabled: false,
+        diagnostics: [],
+        capabilities: [...(definition.capabilities ?? [])],
+        phases: definition.phases.map(
+          ({ id, label, kind, capabilities, maxVisits, transitions }) => ({
+            id,
+            ...(label ? { label } : {}),
+            ...(capabilities ? { capabilities: [...capabilities] } : {}),
+            kind,
+            maxVisits,
+            transitions,
+          }),
+        ),
+      });
+    }
+    return presentations;
+  });
   return {
     start,
     mutate,
-    get definitions() {
-      const current = playbookLibrary.catalog();
-      const presentations: PlaybookDefinitionPresentation[] = current.map((entry) => {
-        const definition = entry.definition;
-        const requiredPersonas = Object.values(
-          definition?.agents ??
-            Object.fromEntries(
-              Object.entries(playbookAuthorities).map(([persona, authority]) => [
-                persona,
-                { persona, authority },
-              ]),
-            ),
-        ).map((assignment) => assignment.persona);
-        const missingPersonas = [...new Set(requiredPersonas)].filter(
-          (persona) => !availablePersonas.has(persona),
-        );
-        const diagnostics = [
-          ...entry.diagnostics,
-          ...(missingPersonas.length
-            ? [`Missing or disabled agent personas: ${missingPersonas.join(", ")}`]
-            : []),
-        ];
-        return {
-          id: entry.id,
-          version: definition?.version ?? 0,
-          hash: definition?.hash ?? "",
-          initial: definition?.initial ?? "",
-          title: entry.title,
-          description: entry.description,
-          enabled: entry.enabled && diagnostics.length === 0,
-          source: entry.source,
-          diagnostics,
-          capabilities: [...(definition?.capabilities ?? [])],
-          phases: (definition?.phases ?? []).map(
-            ({ id: phaseId, label, kind, capabilities, maxVisits, transitions }) => ({
-              id: phaseId,
-              ...(label ? { label } : {}),
-              ...(capabilities ? { capabilities: [...capabilities] } : {}),
-              kind,
-              maxVisits,
-              transitions,
-            }),
-          ),
-        };
-      });
-      for (const definition of definitions) {
-        if (presentations.some((item) => item.hash === definition.hash)) continue;
-        presentations.push({
-          id: definition.id,
-          version: definition.version,
-          hash: definition.hash,
-          initial: definition.initial,
-          ...(definition.title === undefined ? {} : { title: definition.title }),
-          ...(definition.description === undefined ? {} : { description: definition.description }),
-          enabled: false,
-          diagnostics: [],
-          capabilities: [...(definition.capabilities ?? [])],
-          phases: definition.phases.map(
-            ({ id, label, kind, capabilities, maxVisits, transitions }) => ({
-              id,
-              ...(label ? { label } : {}),
-              ...(capabilities ? { capabilities: [...capabilities] } : {}),
-              kind,
-              maxVisits,
-              transitions,
-            }),
-          ),
-        });
-      }
-      return presentations;
-    },
+    definitions: presentationDefinitions,
     importDefinitions: (files: readonly { name: string; content: string }[], confirm = false) =>
       Effect.try({
         try: () => {

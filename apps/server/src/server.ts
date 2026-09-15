@@ -613,13 +613,16 @@ export const makeServerLayer = Layer.unwrap(
               Effect.logWarning("Failed to persist server runtime state", { cause }),
             ),
           );
+          return state;
         }),
-        () =>
-          clearPersistedServerRuntimeState(config.serverRuntimeStatePath).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Failed to clear server runtime state", { cause }),
-            ),
-          ),
+        (state) =>
+          state
+            ? clearPersistedServerRuntimeState(config.serverRuntimeStatePath, state.pid).pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("Failed to clear server runtime state", { cause }),
+                ),
+              )
+            : Effect.void,
       ),
     );
     const tailscaleServeLayer = config.tailscaleServeEnabled

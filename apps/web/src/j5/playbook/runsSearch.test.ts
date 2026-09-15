@@ -21,6 +21,8 @@ it("round-trips filters and omits default values", () => {
     tab: undefined,
   });
   assert.deepEqual(serializeRunsSearch(parsed), { q: "request", status: "running", page: 2 });
+  assert.equal(parseRunsSearch({ status: "all" }).status, "all");
+  assert.deepEqual(serializeRunsSearch({ status: "all" }), { status: "all" });
   assert.deepEqual(serializeRunsSearch({ page: 0, tab: "overview" }), {});
 });
 

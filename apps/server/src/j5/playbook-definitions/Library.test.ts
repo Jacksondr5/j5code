@@ -96,3 +96,56 @@ it("ignores workflow storage files", () => {
     NodeFS.rmSync(stateDir, { recursive: true, force: true });
   }
 });
+
+it("loads an exact snapshot written after library startup", () => {
+  const stateDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "playbook-library-"));
+  try {
+    const definition = compileYamlPlaybook(source);
+    const staleLibrary = createPlaybookLibrary(stateDir, []);
+    createPlaybookLibrary(stateDir, []).snapshot(definition);
+
+    assert.equal(
+      staleLibrary.loadSnapshot({
+        definitionId: definition.id,
+        definitionVersion: definition.version,
+        definitionHash: definition.hash,
+      })?.hash,
+      definition.hash,
+    );
+  } finally {
+    NodeFS.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+it("rejects invalid, altered, and incompatible snapshot identities", () => {
+  const stateDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "playbook-library-"));
+  try {
+    const definition = compileYamlPlaybook(source);
+    const snapshots = NodePath.join(stateDir, "playbook-snapshots");
+    NodeFS.mkdirSync(snapshots);
+    const library = createPlaybookLibrary(stateDir, []);
+    const identity = {
+      definitionId: definition.id,
+      definitionVersion: definition.version,
+      definitionHash: definition.hash,
+    };
+
+    assert.isUndefined(library.loadSnapshot({ ...identity, definitionHash: "../state.sqlite" }));
+    assert.isUndefined(library.loadSnapshot(identity));
+
+    NodeFS.writeFileSync(NodePath.join(snapshots, `${definition.hash}.yaml`), "schema: broken\n");
+    assert.isUndefined(library.loadSnapshot(identity));
+
+    NodeFS.writeFileSync(
+      NodePath.join(snapshots, `${definition.hash}.yaml`),
+      source.replace("version: 1", "version: 2"),
+    );
+    assert.isUndefined(library.loadSnapshot(identity));
+
+    NodeFS.writeFileSync(NodePath.join(snapshots, `${definition.hash}.yaml`), source);
+    assert.isUndefined(library.loadSnapshot({ ...identity, definitionId: "other" }));
+    assert.isUndefined(library.loadSnapshot({ ...identity, definitionHash: "0".repeat(64) }));
+  } finally {
+    NodeFS.rmSync(stateDir, { recursive: true, force: true });
+  }
+});

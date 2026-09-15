@@ -997,6 +997,44 @@ it.effect("services all 101 eligible playbooks in one complete sweep", () =>
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
 
+it.effect("resolves a definition on demand before recovering a run", () =>
+  Effect.gen(function* () {
+    yield* runPlaybookMigrations();
+    const store = yield* makeStore;
+    yield* store.command(
+      {
+        commandId: "start-late-definition",
+        runId: initial.id,
+        expectedRevision: 0,
+        initial,
+        event: { type: "enter" },
+        now: 0,
+      },
+      definition,
+    );
+    const adapter: Adapter = {
+      recovery: "reconcile",
+      reconcile: () => Effect.succeed({ status: "completed", output: "passed" }),
+      interrupt: () => Effect.void,
+    };
+    let loads = 0;
+    yield* makeWorker(
+      store,
+      [],
+      { scripted: adapter },
+      "late-definition-worker",
+      undefined,
+      (run) => {
+        loads += 1;
+        return run.definitionHash === definition.hash ? definition : undefined;
+      },
+    ).drain(1);
+
+    assert.isAbove(loads, 0);
+    assert.equal((yield* store.get(initial.id)).status, "waiting_approval");
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
 it.effect("isolates an adapter failure from other playbooks in the same pass", () =>
   Effect.gen(function* () {
     yield* runPlaybookMigrations();

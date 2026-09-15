@@ -3,6 +3,7 @@ import { Command, GlobalFlag } from "effect/unstable/cli";
 
 import { ServerConfig, type StartupPresentation } from "../config.ts";
 import { runServer } from "../server.ts";
+import { claimStateDirectory } from "../serverRuntimeState.ts";
 import { type CliServerFlags, resolveServerConfig, sharedServerCommandFlags } from "./config.ts";
 
 export const runServerCommand = (
@@ -15,8 +16,9 @@ export const runServerCommand = (
   Effect.gen(function* () {
     const logLevel = yield* GlobalFlag.LogLevel;
     const config = yield* resolveServerConfig(flags, logLevel, options);
+    yield* claimStateDirectory(config.serverRuntimeStatePath);
     return yield* runServer.pipe(Effect.provideService(ServerConfig, config));
-  });
+  }).pipe(Effect.scoped);
 
 export const startCommand = Command.make("start", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription("Run the T3 Code server."),

@@ -12,6 +12,9 @@ import * as Schema from "effect/Schema";
 import * as ServerRuntimeState from "./serverRuntimeState.ts";
 
 const isServerRuntimeStateError = Schema.is(ServerRuntimeState.ServerRuntimeStateError);
+const isStateDirectoryAlreadyInUseError = Schema.is(
+  ServerRuntimeState.StateDirectoryAlreadyInUseError,
+);
 
 interface CapturedLog {
   readonly message: unknown;
@@ -181,6 +184,113 @@ describe("serverRuntimeState", () => {
         assert.equal(error.message, `Failed to persist server runtime state at ${statePath}.`);
         assert.deepInclude(error.cause, { _tag: "PlatformError" });
       }
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("blocks live legacy owners and allows independent directories and stale state", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-runtime-state-test-",
+      });
+      const statePath = path.join(root, "owned", "server-runtime.json");
+      const otherStatePath = path.join(root, "other", "server-runtime.json");
+      const liveState: ServerRuntimeState.PersistedServerRuntimeState = {
+        version: 1,
+        pid: 1,
+        port: 4_971,
+        origin: "http://127.0.0.1:4971",
+        startedAt: "2026-06-20T00:00:00.000Z",
+      };
+      yield* ServerRuntimeState.persistServerRuntimeState({ path: statePath, state: liveState });
+
+      const blocked = yield* ServerRuntimeState.claimStateDirectory(statePath).pipe(
+        Effect.scoped,
+        Effect.flip,
+      );
+      assert.isTrue(isStateDirectoryAlreadyInUseError(blocked));
+      assert.include(blocked.message, "pid 1");
+      assert.include(blocked.message, "--base-dir");
+
+      yield* ServerRuntimeState.claimStateDirectory(otherStatePath);
+      yield* ServerRuntimeState.persistServerRuntimeState({
+        path: statePath,
+        state: { ...liveState, pid: 2_147_483_647 },
+      });
+      yield* ServerRuntimeState.claimStateDirectory(statePath);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "holds ownership through shutdown finalizers and releases it when the scope closes",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-server-ownership-scope-" });
+        const statePath = path.join(root, "server-runtime.json");
+        yield* Effect.gen(function* () {
+          yield* ServerRuntimeState.claimStateDirectory(statePath);
+          yield* Effect.addFinalizer(() =>
+            ServerRuntimeState.claimStateDirectory(statePath).pipe(
+              Effect.scoped,
+              Effect.flip,
+              Effect.tap((error) =>
+                Effect.sync(() => assert.isTrue(isStateDirectoryAlreadyInUseError(error))),
+              ),
+              Effect.orDie,
+            ),
+          );
+        }).pipe(Effect.scoped);
+        yield* ServerRuntimeState.claimStateDirectory(statePath);
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("propagates storage errors and releases claims after failed startup", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-server-ownership-errors-" });
+      const statePath = path.join(root, "server-runtime.json");
+      yield* fs.makeDirectory(statePath);
+      const claim = ServerRuntimeState.claimStateDirectory(statePath).pipe(Effect.scoped);
+      const error = yield* claim.pipe(Effect.flip);
+      assert.deepInclude(error, { _tag: "ServerRuntimeStateError", operation: "read" });
+      yield* fs.remove(statePath, { recursive: true });
+      yield* claim;
+      yield* fs.writeFileString(
+        path.join(root, "server-ownership.sqlite"),
+        "invalid sqlite database",
+      );
+      const sqliteError = yield* claim.pipe(Effect.flip);
+      assert.deepInclude(sqliteError, { _tag: "SqlError" });
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("only clears runtime state owned by the releasing process", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-runtime-state-test-",
+      });
+      const statePath = path.join(root, "server-runtime.json");
+      yield* ServerRuntimeState.persistServerRuntimeState({
+        path: statePath,
+        state: {
+          version: 1,
+          pid: 123,
+          port: 4_971,
+          origin: "http://127.0.0.1:4971",
+          startedAt: "2026-06-20T00:00:00.000Z",
+        },
+      });
+
+      yield* ServerRuntimeState.clearPersistedServerRuntimeState(statePath, 456);
+      assert.isTrue(yield* fileSystem.exists(statePath));
+      yield* ServerRuntimeState.clearPersistedServerRuntimeState(statePath, 123);
+      assert.isFalse(yield* fileSystem.exists(statePath));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

@@ -61,7 +61,7 @@ const PlaybookRunRow = memo(function PlaybookRunRow({
       onClick={() => onSelect(item.id, item.squadronId)}
     >
       <div className="flex items-start justify-between gap-2">
-        <strong className="line-clamp-2 text-sm font-semibold leading-snug text-foreground group-hover:text-foreground">
+        <strong className="line-clamp-2 min-w-0 text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere] group-hover:text-foreground">
           {item.title}
         </strong>
       </div>

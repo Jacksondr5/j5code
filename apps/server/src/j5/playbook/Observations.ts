@@ -366,7 +366,14 @@ export const readBoard = Effect.fn("Playbook.readBoard")(function* (
   return yield* sql.withTransaction(
     Effect.gen(function* () {
       const boundedLimit = Math.min(48, Math.max(1, limit));
-      const filter = makeRunFilter(squadronId, query, status);
+      const baseFilter = makeRunFilter(squadronId, query, status === "all" ? "" : status);
+      const filter =
+        status === ""
+          ? {
+              sql: `${baseFilter.sql || " WHERE 1=1"} AND status IN ('running','restarting','waiting_approval','blocked','cancelling')`,
+              parameters: baseFilter.parameters,
+            }
+          : baseFilter;
       const counts = yield* sql.unsafe<{ total: number; waitingApprovalCount: number }>(
         `SELECT count(*) AS total,
           sum(CASE WHEN status='waiting_approval' THEN 1 ELSE 0 END) AS waitingApprovalCount

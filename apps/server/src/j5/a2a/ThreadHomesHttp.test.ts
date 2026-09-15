@@ -70,7 +70,7 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
     },
   });
   const routes = j5AuthenticatedRoutesLayer.pipe(
-    Layer.provide(Layer.mock(PlaybookService)({ definitions: [] })),
+    Layer.provide(Layer.mock(PlaybookService)({ definitions: Effect.succeed([]) })),
     Layer.provide(homes),
     Layer.provide(
       Layer.mock(A2AArchiveFacts)({

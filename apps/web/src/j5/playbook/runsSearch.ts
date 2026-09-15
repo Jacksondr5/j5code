@@ -9,7 +9,7 @@ export interface RunsSearch {
   readonly newPlaybook?: true | undefined;
   readonly view?: RunsView | undefined;
   readonly q?: string | undefined;
-  readonly status?: keyof typeof statusPresentation | undefined;
+  readonly status?: keyof typeof statusPresentation | "all" | undefined;
   readonly page?: number | undefined;
   readonly tab?: RunDetailTab | undefined;
 }
@@ -27,8 +27,8 @@ export function parseRunsSearch(raw: Record<string, unknown>): RunsSearch {
     view: raw.view === "board" || raw.view === "list" ? raw.view : undefined,
     q: nonEmptyString(raw.q),
     status:
-      status !== undefined && status in statusPresentation
-        ? (status as keyof typeof statusPresentation)
+      status === "all" || (status !== undefined && status in statusPresentation)
+        ? (status as keyof typeof statusPresentation | "all")
         : undefined,
     page: Number.isSafeInteger(page) && page >= 0 ? page : undefined,
     tab: raw.tab === "overview" || raw.tab === "timeline" ? raw.tab : undefined,
