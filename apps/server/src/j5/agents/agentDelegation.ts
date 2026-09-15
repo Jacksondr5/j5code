@@ -12,7 +12,6 @@ import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import * as ProviderRegistry from "../../provider/Services/ProviderRegistry.ts";
-import { DelegateTaskTool } from "../../mcp/toolkits/orchestrator/tools.ts";
 import { invokeAgent } from "./agentInvocation.ts";
 
 /**
@@ -31,7 +30,14 @@ export const J5DelegateTaskInput = Schema.Struct({
 });
 export type J5DelegateTaskInput = typeof J5DelegateTaskInput.Type;
 
-export const J5_DELEGATE_TASK_DESCRIPTION = `${DelegateTaskTool.description ?? ""} When the user writes @agent:ID or asks for a saved agent by name, pass agent=ID (the server pins that agent's provider, model, reasoning, and runtime policy; omit target and runtimeMode) and give a self-contained task; do not substitute a plain child if that call fails; report the error.`;
+/**
+ * Written for J5 rather than prefixed onto upstream's text: upstream's description tells the model to
+ * use this tool for any subagent request, which contradicts the orchestration instructions that keep
+ * ordinary subagent work provider-native. Here the saved-agent use leads and the plain child is the
+ * fallback.
+ */
+export const J5_DELEGATE_TASK_DESCRIPTION =
+  "Run one task as a T3-owned child of THIS thread with only the supplied task prompt; parent conversation history is not copied. Pass agent=ID when the user writes @agent:ID or asks for a saved agent by name: the server pins that agent's instructions, provider, model, reasoning, and runtime policy, so omit target and runtimeMode. Give the agent a self-contained task, and if that call fails, report the error instead of substituting a plain child. Without agent, this is a plain T3-tracked child for cross-provider work or for work the user wants tracked as a T3 task; for an ordinary subagent request, use your provider's native subagent mechanism instead. The childThreadId is backing storage, not an ordinary top-level thread. Provider, model, model options (see orchestrator_capabilities), runtime mode, and interaction mode inherit unless target overrides them. Prefer mode='async' for long work; mode='wait' blocks until completion or timeout. timeoutMs on mode=wait is only the parent's wait budget and does not cancel the child. waitTimedOut on that wait call means the timeout fired; keep that taskId and read status on later task_status. An async child's completion wakes this thread with a continuation message naming the task (queued behind any turn in progress), so end the turn instead of polling or spawning watchers; use task_status only when the result is needed mid-turn.";
 
 /** J5's delegate_task: the upstream tool with the saved-agent extension, registered in place of it. */
 export const J5DelegateTaskTool = Tool.make("delegate_task", {
@@ -65,6 +71,7 @@ export const delegateTask = Effect.fn("j5.delegateTask")(function* (input: J5Del
         "A saved agent pins its provider, model, reasoning, and runtime mode. Omit target and runtimeMode when passing agent.",
     });
   }
+  // Both are undefined here (checked above); the destructure only narrows the type for invokeAgent.
   const { target: _target, runtimeMode: _runtimeMode, ...personaDelegate } = delegate;
   return yield* invokeAgent({ personaId: agent, ...personaDelegate });
 });
