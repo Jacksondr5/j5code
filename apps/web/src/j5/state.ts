@@ -30,6 +30,8 @@ export const answeredInboxQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.inbox({ environmentId, input: { status: "answered" } });
 export const inboxCountQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.openCount({ environmentId, input: {} });
+export const crewProposalsQueryAtom = (environmentId: EnvironmentId) =>
+  j5Environment.crewProposals({ environmentId, input: {} });
 
 export const squadronSourcesAtom = createJ5ReadSourcesAtom({
   ...sourcesInput,
@@ -48,6 +50,12 @@ export const answeredInboxSourcesAtom = createJ5ReadSourcesAtom({
   label: "web-j5:answered-inbox-sources",
   capability: "j5HumanInbox",
   queryAtom: answeredInboxQueryAtom,
+});
+export const crewProposalSourcesAtom = createJ5ReadSourcesAtom({
+  ...sourcesInput,
+  label: "web-j5:crew-proposal-sources",
+  capability: "j5HumanInbox",
+  queryAtom: crewProposalsQueryAtom,
 });
 export const inboxCountSourcesAtom = createJ5ReadSourcesAtom({
   ...sourcesInput,

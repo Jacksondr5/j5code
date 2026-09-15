@@ -1,4 +1,4 @@
-import { AuthOrchestrationReadScope } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, AuthOrchestrationReadScope } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
@@ -52,23 +52,30 @@ export interface ClientReadsHttpPaths {
   readonly openInboxCount: HttpRouter.PathInput;
 }
 
-const authenticateRead = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
-  const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-  const session = yield* serverAuth.authenticateHttpRequest(request).pipe(
-    Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
-      failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
-    ),
-    Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
-      failEnvironmentInternal("internal_error", error),
-    ),
-  );
-  if (!session.scopes.includes(AuthOrchestrationReadScope)) {
-    return yield* failEnvironmentScopeRequired(AuthOrchestrationReadScope);
-  }
-});
+/** One bearer-session check for every J5 route; the scope names what the route may do. */
+export const authenticateWithScope = (
+  scope: typeof AuthOrchestrationReadScope | typeof AuthOrchestrationOperateScope,
+) =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+    const session = yield* serverAuth.authenticateHttpRequest(request).pipe(
+      Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
+        failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
+      ),
+      Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
+        failEnvironmentInternal("internal_error", error),
+      ),
+    );
+    if (!session.scopes.includes(scope)) return yield* failEnvironmentScopeRequired(scope);
+  });
 
-const invalidRequest = (message: string) =>
+/** Shared by every J5 client read: bearer session with orchestration-read scope. */
+export const authenticateClientRead = authenticateWithScope(AuthOrchestrationReadScope);
+/** Shared by every J5 route that acts for the person (stop, archive, answer a gate). */
+export const authenticateOperate = authenticateWithScope(AuthOrchestrationOperateScope);
+
+export const invalidRequest = (message: string) =>
   HttpServerResponse.jsonUnsafe({ error: "invalid_request", message }, { status: 400 });
 
 const operationFailure = (cause: unknown) => {
@@ -103,7 +110,7 @@ const operationFailure = (cause: unknown) => {
   );
 };
 
-const jsonBody = Effect.gen(function* () {
+export const jsonBody = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   return yield* Effect.result(request.json);
 });
@@ -146,7 +153,7 @@ export const makeClientReadsHttpRouteLayer = (paths: ClientReadsHttpPaths) =>
         paths.participantHome,
         Effect.gen(function* () {
           yield* annotateEnvironmentRequest("j5.a2a.clientReads.participantHome");
-          yield* authenticateRead;
+          yield* authenticateClientRead;
           const body = yield* jsonBody;
           if (Result.isFailure(body)) return invalidRequest("The request body must be JSON.");
           const decoded = yield* Effect.result(decodeThreadHomesRequest(body.success));
@@ -169,7 +176,7 @@ export const makeClientReadsHttpRouteLayer = (paths: ClientReadsHttpPaths) =>
         paths.participantIdentities,
         Effect.gen(function* () {
           yield* annotateEnvironmentRequest("j5.a2a.clientReads.participantIdentities");
-          yield* authenticateRead;
+          yield* authenticateClientRead;
           const body = yield* jsonBody;
           if (Result.isFailure(body)) return invalidRequest("The request body must be JSON.");
           const decoded = yield* Effect.result(decodeParticipantIdentitiesRequest(body.success));
@@ -188,7 +195,7 @@ export const makeClientReadsHttpRouteLayer = (paths: ClientReadsHttpPaths) =>
         paths.openInboxCount,
         Effect.gen(function* () {
           yield* annotateEnvironmentRequest("j5.a2a.clientReads.openInboxCount");
-          yield* authenticateRead;
+          yield* authenticateClientRead;
           const body = yield* jsonBody;
           if (Result.isFailure(body)) return invalidRequest("The request body must be JSON.");
           const decoded = yield* Effect.result(decodeOpenInboxCountRequest(body.success));
