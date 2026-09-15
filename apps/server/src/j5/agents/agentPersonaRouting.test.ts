@@ -330,7 +330,7 @@ describe("agent persona routing", () => {
       }),
     ]);
 
-    assert.equal(catalog.personas.length, 11);
+    assert.equal(catalog.personas.length, 12);
     assert.equal(catalog.personas[0]?.personaId, "scout");
     assert.equal(catalog.personas[0]?.definitionVersion, 1);
     assert.equal(catalog.personas[0]?.acceptedInput, "Evidence request or prompt");

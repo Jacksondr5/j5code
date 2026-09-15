@@ -12,6 +12,9 @@ import * as ProjectService from "../../project/ProjectService.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import { ClientReadsService } from "./ClientReadsService.ts";
+import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
+import { AgentCrewProposalService } from "./AgentCrewProposalService.ts";
+import { CrewProposalService } from "./CrewProposalService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import {
   CLIENT_READS_OPEN_COUNT_PATH,
@@ -339,6 +342,13 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
     Layer.provide(Layer.mock(RosterService)({})),
     Layer.provide(Layer.mock(A2ALedger)({})),
     Layer.provide(Layer.mock(SquadronProjectReferences)({})),
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(AgentCrewInstanceService)({}),
+        Layer.mock(AgentCrewProposalService)({}),
+        Layer.mock(CrewProposalService)({}),
+      ),
+    ),
     Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
     Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
     Layer.provide(Layer.mock(VcsProcess.VcsProcess)({})),

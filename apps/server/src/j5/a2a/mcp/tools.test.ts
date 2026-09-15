@@ -3,9 +3,12 @@ import * as Context from "effect/Context";
 import { Tool } from "effect/unstable/ai";
 
 import { A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
+import { J5OrchestratorSurface } from "./orchestratorSurface.ts";
 import { J5_CLAUDE_MCP_ALLOWED_TOOLS } from "./claudeAllowedTools.ts";
 import {
   J5ArchiveAgentTool,
+  J5ProposeCrewTool,
+  J5RequestCrewMemberTool,
   J5SendMessageTool,
   J5SpawnAgentTool,
   J5StopAgentTool,
@@ -60,7 +63,10 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
   assert.property(archiveSchema.properties ?? {}, "confirmation_token");
   assert.sameMembers(Object.keys(J5Toolkit.tools), [
     "send_message",
+    "list_agents",
     "list_participants",
+    "propose_crew",
+    "request_crew_member",
     "spawn_agent",
     "stop_agent",
     "archive_agent",
@@ -68,10 +74,15 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
     "list_squadrons",
     "join_squadron",
   ]);
-  // Declared handoffs are written by the agent itself with the project write_artifact tool
+  // Proposals only file a human-gated request, and must say so: read-only Captains run with
+  // approval policy never and have refused the brief when the gate looked like a shell approval.
+  assert.isFalse(Context.get(J5ProposeCrewTool.annotations, Tool.Destructive));
+  assert.isFalse(Context.get(J5RequestCrewMemberTool.annotations, Tool.Destructive));
+  assert.include(J5ProposeCrewTool.description ?? "", "including approval policy never");
+  assert.include(J5RequestCrewMemberTool.description ?? "", "including approval policy never");
+  // Declared handoffs are written by the seat itself with the project write_artifact tool
   // (artifacts live in application storage, not the sandboxed workspace), so a read-only Claude
-  // persona must have it pre-approved beside the J5 verbs, and the provider-native Subagent verbs
-  // ride along so a refused spawner still has a way to get help. The artifact reads are upstream's.
+  // persona must have it pre-approved beside the J5 verbs. The artifact reads are upstream's.
   assert.sameMembers(
     [...J5_CLAUDE_MCP_ALLOWED_TOOLS],
     [
@@ -86,4 +97,23 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
   assert.isTrue(Context.get(J5ArchiveAgentTool.annotations, Tool.Destructive));
   assert.isFalse(Context.get(J5SpawnAgentTool.annotations, Tool.Idempotent));
   assert.isFalse(Context.get(J5StopAgentTool.annotations, Tool.Idempotent));
+});
+
+// Claude Code drops EVERY tool of an MCP server when one tool's input schema has no top-level
+// `type: "object"` (verified 2026-09-10 with a probe server: a single top-level `anyOf` tool made
+// the whole server's inventory vanish while it still reported "connected"). `Schema.Struct({})`
+// encodes as exactly that anyOf, which is how `list_agents` silently took the whole t3-code
+// toolkit away from every Claude thread. No-input tools must omit `parameters` instead.
+it("publishes every tool with a top-level object input schema", () => {
+  for (const tool of [
+    ...Object.values(J5Toolkit.tools),
+    ...Object.values(J5OrchestratorSurface.tools),
+  ]) {
+    const schema = Tool.getJsonSchema(tool) as {
+      readonly type?: unknown;
+      readonly anyOf?: unknown;
+    };
+    assert.equal(schema.type, "object", `${tool.name} must publish type: "object"`);
+    assert.isUndefined(schema.anyOf, `${tool.name} must not publish a top-level anyOf`);
+  }
 });

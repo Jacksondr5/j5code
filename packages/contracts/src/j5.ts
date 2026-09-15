@@ -82,12 +82,81 @@ export const OpenInboxCountResponse = Schema.Struct({
   count: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
+/** A Crew holds at most this many seats, initial roster and additions together (Crews AC11). */
+export const CREW_SEAT_CAP = 12;
+
+/** One requested or approved Crew seat, as the Captain proposed it or the human edited it. */
+export const CrewProposalSeat = Schema.Struct({
+  seat: Schema.String,
+  agentId: Schema.String,
+  reason: Schema.String,
+  instructions: Schema.optional(Schema.String),
+});
+export type CrewProposalSeat = typeof CrewProposalSeat.Type;
+
+/** The human gate for one Crew request: a roster to launch or a seat to add to a live Crew. */
+export const CrewProposal = Schema.Struct({
+  id: Schema.String,
+  squadronId: Schema.String,
+  captainParticipantId: Schema.String,
+  captainThreadId: Schema.String,
+  crewInstanceId: Schema.NullOr(Schema.String),
+  kind: Schema.Literals(["roster", "addition"]),
+  status: Schema.Literals(["open", "approved", "declined"]),
+  displayName: Schema.String,
+  brief: Schema.String,
+  requestedSeats: Schema.Array(CrewProposalSeat),
+  approvedSeats: Schema.NullOr(Schema.Array(CrewProposalSeat)),
+  createdAt: Schema.String,
+  resolvedAt: Schema.NullOr(Schema.String),
+});
+export type CrewProposal = typeof CrewProposal.Type;
+export type ScopedCrewProposal = CrewProposal & { readonly environmentId: EnvironmentId };
+
+export const CrewProposalsResponse = Schema.Struct({ proposals: Schema.Array(CrewProposal) });
+export const CrewProposalResolveRequest = Schema.Struct({
+  proposalId: Schema.String,
+  decision: Schema.Literals(["approve", "decline"]),
+  seats: Schema.optional(Schema.Array(CrewProposalSeat).check(Schema.isMaxLength(CREW_SEAT_CAP))),
+});
+export type CrewProposalResolveRequest = typeof CrewProposalResolveRequest.Type;
+export const CrewProposalResolveResponse = Schema.Struct({
+  proposal: CrewProposal,
+  crewInstanceId: Schema.NullOr(Schema.String),
+});
+
+/** A Crew as the sidebar and the Fleet page name it. */
+export const CrewRef = Schema.Struct({
+  crewInstanceId: Schema.String,
+  crewName: Schema.String,
+  archived: Schema.Boolean,
+});
+export type CrewRef = typeof CrewRef.Type;
+
+/** What a sidebar row needs: which Crew a thread sits in, or which Crews it commands. */
+export const ThreadCrewMembership = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("member"), seat: Schema.String, crew: CrewRef }),
+  Schema.Struct({ kind: Schema.Literal("captain"), crews: Schema.Array(CrewRef) }),
+]);
+export type ThreadCrewMembership = typeof ThreadCrewMembership.Type;
+export const CrewMembershipEntry = Schema.Struct({
+  threadId: ThreadId,
+  membership: ThreadCrewMembership,
+});
+export type CrewMembershipEntry = typeof CrewMembershipEntry.Type;
+export const CrewMembershipsResponse = Schema.Struct({
+  entries: Schema.Array(CrewMembershipEntry),
+});
+
 export const J5_API_PATHS = {
   squadrons: "/api/j5/squadrons",
   threadHomes: "/api/j5/a2a/client-reads/participant-homes",
   inbox: "/api/j5/a2a/inbox",
   answer: "/api/j5/a2a/inbox/answer",
   openCount: "/api/j5/a2a/client-reads/open-count",
+  crewProposals: "/api/j5/a2a/crews/proposals",
+  crewProposalResolve: "/api/j5/a2a/crews/proposals/resolve",
+  crewMemberships: "/api/j5/a2a/client-reads/crew-memberships",
 } as const;
 
 /**

@@ -1,5 +1,7 @@
 import * as Layer from "effect/Layer";
 
+import { agentCrewReadsHttpRouteLayer } from "./AgentCrewReadsHttp.ts";
+import { crewProposalsHttpRouteLayer } from "./CrewProposalsHttp.ts";
 import {
   CLIENT_READS_OPEN_COUNT_PATH,
   CLIENT_READS_PARTICIPANT_HOMES_PATH,
@@ -20,6 +22,8 @@ import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.
  * rather than adding another upstream server composition seam.
  */
 export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
+  agentCrewReadsHttpRouteLayer,
+  crewProposalsHttpRouteLayer,
   artifactHttpRouteLayer,
   humanInboxHttpRouteLayer,
   machineSenderHttpRouteLayer,

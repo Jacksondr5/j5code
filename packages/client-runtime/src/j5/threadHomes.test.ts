@@ -4,7 +4,7 @@ import type { ThreadHomeEntry } from "@t3tools/contracts/j5";
 
 import { PrimaryConnectionTarget, type PreparedConnection } from "../connection/model.ts";
 import { scopedThreadKey, scopeThreadRef } from "../environment/scoped.ts";
-import { createThreadHomesStore } from "./threadHomes.ts";
+import { THREAD_READ_BATCH_SIZE, createThreadHomesStore } from "./threadHomes.ts";
 
 const alpha = EnvironmentId.make("alpha");
 const bravo = EnvironmentId.make("bravo");
@@ -116,4 +116,24 @@ it("retains cached homes through a failed refresh and clears the failure after a
   store.request([ref(alpha)], true);
   await waitForChange(store, () => store.getScopeReadState(alpha) === "ready");
   expect(load.mock.calls).toHaveLength(3);
+});
+
+it("reads a large request in batches under the route cap and stays unchunked below it", async () => {
+  const loads: Array<number> = [];
+  const store = createThreadHomesStore((_, ids) => {
+    loads.push(ids.length);
+    return Promise.resolve(
+      ids.map((id) => ({
+        threadId: id,
+        home: { kind: "known" as const, squadron: { id: "squadron:big", name: "Big" } },
+      })),
+    );
+  });
+  store.setConnections(new Map([[alpha, prepared(alpha)]]));
+  const refs = Array.from({ length: THREAD_READ_BATCH_SIZE * 2 + 50 }, (_, index) =>
+    scopeThreadRef(alpha, ThreadId.make(`thread:${index}`)),
+  );
+  store.request(refs);
+  await waitForChange(store, () => store.getSnapshot().size === refs.length);
+  expect(loads).toEqual([THREAD_READ_BATCH_SIZE, THREAD_READ_BATCH_SIZE, 50]);
 });

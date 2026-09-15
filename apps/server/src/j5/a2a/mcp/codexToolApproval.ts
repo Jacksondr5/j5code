@@ -5,7 +5,7 @@ import type { ProviderAdapterV2RuntimePolicy } from "../../../orchestration-v2/P
  * and a turn whose approval policy is `never` rejects the call outright with "MCP tool call
  * requires approval, but approval policy is never". Full-access mode and every saved-agent
  * runtime policy send exactly that, so without help `send_message`, `spawn_agent`, and
- * every other J5 verb all fail there. Only the J5 verbs are pre-approved, by name: their handlers
+ * `propose_crew` all fail there. Only the J5 verbs are pre-approved, by name: their handlers
  * authorize each call and their real gates live server-side, plus `write_artifact`, which a saved
  * agent needs for its declared handoff file (application storage, never the workspace), plus the
  * provider-native Subagent verbs (`delegate_task`, `task_status`, `task_cancel`): a Crew member is
@@ -22,6 +22,9 @@ export const J5_CODEX_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
   "list_squadrons",
   "join_squadron",
   "spawn_agent",
+  "list_agents",
+  "propose_crew",
+  "request_crew_member",
   // Declared handoffs are files the seat writes itself into application storage.
   "write_artifact",
   // Provider-native Subagents: the one way a Crew member gets more hands.

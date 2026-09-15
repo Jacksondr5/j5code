@@ -1510,6 +1510,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 data-testid={`thread-card-identity-${thread.id}`}
               >
                 <ThreadCardIdentity
+                  threadId={thread.id}
+                  environmentId={thread.environmentId}
                   home={props.threadHome}
                   fallbackFolder={props.projectTitle}
                   agentPersonaAssignment={thread.agentPersonaAssignment}

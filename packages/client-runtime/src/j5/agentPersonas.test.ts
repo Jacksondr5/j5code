@@ -76,7 +76,7 @@ describe("agent persona catalog presentation", () => {
     });
   });
 
-  it("preserves all eleven server-provided personas for every client", () => {
+  it("preserves all twelve server-provided personas for every client", () => {
     expect(presentAgentPersonaCatalog(catalog).map(({ personaId }) => personaId)).toEqual([
       ...BUILT_IN_AGENT_PERSONA_IDS,
     ]);
