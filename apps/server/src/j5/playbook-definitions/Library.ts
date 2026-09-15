@@ -141,6 +141,32 @@ export function createPlaybookLibrary(
   };
   return {
     catalog,
+    loadSnapshot(identity: {
+      readonly definitionId: string;
+      readonly definitionVersion: number;
+      readonly definitionHash: string;
+    }) {
+      if (!/^[0-9a-f]{64}$/.test(identity.definitionHash)) return undefined;
+      try {
+        const file = NodePath.join(
+          stateDir,
+          "playbook-snapshots",
+          `${identity.definitionHash}.yaml`,
+        );
+        const definition = compileYamlPlaybook(
+          NodeFS.readFileSync(file, "utf8"),
+          file,
+          implementations,
+        );
+        return definition.id === identity.definitionId &&
+          definition.version === identity.definitionVersion &&
+          definition.hash === identity.definitionHash
+          ? definition
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    },
     savedDefinitions() {
       return filesIn(NodePath.join(stateDir, "playbook-snapshots")).flatMap((file) => {
         try {

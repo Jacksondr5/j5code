@@ -156,7 +156,7 @@ export const playbookHttpLayer = Layer.unwrap(
               ),
             });
           if (id === "definitions")
-            return HttpServerResponse.jsonUnsafe({ definitions: service.definitions });
+            return HttpServerResponse.jsonUnsafe({ definitions: yield* service.definitions });
           if (id && parts[4] === "artifacts" && parts[5])
             return HttpServerResponse.jsonUnsafe({
               artifact: yield* service.artifact(id, decodeURIComponent(parts[5])),
@@ -203,17 +203,17 @@ export const playbookHttpLayer = Layer.unwrap(
           if (action === "import") {
             const input = yield* decodeDefinitionImportEffect(body);
             yield* service.importDefinitions(input.files, input.confirmConflicts ?? false);
-            return HttpServerResponse.jsonUnsafe({ definitions: service.definitions });
+            return HttpServerResponse.jsonUnsafe({ definitions: yield* service.definitions });
           }
           if (action === "state") {
             const input = yield* decodeDefinitionStateEffect(body);
             yield* service.setDefinitionEnabled(input.id, input.enabled);
-            return HttpServerResponse.jsonUnsafe({ definitions: service.definitions });
+            return HttpServerResponse.jsonUnsafe({ definitions: yield* service.definitions });
           }
           if (action === "remove") {
             const input = yield* decodeDefinitionStateEffect(body);
             yield* service.removeDefinition(input.id);
-            return HttpServerResponse.jsonUnsafe({ definitions: service.definitions });
+            return HttpServerResponse.jsonUnsafe({ definitions: yield* service.definitions });
           }
           return HttpServerResponse.jsonUnsafe(
             { message: "Unknown definition action" },

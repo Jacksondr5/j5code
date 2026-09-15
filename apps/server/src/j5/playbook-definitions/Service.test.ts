@@ -17,6 +17,7 @@ import { ThreadLaunchService } from "../../orchestration-v2/ThreadLaunchService.
 import { CommandReceiptStoreV2 } from "../../orchestration-v2/CommandReceiptStore.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { SquadronProjectReferences } from "../a2a/SquadronProjectReferences.ts";
+import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { makeStore } from "../playbook/Store.ts";
 import { runPlaybookMigrations } from "../playbook/Migrations.ts";
 import { playbookProvider, definitions } from "../playbook/testFixtures.ts";
@@ -69,13 +70,32 @@ it.effect(
       const path = yield* Path.Path;
       const config = yield* ServerConfig;
       const folder = path.join(config.stateDir, "personas");
-      yield* fs.makeDirectory(folder, { recursive: true });
-      for (const definition of definitions)
-        yield* fs.writeFileString(
-          path.join(folder, `${definition.id}.yaml`),
-          stringify(definition),
-        );
       const service = yield* makeService;
+      const presentation = () =>
+        service.definitions.pipe(
+          Effect.map((items) => items.find(({ id }) => id === "fh-development")!),
+        );
+      const unavailable = yield* presentation();
+      assert.isFalse(unavailable.enabled);
+      assert.include(
+        unavailable.diagnostics?.join("\n") ?? "",
+        "Missing or disabled agent personas",
+      );
+      const personaLibrary = yield* makeAgentPersonaLibrary;
+      yield* personaLibrary.importFiles({
+        files: definitions.map((definition) => ({
+          name: `${definition.id}.yaml`,
+          content: stringify(definition),
+        })),
+        replaceExisting: false,
+      });
+      assert.isTrue((yield* presentation()).enabled);
+      yield* personaLibrary.setImportedEnabled("scout", false);
+      const disabled = yield* presentation();
+      assert.isFalse(disabled.enabled);
+      assert.include(disabled.diagnostics?.join("\n") ?? "", "scout");
+      yield* personaLibrary.setImportedEnabled("scout", true);
+      assert.isTrue((yield* presentation()).enabled);
       const input = {
         commandId: "start",
         definitionId: "fh-development",
@@ -93,6 +113,7 @@ it.effect(
       const store = yield* makeStore;
       const accepted = yield* store.get(first.id);
       assert.lengthOf(Object.keys(readPlaybookExecution(accepted.execution).personas), 7);
+      yield* fs.makeDirectory(folder, { recursive: true });
       yield* fs.writeFileString(path.join(folder, "scout.yaml"), "invalid: now");
       assert.deepEqual(yield* service.start(input), first);
       const restarted = yield* makeService;

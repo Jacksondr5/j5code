@@ -311,7 +311,7 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
     },
   });
   const routes = j5AuthenticatedRoutesLayer.pipe(
-    Layer.provide(Layer.mock(PlaybookService)({ definitions: [] })),
+    Layer.provide(Layer.mock(PlaybookService)({ definitions: Effect.succeed([]) })),
     Layer.provide(clientReads),
     Layer.provide(
       Layer.mock(A2AArchiveFacts)({

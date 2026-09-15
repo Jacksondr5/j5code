@@ -140,7 +140,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
         HttpRouter.serve(
           Layer.mergeAll(
             j5AuthenticatedRoutesLayer.pipe(
-              Layer.provide(Layer.mock(PlaybookService)({ definitions: [] })),
+              Layer.provide(Layer.mock(PlaybookService)({ definitions: Effect.succeed([]) })),
             ),
             McpHttpServer.layer,
             ledgerConsumer,

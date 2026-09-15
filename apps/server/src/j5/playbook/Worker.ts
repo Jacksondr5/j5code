@@ -34,6 +34,9 @@ export const makeWorker = (
   owner: string,
   candidateIsCurrent: (run: Run) => Effect.Effect<boolean, PlaybookError> = () =>
     Effect.succeed(true),
+  loadDefinition?: (
+    run: Pick<Run, "definitionId" | "definitionVersion" | "definitionHash">,
+  ) => Definition | undefined,
 ) => {
   const isPlaybookError = Schema.is(PlaybookError);
   let schedulingCursor = 0;
@@ -43,7 +46,7 @@ export const makeWorker = (
         item.id === run.definitionId &&
         item.version === run.definitionVersion &&
         item.hash === run.definitionHash,
-    );
+    ) ?? loadDefinition?.(run);
 
   const processRecord = Effect.fn("PlaybookWorker.processRecord")(function* (
     record: SchedulingRecord,
