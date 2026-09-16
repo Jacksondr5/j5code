@@ -1,50 +1,48 @@
-import { describe, expect, it } from "@effect/vitest";
-
-import type { ProviderAdapterV2RuntimePolicy } from "../../../orchestration-v2/ProviderAdapter.ts";
+import { assert, it } from "@effect/vitest";
 
 import {
   J5_CODEX_PREAPPROVED_TOOLS,
   codexApprovalPolicyIsNever,
   j5CodexT3McpServerConfig,
 } from "./codexToolApproval.ts";
+import { J5Toolkit } from "./tools.ts";
 
-const policy = (input: {
-  approvalPolicy?: unknown;
-  runtimeMode: ProviderAdapterV2RuntimePolicy["runtimeMode"];
-}): ProviderAdapterV2RuntimePolicy => ({
-  runtimeMode: input.runtimeMode,
-  interactionMode: "default",
-  cwd: null,
-  ...(input.approvalPolicy === undefined ? {} : { approvalPolicy: input.approvalPolicy }),
+it("pre-approves platform tools only where Codex would otherwise reject them outright", () => {
+  assert.isTrue(codexApprovalPolicyIsNever({ runtimeMode: "full-access" }));
+  assert.isTrue(
+    codexApprovalPolicyIsNever({ runtimeMode: "approval-required", approvalPolicy: "never" }),
+  );
+  assert.isFalse(codexApprovalPolicyIsNever({ runtimeMode: "approval-required" }));
+  assert.isFalse(codexApprovalPolicyIsNever({ runtimeMode: "auto" }));
+  assert.isFalse(codexApprovalPolicyIsNever({ runtimeMode: "auto-accept-edits" }));
+  assert.isFalse(
+    codexApprovalPolicyIsNever({ runtimeMode: "full-access", approvalPolicy: "on-request" }),
+  );
+  assert.isFalse(codexApprovalPolicyIsNever(undefined));
+  assert.deepEqual(j5CodexT3McpServerConfig({ runtimeMode: "auto" }), {});
 });
 
-describe("Codex saved-agent tool approval", () => {
-  it("recognizes approval policy never, explicitly and as the full-access default", () => {
-    expect(
-      codexApprovalPolicyIsNever(
-        policy({ approvalPolicy: "never", runtimeMode: "approval-required" }),
-      ),
-    ).toBe(true);
-    expect(codexApprovalPolicyIsNever(policy({ runtimeMode: "full-access" }))).toBe(true);
-    expect(codexApprovalPolicyIsNever(policy({ runtimeMode: "approval-required" }))).toBe(false);
-    expect(
-      codexApprovalPolicyIsNever(
-        policy({ approvalPolicy: "on-request", runtimeMode: "full-access" }),
-      ),
-    ).toBe(false);
-    expect(codexApprovalPolicyIsNever(undefined)).toBe(false);
-  });
-
-  it("pre-approves only the listed tool, and only when approvals are off", () => {
-    expect(J5_CODEX_PREAPPROVED_TOOLS).toEqual(["write_artifact"]);
-    expect(
-      j5CodexT3McpServerConfig(
-        policy({ approvalPolicy: "never", runtimeMode: "approval-required" }),
-      ),
-    ).toEqual({
-      tools: { write_artifact: { approval_mode: "approve" } },
-    });
-    expect(j5CodexT3McpServerConfig(policy({ runtimeMode: "approval-required" }))).toEqual({});
-    expect(j5CodexT3McpServerConfig(undefined)).toEqual({});
-  });
+// Pinned by name: a server-wide default would also wave through write_artifact, worktree
+// handoff, browser preview, and scheduling for a read-only persona (Sentry S-1, 2026-09-14).
+it("pre-approves exactly the J5 verbs, never the whole t3-code server", () => {
+  const config = j5CodexT3McpServerConfig({ runtimeMode: "full-access" });
+  assert.notProperty(config, "default_tools_approval_mode");
+  assert.sameMembers(
+    [...J5_CODEX_PREAPPROVED_TOOLS],
+    [
+      ...Object.keys(J5Toolkit.tools),
+      "write_artifact",
+      // Refused members are told to use delegate_task; it must not then be refused by the sandbox.
+      "delegate_task",
+      "task_status",
+      "task_cancel",
+    ],
+  );
+  assert.sameMembers(Object.keys((config as { tools: object }).tools), [
+    ...J5_CODEX_PREAPPROVED_TOOLS,
+  ]);
+  for (const entry of Object.values((config as { tools: Record<string, unknown> }).tools))
+    assert.deepEqual(entry, { approval_mode: "approve" });
+  for (const upstream of ["t3_worktree_handoff", "preview_open", "schedule_task"])
+    assert.notProperty((config as { tools: object }).tools, upstream);
 });

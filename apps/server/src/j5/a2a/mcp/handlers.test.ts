@@ -11,6 +11,7 @@ import {
   ThreadId,
   type OrchestrationV2Command,
   type OrchestrationV2ThreadProjection,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -20,6 +21,7 @@ import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 
+import { ServerConfig } from "../../../config.ts";
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import {
@@ -28,6 +30,7 @@ import {
   OrchestratorV2,
 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
+import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
 import {
   ArchiveAgentConfirmationRequiredError,
   ArchiveAgentService,
@@ -1273,6 +1276,7 @@ it.effect("preflights home before creation and records facts before the one stab
       threadManagement,
       orchestrator,
       Layer.mock(ParticipantPlacementService)({}),
+      Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(ArchiveAgentService)({}),
       Layer.mock(SquadronJoinService)({}),
@@ -1418,6 +1422,7 @@ it.effect("refuses spawn before thread creation when the caller has no home", ()
       Layer.mock(ThreadManagementService)({
         dispatch: () => Ref.update(dispatches, (count) => count + 1).pipe(Effect.as({} as never)),
       }),
+      Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(ArchiveAgentService)({}),
       Layer.mock(SquadronJoinService)({}),
@@ -1447,6 +1452,271 @@ it.effect("refuses spawn before thread creation when the caller has no home", ()
         "no usable immutable Squadron home",
       );
       assert.equal(yield* Ref.get(dispatches), 0);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+const personaProvider = (
+  instanceId: string,
+  driver: string,
+  models: ReadonlyArray<{ readonly slug: string; readonly options: ReadonlyArray<string> }>,
+): ServerProvider => ({
+  instanceId: ProviderInstanceId.make(instanceId),
+  driver: ProviderDriverKind.make(driver),
+  enabled: true,
+  installed: true,
+  version: null,
+  status: "ready",
+  auth: { status: "authenticated" },
+  checkedAt: "2026-09-09T00:00:00Z",
+  availability: "available",
+  slashCommands: [],
+  skills: [],
+  models: models.map((model) => ({
+    slug: model.slug,
+    name: model.slug,
+    isCustom: false,
+    capabilities: {
+      optionDescriptors: [
+        {
+          id: driver === "codex" ? "reasoningEffort" : "effort",
+          label: "Reasoning",
+          type: "select",
+          options: model.options.map((id) => ({ id, label: id })),
+        },
+      ],
+    },
+  })),
+});
+
+const personaCapabilityProvider = (provider: ServerProvider) => ({
+  providerInstanceId: provider.instanceId,
+  driverKind: provider.driver,
+  displayName: String(provider.instanceId),
+  models: provider.models.map((model) => ({
+    id: model.slug,
+    label: model.name,
+    options: model.capabilities?.optionDescriptors?.map((descriptor) => ({
+      id: descriptor.id,
+      label: descriptor.label,
+      type: "select" as const,
+      options: descriptor.type === "select" ? descriptor.options : [],
+    })),
+  })),
+  canRunChildTask: true,
+  canRunCrossProviderChildTask: true,
+  constraints: [],
+});
+
+it.effect("spawns a saved agent as a Peer Agent only within its declared routes", () =>
+  Effect.gen(function* () {
+    const squadronId = SquadronId.make("squadron:j5:mcp-spawn-persona");
+    const callerParticipantId = ParticipantId.make("agent:j5:mcp-spawn-persona-caller");
+    const childParticipantId = ParticipantId.make("agent:j5:mcp-spawn-persona-child");
+    const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+    const codex = personaProvider("codex", "codex", [
+      { slug: "gpt-5.6-terra", options: ["medium", "high"] },
+      { slug: "gpt-5.6-sol", options: ["high"] },
+    ]);
+    const claude = personaProvider("claudeAgent", "claudeAgent", [
+      { slug: "claude-opus-5", options: ["high"] },
+    ]);
+    const callerRow = {
+      squadronId,
+      participantId: callerParticipantId,
+      participant: {
+        kind: "agent" as const,
+        id: callerParticipantId,
+        threadId: invocation.threadId,
+      },
+      archived: false,
+      canReceiveMessage: true,
+      canOpenExchange: true,
+      acceptsUrgency: false,
+    } satisfies ParticipantDirectoryRow;
+    const dependencies = Layer.mergeAll(
+      Layer.mock(A2ASendService)({ listParticipants: () => Effect.succeed([callerRow]) }),
+      Layer.mock(A2AHomeRegistrar)({
+        getHomeForThread: () => Effect.succeed({ squadronId, participantId: callerParticipantId }),
+      }),
+      Layer.mock(A2ALedger)({
+        readSquadron: () =>
+          Effect.succeed({
+            id: squadronId,
+            name: "Persona",
+            createdAt: DateTime.formatIso(createdAt),
+          }),
+      }),
+      Layer.mock(SpawnCompositionService)({
+        recordFacts: (input) =>
+          Effect.succeed({
+            home: { squadronId, participantId: childParticipantId },
+            placement: {
+              squadronId,
+              participantId: childParticipantId,
+              provenance: {
+                kind: "spawned-by" as const,
+                spawnedByParticipantId: input.spawnedByParticipantId,
+                source: "j5_spawn" as const,
+              },
+              placementParentId: input.spawnedByParticipantId,
+              createdEventSeq: 1,
+              updatedEventSeq: 1,
+            },
+          }),
+      }),
+      Layer.mock(ThreadManagementService)({
+        getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
+        dispatch: (command) =>
+          Ref.update(commands, (items) => [...items, command]).pipe(
+            Effect.as({ events: [], effects: [] } as never),
+          ),
+      }),
+      Layer.mock(OrchestratorMcpService)({
+        capabilities: () =>
+          Effect.succeed({
+            parentThreadId: invocation.threadId,
+            inheritedProviderInstanceId: invocation.providerInstanceId,
+            inheritedModel: "gpt-5.6-sol",
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            providers: [personaCapabilityProvider(codex), personaCapabilityProvider(claude)],
+            features: {
+              appOwnedSubagents: true,
+              asyncPolling: true,
+              cancellation: true,
+              batchThreadCreation: true,
+              threadManagement: true,
+              incrementalThreadRead: true,
+              scheduledTasks: true,
+              maxBatchThreads: 8,
+            },
+          }),
+      }),
+      Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([codex, claude]) }),
+      Layer.mock(ParticipantPlacementService)({}),
+      Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      Layer.mock(ArchiveAgentService)({}),
+      ServerConfig.layerTest(process.cwd(), { prefix: "j5-mcp-spawn-persona-" }),
+    ).pipe(Layer.provideMerge(NodeServices.layer));
+    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+
+    yield* Effect.gen(function* () {
+      const toolkit = yield* J5Toolkit;
+      const call = (args: J5SpawnAgentInput) =>
+        toolkit
+          .handle("spawn_agent", args)
+          .pipe(
+            Stream.unwrap,
+            Stream.run(Sink.last()),
+            Effect.flatMap(Effect.fromOption),
+            Effect.provideService(McpInvocationContext, invocation),
+          );
+      const failureMessage = (response: { readonly result: unknown }) =>
+        (response.result as { readonly message: string }).message;
+      const createdThreads = () =>
+        Ref.get(commands).pipe(
+          Effect.map((items) =>
+            items.flatMap((command) => (command.type === "thread.create" ? [command] : [])),
+          ),
+        );
+      const briefs = () =>
+        Ref.get(commands).pipe(
+          Effect.map((items) =>
+            items.flatMap((command) => (command.type === "message.dispatch" ? [command] : [])),
+          ),
+        );
+      const scout = {
+        brief: "Collect evidence about the auth flow and report back.",
+        agent: "scout",
+        provider: ProviderInstanceId.make("codex"),
+        model: "gpt-5.6-terra",
+        reasoning: "high",
+        client_request_id: "spawn-persona-primary",
+      } satisfies J5SpawnAgentInput;
+
+      const primary = yield* call(scout);
+      assert.isFalse(primary.isFailure, failureMessage(primary));
+      const created = yield* createdThreads();
+      assert.lengthOf(created, 1);
+      const assignment = created[0]!.agentPersonaAssignment;
+      assert.isDefined(assignment);
+      assert.equal(assignment?.personaId, "scout");
+      assert.equal(assignment?.displayName, "Scout");
+      assert.equal(assignment?.resolvedRoute, "primary");
+      assert.equal(assignment?.resolvedDriver, "codex");
+      assert.equal(assignment?.authorityPolicy, "read-only");
+      assert.match(assignment?.definitionDigest ?? "", /^[a-f0-9]{64}$/);
+      const expectedSelection = {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.6-terra",
+        options: [{ id: "reasoningEffort", value: "high" }],
+      };
+      assert.deepStrictEqual(created[0]!.modelSelection, expectedSelection);
+      assert.deepStrictEqual(assignment?.resolvedModelSelection, expectedSelection);
+      assert.equal(created[0]!.runtimeMode, "approval-required");
+      assert.deepStrictEqual((yield* briefs())[0]!.modelSelection, expectedSelection);
+
+      const fallback = yield* call({
+        ...scout,
+        provider: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-opus-5",
+        client_request_id: "spawn-persona-fallback",
+      });
+      assert.isFalse(fallback.isFailure, failureMessage(fallback));
+      const fallbackCreate = (yield* createdThreads())[1]!;
+      assert.equal(fallbackCreate.agentPersonaAssignment?.resolvedRoute, "fallback");
+      assert.equal(fallbackCreate.agentPersonaAssignment?.resolvedDriver, "claudeAgent");
+      assert.deepStrictEqual(fallbackCreate.modelSelection, {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-opus-5",
+        options: [{ id: "effort", value: "high" }],
+      });
+
+      const plain = yield* call({
+        brief: "No saved agent here.",
+        provider: ProviderInstanceId.make("codex"),
+        model: "gpt-5.6-sol",
+        reasoning: "high",
+        client_request_id: "spawn-persona-plain",
+      });
+      assert.isFalse(plain.isFailure, failureMessage(plain));
+      const plainCreate = (yield* createdThreads())[2]!;
+      assert.notProperty(plainCreate, "agentPersonaAssignment");
+      assert.equal(plainCreate.runtimeMode, "full-access");
+
+      const commandCount = (yield* Ref.get(commands)).length;
+      const outOfRoute = yield* call({
+        ...scout,
+        reasoning: "medium",
+        client_request_id: "spawn-persona-out-of-route",
+      });
+      assert.isTrue(outOfRoute.isFailure);
+      assert.include(failureMessage(outOfRoute), "Agent scout allows only");
+      assert.include(failureMessage(outOfRoute), "outside its declared routes");
+      assert.include(failureMessage(outOfRoute), "or omit agent");
+
+      const unenforceable = yield* call({
+        ...scout,
+        agent: "builder",
+        provider: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-opus-5",
+        client_request_id: "spawn-persona-unenforceable",
+      });
+      assert.isTrue(unenforceable.isFailure);
+      assert.include(
+        failureMessage(unenforceable),
+        "cannot enforce its workspace-write permissions on claudeAgent",
+      );
+
+      const unknown = yield* call({
+        ...scout,
+        agent: "nobody",
+        client_request_id: "spawn-persona-unknown",
+      });
+      assert.isTrue(unknown.isFailure);
+      assert.include(failureMessage(unknown), "Unknown agent nobody");
+      assert.lengthOf(yield* Ref.get(commands), commandCount);
     }).pipe(Effect.provide(layer));
   }),
 );

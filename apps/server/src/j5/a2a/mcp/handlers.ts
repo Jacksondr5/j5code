@@ -12,6 +12,10 @@ import {
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
+import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
+import { makeAgentPersonaLibrary } from "../../agents/agentPersonaLibrary.ts";
+import { translateAgentPersonaProviderPolicy } from "../../agents/agentPersonaProviderPolicy.ts";
+import { prepareAgentPersonaPeerSpawn } from "../../agents/agentPersonaSpawn.ts";
 import {
   ArchiveAgentConfirmationRequiredError,
   ArchiveAgentConfirmationStaleError,
@@ -417,6 +421,53 @@ const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
   } satisfies ModelSelection;
 });
 
+/**
+ * A Role-ful spawn keeps the explicit provider/model/reasoning pick; the saved agent's declared
+ * routes constrain it and its authority policy becomes the child's runtime mode. A child's
+ * permissions come from its own saved agent's policy or from the human's approval, never from
+ * the parent: J5 carries no parent-child permission ceiling (Jackson, 2026-09-16), because any
+ * such guard is one message to a trusting peer away from bypass and every child-creation door
+ * would have to enforce it identically.
+ */
+const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function* (
+  input: {
+    readonly agent: string;
+    readonly provider: string;
+    readonly model: string;
+    readonly reasoning: string;
+  },
+  modelSelection: ModelSelection,
+) {
+  const library = yield* makeAgentPersonaLibrary;
+  const providers = yield* (yield* ProviderRegistry).getProviders;
+  const assignment = yield* prepareAgentPersonaPeerSpawn(
+    {
+      personaId: input.agent,
+      provider: providers.find((candidate) => candidate.instanceId === modelSelection.instanceId),
+      instanceId: modelSelection.instanceId,
+      model: input.model,
+      reasoning: input.reasoning,
+    },
+    library,
+  ).pipe(
+    Effect.mapError((error) =>
+      stateError(
+        `Saved agent ${input.agent} cannot be spawned as requested: ${error.message}`,
+        "Call orchestrator_capabilities, then retry spawn_agent with a provider, model, and reasoning from that agent's declared routes, or omit agent for a plain Peer Agent.",
+      ),
+    ),
+  );
+  const policy = translateAgentPersonaProviderPolicy(
+    assignment.authorityPolicy,
+    assignment.resolvedDriver,
+  );
+  return {
+    assignment,
+    modelSelection: assignment.resolvedModelSelection,
+    runtimeMode: policy.runtimeMode,
+  };
+});
+
 const handlers = {
   send_message: (input) =>
     Effect.gen(function* () {
@@ -621,7 +672,7 @@ const handlers = {
       const scope = yield* McpInvocationContext;
       const crypto = yield* Crypto.Crypto;
       const caller = yield* preflightSpawnCaller(scope);
-      const modelSelection = yield* selectSpawnModel(scope, input);
+      const selected = yield* selectSpawnModel(scope, input);
       const threadManagement = yield* ThreadManagementService;
       const parent = yield* threadManagement
         .getThreadProjection(scope.threadId)
@@ -633,6 +684,11 @@ const handlers = {
             ),
           ),
         );
+      const persona =
+        input.agent === undefined
+          ? undefined
+          : yield* prepareSpawnPersona({ ...input, agent: input.agent }, selected);
+      const modelSelection = persona?.modelSelection ?? selected;
       const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
       const stableInput = {
         providerSessionId: scope.providerSessionId,
@@ -649,8 +705,9 @@ const handlers = {
           projectId: parent.thread.projectId,
           title: spawnTitle(input.brief, input.title),
           modelSelection,
-          runtimeMode: parent.thread.runtimeMode,
+          runtimeMode: persona?.runtimeMode ?? parent.thread.runtimeMode,
           interactionMode: parent.thread.interactionMode,
+          ...(persona === undefined ? {} : { agentPersonaAssignment: persona.assignment }),
           branch: parent.thread.branch,
           worktreePath: parent.thread.worktreePath,
         })

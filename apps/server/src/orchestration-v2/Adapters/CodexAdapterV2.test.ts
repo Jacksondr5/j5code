@@ -66,6 +66,7 @@ import {
   resolveCodexRollbackTurnCount,
 } from "./CodexAdapterV2.ts";
 import { makeReplayServerConfig } from "./CodexAdapterV2.testkit.ts";
+import { J5_CODEX_T3_MCP_SERVER_CONFIG } from "../../j5/a2a/mcp/codexToolApproval.ts";
 
 const encodeUnknownJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -586,8 +587,7 @@ describe("CodexAdapterV2 process spawning", () => {
                 http_headers: {
                   Authorization: "Bearer secret-codex-token",
                 },
-                // Full access defaults to approval policy never, so the J5 handoff write is pre-approved.
-                tools: { write_artifact: { approval_mode: "approve" } },
+                ...J5_CODEX_T3_MCP_SERVER_CONFIG,
               },
             },
           },

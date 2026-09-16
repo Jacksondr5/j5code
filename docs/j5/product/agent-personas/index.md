@@ -201,6 +201,8 @@ Settings → Agents displays the selected environment's persona library, includi
 
 Activation continues through the existing orchestrator launch contract. No direct persona picker or editor is added in this slice. A launched task shows its snapshotted display name and fixed route. The Agents right panel remains the separate runtime-activity view for launched provider children and workflows.
 
+Agents can also launch a persona as a Peer Agent: `spawn_agent` accepts an optional `agent` id, keeps provider, model, and reasoning required, and refuses any pick outside that persona's declared routes. The resulting thread carries the same immutable assignment as a composer launch. See [agent tools](../a2a/agent-tools.md).
+
 ## Verification and remaining work
 
 Focused verification covers imported ids and custom artifacts, malformed and missing sources, duplicates, route eligibility, unsupported policies, snapshot integrity, source edits/removal, launch receipts, compatibility with old assignments, and shared client presentation. Server, contracts, and affected client typechecks accompany the focused tests. Browser and simulator verification require an explicit request.

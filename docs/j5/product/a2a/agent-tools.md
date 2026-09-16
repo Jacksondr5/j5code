@@ -56,18 +56,26 @@ Read-only; no events.
 
 ### `spawn_agent`
 
-**Description:** "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. Reuse client_request_id to retry the same spawn safely."
+**Description (contract):** "Spawn a Peer Agent: a full-citizen teammate with its own top-level
+thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and
+records you as its immutable spawner; it is addressable the moment this returns. In your brief,
+tell the new agent what it should do first and whether it should reply to you. Choose provider,
+model, and reasoning for the work in the brief — see orchestrator_capabilities for what's
+available. Set agent to a saved agent id to spawn that agent with its saved instructions and
+runtime policy; provider, model, and reasoning stay required and must be one of that agent's
+declared routes. Reuse client_request_id to retry the same spawn safely."
 
-| Input               | Type                                     | Required | Meaning                                                             |
-| ------------------- | ---------------------------------------- | -------- | ------------------------------------------------------------------- |
-| `brief`             | string, non-empty                        | yes      | The first-turn prompt; carries the task and whether a reply is owed |
-| `title`             | string                                   | no       | The thread title; derived from the brief when omitted               |
-| `provider`          | id from `orchestrator_capabilities`      | yes      | Chosen per task — there is no inherited default                     |
-| `model`             | id from `orchestrator_capabilities`      | yes      | Chosen per task                                                     |
-| `reasoning`         | option from the capabilities descriptors | yes      | Chosen per task                                                     |
-| `client_request_id` | string                                   | no       | Reuse to retry safely                                               |
-
-**Result:** `participant_id`, `thread_id`, `squadron_id`, and the placement (parent is the caller; provenance is spawned-by the caller).
+| Input               | Type                                 | Required | Meaning                                           |
+| ------------------- | ------------------------------------ | -------- | ------------------------------------------------- |
+| `brief`             | string, non-empty                    | yes      | The first-turn prompt the new agent starts with   |
+| `title`             | string                               | no       | Thread title; derived from the brief when omitted |
+| `agent`             | saved agent id from the library      | no       | Role-ful spawn: the child carries that agent's    |
+|                     |                                      |          | immutable assignment (SP3 below)                  |
+| `provider`          | id from `orchestrator_capabilities`  | yes      | Chosen per task — no inherit default (Jackson,    |
+|                     |                                      |          | 2026-08-29: inheriting is wrong more than right)  |
+| `model`             | id from `orchestrator_capabilities`  | yes      | Chosen per task                                   |
+| `reasoning`         | option from capabilities descriptors | yes      | Chosen per task                                   |
+| `client_request_id` | string, non-empty                    | no       | Supply and reuse to make retries safe             |
 
 **Rules.** The new agent is an ordinary root-lineage thread created through upstream's creation seam, never through delegation. Its Squadron home is the caller's, registered before creation and fail-closed if the caller's home no longer names an existing Squadron. Placement and provenance are recorded atomically with creation; then the first turn starts with the brief. The new agent's first turn also states its own participant id and Squadron as platform-provided facts, beside the brief and never inside it. Provider, model and reasoning are required and explicit even when a Role is given: a Role's allowlist constrains the choice and an out-of-list pick is an error naming the Role, never a silent default. The brief carries the task and the reply expectation; the spawner does not follow a spawn with a reply-expected `send_message` — that form is for later work owed by an existing participant. Selection guidance and brief-writing conventions live in the [Spawning Guide](../features/spawning-guide.md).
 
@@ -76,6 +84,17 @@ Read-only; no events.
 **Events:** participant joined, home registered, placement created.
 
 ### `stop_agent`
+
+**Role-ful spawn (built 2026-09-09, `agent` input):** the saved agent's declared routes are the
+allowlist SP3 describes. The explicit provider/model/reasoning pick must equal one route target on
+a provider instance that runs that driver and currently advertises the model and reasoning option;
+otherwise the call refuses, naming the agent and listing its routes, and nothing is created. The
+matching route becomes the child's immutable persona assignment (same snapshot and digest as a
+composer launch), and its authority policy sets the child's runtime mode. The child's permissions
+come from its own saved agent's policy, never from the parent's: J5 carries no parent-child
+permission ceiling between Peer Agents (Jackson, 2026-09-16), since any such guard is one message
+to a trusting peer away from bypass. Disabled, removed, and unknown agents refuse before creation.
+A plain spawn without `agent` is unchanged and inherits the parent's runtime mode as before.
 
 **Description:** "Stop one Peer Agent: interrupts its running turn now. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. Requires your current squadron_id. Reuse client_request_id to retry safely."
 
