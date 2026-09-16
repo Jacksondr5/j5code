@@ -24,23 +24,47 @@ export const resolveSquadronScope = (
       choice.id === selected?.squadronId && choice.environmentId === selected.environmentId,
   ) ?? null;
 
-/** Selected scope admits only that Squadron's immutable, known Registrar homes. */
+export type SidebarThreadHome =
+  | {
+      readonly kind: "known";
+      readonly squadron: { readonly id: string };
+      readonly origin?: "human" | "agent" | undefined;
+    }
+  | { readonly kind: "unknown" };
+
+/**
+ * SB5 sidebar membership: human-created agents show; agent-spawned Peer Agents (Crew members
+ * included) are roster-only unless the user pinned them. Unknown provenance shows, never guesses.
+ */
+export const isSidebarMember = (
+  thread: { readonly pinnedAt?: string | null | undefined },
+  home: SidebarThreadHome | undefined,
+) => !(home?.kind === "known" && home.origin === "agent" && thread.pinnedAt == null);
+
+/**
+ * SB5 membership first, then the selected scope, which admits only that Squadron's immutable,
+ * known Registrar homes. Homes are keyed by scoped thread ref, so the same thread id in two
+ * environments never shares a home.
+ */
 export const filterThreadsForSquadronScope = <
-  T extends { readonly id: string; readonly environmentId: EnvironmentId },
+  T extends {
+    readonly id: string;
+    readonly environmentId: EnvironmentId;
+    readonly pinnedAt?: string | null | undefined;
+  },
 >(
   threads: ReadonlyArray<T>,
   scope: SquadronChoice | null,
-  homesByThreadId: ReadonlyMap<
-    string,
-    | { readonly kind: "known"; readonly squadron: { readonly id: string } }
-    | { readonly kind: "unknown" }
-  >,
+  homesByThreadId: ReadonlyMap<string, SidebarThreadHome>,
 ) => {
-  if (scope === null) return [...threads];
-  return threads.filter((thread) => {
-    const home = homesByThreadId.get(
+  const homeOf = (thread: T) =>
+    homesByThreadId.get(
       scopedThreadKey(scopeThreadRef(thread.environmentId, ThreadId.make(thread.id))),
     );
+  const members = threads.filter((thread) => isSidebarMember(thread, homeOf(thread)));
+  if (scope === null) return members;
+  return members.filter((thread) => {
+    const home = homeOf(thread);
     return (
       thread.environmentId === scope.environmentId &&
       home?.kind === "known" &&

@@ -13,6 +13,7 @@ import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-ro
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { HumanInboxBell } from "../../j5/a2a/HumanInboxBell";
 import { J5Wordmark } from "../../j5/branding/J5Wordmark";
+import { FleetRailEntry } from "../../j5/fleet/FleetRailEntry";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
 import { useThreadShells } from "../../state/entities";
@@ -81,7 +82,8 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           {pillLabel}
         </Badge>
       ) : null}
-      <div className="relative z-10 -me-1 ms-auto flex size-8 shrink-0 items-center justify-center md:me-[var(--sidebar-content-inset)]">
+      <div className="relative z-10 -me-1 ms-auto flex shrink-0 items-center justify-center gap-0.5 md:me-[var(--sidebar-content-inset)]">
+        <FleetRailEntry onBackdrop={backdropVariant !== null} />
         <HumanInboxBell onBackdrop={backdropVariant !== null} />
       </div>
     </SidebarHeader>
@@ -151,13 +153,15 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           ? "project-settings"
           : location.pathname === "/inbox"
             ? "inbox"
-            : location.pathname === "/usage"
-              ? "usage"
-              : location.pathname === "/artifacts"
-                ? "artifacts"
-                : location.pathname === "/pull-requests"
-                  ? "pull-requests"
-                  : null,
+            : location.pathname === "/fleet"
+              ? "fleet"
+              : location.pathname === "/usage"
+                ? "usage"
+                : location.pathname === "/artifacts"
+                  ? "artifacts"
+                  : location.pathname === "/pull-requests"
+                    ? "pull-requests"
+                    : null,
   });
   const { environments } = useEnvironments();
   const threads = useThreadShells();
