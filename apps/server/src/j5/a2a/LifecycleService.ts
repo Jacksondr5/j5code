@@ -28,6 +28,7 @@ import {
 } from "./contracts.ts";
 import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
+import { findPeerCounterparty } from "./peerCounterparty.ts";
 
 export class A2ALifecycleParticipantNotFoundError extends Schema.TaggedError<A2ALifecycleParticipantNotFoundError>()(
   "A2ALifecycleParticipantNotFoundError",
@@ -216,17 +217,29 @@ const makeLayer = (daemon: boolean) =>
         },
       );
 
-      const counterpartySquadron = Effect.fn("j5.a2a.lifecycle.counterpartySquadron")(function* (
+      /** Where the notice about a dropped Exchange goes: a Squadron here, or one on a peer server. */
+      const counterparty = Effect.fn("j5.a2a.lifecycle.counterparty")(function* (
         participantId: ParticipantId,
         exchange: ExchangeRow,
-      ) {
+      ): Effect.fn.Return<
+        { readonly squadronId: SquadronId; readonly environmentId: string | null },
+        SqlError | A2ALifecycleCounterpartyStateError
+      > {
         if (isHumanParticipantId(participantId)) {
-          return SquadronId.make(exchange.squadron_id);
+          return { squadronId: SquadronId.make(exchange.squadron_id), environmentId: null };
         }
+        const remote = yield* findPeerCounterparty(sql, {
+          squadronId: SquadronId.make(exchange.squadron_id),
+          exchangeId: ExchangeId.make(exchange.exchange_id),
+          participantId,
+        });
+        if (remote !== null) return remote;
         const rows = yield* membershipRows(participantId);
         const row =
           rows.find((candidate) => candidate.squadron_id === exchange.squadron_id) ?? rows[0];
-        if (row !== undefined) return SquadronId.make(row.squadron_id);
+        if (row !== undefined) {
+          return { squadronId: SquadronId.make(row.squadron_id), environmentId: null };
+        }
         const historical = yield* historicalParticipantRows(participantId);
         const historicalRow =
           historical.find((candidate) => candidate.squadron_id === exchange.squadron_id) ??
@@ -237,7 +250,7 @@ const makeLayer = (daemon: boolean) =>
             exchangeId: exchange.exchange_id,
           });
         }
-        return SquadronId.make(historicalRow.squadron_id);
+        return { squadronId: SquadronId.make(historicalRow.squadron_id), environmentId: null };
       });
 
       const dropParticipantExchanges = Effect.fn("j5.a2a.lifecycle.dropParticipantExchanges")(
@@ -264,7 +277,7 @@ const makeLayer = (daemon: boolean) =>
             const exchangeId = ExchangeId.make(exchange.exchange_id);
             const messageId = noticeMessageId(exchange, disposition);
             const correlationId = noticeCorrelationId(exchange, disposition);
-            const receiverSquadronId = yield* counterpartySquadron(affectedParticipantId, exchange);
+            const receiver = yield* counterparty(affectedParticipantId, exchange);
             yield* ledger.appendEvents({
               commandId: dropCommandId(exchange, disposition),
               squadronId: SquadronId.make(exchange.squadron_id),
@@ -310,7 +323,10 @@ const makeLayer = (daemon: boolean) =>
                       disposition,
                     }),
                     originSquadronId: SquadronId.make(exchange.squadron_id),
-                    receiverSquadronId,
+                    receiverSquadronId: receiver.squadronId,
+                    ...(receiver.environmentId === null
+                      ? {}
+                      : { receiverEnvironmentId: receiver.environmentId }),
                     exchangeRole: "terminal_notice",
                     envelopeChannel: "lifecycle_notice",
                   },
