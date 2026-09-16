@@ -40,7 +40,6 @@ import {
   failEnvironmentInternal,
   failEnvironmentScopeRequired,
 } from "../../auth/http.ts";
-import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { PeerInboundService } from "./PeerInboundService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
@@ -145,7 +144,6 @@ export const peerHttpRouteLayer = Layer.unwrap(
     const peers = yield* PeerRegistryService;
     const inbound = yield* PeerInboundService;
     const worker = yield* A2ADeliveryWorker;
-    const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
 
     // Rotation is list-revoke-issue; two concurrent issues could both revoke and
@@ -201,7 +199,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
         yield* annotateEnvironmentRequest("j5.a2a.peer.hello");
         const session = yield* authenticate;
         yield* requireScope(session, AuthA2APeerScope);
-        const environmentId = yield* identity.getEnvironmentId;
+        const environmentId = yield* peers.selfEnvironmentId;
         return HttpServerResponse.jsonUnsafe({
           environmentId,
           subject: session.subject,
@@ -225,7 +223,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
             "environmentId (the peer that will hold the credential) is required.",
           );
         }
-        const ourEnvironmentId = yield* identity.getEnvironmentId;
+        const ourEnvironmentId = yield* peers.selfEnvironmentId;
         if (decoded.success.environmentId === ourEnvironmentId) {
           return jsonError(
             400,

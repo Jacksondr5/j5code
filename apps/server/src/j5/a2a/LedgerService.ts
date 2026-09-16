@@ -494,7 +494,8 @@ export const layer: Layer.Layer<
               next_attempt_at,
               delivered_seq,
               created_at,
-              updated_at
+              updated_at,
+              receiver_environment_id
             ) VALUES (
               ${event.squadronId},
               ${payload.messageId},
@@ -514,7 +515,8 @@ export const layer: Layer.Layer<
               NULL,
               NULL,
               ${event.createdAt},
-              ${event.createdAt}
+              ${event.createdAt},
+              ${payload.receiverEnvironmentId ?? null}
             )
           `;
           return;

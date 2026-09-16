@@ -241,6 +241,8 @@ export const MessageSentPayload = Schema.Struct({
   text: Schema.String.check(Schema.isNonEmpty()),
   originSquadronId: SquadronId,
   receiverSquadronId: SquadronId,
+  /** Present when the receiver's Squadron lives on a peer server. */
+  receiverEnvironmentId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   exchangeRole: Schema.Literals(["none", "ask", "followup", "reply", "terminal_notice"]),
   envelopeChannel: DeliveryEnvelopeChannel,
 });

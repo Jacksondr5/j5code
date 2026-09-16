@@ -3,6 +3,7 @@ import type { ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
@@ -30,6 +31,7 @@ import {
 import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { isRegisteredHumanPerson, listRegisteredHumanPersonIds } from "./HumanPersonRegistry.ts";
 import { A2ALedgerTransactionWriter, A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
+import { PeerDirectory } from "./PeerDirectory.ts";
 
 const encodeSentPayload = Schema.encodeEffect(Schema.toCodecJson(MessageSentPayload));
 
@@ -85,6 +87,15 @@ export class A2AAmbiguousParticipantError extends Schema.TaggedError<A2AAmbiguou
 ) {
   override get message(): string {
     return `Participant ${this.participantId} is active in more than one squadron and cannot be addressed unambiguously. Call list_participants and choose a participantId with canReceiveMessage=true, or ask the human to repair squadron membership.`;
+  }
+}
+
+export class A2APeersUnreadError extends Schema.TaggedError<A2APeersUnreadError>()(
+  "A2APeersUnreadError",
+  { participantId: Schema.String, peers: Schema.Array(Schema.String) },
+) {
+  override get message(): string {
+    return `Participant ${this.participantId} is not homed on this server, and ${String(this.peers.length)} peer server(s) could not be read: ${this.peers.join("; ")}. Retry shortly, or call list_participants to see which peers answered.`;
   }
 }
 
@@ -271,6 +282,7 @@ export type A2ASendError =
   | A2AHomeMembershipStateError
   | A2AParticipantNotFoundError
   | A2AAmbiguousParticipantError
+  | A2APeersUnreadError
   | A2AParticipantArchivedError
   | A2AIntentRequiredError
   | A2AUrgencyRequiredError
@@ -342,6 +354,13 @@ interface ResolvedSender {
   readonly participantId: ParticipantId;
 }
 
+/** Where a receiver lives; `environmentId` names a peer server, null means this one. */
+interface ResolvedReceiver {
+  readonly squadronId: SquadronId;
+  readonly participant: Participant;
+  readonly environmentId: string | null;
+}
+
 /** The send body once the sender is resolved; agents and machines share it. */
 type ResolvedSendInput = Omit<SendMessageInput, "senderThreadId">;
 
@@ -371,6 +390,9 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
       const ledger = yield* A2ALedger;
       const writer = yield* A2ALedgerTransactionWriter;
       const sql = yield* SqlClient.SqlClient;
+      // Peering is opt-in: production provides the directory in the A2A runtime
+      // layer; a layer built without it resolves receivers on this server only.
+      const peers = yield* Effect.serviceOption(PeerDirectory);
 
       const membershipRows = Effect.fn("j5.a2a.send.membershipRows")(function* () {
         return yield* sql<MembershipRow>`
@@ -476,10 +498,64 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
         return { squadronId: SquadronId.make(row.squadron_id), participantId: id };
       });
 
+      /**
+       * A receiver no local Squadron homes may be an agent on a peer server. The
+       * platform resolves it through the peers' address books; the sender named a
+       * participant, never a server.
+       */
+      const remoteMembership = Effect.fn("j5.a2a.send.remoteMembership")(function* (
+        id: ParticipantId,
+      ): Effect.fn.Return<
+        ResolvedReceiver,
+        | SqlError
+        | A2AParticipantNotFoundError
+        | A2AAmbiguousParticipantError
+        | A2APeersUnreadError
+        | A2AParticipantArchivedError
+      > {
+        if (Option.isNone(peers)) {
+          return yield* new A2AParticipantNotFoundError({ participantId: id });
+        }
+        const reading = yield* peers.value.resolveAgent(id);
+        const active = reading.agents.filter((agent) => !agent.archived);
+        if (active.length > 1)
+          return yield* new A2AAmbiguousParticipantError({ participantId: id });
+        const agent = active[0] ?? reading.agents[0];
+        if (agent === undefined) {
+          if (reading.unreadPeers.length > 0) {
+            return yield* new A2APeersUnreadError({
+              participantId: id,
+              peers: reading.unreadPeers.map((peer) => `${peer.label}: ${peer.reason}`),
+            });
+          }
+          return yield* new A2AParticipantNotFoundError({ participantId: id });
+        }
+        if (agent.archived) {
+          return yield* new A2AParticipantArchivedError({
+            participantId: id,
+            squadronId: agent.squadronId,
+          });
+        }
+        return {
+          squadronId: agent.squadronId,
+          participant: { kind: "agent" as const, id, threadId: agent.threadId },
+          environmentId: agent.environmentId,
+        };
+      });
+
       const participantMembership = Effect.fn("j5.a2a.send.participantMembership")(function* (
         id: ParticipantId,
         senderSquadronId: SquadronId,
-      ) {
+      ): Effect.fn.Return<
+        ResolvedReceiver,
+        | SqlError
+        | Schema.SchemaError
+        | A2AParticipantNotFoundError
+        | A2AAmbiguousParticipantError
+        | A2APeersUnreadError
+        | A2AParticipantArchivedError
+        | A2AMachineCannotReceiveError
+      > {
         if (isHumanParticipantId(id)) {
           if (!(yield* isRegisteredHumanPerson(sql, id))) {
             return yield* new A2AParticipantNotFoundError({ participantId: id });
@@ -487,6 +563,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
           return {
             squadronId: senderSquadronId,
             participant: { kind: "human" as const, id },
+            environmentId: null,
           };
         }
         if (isMachineParticipantId(id)) {
@@ -498,9 +575,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
         const matches = (yield* membershipRows()).filter((row) => row.participant_id === id);
         if (matches.length === 0) {
           const retired = yield* retiredParticipantRows(id);
-          if (retired[0] === undefined) {
-            return yield* new A2AParticipantNotFoundError({ participantId: id });
-          }
+          if (retired[0] === undefined) return yield* remoteMembership(id);
           if (retired.length > 1) {
             return yield* new A2AAmbiguousParticipantError({ participantId: id });
           }
@@ -521,6 +596,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
         return {
           squadronId: SquadronId.make(matches[0]!.squadron_id),
           participant: yield* decodeParticipant(matches[0]!.payload),
+          environmentId: null,
         };
       });
 
@@ -797,6 +873,9 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
                 ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
                 originSquadronId: sender.squadronId,
                 receiverSquadronId: receiver.squadronId,
+                ...(receiver.environmentId === null
+                  ? {}
+                  : { receiverEnvironmentId: receiver.environmentId }),
                 exchangeRole,
                 envelopeChannel: "peer",
               }),
