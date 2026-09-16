@@ -22,7 +22,9 @@ import { executeAuthenticatedEnvironmentHttpRequest } from "../state/environment
 
 const ErrorResponse = Schema.Struct({
   message: Schema.optionalKey(Schema.String),
-  error: Schema.optionalKey(Schema.String),
+  error: Schema.optionalKey(
+    Schema.Union([Schema.String, Schema.Struct({ code: Schema.String, detail: Schema.String })]),
+  ),
 });
 const decodeErrorResponse = Schema.decodeUnknownOption(ErrorResponse);
 
@@ -86,13 +88,18 @@ export const executeJ5Request = Effect.fn("j5.http.executeRequest")(function* (
       ),
     isUnauthorizedResponse: (response) => response.status === 401,
   });
-  if (response.status >= 200 && response.status < 300) return response;
+  if (response.status === 304 || (response.status >= 200 && response.status < 300)) return response;
   const body = yield* response.json.pipe(Effect.orElseSucceed(() => null));
   const decoded = Option.getOrUndefined(decodeErrorResponse(body));
   return yield* new J5HttpError({
     status: response.status,
-    detail: decoded?.message ?? `J5 request failed (HTTP ${response.status}).`,
-    ...(decoded?.error === undefined ? {} : { code: decoded.error }),
+    detail:
+      typeof decoded?.error === "object"
+        ? decoded.error.detail
+        : (decoded?.message ?? `J5 request failed (HTTP ${response.status}).`),
+    ...(decoded?.error === undefined
+      ? {}
+      : { code: typeof decoded.error === "string" ? decoded.error : decoded.error.code }),
   });
 });
 
