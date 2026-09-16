@@ -19,12 +19,13 @@ import { PeerRegistryService, type PeerConnection } from "./PeerRegistryService.
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
   CommCommandId,
+  CorrelationId,
   ExchangeId,
+  LedgerMessageId,
+  LIFECYCLE_PARTICIPANT_ID,
   ParticipantId,
   SquadronId,
   type AgentParticipant,
-  CorrelationId,
-  LedgerMessageId,
 } from "./contracts.ts";
 
 const timestamp = "2026-09-16T12:00:00.000Z";
@@ -441,4 +442,92 @@ it.effect("never resolves a machine sender's receiver through peers", () =>
       .pipe(Effect.flip);
     assert.equal(refused._tag, "A2AParticipantNotFoundError");
   }).pipe(Effect.provide(makeSendLayer([supportOnHome]))),
+);
+
+it.effect(
+  "carries the recorded drop fact on a terminal notice so the peer ends its Exchange the same way",
+  () =>
+    Effect.gen(function* () {
+      const posted: Array<{ url: string; authorization: string | undefined; body: unknown }> = [];
+      yield* Effect.gen(function* () {
+        const { sent } = yield* crossingAsk();
+        const ledger = yield* A2ALedger;
+        const exchangeId = ExchangeId.make(sent.exchangeId!);
+        const noticeMessageId = LedgerMessageId.make("message:j5:a2a:lifecycle:drop:test");
+        yield* ledger.appendEvents({
+          commandId: CommCommandId.make("command:peer-outbound:drop"),
+          squadronId: localSquadron,
+          acceptedAt: timestamp,
+          events: [
+            {
+              kind: "exchange.dropped",
+              sender: billing.id,
+              receiver: remoteSupport,
+              exchangeId,
+              correlationId: CorrelationId.make("correlation:peer-outbound:drop"),
+              payload: {
+                disposition: "sender-retired",
+                cause: {
+                  kind: "participant-archived",
+                  participantId: billing.id,
+                  squadronId: localSquadron,
+                },
+                facts: { replyRequired: false, retryAllowed: false, replacementRequired: false },
+                noticeMessageId,
+              },
+              createdAt: timestamp,
+            },
+            {
+              kind: "message.sent",
+              sender: LIFECYCLE_PARTICIPANT_ID,
+              receiver: remoteSupport,
+              exchangeId,
+              correlationId: CorrelationId.make("correlation:peer-outbound:drop"),
+              payload: {
+                messageId: noticeMessageId,
+                text: "exchange dropped",
+                originSquadronId: localSquadron,
+                receiverSquadronId: supportOnHome.squadronId,
+                receiverEnvironmentId: homePeer.environmentId,
+                exchangeRole: "terminal_notice",
+                envelopeChannel: "lifecycle_notice",
+              },
+              createdAt: timestamp,
+            },
+          ],
+        });
+        const transport = yield* A2ADeliveryTransport;
+        yield* transport.deliverPeer({
+          originSquadronId: localSquadron,
+          receiverSquadronId: supportOnHome.squadronId,
+          receiverEnvironmentId: homePeer.environmentId,
+          messageId: noticeMessageId,
+          senderId: LIFECYCLE_PARTICIPANT_ID,
+          receiverId: remoteSupport,
+          exchangeId,
+          exchangeRole: "terminal_notice",
+          message: "exchange dropped",
+          envelopeChannel: "lifecycle_notice",
+          createdAt: timestamp,
+        });
+        const body = posted.at(-1)!.body as PeerDeliveryRequest;
+        assert.equal(body.exchangeRole, "terminal_notice");
+        assert.deepStrictEqual(body.terminal, {
+          disposition: "sender-retired",
+          cause: {
+            kind: "participant-archived",
+            participantId: billing.id,
+            squadronId: localSquadron,
+          },
+        });
+        assert.isUndefined(body.intent);
+      }).pipe(
+        Effect.provide(
+          makeTransportLayer(
+            { status: 201, body: { accepted: true, receivedSeq: 9, replay: false } },
+            posted,
+          ),
+        ),
+      );
+    }),
 );
