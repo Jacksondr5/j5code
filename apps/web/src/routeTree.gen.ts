@@ -21,6 +21,7 @@ import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
 import { Route as SettingsScheduledTasksRouteImport } from './routes/settings.scheduled-tasks'
 import { Route as SettingsProvidersRouteImport } from './routes/settings.providers'
+import { Route as SettingsPlaybooksRouteImport } from './routes/settings.playbooks'
 import { Route as SettingsKeybindingsRouteImport } from './routes/settings.keybindings'
 import { Route as SettingsIntegrationsRouteImport } from './routes/settings.integrations'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
@@ -92,6 +93,11 @@ const SettingsScheduledTasksRoute = SettingsScheduledTasksRouteImport.update({
 const SettingsProvidersRoute = SettingsProvidersRouteImport.update({
   id: '/providers',
   path: '/providers',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsPlaybooksRoute = SettingsPlaybooksRouteImport.update({
+  id: '/playbooks',
+  path: '/playbooks',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsKeybindingsRoute = SettingsKeybindingsRouteImport.update({
@@ -181,6 +187,7 @@ export interface FileRoutesByFullPath {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/playbooks': typeof SettingsPlaybooksRoute
   '/settings/providers': typeof SettingsProvidersRoute
   '/settings/scheduled-tasks': typeof SettingsScheduledTasksRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
@@ -206,6 +213,7 @@ export interface FileRoutesByTo {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/playbooks': typeof SettingsPlaybooksRoute
   '/settings/providers': typeof SettingsProvidersRoute
   '/settings/scheduled-tasks': typeof SettingsScheduledTasksRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
@@ -234,6 +242,7 @@ export interface FileRoutesById {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/playbooks': typeof SettingsPlaybooksRoute
   '/settings/providers': typeof SettingsProvidersRoute
   '/settings/scheduled-tasks': typeof SettingsScheduledTasksRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
@@ -263,6 +272,7 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/playbooks'
     | '/settings/providers'
     | '/settings/scheduled-tasks'
     | '/settings/source-control'
@@ -288,6 +298,7 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/playbooks'
     | '/settings/providers'
     | '/settings/scheduled-tasks'
     | '/settings/source-control'
@@ -315,6 +326,7 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/playbooks'
     | '/settings/providers'
     | '/settings/scheduled-tasks'
     | '/settings/source-control'
@@ -420,6 +432,13 @@ declare module '@tanstack/react-router' {
       path: '/providers'
       fullPath: '/settings/providers'
       preLoaderRoute: typeof SettingsProvidersRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/playbooks': {
+      id: '/settings/playbooks'
+      path: '/playbooks'
+      fullPath: '/settings/playbooks'
+      preLoaderRoute: typeof SettingsPlaybooksRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/keybindings': {
@@ -541,6 +560,7 @@ interface SettingsRouteChildren {
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsIntegrationsRoute: typeof SettingsIntegrationsRoute
   SettingsKeybindingsRoute: typeof SettingsKeybindingsRoute
+  SettingsPlaybooksRoute: typeof SettingsPlaybooksRoute
   SettingsProvidersRoute: typeof SettingsProvidersRoute
   SettingsScheduledTasksRoute: typeof SettingsScheduledTasksRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
@@ -555,6 +575,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsIntegrationsRoute: SettingsIntegrationsRoute,
   SettingsKeybindingsRoute: SettingsKeybindingsRoute,
+  SettingsPlaybooksRoute: SettingsPlaybooksRoute,
   SettingsProvidersRoute: SettingsProvidersRoute,
   SettingsScheduledTasksRoute: SettingsScheduledTasksRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,
