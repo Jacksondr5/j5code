@@ -38,8 +38,9 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   background SVGs.
 - Mobile OS identity and links: `apps/mobile/app.config.ts`, mobile package scripts, `App.tsx`,
   pairing QR handling, and the Agent Activity widget.
-- Web fallback identity: `apps/web/src/branding.ts` and the pre-React boot shell in
-  `apps/web/index.html`.
+- Web fallback identity: `apps/web/src/branding.ts`, the pre-React boot shell in
+  `apps/web/index.html`, and the fork-owned `apps/web/src/j5/branding/J5Wordmark.tsx` connected at
+  the sidebar's small `SidebarChrome.tsx` seam.
 
 ## Deliberately unchanged upstream internals
 

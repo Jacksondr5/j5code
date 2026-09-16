@@ -12,10 +12,10 @@ import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-ro
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { HumanInboxBell } from "../../j5/a2a/HumanInboxBell";
+import { J5Wordmark } from "../../j5/branding/J5Wordmark";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
 import { useThreadShells } from "../../state/entities";
-import { T3Wordmark } from "../T3Wordmark";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
@@ -99,7 +99,7 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
       to="/"
     >
       <span className="inline-flex min-w-0 items-baseline gap-1">
-        <T3Wordmark aria-label="T3" className="h-2.5 w-auto shrink-0" />
+        <J5Wordmark />
         <span
           className={cn(
             "truncate text-sm font-medium tracking-tight",
