@@ -1,0 +1,48 @@
+schema: t3-playbook/v1
+id: research-review
+version: 1
+name: Research and review
+description: Research a question, review the evidence, and approve the final report.
+initial: research
+agents:
+  researcher:
+    persona: scout
+    authority: read-only
+phases:
+  - id: research
+    label: Research
+    kind: agent
+    visitLimit: 3
+    approvals: [approval]
+    tasks:
+      - id: investigate
+        agent: researcher
+        instructions: Research the request using the workspace and supplied evidence. State uncertainties explicitly.
+        output: report
+    outcome: completion
+    transitions:
+      completed: review
+  - id: review
+    label: Review
+    kind: agent
+    visitLimit: 3
+    evidence: [research]
+    tasks:
+      - id: review-report
+        persona: critic
+        authority: critic-review
+        instructions: Review the latest research report. Its subjectHash must be the supplied report artifact hash.
+        output: review
+    outcome: review
+    transitions:
+      completed: approval
+      revise: research
+  - id: approval
+    label: Report approval
+    kind: gate
+    visitLimit: 3
+    evidence: [research, review]
+    capabilities: [approval, final-output]
+    transitions:
+      approve: $complete
+      request_changes: research

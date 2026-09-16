@@ -17,6 +17,11 @@ const files = [
   "apps/server/src/j5/playbook-definitions/fh/GitWorkspace.ts",
   "apps/server/src/j5/playbook-definitions/fh/Publication.ts",
   "packages/j5-playbook-contracts/src/fh.ts",
+  "apps/server/src/j5/playbook-definitions/Yaml.ts",
+  "apps/server/src/j5/playbook-definitions/Library.ts",
+  "apps/server/src/j5/playbook-definitions/research-review.yaml",
+  "apps/server/src/j5/playbook-definitions/fh/development.yaml",
+  "apps/server/scripts/copy-playbook-yaml.mjs",
 ];
 const content = files.map((file) => [file, NodeFS.readFileSync(new URL(file, root), "utf8")]);
 const hash = NodeCrypto.createHash("sha256").update(JSON.stringify(content)).digest("hex");
