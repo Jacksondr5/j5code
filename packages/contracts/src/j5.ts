@@ -455,3 +455,94 @@ export const J5_MACHINE_API_PATHS = {
   roster: "/api/j5/a2a/roster",
   whoami: "/api/j5/a2a/whoami",
 } as const;
+
+/**
+ * Peering: two servers that exchange agent messages. A peer holds a session of
+ * the other server whose subject is `peer:<its own environment id>` and whose
+ * only scope is `a2a:peer`. Records are mutual and pairwise; the client that is
+ * connected to both environments introduces them.
+ */
+export const PEER_SUBJECT_PREFIX = "peer:" as const;
+export const peerSubjectForEnvironment = (environmentId: string): string =>
+  `${PEER_SUBJECT_PREFIX}${environmentId}`;
+
+/** An http(s) origin with no path, query, or fragment. */
+export const PeerOrigin = Schema.String.check(
+  Schema.makeFilter((value) => {
+    try {
+      const url = new URL(value);
+      return (
+        ((url.protocol === "http:" || url.protocol === "https:") &&
+          url.pathname === "/" &&
+          url.search === "" &&
+          url.hash === "" &&
+          !value.endsWith("/")) ||
+        "A peer origin must be an http(s) origin such as https://home.example:3773 with no path."
+      );
+    } catch {
+      return "A peer origin must be an http(s) origin such as https://home.example:3773 with no path.";
+    }
+  }),
+);
+export type PeerOrigin = typeof PeerOrigin.Type;
+
+export const PeerRecord = Schema.Struct({
+  environmentId: Schema.String,
+  label: Schema.String,
+  origin: Schema.String,
+  createdAt: Schema.String,
+});
+export type PeerRecord = typeof PeerRecord.Type;
+export const PeerListResponse = Schema.Struct({ peers: Schema.Array(PeerRecord) });
+export type PeerListResponse = typeof PeerListResponse.Type;
+
+/** Mint a credential the named environment will present when it delivers to this server. */
+export const IssuePeerCredentialRequest = Schema.Struct({
+  environmentId: Schema.String.check(Schema.isNonEmpty()),
+  label: Schema.optional(Schema.String),
+});
+export type IssuePeerCredentialRequest = typeof IssuePeerCredentialRequest.Type;
+export const IssuePeerCredentialResponse = Schema.Struct({
+  /** This server's environment id, which the holder records as the peer's id. */
+  environmentId: Schema.String,
+  credential: Schema.String,
+  sessionId: Schema.String,
+  subject: Schema.String,
+  expiresAt: Schema.String,
+});
+export type IssuePeerCredentialResponse = typeof IssuePeerCredentialResponse.Type;
+
+/** Record a peer after proving the credential at the origin; the peer names itself in the hello. */
+export const AddPeerRequest = Schema.Struct({
+  origin: PeerOrigin,
+  credential: Schema.String.check(Schema.isNonEmpty()),
+  label: Schema.optional(Schema.String),
+});
+export type AddPeerRequest = typeof AddPeerRequest.Type;
+export const AddPeerResponse = Schema.Struct({ peer: PeerRecord, created: Schema.Boolean });
+export type AddPeerResponse = typeof AddPeerResponse.Type;
+
+export const RemovePeerRequest = Schema.Struct({
+  environmentId: Schema.String.check(Schema.isNonEmpty()),
+});
+export type RemovePeerRequest = typeof RemovePeerRequest.Type;
+export const RemovePeerResponse = Schema.Struct({
+  removed: Schema.Boolean,
+  revokedSessions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type RemovePeerResponse = typeof RemovePeerResponse.Type;
+
+/** What a server answers to a peer credential: who it is and whom the credential names. */
+export const PeerHelloResponse = Schema.Struct({
+  environmentId: Schema.String,
+  subject: Schema.String,
+  server: Schema.Struct({ version: Schema.String }),
+});
+export type PeerHelloResponse = typeof PeerHelloResponse.Type;
+
+export const J5_PEER_API_PATHS = {
+  peers: "/api/j5/a2a/peers",
+  credentials: "/api/j5/a2a/peers/credentials",
+  remove: "/api/j5/a2a/peers/remove",
+  hello: "/api/j5/a2a/peers/hello",
+} as const;
