@@ -101,8 +101,28 @@ export type AddPeerError =
   | PeerIsSelfError
   | PeerOriginConflictError;
 
+/** A peer record plus the credential this server presents to it; never leaves the process. */
+export interface PeerConnection extends PeerRecord {
+  readonly credential: string;
+}
+
 export interface PeerRegistryServiceShape {
-  /** Proves the credential at the origin, then upserts; re-adding the same peer rotates its credential. */
+  /** This server's environment id, the identity a peer's credential must name. */
+  readonly selfEnvironmentId: Effect.Effect<EnvironmentId>;
+  /**
+   * Every recorded peer with the credential to reach it, for directory reads.
+   * A peer whose session here is gone is still listed, marked "missing", so a
+   * caller can report it as unreadable rather than forget it exists.
+   */
+  readonly connections: () => Effect.Effect<
+    ReadonlyArray<PeerConnection>,
+    SqlError | PeerSessionReadError
+  >;
+  /** One recorded peer with its credential, for a delivery attempt. */
+  readonly connection: (
+    environmentId: string,
+  ) => Effect.Effect<PeerConnection | null, SqlError | PeerSessionReadError>;
+  /** Proves the credential at the origin, then upserts; re-adding the same peer rotates its origin and credential. */
   readonly add: (
     input: AddPeerInput,
   ) => Effect.Effect<{ readonly peer: PeerRecord; readonly created: boolean }, AddPeerError>;
@@ -127,6 +147,10 @@ interface PeerRow {
   readonly credential_expires_at: string | null;
   readonly created_at: string;
   readonly updated_at: string;
+}
+
+interface PeerConnectionRow extends PeerRow {
+  readonly credential: string;
 }
 
 const decodeHello = Schema.decodeUnknownEffect(PeerHelloResponse);
@@ -284,6 +308,32 @@ export const layer: Layer.Layer<
         return recordFromRow(row, yield* liveSubjects);
       });
 
+    const connections: PeerRegistryServiceShape["connections"] = () =>
+      Effect.gen(function* () {
+        const rows = yield* sql<PeerConnectionRow>`
+          SELECT environment_id, label, origin, credential, credential_expires_at, created_at, updated_at
+          FROM j5_a2a_peer
+          ORDER BY label, environment_id
+        `;
+        if (rows.length === 0) return [];
+        const live = yield* liveSubjects;
+        return rows.map((row) => ({ ...recordFromRow(row, live), credential: row.credential }));
+      });
+
+    /** One peer's connection for a delivery attempt: one row and its session status, not the whole registry. */
+    const connection: PeerRegistryServiceShape["connection"] = (environmentId) =>
+      Effect.gen(function* () {
+        const rows = yield* sql<PeerConnectionRow>`
+          SELECT environment_id, label, origin, credential, credential_expires_at, created_at, updated_at
+          FROM j5_a2a_peer
+          WHERE environment_id = ${environmentId}
+          LIMIT 1
+        `;
+        const row = rows[0];
+        if (row === undefined) return null;
+        return { ...recordFromRow(row, yield* liveSubjects), credential: row.credential };
+      });
+
     const list: PeerRegistryServiceShape["list"] = () =>
       Effect.gen(function* () {
         const rows = yield* sql<PeerRow>`
@@ -302,6 +352,14 @@ export const layer: Layer.Layer<
         RETURNING environment_id
       `.pipe(Effect.map((rows) => ({ removed: rows.length > 0 })));
 
-    return PeerRegistryService.of({ add, get, list, remove });
+    return PeerRegistryService.of({
+      selfEnvironmentId: identity.getEnvironmentId,
+      connections,
+      connection,
+      add,
+      get,
+      list,
+      remove,
+    });
   }),
 );

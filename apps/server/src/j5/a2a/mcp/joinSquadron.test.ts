@@ -33,6 +33,7 @@ import {
 } from "../HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "../LedgerService.ts";
 import { runJ5A2AMigrations } from "../Migrations.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "../PeerDirectory.ts";
 import { layer as placementLayer } from "../PlacementService.ts";
 import { layer as sendServiceLayer } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
@@ -121,6 +122,7 @@ const dependencies = Layer.mergeAll(
       Effect.fail(new OrchestratorProjectionError({ threadId: nativeThreadId })),
   }),
   Layer.mock(OrchestratorMcpService)({}),
+  peerDirectoryNoneLayer,
   Layer.mock(SpawnCompositionService)({}),
   Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
   NodeServices.layer,

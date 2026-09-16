@@ -234,18 +234,20 @@ const insertPendingDelivery = (
     readonly createdAt: string;
     readonly originSquadronId: string | null;
     readonly originEnvironmentId: string | null;
+    /** Set when the receiver is homed on a peer server; the worker hands such a row to the peer transport. */
+    readonly receiverEnvironmentId: string | null;
   },
 ) => sql`
   INSERT INTO j5_a2a_delivery (
     squadron_id, message_id, command_id, sent_seq, sender_id, receiver_id, receiver_squadron_id,
     exchange_id, exchange_role, envelope_channel, correlation_id, message_text,
     status, attempts, last_error, next_attempt_at, delivered_seq, created_at, updated_at,
-    origin_squadron_id, origin_environment_id
+    origin_squadron_id, origin_environment_id, receiver_environment_id
   ) VALUES (
     ${row.squadronId}, ${row.messageId}, ${row.commandId}, ${row.sentSeq}, ${row.senderId}, ${row.receiverId}, ${row.receiverSquadronId},
     ${row.exchangeId}, ${row.exchangeRole}, ${row.envelopeChannel}, ${row.correlationId}, ${row.messageText},
     'pending', 0, NULL, NULL, NULL, ${row.createdAt}, ${row.createdAt},
-    ${row.originSquadronId}, ${row.originEnvironmentId}
+    ${row.originSquadronId}, ${row.originEnvironmentId}, ${row.receiverEnvironmentId}
   )
 `;
 
@@ -531,6 +533,7 @@ export const layer: Layer.Layer<
             createdAt: event.createdAt,
             originSquadronId: null,
             originEnvironmentId: null,
+            receiverEnvironmentId: payload.receiverEnvironmentId ?? null,
           });
           return;
         }
@@ -608,6 +611,7 @@ export const layer: Layer.Layer<
             createdAt: event.createdAt,
             originSquadronId: received.originSquadronId,
             originEnvironmentId: received.originEnvironmentId,
+            receiverEnvironmentId: null,
           });
           return;
         }

@@ -6,6 +6,7 @@ import { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import { FetchHttpClient } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -19,6 +20,7 @@ import {
 import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
+import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
   CommCommandId,
@@ -44,6 +46,8 @@ const makeTestLayer = (deliveries: Ref.Ref<ReadonlyArray<AgentDeliveryInput>>) =
   const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   const liveTransport = deliveryTransportLive.pipe(
+    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(Layer.mock(PeerRegistryService)({})),
     Layer.provide(database),
     Layer.provide(Layer.mock(ThreadManagementService)({})),
     Layer.provide(Layer.mock(OrchestratorV2)({})),
@@ -56,6 +60,7 @@ const makeTestLayer = (deliveries: Ref.Ref<ReadonlyArray<AgentDeliveryInput>>) =
       return A2ADeliveryTransport.of({
         deliverAgent: (input) => Ref.update(deliveries, (current) => [...current, input]),
         cancelAgent: production.cancelAgent,
+        deliverPeer: () => Effect.die("peer delivery is not under test"),
         deliverHuman: production.deliverHuman,
       });
     }),

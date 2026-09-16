@@ -19,7 +19,6 @@ import * as Layer from "effect/Layer";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
-import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { peerHttpRouteLayer } from "./PeerHttp.ts";
 import { RosterService } from "./RosterService.ts";
@@ -142,6 +141,7 @@ const makeHandler = (input: {
                     return { peer: { ...homePeer, origin: request.origin }, created: true };
                   }),
         get: (environmentId) => Effect.succeed(environmentId === home ? homePeer : null),
+        selfEnvironmentId: Effect.succeed(work),
         list: () => Effect.succeed([homePeer]),
         remove: (environmentId) =>
           Effect.sync(() => {
@@ -217,11 +217,6 @@ const makeHandler = (input: {
               liveness: null,
             },
           ]),
-      }),
-    ),
-    Layer.provide(
-      Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
-        getEnvironmentId: Effect.succeed(work),
       }),
     ),
     Layer.provideMerge(auth),
