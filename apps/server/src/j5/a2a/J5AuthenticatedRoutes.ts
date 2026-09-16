@@ -1,4 +1,9 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Layer from "effect/Layer";
+import { FetchHttpClient } from "effect/unstable/http";
+
+import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
+import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 
 import { agentCrewReadsHttpRouteLayer } from "./AgentCrewReadsHttp.ts";
 import { crewArchiveHttpRouteLayer } from "./CrewArchiveHttp.ts";
@@ -15,6 +20,8 @@ import {
 import { humanInboxHttpRouteLayer } from "./HumanInboxHttp.ts";
 import { importedThreadsHttpRouteLayer } from "./ImportedThreadsHttp.ts";
 import { machineSenderHttpRouteLayer } from "./MachineSenderHttp.ts";
+import { peerHttpRouteLayer } from "./PeerHttp.ts";
+import { layer as peerRegistryLayer } from "./PeerRegistryService.ts";
 import { preArchiveFactsHttpRouteLayer } from "./PreArchiveFactsHttp.ts";
 import { layer as squadronManagementServiceLayer } from "./SquadronManagementService.ts";
 import { squadronHttpRouteLayer } from "./SquadronHttp.ts";
@@ -27,6 +34,18 @@ import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.
  * One authenticated J5 route aggregate. New J5 HTTP route layers enter here
  * rather than adding another upstream server composition seam.
  */
+// The peer registry reaches other servers, so it carries its own HTTP client and
+// this server's identity rather than widening the shared A2A runtime layer. The
+// identity reads the same environment-id file the server publishes at startup.
+const serverIdentityLayer = ServerEnvironment.identityLayer.pipe(
+  Layer.provide(ServerSecretStore.layer),
+  Layer.provide(NodeServices.layer),
+);
+const peerRoutesProvided = peerHttpRouteLayer.pipe(
+  Layer.provide(peerRegistryLayer.pipe(Layer.provide(FetchHttpClient.layer))),
+  Layer.provide(serverIdentityLayer),
+);
+
 export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
   agentCrewReadsHttpRouteLayer,
   crewArchiveHttpRouteLayer,
@@ -38,6 +57,7 @@ export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
   humanInboxHttpRouteLayer,
   importedThreadsHttpRouteLayer,
   machineSenderHttpRouteLayer,
+  peerRoutesProvided,
   preArchiveFactsHttpRouteLayer,
   squadronHttpRouteLayer,
   threadHomesHttpRouteLayer,
