@@ -23,6 +23,7 @@ import {
   isSidebarSubagentThread,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
+  partitionSidebarThreads,
   pinOrderKeyBetween,
   planPinnedReorder,
   reduceSidebarProjectScopeMenuState,
@@ -1048,6 +1049,106 @@ describe("reduceSidebarProjectScopeMenuState", () => {
         { type: "query-changed", query: "beta" },
       ),
     ).toEqual({ open: true, query: "beta" });
+  });
+});
+
+describe("partitionSidebarThreads", () => {
+  const now = "2026-09-07T12:00:00.000Z";
+  const capabilities = () => ({ threadSettlement: true, threadSnooze: true });
+  const older = makeThreadFixture({
+    id: ThreadId.make("older"),
+    createdAt: "2026-09-05T12:00:00.000Z",
+    updatedAt: now,
+    latestUserMessageAt: now,
+  });
+  const newer = makeThreadFixture({
+    id: ThreadId.make("newer"),
+    createdAt: "2026-09-06T12:00:00.000Z",
+    updatedAt: "2026-09-06T12:00:00.000Z",
+  });
+
+  it("moves a pinned thread out of active work and returns it to static order on unpin", () => {
+    const pinnedOlder = { ...older, pinnedAt: now };
+    const pinned = partitionSidebarThreads([newer, pinnedOlder], capabilities, now);
+    expect(pinned.pinned).toEqual([pinnedOlder]);
+    expect(pinned.active).toEqual([newer]);
+    expect(pinned.snoozed).toEqual([]);
+    expect(pinned.settled).toEqual([]);
+
+    const unpinned = partitionSidebarThreads(
+      [newer, { ...pinnedOlder, pinnedAt: null }],
+      capabilities,
+      now,
+    );
+    expect(unpinned.pinned).toEqual([]);
+    // The older thread has the newest activity, but must return below newer work.
+    expect(sortThreadsForSidebar(unpinned.active).map((thread) => thread.id)).toEqual([
+      newer.id,
+      older.id,
+    ]);
+  });
+
+  it("keeps snooze and settlement ahead of pinning, then restores the pin at wake", () => {
+    const wakeAt = "2026-09-08T12:00:00.000Z";
+    const snoozedPin = {
+      ...older,
+      pinnedAt: now,
+      snoozedAt: now,
+      snoozedUntil: wakeAt,
+    };
+    const settledPin = { ...newer, pinnedAt: now, settledOverride: "settled" as const };
+    const beforeWake = partitionSidebarThreads([snoozedPin, settledPin], capabilities, now);
+    expect(beforeWake).toEqual({
+      pinned: [],
+      active: [],
+      snoozed: [snoozedPin],
+      settled: [settledPin],
+    });
+    const afterWake = partitionSidebarThreads([snoozedPin, settledPin], capabilities, wakeAt);
+    expect(afterWake.pinned).toEqual([snoozedPin]);
+    expect(afterWake.snoozed).toEqual([]);
+    expect(afterWake.settled).toEqual([settledPin]);
+    expect(
+      partitionSidebarThreads([{ ...snoozedPin, settledOverride: "settled" }], capabilities, now)
+        .snoozed,
+    ).toHaveLength(1);
+  });
+
+  it.each([undefined, { threadSettlement: false, threadSnooze: false }])(
+    "honors existing pins without requiring server capabilities: %j",
+    (unsupported) => {
+      const remoteEnvironmentId = EnvironmentId.make("remote");
+      const remotePin = {
+        ...older,
+        environmentId: remoteEnvironmentId,
+        pinnedAt: now,
+        settledOverride: "settled" as const,
+        snoozedUntil: "2026-09-08T12:00:00.000Z",
+      };
+      const remoteActive = { ...remotePin, id: newer.id, pinnedAt: null };
+      const localSettled = { ...newer, settledOverride: "settled" as const };
+      expect(
+        partitionSidebarThreads(
+          [remotePin, remoteActive, localSettled],
+          (environmentId) => (environmentId === remoteEnvironmentId ? unsupported : capabilities()),
+          now,
+        ),
+      ).toEqual({
+        pinned: [remotePin],
+        active: [remoteActive],
+        snoozed: [],
+        settled: [localSettled],
+      });
+    },
+  );
+
+  it("feeds existing manual pin ordering without letting recent activity reorder active work", () => {
+    const pinA = { ...older, pinnedAt: now, pinOrderKey: "a0" };
+    const pinB = { ...newer, pinnedAt: now, pinOrderKey: "a1" };
+    const sections = partitionSidebarThreads([pinB, pinA], capabilities, now);
+    expect(sortPinnedThreadsForSidebar(sections.pinned)).toEqual([pinA, pinB]);
+    const active = partitionSidebarThreads([older, newer], capabilities, now);
+    expect(sortThreadsForSidebar(active.active)).toEqual([newer, older]);
   });
 });
 

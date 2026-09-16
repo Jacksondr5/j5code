@@ -26,6 +26,10 @@ Pin a thread from its menu to keep it above your active work. Drag pinned thread
 to reorder them on web and desktop, or use **Move up** and **Move down** on mobile.
 The order syncs across devices.
 
+Unpin a thread from its menu to return it to active work. Active threads keep a
+stable order based on creation or re-entry after settlement; new messages and
+other activity do not move them to the top.
+
 Pinning does not prevent automatic settlement. Settling a thread removes its pin.
 
 ## Settle finished work
