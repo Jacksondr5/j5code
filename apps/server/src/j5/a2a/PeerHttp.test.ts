@@ -18,7 +18,14 @@ import { HttpRouter, HttpServer } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
+import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { peerHttpRouteLayer } from "./PeerHttp.ts";
+import {
+  A2APeerReceiverNotDeliverableError,
+  A2APeerReceiverNotFoundError,
+  PeerInboundService,
+  type PeerInboundInput,
+} from "./PeerInboundService.ts";
 import {
   PeerCredentialMismatchError,
   PeerRegistryService,
@@ -49,6 +56,8 @@ const makeHandler = (input: {
   readonly existingSessions?: ReadonlyArray<Pick<AuthClientSession, "sessionId" | "subject">>;
   readonly adds?: Array<AddPeerInput>;
   readonly removed?: Array<string>;
+  readonly received?: Array<PeerInboundInput>;
+  readonly notifications?: { count: number };
 }) => {
   const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
     authenticateHttpRequest: () =>
@@ -121,6 +130,32 @@ const makeHandler = (input: {
             input.removed?.push(environmentId);
             return { removed: environmentId === home };
           }),
+      }),
+    ),
+    Layer.provide(
+      Layer.mock(PeerInboundService)({
+        receive: (request) =>
+          request.receiverId === "agent:j5:a2a:thread:ghost"
+            ? Effect.fail(new A2APeerReceiverNotFoundError({ participantId: request.receiverId }))
+            : request.receiverId.startsWith("human:")
+              ? Effect.fail(
+                  new A2APeerReceiverNotDeliverableError({
+                    participantId: request.receiverId,
+                    reason: "human",
+                  }),
+                )
+              : Effect.sync(() => {
+                  input.received?.push(request);
+                  const replay = (input.received?.length ?? 0) > 1;
+                  return { receivedSeq: 12, replay };
+                }),
+      }),
+    ),
+    Layer.provide(
+      Layer.mock(A2ADeliveryWorker)({
+        notify: Effect.sync(() => {
+          if (input.notifications) input.notifications.count += 1;
+        }),
       }),
     ),
     Layer.provide(
@@ -296,5 +331,90 @@ it("lists peers with access:read and removes one while revoking the session it h
   } finally {
     await reader.dispose();
     await admin.dispose();
+  }
+});
+
+const delivery = {
+  messageId: "message:j5:a2a:one",
+  senderId: "agent:j5:a2a:thread:remote-asker",
+  receiverId: "agent:j5:a2a:thread:local-triage",
+  exchangeId: "exchange:j5:a2a:one",
+  correlationId: "correlation:j5:a2a:one",
+  exchangeRole: "ask",
+  envelopeChannel: "peer",
+  text: "What is the incident status?",
+  originSquadronId: "squadron:home-support",
+  intent: "incident status",
+  createdAt: "2026-09-16T10:00:00.000Z",
+} as const;
+
+it("accepts a delivery from a recorded peer, stamps its environment, and wakes the worker", async () => {
+  const received: Array<PeerInboundInput> = [];
+  const notifications = { count: 0 };
+  const { dispose, handler } = makeHandler({
+    subject: `peer:${home}`,
+    scopes: [AuthA2APeerScope],
+    received,
+    notifications,
+  });
+  try {
+    const first = await handler(post(J5_PEER_API_PATHS.deliver, delivery));
+    assert.equal(first.status, 201);
+    assert.deepStrictEqual(await first.json(), { accepted: true, receivedSeq: 12, replay: false });
+    assert.equal(received.length, 1);
+    assert.equal(received[0]!.originEnvironmentId, home, "the origin is the credential's subject");
+    assert.equal(received[0]!.intent, "incident status");
+    assert.equal(notifications.count, 1);
+
+    const again = await handler(post(J5_PEER_API_PATHS.deliver, delivery));
+    assert.equal(again.status, 200);
+    assert.deepStrictEqual(await again.json(), { accepted: true, receivedSeq: 12, replay: true });
+  } finally {
+    await dispose();
+  }
+});
+
+it("refuses a delivery from a credential whose environment is not a recorded peer or lacks the scope", async () => {
+  const stranger = makeHandler({
+    subject: "peer:environment-stranger",
+    scopes: [AuthA2APeerScope],
+  });
+  const admin = makeHandler({ subject: "admin", scopes: [AuthAccessWriteScope] });
+  const machine = makeHandler({ subject: "machine:watchdog", scopes: [AuthA2ASendScope] });
+  try {
+    const refused = await stranger.handler(post(J5_PEER_API_PATHS.deliver, delivery));
+    assert.equal(refused.status, 403);
+    assert.equal(((await refused.json()) as { error: string }).error, "peer_not_registered");
+    assert.equal((await admin.handler(post(J5_PEER_API_PATHS.deliver, delivery))).status, 403);
+    assert.equal((await machine.handler(post(J5_PEER_API_PATHS.deliver, delivery))).status, 403);
+  } finally {
+    await stranger.dispose();
+    await admin.dispose();
+    await machine.dispose();
+  }
+});
+
+it("maps inbound refusals: unknown receiver 404, a person 403 policy, a malformed body 400", async () => {
+  const { dispose, handler } = makeHandler({ subject: `peer:${home}`, scopes: [AuthA2APeerScope] });
+  try {
+    const ghost = await handler(
+      post(J5_PEER_API_PATHS.deliver, { ...delivery, receiverId: "agent:j5:a2a:thread:ghost" }),
+    );
+    assert.equal(ghost.status, 404);
+    assert.equal(((await ghost.json()) as { error: string }).error, "recipient_not_found");
+
+    const person = await handler(
+      post(J5_PEER_API_PATHS.deliver, { ...delivery, receiverId: "human:someone" }),
+    );
+    assert.equal(person.status, 403);
+    assert.deepStrictEqual(
+      ((await person.json()) as { error: string; reason: string }).reason,
+      "A2APeerReceiverNotDeliverableError",
+    );
+
+    const malformed = await handler(post(J5_PEER_API_PATHS.deliver, { messageId: "x" }));
+    assert.equal(malformed.status, 400);
+  } finally {
+    await dispose();
   }
 });
