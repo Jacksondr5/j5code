@@ -1934,6 +1934,7 @@ function PullRequestsRouteView() {
             onAddArtifacts={() => undefined}
             onAddPullRequest={() => undefined}
             onAddAgents={() => undefined}
+            onAddPlaybooks={() => undefined}
             browserAvailable={false}
             terminalAvailable={false}
             diffAvailable={false}
@@ -1941,6 +1942,7 @@ function PullRequestsRouteView() {
             artifactsAvailable={false}
             pullRequestAvailable={false}
             agentsAvailable={false}
+            playbooksAvailable={false}
             liveAgentCount={0}
             pullRequestStatusSeeds={listedPullRequestTabStatuses}
           >

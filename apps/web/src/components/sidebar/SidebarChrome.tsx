@@ -4,6 +4,7 @@ import {
   FolderArchiveIcon,
   GitPullRequestIcon,
   SettingsIcon,
+  BookOpenIcon,
 } from "lucide-react";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { ReactNode } from "react";
@@ -57,7 +58,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   return (
     <SidebarHeader
       className={cn(
-        "@container/sidebar-header relative h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center px-3 py-0 md:px-0",
+        "@container/sidebar-header relative h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center gap-1 px-3 py-0 md:px-0",
         isElectron && "drag-region",
       )}
     >
@@ -73,7 +74,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       <SidebarBrand onBackdrop={backdropVariant !== null} />
       {pillLabel ? (
         <Badge
-          className="relative z-10 ml-1 hidden rounded-full px-1.5 text-muted-foreground @[15rem]/sidebar-header:inline-flex"
+          className="relative z-10 ml-1 hidden max-w-24 truncate rounded-full px-1.5 text-muted-foreground @[24rem]/sidebar-header:inline-flex"
           data-environment-identification="pill"
           size="sm"
           variant="secondary"
@@ -81,7 +82,28 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           {pillLabel}
         </Badge>
       ) : null}
-      <div className="relative z-10 -me-1 ms-auto flex size-8 shrink-0 items-center justify-center md:me-[var(--sidebar-content-inset)]">
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Link
+              to="/runs"
+              search={{ runId: undefined, squadronId: undefined, newPlaybook: undefined }}
+              className={cn(
+                "relative z-10 ms-auto flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs [-webkit-app-region:no-drag] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                backdropVariant
+                  ? "text-white/80 hover:bg-white/15 hover:text-white"
+                  : "text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground",
+              )}
+              aria-label="Playbooks"
+            />
+          }
+        >
+          <BookOpenIcon aria-hidden className="size-4" />
+          <span className="hidden @[24rem]/sidebar-header:inline">Playbooks</span>
+        </TooltipTrigger>
+        <TooltipPopup>Playbooks</TooltipPopup>
+      </Tooltip>
+      <div className="relative z-10 -me-1 flex size-8 shrink-0 items-center justify-center md:me-[var(--sidebar-content-inset)]">
         <HumanInboxBell onBackdrop={backdropVariant !== null} />
       </div>
     </SidebarHeader>
@@ -93,7 +115,7 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
     <Link
       aria-label="Go to threads"
       className={cn(
-        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex",
+        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex",
         onBackdrop ? "text-white" : "text-foreground",
       )}
       to="/"

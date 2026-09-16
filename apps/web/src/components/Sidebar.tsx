@@ -1,3 +1,4 @@
+import { isPlaybookThread } from "@j5/playbook-contracts/sidebar";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { scopedSquadronKey } from "@t3tools/contracts/j5";
 import { autoAnimate } from "@formkit/auto-animate";
@@ -2176,7 +2177,7 @@ export default function Sidebar() {
     // Subagent child threads live in the parent's Agents surface, not the
     // sidebar roster (v2 models them as real threads with lineage).
     const visible = filterThreadsForSquadronScope(
-      filterSidebarV2VisibleThreads(threads, null),
+      filterSidebarV2VisibleThreads(threads, null).filter((thread) => !isPlaybookThread(thread.id)),
       squadronScope,
       threadHomes,
     );

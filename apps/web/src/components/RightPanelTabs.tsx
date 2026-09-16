@@ -17,6 +17,7 @@ import {
   GitPullRequest,
   Globe2,
   Plus,
+  BookOpen,
   TerminalSquare,
   Volume2,
   VolumeOff,
@@ -109,6 +110,7 @@ interface RightPanelTabsProps {
   onAddArtifacts: () => void;
   onAddPullRequest: () => void;
   onAddAgents: () => void;
+  onAddPlaybooks: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -116,6 +118,7 @@ interface RightPanelTabsProps {
   artifactsAvailable: boolean;
   pullRequestAvailable: boolean;
   agentsAvailable: boolean;
+  playbooksAvailable: boolean;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
   /** Running + waiting subagents; badges the Agents card in the empty state. */
   liveAgentCount: number;
@@ -146,6 +149,7 @@ const SURFACE_DISABLED_REASONS = {
   diff: "Diff is only available for server threads in Git repositories.",
   pullRequest: "This thread's branch has no pull request yet.",
   agents: "Agents are only available from a thread.",
+  playbooks: "Playbooks are only available from a thread.",
 } as const;
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -169,6 +173,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   diff: "Available for Git repositories.",
   pullRequest: "No pull request on this branch yet.",
   agents: "Available from a thread.",
+  playbooks: "Available from a thread.",
 } as const;
 
 type TabContextMenuAction =
@@ -307,6 +312,7 @@ function RightPanelEmptyState(props: {
   onAddArtifacts: () => void;
   onAddPullRequest: () => void;
   onAddAgents: () => void;
+  onAddPlaybooks: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -314,6 +320,7 @@ function RightPanelEmptyState(props: {
   artifactsAvailable: boolean;
   pullRequestAvailable: boolean;
   agentsAvailable: boolean;
+  playbooksAvailable: boolean;
   liveAgentCount: number;
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
@@ -381,8 +388,18 @@ function RightPanelEmptyState(props: {
       badgeCount: 0,
     },
     {
+      label: "Playbooks",
+      description: "Review runs and resolve approvals.",
+      icon: BookOpen,
+      shortcut: "W",
+      available: props.playbooksAvailable,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.playbooks,
+      onClick: props.onAddPlaybooks,
+      badgeCount: 0,
+    },
+    {
       label: "Agents",
-      description: "Follow subagents and workflows.",
+      description: "Follow subagents.",
       icon: Bot,
       shortcut: "A",
       available: props.agentsAvailable,
@@ -625,6 +642,8 @@ function surfaceTitle(
       return `#${surface.number}`;
     case "agents":
       return "Agents";
+    case "playbooks":
+      return "Playbooks";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -708,6 +727,8 @@ function SurfaceIcon({
       );
     case "agents":
       return <Bot className="size-3 shrink-0" />;
+    case "playbooks":
+      return <BookOpen className="size-3 shrink-0" />;
   }
 }
 
@@ -836,6 +857,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       available: props.pullRequestAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.pullRequest,
       onClick: props.onAddPullRequest,
+    },
+    {
+      label: "Playbooks",
+      icon: BookOpen,
+      shortcut: "W",
+      available: props.playbooksAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.playbooks,
+      onClick: props.onAddPlaybooks,
     },
     {
       label: "Agents",
@@ -1284,6 +1313,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddArtifacts={props.onAddArtifacts}
             onAddPullRequest={props.onAddPullRequest}
             onAddAgents={props.onAddAgents}
+            onAddPlaybooks={props.onAddPlaybooks}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
@@ -1291,6 +1321,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             artifactsAvailable={props.artifactsAvailable}
             pullRequestAvailable={props.pullRequestAvailable}
             agentsAvailable={props.agentsAvailable}
+            playbooksAvailable={props.playbooksAvailable}
             liveAgentCount={props.liveAgentCount}
           />
         ) : (

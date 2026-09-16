@@ -15,7 +15,7 @@ import { environmentSession } from "../state/session";
 
 export const j5Environment = createJ5EnvironmentAtoms(connectionAtomRuntime);
 
-const sourcesInput = {
+export const sourcesInput = {
   catalogValueAtom: environmentCatalog.catalogValueAtom,
   stateAtom: environmentCatalog.stateAtom,
   configValueAtom: serverEnvironment.configValueAtom,

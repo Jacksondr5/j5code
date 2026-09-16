@@ -9,7 +9,7 @@ import {
 } from "@t3tools/client-runtime/j5/inbox";
 import { spansMultipleEnvironments } from "@t3tools/client-runtime/j5/readSources";
 import * as Cause from "effect/Cause";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowUpRightIcon,
   CheckCircle2Icon,
@@ -40,6 +40,8 @@ import {
 } from "../state";
 import { createVisibleRefreshHook } from "../useVisibleRefresh";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
+import { playbookInboxQuery, playbookInboxSourcesAtom } from "../playbook/inbox";
+import { phaseLabel } from "../playbook/presentation";
 
 interface HumanInboxAnswerAttempt {
   readonly message: string;
@@ -311,6 +313,7 @@ export async function refreshHumanInboxes(environmentId?: EnvironmentId, force =
   const results = await Promise.all([
     refreshJ5Sources(openInboxSourcesAtom, openInboxQueryAtom, options),
     refreshJ5Sources(answeredInboxSourcesAtom, answeredInboxQueryAtom, options),
+    refreshJ5Sources(playbookInboxSourcesAtom, playbookInboxQuery, options),
   ]);
   const failed = results.flat().find((result) => result._tag === "Failure");
   if (failed?._tag === "Failure") throw Cause.squash(failed.cause);
@@ -318,12 +321,23 @@ export async function refreshHumanInboxes(environmentId?: EnvironmentId, force =
 
 const useInboxRefresh = createVisibleRefreshHook(() => {
   void refreshJ5Sources(openInboxSourcesAtom, openInboxQueryAtom);
+  void refreshJ5Sources(playbookInboxSourcesAtom, playbookInboxQuery);
 }, 7_500);
 
 export function HumanInboxPage() {
   const navigate = useNavigate();
   const openSources = useAtomValue(openInboxSourcesAtom);
   const answeredSources = useAtomValue(answeredInboxSourcesAtom);
+  const playbookSources = useAtomValue(playbookInboxSourcesAtom);
+  const playbookCount = playbookSources.sources.reduce(
+    (total, source) => total + (source.data?.total ?? 0),
+    0,
+  );
+  const playbooksComplete =
+    playbookSources.isReady &&
+    playbookSources.sources.every(
+      (source) => source.status === "ready" || source.status === "unsupported",
+    );
   const items = useMemo(() => mergeHumanInboxSources(openSources), [openSources]);
   const answeredItems = useMemo(() => mergeHumanInboxSources(answeredSources), [answeredSources]);
   const showEnvironment = spansMultipleEnvironments([...items, ...answeredItems]);
@@ -458,7 +472,7 @@ export function HumanInboxPage() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   {loading && items.length === 0
                     ? "Loading questions waiting on you…"
-                    : `${items.length} ${complete ? "open" : "loaded"} ${items.length === 1 ? "question" : "questions"}`}
+                    : `${items.length + playbookCount} ${complete && playbooksComplete ? "open" : "loaded"} items`}
                 </p>
               </div>
               <Button
@@ -499,7 +513,52 @@ export function HumanInboxPage() {
               </div>
             ) : null}
 
-            {complete && !loading && error === null && items.length === 0 ? (
+            <section aria-label="Playbook approvals" className="mt-4 space-y-2">
+              {playbookSources.sources.map((source) => (
+                <div key={source.environmentId}>
+                  {source.status !== "unsupported" && j5SourceNotice(source) ? (
+                    <p className="text-sm text-muted-foreground">{j5SourceNotice(source)}</p>
+                  ) : null}
+                  {(source.data?.runs ?? []).map((run) => (
+                    <Link
+                      key={run.id}
+                      to="/runs"
+                      search={{
+                        environmentId: source.environmentId,
+                        runId: run.id,
+                        squadronId: run.squadronId,
+                      }}
+                      hash="playbook-approval"
+                      className="block rounded border p-3 hover:bg-muted/30"
+                    >
+                      <span className="block font-medium">{run.title}</span>
+                      <span className="text-sm text-muted-foreground">
+                        {phaseLabel(run.phase)} · {source.environmentLabel}
+                      </span>
+                    </Link>
+                  ))}
+                  {source.data?.hasMore ? (
+                    <Link
+                      to="/runs"
+                      search={{
+                        environmentId: source.environmentId,
+                        status: "waiting_approval",
+                        view: "list",
+                      }}
+                    >
+                      View all Playbook approvals
+                    </Link>
+                  ) : null}
+                </div>
+              ))}
+            </section>
+
+            {complete &&
+            playbooksComplete &&
+            !loading &&
+            error === null &&
+            items.length === 0 &&
+            playbookCount === 0 ? (
               <div className="flex min-h-56 flex-col items-center justify-center px-6 py-12 text-center">
                 <span className="flex size-10 items-center justify-center rounded-full bg-success/10 text-success">
                   <InboxIcon aria-hidden className="size-5" />

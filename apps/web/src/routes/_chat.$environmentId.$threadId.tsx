@@ -9,6 +9,7 @@ import { SidebarInset } from "~/components/ui/sidebar";
 import { useEnvironmentThreadRefs, useThreadShell } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { environmentShell } from "../state/shell";
+import { PlaybookThreadBanner } from "../j5/playbook/PlaybookThreadBanner";
 
 function ChatThreadRouteView() {
   const navigate = useNavigate();
@@ -66,11 +67,19 @@ function ChatThreadRouteView() {
 
   return (
     <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
-      <ChatView
-        environmentId={threadRef.environmentId}
-        threadId={threadRef.threadId}
-        routeKind="server"
-      />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <PlaybookThreadBanner
+          environmentId={threadRef.environmentId}
+          threadId={threadRef.threadId}
+        />
+        <div className="min-h-0 flex-1">
+          <ChatView
+            environmentId={threadRef.environmentId}
+            threadId={threadRef.threadId}
+            routeKind="server"
+          />
+        </div>
+      </div>
     </SidebarInset>
   );
 }
