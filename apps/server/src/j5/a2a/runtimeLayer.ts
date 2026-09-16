@@ -4,6 +4,7 @@ import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.
 import { layer as agentCrewInstanceLayer } from "./AgentCrewInstanceService.ts";
 import { layer as archiveFactsLayer, placementFactsLayer } from "./ArchiveFactsService.ts";
 import { layer as archiveAgentLayer } from "./ArchiveAgentService.ts";
+import { layer as archiveCrewLayer } from "./ArchiveCrewService.ts";
 import { layer as agentCrewProposalLayer } from "./AgentCrewProposalService.ts";
 import { manualLayer as crewLaunchReporterLayer } from "./CrewLaunchReporter.ts";
 import { layer as crewLaunchLayer } from "./CrewLaunchService.ts";
@@ -12,6 +13,8 @@ import {
   layer as crewProposalLayer,
 } from "./CrewProposalService.ts";
 import { layer as crewSeatFinishNotifierLayer } from "./CrewSeatFinishNotifier.ts";
+import { layer as captainArchiveCascadeLayer } from "./CrewCaptainArchiveCascade.ts";
+import { layer as crewStopLayer } from "./CrewStopService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import {
@@ -86,6 +89,10 @@ export const makeJ5A2AAuxiliaryLayer = (
   const agentHandoffNudgeWorkerProvided = agentHandoffNudgeWorkerLayer.pipe(
     Layer.provide(agentHandoffNudgeQueueLayer),
   );
+  const archiveCrewProvided = archiveCrewLayer.pipe(
+    Layer.provideMerge(archiveAgentProvided),
+    Layer.provideMerge(agentCrewInstanceLayer),
+  );
   const crewLaunchProvided = crewLaunchLayer.pipe(
     Layer.provideMerge(spawnCompositionProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
@@ -96,6 +103,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(agentCrewProposalLayer),
     Layer.provideMerge(agentCrewInstanceLayer),
   );
+  const crewStopProvided = crewStopLayer.pipe(Layer.provideMerge(agentCrewInstanceLayer));
   const crewProposalProvided = crewProposalLayer.pipe(
     Layer.provideMerge(crewLaunchProvided),
     Layer.provideMerge(crewLaunchReporterProvided),
@@ -104,9 +112,15 @@ export const makeJ5A2AAuxiliaryLayer = (
   const crewProposalBootSweepProvided = crewProposalBootSweepLayer.pipe(
     Layer.provide(crewProposalProvided),
   );
+  // A person's archive of a Captain retires its Crews from the same event stream the notifier reads.
+  const captainArchiveCascadeProvided = captainArchiveCascadeLayer.pipe(
+    Layer.provideMerge(archiveCrewProvided),
+    Layer.provideMerge(agentCrewInstanceLayer),
+  );
   // The finish notifier tells a Captain when a seat's handoff file appears, so it reads the workspace.
   const crewSeatFinishNotifierProvided = crewSeatFinishNotifierLayer.pipe(
     Layer.provideMerge(crewLaunchReporterProvided),
+    Layer.provideMerge(captainArchiveCascadeProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
     Layer.provide(artifactWorkspaceLayer),
   );
@@ -129,8 +143,10 @@ export const makeJ5A2AAuxiliaryLayer = (
     spawnCompositionProvided,
     squadronJoinProvided,
     agentCrewInstanceLayer,
+    archiveCrewProvided,
     crewProposalProvided,
     crewProposalBootSweepProvided,
+    crewStopProvided,
     crewSeatFinishNotifierProvided,
   ).pipe(Layer.provideMerge(participantPlacementLayer));
   return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));

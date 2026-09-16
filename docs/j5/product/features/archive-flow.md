@@ -36,7 +36,7 @@ Archiving is **not** deleting, **not** a way to archive a single Crew member, an
 ### The dialog
 
 2. An agent with no open Exchanges and no agents beneath it archives immediately, with no dialog.
-3. Otherwise the dialog names the agent in its title, lists the agents beneath it, lists every open ask with its urgency, direction, counterpart, time open, and verbatim intent, states the count of asks that will be terminated, and reassures that the workspace survives.
+3. Otherwise the dialog names the agent in its title, lists the agents beneath it, lists every live Crew the agent commands with each seat's running turn and open asks, lists every open ask with its urgency, direction, counterpart, time open, and verbatim intent, states the count of asks that will be terminated, and reassures that the workspace survives.
 4. An ask row names its counterpart by display name — an agent's thread title, a person's name with "(inbox)" — and never shows a raw id; an unnamed counterpart reads "Unnamed participant".
 5. The dialog has one confirm and no type-to-confirm.
 
@@ -49,7 +49,7 @@ Archiving is **not** deleting, **not** a way to archive a single Crew member, an
 
 ### Boundaries
 
-10. A Crew member cannot be archived individually through this flow.
+10. A Crew member cannot be archived individually through this flow; the dialog refuses with the way out. A Captain is never archived alone through it: the dialog lists its live Crews seat by seat, and once the archive commits the platform retires those Crews as units, from this flow or any other door ([Crews](crews.md) AC17).
 11. The flow is available from the agent's thread and from its Fleet page row.
 
 ### Unarchiving and deleting

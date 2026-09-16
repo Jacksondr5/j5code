@@ -21,10 +21,31 @@ import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { CaptainMark } from "../squadron/CaptainMark";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
-import { fleetSourcesAtom } from "../state";
-import { formatCrewStateSummary, summarizeCrewState } from "../crew/crewState";
-import { buildFleetTree, originLabel, type FleetNode, type FleetRow } from "./fleet.logic";
-import { mergeFleetSources, refreshFleet, useFleetRefresh } from "./fleetClient";
+import { fleetDetailSourcesAtom } from "../state";
+import { requestConfirmDialog } from "../../confirmDialog";
+import { ArchiveWarningCrewSeats, type ArchiveWarningCrew } from "../a2a/ArchiveWarningContent";
+import { archiveCrew } from "../crew/crewArchiveClient";
+import {
+  classifyCrewSeat,
+  crewHasRunningSeat,
+  formatCrewStateSummary,
+  summarizeCrewState,
+} from "../crew/crewState";
+import { stopCrew } from "../crew/crewStopClient";
+import {
+  buildFleetTree,
+  originLabel,
+  retiredCrews,
+  type FleetNode,
+  type FleetRow,
+} from "./fleet.logic";
+import {
+  mergeFleetSources,
+  refreshFleet,
+  useFleetDetailRefresh,
+  type FleetCrew,
+  type ScopedFleetSquadron,
+} from "./fleetClient";
 
 /**
  * The Roster (SB6): every agent in every Squadron on every connected environment, indented by
@@ -36,8 +57,8 @@ import { mergeFleetSources, refreshFleet, useFleetRefresh } from "./fleetClient"
 export function FleetPage() {
   const navigate = useNavigate();
   const threads = useThreadShells();
-  const sources = useAtomValue(fleetSourcesAtom);
-  useFleetRefresh();
+  const sources = useAtomValue(fleetDetailSourcesAtom);
+  useFleetDetailRefresh();
   const [refreshing, setRefreshing] = useState(false);
   const squadrons = useMemo(() => mergeFleetSources(sources), [sources]);
   const showEnvironment = spansMultipleEnvironments(squadrons);
@@ -154,6 +175,7 @@ export function FleetPage() {
                     onOpenThread={openThread}
                   />
                 )}
+                <RetiredCrews squadron={squadron} onOpenThread={openThread} />
               </section>
             ))}
           </main>
@@ -208,6 +230,76 @@ function FleetNodeRows(
             ),
       ),
     );
+  // The person's Stop crew: interrupts every running seat, retires nothing. The seats' status
+  // pills already tell the truth afterwards, so a failed call needs no second message here.
+  const [busy, setBusy] = useState<string | null>(null);
+  const stop = async (crewInstanceId: string) => {
+    setBusy(crewInstanceId);
+    try {
+      await stopCrew(props.environmentId, crewInstanceId);
+    } catch {
+      // measured state on the rows is the report
+    } finally {
+      setBusy(null);
+    }
+  };
+  // The person's Archive crew: the same unit archive the Captain has, behind one dialog that
+  // lists every seat with what ends for it. The Crew moves to the Squadron's retired list.
+  const archive = async (
+    crew: { crewInstanceId: string; crewName: string },
+    seats: ReadonlyArray<FleetRow>,
+  ) => {
+    const warning: ArchiveWarningCrew = {
+      crewInstanceId: crew.crewInstanceId,
+      crewName: crew.crewName,
+      seats: seats.map(({ agent }) => {
+        const thread =
+          agent.threadId === null
+            ? undefined
+            : props.threadsByKey.get(
+                scopedThreadKey(scopeThreadRef(props.environmentId, ThreadId.make(agent.threadId))),
+              );
+        const displayName = thread?.title ?? agent.displayName;
+        return {
+          seat: agent.crew?.seat ?? agent.participantId,
+          participant:
+            displayName === null
+              ? { displayName: "Unnamed participant", tooltipParticipantId: agent.participantId }
+              : { displayName, tooltipParticipantId: null },
+          runningTurn: classifyCrewSeat(thread) === "running",
+          openAsks: agent.openAsks,
+        };
+      }),
+    };
+    const consequential = warning.seats.some((seat) => seat.runningTurn || seat.openAsks > 0);
+    const confirmed = await (requestConfirmDialog(
+      `Archive crew ${crew.crewName}?`,
+      { variant: "destructive" },
+      {
+        content: (
+          <div className="space-y-3 text-left">
+            <p>Its {warning.seats.length === 1 ? "seat retires" : "seats retire"} together:</p>
+            <ArchiveWarningCrewSeats crew={warning} />
+            <p className="border-t border-border/60 pt-3 text-muted-foreground">
+              Worktrees, branches, and pull requests remain. The roster stays readable under Retired
+              crews.
+            </p>
+          </div>
+        ),
+        confirmLabel: consequential ? "Archive anyway" : "Archive",
+      },
+    ) ?? Promise.resolve(false));
+    if (!confirmed) return;
+    setBusy(crew.crewInstanceId);
+    try {
+      await archiveCrew(props.environmentId, crew.crewInstanceId);
+      refreshFleet();
+    } catch {
+      // the rows keep reporting the measured state; the person can retry
+    } finally {
+      setBusy(null);
+    }
+  };
   return (
     <>
       <FleetRowItem
@@ -238,6 +330,36 @@ function FleetNodeRows(
                       {crew.members.length} {crew.members.length === 1 ? "seat" : "seats"}
                       {summary === null ? "" : ` · ${summary}`}
                     </span>
+                    <span className="ms-auto flex items-center gap-1.5">
+                      {crewHasRunningSeat(state) ? (
+                        <Button
+                          aria-label={`Stop crew ${crew.crewName}`}
+                          disabled={busy === crew.crewInstanceId}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            void stop(crew.crewInstanceId);
+                          }}
+                          size="xs"
+                          variant="outline"
+                        >
+                          Stop crew
+                        </Button>
+                      ) : null}
+                      <Button
+                        aria-label={`Archive crew ${crew.crewName}`}
+                        disabled={busy === crew.crewInstanceId}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          void archive(crew, seats);
+                        }}
+                        size="xs"
+                        variant="ghost"
+                      >
+                        Archive crew
+                      </Button>
+                    </span>
                   </>
                 );
               })()}
@@ -259,6 +381,84 @@ function FleetNodeRows(
         <FleetNodeRows key={child.row.agent.participantId} node={child} {...rows} />
       ))}
     </>
+  );
+}
+
+/**
+ * Retired Crews of one Squadron, collapsed: the brief, the approved roster with who approved
+ * each seat and why, and the Captain's thread, so a successor can be proposed from what was
+ * decided rather than from memory (Crews AC20). Handoffs live on the Artifacts page.
+ */
+function RetiredCrews(props: {
+  readonly squadron: ScopedFleetSquadron;
+  readonly onOpenThread: FleetRowsProps["onOpenThread"];
+}) {
+  const crews = retiredCrews(props.squadron);
+  if (crews.length === 0) return null;
+  return (
+    <details className="group/retired mt-3">
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-medium text-muted-foreground outline-hidden marker:hidden hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        <ChevronRightIcon
+          aria-hidden
+          className="size-3.5 transition-transform duration-150 group-open/retired:rotate-90"
+        />
+        Retired crews ({crews.length})
+      </summary>
+      <ul className="mt-2 space-y-2">
+        {crews.map((crew) => (
+          <RetiredCrewItem
+            key={crew.crewInstanceId}
+            crew={crew}
+            environmentId={props.squadron.environmentId}
+            onOpenThread={props.onOpenThread}
+          />
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function RetiredCrewItem(props: {
+  readonly crew: FleetCrew;
+  readonly environmentId: EnvironmentId;
+  readonly onOpenThread: FleetRowsProps["onOpenThread"];
+}) {
+  const { crew } = props;
+  const retired =
+    crew.archivedAt === null ? null : formatElapsedDurationLabel(crew.archivedAt) || "just now";
+  return (
+    <li className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-sm opacity-80">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="font-medium">Crew · {crew.crewName}</span>
+        <span className="text-xs text-muted-foreground">
+          v{crew.version}
+          {retired === null ? "" : ` · retired ${retired}`}
+        </span>
+        {crew.captainThreadId === null ? null : (
+          <Button
+            className="ms-auto"
+            onClick={() => props.onOpenThread(props.environmentId, crew.captainThreadId!)}
+            size="xs"
+            variant="ghost"
+          >
+            Open Captain
+          </Button>
+        )}
+      </div>
+      <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-muted-foreground">{crew.brief}</p>
+      <ul className="mt-2 space-y-0.5 text-xs">
+        {crew.roster.map((member) => (
+          <li key={member.seat} className="flex flex-wrap items-baseline gap-x-2">
+            <span className="uppercase tracking-wide text-muted-foreground">{member.seat}</span>
+            <span>{member.agentId}</span>
+            <span className="text-muted-foreground">
+              {member.addedVersion > 1 ? `joined at v${member.addedVersion}` : "approved roster"}
+              {member.reason === null ? "" : ` · ${member.reason}`}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </li>
   );
 }
 

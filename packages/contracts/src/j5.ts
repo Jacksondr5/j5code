@@ -222,8 +222,67 @@ export const FleetSquadron = Schema.Struct({
   crews: Schema.Array(FleetCrew),
 });
 export type FleetSquadron = typeof FleetSquadron.Type;
+/** The rail badge reads the live roster only; the Fleet page asks for retired Crews as well. */
+export const FleetReadRequest = Schema.Struct({ includeRetired: Schema.optional(Schema.Boolean) });
+export type FleetReadRequest = typeof FleetReadRequest.Type;
 export const FleetResponse = Schema.Struct({ squadrons: Schema.Array(FleetSquadron) });
 export type FleetResponse = typeof FleetResponse.Type;
+
+/** A person stopping a Crew from the app: every running seat is interrupted, nothing is retired. */
+export const CrewStopRequest = Schema.Struct({ crewInstanceId: Schema.String });
+export type CrewStopRequest = typeof CrewStopRequest.Type;
+export const CrewStopResponse = Schema.Struct({
+  crewInstanceId: Schema.String,
+  members: Schema.Array(
+    Schema.Struct({
+      seat: Schema.String,
+      participantId: Schema.String,
+      result: Schema.Literals(["interrupt_requested", "already_idle", "archived"]),
+    }),
+  ),
+});
+export type CrewStopResponse = typeof CrewStopResponse.Type;
+
+/** A live Crew the archived agent commands, seat by seat, as the archive dialog shows it. */
+export const PreArchiveLiveCrew = Schema.Struct({
+  crewInstanceId: Schema.String,
+  crewName: Schema.String,
+  seats: Schema.Array(
+    Schema.Struct({
+      seat: Schema.String,
+      participantId: Schema.String,
+      runningTurn: Schema.Boolean,
+      openAsks: Schema.Number,
+    }),
+  ),
+});
+export type PreArchiveLiveCrew = typeof PreArchiveLiveCrew.Type;
+/** The Crew seat the archived agent holds; seats are never archived one by one. */
+export const PreArchiveCrewSeat = Schema.Struct({
+  crewInstanceId: Schema.String,
+  crewName: Schema.String,
+  seat: Schema.String,
+});
+export type PreArchiveCrewSeat = typeof PreArchiveCrewSeat.Type;
+
+/**
+ * A person retiring a Crew from the app, after a dialog that listed every seat's consequences:
+ * the seats archive as one unit and nothing is deleted.
+ */
+export const CrewArchiveRequest = Schema.Struct({ crewInstanceId: Schema.String });
+export type CrewArchiveRequest = typeof CrewArchiveRequest.Type;
+export const CrewArchiveResponse = Schema.Struct({
+  crewInstanceId: Schema.String,
+  status: Schema.Literals(["archived", "already_archived"]),
+  members: Schema.Array(
+    Schema.Struct({
+      seat: Schema.String,
+      participantId: Schema.String,
+      result: Schema.Literals(["archived", "already_archived"]),
+    }),
+  ),
+});
+export type CrewArchiveResponse = typeof CrewArchiveResponse.Type;
 
 export const J5_API_PATHS = {
   squadrons: "/api/j5/squadrons",
@@ -233,6 +292,8 @@ export const J5_API_PATHS = {
   openCount: "/api/j5/a2a/client-reads/open-count",
   crewProposals: "/api/j5/a2a/crews/proposals",
   crewProposalResolve: "/api/j5/a2a/crews/proposals/resolve",
+  crewStop: "/api/j5/a2a/crews/stop",
+  crewArchive: "/api/j5/a2a/crews/archive",
   fleet: "/api/j5/a2a/client-reads/fleet",
   crewMemberships: "/api/j5/a2a/client-reads/crew-memberships",
   spawnedChildren: "/api/j5/a2a/client-reads/spawned-children",

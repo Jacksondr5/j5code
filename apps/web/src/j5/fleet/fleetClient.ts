@@ -5,7 +5,13 @@ import type { FleetResponse, FleetSquadron } from "@t3tools/contracts/j5";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { refreshCrewMembershipRows } from "../squadron/CrewMembershipsClient";
 import { refreshSpawnedChildrenRows } from "../squadron/SpawnedChildrenClient";
-import { fleetQueryAtom, fleetSourcesAtom, refreshJ5Sources } from "../state";
+import {
+  fleetDetailQueryAtom,
+  fleetDetailSourcesAtom,
+  fleetQueryAtom,
+  fleetSourcesAtom,
+  refreshJ5Sources,
+} from "../state";
 import { createVisibleRefreshHook } from "../useVisibleRefresh";
 import { fleetInvolvedThreadRefs } from "./fleet.logic";
 
@@ -31,8 +37,9 @@ export const mergeFleetSources = (
     })),
   );
 
+/** The page's read, retired Crews and rosters included. */
 export const refreshFleet = () =>
-  refreshJ5Sources(fleetSourcesAtom, fleetQueryAtom, { force: true });
+  refreshJ5Sources(fleetDetailSourcesAtom, fleetDetailQueryAtom, { force: true });
 
 /**
  * The always-mounted rail badge polls the live roster only (no retired Crews, no rosters). Once
@@ -55,4 +62,9 @@ export const useFleetRefresh = createVisibleRefreshHook(() => {
     .catch((error: unknown) => {
       console.warn("[j5] fleet refresh failed", error);
     });
+}, FLEET_POLL_INTERVAL_MS);
+
+/** The Fleet page's own poll while it is open; retired Crews ride only here. */
+export const useFleetDetailRefresh = createVisibleRefreshHook(() => {
+  void refreshJ5Sources(fleetDetailSourcesAtom, fleetDetailQueryAtom);
 }, FLEET_POLL_INTERVAL_MS);
