@@ -13,7 +13,6 @@ import {
 } from "./providerSetup.ts";
 
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
-import { ArtifactChangeEvent, ArtifactWatchError, ArtifactWatchInput } from "./artifacts.ts";
 import {
   AuthAccessStreamError,
   AuthAccessStreamEvent,
@@ -91,6 +90,7 @@ import {
   ProviderUploadFeedbackResult,
 } from "./provider.ts";
 import { J5AgentPersonaRpcGroup } from "./j5/agentPersona.ts";
+import { J5ArtifactRpcGroup } from "./j5/artifacts.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   PullRequestActionInput,
@@ -399,7 +399,6 @@ export const WS_METHODS = {
   subscribeAuthAccess: "subscribeAuthAccess",
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
-  subscribeArtifactChanges: "subscribeArtifactChanges",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -1084,13 +1083,6 @@ export const WsSubscribePreviewEventsRpc = Rpc.make(WS_METHODS.subscribePreviewE
   stream: true,
 });
 
-export const WsSubscribeArtifactChangesRpc = Rpc.make(WS_METHODS.subscribeArtifactChanges, {
-  payload: ArtifactWatchInput,
-  success: ArtifactChangeEvent,
-  error: Schema.Union([ArtifactWatchError, EnvironmentAuthorizationError]),
-  stream: true,
-});
-
 export const WsSubscribeDiscoveredLocalServersRpc = Rpc.make(
   WS_METHODS.subscribeDiscoveredLocalServers,
   {
@@ -1410,7 +1402,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewAutomationRespondRpc,
   WsPreviewAutomationFocusHostRpc,
   WsSubscribePreviewEventsRpc,
-  WsSubscribeArtifactChangesRpc,
   WsSubscribeDiscoveredLocalServersRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
@@ -1428,4 +1419,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeArchivedShellRpc,
   WsOrchestrationV2SubscribeShellRpc,
   WsOrchestrationV2SubscribeThreadRpc,
-).merge(J5AgentPersonaRpcGroup);
+)
+  .merge(J5AgentPersonaRpcGroup)
+  .merge(J5ArtifactRpcGroup);
