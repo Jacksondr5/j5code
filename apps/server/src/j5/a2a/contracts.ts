@@ -142,14 +142,23 @@ const NonMembershipCommEvent = Schema.Struct({
   payload: Schema.Json,
 });
 
+/**
+ * The receiver Squadron's own row for a message another Squadron sent. When the
+ * origin is a peer server, `originEnvironmentId` names it and the row is also
+ * the fact this server delivers from, since no `message.sent` exists here.
+ */
+export const MessageReceivedPayload = Schema.Struct({
+  originSquadronId: SquadronId,
+  originEnvironmentId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  message: Schema.Json,
+});
+export type MessageReceivedPayload = typeof MessageReceivedPayload.Type;
+
 const MessageReceivedCommEvent = Schema.Struct({
   ...eventAddressFields,
   kind: Schema.Literal("message.received"),
   correlationId: CorrelationId,
-  payload: Schema.Struct({
-    originSquadronId: SquadronId,
-    message: Schema.Json,
-  }),
+  payload: MessageReceivedPayload,
 });
 
 const ParticipantJoinedCommEvent = Schema.Struct({
