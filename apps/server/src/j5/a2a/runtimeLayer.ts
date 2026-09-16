@@ -1,5 +1,6 @@
 import * as Layer from "effect/Layer";
 
+import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.ts";
 import { layer as agentCrewInstanceLayer } from "./AgentCrewInstanceService.ts";
 import { layer as archiveFactsLayer, placementFactsLayer } from "./ArchiveFactsService.ts";
 import { layer as archiveAgentLayer } from "./ArchiveAgentService.ts";
@@ -10,6 +11,8 @@ import {
   bootSweepLayer as crewProposalBootSweepLayer,
   layer as crewProposalLayer,
 } from "./CrewProposalService.ts";
+import { layer as crewMemberSettlerLayer } from "./CrewMemberSettler.ts";
+import { layer as crewProposalLayer } from "./CrewProposalService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import {
@@ -99,6 +102,11 @@ export const makeJ5A2AAuxiliaryLayer = (
   const crewProposalBootSweepProvided = crewProposalBootSweepLayer.pipe(
     Layer.provide(crewProposalProvided),
   );
+  // The settler tells a Captain when a seat's handoff file appears, so it reads the workspace.
+  const crewMemberSettlerProvided = crewMemberSettlerLayer.pipe(
+    Layer.provideMerge(agentCrewInstanceLayer),
+    Layer.provide(artifactWorkspaceLayer),
+  );
   const runtimeWithoutClientReads = Layer.mergeAll(
     agentHandoffNudgeWorkerProvided,
     // Exported to the routes so the J5 WebSocket handler streams the same revision counter the
@@ -120,6 +128,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     agentCrewInstanceLayer,
     crewProposalProvided,
     crewProposalBootSweepProvided,
+    crewMemberSettlerProvided,
   ).pipe(Layer.provideMerge(participantPlacementLayer));
   return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };
