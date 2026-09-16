@@ -60,6 +60,7 @@ const fakeArtifacts = Layer.effect(
       prepare: () => Effect.void,
       list: () => Ref.get(entries),
       read: () => unsupported,
+      trash: () => unsupported,
       write: () => unsupported,
       writeVersioned: () => unsupported,
       exportPlan: () => unsupported,

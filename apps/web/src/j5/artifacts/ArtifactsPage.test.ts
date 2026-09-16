@@ -34,6 +34,6 @@ describe("artifact previews", () => {
     expect(chatViewSource).toContain("embedded");
     expect(chatViewSource).toContain("initialPath: renderedRightPanelSurface.selectedPath");
     expect(source).toContain("useState<string | null>(() => initialPath ?? null)");
-    expect(source).toContain("grid-cols-[minmax(9rem,13rem)_minmax(0,1fr)]");
+    expect(source).toContain("grid-cols-[var(--artifact-file-pane-width)_minmax(0,1fr)]");
   });
 });

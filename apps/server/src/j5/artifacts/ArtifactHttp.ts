@@ -1,9 +1,13 @@
 import {
   ARTIFACT_LIST_PATH,
   ARTIFACT_READ_PATH,
+  ARTIFACT_TRASH_PATH,
   ArtifactListRequest,
   ArtifactReadRequest,
+  ArtifactTrashRequest,
+  AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
+  type AuthEnvironmentScope,
   ProjectId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -30,8 +34,11 @@ import { ArtifactWorkspace } from "./ArtifactWorkspace.ts";
 
 const decodeListRequest = Schema.decodeUnknownEffect(ArtifactListRequest);
 const decodeReadRequest = Schema.decodeUnknownEffect(ArtifactReadRequest);
+const decodeTrashRequest = Schema.decodeUnknownEffect(ArtifactTrashRequest);
 
-const authenticateRead = Effect.gen(function* () {
+const authenticate = Effect.fn("j5.artifacts.authenticate")(function* (
+  requiredScope: AuthEnvironmentScope,
+) {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
   const session = yield* serverAuth.authenticateHttpRequest(request).pipe(
@@ -42,10 +49,13 @@ const authenticateRead = Effect.gen(function* () {
       failEnvironmentInternal("internal_error", error),
     ),
   );
-  if (!session.scopes.includes(AuthOrchestrationReadScope)) {
-    return yield* failEnvironmentScopeRequired(AuthOrchestrationReadScope);
+  if (!session.scopes.includes(requiredScope)) {
+    return yield* failEnvironmentScopeRequired(requiredScope);
   }
 });
+
+const authenticateRead = authenticate(AuthOrchestrationReadScope);
+const authenticateOperate = authenticate(AuthOrchestrationOperateScope);
 
 const requestFailure = (message: string) =>
   HttpServerResponse.jsonUnsafe({ error: "invalid_request", message }, { status: 400 });
@@ -54,8 +64,8 @@ const operationFailure = (cause: unknown) => {
   const tag =
     typeof cause === "object" && cause !== null && "_tag" in cause
       ? String(cause._tag)
-      : "ArtifactReadError";
-  const detail = cause instanceof Error ? cause.message : "Artifact lookup failed.";
+      : "ArtifactOperationError";
+  const detail = cause instanceof Error ? cause.message : "Artifact operation failed.";
   const status =
     tag === "ArtifactProjectUnavailableError"
       ? 404
@@ -66,10 +76,10 @@ const operationFailure = (cause: unknown) => {
           ? 409
           : 500;
   return status === 500
-    ? Effect.logError("J5 artifact read failed", { cause }).pipe(
+    ? Effect.logError("J5 artifact operation failed", { cause }).pipe(
         Effect.as(
           HttpServerResponse.jsonUnsafe(
-            { error: tag, message: "Artifact lookup failed." },
+            { error: tag, message: "Artifact operation failed." },
             { status },
           ),
         ),
@@ -163,6 +173,38 @@ export const artifactHttpRouteLayer = Layer.unwrap(
       ),
     );
 
-    return Layer.mergeAll(listRoute, readRoute);
+    const trashRoute = HttpRouter.add(
+      "POST",
+      ARTIFACT_TRASH_PATH,
+      Effect.gen(function* () {
+        yield* annotateEnvironmentRequest("j5.artifacts.trash");
+        yield* authenticateOperate;
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const body = yield* Effect.result(request.json);
+        if (Result.isFailure(body)) return requestFailure("The request body must be JSON.");
+        const decoded = yield* Effect.result(decodeTrashRequest(body.success));
+        if (Result.isFailure(decoded))
+          return requestFailure("A valid projectId and artifact path are required.");
+        const input = decoded.success;
+        const result = yield* Effect.result(
+          requireProject(projects, input.projectId).pipe(
+            Effect.flatMap(() =>
+              artifacts.trash({ projectId: input.projectId, relativePath: input.path }),
+            ),
+          ),
+        );
+        return Result.isSuccess(result)
+          ? HttpServerResponse.jsonUnsafe({ trashed: true })
+          : yield* operationFailure(result.failure);
+      }).pipe(
+        Effect.catchTags({
+          EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+          EnvironmentInternalError: HttpServerRespondable.toResponse,
+          EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+        }),
+      ),
+    );
+
+    return Layer.mergeAll(listRoute, readRoute, trashRoute);
   }),
 );
