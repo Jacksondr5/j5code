@@ -35,7 +35,9 @@ import {
   type OrchestrationV2ProjectedTurnItem,
   type RunAttemptId,
   type RunId,
+  SCHEDULED_TASK_MESSAGE_ID_PREFIX,
 } from "@t3tools/contracts";
+import { isThreadA2ADeliveryMessage } from "../../j5/a2a/ThreadA2ARenderer";
 import type { ThreadRunSummary } from "@t3tools/client-runtime/state/shell";
 import {
   resolveT3McpToolPresentation,
@@ -278,6 +280,71 @@ export function resolveTimelineMinimapInteractiveWidth(
   expanded: boolean,
 ): number | string {
   return expanded ? TIMELINE_MINIMAP_EXPANDED_HIT_STRIP_WIDTH : collapsedWidth;
+}
+
+export interface TimelineMinimapItem {
+  readonly id: string;
+  readonly rowIndex: number;
+  readonly userText: string | null;
+  readonly assistantText: string | null;
+}
+
+/**
+ * The minimap indexes what the person typed. Automated user-role messages —
+ * A2A deliveries, scheduled task fires, delegated-task completions, restart
+ * continuations, and system nudges — still render in the timeline but would
+ * otherwise crowd the rail on long-running agent threads.
+ */
+export function isHumanAuthoredUserMessage(message: ChatMessage): boolean {
+  if (message.role !== "user") return false;
+  if (message.createdBy !== undefined && message.createdBy !== "user") return false;
+  if (isThreadA2ADeliveryMessage(message)) return false;
+  return !String(message.id).startsWith(SCHEDULED_TASK_MESSAGE_ID_PREFIX);
+}
+
+export function deriveTimelineMinimapItems(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+): TimelineMinimapItem[] {
+  const items: TimelineMinimapItem[] = [];
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row?.kind !== "message" || !isHumanAuthoredUserMessage(row.message)) {
+      continue;
+    }
+
+    items.push({
+      id: row.id,
+      rowIndex: index,
+      userText: compactMinimapPreview(row.message.text),
+      assistantText: compactMinimapPreview(resolveFinalAssistantTextForTurn(rows, index)),
+    });
+  }
+  return items;
+}
+
+function resolveFinalAssistantTextForTurn(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+  userRowIndex: number,
+) {
+  let finalAssistantText: string | null = null;
+  for (let index = userRowIndex + 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row?.kind !== "message") {
+      continue;
+    }
+    if (row.message.role === "user") {
+      break;
+    }
+    if (row.message.role === "assistant") {
+      finalAssistantText = row.message.text ?? null;
+    }
+  }
+  return finalAssistantText;
+}
+
+function compactMinimapPreview(text: string | null | undefined) {
+  const compact = text?.replace(/\s+/g, " ").trim() ?? "";
+  return compact.length > 0 ? compact : null;
 }
 
 function computeElapsedMs(startIso: string, endIso: string): number | null {
