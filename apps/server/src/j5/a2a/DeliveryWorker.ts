@@ -49,6 +49,8 @@ interface DeliveryRow {
   /** Set when the row came in from a peer server; NULL means the origin is `squadron_id` here. */
   readonly origin_squadron_id: string | null;
   readonly origin_environment_id: string | null;
+  /** Set when the receiver is homed on a peer server, which writes its own received row. */
+  readonly receiver_environment_id: string | null;
 }
 
 interface OpenExchangeRow {
@@ -212,8 +214,22 @@ const makeLayer = (daemon: boolean) =>
         const senderId = ParticipantId.make(row.sender_id);
         const receiverId = ParticipantId.make(row.receiver_id);
         const exchangeId = row.exchange_id === null ? null : ExchangeId.make(row.exchange_id);
-        yield* appendReceiverEntry(row);
-        if (isHumanParticipantId(receiverId)) {
+        if (row.receiver_environment_id !== null) {
+          yield* transport.deliverPeer({
+            originSquadronId,
+            receiverSquadronId,
+            receiverEnvironmentId: row.receiver_environment_id,
+            messageId,
+            senderId,
+            receiverId,
+            exchangeId,
+            exchangeRole: row.exchange_role,
+            message: row.message_text,
+            envelopeChannel: row.envelope_channel,
+            createdAt: row.created_at,
+          });
+        } else if (isHumanParticipantId(receiverId)) {
+          yield* appendReceiverEntry(row);
           yield* transport.deliverHuman({
             originSquadronId,
             receiverSquadronId,
@@ -227,6 +243,7 @@ const makeLayer = (daemon: boolean) =>
             createdAt: row.created_at,
           });
         } else {
+          yield* appendReceiverEntry(row);
           yield* transport.deliverAgent({
             originSquadronId,
             receiverSquadronId,
@@ -337,11 +354,13 @@ const makeLayer = (daemon: boolean) =>
           WHERE squadron_id = ${row.squadron_id} AND message_id = ${row.message_id}`;
         if (state[0]?.status === "cancelled") return true;
         if (state[0]?.status === "delivered") return false;
-        // A sender on a peer server has no membership here; only the receiver is checked.
-        const ids =
-          row.envelope_channel === "peer" && row.origin_environment_id == null
-            ? [row.sender_id, row.receiver_id]
-            : [row.receiver_id];
+        // A participant on a peer server has no membership here; only local parties are checked.
+        const ids = [
+          ...(row.envelope_channel === "peer" && row.origin_environment_id == null
+            ? [row.sender_id]
+            : []),
+          ...(row.receiver_environment_id == null ? [row.receiver_id] : []),
+        ];
         for (const id of ids) {
           if (isHumanParticipantId(ParticipantId.make(id))) continue;
           const membership =
@@ -365,12 +384,14 @@ const makeLayer = (daemon: boolean) =>
             attempt,
           } satisfies DeliveryMilestone;
         }
-        const state = isHumanParticipantId(ParticipantId.make(row.receiver_id))
-          ? "cancelled"
-          : yield* transport.cancelAgent({
-              receiverId: ParticipantId.make(row.receiver_id),
-              messageId: LedgerMessageId.make(row.message_id),
-            });
+        const state =
+          isHumanParticipantId(ParticipantId.make(row.receiver_id)) ||
+          row.receiver_environment_id != null
+            ? "cancelled"
+            : yield* transport.cancelAgent({
+                receiverId: ParticipantId.make(row.receiver_id),
+                messageId: LedgerMessageId.make(row.message_id),
+              });
         const now = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         yield* ledger.append({
           commandId: commandId(state, LedgerMessageId.make(row.message_id)),
@@ -420,7 +441,8 @@ const makeLayer = (daemon: boolean) =>
             attempts,
             created_at,
             origin_squadron_id,
-            origin_environment_id
+            origin_environment_id,
+            receiver_environment_id
           FROM j5_a2a_delivery
           WHERE status IN ('pending', 'retry_scheduled')
             AND (next_attempt_at IS NULL OR next_attempt_at <= ${now})

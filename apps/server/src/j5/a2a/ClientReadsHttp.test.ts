@@ -21,6 +21,8 @@ import {
 } from "./ClientReadsHttp.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { MachineParticipantService } from "./MachineParticipantService.ts";
+import { PeerInboundService } from "./PeerInboundService.ts";
+import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { RosterService } from "./RosterService.ts";
 import { A2ASendService } from "./SendService.ts";
 import { A2AHumanPersonIdError } from "./HumanInboxService.ts";
@@ -336,6 +338,8 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
     Layer.provide(Layer.mock(A2ADeliveryWorker)({})),
     Layer.provide(Layer.mock(A2ASendService)({})),
     Layer.provide(Layer.mock(MachineParticipantService)({})),
+    Layer.provide(Layer.mock(PeerRegistryService)({})),
+    Layer.provide(Layer.mock(PeerInboundService)({})),
     Layer.provide(Layer.mock(RosterService)({})),
     Layer.provide(Layer.mock(A2ALedger)({})),
     Layer.provide(Layer.mock(SquadronProjectReferences)({})),
