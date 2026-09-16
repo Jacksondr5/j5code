@@ -21,6 +21,7 @@ import {
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import {
   type DeliveryEnvelopeChannel,
+  ExchangeDroppedPayload,
   SquadronId,
   ExchangeId,
   isHumanParticipantId,
@@ -124,6 +125,7 @@ interface HumanExchangeRow {
 }
 
 const decodeParticipant = Schema.decodeUnknownEffect(Schema.fromJsonString(Participant));
+const decodeDropped = Schema.decodeUnknownEffect(Schema.fromJsonString(ExchangeDroppedPayload));
 
 const assertNever = (channel: never): never => {
   throw new Error(`Unsupported A2A delivery envelope channel: ${String(channel)}`);
@@ -418,6 +420,20 @@ export const live: Layer.Layer<
                   LIMIT 1
                 `
               : [];
+          // A terminal notice carries the drop fact so the peer ends its own Exchange the same way.
+          const droppedRows =
+            input.exchangeRole === "terminal_notice" && input.exchangeId !== null
+              ? yield* sql<{ readonly payload: string }>`
+                  SELECT payload FROM j5_a2a_comm_event
+                  WHERE squadron_id = ${input.originSquadronId}
+                    AND kind = 'exchange.dropped'
+                    AND exchange_id = ${input.exchangeId}
+                  ORDER BY seq DESC
+                  LIMIT 1
+                `
+              : [];
+          const dropped =
+            droppedRows[0] === undefined ? undefined : yield* decodeDropped(droppedRows[0].payload);
           const body = {
             messageId: input.messageId,
             senderId: input.senderId,
@@ -429,6 +445,9 @@ export const live: Layer.Layer<
             text: input.message,
             originSquadronId: input.originSquadronId,
             ...(intentRows[0] === undefined ? {} : { intent: intentRows[0].intent }),
+            ...(dropped === undefined
+              ? {}
+              : { terminal: { disposition: dropped.disposition, cause: dropped.cause } }),
             createdAt: input.createdAt,
           } satisfies PeerDeliveryRequest;
           const request = yield* HttpClientRequest.bodyJson(

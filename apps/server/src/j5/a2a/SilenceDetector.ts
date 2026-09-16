@@ -19,6 +19,7 @@ import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { deliveryMessageId } from "./DeliveryTransport.ts";
 import { formatSilenceNoticeEnvelope } from "./EnvelopeFormatter.ts";
 import { A2ALedger } from "./LedgerService.ts";
+import { findPeerCounterparty } from "./peerCounterparty.ts";
 import {
   CommCommandId,
   CorrelationId,
@@ -349,6 +350,12 @@ const makeLayer = (daemon: boolean) =>
         if ((prior[0]?.count ?? 0) > 0) return [];
 
         const exchangeId = ExchangeId.make(exchange.exchange_id);
+        // The waiter may be on a peer server; the notice then travels the peer path back.
+        const remoteWaiter = yield* findPeerCounterparty(sql, {
+          squadronId: SquadronId.make(exchange.squadron_id),
+          exchangeId,
+          participantId: ParticipantId.make(exchange.sender_id),
+        });
         const messageId = messageIdFor(
           exchange.squadron_id,
           exchange.exchange_id,
@@ -391,7 +398,11 @@ const makeLayer = (daemon: boolean) =>
                     message: noticeMessage(payload, exchangeId),
                   }),
                   originSquadronId: SquadronId.make(exchange.squadron_id),
-                  receiverSquadronId: SquadronId.make(exchange.squadron_id),
+                  receiverSquadronId:
+                    remoteWaiter?.squadronId ?? SquadronId.make(exchange.squadron_id),
+                  ...(remoteWaiter === null
+                    ? {}
+                    : { receiverEnvironmentId: remoteWaiter.environmentId }),
                   exchangeRole: "none",
                   envelopeChannel: "silence_notice",
                 },
