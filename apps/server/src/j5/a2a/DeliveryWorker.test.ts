@@ -13,6 +13,7 @@ import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
+import { FetchHttpClient } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -38,6 +39,7 @@ import {
 import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
+import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
   CommCommandId,
@@ -165,6 +167,7 @@ const crashWindowScenario = (poisonIds: boolean, crossSquadron: boolean) =>
           ),
         ),
       cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: () => Effect.void,
     };
     const hooks = A2ADeliveryHooks.of({
@@ -265,6 +268,7 @@ it.effect("serializes manual runOnce calls against a concurrent drain", () =>
           ),
         ),
       cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: () => Effect.void,
     };
 
@@ -300,6 +304,7 @@ it.effect("refuses a cross-squadron reply before delivery or closure", () =>
     const transport: A2ADeliveryTransportShape = {
       deliverAgent: () => Ref.update(injections, (count) => count + 1),
       cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: () => Effect.void,
     };
     yield* Effect.gen(function* () {
@@ -419,6 +424,7 @@ it.effect("startup reconciliation drains a persisted cross-squadron half-write a
       const transport: A2ADeliveryTransportShape = {
         deliverAgent: () => Ref.update(injectionCount, (count) => count + 1),
         cancelAgent: () => Effect.succeed("cancelled" as const),
+        deliverPeer: () => Effect.die("peer delivery is not under test"),
         deliverHuman: () => Effect.void,
       };
       const secondDatabase = NodeSqliteClient.layer({ filename });
@@ -485,6 +491,7 @@ it.effect("forces repeated delivery failure into a visible alarm", () =>
     const transport: A2ADeliveryTransportShape = {
       deliverAgent: () => Effect.fail(failure),
       cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: () => Effect.fail(failure),
     };
     yield* Effect.gen(function* () {
@@ -628,6 +635,8 @@ it.effect("delivers to the human through the idempotent inbox-data transport", (
     const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
     const threadManagement = Layer.mock(ThreadManagementService)({});
     const transport = deliveryTransportLive.pipe(
+      Layer.provide(FetchHttpClient.layer),
+      Layer.provide(Layer.mock(PeerRegistryService)({})),
       Layer.provide(database),
       Layer.provide(threadManagement),
       Layer.provide(Layer.mock(OrchestratorV2)({})),
@@ -719,6 +728,8 @@ it.effect(
       const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
       const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));
       const transport = deliveryTransportLive.pipe(
+        Layer.provide(FetchHttpClient.layer),
+        Layer.provide(Layer.mock(PeerRegistryService)({})),
         Layer.provide(database),
         Layer.provide(Layer.mock(ThreadManagementService)({})),
         Layer.provide(Layer.mock(OrchestratorV2)({})),
@@ -825,6 +836,8 @@ for (const deliveredBeforeClosure of [true, false]) {
         const ledger = ledgerLayer.pipe(Layer.provide(database));
         const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
         const transport = deliveryTransportLive.pipe(
+          Layer.provide(FetchHttpClient.layer),
+          Layer.provide(Layer.mock(PeerRegistryService)({})),
           Layer.provide(database),
           Layer.provide(Layer.mock(ThreadManagementService)({})),
           Layer.provide(Layer.mock(OrchestratorV2)({})),
@@ -1036,6 +1049,7 @@ for (const outcome of ["cancelled", "delivered"] as const) {
             {
               deliverAgent: () => Effect.void,
               cancelAgent: () => Effect.succeed(outcome),
+              deliverPeer: () => Effect.die("peer delivery is not under test"),
               deliverHuman: () => Effect.void,
             },
             {

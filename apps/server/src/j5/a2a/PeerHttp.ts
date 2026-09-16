@@ -27,7 +27,6 @@ import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import packageJson from "../../../package.json" with { type: "json" };
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import { annotateEnvironmentRequest } from "../../auth/http.ts";
-import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { PeerInboundService } from "./PeerInboundService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
@@ -114,7 +113,6 @@ export const peerHttpRouteLayer = Layer.unwrap(
     const inbound = yield* PeerInboundService;
     const worker = yield* A2ADeliveryWorker;
     const roster = yield* RosterService;
-    const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
 
     // Rotation and removal list sessions and then revoke; one permit keeps them
@@ -178,7 +176,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
         yield* annotateEnvironmentRequest("j5.a2a.peer.hello");
         const session = yield* authenticate;
         yield* requireScope(session, AuthA2APeerScope);
-        const environmentId = yield* identity.getEnvironmentId;
+        const environmentId = yield* peers.selfEnvironmentId;
         // The peer holds this credential, so any earlier one for it is done.
         yield* rotationPermit
           .withPermit(revokeOtherSessionsForSubject(session.subject, session.sessionId))
@@ -212,7 +210,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
             "environmentId (the peer that will hold the credential) is required.",
           );
         }
-        const ourEnvironmentId = yield* identity.getEnvironmentId;
+        const ourEnvironmentId = yield* peers.selfEnvironmentId;
         if (decoded.success.environmentId === ourEnvironmentId) {
           return jsonError(
             400,

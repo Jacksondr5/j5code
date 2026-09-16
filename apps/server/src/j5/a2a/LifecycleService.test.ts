@@ -81,6 +81,7 @@ const makeTestLayer = (
             )
           : Ref.update(notices, (current) => [...current, { channel: "agent" as const, input }]),
       cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: (input) =>
         Ref.update(notices, (current) => [...current, { channel: "human" as const, input }]),
     }),

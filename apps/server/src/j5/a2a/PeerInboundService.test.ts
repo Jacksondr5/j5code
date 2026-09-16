@@ -52,6 +52,7 @@ const makeTestLayer = (delivered: Ref.Ref<Array<AgentDeliveryInput>>) => {
   const transport: A2ADeliveryTransportShape = {
     cancelAgent: () => Effect.succeed("cancelled" as const),
     deliverAgent: (input) => Ref.update(delivered, (rows) => [...rows, input]),
+    deliverPeer: () => Effect.die("peer delivery is not under test"),
     deliverHuman: () => Effect.void,
   };
   const transportLayer = Layer.succeed(A2ADeliveryTransport, A2ADeliveryTransport.of(transport));
