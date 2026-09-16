@@ -2029,7 +2029,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const slashCommandItems = slashCommandItemsForPromptPosition(
         [
           ...builtInSlashCommandItems,
-          ...j5CrewSlashCommandItems(selectedProvider, isServerThread),
+          ...j5CrewSlashCommandItems(selectedProvider),
           ...visibleProviderSlashCommandItems,
           ...skillItems,
         ],
