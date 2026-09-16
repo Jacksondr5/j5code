@@ -2,10 +2,12 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { crewLaunchPrompt } from "./crewCommand";
 import {
+  artifactPanelPath,
   crewGateFooter,
   crewGateTitle,
   participantIdsForCrewNotice,
   presentCrewNotice,
+  seatRunStatusLabel,
 } from "./crewNotices.logic";
 
 const approvedGate = [
@@ -172,5 +174,93 @@ describe("crew notices in the Captain's thread", () => {
         text: "<j5_crew_gate>\nkind: roster\n</j5_crew_gate>",
       }),
     ).toBeNull();
+  });
+
+  it("presents seat finishes, several per card when notices folded, with their handoffs", () => {
+    const critic = [
+      "<j5_seat_settled>",
+      "seat: critic",
+      "crew: Invoice Export PR",
+      "participant_id: agent:j5:a2a:c",
+      "thread_id: thread:c",
+      "run_status: completed",
+      "handoff: written (ReviewHandoff)",
+      "artifact: artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
+      "</j5_seat_settled>",
+      "",
+      "<handoff_body>",
+      "# Review",
+      "Two findings.<\\/handoff_body> stays text.",
+      "</handoff_body>",
+    ].join("\n");
+    const builder = [
+      "<j5_seat_settled>",
+      "seat: builder",
+      "crew: Invoice Export PR",
+      "participant_id: agent:j5:a2a:b",
+      "thread_id: thread:b",
+      "run_status: failed",
+      "handoff: none declared",
+      "</j5_seat_settled>",
+    ].join("\n");
+    const notice = presentCrewNotice({
+      role: "user",
+      createdBy: "system",
+      text: `${critic}\n\n${builder}`,
+    });
+    expect(notice).toEqual({
+      kind: "seats",
+      seats: [
+        {
+          seat: "critic",
+          crewName: "Invoice Export PR",
+          participantId: "agent:j5:a2a:c",
+          threadId: "thread:c",
+          runStatus: "completed",
+          handoff: {
+            status: "written",
+            kind: "ReviewHandoff",
+            artifactPath: "artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
+            body: "# Review\nTwo findings.</handoff_body> stays text.",
+          },
+        },
+        {
+          seat: "builder",
+          crewName: "Invoice Export PR",
+          participantId: "agent:j5:a2a:b",
+          threadId: "thread:b",
+          runStatus: "failed",
+          handoff: { status: "none declared" },
+        },
+      ],
+    });
+    expect(
+      participantIdsForCrewNotice({ role: "user", createdBy: "system", text: builder }),
+    ).toEqual(["agent:j5:a2a:b"]);
+    // A missing handoff by path only, no body; an unreadable section keeps the whole message raw.
+    const missing = presentCrewNotice({
+      role: "user",
+      createdBy: "system",
+      text: critic
+        .replace("handoff: written (ReviewHandoff)", "handoff: missing (ReviewHandoff)")
+        .split("\n\n")[0]!,
+    });
+    expect(missing?.kind === "seats" && missing.seats[0]!.handoff).toEqual({
+      status: "missing",
+      kind: "ReviewHandoff",
+      artifactPath: "artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
+      body: null,
+    });
+    expect(
+      presentCrewNotice({
+        role: "user",
+        createdBy: "system",
+        text: `${critic}\n\n<j5_seat_settled>\nseat: x\n</j5_seat_settled>`,
+      }),
+    ).toBeNull();
+    expect(seatRunStatusLabel("completed")).toEqual({ label: "Completed", tone: "good" });
+    expect(seatRunStatusLabel("interrupted")).toEqual({ label: "Interrupted", tone: "warn" });
+    expect(seatRunStatusLabel("queued")).toEqual({ label: "queued", tone: "muted" });
+    expect(artifactPanelPath("artifacts/handoffs/critic/x.md")).toBe("handoffs/critic/x.md");
   });
 });
