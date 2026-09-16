@@ -63,7 +63,7 @@ While the crew works, the Captain may ask for one more agent. That request lands
 
 When a seat's agent is defined to return a report, such as a review handoff, it writes that report as a handoff artifact under `handoffs/` in the project's Artifacts page, exactly as the agent would when running on its own (see **Handoff artifacts** above). A seat that finishes without writing its report is reminded once. Reports are never left in chat.
 
-Crews are a web and desktop feature; the mobile app shows crew members as ordinary agents and has no roster gate. Members stay out of the thread list so it shows the conversations you started; the Captain's row shows a Captain chip and a toggle that opens into its members with seat, status, and last activity. When a member finishes and owes no reply, its thread settles on its own. **Fleet**, from the icon beside the inbox bell, shows every agent by Squadron with each crew under its Captain.
+Crews are a web and desktop feature; the mobile app shows crew members as ordinary agents and has no roster gate. Members stay out of the thread list so it shows the conversations you started; the Captain's row shows a Captain chip and, for each crew it runs, a toggle named for that crew that opens into its members with seat, status, and last activity; agents it started outside a crew get a toggle of their own. When a member finishes and owes no reply, its thread settles on its own. **Fleet**, from the icon beside the inbox bell, shows every agent by Squadron with each crew under its Captain.
 
 Persona instructions describe intended behavior. They do not grant permissions or guarantee that an agent obeys them. The displayed runtime policy reflects supported provider controls; unsupported modes appear as **Blocked**.
 

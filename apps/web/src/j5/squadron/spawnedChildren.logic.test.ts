@@ -5,17 +5,25 @@ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { SpawnedChild } from "./SpawnedChildrenClient";
 import { replaceSpawnedChildren } from "./SpawnedChildrenClient";
 import {
+  groupSpawnedChildren,
   readExpandedSpawnParents,
   selectSpawnedChildRows,
   spawnedChildrenNeedAttention,
-  spawnedChildrenSummary,
+  spawnedGroupExpansionKey,
   writeExpandedSpawnParents,
 } from "./spawnedChildren.logic";
 
-const child = (id: string, seat: string | null): SpawnedChild => ({
+const child = (
+  id: string,
+  seat: string | null,
+  crew: { crewInstanceId: string; crewName: string } = {
+    crewInstanceId: "crew:1",
+    crewName: "Review Pair",
+  },
+): SpawnedChild => ({
   threadId: ThreadId.make(id),
   participantId: `agent:j5:a2a:${id}`,
-  seat: seat === null ? null : { crewInstanceId: "crew:1", crewName: "Review Pair", seat },
+  seat: seat === null ? null : { ...crew, seat },
 });
 const thread = (
   id: string,
@@ -42,7 +50,7 @@ describe("spawned children under a sidebar row", () => {
     ["retired", thread("retired", "2026-09-09T12:00:00Z", { archivedAt: "2026-09-09T12:30:00Z" })],
   ]);
 
-  it("keeps live children with known threads, newest first, and summarizes them", () => {
+  it("keeps live children with known threads, newest first", () => {
     const rows = selectSpawnedChildRows(
       [
         child("builder", "builder"),
@@ -53,16 +61,39 @@ describe("spawned children under a sidebar row", () => {
       threads,
     );
     expect(rows.map(({ child }) => child.threadId)).toEqual(["critic", "builder"]);
-    // A seat waiting on a person is said on the Captain's row; idle seats stay unsaid.
-    expect(spawnedChildrenSummary(rows)).toBe("2 crew · 1 needs you");
     expect(spawnedChildrenNeedAttention(rows)).toBe(true);
-    expect(spawnedChildrenSummary([])).toBeNull();
-    const mixed = selectSpawnedChildRows(
-      [child("builder", "builder"), child("critic", null)],
-      threads,
+  });
+
+  it("groups seats by Crew, newest Crew first, with the solo peers as one more group", () => {
+    const blog = { crewInstanceId: "crew:2", crewName: "Blog Migration" };
+    const all = new Map([
+      ...threads,
+      ["writer", thread("writer", "2026-09-09T13:00:00Z", { runtime: { status: "running" } })],
+      ["solo", thread("solo", "2026-09-09T09:00:00Z")],
+    ]);
+    const groups = groupSpawnedChildren(
+      selectSpawnedChildRows(
+        [
+          child("builder", "builder"),
+          child("critic", "critic"),
+          child("writer", "writer", blog),
+          child("solo", null),
+        ],
+        all,
+      ),
     );
-    expect(spawnedChildrenSummary(mixed)).toBe("2 agents");
-    expect(spawnedChildrenSummary(mixed.slice(0, 1))).toBe("1 agent");
+    expect(groups.map((group) => [group.key, group.crew?.crewName ?? null, group.summary])).toEqual(
+      [
+        ["crew:crew:2", "Blog Migration", "1 seat · 1 running"],
+        // A seat waiting on a person is said on the Crew's header; idle seats stay unsaid.
+        ["crew:crew:1", "Review Pair", "2 seats · 1 needs you"],
+        ["agents", null, "1 agent"],
+      ],
+    );
+    expect(groups.map((group) => group.needsAttention)).toEqual([false, true, false]);
+    expect(groups[1]!.rows.map(({ child }) => child.threadId)).toEqual(["critic", "builder"]);
+    expect(groupSpawnedChildren([])).toEqual([]);
+    expect(spawnedGroupExpansionKey("captain", "crew:crew:1")).toBe("captain/crew:crew:1");
   });
 
   it("remembers expansion per parent and tolerates broken or missing storage", () => {

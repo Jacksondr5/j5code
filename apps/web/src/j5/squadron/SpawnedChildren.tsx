@@ -12,11 +12,12 @@ import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { useSpawnedChildren, type SpawnedChild } from "./SpawnedChildrenClient";
 import {
+  groupSpawnedChildren,
   readExpandedSpawnParents,
   selectSpawnedChildRows,
-  spawnedChildrenNeedAttention,
-  spawnedChildrenSummary,
+  spawnedGroupExpansionKey,
   writeExpandedSpawnParents,
+  type SpawnedChildGroup,
 } from "./spawnedChildren.logic";
 
 // One process-wide expansion set, mirrored to localStorage, shared by every card.
@@ -29,10 +30,10 @@ const subscribeExpansion = (listener: () => void) => {
   return () => expansionListeners.delete(listener);
 };
 const getExpansion = () => expanded;
-const toggleExpansion = (threadId: string) => {
+const toggleExpansion = (expansionKey: string) => {
   const next = new Set(expanded);
-  if (next.has(threadId)) next.delete(threadId);
-  else next.add(threadId);
+  if (next.has(expansionKey)) next.delete(expansionKey);
+  else next.add(expansionKey);
   expanded = next;
   writeExpandedSpawnParents(typeof localStorage === "undefined" ? undefined : localStorage, next);
   expansionListeners.forEach((listener) => listener());
@@ -41,7 +42,9 @@ const toggleExpansion = (threadId: string) => {
 /**
  * SB5 refinement: agent-spawned Peer Agents stay out of the flat list, but the row that spawned
  * them (a Captain or any spawner) can expand into its placed children so the work is one click
- * away. Collapsed by default; a measured "needs a human" fact on any child shows on the row.
+ * away. Each Crew the row commands is its own named, collapsible group, and the solo peers it
+ * spawned form one more; collapsed by default, with a measured "needs a human" fact on any child
+ * shown on the collapsed header.
  */
 export function SpawnedChildren(props: { readonly thread: EnvironmentThreadShell }) {
   // Every sidebar row mounts this; most rows have no children. Only the cheap children snapshot
@@ -83,12 +86,35 @@ function SpawnedChildrenRows(props: {
     },
     [navigate],
   );
-  const summary = spawnedChildrenSummary(rows);
-  if (summary === null) return null;
-  const isOpen = expandedSet.has(props.thread.id);
-  const attention = spawnedChildrenNeedAttention(rows);
+  const groups = useMemo(() => groupSpawnedChildren(rows), [rows]);
+  if (groups.length === 0) return null;
   return (
-    <div className="ms-6 me-2 mb-1" data-testid={`spawned-children-${props.thread.id}`}>
+    <div
+      className="ms-6 me-2 mb-1 flex flex-col gap-0.5"
+      data-testid={`spawned-children-${props.thread.id}`}
+    >
+      {groups.map((group) => (
+        <SpawnedChildGroupRows
+          key={group.key}
+          group={group}
+          isOpen={expandedSet.has(spawnedGroupExpansionKey(props.thread.id, group.key))}
+          onToggle={() => toggleExpansion(spawnedGroupExpansionKey(props.thread.id, group.key))}
+          onOpen={open}
+        />
+      ))}
+    </div>
+  );
+}
+
+function SpawnedChildGroupRows(props: {
+  readonly group: SpawnedChildGroup<EnvironmentThreadShell>;
+  readonly isOpen: boolean;
+  readonly onToggle: () => void;
+  readonly onOpen: (child: EnvironmentThreadShell) => void;
+}) {
+  const { group, isOpen } = props;
+  return (
+    <div data-testid={`spawned-group-${group.key}`}>
       <div className="flex items-center gap-1">
         <button
           type="button"
@@ -96,25 +122,28 @@ function SpawnedChildrenRows(props: {
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
           onClick={(event) => {
             event.stopPropagation();
-            toggleExpansion(props.thread.id);
+            props.onToggle();
           }}
         >
           <ChevronRightIcon
             aria-hidden
             className={cn("size-3.5 transition-transform duration-150", isOpen && "rotate-90")}
           />
-          <span>{summary}</span>
-          {attention && !isOpen ? (
+          {group.crew !== null ? (
+            <span className="truncate text-foreground">{group.crew.crewName}</span>
+          ) : null}
+          <span className="truncate">{group.summary}</span>
+          {group.needsAttention && !isOpen ? (
             <span
               aria-label="An agent needs a human"
-              className="ms-auto size-1.5 rounded-full bg-amber-500 dark:bg-amber-300/90"
+              className="ms-auto size-1.5 shrink-0 rounded-full bg-amber-500 dark:bg-amber-300/90"
             />
           ) : null}
         </button>
       </div>
       {isOpen ? (
         <ul className="mt-0.5 flex flex-col gap-0.5 border-s border-border/60 ps-2">
-          {rows.map(({ child, thread }) => {
+          {group.rows.map(({ child, thread }) => {
             const status = resolveThreadStatusPill({ thread });
             const elapsed = formatElapsedDurationLabel(thread.updatedAt);
             return (
@@ -124,7 +153,7 @@ function SpawnedChildrenRows(props: {
                   className="flex w-full min-w-0 flex-col gap-0.5 rounded-md px-1.5 py-1 text-left outline-hidden hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={(event) => {
                     event.stopPropagation();
-                    open(thread);
+                    props.onOpen(thread);
                   }}
                 >
                   <span className="flex min-w-0 items-center gap-1.5 text-xs">
