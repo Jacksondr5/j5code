@@ -34,6 +34,8 @@ export const crewProposalsQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.crewProposals({ environmentId, input: {} });
 export const fleetQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.fleet({ environmentId, input: {} });
+export const fleetDetailQueryAtom = (environmentId: EnvironmentId) =>
+  j5Environment.fleet({ environmentId, input: { includeRetired: true } });
 
 export const squadronSourcesAtom = createJ5ReadSourcesAtom({
   ...sourcesInput,
@@ -64,6 +66,12 @@ export const fleetSourcesAtom = createJ5ReadSourcesAtom({
   label: "web-j5:fleet-sources",
   capability: "j5Squadrons",
   queryAtom: fleetQueryAtom,
+});
+export const fleetDetailSourcesAtom = createJ5ReadSourcesAtom({
+  ...sourcesInput,
+  label: "web-j5:fleet-detail-sources",
+  capability: "j5Squadrons",
+  queryAtom: fleetDetailQueryAtom,
 });
 export const inboxCountSourcesAtom = createJ5ReadSourcesAtom({
   ...sourcesInput,

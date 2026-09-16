@@ -32,5 +32,5 @@ Artifacts are local to the environment and project where they were generated. Th
 not synced between machines or treated as shared Squadron documents.
 
 Handoff reports from saved agents, including crew members, land here too, under `handoffs/`,
-one file per agent task. Rewriting the report adds a new version at the top of the same file. See
-**Handoff artifacts** in [Agents](agents.md).
+one file per agent task. Rewriting the file replaces the earlier version. See **Handoff
+artifacts** in [Agents](agents.md).
