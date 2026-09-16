@@ -65,7 +65,7 @@ describe("folder-backed persona library", () => {
   it.effect("loads examples only when no library has been configured", () =>
     Effect.gen(function* () {
       const { library, fs, folder, stateDir, path } = yield* fixture;
-      assert.lengthOf(yield* library.load(), 11);
+      assert.lengthOf(yield* library.load(), 12);
       yield* fs.makeDirectory(folder);
       assert.deepEqual(yield* library.load(), []);
       yield* fs.writeFileString(path.join(stateDir, "agent-personas.json"), json({ folders: [] }));
@@ -216,7 +216,7 @@ describe("imported persona library", () => {
       const restarted = createAgentPersonaLibrary({ fs, path, stateDir });
       const catalog = yield* restarted.catalog();
       assert.deepEqual(catalog.importedIds, result.importedIds);
-      assert.lengthOf(catalog.definitions, 13);
+      assert.lengthOf(catalog.definitions, 14);
       assert.deepEqual(
         catalog.definitions.find(({ id }) => id === custom.id),
         custom,

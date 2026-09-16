@@ -19,6 +19,7 @@ import publisher from "./examples/publisher.json" with { type: "json" };
 import investigator from "./examples/investigator.json" with { type: "json" };
 import prosecutor from "./examples/prosecutor.json" with { type: "json" };
 import herald from "./examples/herald.json" with { type: "json" };
+import crewCaptain from "./examples/crew-captain.json" with { type: "json" };
 
 export const AGENT_PERSONA_IDS = BUILT_IN_AGENT_PERSONA_IDS;
 export type { AgentPersonaId };
@@ -136,6 +137,7 @@ export const BUILT_IN_AGENT_PERSONAS = {
   investigator: decodeAgentPersonaDefinition(investigator),
   prosecutor: decodeAgentPersonaDefinition(prosecutor),
   herald: decodeAgentPersonaDefinition(herald),
+  "crew-captain": decodeAgentPersonaDefinition(crewCaptain),
 };
 
 export const getBuiltInAgentPersona = (id: string): AgentPersonaDefinition => {

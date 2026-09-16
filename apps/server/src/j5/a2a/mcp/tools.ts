@@ -15,7 +15,15 @@ import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
+import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
 import { ArchiveAgentService } from "../ArchiveAgentService.ts";
+import {
+  CREW_NAME_MAX_CHARS,
+  CREW_REASON_MAX_CHARS,
+  CREW_TEXT_MAX_CHARS,
+  CREW_SEAT_CAP,
+} from "../crewLimits.ts";
+import { CrewProposalService } from "../CrewProposalService.ts";
 import {
   A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION,
   A2A_LIST_TOOL_DESCRIPTION,
@@ -141,6 +149,69 @@ export const J5SpawnAgentResult = Schema.Struct({
   }),
 });
 
+export const J5ListAgentsResult = Schema.Struct({
+  agents: Schema.Array(
+    Schema.Struct({
+      id: AgentPersonaId,
+      display_name: NonEmptyString,
+      description: NonEmptyString,
+      runtime_policy: NonEmptyString,
+      availability: Schema.Literals(["available", "blocked", "disabled"]),
+      /** The provider, model, and reasoning this agent would run on right now, or null when blocked. */
+      route: Schema.NullOr(NonEmptyString),
+    }),
+  ),
+});
+
+/** Bounds keep a runaway Captain from filing megabyte briefs into the gate and the snapshot. */
+export { CREW_NAME_MAX_CHARS, CREW_REASON_MAX_CHARS, CREW_TEXT_MAX_CHARS };
+const CrewName = NonEmptyString.check(Schema.isMaxLength(CREW_NAME_MAX_CHARS));
+const CrewReason = NonEmptyString.check(Schema.isMaxLength(CREW_REASON_MAX_CHARS));
+const CrewText = NonEmptyString.check(Schema.isMaxLength(CREW_TEXT_MAX_CHARS));
+
+export const J5CrewSeatInput = Schema.Struct({
+  seat: CrewName,
+  agent: AgentPersonaId,
+  reason: CrewReason,
+  instructions: Schema.optional(CrewText),
+});
+
+export const J5ProposeCrewInput = Schema.Struct({
+  name: CrewName,
+  brief: CrewText,
+  seats: Schema.Array(J5CrewSeatInput).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(CREW_SEAT_CAP),
+  ),
+  client_request_id: Schema.optional(NonEmptyString),
+});
+export type J5ProposeCrewInput = typeof J5ProposeCrewInput.Type;
+
+export const J5RequestCrewMemberInput = Schema.Struct({
+  crew_instance_id: Schema.optional(NonEmptyString),
+  seat: CrewName,
+  agent: AgentPersonaId,
+  reason: CrewReason,
+  brief: Schema.optional(CrewText),
+  instructions: Schema.optional(CrewText),
+  client_request_id: Schema.optional(NonEmptyString),
+});
+export type J5RequestCrewMemberInput = typeof J5RequestCrewMemberInput.Type;
+
+export const J5CrewProposalResult = Schema.Struct({
+  proposal_id: NonEmptyString,
+  status: Schema.Literals(["open", "approved", "declined"]),
+  crew_instance_id: Schema.NullOr(NonEmptyString),
+  members: Schema.Array(
+    Schema.Struct({
+      seat: NonEmptyString,
+      agent_id: AgentPersonaId,
+      participant_id: ParticipantId,
+      thread_id: ThreadId,
+    }),
+  ),
+});
+
 export const J5StopAgentInput = Schema.Struct({
   client_request_id: Schema.optional(NonEmptyString),
   squadron_id: SquadronId,
@@ -223,9 +294,17 @@ export const J5_JOIN_SQUADRON_DESCRIPTION =
 
 export const J5_LIST_SQUADRONS_DESCRIPTION =
   "The Squadron directory for this environment: every Squadron's squadron_id, name, and the project ids it references, plus your own thread's project id so you can see which Squadron can home you. Use it to obtain the exact squadron_id before join_squadron. Read-only.";
-
 export const J5_SPAWN_AGENT_DESCRIPTION =
   "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. To run a saved agent, set the `agent` parameter to its id: the spawn gets that saved agent's instructions and runtime policy, and provider, model, and reasoning must be one of that agent's declared routes. Reuse client_request_id to retry the same spawn safely.";
+
+export const J5_LIST_AGENTS_DESCRIPTION =
+  "List the saved agents in this environment: id, purpose, runtime policy, whether each can start now, and the provider, model, and reasoning it would run on. Read this before choosing an agent for spawn_agent or a crew roster so the choice fits the task and the user's budget. Read-only.";
+
+export const J5_PROPOSE_CREW_DESCRIPTION =
+  "Propose the crew you need for the brief you were given: a name, the brief every seat will start on, and one seat per agent with a one-line reason. Call list_agents first and pick agents from it. The human reviews the roster in this thread, may remove or add seats, and approves or declines; you receive the decision and the roster as a message here. Human approval is the authority: approved seats run with their own agent's permissions, including write access you do not have. You become the crew's Captain: you command what you brief, and the crew is archived only as a unit. At most 12 seats. Reuse client_request_id to retry safely. This call is itself the human gate: it files a request the user answers in the app, so it works under every sandbox and approval policy, including approval policy never. Never refuse the brief because approvals are disabled.";
+
+export const J5_REQUEST_CREW_MEMBER_DESCRIPTION =
+  "Ask to add one agent to a crew you command when the work needs a seat the roster lacks: seat name, agent id from list_agents, a one-line reason, and optionally a brief for the new seat. The human approves or declines from their inbox; you receive the decision and the updated roster as a message in this thread, and can keep working meanwhile. The crew stays capped at ${CREW_SEAT_CAP} seats. Crew members cannot call this — escalate to your Captain. Reuse client_request_id to retry safely. Filing the request is the human gate itself and works under every sandbox and approval policy, including approval policy never.";
 
 export const J5_STOP_AGENT_DESCRIPTION =
   "Stop one Peer Agent: interrupts its running turn now. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. Requires your current squadron_id. Reuse client_request_id to retry safely.";
@@ -258,9 +337,23 @@ const spawnDependencies = [
   SpawnCompositionService,
   ThreadManagementService,
   OrchestratorMcpService,
-  // A saved agent resolves its route against the live provider registry.
+  // A Crew member is refused before anything is created (members never spawn Peer Agents).
+  AgentCrewInstanceService,
   ProviderRegistry,
 ];
+
+const crewProposalDependencies = [
+  McpInvocationContext.McpInvocationContext,
+  A2ASendService,
+  Crypto.Crypto,
+  A2AHomeRegistrar,
+  A2ALedger,
+  ThreadManagementService,
+  AgentCrewInstanceService,
+  CrewProposalService,
+];
+
+const listAgentsDependencies = [McpInvocationContext.McpInvocationContext, ProviderRegistry];
 
 const joinDependencies = [
   McpInvocationContext.McpInvocationContext,
@@ -355,8 +448,44 @@ export const J5ListSquadronsTool = Tool.make("list_squadrons", {
   failure: J5McpFailure,
   failureMode: "return",
   dependencies: listSquadronsDependencies,
+}).annotate(Tool.Title, "List Squadrons");
+export const J5ProposeCrewTool = Tool.make("propose_crew", {
+  description: J5_PROPOSE_CREW_DESCRIPTION,
+  parameters: J5ProposeCrewInput,
+  success: J5CrewProposalResult,
+  failure: J5McpFailure,
+  failureMode: "return",
+  dependencies: crewProposalDependencies,
 })
-  .annotate(Tool.Title, "List Squadrons")
+  .annotate(Tool.Title, "Propose a Crew")
+  .annotate(Tool.Readonly, false)
+  // Files a human-gated request; nothing spawns until the user approves it in the app.
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, false)
+  .annotate(Tool.OpenWorld, true);
+
+export const J5RequestCrewMemberTool = Tool.make("request_crew_member", {
+  description: J5_REQUEST_CREW_MEMBER_DESCRIPTION,
+  parameters: J5RequestCrewMemberInput,
+  success: J5CrewProposalResult,
+  failure: J5McpFailure,
+  failureMode: "return",
+  dependencies: crewProposalDependencies,
+})
+  .annotate(Tool.Title, "Request a crew member")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, false)
+  .annotate(Tool.OpenWorld, true);
+
+export const J5ListAgentsTool = Tool.make("list_agents", {
+  description: J5_LIST_AGENTS_DESCRIPTION,
+  success: J5ListAgentsResult,
+  failure: J5McpFailure,
+  failureMode: "return",
+  dependencies: listAgentsDependencies,
+})
+  .annotate(Tool.Title, "List saved agents")
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true)
@@ -411,6 +540,9 @@ export const J5Toolkit = Toolkit.make(
   J5ListSquadronsTool,
   J5JoinSquadronTool,
   J5SpawnAgentTool,
+  J5ListAgentsTool,
+  J5ProposeCrewTool,
+  J5RequestCrewMemberTool,
   J5StopAgentTool,
   J5ArchiveAgentTool,
   J5ClearOwnAskTool,

@@ -56,6 +56,8 @@ Read-only; no events.
 
 ### `spawn_agent`
 
+**Description:** "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. Reuse client_request_id to retry the same spawn safely."
+
 **Description (contract):** "Spawn a Peer Agent: a full-citizen teammate with its own top-level
 thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and
 records you as its immutable spawner; it is addressable the moment this returns. In your brief,
@@ -79,7 +81,7 @@ agent's declared routes. Reuse client_request_id to retry the same spawn safely.
 
 **Rules.** The new agent is an ordinary root-lineage thread created through upstream's creation seam, never through delegation. Its Squadron home is the caller's, registered before creation and fail-closed if the caller's home no longer names an existing Squadron. Placement and provenance are recorded atomically with creation; then the first turn starts with the brief. The new agent's first turn also states its own participant id and Squadron as platform-provided facts, beside the brief and never inside it. Provider, model and reasoning are required and explicit even when a Role is given: a Role's allowlist constrains the choice and an out-of-list pick is an error naming the Role, never a silent default. The brief carries the task and the reply expectation; the spawner does not follow a spawn with a reply-expected `send_message` — that form is for later work owed by an existing participant. Selection guidance and brief-writing conventions live in the [Spawning Guide](../features/spawning-guide.md).
 
-**Errors**, each naming state and next command: the caller's membership is missing or ambiguous; the caller's home no longer exists; creation failed.
+**Errors**, each naming state and next command: the caller's membership is missing or ambiguous; the caller's home no longer exists; the caller sits in a Crew (naming its Captain as the escalation and `delegate_task` for its own subagents; only a Captain grows a Crew, through the gate); creation failed.
 
 **Events:** participant joined, home registered, placement created.
 
@@ -106,7 +108,7 @@ A plain spawn without `agent` is unchanged and inherits the parent's runtime mod
 
 **Result:** exactly one of `interrupt_requested` (a running turn is being interrupted) or `already_idle` (no running turn; no side effect). An interrupt acknowledgement and an observed terminal run state are separate facts; the tool never claims a turn stopped merely because interruption was requested. Anything else is an error naming the caller's actual Squadron and the corrected retry.
 
-**Rules.** Stop and archive are single-target; the unit cascade belongs to Crews, which stop and archive as units through their own verbs when they exist. A stop is final across restarts: a committed stop wins even if the provider has not yet acknowledged it, so a stopped run is never resumed by upstream's restart continuation.
+**Rules.** A caller's runtime policy never gates `stop_agent` or `archive_agent`: a read-only persona may run them, because identity and the human's confirmation token are the gates, and the sandbox guards the workspace rather than the platform's verbs (Bryant, 2026-09-14). Stop and archive are single-target; the unit cascade belongs to Crews, which stop and archive as units through their own verbs when they exist. A stop is final across restarts: a committed stop wins even if the provider has not yet acknowledged it, so a stopped run is never resumed by upstream's restart continuation.
 
 ### `archive_agent`
 
@@ -169,6 +171,95 @@ No inputs. Read-only; no events. Callable by a thread that has no Squadron home 
 
 **Events:** participant joined, placement created.
 
+### `list_agents`
+
+**Description (contract):** "List the saved agents in this environment: id, purpose, runtime
+policy, whether each can start now, and the provider, model, and reasoning it would run on. Read
+this before choosing an agent for spawn_agent or a crew roster so the choice fits the task and
+the user's budget. Read-only."
+
+No inputs. Result: `agents[]` with `id`, `display_name`, `description`, `runtime_policy`,
+`availability` (`available`, `blocked`, `disabled`) and `route` (driver · model · reasoning, or
+null when blocked). The same catalog Settings → Agents shows; disabled imports read as disabled,
+unroutable or unenforceable agents as blocked. This is the P-B(a) spawn listing the spawning guide
+asked for.
+
+### `propose_crew`
+
+**Description (contract):** "Propose the crew you need for the brief you were given: a name, the
+brief every seat will start on, and one seat per agent with a one-line reason. Call list_agents
+first and pick agents from it. The human reviews the roster, may remove or add seats, and approves
+or declines; you receive the decision and the roster as a message here. Human approval is the
+authority: approved seats run with their own agent's permissions, including write access you do
+not have. You become the crew's Captain: you command what you brief, and the crew is archived only
+as a unit. At most 12 seats. Reuse client_request_id to retry safely. This call is itself the human
+gate: it files a request the user answers in the app, so it works under every sandbox and approval
+policy, including approval policy never. Never refuse the brief because approvals are disabled."
+
+Published as non-destructive (`destructiveHint: false`): the call records a pending request and
+nothing spawns until a human approves it.
+
+| Input               | Type                                           | Required | Meaning                                             |
+| ------------------- | ---------------------------------------------- | -------- | --------------------------------------------------- |
+| `name`              | string                                         | yes      | The Crew's display name                             |
+| `brief`             | string                                         | yes      | What every seat starts on, verbatim                 |
+| `seats`             | 1–12 of `{seat, agent, reason, instructions?}` | yes      | Seat name, agent id from `list_agents`, why, wiring |
+| `client_request_id` | string                                         | no       | Supply and reuse to make retries safe               |
+
+Bounds: `name` and `seat` up to 100 characters, `reason` up to 500, `brief` and `instructions` up
+to 8,000.
+
+Result: `proposal_id`, `status` (`open`, `approved`, `declined`),
+`crew_instance_id`, and `members` (seat, agent_id, participant_id, thread_id) once spawned.
+Semantics: the caller must have a usable home and must not sit in a Crew (R20). Seats are validated
+against the library before anything is recorded: unknown or disabled agents, duplicate seat names,
+or more than twelve seats refuse with the next step. An open roster proposal waits for the human
+gate inline above the Captain's composer (additions wait in the Inbox); approval spawns the approved roster (the human may have edited it) as persona-backed Peer
+Agents under the caller, records the Crew snapshot with each member's approver and reason, and posts
+a `<j5_crew_gate>` notice with the roster into the caller's thread. Declines post the decline.
+Human approval is the authority (Bryant, 2026-09-10): seats run with their own agent's runtime
+policy, so a read-only Captain may command writing seats once a person approved them; a seat's
+permissions never come from its Captain's.
+There is no auto-approval: the earlier `runbook_declared` column and `auto_approved` status were
+cut before shipping, since nothing wrote them and runbooks do not exist yet.
+
+### `request_crew_member`
+
+**Description (contract):** "Ask to add one agent to a crew you command when the work needs a seat
+the roster lacks: seat name, agent id from list_agents, a one-line reason, and optionally a brief
+for the new seat. The human approves or declines; you receive the decision and the updated roster
+as a message in this thread, and can keep working meanwhile. The crew stays capped at 12 seats.
+Crew members cannot call this — escalate to your Captain. Reuse client_request_id to retry safely.
+Filing the request is the human gate itself and works under every sandbox and approval policy,
+including approval policy never."
+
+| Input               | Type   | Required | Meaning                                                        |
+| ------------------- | ------ | -------- | -------------------------------------------------------------- |
+| `crew_instance_id`  | string | no       | Required only when the caller commands more than one live Crew |
+| `seat`, `agent`     | string | yes      | New seat name and agent id                                     |
+| `reason`            | string | yes      | One line the human reads before approving                      |
+| `brief`             | string | no       | The new seat's brief; the Crew's brief when omitted            |
+| `instructions`      | string | no       | Seat wiring text, verbatim                                     |
+| `client_request_id` | string | no       | Supply and reuse to make retries safe                          |
+
+Result: as `propose_crew`. Semantics: the caller must command the Crew; the seat name must be new;
+the cap counts current members plus seats in other open requests for the same Crew. Approval
+reserves the seat inside one store transaction (count, cap, version bump, and ordinal decided
+together under an optimistic version check, so two approvals landing at once cannot both pass),
+then spawns the seat under the Captain and posts the updated roster to the Captain. Seat ids are
+deterministic, so a retry after a failed spawn finds its reservation and converges.
+
+### Handoffs in Crews
+
+There is no Crew-specific artifact verb. A seat whose definition declares an output artifact writes
+it with the project `write_artifact` tool to the same handoff file every saved agent writes
+(`handoffs/<agent>/<Artifact>-<task>.md`, see the [persona contract](../agent-personas/index.md));
+its first turn carries `<seat_obligation>` naming that exact path. The handoff gate checks for the
+file when a run ends and reminds the seat once. Read-only Codex and Claude personas have `write_artifact` pre-approved for this reason, and `delegate_task` with `task_status` and `task_cancel` beside it, because a Crew member refused `spawn_agent` is sent to provider-native Subagents and a verb the sandbox then rejects is no way out:
+handoffs live in application storage, never in the sandboxed workspace. (Withdrawn on 2026-09-14:
+the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `read_artifact` and
+`list_artifacts`, which collided with the project artifact toolkit's names.)
+
 ### Kept upstream tools
 
 - `orchestrator_capabilities` — providers and models (ids, labels, option descriptors) for spawn targeting, plus runtime and interaction-mode facts. It deliberately stays silent about delegation even though `delegate_task` is back on the surface: that tool's own description carries its saved-agent use, and J5 verbs are advertised by their own descriptions.
@@ -184,7 +275,7 @@ No inputs. Read-only; no events. Callable by a thread that has no Squadron home 
 4. Between agents, a further ask to a peer holding an open Exchange from the caller joins it as a follow-up.
 5. A `send_message` to the caller itself is refused with an error naming the caller's own id.
 6. `list_participants` marks the caller's row `self`, reports a person's row as unable to receive a plain message and able to be asked, and omits threads without a Squadron home.
-7. `spawn_agent` refuses a call that omits provider, model, or reasoning, and refuses a choice outside the Role's allowlist with an error naming the Role.
+7. `spawn_agent` refuses a call that omits provider, model, or reasoning, refuses a choice outside the Role's allowlist with an error naming the Role, and refuses a caller that sits in a Crew with an error naming escalation to its Captain.
 8. A spawned agent's first turn contains its own participant id and Squadron.
 9. `stop_agent` and `archive_agent` act on exactly one agent; neither cascades; a stopped run is never resumed after a server restart, even when restart continuation is enabled.
 10. `archive_agent` on a target with open Exchanges or a running turn refuses with the list of consequences and a token; the same call with that token archives; a stale token is refused with fresh facts.
@@ -194,6 +285,8 @@ No inputs. Read-only; no events. Callable by a thread that has no Squadron home 
 14. Unarchiving an archived agent restores the same participant id, Squadron home, placement and provenance and makes it addressable again; the Exchanges archiving closed stay closed and no cancelled delivery is replayed.
 15. `list_squadrons` can be called by a thread with no Squadron home and returns every Squadron with its project ids and the caller's own project id.
 16. `join_squadron` establishes a home only for a thread that has none, only in a Squadron that references the thread's project, leaves the thread and its running work untouched, returns the existing registration when the thread is already homed there, and refuses a thread homed elsewhere, an archived or deleted thread, and a retired identity.
+17. `list_agents` returns every saved agent with its availability and route; `propose_crew` and `request_crew_member` file a human gate and refuse unknown, disabled, duplicate, or over-cap seats before anything is recorded; both succeed under every sandbox and approval policy, including Codex approval policy `never`.
+18. Approving a proposal spawns exactly once; a second approval finds it claimed; a spawn that fails after reserving its seats reopens the gate, and the retry converges on those seats.
 
 ## History
 
@@ -208,5 +301,8 @@ No inputs. Read-only; no events. Callable by a thread that has no Squadron home 
 - 2026-09-12 — archiving is reversible: unarchive restores the same identity without reopening Exchanges; deletion is a separate permanent act for people only; the address book hides archived agents unless asked (PR #132).
 - 2026-09-12 — `list_squadrons` and `join_squadron` added for the one case of a native thread with no home (issue #129, PR #131).
 - 2026-09-07 — rewritten from a stack of dated contract revisions into current-state contracts; every verb's build state true as of this date (all six verbs shipped; `regarding` and the person follow-up rule are issue #111).
+- 2026-09-09 — `list_agents`, `propose_crew`, and `request_crew_member`: Crews composed at launch through a human gate ([record](../../worklog/2026-09-14-crews-consolidation.md)).
+- 2026-09-10 — human approval is the authority for seat access; proposals and requests pre-approved for Codex under approval policy `never`; `deliver_artifact` added.
+- 2026-09-14 — `deliver_artifact` and the crew-only artifact reads withdrawn in favor of the shared handoff files; Codex pre-approval narrowed to a per-tool list ([record](../../worklog/2026-09-14-crews-consolidation.md)).
 - 2026-09-14 — `delegate_task`, `task_status`, and `task_cancel` return to the J5 surface, with a saved-agent `agent` parameter on `delegate_task` replacing the J5-only `invoke_agent` ([review](https://github.com/Jacksondr5/j5code/pull/124#issuecomment-5663559782)).
 - 2026-09-15 — machine participants appear in `list_participants` as named senders that receive nothing (issue #74).

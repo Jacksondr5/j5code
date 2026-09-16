@@ -6,6 +6,9 @@ import * as Layer from "effect/Layer";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { ConnectionError, SqlError } from "effect/unstable/sql/SqlError";
 
+import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
+import { AgentCrewProposalService } from "./AgentCrewProposalService.ts";
+import { CrewProposalService } from "./CrewProposalService.ts";
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as ServerConfig from "../../config.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -107,6 +110,13 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
     Layer.provide(Layer.mock(RosterService)({})),
     Layer.provide(Layer.mock(A2ALedger)({})),
     Layer.provide(Layer.mock(SquadronProjectReferences)({})),
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(AgentCrewInstanceService)({}),
+        Layer.mock(AgentCrewProposalService)({}),
+        Layer.mock(CrewProposalService)({}),
+      ),
+    ),
     Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
     Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
     Layer.provide(Layer.mock(VcsProcess.VcsProcess)({})),

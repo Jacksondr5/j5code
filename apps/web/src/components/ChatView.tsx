@@ -303,6 +303,8 @@ import {
   startSquadronDraft,
 } from "../j5/squadron/SquadronPicker.logic";
 import { refreshThreadHomes, useThreadHomes } from "../j5/squadron/ThreadHomesClient";
+import { CREW_CAPTAIN_PERSONA, crewCommandRefusal, parseCrewCommand } from "../j5/crew/crewCommand";
+import { useCrewCaptainAvailability } from "../j5/crew/useCrewCaptainAvailability";
 import {
   resolveEffectiveSquadronId,
   resolveSquadronDraftChipState,
@@ -1847,6 +1849,7 @@ export default function ChatView(props: ChatViewProps) {
   const activeThreadHomes = useThreadHomes(
     serverThread === null ? [] : [scopeThreadRef(environmentId, serverThread.id)],
   );
+  const j5CrewCaptainAvailable = useCrewCaptainAvailability(environmentId);
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const serverLatestRun = useMemo(
     () => (serverProjection === null ? null : deriveLatestThreadRun(serverProjection)),
@@ -7025,6 +7028,22 @@ export default function ChatView(props: ChatViewProps) {
       }
     }
 
+    // J5: `/crew <brief>` launches this fresh thread as a Crew Captain with the brief as its turn.
+    // Parsed from the raw prompt (attached contexts are not a brief) and refused before any
+    // in-flight state is set, so a refusal leaves the composer exactly as it was.
+    const j5Crew = parseCrewCommand(promptForSend);
+    const j5CrewRefusal =
+      j5Crew === null
+        ? null
+        : crewCommandRefusal(j5Crew, {
+            isLocalDraftThread,
+            captainAvailable: j5CrewCaptainAvailable,
+          });
+    if (j5CrewRefusal !== null) {
+      toastManager.add(stackedThreadToast({ type: "warning", ...j5CrewRefusal }));
+      return;
+    }
+
     sendInFlightRef.current = true;
     if (isDraftHeroState && activeThreadKey) {
       let resolveDockStarted: (() => void) | undefined;
@@ -7070,7 +7089,10 @@ export default function ChatView(props: ChatViewProps) {
       model: ctxSelectedModel,
       models: ctxSelectedProviderModels,
       effort: ctxSelectedPromptEffort,
-      text: messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
+      text:
+        j5Crew?.kind === "launch"
+          ? j5Crew.brief
+          : messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
     });
     if (composerRef.current?.validateProviderInput(outgoingMessageText) === false) {
       return;
@@ -7282,6 +7304,7 @@ export default function ChatView(props: ChatViewProps) {
                       branch: activeThreadBranch,
                       worktreePath: activeThread.worktreePath,
                       createdAt: activeThread.createdAt,
+                      ...(j5Crew?.kind === "launch" ? { agentPersona: CREW_CAPTAIN_PERSONA } : {}),
                     },
                   }
                 : {}),
