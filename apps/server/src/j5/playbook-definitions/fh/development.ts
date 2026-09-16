@@ -403,6 +403,13 @@ const decodeMetadataFields = Schema.decodeUnknownSync(
 );
 
 const definition: Omit<Definition, "hash"> = {
+  publication: {
+    metadata: "metadata",
+    approval: "publication_approval",
+    commit: "commit",
+    push: "push",
+    draft: "draft",
+  },
   id: "fh-development",
   version: 3,
   initial: "workspace",

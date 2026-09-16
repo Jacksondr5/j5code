@@ -154,6 +154,14 @@ export const PlaybookPhasePresentation = Schema.Struct({
   maxVisits: Schema.Number,
   transitions: Schema.Record(Schema.String, Schema.String),
 });
+export const PublicationPhases = Schema.Struct({
+  metadata: Schema.String,
+  approval: Schema.String,
+  commit: Schema.String,
+  push: Schema.String,
+  draft: Schema.String,
+});
+export type PublicationPhases = typeof PublicationPhases.Type;
 export const PlaybookDefinitionPresentation = Schema.Struct({
   id: Schema.String,
   version: Schema.Number,
@@ -164,7 +172,9 @@ export const PlaybookDefinitionPresentation = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
   source: Schema.optional(Schema.Literals(["imported", "configured", "shipped"])),
   diagnostics: Schema.optional(Schema.Array(Schema.String)),
+  canRemove: Schema.optional(Schema.Boolean),
   capabilities: Schema.optional(Schema.Array(Schema.String)),
+  publication: Schema.optional(PublicationPhases),
   phases: Schema.Array(PlaybookPhasePresentation),
 });
 export type PlaybookDefinitionPresentation = typeof PlaybookDefinitionPresentation.Type;

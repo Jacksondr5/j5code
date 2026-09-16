@@ -73,7 +73,14 @@ export function usePlaybookRunDetail(environmentId: EnvironmentId, runId: string
     (queriedRun === null || mutationRun.readVersion >= queriedRun.readVersion)
       ? mutationRun
       : queriedRun;
-  const visibleMetadata = useMemo(() => (run ? visibleArtifactMetadata(run) : []), [run]);
+  const definition = useMemo(
+    () => (run ? findDefinition(definitionsQuery.data ?? [], run) : undefined),
+    [definitionsQuery.data, run],
+  );
+  const visibleMetadata = useMemo(
+    () => (run ? visibleArtifactMetadata(run, definition?.publication) : []),
+    [run, definition],
+  );
   const artifactResults = useAtomValue(
     playbookArtifactsAggregateAtom({
       environmentId,
@@ -108,17 +115,18 @@ export function usePlaybookRunDetail(environmentId: EnvironmentId, runId: string
     [artifacts, gateIds],
   );
   const splitGate = useMemo(() => splitGateArtifacts(gateArtifacts), [gateArtifacts]);
-  const definition = useMemo(
-    () => (run ? findDefinition(definitionsQuery.data ?? [], run) : undefined),
-    [definitionsQuery.data, run],
-  );
   const publicationValidation = useMemo(
     () => (run ? publicationValidationFor(run, gateArtifacts, artifacts) : undefined),
     [run, gateArtifacts, artifacts],
   );
   const savedMetadata = useMemo(
-    () => metadataFrom(gateArtifacts.find((item) => item.phase === "metadata")),
-    [gateArtifacts],
+    () =>
+      metadataFrom(
+        gateArtifacts.find(
+          (item) => item.phase === (definition?.publication?.metadata ?? "metadata"),
+        ),
+      ),
+    [gateArtifacts, definition],
   );
   const appliedDraft = run ? appliedDraftFor(metadataDraft, run) : null;
   const metadata: Metadata = appliedDraft ?? savedMetadata;

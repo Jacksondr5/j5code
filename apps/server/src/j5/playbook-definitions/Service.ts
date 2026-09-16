@@ -51,12 +51,18 @@ import {
   playbookAuthorities,
 } from "../playbook/Execution.ts";
 
+const decodePublicationMetadataEffect = Schema.decodeUnknownEffect(Handoff.PublicationMetadata);
 const decodeValidationEffect = Schema.decodeUnknownEffect(Handoff.Validation);
 const decodeWorkspaceEffect = Schema.decodeUnknownEffect(Handoff.Workspace);
 
 const isPlaybookError = Schema.is(PlaybookError);
 const failure = (error: unknown) =>
-  isPlaybookError(error) ? error : new PlaybookError({ code: "storage", detail: String(error) });
+  isPlaybookError(error)
+    ? error
+    : new PlaybookError({
+        code: "storage",
+        detail: error instanceof Error ? error.message : String(error),
+      });
 
 export const restartPresentation = (
   run: Pick<
@@ -146,16 +152,20 @@ export const makeService = Effect.gen(function* () {
   };
   for (const definition of definitions) validateDefinition(definition);
   const adapters: Record<string, Adapter> = {
-    ...makeCodeAdapters(`${config.stateDir}/playbook-runs`),
+    ...makeCodeAdapters(`${config.stateDir}/playbook-runs`, undefined, definitionFor),
     persona,
   };
   const candidateIsCurrent = Effect.fn("PlaybookService.candidateIsCurrent")(function* (run: Run) {
-    const workspace = yield* decodeWorkspaceEffect(latest(run, "workspace").content).pipe(
-      Effect.mapError(failure),
-    );
-    const validation = yield* decodeValidationEffect(latest(run, "validation").content).pipe(
-      Effect.mapError(failure),
-    );
+    const definition = definitionFor(run);
+    const custom = definition?.runtime?.startsWith("yaml-runtime/");
+    const workspace = yield* decodeWorkspaceEffect(
+      latest(run, custom ? "__workspace" : "workspace").content,
+    ).pipe(Effect.mapError(failure));
+    const validation = yield* custom
+      ? decodePublicationMetadataEffect(
+          latest(run, definition!.publication!.metadata).content,
+        ).pipe(Effect.mapError(failure))
+      : decodeValidationEffect(latest(run, "validation").content).pipe(Effect.mapError(failure));
     const current = yield* Effect.tryPromise({
       try: () => candidate(workspace.worktree, run.baseCommit),
       catch: failure,
@@ -549,6 +559,8 @@ export const makeService = Effect.gen(function* () {
         enabled: entry.enabled && diagnostics.length === 0,
         source: entry.source,
         diagnostics,
+        ...(entry.canRemove ? { canRemove: true } : {}),
+        ...(definition?.publication ? { publication: definition.publication } : {}),
         capabilities: [...(definition?.capabilities ?? [])],
         phases: (definition?.phases ?? []).map(
           ({ id: phaseId, label, kind, capabilities, maxVisits, transitions }) => ({
@@ -573,6 +585,7 @@ export const makeService = Effect.gen(function* () {
         ...(definition.description === undefined ? {} : { description: definition.description }),
         enabled: false,
         diagnostics: [],
+        ...(definition.publication ? { publication: definition.publication } : {}),
         capabilities: [...(definition.capabilities ?? [])],
         phases: definition.phases.map(
           ({ id, label, kind, capabilities, maxVisits, transitions }) => ({

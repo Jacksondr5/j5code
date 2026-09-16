@@ -39,13 +39,17 @@ const GateEvidence = memo(function GateEvidence({
   evidence,
   reviews,
   validation,
+  metadataPhase,
 }: {
   readonly evidence: readonly Artifact[];
   readonly reviews: readonly Artifact[];
   readonly validation: Artifact | undefined;
+  readonly metadataPhase?: string | undefined;
 }) {
   const [fullOpen, setFullOpen] = useState(false);
-  const metadata = evidence.find((artifact) => artifact.phase === "metadata")?.content;
+  const metadata = evidence.find(
+    (artifact) => artifact.phase === (metadataPhase ?? "metadata"),
+  )?.content;
   const identity =
     metadata &&
     typeof metadata === "object" &&
@@ -452,6 +456,7 @@ export function PlaybookRunOverview({
             evidence={model.gateEvidence}
             reviews={model.gateReviews}
             validation={model.publicationValidation}
+            metadataPhase={model.definition?.publication?.metadata}
           />
           <GateDecisionForm model={model} />
           <details>
@@ -500,7 +505,7 @@ export function PlaybookRunOverview({
           </Button>
         </details>
       ) : null}
-      <Result artifacts={model.artifacts} />
+      <Result artifacts={model.artifacts} publication={model.definition?.publication} />
       <details className="rounded-lg border p-4" open={model.hasOpenActions}>
         <summary className="cursor-pointer font-semibold">Current activity and history</summary>
         <div className="mt-3 space-y-4">

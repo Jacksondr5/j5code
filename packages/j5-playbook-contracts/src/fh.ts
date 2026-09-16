@@ -58,7 +58,7 @@ export const Validation = Schema.Struct({
     }),
   ),
 });
-export const Publication = Schema.Struct({
+export const PublicationMetadata = Schema.Struct({
   diff: Schema.String,
   codeIdentity: Text,
   tree: Text,
@@ -67,6 +67,10 @@ export const Publication = Schema.Struct({
   headBranch: Text,
   commitMessage: Text,
   title: Text,
+  body: Schema.String,
+});
+export const Publication = Schema.Struct({
+  ...PublicationMetadata.fields,
   body: Text,
   effectiveChecksHash: Text,
   correctionApproval: Schema.NullOr(

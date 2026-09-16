@@ -1,0 +1,102 @@
+schema: t3-playbook/v1
+id: bug-ticket-resolution
+version: 1
+name: Bug ticket resolution
+description: Investigate a bug ticket, plan and implement the fix, then require approval before creating a pull request.
+initial: scout
+agents:
+  scout:
+    persona: scout
+    authority: read-only
+  planner:
+    persona: navigator
+    authority: read-only
+  developer:
+    persona: builder
+    authority: workspace-write
+phases:
+  - id: scout
+    label: Scout
+    kind: agent
+    tasks:
+      - id: investigate-bug
+        agent: scout
+        instructions: Investigate the bug ticket and relevant workspace evidence. Identify reproduction steps, affected behavior, likely causes, constraints, and open questions in a cited context brief. Do not modify the workspace.
+        output: report
+    outcome: completion
+    transitions:
+      completed: plan
+  - id: plan
+    label: Plan
+    kind: agent
+    evidence: [scout]
+    tasks:
+      - id: plan-fix
+        agent: planner
+        instructions: Turn the scout context brief into a focused implementation and verification plan for resolving the bug. Keep scope to the ticket and call out assumptions and risks.
+        output: report
+    outcome: completion
+    transitions:
+      completed: development
+  - id: development
+    label: Development
+    kind: agent
+    visitLimit: 3
+    evidence: [scout, plan]
+    approvals: [pr-approval]
+    tasks:
+      - id: implement-fix
+        agent: developer
+        instructions: Implement the planned bug fix, preserve unrelated changes, and run the narrowest meaningful verification. Return a review-ready code complete handoff. Do not commit, push, or create a pull request.
+        output: report
+    outcome: completion
+    transitions:
+      completed: prepare-publication
+      changed: plan
+  - id: prepare-publication
+    label: Prepare publication
+    kind: code
+    visitLimit: 3
+    evidence: [development]
+    tasks:
+      - id: prepare
+        operation: metadata
+    transitions:
+      pass: pr-approval
+  - id: pr-approval
+    label: Pull request approval
+    kind: gate
+    visitLimit: 3
+    evidence: [scout, plan, development, prepare-publication]
+    capabilities: [approval, publication]
+    transitions:
+      approve: commit
+      request_changes: development
+      changed: development
+  - id: commit
+    label: Commit
+    kind: code
+    capabilities: [publication]
+    tasks:
+      - id: commit
+        operation: commit
+    transitions:
+      pass: push
+  - id: push
+    label: Push
+    kind: code
+    capabilities: [publication]
+    tasks:
+      - id: push
+        operation: push
+    transitions:
+      pass: create-pr
+  - id: create-pr
+    label: Create pull request
+    kind: code
+    capabilities: [publication]
+    tasks:
+      - id: create-pr
+        operation: draft
+    transitions:
+      pass: $complete

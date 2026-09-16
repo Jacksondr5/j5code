@@ -14,7 +14,7 @@ const decodePullRequests = Schema.decodeUnknownSync(
   ),
 );
 
-type Metadata = typeof Handoff.Publication.Type;
+type Metadata = typeof Handoff.PublicationMetadata.Type;
 export interface GitHub {
   readonly find: (metadata: Metadata) => Promise<{
     url: string;

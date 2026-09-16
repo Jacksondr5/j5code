@@ -26,17 +26,65 @@ it("isolates invalid files and applies imported, configured, and shipped precede
       /Confirm/,
     );
     library.import([{ name: "replacement.yaml", content: replacement }], true);
+    assert.equal(library.catalog().find((item) => item.id === shipped.id)?.canRemove, true);
     assert.equal(library.catalog().find((item) => item.id === shipped.id)?.definition?.version, 2);
     library.setEnabled(shipped.id, false);
     assert.equal(library.catalog().find((item) => item.id === shipped.id)?.enabled, false);
     library.remove(shipped.id);
     assert.equal(library.catalog().find((item) => item.id === shipped.id)?.source, "shipped");
+    assert.equal(library.catalog().find((item) => item.id === shipped.id)?.canRemove, false);
+    assert.throws(() => library.remove(shipped.id), /cannot be removed/);
 
     library.snapshot(shipped);
     assert.equal(library.savedDefinitions()[0]?.hash, shipped.hash);
     assert.isTrue(
       NodeFS.existsSync(NodePath.join(stateDir, "playbook-snapshots", `${shipped.hash}.yaml`)),
     );
+  } finally {
+    NodeFS.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+it("removes managed definitions while preserving snapshots and external definitions", () => {
+  const stateDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "playbook-library-"));
+  try {
+    const managedFolder = NodePath.join(stateDir, "playbooks");
+    const managedFile = NodePath.join(managedFolder, "replacement.yaml");
+    NodeFS.mkdirSync(managedFolder);
+    NodeFS.writeFileSync(managedFile, source.replace("version: 1", "version: 2"));
+    const shipped = compileYamlPlaybook(source, "shipped.yaml");
+    const managed = compileYamlPlaybook(NodeFS.readFileSync(managedFile, "utf8"), managedFile);
+    const library = createPlaybookLibrary(stateDir, [shipped]);
+    library.snapshot(managed);
+
+    assert.equal(library.catalog().find((item) => item.id === shipped.id)?.canRemove, true);
+    library.remove(shipped.id);
+    assert.isFalse(NodeFS.existsSync(managedFile));
+    assert.equal(library.catalog().find((item) => item.id === shipped.id)?.source, "shipped");
+    assert.equal(
+      library.loadSnapshot({
+        definitionId: managed.id,
+        definitionVersion: managed.version,
+        definitionHash: managed.hash,
+      })?.hash,
+      managed.hash,
+    );
+
+    const externalFolder = NodePath.join(stateDir, "external-playbooks");
+    const externalFile = NodePath.join(externalFolder, "external.yaml");
+    NodeFS.mkdirSync(externalFolder);
+    NodeFS.writeFileSync(externalFile, source.replace("version: 1", "version: 3"));
+    NodeFS.writeFileSync(
+      NodePath.join(stateDir, "playbooks.json"),
+      JSON.stringify({ folders: [externalFolder] }),
+    );
+    const externalLibrary = createPlaybookLibrary(stateDir, [shipped]);
+    assert.equal(
+      externalLibrary.catalog().find((item) => item.id === shipped.id)?.canRemove,
+      false,
+    );
+    assert.throws(() => externalLibrary.remove(shipped.id), /cannot be removed/);
+    assert.isTrue(NodeFS.existsSync(externalFile));
   } finally {
     NodeFS.rmSync(stateDir, { recursive: true, force: true });
   }

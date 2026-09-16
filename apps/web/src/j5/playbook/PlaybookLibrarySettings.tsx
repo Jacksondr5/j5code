@@ -32,6 +32,8 @@ import {
   setPlaybookDefinitionEnabled,
 } from "./client";
 
+const errorMessage = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+
 export function PlaybookLibrarySettings() {
   const input = useRef<HTMLInputElement>(null);
   const projects = useProjects();
@@ -52,7 +54,7 @@ export function PlaybookLibrarySettings() {
     () =>
       listPlaybookDefinitions()
         .then(setDefinitions)
-        .catch((cause) => setError(String(cause))),
+        .catch((cause) => setError(errorMessage(cause))),
     [],
   );
   useEffect(() => void refresh(), [refresh]);
@@ -62,7 +64,7 @@ export function PlaybookLibrarySettings() {
     try {
       setDefinitions(await operation());
     } catch (cause) {
-      setError(String(cause));
+      setError(errorMessage(cause));
     } finally {
       setBusy(false);
     }
@@ -90,7 +92,7 @@ export function PlaybookLibrarySettings() {
         setCreateError("Couldn’t open a new chat for this project.");
       }
     } catch (cause) {
-      setCreateError(String(cause));
+      setCreateError(errorMessage(cause));
     } finally {
       setCreateBusy(false);
     }
@@ -128,8 +130,8 @@ export function PlaybookLibrarySettings() {
               try {
                 return await importPlaybookDefinitions(contents);
               } catch (cause) {
-                if (!String(cause).includes("Confirm replacement")) throw cause;
-                if (!window.confirm(`${String(cause)}\n\nReplace the existing definitions?`))
+                if (!errorMessage(cause).includes("Confirm replacement")) throw cause;
+                if (!window.confirm(`${errorMessage(cause)}\n\nReplace the existing definitions?`))
                   return definitions;
                 return importPlaybookDefinitions(contents, true);
               }
@@ -153,34 +155,41 @@ export function PlaybookLibrarySettings() {
                   : `${definition.description ?? ""} Version ${definition.version}. ${definition.source ?? "shipped"}.`
               }
               control={
-                definition.source === "imported" ? (
+                definition.source === "imported" || definition.canRemove ? (
                   <div className="flex gap-2">
-                    <Button
-                      disabled={busy}
-                      variant="outline"
-                      onClick={() =>
-                        void run(() =>
-                          setPlaybookDefinitionEnabled(definition.id, definition.enabled === false),
-                        )
-                      }
-                    >
-                      {definition.enabled === false ? "Enable" : "Disable"}
-                    </Button>
-                    <Button
-                      disabled={busy}
-                      variant="outline"
-                      onClick={() => {
-                        if (
-                          !window.confirm(
-                            `Remove ${definition.title ?? definition.id}? If a configured or shipped definition has the same id, it will become available again.`,
+                    {definition.source === "imported" ? (
+                      <Button
+                        disabled={busy}
+                        variant="outline"
+                        onClick={() =>
+                          void run(() =>
+                            setPlaybookDefinitionEnabled(
+                              definition.id,
+                              definition.enabled === false,
+                            ),
                           )
-                        )
-                          return;
-                        void run(() => removePlaybookDefinition(definition.id));
-                      }}
-                    >
-                      Remove
-                    </Button>
+                        }
+                      >
+                        {definition.enabled === false ? "Enable" : "Disable"}
+                      </Button>
+                    ) : null}
+                    {definition.canRemove ? (
+                      <Button
+                        disabled={busy}
+                        variant="outline"
+                        onClick={() => {
+                          if (
+                            !window.confirm(
+                              `Remove ${definition.title ?? definition.id}? Existing runs and history will be kept. If another definition has the same id, it will become available again.`,
+                            )
+                          )
+                            return;
+                          void run(() => removePlaybookDefinition(definition.id));
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    ) : null}
                   </div>
                 ) : undefined
               }

@@ -9,7 +9,13 @@ import {
   effectiveChecks,
   latest,
 } from "./development.ts";
-import { canonical, gateHash, hash, phaseById } from "../../playbook/Definition.ts";
+import {
+  canonical,
+  gateHash,
+  hash,
+  phaseById,
+  type Definition,
+} from "../../playbook/Definition.ts";
 import * as Workspace from "./GitWorkspace.ts";
 import * as Publication from "./Publication.ts";
 import { PlaybookError } from "../../playbook/Store.ts";
@@ -18,6 +24,10 @@ import type { Adapter } from "../../playbook/Worker.ts";
 const decodeDevelopmentInputs = Schema.decodeUnknownSync(DevelopmentInputs);
 const decodeCodeCompleteHandoff = Schema.decodeUnknownSync(Handoff.CodeCompleteHandoff);
 const decodeCommitResult = Schema.decodeUnknownSync(Handoff.CommitResult);
+const decodeReport = Schema.decodeUnknownSync(
+  Schema.Struct({ summary: Schema.String, body: Schema.String }),
+);
+const decodePublicationMetadata = Schema.decodeUnknownSync(Handoff.PublicationMetadata);
 const decodePublication = Schema.decodeUnknownSync(Handoff.Publication);
 const decodePushResult = Schema.decodeUnknownSync(Handoff.PushResult);
 const decodeValidation = Schema.decodeUnknownSync(Handoff.Validation);
@@ -26,6 +36,7 @@ const decodeWorkspace = Schema.decodeUnknownSync(Handoff.Workspace);
 export function makeCodeAdapters(
   root: string,
   github = Publication.github,
+  definitionFor?: (run: Run) => Definition | undefined,
 ): Record<string, Adapter> {
   const running = new Map<string, AbortController>();
   const getWorkspace = (run: Run) => decodeWorkspace(latest(run, "workspace").content);
@@ -116,6 +127,68 @@ export function makeCodeAdapters(
       return Publication.draft(info, decodePushResult(latest(run, "push").content).commit, github);
     },
   };
+  for (const operation of ["metadata", "commit", "push", "draft"] as const) {
+    operations[`custom_${operation}`] = async (run) => {
+      const definition = definitionFor?.(run);
+      const phases = definition?.publication;
+      if (!definition || !phases) throw new Error("Custom publication definition is unavailable");
+      const workspace = decodeWorkspace(latest(run, "__workspace").content);
+      if (operation === "metadata") {
+        const phase = phaseById(definition, phases.metadata);
+        const input = definition.input(run, phase, phase.tasks[0]!) as {
+          selectedEvidenceIds: readonly string[];
+        };
+        const report = decodeReport(
+          run.artifacts.find((artifact) => artifact.id === input.selectedEvidenceIds[0])?.content,
+        );
+        const current = await Workspace.candidate(workspace.worktree, run.baseCommit);
+        const inputs = decodeDevelopmentInputs(run.inputs);
+        return {
+          ...current,
+          diff: await Workspace.git(workspace.worktree, [
+            "diff",
+            "--binary",
+            "--no-ext-diff",
+            "--no-textconv",
+            run.baseCommit,
+            current.tree,
+            "--",
+          ]),
+          repository: await Workspace.git(workspace.worktree, ["remote", "get-url", "origin"]),
+          baseBranch: await Workspace.publicationBaseBranch(run.repository, inputs.baseRef),
+          headBranch: workspace.branch,
+          commitMessage: `fix: ${report.summary.split("\n")[0]!.slice(0, 100)}`,
+          title: report.summary.split("\n")[0]!.slice(0, 120),
+          body: `${report.summary}\n\n${report.body}\n\nPlaybook: ${run.id}`,
+        };
+      }
+      const evidence = definition.gateArtifacts(run, phaseById(definition, phases.approval));
+      const approval = run.approvals.findLast((item) => item.phase === phases.approval);
+      if (
+        !approval ||
+        approval.decision !== "approve" ||
+        approval.artifactHash !== gateHash(evidence) ||
+        evidence.some((artifact) => artifact.revision > approval.gateRevision)
+      )
+        throw new Error(`Exact ${phases.approval} approval is missing`);
+      const metadata = decodePublicationMetadata(latest(run, phases.metadata).content);
+      if (operation === "commit")
+        return Publication.commit(workspace.worktree, run.baseCommit, metadata);
+      if (operation === "push")
+        return Publication.push(
+          workspace.worktree,
+          run.baseCommit,
+          metadata,
+          decodeCommitResult(latest(run, phases.commit).content).commit,
+        );
+      await Publication.verifyCandidate(workspace.worktree, run.baseCommit, metadata);
+      return Publication.draft(
+        metadata,
+        decodePushResult(latest(run, phases.push).content).commit,
+        github,
+      );
+    };
+  }
   const adapters: Record<string, Adapter> = Object.fromEntries(
     Object.entries(operations).map(([name, operation]) => [
       name,

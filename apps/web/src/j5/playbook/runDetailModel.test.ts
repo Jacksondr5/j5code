@@ -123,3 +123,42 @@ it("matches definitions and keeps drafts tied to run, gate revision, and hash", 
   assert.deepEqual(metadataFrom(artifact("metadata", "metadata", saved)), saved);
   assert.isTrue(sameMetadata(saved, { ...saved }));
 });
+
+it("loads publication results with custom phase names", () => {
+  const publication = {
+    metadata: "prepare",
+    approval: "release",
+    commit: "save",
+    push: "upload",
+    draft: "create-pr",
+  };
+  const metadata = artifact("prepared", publication.metadata, {
+    commitMessage: "fix: issue",
+    title: "Fix issue",
+    body: "Report",
+  });
+  const custom = {
+    ...runValue,
+    phase: "release",
+    artifacts: [metadata],
+    gate: { revision: 4, artifactHash: "custom-gate", artifactIds: [metadata.id] },
+  } as RunDetail;
+  assert.deepEqual(visibleArtifactMetadata(custom, publication), [metadata]);
+  assert.deepEqual(metadataFrom(metadata), {
+    commitMessage: "fix: issue",
+    title: "Fix issue",
+    body: "Report",
+  });
+  const results = [
+    artifact("saved", "save"),
+    artifact("uploaded", "upload"),
+    artifact("pr", "create-pr"),
+  ];
+  assert.deepEqual(
+    visibleArtifactMetadata(
+      { ...custom, status: "completed", gate: null, artifacts: [metadata, ...results] },
+      publication,
+    ),
+    results,
+  );
+});

@@ -136,10 +136,20 @@ export function Progress({
   );
 }
 
-export function Result({ artifacts }: { artifacts: readonly Artifact[] }) {
-  const commit = artifacts.findLast((artifact) => artifact.phase === "commit");
-  const push = artifacts.findLast((artifact) => artifact.phase === "push");
-  const draft = artifacts.findLast((artifact) => artifact.phase === "draft");
+export function Result({
+  artifacts,
+  publication,
+}: {
+  artifacts: readonly Artifact[];
+  publication?: PlaybookDefinitionPresentation["publication"];
+}) {
+  const commit = artifacts.findLast(
+    (artifact) => artifact.phase === (publication?.commit ?? "commit"),
+  );
+  const push = artifacts.findLast((artifact) => artifact.phase === (publication?.push ?? "push"));
+  const draft = artifacts.findLast(
+    (artifact) => artifact.phase === (publication?.draft ?? "draft"),
+  );
   if (!commit && !push && !draft) return null;
   const value = (artifact: Artifact | undefined, key: string) =>
     artifact && record(artifact.content) ? String(artifact.content[key] ?? "") : "";

@@ -25,7 +25,10 @@ export function gateArtifactMetadata(run: RunDetail): readonly ArtifactMetadata[
   return run.gate.artifactIds.flatMap((id) => byId.get(id) ?? []);
 }
 
-export function visibleArtifactMetadata(run: RunDetail): readonly ArtifactMetadata[] {
+export function visibleArtifactMetadata(
+  run: RunDetail,
+  publication?: PlaybookDefinitionPresentation["publication"],
+): readonly ArtifactMetadata[] {
   const result: ArtifactMetadata[] = [];
   const seen = new Set<string>();
   const append = (artifact: ArtifactMetadata | undefined) => {
@@ -38,7 +41,13 @@ export function visibleArtifactMetadata(run: RunDetail): readonly ArtifactMetada
     append(run.artifacts.findLast((artifact) => artifact.phase === "validation"));
   if (run.status === "completed")
     run.artifacts
-      .filter((artifact) => ["commit", "push", "draft"].includes(artifact.phase))
+      .filter((artifact) =>
+        [
+          publication?.commit ?? "commit",
+          publication?.push ?? "push",
+          publication?.draft ?? "draft",
+        ].includes(artifact.phase),
+      )
       .forEach(append);
   return result;
 }

@@ -22,9 +22,9 @@ Default the output to `<stateDir>/playbooks/<id>.yaml`, or use the user's named 
 Read and adapt the applicable shipped example:
 
 - Agent and gate phases: `apps/server/src/j5/playbook-definitions/research-review.yaml`.
-- Code tasks (`workspace`, `validation`, `commit`, `push`, `draft`): `apps/server/src/j5/playbook-definitions/fh/development.yaml`.
+- Custom publication: [examples/publication.yaml](examples/publication.yaml), including preparation and a report-based approval gate.
 
-Copy their YAML structure. The development example declares a registered `implementation`, which bypasses ordinary phase compilation. Copy its code-task shapes only, omit `implementation`, and use the transition keys and outcome rules below for generic YAML phases.
+Copy their YAML structure. Do not copy the built-in Development implementation: its validation and repair operations are unavailable to custom YAML.
 
 ## 4. Rules
 
@@ -33,21 +33,22 @@ Use `Yaml.ts` as the authority if the checkout differs from this reference. Its 
 - Set `schema: t3-playbook/v1`, nonempty `id`, `name`, `description`, and `initial` (a declared phase id), integer `version >= 1`, optional `agents`, and a nonempty `phases` list. Omit `implementation`.
 - Define `agents.<name>` as `{ persona, authority }`. Require a nonempty persona. The current imported authority schema accepts `read-only`, `critic-review`, `workspace-write`, `critic-fix`, `diagnostic`, and `publish-only`.
 - Give every phase a unique nonempty `id`, `kind: agent|code|gate`, and a `transitions` map. Reserve `__workspace` for the compiler-generated phase. Make every authored phase reachable from `initial`.
-- Allow optional nonempty `label`, `tasks`, integer `visitLimit >= 1` (default 1), `outcome: completion|review|validation` (default completion), and `evidence`, `approvals`, `capabilities` arrays of nonempty strings.
+- Allow optional nonempty `label`, `tasks`, integer `visitLimit >= 1` (default 1), `outcome: completion|review` (default completion), and `evidence`, `approvals`, `capabilities` arrays of nonempty strings.
 - Make evidence entries reference a phase id or `__workspace`. Make approvals entries reference a gate phase id. Make transition targets reference a phase id or `$complete`.
 
 | Phase kind | Allowed transition keys                                      |
 | ---------- | ------------------------------------------------------------ |
 | gate       | `approve`, `request_changes`, `changed`                      |
 | agent      | `completed`, `changed`; also `revise` with `outcome: review` |
-| code       | `pass`, `changed`; also `revise` with `outcome: validation`  |
+| code       | `pass`, `changed`                                            |
 
 - Use `changed` for invalidation. Omit tasks and outcome from gates. Exact diagnostics include "gates cannot have tasks" and "gates cannot declare outcome aggregation".
 - Give agent and code phases at least one task. Give every task a nonempty id, unique within its phase.
 - For each agent task, "set exactly one of agent or persona". Resolve named agents from `agents`. For inline personas, optionally set authority (default `read-only`). Supply nonempty `instructions` and `output: report|review`: "agent tasks require instructions and output". Schedule the same named agent at most once per phase.
 - Set `outcome: review` only on an agent phase whose tasks all use `output: review`: "review aggregation requires agent tasks with review output".
-- For code tasks, set `operation: workspace|validation|repair_capacity|metadata|commit|push|draft` and omit agent/persona: "code tasks require one registered operation".
-- Set `outcome: validation` only on a code phase with operation `validation` in its first task: "validation aggregation requires validation as the first code task".
+- For code tasks, set `operation: metadata|commit|push|draft` and omit agent/persona: "code tasks require one registered operation".
+- Publishing requires exactly one contiguous sequence: `metadata` → gate → `commit` → `push` → `draft` → `$complete`, each operation in its own phase. Preparation selects exactly one developer report phase (one report task) through `evidence`. The report must run before preparation. Include preparation in gate evidence. No incoming transition may bypass this order; only the gate's `approve` enters commit.
+- Route `request_changes` and `changed` back to development or preparation, with enough visits for the full loop. Preparation captures the exact code and initial publication text; humans can edit text at the gate. A changed candidate requires fresh preparation and approval. `__workspace` is generated automatically; `workspace`, `validation`, and `repair_capacity` operations are built-in-only.
 - Set `visitLimit >= 2` on every phase that needs revisiting, including intermediate phases in a loop. Choose limits for the requested number of visits. The compiler accepts a loop with limit 1, but that phase cannot run a second time.
 - Write YAML 1.2 with unique mapping keys and no aliases or anchors.
 

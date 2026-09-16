@@ -13,6 +13,8 @@ export interface PlaybookCatalogEntry {
   readonly enabled: boolean;
   readonly source: "imported" | "configured" | "shipped";
   readonly diagnostics: readonly string[];
+  readonly canRemove: boolean;
+  readonly removeKey?: string;
 }
 
 type StoredImport = { readonly name: string; readonly content: string; readonly enabled: boolean };
@@ -70,6 +72,20 @@ export function createPlaybookLibrary(
   implementations: Readonly<Record<string, Definition>> = {},
 ) {
   let imports = readJson<StoredImport[]>(importsFile(stateDir), []);
+  const managedFolder = NodePath.resolve(stateDir, "playbooks");
+  const isManagedFile = (file: string) => {
+    try {
+      if (!NodeFS.lstatSync(managedFolder).isDirectory()) return false;
+    } catch {
+      return false;
+    }
+    const relative = NodePath.relative(managedFolder, file);
+    return (
+      relative !== ".." &&
+      !relative.startsWith(`..${NodePath.sep}`) &&
+      !NodePath.isAbsolute(relative)
+    );
+  };
   const configuredFolders = () => {
     const configFile = NodePath.join(stateDir, "playbooks.json");
     if (NodeFS.existsSync(configFile)) {
@@ -80,7 +96,12 @@ export function createPlaybookLibrary(
   };
   const compileLayer = (
     source: PlaybookCatalogEntry["source"],
-    files: readonly { name: string; content: string; enabled?: boolean }[],
+    files: readonly {
+      name: string;
+      content: string;
+      enabled?: boolean;
+      canRemove?: boolean;
+    }[],
   ) => {
     const compiled = files.map((file) => {
       try {
@@ -107,6 +128,8 @@ export function createPlaybookLibrary(
           enabled: item.file.enabled ?? true,
           source,
           diagnostics: [],
+          canRemove: source === "imported" || item.file.canRemove === true,
+          ...(source === "configured" ? { removeKey: item.file.name } : {}),
         };
       return {
         id: `invalid:${source}:${item.file.name}`,
@@ -114,10 +137,14 @@ export function createPlaybookLibrary(
         description: "Invalid playbook definition",
         enabled: false,
         source,
+        canRemove: source === "imported" || item.file.canRemove === true,
+        ...(source === "configured" ? { removeKey: item.file.name } : {}),
         diagnostics: [
           duplicate
             ? `Duplicate playbook id ${item.definition!.id} in ${source} layer`
-            : String(item.cause),
+            : item.cause instanceof Error
+              ? item.cause.message
+              : String(item.cause),
         ],
       };
     });
@@ -131,8 +158,14 @@ export function createPlaybookLibrary(
       enabled: true,
       source: "shipped",
       diagnostics: [],
+      canRemove: false,
     }));
-    const configured = compileLayer("configured", configuredFolders().flatMap(filesIn));
+    const configured = compileLayer(
+      "configured",
+      configuredFolders().flatMap((folder) =>
+        filesIn(folder).map((file) => ({ ...file, canRemove: isManagedFile(file.name) })),
+      ),
+    );
     const imported = compileLayer("imported", imports);
     const visible = new Map<string, PlaybookCatalogEntry>();
     for (const layer of [shippedEntries, configured, imported])
@@ -237,16 +270,22 @@ export function createPlaybookLibrary(
       return catalog();
     },
     remove(id: string) {
-      const before = imports.length;
-      imports = imports.filter((item) => {
-        try {
-          return compileYamlPlaybook(item.content, item.name, implementations).id !== id;
-        } catch {
-          return true;
-        }
-      });
-      if (imports.length === before) throw new Error(`Unknown imported playbook ${id}`);
-      persist(stateDir, imports);
+      const entry = catalog().find((item) => item.id === id);
+      if (!entry?.canRemove) throw new Error(`Playbook cannot be removed: ${id}`);
+      if (entry.source === "imported") {
+        imports = imports.filter((item) => {
+          try {
+            return compileYamlPlaybook(item.content, item.name, implementations).id !== id;
+          } catch {
+            return true;
+          }
+        });
+        persist(stateDir, imports);
+      } else if (entry.removeKey) {
+        NodeFS.unlinkSync(entry.removeKey);
+      } else {
+        throw new Error(`Playbook cannot be removed: ${id}`);
+      }
       return catalog();
     },
   };

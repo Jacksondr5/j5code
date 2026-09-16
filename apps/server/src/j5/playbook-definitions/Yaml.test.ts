@@ -3,6 +3,7 @@ import type { Action, Decision, Run } from "@j5/playbook-contracts";
 import { assert, it } from "@effect/vitest";
 import * as NodeFS from "node:fs";
 
+import { parse, stringify } from "yaml";
 import { compileYamlPlaybook } from "./Yaml.ts";
 import { development } from "./fh/development.ts";
 import { hash } from "../playbook/Definition.ts";
@@ -250,16 +251,17 @@ it("accepts bounded generic graphs and supported optional bindings", () => {
   );
 });
 
-it("maps registered code operations without permitting scripts", () => {
+it("rejects built-in validation operations in custom YAML", () => {
   const withValidation = source
     .replace("initial: research", "initial: verify")
     .replace(
       "phases:\n",
       "phases:\n  - id: verify\n    kind: code\n    tasks:\n      - id: validation\n        operation: validation\n    outcome: validation\n    transitions: { pass: research, revise: research }\n",
     );
-  const definition = compileYamlPlaybook(withValidation, "operations.yaml");
-  assert.equal(definition.phases[1]!.tasks[0]!.adapter, "validation");
-  assert.notInclude(definition.source!, "executable:");
+  assert.throws(
+    () => compileYamlPlaybook(withValidation, "operations.yaml"),
+    /operations.yaml:phases.verify.tasks.validation.operation: validation is built-in-only/,
+  );
 });
 
 it("rejects scheduling the same shared conversation twice in one phase", () => {
@@ -299,4 +301,90 @@ it("validates corrected reviews against the originally scheduled evidence", () =
     definition.validate(action, { verdict: "accept", subjectHash, findings: [] }, {} as Run),
     { verdict: "accept", subjectHash, findings: [] },
   );
+});
+
+const publicationSource = NodeFS.readFileSync(
+  new URL(
+    "../../../../../.agents/skills/j5-new-playbook/examples/publication.yaml",
+    import.meta.url,
+  ),
+  "utf8",
+);
+it("compiles custom publication phases and rejects incomplete or unsafe sequences", () => {
+  const definition = compileYamlPlaybook(publicationSource);
+  assert.deepEqual(definition.publication, {
+    metadata: "prepare-publication",
+    approval: "pr-approval",
+    commit: "commit",
+    push: "push",
+    draft: "create-pr",
+  });
+  const check = (
+    mutate: (source: {
+      phases: Array<{
+        id: string;
+        evidence?: string[];
+        tasks?: Array<{ operation?: string }>;
+        transitions: Record<string, string>;
+      }>;
+      initial: string;
+    }) => void,
+    error: RegExp,
+  ) => {
+    const source = parse(publicationSource) as {
+      phases: Array<{
+        id: string;
+        evidence?: string[];
+        tasks?: Array<{ operation?: string }>;
+        transitions: Record<string, string>;
+      }>;
+      initial: string;
+    };
+    mutate(source);
+    assert.throws(() => compileYamlPlaybook(stringify(source), "bug.yaml"), error);
+  };
+  check((source) => {
+    source.phases = source.phases.filter(
+      (phase: { id: string }) => phase.id !== "prepare-publication",
+    );
+    source.phases[2]!.transitions.completed = "pr-approval";
+    source.phases[3]!.evidence!.pop();
+  }, /bug.yaml:phases: publication requires exactly one preparation step/);
+  check((source) => {
+    source.phases[4]!.evidence!.pop();
+  }, /include preparation phase/);
+  check((source) => {
+    source.phases[2]!.transitions.completed = "commit";
+  }, /cannot bypass publication/);
+  check((source) => {
+    source.phases[4]!.transitions.request_changes = "commit";
+  }, /cannot bypass publication/);
+  check((source) => {
+    source.phases[5]!.transitions.pass = "create-pr";
+  }, /publication order requires push/);
+  check((source) => {
+    source.phases[3]!.tasks![0]!.operation = "validation";
+  }, /built-in-only/);
+  check((source) => {
+    source.phases[3]!.tasks![0]!.operation = "repair_capacity";
+  }, /built-in-only/);
+  check((source) => {
+    source.phases[3]!.evidence = ["scout", "development"];
+  }, /select exactly one developer report/);
+  check((source) => {
+    source.phases.push({ ...structuredClone(source.phases[3]!), id: "second-preparation" });
+  }, /exactly one preparation step/);
+  assert.throws(
+    () =>
+      compileYamlPlaybook(
+        publicationSource.replace(
+          "label: Prepare publication",
+          "label: Prepare publication\n    capabilities: [publication]",
+        ),
+      ),
+    /capabilities: publication and candidate-watch require/,
+  );
+  check((source) => {
+    source.initial = "prepare-publication";
+  }, /developer report must run before preparation/);
 });

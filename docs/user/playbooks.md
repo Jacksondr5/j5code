@@ -25,8 +25,11 @@ resolved once. Each run owns a separate branch and worktree under the server hom
 
 Settings → Playbooks imports `.yaml` and `.yml` definitions into the selected server environment.
 Imported definitions override configured and shipped definitions with the same id. Disable an
-import to prevent future starts, or remove it to reveal the configured or shipped definition it
-replaced. Invalid files remain listed with their diagnostic and do not hide valid playbooks.
+import to prevent future starts. Remove an import or a definition created through the guided flow
+to reveal any lower-priority definition with the same id. Removal keeps existing runs, history,
+and their immutable snapshots. Shipped definitions and definitions loaded from folders in
+`playbooks.json` are read-only. Invalid files remain listed with their diagnostic and do not hide
+valid playbooks.
 
 Definitions use `schema: t3-playbook/v1`, an ordered `phases` list, and explicit transitions.
 An agent task sets exactly one of `agent` or `persona`. `agent` refers to a named entry under
@@ -35,11 +38,25 @@ for that task. The same named agent cannot run twice in one phase. Built-in outp
 and `review`; review verdicts must agree with blocking findings and identify selected evidence.
 Phase visits default to one, so add `visitLimit` to every phase that a transition can revisit.
 
+### Publishing from custom playbooks
+
+Use one sequence: metadata preparation → publication approval → commit → push → draft PR.
+Each code phase has one task with `operation: metadata`, `commit`, `push`, or `draft`.
+Preparation selects one developer report phase through `evidence`; that phase must have one
+report task and run before preparation. Include preparation in the gate's evidence. Only
+`approve` may enter commit, and draft creation ends at `$complete`. Phase names are yours to choose.
+
+Preparation captures the candidate diff and publication text. Edit the commit message and PR
+text at the approval gate, save, then approve the new gate version. Changed code needs fresh
+preparation and approval. Route `request_changes` and `changed` back through development or
+preparation, and give revisited phases enough visits. Custom playbooks use developer reports
+for verification evidence; `workspace`, `validation`, and `repair_capacity` operations are
+reserved for built-in implementations.
+
 ### Validation
 
 Generic YAML transitions use `approve`/`request_changes` for gates, `completed` (and `revise`
-for review aggregation) for agent phases, and `pass` (and `revise` for validation aggregation)
-for code phases. `changed` is reserved for invalidation. Evidence references must name a phase
+for review aggregation) for agent phases, and `pass` for code phases. `changed` is reserved for invalidation. Evidence references must name a phase
 (or `__workspace`) and approval references must name a gate; import diagnostics identify the
 source file and field.
 

@@ -1,5 +1,5 @@
 import * as NodeCrypto from "node:crypto";
-import type { Action, Artifact, Run } from "@j5/playbook-contracts";
+import type { Action, Artifact, Run, PublicationPhases } from "@j5/playbook-contracts";
 import type { AgentPersonaAuthorityPolicy } from "@t3tools/contracts";
 
 /** Object key order is not part of command or artifact identity. */
@@ -41,6 +41,7 @@ export interface Definition {
   readonly version: number;
   /** Includes executable implementation version, schemas, prompts, and phase table. */
   readonly hash: string;
+  readonly publication?: PublicationPhases;
   readonly initial: string;
   readonly phases: ReadonlyArray<Phase>;
   readonly title?: string;
