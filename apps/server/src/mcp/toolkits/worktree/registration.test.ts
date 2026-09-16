@@ -178,7 +178,8 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(toolNames).toContain("schedule_task");
       expect(toolNames).toContain("t3_thread_list");
       expect(toolNames).toContain("t3_thread_read");
-      expect(toolNames).toContain("t3_thread_wait");
+      // Blocking on another thread starves a participant of the notices it waits for.
+      expect(toolNames).not.toContain("t3_thread_wait");
       // J5 re-declares delegate_task with a saved-agent parameter and keeps its status/cancel pair.
       expect(toolNames).toContain("delegate_task");
       expect(toolNames).toContain("task_status");
@@ -230,7 +231,6 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "stop_agent",
         "t3_thread_list",
         "t3_thread_read",
-        "t3_thread_wait",
         "t3_worktree_handoff",
         "t3_worktree_status",
         "task_cancel",
