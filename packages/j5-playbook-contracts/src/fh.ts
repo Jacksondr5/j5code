@@ -59,6 +59,8 @@ export const Validation = Schema.Struct({
   ),
 });
 export const PublicationMetadata = Schema.Struct({
+  // Last published commit; absent in legacy runs that publish once from the pinned base.
+  parentCommit: Schema.optional(Text),
   diff: Schema.String,
   codeIdentity: Text,
   tree: Text,
@@ -85,4 +87,11 @@ export const PullRequestResult = Schema.Struct({
   number: Schema.Number,
   draft: Schema.Literal(true),
   merged: Schema.Literal(false),
+});
+export const PullRequestFeedback = Schema.Struct({
+  url: Text,
+  commit: Text,
+  collectedAt: Text,
+  body: Schema.String,
+  unknowns: Schema.Array(Schema.String),
 });

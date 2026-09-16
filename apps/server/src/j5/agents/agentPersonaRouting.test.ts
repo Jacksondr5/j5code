@@ -138,8 +138,19 @@ describe("agent persona routing", () => {
     );
   });
 
-  it("blocks Builder fallback, Investigator, and Publisher when authority cannot be enforced", () => {
-    for (const personaId of ["builder", "investigator", "publisher"] as const) {
+  it("routes Investigator only through providers supporting read-only diagnosis", () => {
+    const definition = listBuiltInAgentPersonas().find(({ id }) => id === "investigator")!;
+    for (const target of definition.modelRoute) {
+      const resolution = resolveAgentPersonaRoute({
+        personaId: "investigator",
+        providers: [providerForTarget(target)],
+      });
+      assert.equal(resolution.status, "available");
+    }
+  });
+
+  it("blocks Builder fallback and Publisher when authority cannot be enforced", () => {
+    for (const personaId of ["builder", "publisher"] as const) {
       const definition = listBuiltInAgentPersonas().find(({ id }) => id === personaId)!;
       const [primary, fallback] = definition.modelRoute;
       const providers =

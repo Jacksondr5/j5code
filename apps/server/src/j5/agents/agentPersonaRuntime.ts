@@ -53,6 +53,8 @@ export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime"
       thread.id === undefined ? undefined : agentPersonaArtifactInstructions(definition, thread.id);
     if (artifactSection !== undefined) instructions = `${instructions}\n\n${artifactSection}`;
   }
+  if (assignment.authorityPolicy === "diagnostic")
+    instructions = `${instructions ?? ""}\n\nDiagnostic runtime limitation: this environment enforces read-only access with no network access. Inspect existing evidence and use only read-only diagnostics. If reproduction requires writes or temporary instrumentation, report that limitation and the missing evidence; do not claim the issue was reproduced or request broader permissions.`;
   return {
     ...translateAgentPersonaProviderPolicy(assignment.authorityPolicy, assignment.resolvedDriver),
     ...(instructions === undefined ? {} : { agentPersonaInstructions: instructions }),

@@ -84,6 +84,31 @@ const TestLayer = layerFromProjectRepository.pipe(
 );
 
 it.layer(TestLayer)("agent persona runtime policy", (it) => {
+  it.effect("makes the diagnostic read-only limitation explicit", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const thread = {
+        ...makeThread({ now, worktreePath: "/project-worktree" }),
+        agentPersonaAssignment: {
+          personaId: "investigator",
+          definitionVersion: 1,
+          authorityPolicy: "diagnostic",
+          resolvedRoute: "primary",
+          resolvedDriver: ProviderDriverKind.make("codex"),
+          resolvedModelSelection: modelSelection,
+        },
+      } satisfies OrchestrationV2AppThread;
+      const resolved = yield* policy.resolve({ thread, modelSelection });
+      assert.deepEqual(resolved.sandboxPolicy, {
+        type: "readOnly",
+        access: { type: "fullAccess" },
+        networkAccess: false,
+      });
+      assert.include(resolved.agentPersonaInstructions!, "Diagnostic runtime limitation");
+      assert.include(resolved.agentPersonaInstructions!, "do not claim the issue was reproduced");
+    }),
+  );
   it.effect("lets durable persona authority override the thread runtime mode", () =>
     Effect.gen(function* () {
       const policy = yield* RuntimePolicyV2;
