@@ -3441,7 +3441,7 @@ describe("timeline minimap items", () => {
     assistantCopyStreaming: false,
   });
 
-  it("keeps only messages the person typed", () => {
+  it("keeps only messages the person sent, including Inbox replies", () => {
     expect(isHumanAuthoredUserMessage(message({ id: "typed" }))).toBe(true);
     expect(isHumanAuthoredUserMessage(message({ id: "web", createdBy: "user" }))).toBe(true);
     expect(isHumanAuthoredUserMessage(message({ id: "steer", inputIntent: "steer" }))).toBe(true);
@@ -3452,7 +3452,19 @@ describe("timeline minimap items", () => {
     );
     expect(isHumanAuthoredUserMessage(message({ id: "nudge", createdBy: "system" }))).toBe(false);
     expect(
-      isHumanAuthoredUserMessage(message({ id: `${J5_A2A_DELIVERY_MESSAGE_PREFIX}inbox` })),
+      isHumanAuthoredUserMessage(
+        message({ id: `${J5_A2A_DELIVERY_MESSAGE_PREFIX}inbox`, createdBy: "user" }),
+      ),
+    ).toBe(true);
+    expect(
+      isHumanAuthoredUserMessage(
+        message({ id: `${J5_A2A_DELIVERY_MESSAGE_PREFIX}peer`, createdBy: "agent" }),
+      ),
+    ).toBe(false);
+    expect(
+      isHumanAuthoredUserMessage(
+        message({ id: `${J5_A2A_DELIVERY_MESSAGE_PREFIX}silence`, createdBy: "system" }),
+      ),
     ).toBe(false);
     expect(
       isHumanAuthoredUserMessage(
@@ -3471,11 +3483,25 @@ describe("timeline minimap items", () => {
       row(message({ id: "a3", role: "assistant", text: "reply to schedule" })),
       row(message({ id: "u2", text: "second ask" })),
       row(message({ id: "a4", role: "assistant", text: "second reply" })),
+      row(
+        message({
+          id: `${J5_A2A_DELIVERY_MESSAGE_PREFIX}inbox`,
+          createdBy: "user",
+          text: "inbox reply",
+        }),
+      ),
+      row(message({ id: "a5", role: "assistant", text: "reply to inbox" })),
     ];
 
     expect(deriveTimelineMinimapItems(rows)).toEqual([
       { id: "u1", rowIndex: 0, userText: "first ask", assistantText: "first reply" },
       { id: "u2", rowIndex: 6, userText: "second ask", assistantText: "second reply" },
+      {
+        id: `${J5_A2A_DELIVERY_MESSAGE_PREFIX}inbox`,
+        rowIndex: 8,
+        userText: "inbox reply",
+        assistantText: "reply to inbox",
+      },
     ]);
   });
 });
