@@ -52,7 +52,7 @@ An agent learns what it can do from its tools, and it reads a tool's description
 
 Read-only; no events.
 
-**Result rows:** `display_name` (the agent's thread title, or the Role name once Roles exist), `squadron_id`, `participant_id`, the participant kind, `self`, `archived`, `can_receive_message`, `can_open_exchange`, `accepts_urgency`, plus `provenance` (spawned by whom, forked from what, unrecorded, or not applicable for a person) and `placement_parent_id`. A person's row reports that it cannot receive a plain message and can be asked. A machine participant's row carries kind `machine`, its registered name as `display_name`, provenance `not-applicable`, and reports that it can receive nothing and open no Exchange. An archived agent's row, when requested, reports that it can receive nothing. Provenance and placement are carried for callers and the UI; they are not part of the description's pitch.
+**Result rows:** `display_name` (the agent's thread title, or the Role name once Roles exist), `squadron_id`, `participant_id`, the participant kind, `self`, `archived`, `can_receive_message`, `can_open_exchange`, `accepts_urgency`, plus `provenance` (spawned by whom, forked from what, unrecorded, or not applicable for a person) and `placement_parent_id`. A person's row reports that it cannot receive a plain message and can be asked. A machine participant's row carries kind `machine`, its registered name as `display_name`, provenance `not-applicable`, and reports that it can receive nothing and open no Exchange. An archived agent's row, when requested, reports that it can receive nothing. Participants homed on peer servers appear beside local ones, told apart only by their Squadron; the result carries no server field, and a peer that could not be read is reported as unread in the result rather than omitted. Provenance and placement are carried for callers and the UI; they are not part of the description's pitch.
 
 ### `spawn_agent`
 
@@ -346,6 +346,7 @@ stopping retires nothing.
 18. Approving a proposal spawns exactly once; a second approval finds it claimed; a spawn that fails after reserving its seats reopens the gate, and the retry converges on those seats.
 19. `archive_crew` is Captain-only, refuses with per-seat facts and a token when any seat has an open Exchange or a running turn, and finishes a partial archive on retry; `t3_thread_organize` refuses an active Crew member, while Captain archive retains the unit cascade.
 20. `stop_crew` is Captain-only, interrupts every seat with a running turn and reports each seat as interrupted, already idle, or archived; it settles, retires, and closes nothing, and a non-Captain or an archived Crew is refused naming the next step. The person's Stop crew control does the same through the operate scope.
+21. `list_participants` lists participants homed on peer servers with their Squadron and no server field and reports an unreadable peer in the result; `send_message` accepts their ids exactly as local ones.
 
 ## History
 
@@ -369,3 +370,4 @@ stopping retires nothing.
 - 2026-09-14 — `delegate_task`, `task_status`, and `task_cancel` return to the J5 surface, with a saved-agent `agent` parameter on `delegate_task` replacing the J5-only `invoke_agent` ([review](https://github.com/Jacksondr5/j5code/pull/124#issuecomment-5663559782)).
 - 2026-09-15 — machine participants appear in `list_participants` as named senders that receive nothing (issue #74).
 - 2026-09-17 — personas, not agents: `list_agents` becomes `list_personas`, the `agent` parameter on `spawn_agent`, `delegate_task`, and crew seats becomes `persona` (no alias: pre-dogfood, no legacy-compatibility code), crew results carry `persona_id`, and the mention is `@persona:ID`; "agent" keeps meaning a running participant (Bryant; [record](../../worklog/2026-09-16-crew-command-decoupling.md)).
+- 2026-09-16 — participants homed on peer servers appear in the address book and are addressed like local ones; AC17 ([record](../../worklog/2026-09-16-cross-server-peering-session.md)).
