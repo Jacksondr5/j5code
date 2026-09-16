@@ -8,10 +8,13 @@ import {
   AddPeerRequest,
   IssuePeerCredentialRequest,
   J5_PEER_API_PATHS,
+  PeerDeliveryRequest,
   RemovePeerRequest,
+  environmentIdFromPeerSubject,
   peerSubjectForEnvironment,
   type AddPeerResponse,
   type IssuePeerCredentialResponse,
+  type PeerDeliveryResponse,
   type PeerHelloResponse,
   type PeerListResponse,
   type RemovePeerResponse,
@@ -37,19 +40,23 @@ import {
   failEnvironmentScopeRequired,
 } from "../../auth/http.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
+import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
+import { PeerInboundService } from "./PeerInboundService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 
 /**
  * The peering HTTP surface. Administrative routes (issue a credential, add,
  * list, remove) carry the same `access:*` scopes as Settings → Connections,
- * because a peer is one more authorized session there. The hello route is the
- * one thing a peer credential can reach in this PR: it proves reachability and
- * tells the caller who this server is and whom the credential names.
+ * because a peer is one more authorized session there. A peer credential
+ * reaches two routes: hello, which proves reachability and tells the caller who
+ * this server is and whom the credential names, and deliver, which accepts one
+ * message from a registered peer and records it before delivering locally.
  */
 
 const decodeIssueRequest = Schema.decodeUnknownEffect(IssuePeerCredentialRequest);
 const decodeAddRequest = Schema.decodeUnknownEffect(AddPeerRequest);
 const decodeRemoveRequest = Schema.decodeUnknownEffect(RemovePeerRequest);
+const decodeDeliveryRequest = Schema.decodeUnknownEffect(PeerDeliveryRequest);
 
 const authenticate = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
@@ -102,6 +109,25 @@ const addFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServer
   }
 };
 
+const deliveryFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServerResponse> => {
+  const tag = tagOf(error);
+  const message = messageOf(error, "Delivery failed.");
+  switch (tag) {
+    case "A2APeerReceiverNotFoundError":
+      return Effect.succeed(jsonError(404, "recipient_not_found", message));
+    case "A2APeerReceiverNotDeliverableError":
+      return Effect.succeed(jsonError(403, "policy_refused", message, { reason: tag }));
+    case "A2APeerAskIntentRequiredError":
+      return Effect.succeed(requestFailure(message));
+    case "CommCommandConflictError":
+      return Effect.succeed(jsonError(409, "message_id_conflict", message));
+    default:
+      return Effect.logError("J5 A2A peer delivery failed", { cause: error }).pipe(
+        Effect.as(jsonError(500, tag, "Delivery failed.")),
+      );
+  }
+};
+
 const respondableTags = {
   EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
   EnvironmentInternalError: HttpServerRespondable.toResponse,
@@ -116,8 +142,39 @@ const readJsonBody = Effect.gen(function* () {
 export const peerHttpRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const peers = yield* PeerRegistryService;
+    const inbound = yield* PeerInboundService;
+    const worker = yield* A2ADeliveryWorker;
     const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+
+    /** A credential alone is not enough: the environment it names must be a recorded peer. */
+    const registeredPeerForSession = (session: EnvironmentAuth.AuthenticatedSession) =>
+      Effect.gen(function* () {
+        const environmentId = environmentIdFromPeerSubject(session.subject);
+        if (environmentId === null) {
+          return Result.fail(
+            jsonError(
+              403,
+              "peer_subject_required",
+              `This credential is not bound to a peer environment (subject "${session.subject}").`,
+            ),
+          );
+        }
+        const listed = yield* Effect.result(peers.list());
+        if (Result.isFailure(listed)) {
+          yield* Effect.logError("J5 A2A peer lookup failed", { cause: listed.failure });
+          return Result.fail(jsonError(500, tagOf(listed.failure), "Peer lookup failed."));
+        }
+        return listed.success.some((peer) => peer.environmentId === environmentId)
+          ? Result.succeed(environmentId)
+          : Result.fail(
+              jsonError(
+                403,
+                "peer_not_registered",
+                `Environment ${environmentId} holds a credential but is not a recorded peer of this server. Record it with \`j5 a2a peer add\` here, or remove the stale credential in Settings → Connections.`,
+              ),
+            );
+      });
 
     /** One live session per peer subject: issuing again rotates the old one out. */
     const revokeSessionsForSubject = (subject: string) =>
@@ -281,6 +338,46 @@ export const peerHttpRouteLayer = Layer.unwrap(
       }).pipe(Effect.catchTags(respondableTags)),
     );
 
-    return Layer.mergeAll(helloRoute, issueCredentialRoute, addRoute, listRoute, removeRoute);
+    const deliverRoute = HttpRouter.add(
+      "POST",
+      J5_PEER_API_PATHS.deliver,
+      Effect.gen(function* () {
+        yield* annotateEnvironmentRequest("j5.a2a.peer.deliver");
+        const session = yield* authenticate;
+        yield* requireScope(session, AuthA2APeerScope);
+        const origin = yield* registeredPeerForSession(session);
+        if (Result.isFailure(origin)) return origin.failure;
+        const body = yield* readJsonBody;
+        if (Result.isFailure(body)) return requestFailure("The request body must be JSON.");
+        const decoded = yield* Effect.result(decodeDeliveryRequest(body.success));
+        if (Result.isFailure(decoded)) {
+          return requestFailure(
+            "messageId, senderId, receiverId, exchangeId, correlationId, exchangeRole, envelopeChannel, text, originSquadronId, and createdAt are required.",
+          );
+        }
+        const received = yield* Effect.result(
+          inbound.receive({ ...decoded.success, originEnvironmentId: origin.success }),
+        );
+        if (Result.isFailure(received)) return yield* deliveryFailure(received.failure);
+        yield* worker.notify;
+        return HttpServerResponse.jsonUnsafe(
+          {
+            accepted: true,
+            receivedSeq: received.success.receivedSeq,
+            replay: received.success.replay,
+          } satisfies PeerDeliveryResponse,
+          { status: received.success.replay ? 200 : 201 },
+        );
+      }).pipe(Effect.catchTags(respondableTags)),
+    );
+
+    return Layer.mergeAll(
+      helloRoute,
+      issueCredentialRoute,
+      addRoute,
+      listRoute,
+      removeRoute,
+      deliverRoute,
+    );
   }),
 );
