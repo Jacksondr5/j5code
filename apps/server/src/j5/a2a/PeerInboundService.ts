@@ -251,6 +251,46 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
             }
           }
 
+          if (
+            input.exchangeRole === "terminal_notice" &&
+            input.terminal !== undefined &&
+            exchangeId !== null
+          ) {
+            // The origin dropped the Exchange; this side holds the same Exchange and drops it too.
+            const open = yield* sql<OpenExchangeRow>`
+              SELECT exchange_id
+              FROM j5_a2a_exchange
+              WHERE squadron_id = ${receiver.squadronId}
+                AND exchange_id = ${exchangeId}
+                AND status = 'open'
+              LIMIT 1
+            `;
+            if (open[0] !== undefined) {
+              events.push({
+                kind: "exchange.dropped",
+                sender: senderId,
+                receiver: receiverId,
+                exchangeId,
+                correlationId,
+                payload: {
+                  disposition: input.terminal.disposition,
+                  cause: {
+                    kind: input.terminal.cause.kind,
+                    participantId: ParticipantId.make(input.terminal.cause.participantId),
+                    squadronId: SquadronId.make(input.terminal.cause.squadronId),
+                  },
+                  facts: {
+                    replyRequired: false,
+                    retryAllowed: false,
+                    replacementRequired: false,
+                  },
+                  noticeMessageId: messageId,
+                },
+                createdAt: input.createdAt,
+              });
+            }
+          }
+
           const appended = yield* ledger.appendEvents({
             commandId: peerReceiveCommandId({
               originEnvironmentId: input.originEnvironmentId,
