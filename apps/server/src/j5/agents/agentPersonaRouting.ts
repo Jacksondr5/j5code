@@ -60,7 +60,7 @@ export function unavailableAgentPersonaReason(
     : "routes-unavailable";
 }
 
-function unavailableReason(
+export function unavailableReason(
   provider: ServerProvider,
   target: AgentModelTarget,
 ): AgentPersonaRouteFailureCode | undefined {
