@@ -2,6 +2,7 @@ import { Tool, Toolkit } from "effect/unstable/ai";
 import * as Schema from "effect/Schema";
 
 import {
+  AgentPersonaId,
   OrchestrationV2RunStatus,
   ProjectId,
   ProviderInstanceId,
@@ -13,6 +14,7 @@ import * as McpInvocationContext from "../../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
+import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
 import { ArchiveAgentService } from "../ArchiveAgentService.ts";
 import {
   A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION,
@@ -117,6 +119,7 @@ const NonEmptyString = Schema.String.check(Schema.isNonEmpty());
 export const J5SpawnAgentInput = Schema.Struct({
   brief: NonEmptyString,
   title: Schema.optional(NonEmptyString),
+  agent: Schema.optional(AgentPersonaId),
   provider: ProviderInstanceId,
   model: NonEmptyString,
   reasoning: NonEmptyString,
@@ -222,7 +225,7 @@ export const J5_LIST_SQUADRONS_DESCRIPTION =
   "The Squadron directory for this environment: every Squadron's squadron_id, name, and the project ids it references, plus your own thread's project id so you can see which Squadron can home you. Use it to obtain the exact squadron_id before join_squadron. Read-only.";
 
 export const J5_SPAWN_AGENT_DESCRIPTION =
-  "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. Reuse client_request_id to retry the same spawn safely.";
+  "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. Set agent to a saved agent id to spawn that agent with its saved instructions and runtime policy; provider, model, and reasoning stay required and must be one of that agent's declared routes. Reuse client_request_id to retry the same spawn safely.";
 
 export const J5_STOP_AGENT_DESCRIPTION =
   "Stop one Peer Agent: interrupts its running turn now. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. Requires your current squadron_id. Reuse client_request_id to retry safely.";
@@ -255,6 +258,8 @@ const spawnDependencies = [
   SpawnCompositionService,
   ThreadManagementService,
   OrchestratorMcpService,
+  // A saved agent resolves its route against the live provider registry.
+  ProviderRegistry,
 ];
 
 const joinDependencies = [
