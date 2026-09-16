@@ -12,9 +12,11 @@ import * as Option from "effect/Option";
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
 
 import ChatMarkdown from "../../components/ChatMarkdown";
+import { DiffFilePathCopyButton } from "../../components/DiffFilePathCopyButton";
 import { Button } from "../../components/ui/button";
 import { ScrollArea } from "../../components/ui/scroll-area";
 import { SidebarInset } from "../../components/ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../../components/WorkspaceBreadcrumb";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { isElectron } from "../../env";
@@ -288,6 +290,7 @@ export function ArtifactsPage({
     }
   }, [entries, selectedEnvironmentId, selectedPath, selectedProjectId, trashing]);
   const selectedExtension = selectedPath === null ? "" : extensionOf(selectedPath);
+  const selectedName = selectedPath?.split("/").at(-1) ?? null;
   const image = IMAGE_MEDIA_TYPES[selectedExtension] !== undefined;
   const markdown = MARKDOWN_EXTENSIONS.has(selectedExtension);
   const html = selectedExtension === "html" || selectedExtension === "htm";
@@ -385,19 +388,10 @@ export function ArtifactsPage({
               <div className="p-2">
                 <div className="flex items-center px-2 py-1.5">
                   <p className="text-xs font-medium text-muted-foreground">Files</p>
-                  <Button
-                    aria-label="Move artifact to Trash"
-                    className="ms-auto"
-                    disabled={selectedPath === null || trashing}
-                    onClick={() => void trashSelectedArtifact()}
-                    size="icon-xs"
-                    variant="ghost"
-                  >
-                    <Trash2Icon className="size-3.5" />
-                  </Button>
                   {embedded ? (
                     <Button
                       aria-label="Refresh artifacts"
+                      className="ms-auto"
                       disabled={listState === "loading" || selectedProject === null}
                       onClick={refresh}
                       size="icon-xs"
@@ -454,48 +448,72 @@ export function ArtifactsPage({
             />
           </div>
 
-          <ScrollArea className="min-h-0">
-            <div className={cn("min-h-full", embedded ? "p-4" : "p-5 md:p-8")}>
-              {contentState === "loading" ? (
-                <p className="text-sm text-muted-foreground">Opening artifact…</p>
-              ) : contentState === "error" ? (
-                <p className="text-sm text-destructive">{error}</p>
-              ) : content === null ? (
-                <div className="flex min-h-72 flex-col items-center justify-center text-center text-muted-foreground">
-                  <FolderArchiveIcon className="mb-3 size-8" />
-                  <p className="text-sm">Select an artifact to preview it.</p>
-                </div>
-              ) : image ? (
-                <img
-                  alt={content.path}
-                  className="mx-auto max-h-[calc(100dvh-8rem)] max-w-full rounded-md border border-border object-contain"
-                  src={binaryDataUrl(content)}
-                />
-              ) : html && content.encoding === "utf8" ? (
-                <iframe
-                  className="h-[calc(100dvh-8rem)] min-h-96 w-full border-0 bg-transparent"
-                  referrerPolicy="no-referrer"
-                  sandbox=""
-                  srcDoc={content.content}
-                  title={`Artifact preview: ${content.path}`}
-                />
-              ) : markdown && content.encoding === "utf8" ? (
-                <ChatMarkdown
-                  className="mx-auto max-w-4xl"
-                  cwd={selectedWorkspaceRoot}
-                  text={content.content}
-                />
-              ) : content.encoding === "utf8" ? (
-                <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-sm">
-                  {content.content}
-                </pre>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Binary preview is not available for this artifact.
-                </p>
-              )}
-            </div>
-          </ScrollArea>
+          <div className="flex min-h-0 min-w-0 flex-col">
+            <header className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-3">
+              <p className="min-w-0 flex-1 truncate text-xs font-medium">
+                {selectedName ?? "No artifact selected"}
+              </p>
+              {selectedPath !== null ? <DiffFilePathCopyButton filePath={selectedPath} /> : null}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      aria-label="Move artifact to Trash"
+                      disabled={selectedPath === null || trashing}
+                      onClick={() => void trashSelectedArtifact()}
+                      size="icon-micro"
+                      variant="ghost"
+                    />
+                  }
+                >
+                  <Trash2Icon className="size-3 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipPopup>Move to Trash</TooltipPopup>
+              </Tooltip>
+            </header>
+            <ScrollArea className="min-h-0 flex-1">
+              <div className={cn("min-h-full", embedded ? "p-4" : "p-5 md:p-8")}>
+                {contentState === "loading" ? (
+                  <p className="text-sm text-muted-foreground">Opening artifact…</p>
+                ) : contentState === "error" ? (
+                  <p className="text-sm text-destructive">{error}</p>
+                ) : content === null ? (
+                  <div className="flex min-h-72 flex-col items-center justify-center text-center text-muted-foreground">
+                    <FolderArchiveIcon className="mb-3 size-8" />
+                    <p className="text-sm">Select an artifact to preview it.</p>
+                  </div>
+                ) : image ? (
+                  <img
+                    alt={content.path}
+                    className="mx-auto max-h-[calc(100dvh-8rem)] max-w-full rounded-md border border-border object-contain"
+                    src={binaryDataUrl(content)}
+                  />
+                ) : html && content.encoding === "utf8" ? (
+                  <iframe
+                    className="h-[calc(100dvh-8rem)] min-h-96 w-full border-0 bg-transparent"
+                    referrerPolicy="no-referrer"
+                    sandbox=""
+                    srcDoc={content.content}
+                    title={`Artifact preview: ${content.path}`}
+                  />
+                ) : markdown && content.encoding === "utf8" ? (
+                  <ChatMarkdown
+                    className="mx-auto max-w-4xl"
+                    cwd={selectedWorkspaceRoot}
+                    text={content.content}
+                  />
+                ) : content.encoding === "utf8" ? (
+                  <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-sm">
+                    {content.content}
+                  </pre>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Binary preview is not available for this artifact.
+                  </p>
+                )}
+              </div>
+            </ScrollArea>
+          </div>
         </div>
       </div>
     </SidebarInset>
