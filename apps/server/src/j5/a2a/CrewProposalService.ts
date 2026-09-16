@@ -126,7 +126,7 @@ export const crewGateNoticeText = (input: {
   readonly instance: AgentCrewInstance | null;
   readonly status: "approved" | "declined";
 }) => {
-  const head = `<j5_crew_gate>\nproposal_id: ${input.proposal.id}\nkind: ${input.proposal.kind}\ndecision: ${input.status}`;
+  const head = `<j5_crew_gate>\nproposal_id: ${input.proposal.id}\nkind: ${input.proposal.kind}\ndecision: ${input.status}\ncrew_name: ${input.proposal.displayName}`;
   if (input.instance === null || input.status === "declined") {
     return `${head}\nrequested_seats: ${input.proposal.requestedSeats.map(({ seat, agentId }) => `${seat}=${agentId}`).join(", ")}\n</j5_crew_gate>\n\nThe human declined this crew request. Continue with the agents you have, or revise the request and propose again with a clearer reason.`;
   }

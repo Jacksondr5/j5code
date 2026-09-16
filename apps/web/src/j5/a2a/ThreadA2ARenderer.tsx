@@ -1,9 +1,12 @@
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import type { ChatMessage } from "~/types";
 import { useNowMinute } from "~/hooks/useNowMinute";
+import type { ScopedThreadRef } from "@t3tools/contracts";
 import { InboxIcon, SendIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { renderCrewNotice } from "../crew/CrewNoticeRenderer";
+import { participantIdsForCrewNotice } from "../crew/crewNotices.logic";
 import { presentParticipantIdentity } from "./ParticipantIdentity";
 
 /**
@@ -40,6 +43,9 @@ export interface ThreadA2ADeliveryCompositionInput {
   readonly participantLabels?: ReadonlyMap<string, string> | undefined;
   /** The caller supplies this only when it can prove the authenticated viewer. */
   readonly resolveViewerParticipantId?: (() => string | null) | undefined;
+  /** The shown thread, for Crew cards that open seats and render the brief's markdown. */
+  readonly threadRef?: ScopedThreadRef | null | undefined;
+  readonly markdownCwd?: string | undefined;
   /** Test-only clock injection; production cards read the current wall clock once per render. */
   readonly now?: number | undefined;
 }
@@ -301,7 +307,9 @@ export function presentThreadA2ADelivery(
 
 export function participantIdsForThreadA2ADelivery(message: ChatMessage): ReadonlyArray<string> {
   const presentation = presentThreadA2ADelivery({ message });
-  return presentation?.kind === "peer" ? [presentation.senderId] : [];
+  return presentation?.kind === "peer"
+    ? [presentation.senderId]
+    : participantIdsForCrewNotice(message);
 }
 
 export function formatThreadA2AQueuedDelivery(
@@ -624,6 +632,10 @@ export function renderThreadA2AOutboundTool(input: {
  * returns null for non-A2A messages so the existing renderer owns that path.
  */
 export function renderThreadA2ADelivery(props: ThreadA2ADeliveryCompositionInput): ReactNode {
+  // Crew notices share this user-row seam: the person's `/crew` turn and the platform's gate
+  // decisions render as cards here, so the upstream row never shows their tagged blocks.
+  const crewNotice = renderCrewNotice(props);
+  if (crewNotice !== null) return crewNotice;
   const presentation = presentThreadA2ADelivery(props);
   if (presentation === null) return null;
 
