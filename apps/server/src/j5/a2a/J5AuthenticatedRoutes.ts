@@ -21,6 +21,7 @@ import { humanInboxHttpRouteLayer } from "./HumanInboxHttp.ts";
 import { importedThreadsHttpRouteLayer } from "./ImportedThreadsHttp.ts";
 import { machineSenderHttpRouteLayer } from "./MachineSenderHttp.ts";
 import { peerHttpRouteLayer } from "./PeerHttp.ts";
+import { layer as peerInboundLayer } from "./PeerInboundService.ts";
 import { layer as peerRegistryLayer } from "./PeerRegistryService.ts";
 import { preArchiveFactsHttpRouteLayer } from "./PreArchiveFactsHttp.ts";
 import { layer as squadronManagementServiceLayer } from "./SquadronManagementService.ts";
@@ -39,6 +40,7 @@ const serverIdentityLayer = ServerEnvironment.identityLayer.pipe(
 );
 const peerRoutesProvided = peerHttpRouteLayer.pipe(
   Layer.provide(peerRegistryLayer.pipe(Layer.provide(FetchHttpClient.layer))),
+  Layer.provide(peerInboundLayer),
   Layer.provide(serverIdentityLayer),
 );
 

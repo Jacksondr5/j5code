@@ -22,6 +22,7 @@ import {
   type ExchangeId,
   MessageDeliveredPayload,
   MessageDeliveryFailedPayload,
+  MessageReceivedPayload,
   MessageSentPayload,
   type SquadronId,
   type LedgerCursor,
@@ -200,10 +201,12 @@ const decodeMessageCancelled = Schema.decodeUnknownEffect(
   Schema.Struct({ messageId: Schema.String, reason: Schema.String }),
 );
 const decodeMessageSent = Schema.decodeUnknownEffect(MessageSentPayload);
+const decodeMessageReceived = Schema.decodeUnknownEffect(MessageReceivedPayload);
 const decodeMessageDelivered = Schema.decodeUnknownEffect(MessageDeliveredPayload);
 const decodeMessageDeliveryFailed = Schema.decodeUnknownEffect(MessageDeliveryFailedPayload);
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
-const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Json));
+// Unknown-typed so a payload with an optional key (a peer-received row) still encodes.
+const encodeJson = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 
 const preserveDomainError =
   (operation: string) =>
@@ -565,7 +568,64 @@ export const layer: Layer.Layer<
             WHERE squadron_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status <> 'delivered'`;
           return;
         }
-        case "message.received":
+        case "message.received": {
+          // A row received from a peer server is the only sent-side fact this
+          // server has, so it projects the pending delivery a local send would.
+          const received = yield* decodeMessageReceived(event.payload);
+          if (received.originEnvironmentId === undefined) return;
+          const message = yield* decodeMessageSent(received.message);
+          if (event.sender === null || event.receiver === null) {
+            return yield* new A2AStorageError({ operation: "project peer-received message" });
+          }
+          yield* sql`
+            INSERT INTO j5_a2a_delivery (
+              squadron_id,
+              message_id,
+              command_id,
+              sent_seq,
+              sender_id,
+              receiver_id,
+              receiver_squadron_id,
+              exchange_id,
+              exchange_role,
+              envelope_channel,
+              correlation_id,
+              message_text,
+              status,
+              attempts,
+              last_error,
+              next_attempt_at,
+              delivered_seq,
+              created_at,
+              updated_at,
+              origin_squadron_id,
+              origin_environment_id
+            ) VALUES (
+              ${event.squadronId},
+              ${message.messageId},
+              ${commandId},
+              ${event.seq},
+              ${event.sender},
+              ${event.receiver},
+              ${event.squadronId},
+              ${event.exchangeId},
+              ${message.exchangeRole},
+              ${message.envelopeChannel},
+              ${event.correlationId},
+              ${message.text},
+              'pending',
+              0,
+              NULL,
+              NULL,
+              NULL,
+              ${event.createdAt},
+              ${event.createdAt},
+              ${received.originSquadronId},
+              ${received.originEnvironmentId}
+            )
+          `;
+          return;
+        }
         case "silence.notice":
         case "participant.joined":
         case "participant.left":
