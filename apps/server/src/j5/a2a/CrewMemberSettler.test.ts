@@ -352,6 +352,7 @@ it.effect(
       const scout = participantIdForThread(scoutThread);
       const scoutNotice = seatSettledNoticeText({
         seatName: "scout",
+        crewName: "Fold Crew",
         participantId: scout,
         threadId: scoutThread,
         runStatus: "completed",

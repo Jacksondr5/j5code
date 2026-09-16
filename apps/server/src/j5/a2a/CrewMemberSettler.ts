@@ -131,6 +131,8 @@ export type SeatHandoffFact =
  */
 export const seatSettledNoticeText = (input: {
   readonly seatName: string;
+  /** Which Crew the seat sits in; a Captain may command several. */
+  readonly crewName: string;
   readonly participantId: string;
   readonly threadId: string;
   readonly runStatus: string;
@@ -140,7 +142,7 @@ export const seatSettledNoticeText = (input: {
     input.handoff.status === "none declared"
       ? "handoff: none declared"
       : `handoff: ${input.handoff.status} (${input.handoff.kind})\nartifact: ${agentHandoffLogicalPath(input.handoff.path)}`;
-  const head = `<j5_seat_settled>\nseat: ${input.seatName}\nparticipant_id: ${input.participantId}\nthread_id: ${input.threadId}\nrun_status: ${input.runStatus}\n${handoffLine}\n</j5_seat_settled>`;
+  const head = `<j5_seat_settled>\nseat: ${input.seatName}\ncrew: ${input.crewName}\nparticipant_id: ${input.participantId}\nthread_id: ${input.threadId}\nrun_status: ${input.runStatus}\n${handoffLine}\n</j5_seat_settled>`;
   if (input.handoff.status !== "written") return head;
   return input.handoff.body !== null && input.handoff.body.length <= INLINE_HANDOFF_MAX_CHARS
     ? `${head}\n\n<handoff_body>\n${noticeBody(input.handoff.body)}\n</handoff_body>`
@@ -216,6 +218,7 @@ const makeLayer = (daemon: boolean) =>
         const stable = { providerSessionId: SETTLE_SESSION, requestKey: `${threadId}:${run.id}` };
         const text = seatSettledNoticeText({
           seatName,
+          crewName: instance.displayName,
           participantId: participantIdForThread(threadId),
           threadId,
           runStatus: run.status,
