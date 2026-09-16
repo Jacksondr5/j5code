@@ -31,6 +31,7 @@ export const BUILT_IN_AGENT_PERSONA_IDS = [
   "investigator",
   "prosecutor",
   "herald",
+  "crew-captain",
 ] as const;
 
 export const AgentPersonaId = TrimmedNonEmptyString.check(

@@ -53,6 +53,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 11, name: "ReversibleLifecycle" },
       { migration_id: 12, name: "AgentHandoffs" },
       { migration_id: 13, name: "MachineParticipants" },
+      { migration_id: 14, name: "AgentCrews" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -70,6 +71,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [11, "ReversibleLifecycle"],
         [12, "AgentHandoffs"],
         [13, "MachineParticipants"],
+        [14, "AgentCrews"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
@@ -1135,4 +1137,63 @@ it.effect("runs the J5 migration lane during normal SQLite setup", () =>
     `;
     assert.deepStrictEqual(rows, [{ name: "j5_a2a_comm_event" }]);
   }).pipe(Effect.provide(SqlitePersistenceMemory)),
+);
+
+// An earlier cut of the crews tables ran on one development database before id 13 went to
+// machine participants; 14 drops those earlier-shaped tables and recreates them, so that database
+// lands on the same schema as a fresh one.
+it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 12 });
+    yield* sql`
+      CREATE TABLE j5_agent_crew_instance (
+        id TEXT PRIMARY KEY, squadron_id TEXT NOT NULL, captain_participant_id TEXT NOT NULL,
+        captain_thread_id TEXT NOT NULL, display_name TEXT NOT NULL, brief TEXT NOT NULL,
+        version INTEGER NOT NULL, created_at TEXT NOT NULL, archived_at TEXT
+      )
+    `;
+    yield* sql`
+      CREATE TABLE j5_agent_crew_member (
+        crew_instance_id TEXT NOT NULL, seat_name TEXT NOT NULL, agent_id TEXT NOT NULL,
+        participant_id TEXT NOT NULL UNIQUE, thread_id TEXT NOT NULL, ordinal INTEGER NOT NULL,
+        added_version INTEGER NOT NULL,
+        approved_by TEXT NOT NULL CHECK (approved_by IN ('human', 'runbook')), reason TEXT,
+        PRIMARY KEY (crew_instance_id, seat_name)
+      )
+    `;
+    yield* sql`
+      CREATE TABLE j5_agent_crew_proposal (
+        id TEXT PRIMARY KEY, squadron_id TEXT NOT NULL, captain_participant_id TEXT NOT NULL,
+        captain_thread_id TEXT NOT NULL, crew_instance_id TEXT, kind TEXT NOT NULL,
+        status TEXT NOT NULL, brief TEXT NOT NULL, display_name TEXT NOT NULL,
+        requested_seats TEXT NOT NULL, approved_seats TEXT,
+        runbook_declared INTEGER NOT NULL, created_at TEXT NOT NULL, resolved_at TEXT
+      )
+    `;
+    yield* runJ5A2AMigrations();
+
+    const applied = yield* sql<{ readonly migration_id: number }>`
+      SELECT migration_id FROM ${sql(J5_A2A_MIGRATIONS_TABLE)} WHERE migration_id >= 13
+      ORDER BY migration_id
+    `;
+    assert.deepStrictEqual(
+      applied.map((row) => row.migration_id),
+      [13, 14],
+    );
+    const memberColumns = yield* sql<{ readonly name: string }>`
+      SELECT name FROM pragma_table_info('j5_agent_crew_member') ORDER BY cid
+    `;
+    assert.notInclude(
+      memberColumns.map((column) => column.name),
+      "approved_by",
+    );
+    const proposalColumns = yield* sql<{ readonly name: string }>`
+      SELECT name FROM pragma_table_info('j5_agent_crew_proposal') ORDER BY cid
+    `;
+    assert.notInclude(
+      proposalColumns.map((column) => column.name),
+      "runbook_declared",
+    );
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );

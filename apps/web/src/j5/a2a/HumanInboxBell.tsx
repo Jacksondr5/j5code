@@ -6,7 +6,14 @@ import { mergeOpenInboxCounts } from "@t3tools/client-runtime/j5/inbox";
 
 import { useSidebar } from "../../components/ui/sidebar";
 import { cn } from "../../lib/utils";
-import { inboxCountQueryAtom, inboxCountSourcesAtom, refreshJ5Sources } from "../state";
+import { inboxCrewRequests } from "../crew/crewProposals.logic";
+import { mergeCrewProposalSources, useCrewProposalsRefresh } from "../crew/crewProposalsClient";
+import {
+  crewProposalSourcesAtom,
+  inboxCountQueryAtom,
+  inboxCountSourcesAtom,
+  refreshJ5Sources,
+} from "../state";
 import { createVisibleRefreshHook } from "../useVisibleRefresh";
 
 export const COUNT_POLL_INTERVAL_MS = 7_500;
@@ -19,8 +26,16 @@ export const shouldShowOpenInboxCount = (count: number | null) => count !== null
 export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean }) {
   const { isMobile, setOpenMobile } = useSidebar();
   const sources = useAtomValue(inboxCountSourcesAtom);
-  const { count, incomplete } = mergeOpenInboxCounts(sources);
+  const crewSources = useAtomValue(crewProposalSourcesAtom);
+  const merged = mergeOpenInboxCounts(sources);
+  // Mid-run seat requests are a human gate too; the bell counts them beside open questions.
+  // The initial roster is answered inline in the Captain's thread and stays off the bell.
+  const crewRequests = inboxCrewRequests(mergeCrewProposalSources(crewSources)).length;
+  const count =
+    merged.count === null ? (crewRequests > 0 ? crewRequests : null) : merged.count + crewRequests;
+  const incomplete = merged.incomplete;
   useCountRefresh();
+  useCrewProposalsRefresh();
 
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) setOpenMobile(false);

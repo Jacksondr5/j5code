@@ -1,5 +1,5 @@
 import type { ProjectId } from "@t3tools/contracts";
-import type { AnswerHumanExchangeRequest } from "@t3tools/contracts/j5";
+import type { AnswerHumanExchangeRequest, CrewProposalResolveRequest } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -48,6 +48,21 @@ export function createJ5EnvironmentAtoms<R, E>(
       execute: (input: { readonly personId?: string }) =>
         preparedConnection.pipe(
           Effect.flatMap((prepared) => J5Http.readOpenInboxCount(prepared, input.personId)),
+        ),
+    }),
+    // Crew gates are read per environment like the inbox; a Captain on any connected server
+    // reaches the human's bell and thread.
+    crewProposals: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:crew-proposals",
+      staleTimeMs: 7_500,
+      execute: (_input: Record<string, never>) =>
+        preparedConnection.pipe(Effect.flatMap(J5Http.listCrewProposals)),
+    }),
+    resolveCrewProposal: createEnvironmentCommand(runtime, {
+      label: "j5:resolve-crew-proposal",
+      execute: (input: CrewProposalResolveRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.resolveCrewProposal(prepared, input)),
         ),
     }),
     createSquadron: createEnvironmentCommand(runtime, {
