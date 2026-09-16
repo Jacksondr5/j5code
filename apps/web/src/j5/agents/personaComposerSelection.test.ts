@@ -15,7 +15,7 @@ describe("composerModelSelectionForThread", () => {
     expect(
       composerModelSelectionForThread(
         {
-          personaId: "crew-captain",
+          personaId: "navigator",
           definitionVersion: 3,
           authorityPolicy: "read-only",
           resolvedRoute: "primary",

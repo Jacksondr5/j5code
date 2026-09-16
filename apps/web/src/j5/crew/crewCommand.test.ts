@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { addSeat, describeSeatAgent, removeSeat } from "./CrewProposalCard";
-import { CREW_CAPTAIN_PERSONA, crewCommandRefusal, parseCrewCommand } from "./crewCommand";
+import { crewCommandRefusal, crewLaunchPrompt, parseCrewCommand } from "./crewCommand";
 import { j5CrewSlashCommandItems } from "./crewSlashCommand";
 import { ProviderDriverKind } from "@t3tools/contracts";
 
@@ -18,27 +18,21 @@ describe("/crew command", () => {
     expect(parseCrewCommand("/crew")).toEqual({ kind: "missing-brief" });
     expect(parseCrewCommand("/crews go")).toBeNull();
     expect(parseCrewCommand("please /crew this")).toBeNull();
-    expect(CREW_CAPTAIN_PERSONA.personaId).toBe("crew-captain");
   });
 
-  it("refuses without a brief or on an existing thread, and allows a fresh draft", () => {
-    const draft = { isLocalDraftThread: true, captainAvailable: true };
-    expect(crewCommandRefusal({ kind: "missing-brief" }, draft)?.title).toBe(
-      "Give the crew a brief",
-    );
+  it("refuses only a missing brief; any thread and any agent may compose a crew", () => {
+    expect(crewCommandRefusal({ kind: "missing-brief" })?.title).toBe("Give the crew a brief");
+    expect(crewCommandRefusal({ kind: "launch", brief: "x" })).toBeNull();
+  });
+
+  it("sends the brief verbatim after the platform's crew guidance", () => {
+    const prompt = crewLaunchPrompt("Land the invoice-export PR: build, review, sit on CI.");
+    expect(prompt.startsWith("<j5_crew_launch>\n")).toBe(true);
     expect(
-      crewCommandRefusal({ kind: "launch", brief: "x" }, { ...draft, isLocalDraftThread: false })
-        ?.title,
-    ).toBe("Start a new thread for a crew");
-    expect(
-      crewCommandRefusal({ kind: "launch", brief: "x" }, { ...draft, captainAvailable: false })
-        ?.title,
-    ).toBe("Add a crew-captain agent first");
-    // Unknown availability defers to the server rather than blocking the send.
-    expect(
-      crewCommandRefusal({ kind: "launch", brief: "x" }, { ...draft, captainAvailable: null }),
-    ).toBeNull();
-    expect(crewCommandRefusal({ kind: "launch", brief: "x" }, draft)).toBeNull();
+      prompt.endsWith("</j5_crew_launch>\n\nLand the invoice-export PR: build, review, sit on CI."),
+    ).toBe(true);
+    expect(prompt).toContain("propose_crew");
+    expect(prompt).toContain("several Crews at once");
   });
 });
 
@@ -85,10 +79,9 @@ describe("crew proposal roster edits", () => {
 });
 
 describe("/crew slash menu entry", () => {
-  it("offers /crew only on a fresh draft and inserts the command on selection", () => {
+  it("offers /crew in every composer and inserts the command on selection", () => {
     const codex = ProviderDriverKind.make("codex");
-    expect(j5CrewSlashCommandItems(codex, true)).toEqual([]);
-    const [item] = j5CrewSlashCommandItems(codex, false);
+    const [item] = j5CrewSlashCommandItems(codex);
     expect(item).toMatchObject({
       type: "provider-slash-command",
       label: "/crew",
