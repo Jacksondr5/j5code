@@ -1,16 +1,24 @@
-import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import {
+  scopedProjectKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "@t3tools/client-runtime/environment";
+import { presentAgentPersonaCatalog } from "@t3tools/client-runtime/j5/agent-personas";
+import { SKILL_MANAGER_PERSONA_ID } from "@t3tools/contracts";
+import { Link } from "@tanstack/react-router";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { useState } from "react";
 
-import installerInstructions from "../../../../../.agents/skills/j5-install-skills/SKILL.md?raw";
-import { composerDraftHasUserContent, useComposerDraftStore } from "../../composerDraftStore";
 import { SettingsPageContainer, SettingsSection } from "../../components/settings/settingsLayout";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useProjects } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
+import { useEnvironmentQuery } from "../../state/query";
 import { AgentFolderPickerDialog } from "../agents/AgentFolderPickerDialog";
+import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
+import { prepareSkillManagerDraft } from "./skillManagerDraft";
 
 const projectKey = (project: EnvironmentProject) =>
   scopedProjectKey(scopeProjectRef(project.environmentId, project.id));
@@ -29,9 +37,23 @@ export function SkillInstallerSettings() {
     (selectedKey === "" && projects.length === 1 ? projects[0] : undefined);
   const environmentLabel = (id: EnvironmentProject["environmentId"]) =>
     environments.find((item) => item.environmentId === id)?.label ?? id;
+  const catalog = useEnvironmentQuery(
+    project
+      ? agentPersonaEnvironment.catalog({
+          environmentId: project.environmentId,
+          input: {},
+        })
+      : null,
+  );
+  const manager = catalog.data
+    ? presentAgentPersonaCatalog(catalog.data).find(
+        (persona) => persona.personaId === SKILL_MANAGER_PERSONA_ID,
+      )
+    : undefined;
+  const canLaunch = manager?.availability === "available" && !catalog.isPending && !catalog.error;
 
   async function launch() {
-    if (!project || busy) return;
+    if (!project || busy || !canLaunch) return;
     setBusy(true);
     setError(null);
     try {
@@ -41,20 +63,12 @@ export function SkillInstallerSettings() {
         worktreePath: null,
         startFromOrigin: false,
       });
-      if (!opened) throw new Error("Couldn’t open an installer chat for this project.");
-      const store = useComposerDraftStore.getState();
-      // Navigation can race with typing. Never replace work already in the destination draft.
-      if (!composerDraftHasUserContent(store.getComposerDraft(opened.draftId))) {
-        store.setPrompt(
-          opened.draftId,
-          [
-            "Help me choose and install skill groups for my user on this environment.",
-            ...(folder.trim() ? [`Catalog folder: ${JSON.stringify(folder.trim())}`] : []),
-            "Follow these installer skill instructions:",
-            installerInstructions,
-          ].join("\n\n"),
-        );
-      }
+      if (!opened) throw new Error("Couldn’t open Skill Manager for this project.");
+      prepareSkillManagerDraft(
+        opened.draftId,
+        scopeThreadRef(project.environmentId, opened.threadId),
+        folder,
+      );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -66,7 +80,7 @@ export function SkillInstallerSettings() {
     <SettingsPageContainer>
       <SettingsSection
         title="Skills"
-        description="Choose shared skill groups and manage your user installation in a guided chat."
+        description="Choose shared skill groups and manage your user installation with Skill Manager."
       >
         <div className="grid gap-4 p-4">
           <label className="grid gap-2 text-sm">
@@ -98,7 +112,7 @@ export function SkillInstallerSettings() {
           </p>
           {projects.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Add a project in a connected environment to open the installer.
+              Add a project in a connected environment to open Skill Manager.
             </p>
           ) : null}
           <label className="grid gap-2 text-sm">
@@ -121,13 +135,32 @@ export function SkillInstallerSettings() {
             <Button variant="outline" disabled={busy || !project} onClick={() => setPicking(true)}>
               Browse folders
             </Button>
-            <Button disabled={busy || !project} onClick={() => void launch()}>
-              {busy ? "Opening…" : "Open installer chat"}
+            <Button disabled={busy || !project || !canLaunch} onClick={() => void launch()}>
+              {busy ? "Opening…" : "Open Skill Manager"}
             </Button>
           </div>
+          {project && !canLaunch ? (
+            <div role="status" className="grid gap-1 text-sm text-muted-foreground">
+              <p>
+                {catalog.error ??
+                  (catalog.isPending || !catalog.data
+                    ? "Checking Skill Manager…"
+                    : manager
+                      ? `Skill Manager is ${manager.availabilityLabel.toLowerCase()}.`
+                      : "Skill Manager is not available in this environment. Update the environment to a version that includes it.")}
+              </p>
+              {manager?.blockedReasons.map((reason) => (
+                <p key={reason}>{reason}</p>
+              ))}
+              <Link to="/settings/agents" className="underline">
+                Manage agent availability
+              </Link>
+            </div>
+          ) : null}
           <p className="text-xs text-muted-foreground">
-            Send the prepared message, then choose any combination of groups. You can ask the
-            installer to list, update, or remove installed groups too.
+            Send the prepared message, then choose any combination of groups. You can ask the agent
+            to list, update, or remove installed groups too. Provider permission prompts cover
+            user-directory writes and repository updates.
           </p>
           {error ? (
             <p role="alert" className="text-sm text-destructive-foreground">

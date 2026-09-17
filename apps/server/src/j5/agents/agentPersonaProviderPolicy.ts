@@ -5,7 +5,7 @@ import { getAgentAuthorityRules } from "./agentPersonas.ts";
 export interface AgentPersonaProviderPolicy {
   readonly runtimeMode: RuntimeMode;
   readonly approvalPolicy?: "never";
-  readonly sandboxPolicy:
+  readonly sandboxPolicy?:
     | {
         readonly type: "readOnly";
         readonly access: { readonly type: "fullAccess" };
@@ -38,6 +38,7 @@ export function providerCanEnforceAgentPersonaAuthority(
   switch (authorityPolicy) {
     case "read-only":
     case "critic-review":
+    case "user-approved":
       return driver === "codex" || driver === "claudeAgent";
     case "workspace-write":
     case "critic-fix":
@@ -57,6 +58,10 @@ export function translateAgentPersonaProviderPolicy(
   }
 
   switch (getAgentAuthorityRules(authorityPolicy).workspace) {
+    case "user-approved":
+      // Native permission prompts allow home-directory writes and Git operations
+      // without granting a persona blanket access or changing existing policies.
+      return { runtimeMode: "approval-required" };
     case "read-only":
       return READ_ONLY_POLICY;
     case "write":

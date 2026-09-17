@@ -69,10 +69,20 @@ export const invokeAgent = Effect.fn("j5.invokeAgent")(function* (
     assignment.resolvedDriver,
   );
   if (
+    assignment.authorityPolicy === "user-approved" &&
+    parent.thread.agentPersonaAssignment !== undefined &&
+    parent.thread.agentPersonaAssignment.authorityPolicy !== "user-approved"
+  ) {
+    return yield* new OrchestratorMcpFailure({
+      code: "runtime_mode_escalation_denied",
+      message: "A constrained agent cannot invoke an agent that requests broader permissions.",
+    });
+  }
+  if (
     parent.thread.agentPersonaAssignment !== undefined &&
     "sandboxPolicy" in parentPolicy &&
-    parentPolicy.sandboxPolicy.type === "readOnly" &&
-    policy.sandboxPolicy.type !== "readOnly"
+    parentPolicy.sandboxPolicy?.type === "readOnly" &&
+    policy.sandboxPolicy?.type !== "readOnly"
   ) {
     return yield* new OrchestratorMcpFailure({
       code: "runtime_mode_escalation_denied",

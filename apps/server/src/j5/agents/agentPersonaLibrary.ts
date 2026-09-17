@@ -1,6 +1,7 @@
 import * as NodeCrypto from "node:crypto";
 import {
   AgentPersonaId,
+  SKILL_MANAGER_PERSONA_ID,
   isAgentPersonaDefinitionFile,
   AgentPersonaImportConflictError,
   AGENT_PERSONA_IMPORT_MAX_BYTES,
@@ -180,6 +181,12 @@ export function createAgentPersonaLibrary(storage?: {
         definitions.set(definition.id, definition);
         paths.set(definition.id, file);
       }
+    }
+    // The installer must remain available before a team has imported its catalog.
+    // A folder definition or imported copy may still override it, and normal
+    // disabled/removed state applies in catalog(). Other examples stay opt-in.
+    if (!definitions.has(SKILL_MANAGER_PERSONA_ID)) {
+      definitions.set(SKILL_MANAGER_PERSONA_ID, getBuiltInAgentPersona(SKILL_MANAGER_PERSONA_ID));
     }
     return { definitions: [...definitions.values()], paths };
   });

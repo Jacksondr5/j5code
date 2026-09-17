@@ -19,6 +19,7 @@ import publisher from "./examples/publisher.json" with { type: "json" };
 import investigator from "./examples/investigator.json" with { type: "json" };
 import prosecutor from "./examples/prosecutor.json" with { type: "json" };
 import herald from "./examples/herald.json" with { type: "json" };
+import skillManager from "./examples/skill-manager.json" with { type: "json" };
 
 export const AGENT_PERSONA_IDS = BUILT_IN_AGENT_PERSONA_IDS;
 export type { AgentPersonaId };
@@ -26,7 +27,12 @@ export type AgentArtifactId = string;
 export type AgentAuthorityPolicyId = AgentPersonaAuthorityPolicy;
 
 export interface AgentAuthorityRules {
-  readonly workspace: "read-only" | "write" | "diagnostic-write" | "publication-only";
+  readonly workspace:
+    | "read-only"
+    | "write"
+    | "diagnostic-write"
+    | "publication-only"
+    | "user-approved";
   readonly mayCommit: boolean;
   readonly mayPush: boolean;
   readonly mayWritePullRequest: boolean;
@@ -35,6 +41,13 @@ export interface AgentAuthorityRules {
 
 /** Behavioral expectations; provider policy translation separately defines enforceable controls. */
 export const AGENT_AUTHORITY_RULES = {
+  "user-approved": {
+    workspace: "user-approved",
+    mayCommit: false,
+    mayPush: false,
+    mayWritePullRequest: false,
+    mayMergePullRequest: false,
+  },
   "read-only": {
     workspace: "read-only",
     mayCommit: false,
@@ -136,6 +149,7 @@ export const BUILT_IN_AGENT_PERSONAS = {
   investigator: decodeAgentPersonaDefinition(investigator),
   prosecutor: decodeAgentPersonaDefinition(prosecutor),
   herald: decodeAgentPersonaDefinition(herald),
+  "skill-manager": decodeAgentPersonaDefinition(skillManager),
 };
 
 export const getBuiltInAgentPersona = (id: string): AgentPersonaDefinition => {

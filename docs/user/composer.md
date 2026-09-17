@@ -110,14 +110,15 @@ composer when it is empty, and is discarded otherwise.
 
 To manage shared skill groups, open **Settings → Skills** and choose a chat project
 on the machine where you want to install them. You can provide a local catalog folder
-or choose it in chat. Open the installer chat and send the prepared message to list
-groups and select any combination. The chat includes the installer instructions;
-your project does not need a J5 source checkout.
+or choose it in chat. **Open Skill Manager** starts a chat with the dedicated agent
+selected. Send the short prepared message to list groups and choose any combination.
+If the agent is unavailable, check its status in **Settings → Agents**.
 
-The installer uses `catalog.yaml` and `skills/<name>/SKILL.md` in the catalog folder.
+Skill Manager uses `catalog.yaml` and `skills/<name>/SKILL.md` in the catalog folder.
 It resolves group dependencies and installs links into the environment user's skill
-directories. Existing project skills and provider disable settings remain in effect.
-Ask the installer to change the selection, remove its installed skills, or explicitly
+directories, using the provider's normal permission prompts for writes and updates.
+Existing project skills and provider disable settings remain in effect.
+Ask Skill Manager to change the selection, remove its installed skills, or explicitly
 update the catalog checkout. Keep the catalog folder in place while its skills are
 installed. Refresh the provider's skill list or start a new session after changes.
 
