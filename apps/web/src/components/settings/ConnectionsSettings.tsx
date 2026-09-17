@@ -77,6 +77,7 @@ import {
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { LoadBalancingSettings } from "./LoadBalancingSettings";
 import { GitHubRoutingSettings } from "./GitHubRoutingSettings";
+import { PeerServersSettings } from "../../j5/peering/PeerServersSettings";
 import { Input } from "../ui/input";
 import { CommandShortcut } from "../ui/command";
 import {
@@ -3757,6 +3758,11 @@ export function ConnectionsSettings() {
       </SettingsSection>
       <LoadBalancingSettings environments={loadBalancingEnvironments} />
       <GitHubRoutingSettings environments={loadBalancingEnvironments} />
+      {/* J5: peering between this environment and another the client is connected to. */}
+      <PeerServersSettings
+        primaryEnvironmentId={primaryEnvironmentId}
+        canManage={canManageLocalBackend}
+      />
     </SettingsPageContainer>
   );
 }
