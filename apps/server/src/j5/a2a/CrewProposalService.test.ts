@@ -15,6 +15,7 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 
 import { ServerConfig } from "../../config.ts";
+import { OrchestratorDispatchError } from "../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import {
@@ -106,7 +107,8 @@ const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
               ),
             ),
     // Additions reserve rows under the real deterministic ids before spawning, like the launcher;
-    // a brief of "fail once" then fails the spawn the first time to leave that reservation behind.
+    // a brief of "fail once" (or "fail twice") then fails that many spawns to leave the
+    // reservation behind.
     addSeats: (input) =>
       Effect.gen(function* () {
         const outcome = yield* crews.addMembers(
@@ -125,14 +127,17 @@ const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
             };
           }),
         );
-        if (input.brief === "fail once" && !failedOnce.has(input.requestKey)) {
-          failedOnce.add(input.requestKey);
+        const wanted = input.brief === "fail twice" ? 2 : input.brief === "fail once" ? 1 : 0;
+        const failedSoFar = failures.get(input.requestKey) ?? 0;
+        if (failedSoFar < wanted) {
+          failures.set(input.requestKey, failedSoFar + 1);
           return yield* Effect.fail(launchFailure(new Error("spawn failed after reserving")));
         }
         return outcome.instance!;
       }).pipe(Effect.mapError(launchFailure)),
   });
-const failedOnce = new Set<string>();
+/** How many times each addition request has failed so far; briefs "fail once" and "fail twice". */
+const failures = new Map<string, number>();
 
 const fixture = Effect.gen(function* () {
   const database = NodeSqliteClient.layerMemory();
@@ -155,6 +160,8 @@ const fixture = Effect.gen(function* () {
     context,
   );
   const notices = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+  // Seat threads whose archive the store refuses, to prove a decline whose cleanup fails stays open.
+  const archiveFailures = yield* Ref.make<ReadonlySet<string>>(new Set());
   const layer = crewProposalLayer.pipe(
     Layer.provideMerge(fakeLauncher(crews)),
     Layer.provideMerge(
@@ -164,16 +171,27 @@ const fixture = Effect.gen(function* () {
             thread: thread(threadId),
           } as unknown as OrchestrationV2ThreadProjection),
         dispatch: (command) =>
-          Ref.update(notices, (items) => [...items, command]).pipe(
-            Effect.as({ events: [], effects: [] } as never),
-          ),
+          Effect.gen(function* () {
+            if (
+              command.type === "thread.archive" &&
+              (yield* Ref.get(archiveFailures)).has(command.threadId)
+            )
+              return yield* Effect.fail(
+                new OrchestratorDispatchError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                }),
+              );
+            yield* Ref.update(notices, (items) => [...items, command]);
+            return { events: [], effects: [] } as never;
+          }),
       }),
     ),
     Layer.provideMerge(Layer.succeedContext(context)),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-proposal-" })),
     Layer.provideMerge(NodeServices.layer),
   );
-  return { layer, notices };
+  return { layer, notices, archiveFailures };
 });
 
 it.effect(
@@ -516,6 +534,102 @@ it.effect("declining a roster whose launch failed partway retires what the launc
       const notice = (yield* Ref.get(notices)).at(-1);
       assert.equal(notice?.type, "message.dispatch");
       if (notice?.type === "message.dispatch") assert.include(notice.text, "decision: declined");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a decline cleans up before it is recorded, and releases every name it reserved", () =>
+  Effect.gen(function* () {
+    const { layer, notices, archiveFailures } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const gate = yield* CrewProposalService;
+      const proposals = yield* AgentCrewProposalService;
+      const crews = yield* AgentCrewInstanceService;
+
+      // A roster whose launch failed partway: while a seat's archive fails, the decline is not
+      // recorded, so the person can decline again once the store recovers.
+      const roster = yield* gate.propose({
+        requestKey: "cleanup-1",
+        captain,
+        displayName: "Boom after record",
+        brief: "The second seat never spawns.",
+        seats: [
+          { seat: "builder", agentId: "builder", reason: "Builds" },
+          { seat: "critic", agentId: "critic", reason: "Reviews" },
+        ],
+      });
+      yield* gate
+        .resolve({ proposalId: roster.proposal.id, decision: "approve" })
+        .pipe(Effect.flip);
+      yield* Ref.set(archiveFailures, new Set(["thread:critic"]));
+      const stuck = yield* gate
+        .resolve({ proposalId: roster.proposal.id, decision: "decline" })
+        .pipe(Effect.flip);
+      assert.equal(stuck._tag, "CrewProposalOperationError");
+      const stillOpen = (yield* proposals.read(roster.proposal.id))!;
+      assert.equal(stillOpen.status, "open");
+      assert.isNull((yield* crews.read(stillOpen.crewInstanceId!))!.archivedAt);
+      yield* Ref.set(archiveFailures, new Set());
+      const declined = yield* gate.resolve({ proposalId: roster.proposal.id, decision: "decline" });
+      assert.equal(declined.proposal.status, "declined");
+      assert.isNotNull((yield* crews.read(stillOpen.crewInstanceId!))!.archivedAt);
+
+      // An addition renamed between two failed attempts reserved two names; declining releases
+      // both, not only the last one the person approved.
+      const live = yield* gate.propose({
+        requestKey: "cleanup-2",
+        captain,
+        displayName: "Live Crew",
+        brief: "Build it.",
+        // The fake launcher mints seat ids from names alone, so this roster reuses none above.
+        seats: [{ seat: "maker", agentId: "builder", reason: "Builds" }],
+      });
+      const approved = yield* gate.resolve({ proposalId: live.proposal.id, decision: "approve" });
+      const addition = yield* gate.requestMember({
+        requestKey: "cleanup-add-1",
+        captain,
+        crewInstanceId: approved.instance!.id,
+        seat: { seat: "scout", agentId: "critic", reason: "Recon" },
+        brief: "fail twice",
+      });
+      yield* gate
+        .resolve({ proposalId: addition.proposal.id, decision: "approve" })
+        .pipe(Effect.flip);
+      yield* gate
+        .resolve({
+          proposalId: addition.proposal.id,
+          decision: "approve",
+          seats: [{ seat: "ranger", agentId: "critic", reason: "Renamed on the card" }],
+        })
+        .pipe(Effect.flip);
+      assert.sameMembers(
+        (yield* crews.read(approved.instance!.id))!.members.map(({ seatName }) => seatName),
+        ["maker", "scout", "ranger"],
+      );
+      // The reopened gate carries the person's edit, which is what the card reseeds from.
+      assert.deepStrictEqual(
+        (yield* proposals.read(addition.proposal.id))!.approvedSeats?.map(({ seat }) => seat),
+        ["ranger"],
+      );
+      yield* gate.resolve({ proposalId: addition.proposal.id, decision: "decline" });
+      const afterwards = (yield* crews.read(approved.instance!.id))!;
+      assert.deepStrictEqual(
+        afterwards.members.map(({ seatName }) => seatName),
+        ["maker"],
+      );
+      assert.isNull(afterwards.archivedAt);
+      // Both reserved seat threads were archived under their own stable command ids.
+      const archived = (yield* Ref.get(notices))
+        .filter((command) => command.type === "thread.archive")
+        .map((command) => command.threadId);
+      for (const seat of ["scout", "ranger"])
+        assert.include(
+          archived,
+          spawnThreadId({
+            providerSessionId: "j5-crew-proposal",
+            requestKey: crewSeatRequestKey(addition.proposal.id, seat),
+          }),
+        );
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );
