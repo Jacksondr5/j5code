@@ -32,7 +32,7 @@ describe("/crew command", () => {
       prompt.endsWith("</j5_crew_launch>\n\nLand the invoice-export PR: build, review, sit on CI."),
     ).toBe(true);
     expect(prompt).toContain("propose_crew");
-    expect(prompt).toContain("several Crews at once");
+    expect(prompt).toContain("end your turn");
   });
 });
 
@@ -42,15 +42,21 @@ describe("crew proposal roster edits", () => {
     { seat: "critic", agentId: "critic", reason: "Reviews" },
   ];
 
-  it("removes a seat by name and adds a normalized seat with a default reason", () => {
+  it("removes a seat by name and adds a normalized seat with the user's instructions", () => {
     expect(removeSeat(seats, "critic").map((seat) => seat.seat)).toEqual(["builder"]);
-    const added = addSeat(seats, { seat: "Security Pass", agentId: "sentry", reason: "  " });
+    const added = addSeat(seats, { seat: "Security Pass", agentId: "sentry", instructions: "  " });
     expect(added.error).toBeNull();
     expect(added.seats.at(-1)).toEqual({
       seat: "security-pass",
       agentId: "sentry",
       reason: "Added by the user",
     });
+    const briefed = addSeat(seats, {
+      seat: "eyes",
+      agentId: "sentry",
+      instructions: " Review only the auth module. ",
+    });
+    expect(briefed.seats.at(-1)?.instructions).toBe("Review only the auth module.");
   });
 
   it("names the agent and the access a seat is approved with, or admits it cannot", () => {
@@ -66,13 +72,13 @@ describe("crew proposal roster edits", () => {
   });
 
   it("rejects duplicate or malformed seat names and a missing agent", () => {
-    expect(addSeat(seats, { seat: "builder", agentId: "scout", reason: "r" }).error).toContain(
+    expect(addSeat(seats, { seat: "builder", agentId: "scout", instructions: "" }).error).toContain(
       "already exists",
     );
-    expect(addSeat(seats, { seat: "9lives", agentId: "scout", reason: "r" }).error).toContain(
+    expect(addSeat(seats, { seat: "9lives", agentId: "scout", instructions: "" }).error).toContain(
       "lowercase",
     );
-    expect(addSeat(seats, { seat: "eyes", agentId: "", reason: "r" }).error).toContain(
+    expect(addSeat(seats, { seat: "eyes", agentId: "", instructions: "" }).error).toContain(
       "Pick an agent",
     );
   });

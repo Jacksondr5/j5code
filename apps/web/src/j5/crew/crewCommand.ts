@@ -39,7 +39,7 @@ export function crewCommandRefusal(
 export const crewLaunchPrompt = (brief: string) =>
   [
     "<j5_crew_launch>",
-    "Compose a Crew for the brief below instead of doing the work yourself. Read the brief and anything it references, call list_agents, and choose the smallest roster that covers the work, one seat per distinct responsibility. File it with propose_crew: a short crew name that says what this Crew is for, the brief every seat starts on, and one seat per agent with a one-line reason and, when useful, seat instructions. Then end your turn; the person's decision, and later every seat's finish, arrive as new messages in this thread, so never wait or poll for them inside a turn. Approved seats run with their own agent's permissions, and propose_crew is itself the human gate, so a read-only session or an approval policy of never does not block it. You may command several Crews at once when the work is concurrent; each proposal names its own Crew, and later requests, stops, and archives name the Crew they mean.",
+    "Compose a Crew for the brief below with propose_crew instead of doing the work yourself, then end your turn: the person's decision, and later every seat's finish, arrive as new messages in this thread, so never wait or poll for them inside a turn.",
     "</j5_crew_launch>",
     "",
     brief,
