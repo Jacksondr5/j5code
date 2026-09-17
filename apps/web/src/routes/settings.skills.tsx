@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { SkillCatalogSettings } from "../j5/skills/SkillCatalogSettings";
+import { SkillInstallerSettings } from "../j5/skills/SkillInstallerSettings";
 
-export const Route = createFileRoute("/settings/skills")({ component: SkillCatalogSettings });
+export const Route = createFileRoute("/settings/skills")({ component: SkillInstallerSettings });

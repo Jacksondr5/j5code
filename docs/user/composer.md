@@ -108,21 +108,18 @@ composer when it is empty, and is discarded otherwise.
 
 ## Commands and skills
 
-To install shared skill groups, open **Settings → Skills**, choose the environment,
-and select a folder containing `catalog.yaml` and `skills/<name>/SKILL.md` files.
-Load the catalog, select one or more groups, and apply the selection. Required groups
-are included automatically. Clear the selection and apply to remove this catalog's
-installed skills.
+To manage shared skill groups, open **Settings → Skills** and choose a chat project
+on the machine where you want to install them. You can provide a local catalog folder
+or choose it in chat. Open the installer chat and send the prepared message to list
+groups and select any combination. The chat includes the installer instructions;
+your project does not need a J5 source checkout.
 
-Installation uses the environment machine's global user skill directories for
-Claude and Codex; Cursor can read these directories too. Environments running under
-the same OS user share the selection. Existing skills and provider disable settings
-are preserved, and project skills remain available independently. Custom provider
-home directories, Grok, and Antigravity are not configured by this installer.
-
-Keep the catalog folder in place. To update a Git checkout, pull its changes, then
-reload the catalog and apply the selection to reconcile added or removed skills.
-Refresh the provider's skills or start a new agent session to see the result.
+The installer uses `catalog.yaml` and `skills/<name>/SKILL.md` in the catalog folder.
+It resolves group dependencies and installs links into the environment user's skill
+directories. Existing project skills and provider disable settings remain in effect.
+Ask the installer to change the selection, remove its installed skills, or explicitly
+update the catalog checkout. Keep the catalog folder in place while its skills are
+installed. Refresh the provider's skill list or start a new session after changes.
 
 The catalog lists groups, their skills, and optional dependencies:
 
