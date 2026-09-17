@@ -1344,7 +1344,7 @@ it.effect("preflights home before creation and records facts before the one stab
       if (firstTurn?.type === "message.dispatch") {
         assert.equal(
           firstTurn.text,
-          `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${childParticipantId}\nsquadron_id: ${squadronId}\nsquadron_name: ${squadronName}\n</j5_spawn_context>\n\n<spawner_brief>\n${args.brief}\n</spawner_brief>`,
+          `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${childParticipantId}\nsquadron_id: ${squadronId}\nsquadron_name: ${squadronName}\nspawned_by: ${callerParticipantId}\nspawner_thread_id: ${invocation.threadId}\n</j5_spawn_context>\n\n<spawner_brief>\n${args.brief}\n</spawner_brief>`,
         );
       }
       const replayTurn = capturedCommands[3];

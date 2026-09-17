@@ -349,13 +349,17 @@ const spawnTitle = (brief: string, title: string | undefined): string => {
   return value.length > 80 ? `${value.slice(0, 77)}...` : value;
 };
 
+// The web timeline parses this exact template (apps/web/src/j5/a2a/SpawnBrief.tsx)
+// to attribute the brief to its spawner; keep the two in step.
 const spawnFirstTurnText = (input: {
   readonly brief: string;
   readonly participantId: string;
   readonly squadronId: string;
   readonly squadronName: string;
+  readonly spawnedByParticipantId: string;
+  readonly spawnerThreadId: string;
 }) =>
-  `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${input.participantId}\nsquadron_id: ${input.squadronId}\nsquadron_name: ${input.squadronName}\n</j5_spawn_context>\n\n<spawner_brief>\n${input.brief}\n</spawner_brief>`;
+  `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${input.participantId}\nsquadron_id: ${input.squadronId}\nsquadron_name: ${input.squadronName}\nspawned_by: ${input.spawnedByParticipantId}\nspawner_thread_id: ${input.spawnerThreadId}\n</j5_spawn_context>\n\n<spawner_brief>\n${input.brief}\n</spawner_brief>`;
 
 const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
   scope: McpInvocationScope,
@@ -714,6 +718,8 @@ const handlers = {
             participantId: facts.home.participantId,
             squadronId: facts.home.squadronId,
             squadronName: caller.squadron.name,
+            spawnedByParticipantId: caller.participantId,
+            spawnerThreadId: scope.threadId,
           }),
           attachments: [],
           modelSelection,
