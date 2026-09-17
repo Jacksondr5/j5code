@@ -3,8 +3,8 @@ import { useCallback, useState } from "react";
 
 import type {
   OnboardingFolderOutcome,
+  OnboardingSquadronAssignment,
   OnboardingSquadronHome,
-  OnboardingSquadronRow,
 } from "./onboardingSquadrons.logic";
 
 /**
@@ -23,10 +23,8 @@ export interface OnboardingImportMemory {
     string,
     { readonly projectId: ProjectId; readonly commandId: CommandId }
   >;
-  /** The Squadron each row settled on, keyed by row id. Never created twice, never inferred. */
+  /** The Squadron each folder settled on. Never created twice, never inferred. */
   readonly homes: Map<string, OnboardingSquadronHome>;
-  /** The Squadron that received each folder's import, keyed by folder; the landing draft uses it. */
-  readonly recipients: Map<string, OnboardingSquadronHome>;
   /** Folders whose results report kept conversations; the wizard waits for a click before leaving. */
   readonly keptFolders: Set<string>;
 }
@@ -35,12 +33,8 @@ export interface OnboardingImportSession {
   /** `null` until the person touches the list, so the scan's default selection applies. */
   readonly selectedKeys: ReadonlySet<string> | null;
   readonly setSelectedKeys: (next: ReadonlySet<string>) => void;
-  /** Squadron rows per folder; a folder absent here has its one default row. */
-  readonly rows: ReadonlyMap<string, ReadonlyArray<OnboardingSquadronRow>>;
-  readonly setRows: (key: string, rows: ReadonlyArray<OnboardingSquadronRow>) => void;
-  /** Definite create rejections per row, cleared when the row runs again. */
-  readonly rowErrors: ReadonlyMap<string, string>;
-  readonly setRowError: (rowId: string, message: string | null) => void;
+  readonly assignments: ReadonlyMap<string, OnboardingSquadronAssignment>;
+  readonly setAssignment: (key: string, assignment: OnboardingSquadronAssignment) => void;
   readonly outcomes: ReadonlyMap<string, OnboardingFolderOutcome>;
   readonly setOutcome: (key: string, outcome: OnboardingFolderOutcome) => void;
   readonly memory: OnboardingImportMemory;
@@ -49,10 +43,9 @@ export interface OnboardingImportSession {
 /** One session per wizard mount. Entries for unchecked folders stay put, so reselecting restores them. */
 export function useOnboardingImportSession(): OnboardingImportSession {
   const [selectedKeys, setSelectedKeys] = useState<ReadonlySet<string> | null>(null);
-  const [rows, setRowsState] = useState<ReadonlyMap<string, ReadonlyArray<OnboardingSquadronRow>>>(
+  const [assignments, setAssignments] = useState<ReadonlyMap<string, OnboardingSquadronAssignment>>(
     () => new Map(),
   );
-  const [rowErrors, setRowErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [outcomes, setOutcomes] = useState<ReadonlyMap<string, OnboardingFolderOutcome>>(
     () => new Map(),
   );
@@ -61,20 +54,10 @@ export function useOnboardingImportSession(): OnboardingImportSession {
     projectsWithImportedHistory: new Map(),
     projectAttempts: new Map(),
     homes: new Map(),
-    recipients: new Map(),
     keptFolders: new Set(),
   }));
-  const setRows = useCallback((key: string, next: ReadonlyArray<OnboardingSquadronRow>) => {
-    setRowsState((current) => new Map(current).set(key, next));
-  }, []);
-  const setRowError = useCallback((rowId: string, message: string | null) => {
-    setRowErrors((current) => {
-      if (message === null && !current.has(rowId)) return current;
-      const next = new Map(current);
-      if (message === null) next.delete(rowId);
-      else next.set(rowId, message);
-      return next;
-    });
+  const setAssignment = useCallback((key: string, assignment: OnboardingSquadronAssignment) => {
+    setAssignments((current) => new Map(current).set(key, assignment));
   }, []);
   const setOutcome = useCallback((key: string, outcome: OnboardingFolderOutcome) => {
     setOutcomes((current) => new Map(current).set(key, outcome));
@@ -82,10 +65,8 @@ export function useOnboardingImportSession(): OnboardingImportSession {
   return {
     selectedKeys,
     setSelectedKeys,
-    rows,
-    setRows,
-    rowErrors,
-    setRowError,
+    assignments,
+    setAssignment,
     outcomes,
     setOutcome,
     memory,

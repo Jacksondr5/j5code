@@ -1,12 +1,5 @@
 import { EnvironmentId, type ProjectId } from "@t3tools/contracts";
-import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
-  CheckIcon,
-  MonitorIcon,
-  PlusIcon,
-  XIcon,
-} from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, CheckIcon, MonitorIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { Button } from "../../components/ui/button";
@@ -19,24 +12,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
-import { cn, randomUUID } from "../../lib/utils";
+import { cn } from "../../lib/utils";
 import {
   refreshSquadronDirectory,
   type ScopedManagedSquadron,
 } from "../squadron/SquadronDirectory";
 import {
-  addOnboardingRow,
   describeOnboardingFolderOutcome,
   eligibleExistingSquadrons,
   isOnboardingFolderComplete,
-  removeOnboardingRow,
-  resolveOnboardingRows,
+  resolveOnboardingAssignment,
   resolveOnboardingSquadronsReadiness,
-  updateOnboardingRow,
   type OnboardingFolderOutcome,
   type OnboardingSquadronAssignment,
   type OnboardingSquadronHome,
-  type OnboardingSquadronRow,
 } from "./onboardingSquadrons.logic";
 
 const NEW_SQUADRON_VALUE = "new";
@@ -52,17 +41,16 @@ export interface OnboardingSquadronFolder {
 }
 
 /**
- * Fourth onboarding stage. Lists only the folders chosen on Projects and asks which Squadrons
- * to create for each; the first row receives the folder's imported conversations. Nothing is
- * created here; the final button hands the choices back to the import run. After a run, each
- * card shows its own result and the button retries only what did not land.
+ * Fourth onboarding stage. Lists only the folders chosen on Projects and asks which Squadron
+ * owns each one's conversations. Nothing is created here; the final button hands the choices
+ * back to the import run. After a run, each row shows its own result and the button retries
+ * only what did not land.
  */
 export function SquadronsStage({
   folders,
   squadrons,
-  rows,
-  onRowsChange,
-  rowErrors,
+  assignments,
+  onAssignmentChange,
   homes,
   outcomes,
   isImporting,
@@ -74,10 +62,8 @@ export function SquadronsStage({
   readonly folders: ReadonlyArray<OnboardingSquadronFolder>;
   /** The merged Squadron directory; rows filter it to their own folder. */
   readonly squadrons: ReadonlyArray<ScopedManagedSquadron>;
-  readonly rows: ReadonlyMap<string, ReadonlyArray<OnboardingSquadronRow>>;
-  readonly onRowsChange: (key: string, rows: ReadonlyArray<OnboardingSquadronRow>) => void;
-  readonly rowErrors: ReadonlyMap<string, string>;
-  /** Created Squadrons by row id; these rows are locked. */
+  readonly assignments: ReadonlyMap<string, OnboardingSquadronAssignment>;
+  readonly onAssignmentChange: (key: string, assignment: OnboardingSquadronAssignment) => void;
   readonly homes: ReadonlyMap<string, OnboardingSquadronHome>;
   readonly outcomes: ReadonlyMap<string, OnboardingFolderOutcome>;
   readonly isImporting: boolean;
@@ -96,7 +82,7 @@ export function SquadronsStage({
       const outcome = outcomes.get(folder.key);
       return outcome !== undefined && isOnboardingFolderComplete(outcome);
     });
-  const readiness = resolveOnboardingSquadronsReadiness(folders, rows, homes);
+  const readiness = resolveOnboardingSquadronsReadiness(folders, assignments, homes);
   // The wizard panel animates its height with overflow hidden while this stage mounts. A plain
   // autoFocus scrolls that clipped container to reveal the button and hides the heading, so
   // focus the primary action once without scrolling.
@@ -124,8 +110,8 @@ export function SquadronsStage({
         Create Squadrons for your projects
       </h1>
       <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
-        Squadrons are groups of agents that work on a big initiative. You can create multiple
-        Squadrons for a project, or start with just one
+        Squadrons are groups of agents that work on a big initiative. We'll import your previous
+        conversations into a squadron to start off, you can create more afterwards.
       </p>
       <ScrollArea
         scrollFade
@@ -133,13 +119,10 @@ export function SquadronsStage({
       >
         <ul className="space-y-2 pr-3">
           {folders.map((folder) => {
+            const home = homes.get(folder.key);
             const outcome = outcomes.get(folder.key);
-            const folderRows = resolveOnboardingRows(rows, folder);
+            const assignment = resolveOnboardingAssignment(assignments, folder);
             const existing = eligibleExistingSquadrons(squadrons, folder);
-            const multiple = folderRows.length > 1;
-            // Adding and removing stop once the folder's run has started, so the list stays
-            // stable across retries; rows that failed keep their own recovery controls.
-            const editable = !isImporting && outcome === undefined;
             return (
               <li
                 key={folder.key}
@@ -159,78 +142,22 @@ export function SquadronsStage({
                     </span>
                   ) : null}
                 </div>
-                {folderRows.map((row, index) => {
-                  const home = homes.get(row.rowId);
-                  const rowError = rowErrors.get(row.rowId);
-                  return (
-                    <div key={row.rowId} className="mt-2">
-                      {multiple && index === 0 ? (
-                        <span className="mb-1 block text-[11px] text-muted-foreground">
-                          Receives the imported conversations
-                        </span>
-                      ) : null}
-                      <div className="flex items-center gap-2">
-                        <div className="min-w-0 flex-1">
-                          {home !== undefined ? (
-                            <span className="inline-flex items-center gap-1.5 text-sm text-foreground">
-                              <CheckIcon className="size-3.5 text-success-foreground" aria-hidden />
-                              {home.name}
-                            </span>
-                          ) : (
-                            <AssignmentControl
-                              folder={folder}
-                              assignment={row.assignment}
-                              existing={existing}
-                              disabled={isImporting}
-                              onChange={(next) =>
-                                onRowsChange(
-                                  folder.key,
-                                  updateOnboardingRow(folderRows, row.rowId, next),
-                                )
-                              }
-                            />
-                          )}
-                        </div>
-                        {home === undefined &&
-                        row.assignment.kind !== "unconfirmed" &&
-                        multiple &&
-                        editable ? (
-                          <Button
-                            size="icon-xs"
-                            variant="ghost"
-                            aria-label="Remove this Squadron"
-                            onClick={() =>
-                              onRowsChange(
-                                folder.key,
-                                removeOnboardingRow(folderRows, row.rowId, homes),
-                              )
-                            }
-                          >
-                            <XIcon className="size-3.5" />
-                          </Button>
-                        ) : null}
-                      </div>
-                      {rowError !== undefined ? (
-                        <p role="alert" className="mt-1 text-xs text-destructive">
-                          {rowError}
-                        </p>
-                      ) : null}
-                    </div>
-                  );
-                })}
-                {editable ? (
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    className="mt-2"
-                    onClick={() =>
-                      onRowsChange(folder.key, addOnboardingRow(folderRows, randomUUID()))
-                    }
-                  >
-                    <PlusIcon className="size-3.5" />
-                    Add another Squadron
-                  </Button>
-                ) : null}
+                <div className="mt-2">
+                  {home !== undefined ? (
+                    <span className="inline-flex items-center gap-1.5 text-sm text-foreground">
+                      <CheckIcon className="size-3.5 text-success-foreground" aria-hidden />
+                      {home.name}
+                    </span>
+                  ) : (
+                    <AssignmentControl
+                      folder={folder}
+                      assignment={assignment}
+                      existing={existing}
+                      disabled={isImporting}
+                      onChange={(next) => onAssignmentChange(folder.key, next)}
+                    />
+                  )}
+                </div>
                 {outcome !== undefined ? <OutcomeLine outcome={outcome} /> : null}
               </li>
             );

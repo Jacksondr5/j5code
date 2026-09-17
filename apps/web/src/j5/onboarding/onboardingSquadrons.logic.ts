@@ -16,17 +16,7 @@ export type OnboardingSquadronAssignment =
   | { readonly kind: "existing"; readonly squadronId: string }
   | { readonly kind: "unconfirmed"; readonly name: string };
 
-/**
- * One Squadron row on a folder's card. A folder starts with one row named after it and may add
- * more; every row references the folder's project. The row id is the retry identity: created
- * Squadrons are remembered by it, so reordering, removal, or re-rendering never re-creates one.
- */
-export interface OnboardingSquadronRow {
-  readonly rowId: string;
-  readonly assignment: OnboardingSquadronAssignment;
-}
-
-/** A Squadron that a row's run already settled on. Locked for the rest of the wizard. */
+/** A Squadron that a folder's run already settled on. Locked for the rest of the wizard. */
 export interface OnboardingSquadronHome {
   readonly squadronId: string;
   readonly name: string;
@@ -56,55 +46,11 @@ export const defaultOnboardingAssignment = (candidate: {
   readonly title: string;
 }): OnboardingSquadronAssignment => ({ kind: "new", name: candidate.title });
 
-/** The default row's id is derived from the folder so it stays stable without being stored. */
-export const defaultOnboardingRowId = (folderKey: string): string => `default:${folderKey}`;
-
-export const resolveOnboardingRows = (
-  rows: ReadonlyMap<string, ReadonlyArray<OnboardingSquadronRow>>,
+export const resolveOnboardingAssignment = (
+  assignments: ReadonlyMap<string, OnboardingSquadronAssignment>,
   candidate: { readonly key: string; readonly title: string },
-): ReadonlyArray<OnboardingSquadronRow> =>
-  rows.get(candidate.key) ?? [
-    {
-      rowId: defaultOnboardingRowId(candidate.key),
-      assignment: defaultOnboardingAssignment(candidate),
-    },
-  ];
-
-/** Added Squadrons start unnamed; the person names each one. */
-export const addOnboardingRow = (
-  rows: ReadonlyArray<OnboardingSquadronRow>,
-  rowId: string,
-): ReadonlyArray<OnboardingSquadronRow> => [
-  ...rows,
-  { rowId, assignment: { kind: "new", name: "" } },
-];
-
-export const updateOnboardingRow = (
-  rows: ReadonlyArray<OnboardingSquadronRow>,
-  rowId: string,
-  assignment: OnboardingSquadronAssignment,
-): ReadonlyArray<OnboardingSquadronRow> =>
-  rows.map((row) => (row.rowId === rowId ? { ...row, assignment } : row));
-
-/**
- * A folder keeps at least one row. A row whose Squadron exists cannot be removed, and neither
- * can an unconfirmed one: the server may have created it, and dropping the row would hide that.
- */
-export const removeOnboardingRow = (
-  rows: ReadonlyArray<OnboardingSquadronRow>,
-  rowId: string,
-  homes: ReadonlyMap<string, OnboardingSquadronHome>,
-): ReadonlyArray<OnboardingSquadronRow> => {
-  const row = rows.find((entry) => entry.rowId === rowId);
-  if (rows.length <= 1 || row === undefined || homes.has(rowId)) return rows;
-  if (row.assignment.kind === "unconfirmed") return rows;
-  return rows.filter((entry) => entry.rowId !== rowId);
-};
-
-/** The first row receives the folder's imported conversations; the others start empty. */
-export const selectImportRecipientRow = (
-  rows: ReadonlyArray<OnboardingSquadronRow>,
-): OnboardingSquadronRow | undefined => rows[0];
+): OnboardingSquadronAssignment =>
+  assignments.get(candidate.key) ?? defaultOnboardingAssignment(candidate);
 
 /**
  * Existing Squadrons are offered only from the folder's own environment and only when they
@@ -127,20 +73,19 @@ export const eligibleExistingSquadrons = (
 
 export type OnboardingSquadronsReadiness = "ready" | "empty-name" | "unconfirmed";
 
-/** The final button stays disabled until every row on every selected folder is actionable. */
+/** The final button stays disabled until every selected folder has an actionable choice. */
 export const resolveOnboardingSquadronsReadiness = (
   selected: ReadonlyArray<{ readonly key: string; readonly title: string }>,
-  rows: ReadonlyMap<string, ReadonlyArray<OnboardingSquadronRow>>,
+  assignments: ReadonlyMap<string, OnboardingSquadronAssignment>,
   homes: ReadonlyMap<string, OnboardingSquadronHome>,
 ): OnboardingSquadronsReadiness => {
   let readiness: OnboardingSquadronsReadiness = "ready";
   for (const candidate of selected) {
-    for (const row of resolveOnboardingRows(rows, candidate)) {
-      if (homes.has(row.rowId)) continue;
-      if (row.assignment.kind === "unconfirmed") return "unconfirmed";
-      if (row.assignment.kind === "new" && row.assignment.name.trim().length === 0) {
-        readiness = "empty-name";
-      }
+    if (homes.has(candidate.key)) continue;
+    const assignment = resolveOnboardingAssignment(assignments, candidate);
+    if (assignment.kind === "unconfirmed") return "unconfirmed";
+    if (assignment.kind === "new" && assignment.name.trim().length === 0) {
+      readiness = "empty-name";
     }
   }
   return readiness;
@@ -208,49 +153,6 @@ export async function ensureOnboardingSquadron(input: {
     }
     return { kind: "unconfirmed" };
   }
-}
-
-export interface OnboardingFolderSquadronsResult {
-  /** The Squadron that receives the import, when its row landed. */
-  readonly recipient: OnboardingSquadronHome | null;
-  readonly failures: ReadonlyArray<{
-    readonly rowId: string;
-    readonly result: Exclude<EnsureOnboardingSquadronResult, { readonly kind: "ready" }>;
-  }>;
-}
-
-/**
- * Settles every row of one folder in order. Rows already remembered in `homes` are reused, so a
- * retry creates only the rows that did not land.
- */
-export async function ensureOnboardingFolderSquadrons(input: {
-  readonly rows: ReadonlyArray<OnboardingSquadronRow>;
-  readonly projectRef: ScopedProjectRef;
-  readonly homes: Map<string, OnboardingSquadronHome>;
-  readonly existingSquadrons: ReadonlyArray<ScopedManagedSquadron>;
-  readonly createSquadron: Parameters<typeof ensureOnboardingSquadron>[0]["createSquadron"];
-  readonly isDefiniteRejection: (error: unknown) => boolean;
-}): Promise<OnboardingFolderSquadronsResult> {
-  const recipientRow = selectImportRecipientRow(input.rows);
-  let recipient: OnboardingSquadronHome | null = null;
-  const failures: Array<OnboardingFolderSquadronsResult["failures"][number]> = [];
-  for (const row of input.rows) {
-    const result = await ensureOnboardingSquadron({
-      key: row.rowId,
-      projectRef: input.projectRef,
-      assignment: row.assignment,
-      homes: input.homes,
-      existingSquadrons: input.existingSquadrons,
-      createSquadron: input.createSquadron,
-      isDefiniteRejection: input.isDefiniteRejection,
-    });
-    if (result.kind === "ready") {
-      if (row.rowId === recipientRow?.rowId) recipient = result.home;
-    } else {
-      failures.push({ rowId: row.rowId, result });
-    }
-  }
-  return { recipient, failures };
 }
 
 export const summarizeAssignmentEntries = (
@@ -322,12 +224,12 @@ export const describeOnboardingFolderOutcome = (
   }
 };
 
-/** The landing draft carries the Squadron that received the landing folder's import, never a guess. */
+/** The landing draft carries the Squadron of the folder the wizard lands on, never a guess. */
 export const resolveOnboardingLandingSquadron = (
   projectRef: ScopedProjectRef,
-  recipients: ReadonlyMap<string, OnboardingSquadronHome>,
+  homes: ReadonlyMap<string, OnboardingSquadronHome>,
 ): ScopedSquadronRef | undefined => {
-  for (const home of recipients.values()) {
+  for (const home of homes.values()) {
     if (
       home.projectRef.environmentId === projectRef.environmentId &&
       home.projectRef.projectId === projectRef.projectId
