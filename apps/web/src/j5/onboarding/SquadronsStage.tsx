@@ -106,9 +106,12 @@ export function SquadronsStage({
 
   return (
     <>
-      <h1 className="text-2xl font-semibold tracking-tight text-foreground">Squadrons</h1>
+      <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+        Create Squadrons for your projects
+      </h1>
       <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
-        Give each folder a Squadron so its conversations have an owner.
+        Squadrons are groups of agents that work on a big initiative. Create one for each big
+        feature you want multiple agents to tackle, or just name a single Squadron to get started.
       </p>
       <ScrollArea
         scrollFade
