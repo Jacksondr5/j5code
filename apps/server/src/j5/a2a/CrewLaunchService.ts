@@ -1,4 +1,5 @@
 import type {
+  ModelSelection,
   OrchestrationV2AgentPersonaAssignment,
   OrchestrationV2AppThread,
   RuntimeMode,
@@ -37,10 +38,14 @@ import {
   spawnTitle,
 } from "./spawnIds.ts";
 
-/** One approved seat: who fills it, why, and any wiring text its brief carries verbatim. */
+/**
+ * One approved seat: who fills it, why, and any wiring text its brief carries verbatim. A null
+ * agent is a custom seat, approved by name and instructions alone; it runs on the Captain's own
+ * provider, model, and runtime mode because it has no policy of its own.
+ */
 export interface CrewLaunchSeat {
   readonly name: string;
-  readonly agentId: string;
+  readonly agentId: string | null;
   readonly reason: string | null;
   readonly instructions?: string | undefined;
 }
@@ -162,9 +167,12 @@ export const layer = Layer.effect(
 
     interface ResolvedSeat {
       readonly seat: CrewLaunchSeat;
-      readonly assignment: OrchestrationV2AgentPersonaAssignment;
+      /** Null for a custom seat: no saved agent, so no assignment and no handoff obligation. */
+      readonly assignment: OrchestrationV2AgentPersonaAssignment | null;
+      readonly modelSelection: ModelSelection;
       readonly runtimeMode: RuntimeMode;
       readonly outputArtifact: string | null;
+      readonly agentDisplayName: string;
     }
 
     // Resolve every seat before creating anything: a Crew launches whole or not at all.
@@ -175,10 +183,24 @@ export const layer = Layer.effect(
       const providers = yield* registry.getProviders;
       const resolved: Array<ResolvedSeat> = [];
       for (const seat of seats) {
+        const agentId = seat.agentId;
+        if (agentId === null) {
+          // The human approved this seat by its name and instructions; with no definition to run
+          // as, it takes the Captain's provider, model, and runtime mode.
+          resolved.push({
+            seat,
+            assignment: null,
+            modelSelection: captain.thread.modelSelection,
+            runtimeMode: captain.thread.runtimeMode,
+            outputArtifact: null,
+            agentDisplayName: "custom",
+          });
+          continue;
+        }
         // Resolved at spawn, against the providers as they are now: a signed-out, disabled, or
         // missing provider refuses the seat here with that reason, before anything is created.
         const assignment = yield* prepareAgentPersonaLaunch(
-          { personaId: seat.agentId },
+          { personaId: agentId },
           providers,
           agents,
         ).pipe(
@@ -186,7 +208,7 @@ export const layer = Layer.effect(
             (error) =>
               new CrewLaunchSeatUnavailableError({
                 seatName: seat.name,
-                agentId: seat.agentId,
+                agentId,
                 detail: error.message,
               }),
           ),
@@ -205,7 +227,7 @@ export const layer = Layer.effect(
             (error) =>
               new CrewLaunchSeatUnavailableError({
                 seatName: seat.name,
-                agentId: seat.agentId,
+                agentId,
                 detail: error.message,
               }),
           ),
@@ -213,8 +235,10 @@ export const layer = Layer.effect(
         resolved.push({
           seat,
           assignment,
+          modelSelection: assignment.resolvedModelSelection,
           runtimeMode: policy.runtimeMode,
           outputArtifact: definition.outputArtifact ?? null,
+          agentDisplayName: assignment.displayName ?? agentId,
         });
       }
       return resolved;
@@ -236,7 +260,6 @@ export const layer = Layer.effect(
           stableInput,
           threadId,
           participantId: participantIdForThread(threadId),
-          agentDisplayName: entry.assignment.displayName ?? entry.seat.agentId,
         };
       });
     type Planned = ReturnType<typeof plan>[number];
@@ -265,10 +288,10 @@ export const layer = Layer.effect(
             projectId: captain.thread.projectId,
             // The seat's name alone: the sidebar group and the Crew chip already say which Crew.
             title: spawnTitle(member.seat.name, undefined),
-            modelSelection: member.assignment.resolvedModelSelection,
+            modelSelection: member.modelSelection,
             runtimeMode: member.runtimeMode,
             interactionMode: captain.thread.interactionMode,
-            agentPersonaAssignment: member.assignment,
+            ...(member.assignment === null ? {} : { agentPersonaAssignment: member.assignment }),
             branch: captain.thread.branch,
             worktreePath: captain.thread.worktreePath,
           })
@@ -312,7 +335,8 @@ export const layer = Layer.effect(
         participantId: member.participantId,
         agentDisplayName:
           planned.find((entry) => entry.seat.name === member.seatName)?.agentDisplayName ??
-          member.agentId,
+          member.agentId ??
+          "custom",
       }));
       for (const member of planned) {
         yield* threadManagement
@@ -335,7 +359,7 @@ export const layer = Layer.effect(
                 seatInstructions: member.seat.instructions,
                 captainParticipantId: captain.participantId,
                 obligation:
-                  member.outputArtifact === null
+                  member.outputArtifact === null || member.assignment === null
                     ? undefined
                     : {
                         kind: member.outputArtifact,
@@ -349,7 +373,7 @@ export const layer = Layer.effect(
               },
             }),
             attachments: [],
-            modelSelection: member.assignment.resolvedModelSelection,
+            modelSelection: member.modelSelection,
             dispatchMode: { type: "start_immediately" },
           })
           .pipe(

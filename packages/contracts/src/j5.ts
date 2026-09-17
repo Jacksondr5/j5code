@@ -87,10 +87,13 @@ export const OpenInboxCountResponse = Schema.Struct({
 /** A Crew holds at most this many seats, initial roster and additions together (Crews AC11). */
 export const CREW_SEAT_CAP = 12;
 
-/** One requested or approved Crew seat, as the Captain proposed it or the human edited it. */
+/**
+ * One requested or approved Crew seat, as the Captain proposed it or the human edited it. A null
+ * agent is a custom seat: no saved agent, it runs on the Captain's provider, model, and mode.
+ */
 export const CrewProposalSeat = Schema.Struct({
   seat: Schema.String,
-  agentId: Schema.String,
+  agentId: Schema.NullOr(Schema.String),
   reason: Schema.String,
   instructions: Schema.optional(Schema.String),
 });
@@ -185,7 +188,7 @@ export const FleetCrew = Schema.Struct({
   roster: Schema.Array(
     Schema.Struct({
       seat: Schema.String,
-      agentId: Schema.String,
+      agentId: Schema.NullOr(Schema.String),
       participantId: Schema.String,
       addedVersion: Schema.Number,
       reason: Schema.NullOr(Schema.String),
