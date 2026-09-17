@@ -77,22 +77,22 @@ export function validateAgentPersonaAssignment(
   )?.value;
 
   if (assignment.definitionVersion !== definition.version) {
-    return "Agent persona assignment uses an unknown definition version.";
+    return "Persona assignment uses an unknown definition version.";
   }
   if (
     !definition.authority.allowedPolicies.some((policy) => policy === assignment.authorityPolicy)
   ) {
-    return "Agent persona assignment uses an authority policy outside its definition.";
+    return "Persona assignment uses an authority policy outside its definition.";
   }
   if (!providerCanEnforceAgentPersonaAuthority(target.driver, assignment.authorityPolicy)) {
-    return "Agent persona assignment targets a provider that cannot enforce its authority policy.";
+    return "Persona assignment targets a provider that cannot enforce its authority policy.";
   }
   if (
     assignment.resolvedDriver !== target.driver ||
     assignment.resolvedModelSelection.model !== target.model ||
     selectedEffort !== target.reasoningEffort
   ) {
-    return "Agent persona assignment does not match its declared model route.";
+    return "Persona assignment does not match its declared model route.";
   }
   return undefined;
 }

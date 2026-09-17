@@ -15,7 +15,7 @@ export const J5_CLAUDE_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__t3-code__list_squadrons",
   "mcp__t3-code__join_squadron",
   "mcp__t3-code__spawn_agent",
-  "mcp__t3-code__list_agents",
+  "mcp__t3-code__list_personas",
   "mcp__t3-code__propose_crew",
   "mcp__t3-code__request_crew_member",
   "mcp__t3-code__write_artifact", // project artifact toolkit: declared handoffs

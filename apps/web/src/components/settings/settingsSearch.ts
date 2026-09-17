@@ -5,7 +5,7 @@ export type SettingsPath =
   | "/settings/general"
   | "/settings/appearance"
   | "/settings/keybindings"
-  | "/settings/agents"
+  | "/settings/personas"
   | "/settings/providers"
   | "/settings/integrations"
   | "/settings/scheduled-tasks"
@@ -52,7 +52,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/general": "General",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
-  "/settings/agents": "Agents",
+  "/settings/personas": "Personas",
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
   "/settings/scheduled-tasks": "Schedule Tasks",
@@ -328,9 +328,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["keyboard shortcuts hotkeys commands bindings json"],
   },
   {
-    id: "agents",
-    title: "Agents",
-    to: "/settings/agents",
+    id: "personas",
+    title: "Personas",
+    to: "/settings/personas",
+    // "agents" stays a search hit: the library was called Agents until 2026-09-17.
+    searchTerms: ["agents saved agent library yaml definitions instructions runtime policy"],
   },
   {
     id: "providers",

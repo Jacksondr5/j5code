@@ -59,12 +59,12 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
   const catalog = yield* library.catalog();
   if (catalog.disabledIds.includes(request.personaId))
     return yield* new AgentPersonaLibraryError({
-      message: "Agent persona is disabled in this environment.",
+      message: "Persona is disabled in this environment.",
     });
   const definition = catalog.definitions.find(({ id }) => id === request.personaId);
   if (definition === undefined)
     return yield* new AgentPersonaLibraryError({
-      message: "Unknown agent persona in this environment.",
+      message: "Unknown persona in this environment.",
     });
   if (
     request.authorityPolicy !== undefined &&
@@ -86,8 +86,8 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
     return yield* new AgentPersonaLibraryError({
       message:
         unavailableAgentPersonaReason(resolution) === "authority-not-enforceable"
-          ? `Agent persona ${request.personaId} is blocked because neither route can enforce its authority policy.`
-          : `Agent persona ${request.personaId} is blocked because its primary and fallback models are unavailable: ${describeRouteAttempts(resolution.attempts)}.`,
+          ? `Persona ${request.personaId} is blocked because neither route can enforce its authority policy.`
+          : `Persona ${request.personaId} is blocked because its primary and fallback models are unavailable: ${describeRouteAttempts(resolution.attempts)}.`,
     });
   }
   const result = buildAgentPersonaAssignment({ ...authority, definition, resolution });

@@ -395,7 +395,7 @@ export function agentPersonaDrift(
 }
 
 export const AGENT_PERSONA_DRIFT_MESSAGE =
-  "This agent's definition changed after this task launched. The task keeps the definition it started with; start a new task to use the current one.";
+  "This persona's definition changed after this task launched. The task keeps the definition it started with; start a new task to use the current one.";
 
 /** Short origin for a catalog row; folder origins name the file's parent folder only. */
 export function agentPersonaOriginLabel(origin: AgentPersonaOrigin): string {

@@ -42,7 +42,7 @@ export function AgentPersonaAssignmentControls(props: {
   return (
     <>
       <ComposerInlineControl
-        accessibilityLabel={`Agent persona: ${presentation.personaLabel}`}
+        accessibilityLabel={`Persona: ${presentation.personaLabel}`}
         emphasized
         icon="person.crop.circle"
         label={presentation.personaLabel}
@@ -57,7 +57,7 @@ export function AgentPersonaAssignmentControls(props: {
       />
       {props.onClear ? (
         <ComposerInlineControl
-          accessibilityLabel="Remove agent"
+          accessibilityLabel="Remove persona"
           accessibilityHint="Start as a regular task instead"
           icon="xmark"
           label=""
@@ -77,7 +77,7 @@ export function AgentPersonaAssignmentControls(props: {
       ) : null}
       {drift === "changed" ? (
         <ComposerInlineControl
-          accessibilityLabel="Agent definition changed since launch"
+          accessibilityLabel="Persona definition changed since launch"
           accessibilityHint={AGENT_PERSONA_DRIFT_MESSAGE}
           icon="exclamationmark.triangle"
           label="Changed"

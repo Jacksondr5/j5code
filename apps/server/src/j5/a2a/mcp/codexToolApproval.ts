@@ -22,7 +22,7 @@ export const J5_CODEX_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
   "list_squadrons",
   "join_squadron",
   "spawn_agent",
-  "list_agents",
+  "list_personas",
   "propose_crew",
   "request_crew_member",
   // Declared handoffs are files the seat writes itself into application storage.

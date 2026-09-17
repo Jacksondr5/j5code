@@ -1955,7 +1955,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (composerTrigger.kind === "agent") return agentPicker.items;
     if (composerTrigger.kind === "path") {
       return [
-        // J5: saved agents whose id or name starts with the typed text lead the file results.
+        // J5: personas whose id or name starts with the typed text lead the file results.
         ...agentPicker.items,
         ...workspaceEntries.entries.map((entry) => ({
           id: `path:${entry.kind}:${entry.path}`,
@@ -2130,7 +2130,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     (composerTriggerKind === "agent" && agentPicker.isPending) ||
     (composerTriggerKind === "path" && pathTriggerQuery.length > 0 && workspaceEntries.isPending);
   const composerMenuEmptyState = useMemo(() => {
-    if (composerTriggerKind === "agent") return agentPicker.error ?? "No available agents found.";
+    if (composerTriggerKind === "agent") return agentPicker.error ?? "No available personas found.";
     if (composerTriggerKind === "skill") {
       return "No skills found. Try / to browse provider commands.";
     }

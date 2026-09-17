@@ -20,7 +20,7 @@ import type { ThreadHome } from "./ThreadHomesClient";
  * Thread cards identify registered work by its immutable Registrar Squadron.
  * Native threads have no Registrar home, so their existing folder label stays
  * as the honest fallback rather than inventing a Squadron. A thread launched as
- * a saved agent shows that agent beside its home; a Crew member adds a seat chip
+ * a persona shows that persona beside its home; a Crew member adds a seat chip
  * and a Captain adds the anchor mark. The list itself stays flat by recency, and
  * the grouped org tree belongs to the Roster.
  */
@@ -30,7 +30,7 @@ export function ThreadCardIdentity(props: {
   readonly environmentId?: EnvironmentId;
   readonly home: ThreadHome | undefined;
   readonly fallbackFolder: string | null;
-  /** Threads launched as a saved agent show the agent beside their home. */
+  /** Threads launched as a persona show the persona beside their home. */
   readonly agentPersonaAssignment?: OrchestrationV2AgentPersonaAssignment | undefined;
 }) {
   const membership = useCrewMembership(

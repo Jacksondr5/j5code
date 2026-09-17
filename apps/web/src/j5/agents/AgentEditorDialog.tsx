@@ -88,7 +88,7 @@ export function AgentEditorDialog(props: {
           }}
         >
           <DialogHeader>
-            <DialogTitle>Edit agent</DialogTitle>
+            <DialogTitle>Edit persona</DialogTitle>
             <DialogDescription>
               Changes apply to this imported copy and future launches. The original file and
               existing tasks stay unchanged.
