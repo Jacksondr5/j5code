@@ -27,16 +27,18 @@ import { participantIdForThread } from "./HomeRegistrar.ts";
 import { lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
 
 /**
- * Crew members settle themselves: when a member's run ends and it owes no reply to anyone, its
- * thread is settled so the roster shows finished seats as done. A later inbound message starts a
- * new run as usual; settlement is a resting state, not a lock. Captains are never auto-settled
- * here because they keep coordinating after their own turns end.
+ * A seat tells its Captain when it finishes: when a member's run ends and it owes no reply to
+ * anyone, the platform posts a notice into the Captain's thread with how the run ended, as
+ * measured facts, and where the seat's handoff stands. The seat's thread is otherwise left as
+ * upstream leaves any thread; nothing here settles it (Jackson's review, 2026-09-17: upstream
+ * settles by hand, by merged PR, or by three idle days, and a seat marked settled seconds after
+ * launch read as wrong). A later inbound message starts a new run as usual. Captains are never
+ * reported on here because they keep coordinating after their own turns end.
  *
- * A settlement tells the Captain, as measured facts, how the run ended and where the seat's
- * handoff stands. A member whose definition declares an output artifact writes it as its handoff
- * file, the same shared artifact every saved agent produces; the handoff gate
- * (agentHandoffObserver) checks for it and reminds the seat once. The notice carries the file
- * inline when it exists and is short, so a seat finishing is one message to the Captain, not two.
+ * A member whose definition declares an output artifact writes it as its handoff file, the same
+ * shared artifact every saved agent produces; the handoff gate (agentHandoffObserver) checks for
+ * it and reminds the seat once. The notice carries the file inline when it exists and is short,
+ * so a seat finishing is one message to the Captain, not two.
  *
  * Two rules keep the Captain's queue short (Bryant, 2026-09-14). A notice is posted the first time
  * a seat finishes and again only when its facts changed; a finish whose notice would read exactly
@@ -44,18 +46,19 @@ import { lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
  * notice that arrives while the Captain's turn is running folds into the seat notice already
  * queued behind that turn, so the Captain absorbs its Crew's news in one turn, not one per seat.
  */
-export interface CrewMemberSettlerShape {
-  /** Returns the thread id it settled, or null when the event needed no action. */
+export interface CrewSeatFinishNotifierShape {
+  /** Returns the seat thread whose Captain was told, or null when the event needed no action. */
   readonly handleStoredEvent: (
     event: OrchestrationV2StoredEvent,
   ) => Effect.Effect<ThreadId | null, never>;
 }
 
-export class CrewMemberSettler extends Context.Service<CrewMemberSettler, CrewMemberSettlerShape>()(
-  "t3/j5/a2a/CrewMemberSettler",
-) {}
+export class CrewSeatFinishNotifier extends Context.Service<
+  CrewSeatFinishNotifier,
+  CrewSeatFinishNotifierShape
+>()("t3/j5/a2a/CrewSeatFinishNotifier") {}
 
-const SETTLE_SESSION = "j5-crew-settle";
+const FINISH_SESSION = "j5-crew-seat-finish";
 /** Bodies up to this size ride inline in the Captain's notice; longer ones are read on demand. */
 export const INLINE_HANDOFF_MAX_CHARS = 4_000;
 
@@ -63,8 +66,8 @@ export const INLINE_HANDOFF_MAX_CHARS = 4_000;
  * A seat has finished only when its run completed or failed. Interrupted, cancelled, and rolled
  * back runs are terminal to the orchestrator but not finishes for a Crew: `stop_crew` and the
  * person's Stop crew interrupt seats precisely so they can be briefed again, and the definition
- * says nothing settles then (Crews AC21). Treating those as finishes would settle every stopped
- * seat and wake the Captain to react to its own stop.
+ * says nothing is reported then (Crews AC21). Treating those as finishes would wake the Captain
+ * to react to its own stop.
  */
 const finishedRun = (stored: OrchestrationV2StoredEvent): OrchestrationV2Run | undefined => {
   const event = stored.event;
@@ -74,7 +77,7 @@ const finishedRun = (stored: OrchestrationV2StoredEvent): OrchestrationV2Run | u
     : undefined;
 };
 
-const NOTICE_OPEN = "<j5_seat_settled>";
+const NOTICE_OPEN = "<j5_seat_finished>";
 
 /** Each seat's section of a notice or digest: its opening tag through the text before the next. */
 export const seatNoticeSections = (text: string): ReadonlyArray<string> =>
@@ -121,12 +124,12 @@ export const queuedSeatDigest = (captain: OrchestrationV2ThreadProjection) => {
 /**
  * A seat's body must not be able to end the body block and continue as platform voice, nor open
  * a seat section of its own: a Critic reviewing this feature will quote a notice, and both the
- * settler's sections and the card's parser split on the opening tag.
+ * notifier's sections and the card's parser split on the opening tag.
  */
 const noticeBody = (body: string) =>
   body
     .replace(/<\/handoff_body>/g, "<\\/handoff_body>")
-    .replace(/<j5_seat_settled>/g, "<\\j5_seat_settled>");
+    .replace(/<j5_seat_finished>/g, "<\\j5_seat_finished>");
 
 /** Twelve hex characters of the body's SHA-256, so a rewritten handoff changes the notice text. */
 const handoffDigest = (body: string) =>
@@ -143,12 +146,12 @@ export type SeatHandoffFact =
   | { readonly status: "none declared" };
 
 /**
- * The platform-composed notice the Captain receives when a seat settles: measured facts about
+ * The platform-composed notice the Captain receives when a seat finishes: measured facts about
  * the run and the handoff, then the handoff body when it exists and is short. A written handoff
  * always carries its size and digest in the facts, so a re-briefed seat that rewrites a body too
  * long to inline still produces a changed notice and the Captain hears of it.
  */
-export const seatSettledNoticeText = (input: {
+export const seatFinishedNoticeText = (input: {
   readonly seatName: string;
   /** Which Crew the seat sits in; a Captain may command several. */
   readonly crewName: string;
@@ -163,7 +166,7 @@ export const seatSettledNoticeText = (input: {
       : input.handoff.status === "missing"
         ? `handoff: missing (${input.handoff.kind})\nartifact: ${agentHandoffLogicalPath(input.handoff.path)}`
         : `handoff: written (${input.handoff.kind})\nartifact: ${agentHandoffLogicalPath(input.handoff.path)}\nhandoff_chars: ${input.handoff.body?.length ?? 0}\nhandoff_digest: ${input.handoff.body === null ? "binary" : handoffDigest(input.handoff.body)}`;
-  const head = `<j5_seat_settled>\nseat: ${input.seatName}\ncrew: ${input.crewName}\nparticipant_id: ${input.participantId}\nthread_id: ${input.threadId}\nrun_status: ${input.runStatus}\n${handoffLine}\n</j5_seat_settled>`;
+  const head = `<j5_seat_finished>\nseat: ${input.seatName}\ncrew: ${input.crewName}\nparticipant_id: ${input.participantId}\nthread_id: ${input.threadId}\nrun_status: ${input.runStatus}\n${handoffLine}\n</j5_seat_finished>`;
   if (input.handoff.status !== "written") return head;
   return input.handoff.body !== null && input.handoff.body.length <= INLINE_HANDOFF_MAX_CHARS
     ? `${head}\n\n<handoff_body>\n${noticeBody(input.handoff.body)}\n</handoff_body>`
@@ -172,7 +175,7 @@ export const seatSettledNoticeText = (input: {
 
 const makeLayer = (daemon: boolean) =>
   Layer.effect(
-    CrewMemberSettler,
+    CrewSeatFinishNotifier,
     Effect.gen(function* () {
       const threads = yield* ThreadManagement.ThreadManagementService;
       const crews = yield* AgentCrewInstanceService;
@@ -180,7 +183,7 @@ const makeLayer = (daemon: boolean) =>
       const agents = yield* makeAgentPersonaLibrary;
       const sql = yield* SqlClient.SqlClient;
 
-      const owedReplies = Effect.fn("j5.a2a.crewSettler.owedReplies")(function* (
+      const owedReplies = Effect.fn("j5.a2a.crewSeatFinish.owedReplies")(function* (
         participantId: string,
       ) {
         const rows = yield* sql<{ readonly count: number }>`
@@ -191,7 +194,7 @@ const makeLayer = (daemon: boolean) =>
       });
 
       /** Where the seat's declared handoff stands: the file itself is the fact, not the store. */
-      const handoffFact = Effect.fn("j5.a2a.crewSettler.handoffFact")(function* (
+      const handoffFact = Effect.fn("j5.a2a.crewSeatFinish.handoffFact")(function* (
         projection: OrchestrationV2ThreadProjection,
         kind: string | null,
       ): Effect.fn.Return<SeatHandoffFact, never, never> {
@@ -208,7 +211,7 @@ const makeLayer = (daemon: boolean) =>
         const content = yield* Effect.result(workspace.read({ projectId, relativePath: path }));
         if (Result.isFailure(content)) {
           if (content.failure.reason !== "not_found") {
-            yield* Effect.logWarning("J5 crew settler could not read a seat handoff", {
+            yield* Effect.logWarning("J5 crew seat notifier could not read a seat handoff", {
               path,
               cause: content.failure,
             });
@@ -227,7 +230,7 @@ const makeLayer = (daemon: boolean) =>
        * Tells the Captain what changed. Ids derive from the run, so a redelivered event cannot
        * post twice; a fold checks the digest for the same text for the same reason.
        */
-      const notifyCaptain = Effect.fn("j5.a2a.crewSettler.notifyCaptain")(function* (
+      const notifyCaptain = Effect.fn("j5.a2a.crewSeatFinish.notifyCaptain")(function* (
         instance: AgentCrewInstance,
         seatName: string,
         projection: OrchestrationV2ThreadProjection,
@@ -236,8 +239,8 @@ const makeLayer = (daemon: boolean) =>
       ) {
         const threadId = projection.thread.id;
         const captain = yield* threads.getThreadProjection(instance.captainThreadId);
-        const stable = { providerSessionId: SETTLE_SESSION, requestKey: `${threadId}:${run.id}` };
-        const text = seatSettledNoticeText({
+        const stable = { providerSessionId: FINISH_SESSION, requestKey: `${threadId}:${run.id}` };
+        const text = seatFinishedNoticeText({
           seatName,
           crewName: instance.displayName,
           participantId: participantIdForThread(threadId),
@@ -252,7 +255,7 @@ const makeLayer = (daemon: boolean) =>
           if (!digest.message.text.includes(text)) {
             yield* threads.dispatch({
               type: "queued-run.edit",
-              commandId: lifecycleCommandId({ ...stable, operation: "seat-settled-fold" }),
+              commandId: lifecycleCommandId({ ...stable, operation: "seat-finished-fold" }),
               threadId: instance.captainThreadId,
               runId: digest.run.id,
               text: `${digest.message.text}\n\n${text}`,
@@ -264,10 +267,10 @@ const makeLayer = (daemon: boolean) =>
           type: "message.dispatch",
           createdBy: "system",
           creationSource: "server",
-          commandId: lifecycleCommandId({ ...stable, operation: "seat-settled" }),
+          commandId: lifecycleCommandId({ ...stable, operation: "seat-finished" }),
           threadId: instance.captainThreadId,
           messageId: MessageId.make(
-            lifecycleId({ ...stable, kind: "message", operation: "seat-settled" }),
+            lifecycleId({ ...stable, kind: "message", operation: "seat-finished" }),
           ),
           text,
           attachments: [],
@@ -277,7 +280,7 @@ const makeLayer = (daemon: boolean) =>
         return "posted" as const;
       });
 
-      const settleIfFinished = Effect.fn("j5.a2a.crewSettler.settleIfFinished")(function* (
+      const notifyIfFinished = Effect.fn("j5.a2a.crewSeatFinish.notifyIfFinished")(function* (
         threadId: ThreadId,
         run: OrchestrationV2Run,
       ) {
@@ -287,48 +290,38 @@ const makeLayer = (daemon: boolean) =>
         const instance = yield* crews.read(membership.crewInstanceId);
         if (instance === null || instance.archivedAt !== null) return null;
         const projection = yield* threads.getThreadProjection(threadId);
-        if (projection.thread.archivedAt !== null || projection.thread.settledOverride !== null)
-          return null;
+        if (projection.thread.archivedAt !== null) return null;
         if (ThreadManagement.latestActiveRun(projection) !== undefined) return null;
         if ((yield* owedReplies(participantId)) > 0) return null;
         // What the seat owes comes from its immutable snapshot, not today's library. A snapshot
-        // that cannot be read leaves the seat unsettled and logged rather than quietly finished.
+        // that cannot be read leaves the seat unreported and logged rather than quietly finished.
         const assignment = projection.thread.agentPersonaAssignment;
         const owedKind =
           assignment === undefined
             ? null
             : ((yield* agents.readSnapshot(assignment)).outputArtifact ?? null);
         const handoff = yield* handoffFact(projection, owedKind);
-        // The notice commits before the seat settles: a notice that fails leaves the seat
-        // unsettled and logged, so the next pass (the seat's next finish, or the boot sweep)
-        // retries it rather than the Captain silently never hearing.
+        // A notice that fails is logged and left for the next pass (the seat's next finish), so
+        // the Captain is never silently left unaware.
         yield* notifyCaptain(instance, membership.seatName, projection, run, handoff);
-        yield* threads.dispatch({
-          type: "thread.settle",
-          commandId: lifecycleCommandId({
-            providerSessionId: SETTLE_SESSION,
-            requestKey: `${threadId}:${run.id}`,
-            operation: "crew-member-settle",
-          }),
-          threadId,
-          settledAt: yield* DateTime.now,
-        });
         return threadId;
       });
 
-      const handleStoredEvent: CrewMemberSettlerShape["handleStoredEvent"] = (stored) =>
+      const handleStoredEvent: CrewSeatFinishNotifierShape["handleStoredEvent"] = (stored) =>
         Effect.gen(function* () {
           const run = finishedRun(stored);
           if (run === undefined) return null;
-          return yield* settleIfFinished(run.threadId, run);
+          return yield* notifyIfFinished(run.threadId, run);
         }).pipe(
           Effect.catchCause((cause) =>
-            Effect.logWarning("J5 crew member settlement skipped", { cause }).pipe(Effect.as(null)),
+            Effect.logWarning("J5 crew seat finish notice skipped", { cause }).pipe(
+              Effect.as(null),
+            ),
           ),
         );
 
       if (daemon) {
-        // Start from the current high-water mark: a missed settle is harmless and the next
+        // Start from the current high-water mark: a missed finish is harmless and the next
         // terminal run for that member catches up.
         const runDaemon = Effect.gen(function* () {
           const rows = yield* sql<{ readonly sequence: number }>`
@@ -345,7 +338,7 @@ const makeLayer = (daemon: boolean) =>
                 ),
               ),
               Effect.catchCause((cause) =>
-                Effect.logWarning("J5 crew member settlement stream failed; resuming", {
+                Effect.logWarning("J5 crew seat finish stream failed; resuming", {
                   cause,
                 }).pipe(Effect.andThen(Effect.sleep(Duration.seconds(1)))),
               ),
@@ -355,7 +348,7 @@ const makeLayer = (daemon: boolean) =>
         yield* Effect.forkScoped(runDaemon);
       }
 
-      return CrewMemberSettler.of({ handleStoredEvent });
+      return CrewSeatFinishNotifier.of({ handleStoredEvent });
     }),
   );
 

@@ -179,8 +179,7 @@ export const layer = Layer.effect(
       if (existingSeatCount + seats.length > CREW_SEAT_CAP)
         return yield* new CrewProposalRequestError({
           detail: `A crew may hold at most ${CREW_SEAT_CAP} seats; this request would reach ${existingSeatCount + seats.length}.`,
-          nextStep:
-            "Request fewer seats, or let a member finish and settle before asking for more.",
+          nextStep: "Request fewer seats, or let a member finish before asking for more.",
         });
       const catalog = yield* agents
         .catalog()

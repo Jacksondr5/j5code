@@ -255,8 +255,8 @@ There is no Crew-specific artifact verb. A seat whose definition declares an out
 it with the project `write_artifact` tool to the same handoff file every saved agent writes
 (`handoffs/<agent>/<Artifact>-<task>.md`, see the [persona contract](../agent-personas/index.md));
 its first turn carries `<seat_obligation>` naming that exact path. The handoff gate checks for the
-file when a run ends and reminds the seat once. When a seat settles, the crew settler posts one
-platform-composed `<j5_seat_settled>` notice per finished run into the Captain's thread: the seat,
+file when a run ends and reminds the seat once. When a seat finishes, the seat finish notifier posts
+one platform-composed `<j5_seat_finished>` notice per finished run into the Captain's thread: the seat,
 its participant and thread ids, the run status (completed, failed, or cancelled), and the handoff
 as `written`, `missing`, or `none declared` with its path; a written handoff up to 4,000
 characters rides inline, longer ones name the path for the project `read_artifact` tool. Ids

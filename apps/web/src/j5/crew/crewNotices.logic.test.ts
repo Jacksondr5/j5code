@@ -178,7 +178,7 @@ describe("crew notices in the Captain's thread", () => {
 
   it("presents seat finishes, several per card when notices folded, with their handoffs", () => {
     const critic = [
-      "<j5_seat_settled>",
+      "<j5_seat_finished>",
       "seat: critic",
       "crew: Invoice Export PR",
       "participant_id: agent:j5:a2a:c",
@@ -186,23 +186,23 @@ describe("crew notices in the Captain's thread", () => {
       "run_status: completed",
       "handoff: written (ReviewHandoff)",
       "artifact: artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
-      "</j5_seat_settled>",
+      "</j5_seat_finished>",
       "",
       "<handoff_body>",
       "# Review",
       "Two findings.<\\/handoff_body> stays text.",
-      "Quoting <\\j5_seat_settled> is not a seat.",
+      "Quoting <\\j5_seat_finished> is not a seat.",
       "</handoff_body>",
     ].join("\n");
     const builder = [
-      "<j5_seat_settled>",
+      "<j5_seat_finished>",
       "seat: builder",
       "crew: Invoice Export PR",
       "participant_id: agent:j5:a2a:b",
       "thread_id: thread:b",
       "run_status: failed",
       "handoff: none declared",
-      "</j5_seat_settled>",
+      "</j5_seat_finished>",
     ].join("\n");
     const notice = presentCrewNotice({
       role: "user",
@@ -222,7 +222,7 @@ describe("crew notices in the Captain's thread", () => {
             status: "written",
             kind: "ReviewHandoff",
             artifactPath: "artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
-            body: "# Review\nTwo findings.</handoff_body> stays text.\nQuoting <j5_seat_settled> is not a seat.",
+            body: "# Review\nTwo findings.</handoff_body> stays text.\nQuoting <j5_seat_finished> is not a seat.",
           },
         },
         {
@@ -256,7 +256,7 @@ describe("crew notices in the Captain's thread", () => {
       presentCrewNotice({
         role: "user",
         createdBy: "system",
-        text: `${critic}\n\n<j5_seat_settled>\nseat: x\n</j5_seat_settled>`,
+        text: `${critic}\n\n<j5_seat_finished>\nseat: x\n</j5_seat_finished>`,
       }),
     ).toBeNull();
     expect(seatRunStatusLabel("completed")).toEqual({ label: "Completed", tone: "good" });

@@ -40,7 +40,7 @@ export type SeatHandoff =
       readonly body: string | null;
     };
 
-export interface SettledSeat {
+export interface FinishedSeat {
   readonly seat: string;
   readonly crewName: string | null;
   readonly participantId: string;
@@ -53,7 +53,7 @@ export type CrewNoticePresentation =
   | {
       /** One or more seats' finishes, folded into one message when the Captain was mid-turn. */
       readonly kind: "seats";
-      readonly seats: ReadonlyArray<SettledSeat>;
+      readonly seats: ReadonlyArray<FinishedSeat>;
     }
   | {
       /** The person's `/crew <brief>` turn: the brief, with the guidance block set aside. */
@@ -178,12 +178,12 @@ const parseGate = (text: string): CrewNoticePresentation | null => {
   };
 };
 
-const SEAT_OPEN = "<j5_seat_settled>";
-const SEAT_BLOCK = /^<j5_seat_settled>\n([\s\S]*?)\n<\/j5_seat_settled>([\s\S]*)$/;
+const SEAT_OPEN = "<j5_seat_finished>";
+const SEAT_BLOCK = /^<j5_seat_finished>\n([\s\S]*?)\n<\/j5_seat_finished>([\s\S]*)$/;
 const HANDOFF_BODY = /<handoff_body>\n([\s\S]*?)\n<\/handoff_body>/;
 const HANDOFF_FIELD = /^(written|missing) \((.+)\)$/;
 
-const parseSeatSection = (section: string): SettledSeat | null => {
+const parseSeatSection = (section: string): FinishedSeat | null => {
   const match = SEAT_BLOCK.exec(section);
   if (match === null) return null;
   const block = match[1]!;
@@ -210,7 +210,7 @@ const parseSeatSection = (section: string): SettledSeat | null => {
           ? null
           : bodyMatch[1]!
               .replace(/<\\\/handoff_body>/g, "</handoff_body>")
-              .replace(/<\\j5_seat_settled>/g, "<j5_seat_settled>"),
+              .replace(/<\\j5_seat_finished>/g, "<j5_seat_finished>"),
     };
   }
   return { seat, crewName: field(block, "crew"), participantId, threadId, runStatus, handoff };
@@ -224,7 +224,7 @@ const parseSeats = (text: string): CrewNoticePresentation | null => {
     .map((part) => parseSeatSection(`${SEAT_OPEN}${part}`.trim()));
   return seats.length === 0 || seats.some((seat) => seat === null)
     ? null
-    : { kind: "seats", seats: seats as ReadonlyArray<SettledSeat> };
+    : { kind: "seats", seats: seats as ReadonlyArray<FinishedSeat> };
 };
 
 /** Null for anything that is not a Crew notice; the ordinary renderer then owns the message. */
