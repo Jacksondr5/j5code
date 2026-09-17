@@ -57,9 +57,9 @@ export interface CrewSeatFinishNotifierShape {
     event: OrchestrationV2StoredEvent,
   ) => Effect.Effect<ThreadId | null, never>;
   /**
-   * The boot sweep: settle every live Crew member whose last run finished while nothing settled
-   * it, telling its Captain as usual. Covers a notice that failed (the seat was left unsettled
-   * on purpose) and a finish that landed while the server was down. Returns the threads settled.
+   * The boot sweep: tell every Captain about a live seat whose last run finished while nothing
+   * reported it. Covers a notice that failed (the seat was left unreported on purpose) and a
+   * finish that landed while the server was down. Returns the seat threads reported.
    */
   readonly reconcile: Effect.Effect<ReadonlyArray<ThreadId>>;
 }

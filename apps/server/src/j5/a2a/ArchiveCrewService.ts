@@ -111,7 +111,7 @@ export class ArchiveCrewConfirmationRequiredError extends Data.TaggedError(
       0,
     );
     const running = this.facts.members.filter((member) => member.facts.runningTurn !== null).length;
-    return `Archiving this Crew would end active work: ${waiting} open exchange(s) and ${running} running turn(s) across its seats. Review every listed member fact, check with the human before retiring a Crew that others are waiting on, then retry archive_crew with the confirmation_token.`;
+    return `Archiving this Crew would end active work: ${waiting} open exchange(s) and ${running} running turn(s) across its seats. Review every listed member fact, check with the user before retiring a Crew that others are waiting on, then retry archive_crew with the confirmation_token.`;
   }
 }
 

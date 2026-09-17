@@ -39,7 +39,7 @@ Crews are deliberately disposable. They **archive only as a unit** — members a
 
 **Archive and respawn are judgment moments, and the platform never makes that decision itself.** Archiving a Crew with open Exchanges or running turns refuses with the list, seat by seat, and requires a confirmation token; the expectation, carried in guidance rather than enforced, is that a Captain checks with the person and they plan together. The successor Crew starts from a fresh proposal and a fresh brief written by whoever respawns it — where things stand, the state of the durable artifacts, what to do next. There is no auto-forwarded original brief, no generated summary, no transferred conversation, no inherited obligations, no auto-reopened asks; the archived Crew's brief, roster, ledger, and handoffs stay readable for the respawner to consult.
 
-The platform ships the machinery — propose, gate, spawn, render, remind, settle, archive. The Captain agent that composes a Crew, the Roles it seats, and any Playbook it follows are always the user's content: the PR Group is one Captain's proposal someone approved, never the product's opinion.
+The platform ships the machinery — propose, gate, spawn, render, remind, notify, archive. The Captain agent that composes a Crew, the Roles it seats, and any Playbook it follows are always the user's content: the PR Group is one Captain's proposal someone approved, never the product's opinion.
 
 ## Acceptance criteria
 
