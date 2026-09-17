@@ -246,7 +246,7 @@ it("preserves elicitation identity and mode-specific fields after schema generat
     { mode: "openai/form", requestedSchema: { type: "object" } },
     { mode: "openaiForm", requestedSchema: { type: "object" } },
     { mode: "url", url: "https://example.com/authorize", elicitationId: "request-1" },
-  ]) {
+  ] as const) {
     const request = { ...common, ...fields };
     assert.deepEqual(decodeElicitation(request), request);
     const { serverName: _server, ...withoutServer } = request;
