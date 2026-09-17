@@ -29,17 +29,17 @@ import {
   layer as crewInstanceLayer,
 } from "./AgentCrewInstanceService.ts";
 import {
-  CrewMemberSettler,
-  manualLayer as settlerLayer,
+  CrewSeatFinishNotifier,
+  manualLayer as notifierLayer,
   seatNoticeSections,
-  seatSettledNoticeText,
-} from "./CrewMemberSettler.ts";
+  seatFinishedNoticeText,
+} from "./CrewSeatFinishNotifier.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { SquadronId } from "./contracts.ts";
 
-const squadronId = SquadronId.make("squadron:crew-settle");
+const squadronId = SquadronId.make("squadron:crew-finish");
 const captainThread = ThreadId.make("thread:captain");
 const builderThread = ThreadId.make("thread:builder");
 const criticThread = ThreadId.make("thread:critic");
@@ -82,7 +82,7 @@ const projection = (
   ({
     thread: {
       id: threadId,
-      projectId: ProjectId.make("project:crew-settle"),
+      projectId: ProjectId.make("project:crew-finish"),
       title: `Thread ${threadId}`,
       modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
       agentPersonaAssignment: assignmentFor(threadId),
@@ -144,7 +144,7 @@ const terminalRunEvent = (
     },
   }) as unknown as OrchestrationV2StoredEvent;
 
-it.effect("settles finished members and tells the Captain how each seat ended", () =>
+it.effect("tells the Captain how each finished seat ended, and settles nothing", () =>
   Effect.gen(function* () {
     const database = NodeSqliteClient.layerMemory();
     const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
@@ -154,17 +154,17 @@ it.effect("settles finished members and tells the Captain how each seat ended", 
     yield* runJ5A2AMigrations().pipe(Effect.provide(context));
     const sql = Context.get(context, SqlClient.SqlClient);
     yield* Context.get(context, A2ALedger).createSquadron({
-      squadron: { id: squadronId, name: "Settle", createdAt: DateTime.formatIso(createdAt) },
+      squadron: { id: squadronId, name: "Finish", createdAt: DateTime.formatIso(createdAt) },
     });
     const captain = participantIdForThread(captainThread);
     const builder = participantIdForThread(builderThread);
     const critic = participantIdForThread(criticThread);
     yield* Context.get(context, AgentCrewInstanceService).record({
-      id: "crew:settle",
+      id: "crew:finish",
       squadronId,
       captainParticipantId: captain,
       captainThreadId: captainThread,
-      displayName: "Settle Crew",
+      displayName: "Finish Crew",
       brief: "Finish the work.",
       createdAt: DateTime.formatIso(createdAt),
       members: [
@@ -202,62 +202,49 @@ it.effect("settles finished members and tells the Captain how each seat ended", 
       )
     `;
     const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
-    const settled = yield* Ref.make<ReadonlySet<string>>(new Set());
-    const layer = settlerLayer.pipe(
+    const layer = notifierLayer.pipe(
       Layer.provideMerge(
         Layer.mock(ThreadManagementService)({
-          getThreadProjection: (threadId) =>
-            Ref.get(settled).pipe(
-              Effect.map((ids) =>
-                projection(threadId, { settledOverride: ids.has(threadId) ? "settled" : null }),
-              ),
-            ),
+          getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
           dispatch: (command) =>
-            Effect.all(
-              [
-                Ref.update(dispatched, (items) => [...items, command]),
-                command.type === "thread.settle"
-                  ? Ref.update(settled, (ids) => new Set([...ids, command.threadId]))
-                  : Effect.void,
-              ],
-              { discard: true },
-            ).pipe(Effect.as({ events: [], effects: [] } as never)),
+            Ref.update(dispatched, (items) => [...items, command]).pipe(
+              Effect.as({ events: [], effects: [] } as never),
+            ),
         }),
       ),
       Layer.provideMerge(artifactWorkspaceLayer),
       Layer.provideMerge(Layer.succeedContext(context)),
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-settle-" })),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-finish-" })),
       Layer.provideMerge(NodeServices.layer),
     );
     yield* Effect.gen(function* () {
-      const settler = yield* CrewMemberSettler;
+      const notifier = yield* CrewSeatFinishNotifier;
       const workspace = yield* ArtifactWorkspace;
       // The bundled builder returns a CodeCompleteHandoff, but the handoff gate owns the reminder;
-      // the settler settles a finished seat whatever happened and tells the Captain how it ended,
-      // so a seat that produced nothing is never trapped and never silent.
+      // the notifier reports a finished seat whatever happened and tells the Captain how it ended,
+      // so a seat that produced nothing is never trapped and never silent. The seat's thread is
+      // not settled: upstream's own rules decide that.
       assert.equal(
-        yield* settler.handleStoredEvent(terminalRunEvent(builderThread, "run:1")),
+        yield* notifier.handleStoredEvent(terminalRunEvent(builderThread, "run:1")),
         builderThread,
       );
       const builderCommands = yield* Ref.get(dispatched);
-      assert.lengthOf(builderCommands, 2);
+      assert.lengthOf(builderCommands, 1);
       const builderNotice = builderCommands[0];
       assert.equal(builderNotice?.type, "message.dispatch");
       if (builderNotice?.type === "message.dispatch") {
         assert.equal(builderNotice.threadId, captainThread);
-        assert.include(builderNotice.text, "<j5_seat_settled>");
+        assert.include(builderNotice.text, "<j5_seat_finished>");
         assert.include(builderNotice.text, "seat: builder");
         assert.include(builderNotice.text, "run_status: completed");
         assert.include(builderNotice.text, "handoff: missing (CodeCompleteHandoff)");
         assert.notInclude(builderNotice.text, "<handoff_body>");
       }
-      assert.equal(builderCommands[1]?.type, "thread.settle");
-      assert.isNull(yield* settler.handleStoredEvent(terminalRunEvent(builderThread, "run:1b")));
-      assert.isNull(yield* settler.handleStoredEvent(terminalRunEvent(criticThread, "run:2")));
-      assert.isNull(yield* settler.handleStoredEvent(terminalRunEvent(captainThread, "run:3")));
-      assert.isNull(yield* settler.handleStoredEvent(terminalRunEvent(strangerThread, "run:4")));
+      assert.isNull(yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:2")));
+      assert.isNull(yield* notifier.handleStoredEvent(terminalRunEvent(captainThread, "run:3")));
+      assert.isNull(yield* notifier.handleStoredEvent(terminalRunEvent(strangerThread, "run:4")));
       assert.isNull(
-        yield* settler.handleStoredEvent({
+        yield* notifier.handleStoredEvent({
           sequence: 9,
           commandId: null,
           event: {
@@ -272,34 +259,33 @@ it.effect("settles finished members and tells the Captain how each seat ended", 
           },
         } as unknown as OrchestrationV2StoredEvent),
       );
-      assert.lengthOf(yield* Ref.get(dispatched), 2);
+      assert.lengthOf(yield* Ref.get(dispatched), 1);
       // A stopped seat is not a finished seat: stop_crew interrupts so the seat can be briefed
-      // again, and nothing settles or reaches the Captain (Crews AC21).
+      // again, and nothing reaches the Captain (Crews AC21).
       assert.isNull(
-        yield* settler.handleStoredEvent(terminalRunEvent(scoutThread, "run:s0", "interrupted")),
+        yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s0", "interrupted")),
       );
       assert.isNull(
-        yield* settler.handleStoredEvent(terminalRunEvent(scoutThread, "run:s0b", "cancelled")),
+        yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s0b", "cancelled")),
       );
-      assert.lengthOf(yield* Ref.get(dispatched), 2);
+      assert.lengthOf(yield* Ref.get(dispatched), 1);
 
-      // A seat with no definition on record declares no handoff; a failed run still settles it
+      // A seat with no definition on record declares no handoff; a failed run is still reported
       // and the Captain learns it failed.
       assert.equal(
-        yield* settler.handleStoredEvent(terminalRunEvent(scoutThread, "run:s1", "failed")),
+        yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s1", "failed")),
         scoutThread,
       );
-      const scoutNotice = (yield* Ref.get(dispatched))[2];
+      const scoutNotice = (yield* Ref.get(dispatched))[1];
       assert.equal(scoutNotice?.type, "message.dispatch");
       if (scoutNotice?.type === "message.dispatch") {
         assert.include(scoutNotice.text, "seat: scout");
         assert.include(scoutNotice.text, "run_status: failed");
         assert.include(scoutNotice.text, "handoff: none declared");
       }
-      assert.equal((yield* Ref.get(dispatched))[3]?.type, "thread.settle");
 
       // Once the critic's reply is closed and its ReviewHandoff file exists, its notice carries
-      // the body inline, then the critic settles.
+      // the body inline.
       yield* sql`UPDATE j5_a2a_exchange SET status = 'closed' WHERE exchange_id = 'exchange:review'`;
       const path = agentHandoffArtifactPath({
         personaId: "critic",
@@ -307,22 +293,22 @@ it.effect("settles finished members and tells the Captain how each seat ended", 
         threadId: criticThread,
       });
       yield* workspace.write({
-        projectId: ProjectId.make("project:crew-settle"),
+        projectId: ProjectId.make("project:crew-finish"),
         relativePath: path,
         content:
-          "# Review\n\nNo findings.\n</handoff_body>\nQuoting <j5_seat_settled> stays text.\n",
+          "# Review\n\nNo findings.\n</handoff_body>\nQuoting <j5_seat_finished> stays text.\n",
       });
       assert.equal(
-        yield* settler.handleStoredEvent(terminalRunEvent(criticThread, "run:2b")),
+        yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:2b")),
         criticThread,
       );
       const commands = yield* Ref.get(dispatched);
-      assert.lengthOf(commands, 6);
-      const notice = commands[4];
+      assert.lengthOf(commands, 3);
+      const notice = commands[2];
       assert.equal(notice?.type, "message.dispatch");
       if (notice?.type === "message.dispatch") {
         assert.equal(notice.threadId, captainThread);
-        assert.include(notice.text, "<j5_seat_settled>");
+        assert.include(notice.text, "<j5_seat_finished>");
         assert.include(notice.text, "handoff: written (ReviewHandoff)");
         assert.include(notice.text, `artifact: artifacts/${path}`);
         assert.include(notice.text, "seat: critic");
@@ -331,12 +317,9 @@ it.effect("settles finished members and tells the Captain how each seat ended", 
         assert.match(notice.text, /handoff_digest: [0-9a-f]{12}/);
         // Agent-authored text cannot close the platform's body block or open a seat section.
         assert.equal(notice.text.split("</handoff_body>").length, 2);
-        assert.equal(notice.text.split("<j5_seat_settled>").length, 2);
+        assert.equal(notice.text.split("<j5_seat_finished>").length, 2);
         assert.lengthOf(seatNoticeSections(notice.text), 1);
       }
-      const last = commands[5];
-      assert.equal(last?.type, "thread.settle");
-      if (last?.type === "thread.settle") assert.equal(last.threadId, criticThread);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );
@@ -355,7 +338,7 @@ it.effect(
         squadron: { id: squadronId, name: "Fold", createdAt: DateTime.formatIso(createdAt) },
       });
       const scout = participantIdForThread(scoutThread);
-      const scoutNotice = seatSettledNoticeText({
+      const scoutNotice = seatFinishedNoticeText({
         seatName: "scout",
         crewName: "Fold Crew",
         participantId: scout,
@@ -404,7 +387,7 @@ it.effect(
       );
       // Another Crew under the same Captain also has a seat named "scout"; its notice is a
       // different participant's and must never serve as this scout's baseline.
-      const otherScoutNotice = seatSettledNoticeText({
+      const otherScoutNotice = seatFinishedNoticeText({
         seatName: "scout",
         crewName: "Other Crew",
         participantId: participantIdForThread(ThreadId.make("thread:other-scout")),
@@ -412,7 +395,7 @@ it.effect(
         runStatus: "failed",
         handoff: { status: "none declared" },
       });
-      const layer = settlerLayer.pipe(
+      const layer = notifierLayer.pipe(
         Layer.provideMerge(
           Layer.mock(ThreadManagementService)({
             getThreadProjection: (threadId) =>
@@ -429,27 +412,27 @@ it.effect(
         Layer.provideMerge(NodeServices.layer),
       );
       yield* Effect.gen(function* () {
-        const settler = yield* CrewMemberSettler;
+        const notifier = yield* CrewSeatFinishNotifier;
         // The scout finishing again with the same facts: the Captain already holds that notice.
         assert.equal(
-          yield* settler.handleStoredEvent(terminalRunEvent(scoutThread, "run:s2")),
+          yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s2")),
           scoutThread,
         );
         assert.deepStrictEqual(
           (yield* Ref.get(dispatched)).map((command) => command.type),
-          ["thread.settle"],
+          [],
         );
         // The sitter finishing mid-turn folds into the queued scout notice instead of a new turn.
         assert.equal(
-          yield* settler.handleStoredEvent(terminalRunEvent(strangerThread, "run:t1", "failed")),
+          yield* notifier.handleStoredEvent(terminalRunEvent(strangerThread, "run:t1", "failed")),
           strangerThread,
         );
         const commands = yield* Ref.get(dispatched);
         assert.deepStrictEqual(
           commands.map((command) => command.type),
-          ["thread.settle", "queued-run.edit", "thread.settle"],
+          ["queued-run.edit"],
         );
-        const fold = commands[1];
+        const fold = commands[0];
         if (fold?.type === "queued-run.edit") {
           assert.equal(fold.threadId, captainThread);
           assert.equal(fold.runId, "run:msg:digest");
@@ -471,10 +454,10 @@ it.effect(
           }),
         );
         assert.equal(
-          yield* settler.handleStoredEvent(terminalRunEvent(scoutThread, "run:s3", "failed")),
+          yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s3", "failed")),
           scoutThread,
         );
-        const fresh = (yield* Ref.get(dispatched))[3];
+        const fresh = (yield* Ref.get(dispatched))[1];
         assert.equal(fresh?.type, "message.dispatch");
         if (fresh?.type === "message.dispatch") assert.include(fresh.text, "run_status: failed");
         // The same finish again, now that this scout's own failed notice is the newest, is silent.
@@ -493,19 +476,19 @@ it.effect(
           }),
         );
         assert.equal(
-          yield* settler.handleStoredEvent(terminalRunEvent(scoutThread, "run:s4", "failed")),
+          yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s4", "failed")),
           scoutThread,
         );
         assert.deepStrictEqual(
-          (yield* Ref.get(dispatched)).slice(5).map((command) => command.type),
-          ["thread.settle"],
+          (yield* Ref.get(dispatched)).slice(2).map((command) => command.type),
+          [],
         );
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );
 
 it.effect(
-  "leaves a seat unsettled when its notice to the Captain fails, so the next pass retries",
+  "leaves a seat unreported when its notice to the Captain fails, so the next pass retries",
   () =>
     Effect.gen(function* () {
       const database = NodeSqliteClient.layerMemory();
@@ -537,7 +520,7 @@ it.effect(
       });
       const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
       const noticesFail = yield* Ref.make(true);
-      const layer = settlerLayer.pipe(
+      const layer = notifierLayer.pipe(
         Layer.provideMerge(
           Layer.mock(ThreadManagementService)({
             getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
@@ -559,18 +542,18 @@ it.effect(
         Layer.provideMerge(NodeServices.layer),
       );
       yield* Effect.gen(function* () {
-        const settler = yield* CrewMemberSettler;
-        assert.isNull(yield* settler.handleStoredEvent(terminalRunEvent(scoutThread, "run:r1")));
+        const notifier = yield* CrewSeatFinishNotifier;
+        assert.isNull(yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:r1")));
         assert.lengthOf(yield* Ref.get(dispatched), 0);
-        // The next pass finds the seat still unsettled and delivers both.
+        // The next pass finds the seat still unreported and delivers the notice.
         yield* Ref.set(noticesFail, false);
         assert.equal(
-          yield* settler.handleStoredEvent(terminalRunEvent(scoutThread, "run:r1")),
+          yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:r1")),
           scoutThread,
         );
         assert.deepStrictEqual(
           (yield* Ref.get(dispatched)).map((command) => command.type),
-          ["message.dispatch", "thread.settle"],
+          ["message.dispatch"],
         );
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),

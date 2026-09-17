@@ -11,7 +11,7 @@ import {
   bootSweepLayer as crewProposalBootSweepLayer,
   layer as crewProposalLayer,
 } from "./CrewProposalService.ts";
-import { layer as crewMemberSettlerLayer } from "./CrewMemberSettler.ts";
+import { layer as crewSeatFinishNotifierLayer } from "./CrewSeatFinishNotifier.ts";
 import { layer as crewProposalLayer } from "./CrewProposalService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
@@ -102,8 +102,8 @@ export const makeJ5A2AAuxiliaryLayer = (
   const crewProposalBootSweepProvided = crewProposalBootSweepLayer.pipe(
     Layer.provide(crewProposalProvided),
   );
-  // The settler tells a Captain when a seat's handoff file appears, so it reads the workspace.
-  const crewMemberSettlerProvided = crewMemberSettlerLayer.pipe(
+  // The finish notifier tells a Captain when a seat's handoff file appears, so it reads the workspace.
+  const crewSeatFinishNotifierProvided = crewSeatFinishNotifierLayer.pipe(
     Layer.provideMerge(agentCrewInstanceLayer),
     Layer.provide(artifactWorkspaceLayer),
   );
@@ -128,7 +128,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     agentCrewInstanceLayer,
     crewProposalProvided,
     crewProposalBootSweepProvided,
-    crewMemberSettlerProvided,
+    crewSeatFinishNotifierProvided,
   ).pipe(Layer.provideMerge(participantPlacementLayer));
   return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };
