@@ -134,6 +134,7 @@ import {
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import { makeAgentPersonaRpcHandlers } from "./j5/agents/agentPersonaRpc.ts";
+import { makeArtifactRpcHandlers } from "./j5/artifacts/artifactRpc.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
@@ -1314,6 +1315,12 @@ const makeWsRpcLayer = (
         }
       });
 
+      // J5 fork extension: the artifact change stream is a J5 RPC group (see artifactRpc.ts).
+      const artifactRpcHandlers = makeArtifactRpcHandlers({
+        projects: projectService,
+        artifacts: artifactWorkspace,
+        observeStream: observeRpcStreamEffect,
+      });
       const agentPersonaRpcHandlers = yield* makeAgentPersonaRpcHandlers({
         providers: providerRegistry.getProviders,
         observe: observeRpcEffect,
@@ -2532,56 +2539,7 @@ const makeWsRpcLayer = (
           observeRpcStream(WS_METHODS.subscribePreviewEvents, previewManager.events, {
             "rpc.aggregate": "preview",
           }),
-        [WS_METHODS.subscribeArtifactChanges]: (input) =>
-          observeRpcStreamEffect(
-            WS_METHODS.subscribeArtifactChanges,
-            projectService.getById(input.projectId).pipe(
-              Effect.flatMap(
-                Option.match({
-                  onNone: () =>
-                    Effect.fail(
-                      new ArtifactWatchError({
-                        projectId: input.projectId,
-                        detail: `Project ${input.projectId} is not available.`,
-                      }),
-                    ),
-                  onSome: () =>
-                    Effect.succeed(
-                      Stream.merge(
-                        Stream.make({ projectId: input.projectId, revision: 0 }),
-                        artifactWorkspace.watch(input.projectId).pipe(
-                          Stream.mapError(
-                            (cause) =>
-                              new ArtifactWatchError({
-                                projectId: input.projectId,
-                                detail: cause.message,
-                              }),
-                          ),
-                          Stream.mapAccum(
-                            () => 0,
-                            (revision) => {
-                              const nextRevision = revision + 1;
-                              return [
-                                nextRevision,
-                                [{ projectId: input.projectId, revision: nextRevision }],
-                              ] as const;
-                            },
-                          ),
-                        ),
-                      ),
-                    ),
-                }),
-              ),
-              Effect.mapError(
-                (cause) =>
-                  new ArtifactWatchError({
-                    projectId: input.projectId,
-                    detail: cause.message,
-                  }),
-              ),
-            ),
-            { "rpc.aggregate": "artifacts" },
-          ),
+        ...artifactRpcHandlers,
         [WS_METHODS.subscribeDiscoveredLocalServers]: (input) =>
           observeRpcStream(
             WS_METHODS.subscribeDiscoveredLocalServers,

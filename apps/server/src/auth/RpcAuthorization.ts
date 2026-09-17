@@ -14,6 +14,7 @@ import {
 import type * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 import { AGENT_PERSONA_RPC_SCOPES } from "../j5/agents/agentPersonaRpc.ts";
+import { ARTIFACT_RPC_SCOPES } from "../j5/artifacts/artifactRpc.ts";
 
 type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
 
@@ -24,6 +25,7 @@ type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
  */
 export const RPC_REQUIRED_SCOPES = {
   ...AGENT_PERSONA_RPC_SCOPES,
+  ...ARTIFACT_RPC_SCOPES,
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: AuthOrchestrationReadScope,
   [ORCHESTRATION_V2_WS_METHODS.getTurnDiff]: AuthOrchestrationReadScope,
@@ -152,7 +154,6 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.previewAutomationRespond]: AuthOrchestrationOperateScope,
   [WS_METHODS.previewAutomationFocusHost]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribePreviewEvents]: AuthOrchestrationReadScope,
-  [WS_METHODS.subscribeArtifactChanges]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeDiscoveredLocalServers]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeServerConfig]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeServerLifecycle]: AuthOrchestrationReadScope,

@@ -7,6 +7,7 @@ import {
   FolderArchiveIcon,
   RefreshCwIcon,
 } from "lucide-react";
+import * as Option from "effect/Option";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import ChatMarkdown from "../../components/ChatMarkdown";
@@ -18,10 +19,12 @@ import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
 import { useProjects } from "../../state/entities";
-import { artifactEnvironment } from "../../state/artifacts";
 import { useEnvironmentQuery } from "../../state/query";
+import { usePreparedConnection } from "../../state/session";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
+import { artifactEnvironment } from "./artifactChanges";
 import { listArtifacts, readArtifact } from "./artifactClient";
+import { artifactPreviewRevision } from "./artifactPreview.logic";
 import { nextArtifactRefreshGeneration } from "./artifactRefresh";
 
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdx"]);
@@ -80,7 +83,10 @@ export function ArtifactsPage({
   const [listState, setListState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [contentState, setContentState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
-  const [refreshGeneration, setRefreshGeneration] = useState(0);
+  // Two counters on purpose: the change stream bumps the list only; the Refresh button bumps
+  // both. Only the second reaches the body read, so another file changing never re-reads this one.
+  const [listGeneration, setListGeneration] = useState(0);
+  const [manualRefreshes, setManualRefreshes] = useState(0);
   const [listedProjectKey, setListedProjectKey] = useState<string | null>(null);
 
   const selectedProject = useMemo(
@@ -93,6 +99,13 @@ export function ArtifactsPage({
   const selectedProjectId = selectedProject?.id ?? null;
   const selectedWorkspaceRoot = selectedProject?.workspaceRoot;
   const selectedKey = selectedProject === null ? null : projectKey(selectedProject);
+  // The artifact client reads the environment's prepared connection from an atom that only holds
+  // a value while something subscribes to it. Inside a thread the chat surface keeps it mounted;
+  // on the standalone route this page is the only subscriber, so it must hold the subscription
+  // itself and wait for the connection before fetching, or every read fails as "not connected".
+  const connected = Option.isSome(usePreparedConnection(selectedEnvironmentId));
+  const selectedEntry = entries.find((entry) => entry.path === selectedPath);
+  const selectedRevision = artifactPreviewRevision(selectedEntry, manualRefreshes);
   const artifactChange = useEnvironmentQuery(
     selectedEnvironmentId !== null && selectedProjectId !== null && listedProjectKey === selectedKey
       ? artifactEnvironment.changes({
@@ -115,6 +128,11 @@ export function ArtifactsPage({
       setSelectedPath(null);
       setListedProjectKey(null);
       setListState("ready");
+      return;
+    }
+    if (!connected) {
+      setListState("loading");
+      setError(null);
       return;
     }
     let current = true;
@@ -146,16 +164,21 @@ export function ArtifactsPage({
     return () => {
       current = false;
     };
-  }, [refreshGeneration, selectedEnvironmentId, selectedProjectId]);
+  }, [connected, listGeneration, manualRefreshes, selectedEnvironmentId, selectedProjectId]);
 
   useEffect(() => {
-    setRefreshGeneration((generation) =>
+    setListGeneration((generation) =>
       nextArtifactRefreshGeneration(generation, artifactChange.data),
     );
   }, [artifactChange.data]);
 
   useEffect(() => {
-    if (selectedEnvironmentId === null || selectedProjectId === null || selectedPath === null) {
+    if (
+      !connected ||
+      selectedEnvironmentId === null ||
+      selectedProjectId === null ||
+      selectedPath === null
+    ) {
       setContent(null);
       setContentState("idle");
       return;
@@ -182,9 +205,9 @@ export function ArtifactsPage({
     return () => {
       current = false;
     };
-  }, [refreshGeneration, selectedEnvironmentId, selectedPath, selectedProjectId]);
+  }, [connected, selectedEnvironmentId, selectedPath, selectedProjectId, selectedRevision]);
 
-  const refresh = useCallback(() => setRefreshGeneration((generation) => generation + 1), []);
+  const refresh = useCallback(() => setManualRefreshes((count) => count + 1), []);
   const selectedExtension = selectedPath === null ? "" : extensionOf(selectedPath);
   const image = IMAGE_MEDIA_TYPES[selectedExtension] !== undefined;
   const markdown = MARKDOWN_EXTENSIONS.has(selectedExtension);
@@ -314,6 +337,11 @@ export function ArtifactsPage({
                   </button>
                 );
               })}
+              {listState === "loading" && !connected && selectedProject !== null ? (
+                <p className="px-2 py-6 text-sm text-muted-foreground">
+                  Connecting to the environment…
+                </p>
+              ) : null}
               {listState === "ready" && entries.length === 0 && selectedProject !== null ? (
                 <p className="px-2 py-6 text-sm text-muted-foreground">
                   Planning documents created in <code>artifacts/</code> will appear here.
