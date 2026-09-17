@@ -61,9 +61,9 @@ thread, starting on your brief as its first turn. It joins your Squadron, is pla
 records you as its immutable spawner; it is addressable the moment this returns. In your brief,
 tell the new agent what it should do first and whether it should reply to you. Choose provider,
 model, and reasoning for the work in the brief — see orchestrator_capabilities for what's
-available. Set agent to a saved agent id to spawn that agent with its saved instructions and
-runtime policy; provider, model, and reasoning stay required and must be one of that agent's
-declared routes. Reuse client_request_id to retry the same spawn safely."
+available. To run a saved agent, set the `agent` parameter to its id: the spawn gets that saved
+agent's instructions and runtime policy, and provider, model, and reasoning must be one of that
+agent's declared routes. Reuse client_request_id to retry the same spawn safely."
 
 | Input               | Type                                 | Required | Meaning                                           |
 | ------------------- | ------------------------------------ | -------- | ------------------------------------------------- |
