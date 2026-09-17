@@ -30,12 +30,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../../appearanceFonts";
 import { APP_BASE_NAME, CLI_COMMAND } from "../../branding";
 import {
-  ensureOnboardingSquadron,
+  ensureOnboardingFolderSquadrons,
   hasKeptConversations,
   isOnboardingFolderComplete,
-  resolveOnboardingAssignment,
   resolveOnboardingLandingSquadron,
+  resolveOnboardingRows,
   summarizeAssignmentEntries,
+  updateOnboardingRow,
 } from "../../j5/onboarding/onboardingSquadrons.logic";
 import { SquadronsStage } from "../../j5/onboarding/SquadronsStage";
 import {
@@ -1028,7 +1029,7 @@ function ImportStep({
       setLandingProject(null);
       void onDone(
         landingProject,
-        resolveOnboardingLandingSquadron(landingProject, memory.homes),
+        resolveOnboardingLandingSquadron(landingProject, memory.recipients),
       ).then((completed) => {
         if (!completed) setIsImporting(false);
       });
@@ -1131,36 +1132,53 @@ function ImportStep({
         }
       }
 
-      // J5: the folder's Squadron exists before its history lands, so even an empty or failed
-      // import leaves the folder owned. A remembered home is reused; nothing is created twice.
-      const assignment = resolveOnboardingAssignment(session.assignments, candidate);
-      const squadronResult = await ensureOnboardingSquadron({
-        key: candidate.key,
+      // J5: every Squadron on the folder's card exists before its history lands, so even an
+      // empty or failed import leaves the folder owned. Rows already remembered are reused;
+      // nothing is created twice. Any row that did not land keeps the folder out of the import
+      // until a retry settles it.
+      const rows = resolveOnboardingRows(session.rows, candidate);
+      for (const row of rows) session.setRowError(row.rowId, null);
+      const folderSquadrons = await ensureOnboardingFolderSquadrons({
+        rows,
         projectRef: scopeProjectRef(environmentId, projectId),
-        assignment,
         homes: memory.homes,
         existingSquadrons: squadrons,
         createSquadron,
         isDefiniteRejection: isDefiniteSquadronRejection,
       });
       if (importGeneration !== importGenerationRef.current) return;
-      if (squadronResult.kind !== "ready") {
+      if (folderSquadrons.failures.length > 0 || folderSquadrons.recipient === null) {
         squadronFailures += 1;
-        if (squadronResult.kind === "unconfirmed") {
-          session.setAssignment(candidate.key, {
-            kind: "unconfirmed",
-            name: assignment.kind === "new" ? assignment.name : candidate.title,
-          });
-          session.setOutcome(candidate.key, { kind: "squadron_unconfirmed" });
-        } else {
-          session.setOutcome(candidate.key, {
-            kind: "squadron_failed",
-            message: squadronResult.message,
-          });
+        let nextRows = rows;
+        for (const failure of folderSquadrons.failures) {
+          const row = rows.find((entry) => entry.rowId === failure.rowId);
+          if (failure.result.kind === "unconfirmed") {
+            nextRows = updateOnboardingRow(nextRows, failure.rowId, {
+              kind: "unconfirmed",
+              name: row?.assignment.kind === "new" ? row.assignment.name : candidate.title,
+            });
+          } else {
+            session.setRowError(failure.rowId, failure.result.message);
+          }
         }
+        if (nextRows !== rows) session.setRows(candidate.key, nextRows);
+        const unconfirmed = folderSquadrons.failures.some(
+          (failure) => failure.result.kind === "unconfirmed",
+        );
+        const count = folderSquadrons.failures.length;
+        session.setOutcome(
+          candidate.key,
+          unconfirmed
+            ? { kind: "squadron_unconfirmed" }
+            : {
+                kind: "squadron_failed",
+                message: `${count} ${count === 1 ? "Squadron" : "Squadrons"} could not be created.`,
+              },
+        );
         continue;
       }
-      const home = squadronResult.home;
+      const home = folderSquadrons.recipient;
+      memory.recipients.set(candidate.key, home);
 
       const threadImportResult = await importThreads({
         environmentId,
@@ -1281,8 +1299,9 @@ function ImportStep({
           projectId: resolveOnboardingProjectId(projects, candidate.environmentId, candidate),
         }))}
         squadrons={squadrons}
-        assignments={session.assignments}
-        onAssignmentChange={session.setAssignment}
+        rows={session.rows}
+        onRowsChange={session.setRows}
+        rowErrors={session.rowErrors}
         homes={memory.homes}
         outcomes={session.outcomes}
         isImporting={isImporting}

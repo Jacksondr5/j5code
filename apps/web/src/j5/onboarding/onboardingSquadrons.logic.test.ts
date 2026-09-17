@@ -3,18 +3,24 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { ScopedManagedSquadron } from "../squadron/SquadronDirectory";
 import {
+  addOnboardingRow,
+  defaultOnboardingRowId,
   describeOnboardingFolderOutcome,
   eligibleExistingSquadrons,
+  ensureOnboardingFolderSquadrons,
   ensureOnboardingSquadron,
   hasKeptConversations,
   isOnboardingFolderComplete,
   openOnboardingSquadronDraft,
-  resolveOnboardingAssignment,
+  removeOnboardingRow,
   resolveOnboardingLandingSquadron,
+  resolveOnboardingRows,
   resolveOnboardingSquadronsReadiness,
+  selectImportRecipientRow,
   summarizeAssignmentEntries,
-  type OnboardingSquadronAssignment,
+  updateOnboardingRow,
   type OnboardingSquadronHome,
+  type OnboardingSquadronRow,
 } from "./onboardingSquadrons.logic";
 
 const laptop = EnvironmentId.make("env:laptop");
@@ -42,22 +48,57 @@ class RejectedError extends Error {
 const isDefiniteRejection = (error: unknown) =>
   error instanceof RejectedError && error.status >= 400 && error.status < 500;
 
-describe("resolveOnboardingAssignment", () => {
-  it("defaults each folder to a new Squadron named after the folder", () => {
-    expect(resolveOnboardingAssignment(new Map(), { key: "k", title: "acme-api" })).toEqual({
-      kind: "new",
-      name: "acme-api",
-    });
+describe("Squadron rows", () => {
+  const folder = { key: "k", title: "acme-api" };
+
+  it("defaults each folder to one row with a stable id, named after the folder", () => {
+    const first = resolveOnboardingRows(new Map(), folder);
+    const second = resolveOnboardingRows(new Map(), folder);
+    expect(first).toEqual([
+      { rowId: defaultOnboardingRowId("k"), assignment: { kind: "new", name: "acme-api" } },
+    ]);
+    expect(second[0]?.rowId).toBe(first[0]?.rowId);
   });
 
-  it("keeps a folder's earlier choice so deselecting and reselecting restores it", () => {
-    const assignments = new Map<string, OnboardingSquadronAssignment>([
-      ["k", { kind: "existing", squadronId: "squadron:alpha" }],
+  it("keeps a folder's rows so deselecting and reselecting restores every choice", () => {
+    const stored: ReadonlyArray<OnboardingSquadronRow> = [
+      { rowId: "row-1", assignment: { kind: "existing", squadronId: "squadron:alpha" } },
+      { rowId: "row-2", assignment: { kind: "new", name: "Bravo" } },
+    ];
+    expect(resolveOnboardingRows(new Map([["k", stored]]), folder)).toBe(stored);
+  });
+
+  it("adds unnamed rows, edits by id, and the first row is the import recipient", () => {
+    const rows = addOnboardingRow(resolveOnboardingRows(new Map(), folder), "row-2");
+    const renamed = updateOnboardingRow(rows, "row-2", { kind: "new", name: "Bravo" });
+    expect(rows[1]).toEqual({ rowId: "row-2", assignment: { kind: "new", name: "" } });
+    expect(renamed.map((row) => row.assignment)).toEqual([
+      { kind: "new", name: "acme-api" },
+      { kind: "new", name: "Bravo" },
     ]);
-    expect(resolveOnboardingAssignment(assignments, { key: "k", title: "acme-api" })).toEqual({
-      kind: "existing",
-      squadronId: "squadron:alpha",
-    });
+    expect(selectImportRecipientRow(renamed)?.rowId).toBe(defaultOnboardingRowId("k"));
+  });
+
+  it("never removes the last row, a created row, or an unconfirmed row", () => {
+    const only = resolveOnboardingRows(new Map(), folder);
+    const rows = addOnboardingRow(only, "row-2");
+    const homes = new Map<string, OnboardingSquadronHome>([
+      [
+        "row-2",
+        {
+          squadronId: "squadron:bravo",
+          name: "Bravo",
+          projectRef: { environmentId: laptop, projectId: apiProject },
+        },
+      ],
+    ]);
+    const unconfirmed = updateOnboardingRow(rows, "row-2", { kind: "unconfirmed", name: "x" });
+    expect(removeOnboardingRow(only, only[0]!.rowId, new Map())).toBe(only);
+    expect(removeOnboardingRow(rows, "row-2", homes)).toBe(rows);
+    expect(removeOnboardingRow(unconfirmed, "row-2", new Map())).toBe(unconfirmed);
+    expect(removeOnboardingRow(rows, only[0]!.rowId, homes).map((row) => row.rowId)).toEqual([
+      "row-2",
+    ]);
   });
 });
 
@@ -90,30 +131,35 @@ describe("resolveOnboardingSquadronsReadiness", () => {
     { key: "b", title: "acme-web" },
   ];
 
-  it("blocks the import while any selected folder has an unconfirmed create", () => {
-    const assignments = new Map<string, OnboardingSquadronAssignment>([
-      ["a", { kind: "unconfirmed", name: "acme-api" }],
-      ["b", { kind: "new", name: " " }],
-    ]);
-    expect(resolveOnboardingSquadronsReadiness(folders, assignments, new Map())).toBe(
-      "unconfirmed",
-    );
+  const rowsOf = (entries: Record<string, ReadonlyArray<OnboardingSquadronRow>>) =>
+    new Map(Object.entries(entries));
+
+  it("blocks the import while any row has an unconfirmed create", () => {
+    const rows = rowsOf({
+      a: [
+        { rowId: "a-1", assignment: { kind: "new", name: "acme-api" } },
+        { rowId: "a-2", assignment: { kind: "unconfirmed", name: "Bravo" } },
+      ],
+      b: [{ rowId: "b-1", assignment: { kind: "new", name: " " } }],
+    });
+    expect(resolveOnboardingSquadronsReadiness(folders, rows, new Map())).toBe("unconfirmed");
   });
 
-  it("blocks the import while a new Squadron has no name", () => {
-    const assignments = new Map<string, OnboardingSquadronAssignment>([
-      ["b", { kind: "new", name: "  " }],
-    ]);
-    expect(resolveOnboardingSquadronsReadiness(folders, assignments, new Map())).toBe("empty-name");
+  it("blocks the import while any new Squadron on any row has no name", () => {
+    const rows = rowsOf({
+      b: [
+        { rowId: "b-1", assignment: { kind: "new", name: "acme-web" } },
+        { rowId: "b-2", assignment: { kind: "new", name: "  " } },
+      ],
+    });
+    expect(resolveOnboardingSquadronsReadiness(folders, rows, new Map())).toBe("empty-name");
   });
 
-  it("ignores folders whose Squadron already landed", () => {
-    const assignments = new Map<string, OnboardingSquadronAssignment>([
-      ["a", { kind: "unconfirmed", name: "acme-api" }],
-    ]);
+  it("ignores rows whose Squadron already landed", () => {
+    const rows = rowsOf({ a: [{ rowId: "a-1", assignment: { kind: "unconfirmed", name: "x" } }] });
     const homes = new Map<string, OnboardingSquadronHome>([
       [
-        "a",
+        "a-1",
         {
           squadronId: "squadron:alpha",
           name: "alpha",
@@ -121,7 +167,7 @@ describe("resolveOnboardingSquadronsReadiness", () => {
         },
       ],
     ]);
-    expect(resolveOnboardingSquadronsReadiness(folders, assignments, homes)).toBe("ready");
+    expect(resolveOnboardingSquadronsReadiness(folders, rows, homes)).toBe("ready");
   });
 });
 
@@ -237,6 +283,104 @@ describe("ensureOnboardingSquadron", () => {
   });
 });
 
+describe("ensureOnboardingFolderSquadrons", () => {
+  const projectRef = { environmentId: laptop, projectId: apiProject };
+
+  it("retries only the rows that did not land", async () => {
+    let failBravo = true;
+    const createSquadron = vi.fn(async (_environmentId: EnvironmentId, input: { name: string }) => {
+      if (input.name === "Bravo" && failBravo) throw new RejectedError(400);
+      return { squadron: { id: `squadron:${input.name.toLowerCase()}`, name: input.name } };
+    });
+    const homes = new Map<string, OnboardingSquadronHome>();
+    const rows: ReadonlyArray<OnboardingSquadronRow> = [
+      { rowId: "row-alpha", assignment: { kind: "new", name: "Alpha" } },
+      { rowId: "row-bravo", assignment: { kind: "new", name: "Bravo" } },
+    ];
+    const base = { projectRef, homes, existingSquadrons: [], createSquadron, isDefiniteRejection };
+
+    const first = await ensureOnboardingFolderSquadrons({ rows, ...base });
+    failBravo = false;
+    const retry = await ensureOnboardingFolderSquadrons({
+      rows: addOnboardingRow(rows, "row-charlie").map((row) =>
+        row.rowId === "row-charlie"
+          ? { ...row, assignment: { kind: "new", name: "Charlie" } }
+          : row,
+      ),
+      ...base,
+    });
+
+    expect(first.recipient?.squadronId).toBe("squadron:alpha");
+    expect(first.failures).toEqual([
+      { rowId: "row-bravo", result: { kind: "failed", message: "HTTP 400" } },
+    ]);
+    expect(retry.recipient?.squadronId).toBe("squadron:alpha");
+    expect(retry.failures).toEqual([]);
+    expect(createSquadron.mock.calls.map(([, input]) => input.name)).toEqual([
+      "Alpha",
+      "Bravo",
+      "Bravo",
+      "Charlie",
+    ]);
+    expect([...homes.keys()]).toEqual(["row-alpha", "row-bravo", "row-charlie"]);
+  });
+
+  it("lands on the first row's Squadron even when an extra row was created earlier", async () => {
+    let failAlpha = true;
+    const createSquadron = vi.fn(async (_environmentId: EnvironmentId, input: { name: string }) => {
+      if (input.name === "Alpha" && failAlpha) throw new Error("socket hang up");
+      return { squadron: { id: `squadron:${input.name.toLowerCase()}`, name: input.name } };
+    });
+    const homes = new Map<string, OnboardingSquadronHome>();
+    // The wizard records a folder's recipient only when its first row landed.
+    const recipients = new Map<string, OnboardingSquadronHome>();
+    const rows: ReadonlyArray<OnboardingSquadronRow> = [
+      { rowId: "row-alpha", assignment: { kind: "new", name: "Alpha" } },
+      { rowId: "row-bravo", assignment: { kind: "new", name: "Bravo" } },
+    ];
+    const base = { projectRef, homes, existingSquadrons: [], createSquadron, isDefiniteRejection };
+
+    const first = await ensureOnboardingFolderSquadrons({ rows, ...base });
+    if (first.recipient !== null) recipients.set("folder", first.recipient);
+    failAlpha = false;
+    const retry = await ensureOnboardingFolderSquadrons({
+      rows: updateOnboardingRow(rows, "row-alpha", { kind: "new", name: "Alpha" }),
+      ...base,
+    });
+    if (retry.recipient !== null) recipients.set("folder", retry.recipient);
+
+    expect(first.recipient).toBeNull();
+    expect([...homes.keys()]).toEqual(["row-bravo", "row-alpha"]);
+    expect(resolveOnboardingLandingSquadron(projectRef, recipients)).toEqual({
+      environmentId: laptop,
+      squadronId: "squadron:alpha",
+    });
+    expect(createSquadron.mock.calls.map(([, input]) => input.name)).toEqual([
+      "Alpha",
+      "Bravo",
+      "Alpha",
+    ]);
+  });
+
+  it("reports no recipient when the first row is the one that failed", async () => {
+    const createSquadron = vi.fn(async () => {
+      throw new Error("socket hang up");
+    });
+    const result = await ensureOnboardingFolderSquadrons({
+      rows: [{ rowId: "row-alpha", assignment: { kind: "new", name: "Alpha" } }],
+      projectRef,
+      homes: new Map(),
+      existingSquadrons: [],
+      createSquadron,
+      isDefiniteRejection,
+    });
+    expect(result).toEqual({
+      recipient: null,
+      failures: [{ rowId: "row-alpha", result: { kind: "unconfirmed" } }],
+    });
+  });
+});
+
 describe("folder outcomes", () => {
   const entries = (
     ...statuses: ReadonlyArray<
@@ -302,7 +446,7 @@ describe("folder outcomes", () => {
 });
 
 describe("landing", () => {
-  it("carries the landing folder's own Squadron into the draft, and nothing when it has none", async () => {
+  it("carries the landing folder's import recipient into the draft, and nothing when it has none", async () => {
     const projectRef = { environmentId: laptop, projectId: apiProject };
     const homes = new Map<string, OnboardingSquadronHome>([
       [
