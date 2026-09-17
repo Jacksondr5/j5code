@@ -108,19 +108,19 @@ composer when it is empty, and is discarded otherwise.
 
 ## Commands and skills
 
-To manage shared skill groups, open **Settings → Skills** and choose a chat project
-on the machine where you want to install them. You can provide a local catalog folder
-or choose it in chat. **Open Skill Manager** starts a chat with the dedicated agent
-selected. Send the short prepared message to list groups and choose any combination.
-If the agent is unavailable, check its status in **Settings → Agents**.
+To manage shared skill groups, open **Settings → Skills** and choose a project
+on the machine where you want to install them. Enter the local catalog folder
+once — it is remembered for that environment. **Open installer** runs the
+catalog wizard in the thread terminal: pick groups with Space, confirm once,
+and read the result there. No agent chat is involved.
 
-Skill Manager uses `catalog.yaml` and `skills/<name>/SKILL.md` in the catalog folder.
+The wizard uses `catalog.yaml` and `skills/<name>/SKILL.md` in the catalog folder.
 It resolves group dependencies and installs links into the environment user's skill
-directories, using the provider's normal permission prompts for writes and updates.
-Existing project skills and provider disable settings remain in effect.
-Ask Skill Manager to change the selection, remove its installed skills, or explicitly
-update the catalog checkout. Keep the catalog folder in place while its skills are
-installed. Refresh the provider's skill list or start a new session after changes.
+directories with no agent approvals. Existing project skills and provider disable
+settings remain in effect. Run the wizard again to change the selection, remove
+installed groups, or explicitly update the catalog checkout. Keep the catalog folder
+in place while its skills are installed. Refresh the provider's skill list or start
+a new session after changes.
 
 The catalog lists groups, their skills, and optional dependencies:
 

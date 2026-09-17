@@ -338,7 +338,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "skills",
     title: "Skills",
     to: "/settings/skills",
-    searchTerms: ["catalog yaml folder groups global user install skills installer chat"],
+    searchTerms: [
+      "catalog yaml folder groups global user install skills installer terminal wizard",
+    ],
   },
   {
     id: "providers",

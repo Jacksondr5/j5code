@@ -3,72 +3,120 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
-import { presentAgentPersonaCatalog } from "@t3tools/client-runtime/j5/agent-personas";
-import { SKILL_MANAGER_PERSONA_ID } from "@t3tools/contracts";
-import { Link } from "@tanstack/react-router";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
+import { projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
+import { nextTerminalId } from "@t3tools/shared/terminalLabels";
 import { useState } from "react";
+
+import { skillInstallerCommand } from "./skillInstallerCommand";
 
 import { SettingsPageContainer, SettingsSection } from "../../components/settings/settingsLayout";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
-import { useProjects } from "../../state/entities";
+import { useProjects, useServerConfigs } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
-import { useEnvironmentQuery } from "../../state/query";
+import { terminalEnvironment } from "../../state/terminal";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../../terminalUiStateStore";
 import { AgentFolderPickerDialog } from "../agents/AgentFolderPickerDialog";
-import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
-import { prepareSkillManagerDraft } from "./skillManagerDraft";
 
 const projectKey = (project: EnvironmentProject) =>
   scopedProjectKey(scopeProjectRef(project.environmentId, project.id));
 
+const folderStorageKey = (environmentId: string) => `j5.skillInstaller.folder:${environmentId}`;
+
+const readStoredFolder = (environmentId: string) => {
+  try {
+    return window.localStorage.getItem(folderStorageKey(environmentId)) ?? "";
+  } catch {
+    return "";
+  }
+};
+
+const storeFolder = (environmentId: string, folder: string) => {
+  try {
+    if (folder.trim()) window.localStorage.setItem(folderStorageKey(environmentId), folder.trim());
+    else window.localStorage.removeItem(folderStorageKey(environmentId));
+  } catch {
+    // Private browsing or storage limits must not block the installer.
+  }
+};
+
 export function SkillInstallerSettings() {
   const projects = useProjects();
   const { environments } = useEnvironments();
+  const serverConfigs = useServerConfigs();
   const openThread = useNewThreadHandler();
+  const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
+  const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const [selectedKey, setSelectedKey] = useState("");
   const [folder, setFolder] = useState("");
+  const [folderTouched, setFolderTouched] = useState(false);
   const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [launched, setLaunched] = useState(false);
   const project =
     projects.find((item) => projectKey(item) === selectedKey) ??
     (selectedKey === "" && projects.length === 1 ? projects[0] : undefined);
   const environmentLabel = (id: EnvironmentProject["environmentId"]) =>
     environments.find((item) => item.environmentId === id)?.label ?? id;
-  const catalog = useEnvironmentQuery(
-    project
-      ? agentPersonaEnvironment.catalog({
-          environmentId: project.environmentId,
-          input: {},
-        })
-      : null,
-  );
-  const manager = catalog.data
-    ? presentAgentPersonaCatalog(catalog.data).find(
-        (persona) => persona.personaId === SKILL_MANAGER_PERSONA_ID,
-      )
+  // The folder is chosen once per environment and remembered locally.
+  const effectiveFolder =
+    folderTouched || !project ? folder : (readStoredFolder(project.environmentId) ?? "");
+  const setEffectiveFolder = (value: string) => {
+    setFolder(value);
+    setFolderTouched(true);
+  };
+  const platform = project
+    ? serverConfigs.get(project.environmentId)?.environment.platform.os
     : undefined;
-  const canLaunch = manager?.availability === "available" && !catalog.isPending && !catalog.error;
+  const command =
+    skillInstallerCommand(effectiveFolder, platform) ?? "node <catalog-folder>/install-skills.mjs";
 
   async function launch() {
-    if (!project || busy || !canLaunch) return;
+    if (!project || busy || !effectiveFolder.trim()) return;
     setBusy(true);
     setError(null);
+    setLaunched(false);
     try {
+      storeFolder(project.environmentId, effectiveFolder);
+      // A thread hosts the terminal session; no agent message is sent.
       const opened = await openThread(scopeProjectRef(project.environmentId, project.id), {
         envMode: "local",
         branch: null,
         worktreePath: null,
         startFromOrigin: false,
       });
-      if (!opened) throw new Error("Couldn’t open Skill Manager for this project.");
-      prepareSkillManagerDraft(
-        opened.draftId,
-        scopeThreadRef(project.environmentId, opened.threadId),
-        folder,
-      );
+      if (!opened) throw new Error("Couldn’t open a terminal host for this project.");
+      const threadRef = scopeThreadRef(project.environmentId, opened.threadId);
+      const existingIds = selectThreadTerminalUiState(
+        useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
+        threadRef,
+      ).terminalIds;
+      const terminalId = nextTerminalId(existingIds);
+      useTerminalUiStateStore.getState().ensureTerminal(threadRef, terminalId, { open: true });
+      const openResult = await openTerminal({
+        environmentId: project.environmentId,
+        input: {
+          threadId: opened.threadId,
+          terminalId,
+          cwd: project.workspaceRoot,
+          env: projectScriptRuntimeEnv({ project: { cwd: project.workspaceRoot } }),
+        },
+      });
+      if (openResult._tag === "Failure") {
+        throw new Error("Couldn’t open a terminal on this environment.");
+      }
+      const writeResult = await writeTerminal({
+        environmentId: project.environmentId,
+        input: { threadId: opened.threadId, terminalId, data: `${command}\r` },
+      });
+      if (writeResult._tag === "Failure") {
+        throw new Error("Couldn’t start the installer in the terminal.");
+      }
+      setLaunched(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -80,11 +128,11 @@ export function SkillInstallerSettings() {
     <SettingsPageContainer>
       <SettingsSection
         title="Skills"
-        description="Choose shared skill groups and manage your user installation with Skill Manager."
+        description="Run the catalog wizard in this environment's terminal. No agent chat involved."
       >
         <div className="grid gap-4 p-4">
           <label className="grid gap-2 text-sm">
-            Chat project
+            Project
             <select
               aria-label="Installer project"
               className="w-full rounded border bg-background p-2"
@@ -93,7 +141,9 @@ export function SkillInstallerSettings() {
               onChange={(event) => {
                 setSelectedKey(event.target.value);
                 setFolder("");
+                setFolderTouched(false);
                 setError(null);
+                setLaunched(false);
               }}
             >
               <option value="" disabled>
@@ -112,55 +162,52 @@ export function SkillInstallerSettings() {
           </p>
           {projects.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Add a project in a connected environment to open Skill Manager.
+              Add a project in a connected environment to open the installer.
             </p>
           ) : null}
           <label className="grid gap-2 text-sm">
-            Catalog folder (optional)
+            Catalog folder
             <Input
-              value={folder}
+              value={effectiveFolder}
               disabled={busy || !project}
               placeholder="/path/to/agent-skills"
               autoComplete="off"
               spellCheck={false}
               className="font-mono"
-              onChange={(event) => setFolder(event.target.value)}
+              onChange={(event) => {
+                setEffectiveFolder(event.target.value);
+                setLaunched(false);
+              }}
             />
           </label>
           <p className="text-xs text-muted-foreground">
-            A folder containing catalog.yaml and skills. Leave this blank to choose in chat or reuse
-            your previous catalog.
+            A folder containing catalog.yaml and install-skills.mjs. Remembered for this
+            environment.
+          </p>
+          <p aria-live="polite" className="rounded border bg-muted/50 p-2 font-mono text-xs">
+            {command}
           </p>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" disabled={busy || !project} onClick={() => setPicking(true)}>
               Browse folders
             </Button>
-            <Button disabled={busy || !project || !canLaunch} onClick={() => void launch()}>
-              {busy ? "Opening…" : "Open Skill Manager"}
+            <Button
+              disabled={busy || !project || !effectiveFolder.trim()}
+              onClick={() => void launch()}
+            >
+              {busy ? "Opening…" : "Open installer"}
             </Button>
           </div>
-          {project && !canLaunch ? (
-            <div role="status" className="grid gap-1 text-sm text-muted-foreground">
-              <p>
-                {catalog.error ??
-                  (catalog.isPending || !catalog.data
-                    ? "Checking Skill Manager…"
-                    : manager
-                      ? `Skill Manager is ${manager.availabilityLabel.toLowerCase()}.`
-                      : "Skill Manager is not available in this environment. Update the environment to a version that includes it.")}
-              </p>
-              {manager?.blockedReasons.map((reason) => (
-                <p key={reason}>{reason}</p>
-              ))}
-              <Link to="/settings/agents" className="underline">
-                Manage agent availability
-              </Link>
-            </div>
+          {launched ? (
+            <p role="status" className="text-sm text-muted-foreground">
+              Installer running in the thread terminal. Select groups with Space, confirm once, and
+              read the result there.
+            </p>
           ) : null}
           <p className="text-xs text-muted-foreground">
-            Send the prepared message, then choose any combination of groups. You can ask the agent
-            to list, update, or remove installed groups too. Provider permission prompts cover
-            user-directory writes and repository updates.
+            The wizard preselects core, Atlassian, and Dynatrace groups, resolves dependencies,
+            previews additions and removals, and applies after one confirmation. Run it again to
+            change the selection, check for updates, update the catalog, or uninstall.
           </p>
           {error ? (
             <p role="alert" className="text-sm text-destructive-foreground">
@@ -175,7 +222,8 @@ export function SkillInstallerSettings() {
           environmentLabel={environmentLabel(project.environmentId)}
           onClose={() => setPicking(false)}
           onSelect={(path) => {
-            setFolder(path);
+            setEffectiveFolder(path);
+            setLaunched(false);
             setPicking(false);
           }}
         />
