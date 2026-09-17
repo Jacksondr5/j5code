@@ -376,6 +376,37 @@ describe("ArtifactWorkspace", () => {
       ),
   );
 
+  it.effect.skipIf(!symlinksSupported)("does not trash through an artifact symlink", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        trashMock.mockClear();
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const serverConfig = yield* ServerConfig.ServerConfig;
+        const artifacts = yield* ArtifactWorkspace.ArtifactWorkspace;
+        yield* artifacts.write({ projectId, relativePath: "target.md", content: "keep" });
+        const artifactRoot = path.join(
+          serverConfig.stateDir,
+          ArtifactWorkspace.ARTIFACT_DIRECTORY_NAME,
+          ArtifactWorkspace.artifactProjectDirectoryName(projectId),
+        );
+        yield* fileSystem.symlink(
+          path.join(artifactRoot, "target.md"),
+          path.join(artifactRoot, "link.md"),
+        );
+
+        const result = yield* Effect.exit(artifacts.trash({ projectId, relativePath: "link.md" }));
+
+        assert.isTrue(result._tag === "Failure");
+        expect(trashMock).not.toHaveBeenCalled();
+        assert.equal(
+          (yield* artifacts.read({ projectId, relativePath: "target.md" })).content,
+          "keep",
+        );
+      }).pipe(Effect.provide(TestLayer)),
+    ),
+  );
+
   it.effect("watches for files created in the artifacts directory", () =>
     Effect.gen(function* () {
       let watchedPath: string | null = null;

@@ -1,4 +1,4 @@
-import { AgentHandoff, type ThreadId } from "@t3tools/contracts";
+import { AgentHandoff, type ProjectId, type ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -42,6 +42,10 @@ export const makeAgentHandoffStore = Effect.gen(function* () {
           ? Effect.succeed([] as ReadonlyArray<Row>)
           : sql<Row>`SELECT * FROM j5_agent_handoffs WHERE thread_id IN ${sql.in(input.threadIds)} ORDER BY checked_at DESC`
       ).pipe(Effect.map((rows) => rows.map(fromRow))),
+    listByProjectPath: (projectId: ProjectId, path: string) =>
+      sql<Row>`SELECT * FROM j5_agent_handoffs WHERE project_id = ${projectId} AND path = ${path}`.pipe(
+        Effect.map((rows) => rows.map(fromRow)),
+      ),
     upsert: (handoff: AgentHandoff) =>
       sql`
         INSERT INTO j5_agent_handoffs (thread_id, project_id, persona_id, artifact, path, status, run_id, checked_at)

@@ -10,17 +10,6 @@ const chatViewSource = NodeFS.readFileSync(
 );
 
 describe("artifact previews", () => {
-  // When the body re-reads is decided by artifactPreviewRevision and tested in
-  // artifactPreview.logic.test.ts; a source-string assertion here could not tell a double read
-  // from a single one.
-  it("holds the environment connection itself and waits for it before fetching", () => {
-    // Without a subscriber the prepared-connection atom reads as none, so the standalone route
-    // failed every list with "The project environment is not connected."
-    expect(source).toContain("usePreparedConnection(selectedEnvironmentId)");
-    expect(source).toContain("if (!connected) {");
-    expect(source).toContain("Connecting to the environment…");
-  });
-
   it("renders HTML in an isolated transparent iframe", () => {
     expect(source).toContain('sandbox=""');
     expect(source).toContain('referrerPolicy="no-referrer"');

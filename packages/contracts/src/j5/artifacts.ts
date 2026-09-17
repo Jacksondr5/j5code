@@ -3,6 +3,20 @@ import { Rpc, RpcGroup } from "effect/unstable/rpc";
 
 import { ArtifactChangeEvent, ArtifactWatchError, ArtifactWatchInput } from "../artifacts.ts";
 import { EnvironmentAuthorizationError } from "../auth.ts";
+import { ProjectId } from "../baseSchemas.ts";
+
+export const ARTIFACT_TRASH_PATH = "/api/j5/artifacts/trash";
+
+export const ArtifactTrashRequest = Schema.Struct({
+  projectId: ProjectId,
+  path: Schema.String,
+});
+export type ArtifactTrashRequest = typeof ArtifactTrashRequest.Type;
+
+export const ArtifactTrashResponse = Schema.Struct({
+  trashed: Schema.Literal(true),
+});
+export type ArtifactTrashResponse = typeof ArtifactTrashResponse.Type;
 
 /**
  * The J5 artifact WebSocket surface: one stream that tells a client a project's artifacts

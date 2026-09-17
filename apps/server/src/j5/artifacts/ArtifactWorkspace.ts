@@ -536,6 +536,12 @@ export const layer = Layer.effect(
             detail: "Artifact links cannot leave the artifacts directory.",
           });
         }
+        if (realPath !== requestedPath) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "trash-artifact",
+            detail: "Artifact links cannot be moved to the Trash.",
+          });
+        }
         const info = yield* fileSystem
           .stat(realPath)
           .pipe(
@@ -549,9 +555,9 @@ export const layer = Layer.effect(
             detail: "Only artifact files can be moved to the Trash.",
           });
         }
-        // Move the requested entry rather than its real path. For an in-root symlink this trashes
-        // the link the user selected without unexpectedly removing its target.
-        yield* Effect.tryPromise(() => trash(requestedPath, { glob: false })).pipe(
+        // Use the already-validated canonical path. Symlink entries are rejected above, so a
+        // local writer cannot redirect this operation by swapping a requested ancestor.
+        yield* Effect.tryPromise(() => trash(realPath, { glob: false })).pipe(
           Effect.mapError(
             workspaceError("trash-artifact", "The artifact could not be moved to the Trash."),
           ),

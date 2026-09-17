@@ -29,9 +29,9 @@ import { usePreparedConnection } from "../../state/session";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { artifactEnvironment } from "./artifactChanges";
 import { listArtifacts, readArtifact, trashArtifact } from "./artifactClient";
+import { canFetchArtifacts } from "./artifactConnection.logic";
 import { artifactPreviewRevision } from "./artifactPreview.logic";
 import { nextArtifactRefreshGeneration } from "./artifactRefresh";
-import { artifactSelectionAfterTrash } from "./artifactTrash.logic";
 
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdx"]);
 const IMAGE_MEDIA_TYPES: Readonly<Record<string, string>> = {
@@ -49,17 +49,19 @@ const projectKey = (project: Pick<EnvironmentProject, "environmentId" | "id">) =
 
 const ARTIFACT_FILE_PANE_MIN_WIDTH = 144;
 const ARTIFACT_FILE_PANE_MAX_WIDTH = 480;
+const ARTIFACT_EMBEDDED_FILE_PANE_MAX_WIDTH = 192;
 
 function ArtifactFilePaneResizeHandle(props: {
   readonly embedded: boolean;
   readonly handlers: ResizableWidthHandlers;
+  readonly maxWidth: number;
   readonly width: number;
 }) {
   return (
     <div
       aria-label="Resize artifact file list"
       aria-orientation="vertical"
-      aria-valuemax={ARTIFACT_FILE_PANE_MAX_WIDTH}
+      aria-valuemax={props.maxWidth}
       aria-valuemin={ARTIFACT_FILE_PANE_MIN_WIDTH}
       aria-valuenow={props.width}
       className={cn(
@@ -119,6 +121,7 @@ export function ArtifactsPage({
   const [listState, setListState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [contentState, setContentState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [trashError, setTrashError] = useState<string | null>(null);
   // Two counters on purpose: the change stream bumps the list only; the Refresh button bumps
   // both. Only the second reaches the body read, so another file changing never re-reads this one.
   const [listGeneration, setListGeneration] = useState(0);
@@ -127,11 +130,14 @@ export function ArtifactsPage({
   const [trashing, setTrashing] = useState(false);
   const filePane = useResizableWidth({
     storageKey: embedded ? "j5:artifacts:embedded-file-pane-width" : "j5:artifacts:file-pane-width",
-    defaultWidth: embedded ? 208 : 288,
+    defaultWidth: embedded ? 176 : 288,
     minWidth: ARTIFACT_FILE_PANE_MIN_WIDTH,
-    maxWidth: ARTIFACT_FILE_PANE_MAX_WIDTH,
+    maxWidth: embedded ? ARTIFACT_EMBEDDED_FILE_PANE_MAX_WIDTH : ARTIFACT_FILE_PANE_MAX_WIDTH,
     edge: "right",
   });
+  const filePaneMaxWidth = embedded
+    ? ARTIFACT_EMBEDDED_FILE_PANE_MAX_WIDTH
+    : ARTIFACT_FILE_PANE_MAX_WIDTH;
 
   const selectedProject = useMemo(
     () =>
@@ -174,7 +180,13 @@ export function ArtifactsPage({
       setListState("ready");
       return;
     }
-    if (!connected) {
+    if (
+      !canFetchArtifacts({
+        environmentId: selectedEnvironmentId,
+        projectId: selectedProjectId,
+        connected,
+      })
+    ) {
       setListState("loading");
       setError(null);
       return;
@@ -270,25 +282,24 @@ export function ArtifactsPage({
     if (confirmation === undefined || !(await confirmation)) return;
 
     setTrashing(true);
-    setError(null);
+    setTrashError(null);
     try {
       await trashArtifact({
         environmentId: selectedEnvironmentId,
         projectId: selectedProjectId,
         path,
       });
-      const next = artifactSelectionAfterTrash(entries, path);
-      setEntries(next.entries);
-      setSelectedPath((current) => (current === path ? next.selectedPath : current));
+      // Re-read whichever project is current when the request completes. The list effect cancels
+      // superseded reads, so an in-flight deletion from another project cannot write stale rows.
+      setListGeneration((generation) => generation + 1);
     } catch (cause) {
-      setError(
+      setTrashError(
         cause instanceof Error ? cause.message : "The artifact could not be moved to Trash.",
       );
-      setContentState("error");
     } finally {
       setTrashing(false);
     }
-  }, [entries, selectedEnvironmentId, selectedPath, selectedProjectId, trashing]);
+  }, [selectedEnvironmentId, selectedPath, selectedProjectId, trashing]);
   const selectedExtension = selectedPath === null ? "" : extensionOf(selectedPath);
   const selectedName = selectedPath?.split("/").at(-1) ?? null;
   const image = IMAGE_MEDIA_TYPES[selectedExtension] !== undefined;
@@ -358,6 +369,7 @@ export function ArtifactsPage({
                       onClick={() => {
                         setSelectedProjectKey(projectKey(project));
                         setSelectedPath(null);
+                        setTrashError(null);
                       }}
                       type="button"
                     >
@@ -413,7 +425,10 @@ export function ArtifactsPage({
                         "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
                         selectedPath === entry.path && "bg-muted",
                       )}
-                      onClick={() => setSelectedPath(entry.path)}
+                      onClick={() => {
+                        setSelectedPath(entry.path);
+                        setTrashError(null);
+                      }}
                       type="button"
                     >
                       <Icon className="size-4 shrink-0 text-muted-foreground" />
@@ -444,6 +459,7 @@ export function ArtifactsPage({
             <ArtifactFilePaneResizeHandle
               embedded={embedded}
               handlers={filePane.handlers}
+              maxWidth={filePaneMaxWidth}
               width={filePane.width}
             />
           </div>
@@ -471,6 +487,11 @@ export function ArtifactsPage({
                 <TooltipPopup>Move to Trash</TooltipPopup>
               </Tooltip>
             </header>
+            {trashError !== null ? (
+              <p className="shrink-0 border-b border-border px-3 py-2 text-xs text-destructive">
+                {trashError}
+              </p>
+            ) : null}
             <ScrollArea className="min-h-0 flex-1">
               <div className={cn("min-h-full", embedded ? "p-4" : "p-5 md:p-8")}>
                 {contentState === "loading" ? (

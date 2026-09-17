@@ -30,6 +30,7 @@ import {
   failEnvironmentScopeRequired,
 } from "../../auth/http.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
+import { AgentHandoffArtifactTrash } from "../agents/agentHandoffArtifactTrash.ts";
 import { ArtifactWorkspace } from "./ArtifactWorkspace.ts";
 
 const decodeListRequest = Schema.decodeUnknownEffect(ArtifactListRequest);
@@ -110,6 +111,7 @@ class ArtifactProjectUnavailableError extends Schema.TaggedErrorClass<ArtifactPr
 export const artifactHttpRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const artifacts = yield* ArtifactWorkspace;
+    const handoffTrash = yield* AgentHandoffArtifactTrash;
     const projects = yield* ProjectService.ProjectService;
 
     const listRoute = HttpRouter.add(
@@ -190,6 +192,17 @@ export const artifactHttpRouteLayer = Layer.unwrap(
           requireProject(projects, input.projectId).pipe(
             Effect.flatMap(() =>
               artifacts.trash({ projectId: input.projectId, relativePath: input.path }),
+            ),
+            Effect.tap(() =>
+              handoffTrash.reconcile({ projectId: input.projectId, path: input.path }).pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("Trashed artifact handoff state could not be reconciled", {
+                    cause,
+                    projectId: input.projectId,
+                    path: input.path,
+                  }),
+                ),
+              ),
             ),
           ),
         );

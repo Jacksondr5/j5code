@@ -4,7 +4,6 @@ import { NonNegativeInt, ProjectId } from "./baseSchemas.ts";
 
 export const ARTIFACT_LIST_PATH = "/api/j5/artifacts/list";
 export const ARTIFACT_READ_PATH = "/api/j5/artifacts/read";
-export const ARTIFACT_TRASH_PATH = "/api/j5/artifacts/trash";
 
 export const ArtifactEntry = Schema.Struct({
   path: Schema.String,
@@ -66,17 +65,6 @@ export const ArtifactReadRequest = Schema.Struct({
   path: Schema.String,
 });
 export type ArtifactReadRequest = typeof ArtifactReadRequest.Type;
-
-export const ArtifactTrashRequest = Schema.Struct({
-  projectId: ProjectId,
-  path: Schema.String,
-});
-export type ArtifactTrashRequest = typeof ArtifactTrashRequest.Type;
-
-export const ArtifactTrashResponse = Schema.Struct({
-  trashed: Schema.Literal(true),
-});
-export type ArtifactTrashResponse = typeof ArtifactTrashResponse.Type;
 
 export const ArtifactWatchInput = Schema.Struct({
   projectId: ProjectId,
