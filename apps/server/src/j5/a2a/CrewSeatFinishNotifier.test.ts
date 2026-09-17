@@ -593,6 +593,7 @@ it.effect(
               ),
           }),
         ),
+        Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
         Layer.provideMerge(artifactWorkspaceLayer),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-retry-" })),
@@ -614,4 +615,105 @@ it.effect(
         );
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
+);
+
+it.effect("the boot sweep settles a finished seat nothing settled and tells its Captain", () =>
+  Effect.gen(function* () {
+    const database = NodeSqliteClient.layerMemory();
+    const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
+      Layer.provideMerge(database),
+    );
+    const context = yield* Layer.build(storage);
+    yield* runJ5A2AMigrations().pipe(Effect.provide(context));
+    yield* Context.get(context, A2ALedger).createSquadron({
+      squadron: { id: squadronId, name: "Sweep", createdAt: DateTime.formatIso(createdAt) },
+    });
+    yield* Context.get(context, AgentCrewInstanceService).record({
+      id: "crew:sweep",
+      squadronId,
+      captainParticipantId: participantIdForThread(captainThread),
+      captainThreadId: captainThread,
+      displayName: "Sweep Crew",
+      brief: "Finish the work.",
+      createdAt: DateTime.formatIso(createdAt),
+      members: [
+        // Finished while the server was down: settles now.
+        {
+          seatName: "scout",
+          agentId: "scout",
+          participantId: participantIdForThread(scoutThread),
+          threadId: scoutThread,
+          reason: null,
+        },
+        // Still running: left alone.
+        {
+          seatName: "sitter",
+          agentId: "sitter",
+          participantId: participantIdForThread(strangerThread),
+          threadId: strangerThread,
+          reason: null,
+        },
+      ],
+    });
+    const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+    const finished = (threadId: ThreadId) =>
+      ({
+        ...projection(threadId),
+        runs: [
+          {
+            id: RunId.make("run:old"),
+            threadId,
+            status: "completed",
+            completedAt: DateTime.makeUnsafe("2026-09-09T16:05:00.000Z"),
+          },
+          {
+            id: RunId.make("run:newest"),
+            threadId,
+            status: "failed",
+            completedAt: DateTime.makeUnsafe("2026-09-09T16:09:00.000Z"),
+          },
+        ],
+      }) as unknown as OrchestrationV2ThreadProjection;
+    const layer = settlerLayer.pipe(
+      Layer.provideMerge(
+        Layer.mock(ThreadManagementService)({
+          getThreadProjection: (threadId) =>
+            Effect.succeed(
+              threadId === scoutThread
+                ? finished(threadId)
+                : threadId === strangerThread
+                  ? projection(threadId, { running: true })
+                  : projection(threadId),
+            ),
+          dispatch: (command) =>
+            Ref.update(dispatched, (items) => [...items, command]).pipe(
+              Effect.as({ events: [], effects: [] } as never),
+            ),
+        }),
+      ),
+      Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+      Layer.provideMerge(artifactWorkspaceLayer),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-sweep-" })),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const settler = yield* CrewMemberSettler;
+      assert.deepStrictEqual(yield* settler.reconcile, [scoutThread]);
+      const commands = yield* Ref.get(dispatched);
+      assert.deepStrictEqual(
+        commands.map((command) => command.type),
+        ["message.dispatch", "thread.settle"],
+      );
+      const notice = commands[0];
+      if (notice?.type === "message.dispatch") {
+        assert.equal(notice.threadId, captainThread);
+        assert.include(notice.text, "seat: scout");
+        // The newest finish is the one reported.
+        assert.include(notice.text, "run_status: failed");
+      }
+      const settle = commands[1];
+      if (settle?.type === "thread.settle") assert.equal(settle.threadId, scoutThread);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
 );

@@ -3,7 +3,9 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Result from "effect/Result";
 
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { ArchiveCrewService } from "./ArchiveCrewService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
@@ -19,6 +21,13 @@ export interface CrewCaptainArchiveCascadeShape {
   readonly handleStoredEvent: (
     stored: OrchestrationV2StoredEvent,
   ) => Effect.Effect<ReadonlyArray<string> | null>;
+  /**
+   * The boot sweep: retire every live Crew whose Captain thread is already archived or gone.
+   * Covers a cascade that failed partway (the loop logs and moves on, so nothing else retries
+   * it) and an archive that landed while the server was down, since the event stream resumes
+   * from its high-water mark. Returns the ids retired.
+   */
+  readonly reconcile: Effect.Effect<ReadonlyArray<string>>;
 }
 
 export class CrewCaptainArchiveCascade extends Context.Service<
@@ -41,6 +50,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const crews = yield* AgentCrewInstanceService;
     const archives = yield* ArchiveCrewService;
+    const threads = yield* ThreadManagementService;
 
     const retire = Effect.fn("j5.a2a.captainArchiveCascade.retire")(function* (
       captainThreadId: ThreadId,
@@ -109,6 +119,52 @@ export const layer = Layer.effect(
         ),
       );
 
-    return CrewCaptainArchiveCascade.of({ handleStoredEvent });
+    /**
+     * Archived or deleted: either way the Captain no longer commands, so its Crews retire. A
+     * deleted thread keeps its projection with `deletedAt` set, so both read as facts; a
+     * projection that cannot be read is the store's problem and leaves the Crew alone this pass.
+     */
+    const captainIsGone = Effect.fn("j5.a2a.captainArchiveCascade.captainIsGone")(function* (
+      instance: AgentCrewInstance,
+    ) {
+      const read = yield* Effect.result(threads.getThreadProjection(instance.captainThreadId));
+      if (Result.isSuccess(read))
+        return read.success.thread.archivedAt !== null || read.success.thread.deletedAt !== null;
+      yield* Effect.logWarning("J5 Captain archive sweep could not read a Captain thread", {
+        captainThreadId: instance.captainThreadId,
+        crewInstanceId: instance.id,
+        cause: read.failure,
+      });
+      return false;
+    });
+
+    const reconcile: CrewCaptainArchiveCascadeShape["reconcile"] = Effect.gen(function* () {
+      const live = yield* crews.listLive();
+      const retired: Array<string> = [];
+      for (const instance of live) {
+        // A defect while reading one Captain skips that Crew, not the sweep.
+        const gone = yield* captainIsGone(instance).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("J5 Captain archive sweep could not read a Captain thread", {
+              captainThreadId: instance.captainThreadId,
+              crewInstanceId: instance.id,
+              cause,
+            }).pipe(Effect.as(false)),
+          ),
+        );
+        if (!gone) continue;
+        yield* retire(instance.captainThreadId, instance);
+        retired.push(instance.id);
+      }
+      if (retired.length > 0)
+        yield* Effect.logInfo("J5 Captain archive sweep retired orphaned Crews", { retired });
+      return retired;
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logError("J5 Captain archive sweep failed", { cause }).pipe(Effect.as([])),
+      ),
+    );
+
+    return CrewCaptainArchiveCascade.of({ handleStoredEvent, reconcile });
   }),
 );

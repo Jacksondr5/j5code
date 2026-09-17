@@ -56,6 +56,12 @@ export interface CrewSeatFinishNotifierShape {
   readonly handleStoredEvent: (
     event: OrchestrationV2StoredEvent,
   ) => Effect.Effect<ThreadId | null, never>;
+  /**
+   * The boot sweep: settle every live Crew member whose last run finished while nothing settled
+   * it, telling its Captain as usual. Covers a notice that failed (the seat was left unsettled
+   * on purpose) and a finish that landed while the server was down. Returns the threads settled.
+   */
+  readonly reconcile: Effect.Effect<ReadonlyArray<ThreadId>>;
 }
 
 export class CrewSeatFinishNotifier extends Context.Service<
@@ -340,6 +346,52 @@ const makeLayer = (daemon: boolean) =>
         return threadId;
       });
 
+      /** The run a sweep would report: the newest finish, only when nothing is running. */
+      const outstandingFinish = (projection: OrchestrationV2ThreadProjection) => {
+        if (ThreadManagement.latestActiveRun(projection) !== undefined) return undefined;
+        return projection.runs
+          .filter((run) => run.status === "completed" || run.status === "failed")
+          .toSorted(
+            (a, b) =>
+              (b.completedAt === null ? 0 : DateTime.toEpochMillis(b.completedAt)) -
+              (a.completedAt === null ? 0 : DateTime.toEpochMillis(a.completedAt)),
+          )[0];
+      };
+
+      const reconcile: CrewSeatFinishNotifierShape["reconcile"] = Effect.gen(function* () {
+        const reportedNow: Array<ThreadId> = [];
+        for (const instance of yield* crews.listLive()) {
+          for (const member of instance.members) {
+            // A seat whose thread cannot be read (gone, or the store hiccuped) is skipped this pass.
+            const projection = yield* threads
+              .getThreadProjection(member.threadId)
+              .pipe(Effect.catchCause(() => Effect.succeed(null)));
+            if (projection === null) continue;
+            if (projection.thread.archivedAt !== null) continue;
+            const run = outstandingFinish(projection);
+            if (run === undefined) continue;
+            const outcome = yield* notifyIfFinished(member.threadId, run).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("J5 crew seat finish sweep skipped a seat", {
+                  threadId: member.threadId,
+                  cause,
+                }).pipe(Effect.as(null)),
+              ),
+            );
+            if (outcome !== null) reportedNow.push(outcome);
+          }
+        }
+        if (reportedNow.length > 0)
+          yield* Effect.logInfo("J5 crew seat finish sweep reported finished seats", {
+            reportedNow,
+          });
+        return reportedNow;
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logError("J5 crew seat finish sweep failed", { cause }).pipe(Effect.as([])),
+        ),
+      );
+
       const handleStoredEvent: CrewSeatFinishNotifierShape["handleStoredEvent"] = (stored) =>
         Effect.gen(function* () {
           const run = finishedRun(stored);
@@ -354,8 +406,9 @@ const makeLayer = (daemon: boolean) =>
         );
 
       if (daemon) {
-        // Start from the current high-water mark: a missed finish is harmless and the next
-        // terminal run for that member catches up.
+        // The stream starts from the current high-water mark, so everything that landed while
+        // the server was down, and every reaction that failed before it, is caught up by one
+        // sweep first: orphaned Crews retire, finished seats tell their Captains.
         const runDaemon = Effect.gen(function* () {
           const rows = yield* sql<{ readonly sequence: number }>`
             SELECT COALESCE(MAX(sequence), 0) AS sequence FROM orchestration_v2_events
@@ -364,6 +417,8 @@ const makeLayer = (daemon: boolean) =>
           // Launches the server lost mid-report are reported first, so a first turn that failed
           // while it was down is a launch outcome rather than a finish.
           yield* reporter.reconcile;
+          yield* cascade.reconcile;
+          yield* reconcile;
           // Suspended so each resume after a stream failure starts from the last handled
           // sequence rather than from the daemon's start.
           return yield* Effect.forever(
@@ -388,7 +443,7 @@ const makeLayer = (daemon: boolean) =>
         yield* Effect.forkScoped(runDaemon);
       }
 
-      return CrewSeatFinishNotifier.of({ handleStoredEvent });
+      return CrewSeatFinishNotifier.of({ handleStoredEvent, reconcile });
     }),
   );
 

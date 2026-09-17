@@ -133,6 +133,10 @@ import {
   observeRpcStreamEffect as instrumentRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
+import {
+  makeCrewSeatArchiveGuard,
+  type CrewSeatArchiveGuard,
+} from "./j5/a2a/crewSeatArchiveGuard.ts";
 import { makeAgentPersonaRpcHandlers } from "./j5/agents/agentPersonaRpc.ts";
 import { makeArtifactRpcHandlers } from "./j5/artifacts/artifactRpc.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
@@ -527,6 +531,8 @@ const makeWsRpcLayer = (
   clientAnalyticsProps: Readonly<Record<string, unknown>>,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
   artifactWorkspace: ArtifactWorkspace.ArtifactWorkspace["Service"],
+  // J5: a Crew member is never archived or deleted alone, whichever client door asks.
+  j5CrewSeatArchiveGuard: CrewSeatArchiveGuard,
 ) =>
   ServerWsRpcGroup.toLayer(
     Effect.gen(function* () {
@@ -1346,6 +1352,7 @@ const makeWsRpcLayer = (
                 claimed === null || command.type !== "message.dispatch"
                   ? command
                   : { ...command, attachments: claimed.attachments };
+              yield* j5CrewSeatArchiveGuard(command);
               return yield* startup
                 .enqueueCommand(
                   threadManagement.dispatch(
@@ -2717,6 +2724,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const artifactWorkspace = yield* ArtifactWorkspace.ArtifactWorkspace;
+    const j5CrewSeatArchiveGuard = yield* makeCrewSeatArchiveGuard;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
     // J5: the revision counter the saved-agent handoff observer bumps; one instance per server.
@@ -2765,6 +2773,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               clientAnalyticsProps,
               previewAutomationBroker,
               artifactWorkspace,
+              j5CrewSeatArchiveGuard,
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(ProviderMaintenanceRunner.layer),

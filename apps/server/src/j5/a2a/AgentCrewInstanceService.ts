@@ -99,6 +99,8 @@ export interface AgentCrewInstanceServiceShape {
   readonly listForSquadron: (
     squadronId: SquadronId,
   ) => Effect.Effect<ReadonlyArray<AgentCrewInstance>, SqlError>;
+  /** Every Crew not yet retired, across Squadrons; the boot reconciliation walks this. */
+  readonly listLive: () => Effect.Effect<ReadonlyArray<AgentCrewInstance>, SqlError>;
   /** Every Crew that any of these threads sits in or that any of these participants commands. */
   readonly listInvolving: (input: {
     readonly threadIds: ReadonlyArray<ThreadId>;
@@ -325,6 +327,14 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
         return yield* readMany(rows);
       });
 
+      const listLive = Effect.fn("j5.a2a.agentCrewInstances.listLive")(function* () {
+        const rows = yield* sql<InstanceRow>`
+          SELECT * FROM j5_agent_crew_instance WHERE archived_at IS NULL
+          ORDER BY created_at, id
+        `;
+        return yield* readMany(rows);
+      });
+
       const listInvolving = Effect.fn("j5.a2a.agentCrewInstances.listInvolving")(function* (input: {
         readonly threadIds: ReadonlyArray<ThreadId>;
         readonly participantIds: ReadonlyArray<ParticipantId>;
@@ -384,6 +394,7 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
         removeMembers,
         listForCaptain,
         listForSquadron,
+        listLive,
         listInvolving,
         markArchived,
       });
