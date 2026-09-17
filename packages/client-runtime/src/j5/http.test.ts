@@ -1,6 +1,7 @@
 import { expect, it } from "@effect/vitest";
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 import {
   BearerConnectionTarget,
@@ -13,14 +14,20 @@ import { RemoteEnvironmentAuthorization } from "../authorization/service.ts";
 import { remoteHttpClientLayer } from "../rpc/http.ts";
 import { ManagedRelayDpopSigner } from "../relay/managedRelay.ts";
 import {
+  addPeer,
   answerHumanExchange,
   createSquadron,
+  issuePeerCredential,
+  listPeers,
+  removePeer,
   isJ5UnsupportedError,
   J5HttpError,
   listHumanInbox,
   listSquadrons,
   readOpenInboxCount,
 } from "./http.ts";
+
+const isJ5HttpError = Schema.is(J5HttpError);
 
 const relayToken = (accessToken: string) =>
   ({ _tag: "Dpop", accessToken, expiresAtEpochMs: 4_102_444_800_000 }) as const;
@@ -280,3 +287,102 @@ it("does not mistake a missing person or rejected credential for a missing J5 ro
   );
   expect(isJ5UnsupportedError(new J5HttpError({ status: 403, detail: "Read-only" }))).toBe(false);
 });
+
+it.effect(
+  "drives the peer routes with each server's own credential and decodes their answers",
+  () =>
+    Effect.gen(function* () {
+      const requests: Array<{ url: string; authorization: string | null; body: unknown }> = [];
+      const fetch: typeof globalThis.fetch = async (input, init) => {
+        const request = new Request(input, init);
+        const body = request.method === "POST" ? await request.json() : null;
+        const path = new URL(request.url).pathname;
+        requests.push({
+          url: request.url,
+          authorization: request.headers.get("authorization"),
+          body,
+        });
+        if (path === "/api/j5/a2a/peers/credentials") {
+          return Response.json(
+            {
+              environmentId: "environment-work",
+              credential: "issued",
+              sessionId: "auth-session:peer",
+              subject: "peer:environment-home",
+              expiresAt: "2027-01-01T00:00:00.000Z",
+            },
+            { status: 201 },
+          );
+        }
+        if (path === "/api/j5/a2a/peers" && request.method === "POST") {
+          return Response.json(
+            {
+              peer: {
+                environmentId: "environment-home",
+                label: "Home",
+                origin: "https://home.test",
+                createdAt: "2026-09-16T00:00:00.000Z",
+              },
+              created: true,
+            },
+            { status: 201 },
+          );
+        }
+        if (path === "/api/j5/a2a/peers/remove") {
+          return Response.json({ removed: true, revokedSessions: 1 });
+        }
+        return Response.json({ peers: [] });
+      };
+      const work = prepared("work", { _tag: "Bearer", token: "work-token" });
+      const issued = yield* issuePeerCredential(work, {
+        environmentId: "environment-home",
+        label: "Home",
+      }).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+      expect(issued.credential).toBe("issued");
+      const added = yield* addPeer(work, {
+        origin: "https://home.test",
+        credential: "home-issued",
+        label: "Home",
+      }).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+      expect(added.created).toBe(true);
+      expect(added.peer.label).toBe("Home");
+      const peers = yield* listPeers(work).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+      expect(peers).toEqual([]);
+      const removed = yield* removePeer(work, { environmentId: "environment-home" }).pipe(
+        Effect.provide(remoteHttpClientLayer(fetch)),
+      );
+      expect(removed).toEqual({ removed: true, revokedSessions: 1 });
+      expect(
+        requests.map((request) => [new URL(request.url).pathname, request.authorization]),
+      ).toEqual([
+        ["/api/j5/a2a/peers/credentials", "Bearer work-token"],
+        ["/api/j5/a2a/peers", "Bearer work-token"],
+        ["/api/j5/a2a/peers", "Bearer work-token"],
+        ["/api/j5/a2a/peers/remove", "Bearer work-token"],
+      ]);
+      expect(requests[1]!.body).toEqual({
+        origin: "https://home.test",
+        credential: "home-issued",
+        label: "Home",
+      });
+    }),
+);
+
+it.effect("surfaces the server's peer refusal code and message", () =>
+  Effect.gen(function* () {
+    const fetch: typeof globalThis.fetch = async () =>
+      Response.json(
+        { error: "peer_unreachable", message: "Could not reach a J5 server at https://dark.test" },
+        { status: 502 },
+      );
+    const failure = yield* addPeer(prepared("work", { _tag: "Bearer", token: "t" }), {
+      origin: "https://dark.test",
+      credential: "c",
+    }).pipe(Effect.provide(remoteHttpClientLayer(fetch)), Effect.flip);
+    expect(isJ5HttpError(failure)).toBe(true);
+    if (isJ5HttpError(failure)) {
+      expect(failure.code).toBe("peer_unreachable");
+      expect(failure.message).toContain("dark.test");
+    }
+  }),
+);

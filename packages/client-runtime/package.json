@@ -283,6 +283,10 @@
       "types": "./src/j5/inbox.ts",
       "default": "./src/j5/inbox.ts"
     },
+    "./j5/peering": {
+      "types": "./src/j5/peering.ts",
+      "default": "./src/j5/peering.ts"
+    },
     "./j5/squadrons": {
       "types": "./src/j5/squadrons.ts",
       "default": "./src/j5/squadrons.ts"
