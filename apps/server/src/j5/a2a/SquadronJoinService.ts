@@ -104,6 +104,9 @@ export interface SquadronJoinServiceShape {
  * The agent-invocable repair path for native threads that were created without
  * a Squadron. It never selects, moves, or revives a home: an existing home in
  * the requested Squadron is returned as-is, any other home is refused.
+ * Callers check orchestration availability before joining. That read is not
+ * atomic with archive: an archive consumed before the first home exists can
+ * leave the new membership active until the next lifecycle event (#179).
  */
 export class SquadronJoinService extends Context.Service<
   SquadronJoinService,

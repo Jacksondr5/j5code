@@ -1,5 +1,7 @@
 import {
   AnswerHumanExchangeResponse,
+  AssignImportedThreadsResponse,
+  type AssignImportedThreadsRequest,
   CreateSquadronResponse,
   HumanInboxResponse,
   J5_API_PATHS,
@@ -116,6 +118,17 @@ export const createSquadron = Effect.fn("j5.http.createSquadron")(function* (
   );
   const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
   return (yield* HttpClientResponse.schemaBodyJson(CreateSquadronResponse)(response)).squadron;
+});
+
+export const assignImportedThreads = Effect.fn("j5.http.assignImportedThreads")(function* (
+  prepared: PreparedConnection,
+  input: AssignImportedThreadsRequest,
+) {
+  const request = yield* HttpClientRequest.post(J5_API_PATHS.assignImportedThreads).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(AssignImportedThreadsResponse)(response);
 });
 
 export const listThreadHomes = Effect.fn("j5.http.listThreadHomes")(function* (

@@ -1,3 +1,5 @@
+import { A2AHomeRegistrar } from "./HomeRegistrar.ts";
+import { SquadronJoinService } from "./SquadronJoinService.ts";
 import { AuthOrchestrationReadScope, AuthSessionId, ThreadId } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -332,6 +334,8 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
     Layer.provide(Layer.mock(A2AHumanInbox)({})),
     Layer.provide(Layer.mock(A2ADeliveryWorker)({})),
     Layer.provide(Layer.mock(A2ALedger)({})),
+    Layer.provide(Layer.mock(A2AHomeRegistrar)({})),
+    Layer.provide(Layer.mock(SquadronJoinService)({})),
     Layer.provide(Layer.mock(SquadronProjectReferences)({})),
     Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
     Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
