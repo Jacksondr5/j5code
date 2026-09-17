@@ -8,7 +8,6 @@ it("keeps web and mobile agent syntax identical and removable as ordinary prompt
     "@persona:",
     "Please @persona:team-researcher",
     "@persona:scout\n@persona:critic",
-    "@agent:scout",
   ]) {
     expect(detectWeb(text, text.length)).toEqual(detectShared(text, text.length));
   }

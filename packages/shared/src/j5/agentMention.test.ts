@@ -13,8 +13,8 @@ describe("agent mention syntax", () => {
       rangeEnd: text.length,
     });
     expect(detectComposerTrigger("@persona:", 9)?.query).toBe("");
-    // The pre-rename spelling still resolves, so old drafts and habits keep working.
-    expect(detectComposerTrigger("@agent:scout", 12)?.query).toBe("scout");
+    // Only the persona spelling is a mention; no pre-dogfood spelling is kept alive.
+    expect(detectComposerTrigger("@agent:scout", 12)?.kind).not.toBe("agent");
   });
   it("preserves file mentions, skills and email text", () => {
     expect(detectComposerTrigger("@src/index", 10)?.kind).toBe("path");
@@ -22,7 +22,7 @@ describe("agent mention syntax", () => {
     expect(detectComposerTrigger("me@example.com", 14)).toBeNull();
   });
   it("keeps agent references editable text without mistaking them for files", () => {
-    expect(collectComposerInlineTokens("@persona:researcher @agent:old @./src/index.ts ")).toEqual([
+    expect(collectComposerInlineTokens("@persona:researcher @./src/index.ts ")).toEqual([
       expect.objectContaining({ type: "mention", value: "./src/index.ts" }),
     ]);
     expect(collectComposerInlineTokens('@"persona:notes" ')).toEqual([

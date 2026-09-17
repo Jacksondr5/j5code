@@ -58,8 +58,8 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
   assert.sameMembers([...(archiveSchema.required ?? [])], ["squadron_id", "participant_id"]);
   assert.property(spawnSchema.properties ?? {}, "client_request_id");
   assert.property(spawnSchema.properties ?? {}, "persona");
-  // The pre-rename spelling stays accepted for one release.
-  assert.property(spawnSchema.properties ?? {}, "agent");
+  // No pre-dogfood compatibility spelling: `persona` is the only name the model sees.
+  assert.notProperty(spawnSchema.properties ?? {}, "agent");
   assert.include(J5SpawnAgentTool.description ?? "", "one of that persona's declared routes");
   assert.property(stopSchema.properties ?? {}, "client_request_id");
   assert.property(archiveSchema.properties ?? {}, "client_request_id");

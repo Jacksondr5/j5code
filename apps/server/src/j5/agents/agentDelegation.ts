@@ -17,8 +17,7 @@ import { invokeAgent } from "./agentInvocation.ts";
 /**
  * Upstream's delegate_task input plus an optional persona. With `persona`, the server applies
  * the saved definition's instructions, model route, reasoning, and runtime policy; without it,
- * this is upstream's plain child delegation. `agent` is the pre-rename spelling, accepted for
- * one release (2026-09-17).
+ * this is upstream's plain child delegation.
  */
 export const J5DelegateTaskInput = Schema.Struct({
   ...OrchestratorMcpDelegateTaskInput.fields,
@@ -27,9 +26,6 @@ export const J5DelegateTaskInput = Schema.Struct({
       description:
         "Persona ID to run the child as, taken from an @persona:ID mention or the Settings → Personas library. The server applies its instructions, model route, reasoning, and runtime policy; omit target and runtimeMode when passing persona.",
     }),
-  ),
-  agent: Schema.optional(
-    AgentPersonaId.annotate({ description: "Deprecated: the former name of persona." }),
   ),
 });
 export type J5DelegateTaskInput = typeof J5DelegateTaskInput.Type;
@@ -62,8 +58,7 @@ export const J5DelegateTaskTool = Tool.make("delegate_task", {
   .annotate(Tool.OpenWorld, true);
 
 export const delegateTask = Effect.fn("j5.delegateTask")(function* (input: J5DelegateTaskInput) {
-  const { persona, agent, ...delegate } = input;
-  const personaId = persona ?? agent;
+  const { persona: personaId, ...delegate } = input;
   if (personaId === undefined) {
     const scope = yield* McpInvocationContext;
     const service = yield* OrchestratorMcpService;

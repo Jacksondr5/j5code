@@ -95,6 +95,15 @@ describe("crew notices in the Captain's thread", () => {
     if (notice?.kind === "gate") expect(crewGateTitle(notice)).toBe("Crew launched");
     // Only the platform posts gate notices; the same text from a person is not one.
     expect(presentCrewNotice({ role: "user", createdBy: "user", text: approvedGate })).toBeNull();
+    // A roster line the parser does not understand leaves the whole message raw, rather than an
+    // approved card with that seat silently missing.
+    expect(
+      presentCrewNotice({
+        role: "user",
+        createdBy: "system",
+        text: approvedGate.replace("thread_id=thread:c", "thread_id=thread:c tail=junk"),
+      }),
+    ).toBeNull();
   });
 
   it("presents a launch report: what the person changed and how each seat's first turn went", () => {

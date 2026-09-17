@@ -10,7 +10,7 @@ export function useAgentMentionPicker(
   trigger: { kind: string; query: string } | null,
 ) {
   const supported = provider === "codex" || provider === "claudeAgent";
-  // Explicit `@persona:` (or the older `@agent:`) lists every launchable persona; a bare `@name` adds only prefix matches
+  // Explicit `@persona:` lists every launchable persona; a bare `@name` adds only prefix matches
   // above the file results so `@scout` finds Scout without hiding paths.
   const enabled = supported && (trigger?.kind === "agent" || trigger?.kind === "path");
   const catalog = useEnvironmentQuery(
