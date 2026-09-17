@@ -206,7 +206,11 @@ const parseSeatSection = (section: string): SettledSeat | null => {
       kind: parsed[2]!,
       artifactPath: field(block, "artifact"),
       body:
-        bodyMatch === null ? null : bodyMatch[1]!.replace(/<\\\/handoff_body>/g, "</handoff_body>"),
+        bodyMatch === null
+          ? null
+          : bodyMatch[1]!
+              .replace(/<\\\/handoff_body>/g, "</handoff_body>")
+              .replace(/<\\j5_seat_settled>/g, "<j5_seat_settled>"),
     };
   }
   return { seat, crewName: field(block, "crew"), participantId, threadId, runStatus, handoff };

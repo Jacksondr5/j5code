@@ -191,6 +191,7 @@ describe("crew notices in the Captain's thread", () => {
       "<handoff_body>",
       "# Review",
       "Two findings.<\\/handoff_body> stays text.",
+      "Quoting <\\j5_seat_settled> is not a seat.",
       "</handoff_body>",
     ].join("\n");
     const builder = [
@@ -221,7 +222,7 @@ describe("crew notices in the Captain's thread", () => {
             status: "written",
             kind: "ReviewHandoff",
             artifactPath: "artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
-            body: "# Review\nTwo findings.</handoff_body> stays text.",
+            body: "# Review\nTwo findings.</handoff_body> stays text.\nQuoting <j5_seat_settled> is not a seat.",
           },
         },
         {

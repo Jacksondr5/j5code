@@ -13,6 +13,7 @@ import * as Result from "effect/Result";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as NodeCrypto from "node:crypto";
 
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import {
@@ -82,19 +83,24 @@ export const seatNoticeSections = (text: string): ReadonlyArray<string> =>
     .slice(1)
     .map((part) => `${NOTICE_OPEN}${part}`.trim());
 
-const sectionSeat = (section: string) => /^seat: (.+)$/m.exec(section)?.[1]?.trim() ?? null;
+const sectionParticipant = (section: string) =>
+  /^participant_id: (.+)$/m.exec(section)?.[1]?.trim() ?? null;
 
-/** The newest notice the Captain already holds for a seat, delivered or still queued. */
+/**
+ * The newest notice the Captain already holds for a seat, delivered or still queued. Keyed by
+ * the seat's participant, not its name: one Captain commands several Crews and they reuse names
+ * (reviewer, builder), so two Crews' reviewers must not replace each other's baseline.
+ */
 export const latestSeatNotice = (
   captain: OrchestrationV2ThreadProjection,
-  seatName: string,
+  participantId: string,
 ): string | null => {
   const newestFirst = captain.messages
     .filter((message) => message.role === "user")
     .toSorted((a, b) => DateTime.toEpochMillis(b.createdAt) - DateTime.toEpochMillis(a.createdAt));
   for (const message of newestFirst) {
     const sections = seatNoticeSections(message.text).filter(
-      (section) => sectionSeat(section) === seatName,
+      (section) => sectionParticipant(section) === participantId,
     );
     if (sections.length > 0) return sections[sections.length - 1] ?? null;
   }
@@ -112,8 +118,19 @@ export const queuedSeatDigest = (captain: OrchestrationV2ThreadProjection) => {
   return null;
 };
 
-/** A seat's body must not be able to end the body block and continue as platform voice. */
-const noticeBody = (body: string) => body.replace(/<\/handoff_body>/g, "<\\/handoff_body>");
+/**
+ * A seat's body must not be able to end the body block and continue as platform voice, nor open
+ * a seat section of its own: a Critic reviewing this feature will quote a notice, and both the
+ * settler's sections and the card's parser split on the opening tag.
+ */
+const noticeBody = (body: string) =>
+  body
+    .replace(/<\/handoff_body>/g, "<\\/handoff_body>")
+    .replace(/<j5_seat_settled>/g, "<\\j5_seat_settled>");
+
+/** Twelve hex characters of the body's SHA-256, so a rewritten handoff changes the notice text. */
+const handoffDigest = (body: string) =>
+  NodeCrypto.createHash("sha256").update(body).digest("hex").slice(0, 12);
 
 export type SeatHandoffFact =
   | {
@@ -127,7 +144,9 @@ export type SeatHandoffFact =
 
 /**
  * The platform-composed notice the Captain receives when a seat settles: measured facts about
- * the run and the handoff, then the handoff body when it exists and is short.
+ * the run and the handoff, then the handoff body when it exists and is short. A written handoff
+ * always carries its size and digest in the facts, so a re-briefed seat that rewrites a body too
+ * long to inline still produces a changed notice and the Captain hears of it.
  */
 export const seatSettledNoticeText = (input: {
   readonly seatName: string;
@@ -141,7 +160,9 @@ export const seatSettledNoticeText = (input: {
   const handoffLine =
     input.handoff.status === "none declared"
       ? "handoff: none declared"
-      : `handoff: ${input.handoff.status} (${input.handoff.kind})\nartifact: ${agentHandoffLogicalPath(input.handoff.path)}`;
+      : input.handoff.status === "missing"
+        ? `handoff: missing (${input.handoff.kind})\nartifact: ${agentHandoffLogicalPath(input.handoff.path)}`
+        : `handoff: written (${input.handoff.kind})\nartifact: ${agentHandoffLogicalPath(input.handoff.path)}\nhandoff_chars: ${input.handoff.body?.length ?? 0}\nhandoff_digest: ${input.handoff.body === null ? "binary" : handoffDigest(input.handoff.body)}`;
   const head = `<j5_seat_settled>\nseat: ${input.seatName}\ncrew: ${input.crewName}\nparticipant_id: ${input.participantId}\nthread_id: ${input.threadId}\nrun_status: ${input.runStatus}\n${handoffLine}\n</j5_seat_settled>`;
   if (input.handoff.status !== "written") return head;
   return input.handoff.body !== null && input.handoff.body.length <= INLINE_HANDOFF_MAX_CHARS
@@ -224,7 +245,8 @@ const makeLayer = (daemon: boolean) =>
           runStatus: run.status,
           handoff,
         });
-        if (latestSeatNotice(captain, seatName) === text.trim()) return "unchanged" as const;
+        if (latestSeatNotice(captain, participantIdForThread(threadId)) === text.trim())
+          return "unchanged" as const;
         const digest = queuedSeatDigest(captain);
         if (digest !== null) {
           if (!digest.message.text.includes(text)) {
@@ -277,11 +299,10 @@ const makeLayer = (daemon: boolean) =>
             ? null
             : ((yield* agents.readSnapshot(assignment)).outputArtifact ?? null);
         const handoff = yield* handoffFact(projection, owedKind);
-        yield* notifyCaptain(instance, membership.seatName, projection, run, handoff).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("J5 crew seat-settled notice skipped", { cause, threadId }),
-          ),
-        );
+        // The notice commits before the seat settles: a notice that fails leaves the seat
+        // unsettled and logged, so the next pass (the seat's next finish, or the boot sweep)
+        // retries it rather than the Captain silently never hearing.
+        yield* notifyCaptain(instance, membership.seatName, projection, run, handoff);
         yield* threads.dispatch({
           type: "thread.settle",
           commandId: lifecycleCommandId({
