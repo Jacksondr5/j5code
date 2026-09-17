@@ -14,6 +14,7 @@ import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { ScrollArea } from "../../components/ui/scroll-area";
 import { SidebarInset } from "../../components/ui/sidebar";
+import { toastManager } from "../../components/ui/toast";
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import { useThreadShells } from "../../state/entities";
@@ -231,14 +232,19 @@ function FleetNodeRows(
       ),
     );
   // The person's Stop crew: interrupts every running seat, retires nothing. The seats' status
-  // pills already tell the truth afterwards, so a failed call needs no second message here.
+  // pills tell the truth afterwards; a refused or failed call says so, since a button that does
+  // nothing visible is a lying spinner.
   const [busy, setBusy] = useState<string | null>(null);
-  const stop = async (crewInstanceId: string) => {
-    setBusy(crewInstanceId);
+  const stop = async (crew: { crewInstanceId: string; crewName: string }) => {
+    setBusy(crew.crewInstanceId);
     try {
-      await stopCrew(props.environmentId, crewInstanceId);
-    } catch {
-      // measured state on the rows is the report
+      await stopCrew(props.environmentId, crew.crewInstanceId);
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: `Could not stop crew ${crew.crewName}`,
+        description: error instanceof Error ? error.message : String(error),
+      });
     } finally {
       setBusy(null);
     }
@@ -294,8 +300,12 @@ function FleetNodeRows(
     try {
       await archiveCrew(props.environmentId, crew.crewInstanceId);
       refreshFleet();
-    } catch {
-      // the rows keep reporting the measured state; the person can retry
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: `Could not archive crew ${crew.crewName}`,
+        description: error instanceof Error ? error.message : String(error),
+      });
     } finally {
       setBusy(null);
     }
@@ -338,7 +348,7 @@ function FleetNodeRows(
                           onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            void stop(crew.crewInstanceId);
+                            void stop(crew);
                           }}
                           size="xs"
                           variant="outline"

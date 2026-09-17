@@ -81,7 +81,8 @@ const projectLiveCrew = (entry: ArchiveCrewCaptainFacts): PreArchiveLiveCrew => 
  * facts carry its Crew relations, because a Captain is never archived alone and a seat is never
  * archived one by one (Crews AC16, AC17): `liveCrews` are the Crews it commands, seat by seat,
  * which the lifecycle cascade retires as units when the archive commits, and `crewSeat` is the
- * seat it holds, which the web refuses to archive alone. A failed Crew read is `null`, shown as
+ * seat it holds, which the web refuses to archive alone up front (the server's dispatch guard,
+ * `crewSeatArchiveGuard.ts`, refuses it for every door). A failed Crew read is `null`, shown as
  * "couldn't check", never as no Crews.
  */
 export const preArchiveFactsHttpRouteLayer = Layer.unwrap(

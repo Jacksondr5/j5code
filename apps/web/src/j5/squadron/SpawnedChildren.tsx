@@ -9,6 +9,7 @@ import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { resolveThreadStatusPill } from "../../components/Sidebar.logic";
 import { Badge } from "../../components/ui/badge";
 import { ProviderInstanceIcon } from "../../components/chat/ProviderInstanceIcon";
+import { toastManager } from "../../components/ui/toast";
 import { cn } from "../../lib/utils";
 import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../../providerInstances";
 import { useThreadShells } from "../../state/entities";
@@ -182,7 +183,13 @@ function SpawnedChildGroupRows(props: {
               event.stopPropagation();
               setStopping(true);
               void stopCrew(props.environmentId, stoppable.crewInstanceId)
-                .catch(() => undefined)
+                .catch((error: unknown) => {
+                  toastManager.add({
+                    type: "error",
+                    title: `Could not stop crew ${stoppable.crewName}`,
+                    description: error instanceof Error ? error.message : String(error),
+                  });
+                })
                 .finally(() => setStopping(false));
             }}
           >

@@ -97,9 +97,11 @@ it.effect("records a crew once, exposes membership, and lists by captain", () =>
       }),
       [],
     );
+    assert.deepStrictEqual(yield* service.listLive(), [first]);
     yield* service.markArchived(input.id, "2026-09-09T17:00:00.000Z");
     yield* service.markArchived(input.id, "2026-09-09T18:00:00.000Z");
     assert.equal((yield* service.read(input.id))?.archivedAt, "2026-09-09T17:00:00.000Z");
+    assert.deepStrictEqual(yield* service.listLive(), []);
     // A retired Crew's seat is a plain agent again: it may spawn, propose, and be archived alone.
     assert.isNull(yield* service.findMembership(input.members[1]!.participantId));
   }).pipe(Effect.provide(testLayer)),
