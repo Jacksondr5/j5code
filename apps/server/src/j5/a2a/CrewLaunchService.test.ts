@@ -432,7 +432,7 @@ it.effect(
         if (brief?.type === "message.dispatch") {
           assert.include(brief.text, "<seat_instructions>\nWrite the running notes.");
           assert.notInclude(brief.text, "<seat_obligation>");
-          assert.include(brief.text, "agent=custom");
+          assert.include(brief.text, "persona=custom");
         }
 
         // A persona Captain stores the mode the person picked at launch (full-access here) but runs

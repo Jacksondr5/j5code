@@ -48,18 +48,18 @@ export const guardAgentPersonaThreadCreate = <E>(
     if (invalid !== undefined) return yield* new AgentPersonaLibraryError({ message: invalid });
     if ((yield* driverFor(command.modelSelection.instanceId)) !== assignment.resolvedDriver) {
       return yield* new AgentPersonaLibraryError({
-        message: "Agent persona assignment provider instance does not match its resolved driver.",
+        message: "Persona assignment provider instance does not match its resolved driver.",
       });
     }
     if (!modelSelectionsEqual(command.modelSelection, assignment.resolvedModelSelection)) {
       return yield* new AgentPersonaLibraryError({
-        message: "Agent persona assignment must match the thread model selection.",
+        message: "Persona assignment must match the thread model selection.",
       });
     }
   });
 
 const immutableRoute = (thread: PersonaThread) =>
-  `Agent persona thread ${thread.id} has an immutable model route.`;
+  `Persona thread ${thread.id} has an immutable model route.`;
 
 /** Persona threads keep their launch route; explicit model or provider changes are rejected. */
 export const agentPersonaRouteLockedError = (
@@ -107,7 +107,7 @@ export const resolveAgentPersonaLaunch = Effect.fn("j5.resolveAgentPersonaLaunch
   if (input.agentPersona === undefined) return requested;
   if (input.reuseExistingThread === true) {
     return yield* new AgentPersonaLibraryError({
-      message: "Agent persona assignment requires a newly created thread.",
+      message: "Persona assignment requires a newly created thread.",
     });
   }
   if (options.replay) return requested;

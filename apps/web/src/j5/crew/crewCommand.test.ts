@@ -59,7 +59,7 @@ describe("crew proposal roster edits", () => {
     expect(briefed.seats.at(-1)?.instructions).toBe("Review only the auth module.");
   });
 
-  it("names the agent and the access a seat is approved with, or admits it cannot", () => {
+  it("names the persona and the access a seat is approved with, or admits it cannot", () => {
     const rows = [
       { personaId: "critic", displayName: "Critic", authority: "Review only" },
       { personaId: "builder", displayName: "Builder", authority: "Workspace write" },
@@ -70,15 +70,15 @@ describe("crew proposal roster edits", () => {
     });
     expect(describeSeatAgent(rows, "ghost")).toEqual({ name: "ghost", authority: null });
     expect(describeSeatAgent(rows, null)).toEqual({
-      name: "Custom agent",
+      name: "Custom seat",
       authority: "Runs with the Captain's model and access mode",
     });
   });
 
-  it("adds a custom seat with no agent behind it once it has instructions", () => {
+  it("adds a custom seat with no persona behind it once it has instructions", () => {
     expect(
       addSeat(seats, { seat: "scribe", agentId: CUSTOM_AGENT, instructions: " " }).error,
-    ).toContain("Give the custom agent");
+    ).toContain("Give the custom seat");
     const custom = addSeat(seats, {
       seat: "scribe",
       agentId: CUSTOM_AGENT,
@@ -93,7 +93,7 @@ describe("crew proposal roster edits", () => {
     });
   });
 
-  it("rejects duplicate or malformed seat names and a missing agent", () => {
+  it("rejects duplicate or malformed seat names and a missing persona", () => {
     expect(addSeat(seats, { seat: "builder", agentId: "scout", instructions: "" }).error).toContain(
       "already exists",
     );
@@ -101,7 +101,7 @@ describe("crew proposal roster edits", () => {
       "lowercase",
     );
     expect(addSeat(seats, { seat: "eyes", agentId: "", instructions: "" }).error).toContain(
-      "Pick an agent",
+      "Pick a persona",
     );
   });
 });

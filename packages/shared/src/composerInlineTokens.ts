@@ -88,7 +88,9 @@ function collectMentionTokens(text: string): ComposerInlineToken[] {
     if (
       !path ||
       (quotedPath === undefined &&
-        (path.startsWith("agent:") || SCOPED_PACKAGE_REFERENCE_REGEX.test(path)))
+        (path.startsWith("persona:") ||
+          path.startsWith("agent:") ||
+          SCOPED_PACKAGE_REFERENCE_REGEX.test(path)))
     ) {
       continue;
     }

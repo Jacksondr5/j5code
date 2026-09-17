@@ -195,7 +195,7 @@ it.effect("persists the saved persona on a nested child and reuses that child on
     // delegate_task with agent takes the same path; target or runtimeMode alongside it is refused.
     const viaDelegate = yield* delegateTask({
       task: "Return a short evidence brief.",
-      agent: "scout",
+      persona: "scout",
       clientRequestId: "delegate-request",
     }).pipe(Effect.provideService(McpInvocationContext, scope));
     assert.equal(

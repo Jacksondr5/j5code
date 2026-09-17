@@ -341,7 +341,7 @@ it.effect("gates every roster on the human and gates additions with the seat cap
           brief: null,
         })
         .pipe(Effect.flip);
-      assert.include(unknown.message, 'names agent "nobody"');
+      assert.include(unknown.message, 'names persona "nobody"');
 
       // A custom seat has nothing but its instructions to run on, so it cannot be filed without them.
       const bare = yield* gate

@@ -9,7 +9,7 @@ import { selectDraftAgent } from "./agentDraftState";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 
 /**
- * "Start as agent" for a new-task draft. Lists launchable agents only; choosing one pins
+ * "Start as persona" for a new-task draft. Lists launchable personas only; choosing one pins
  * its route in the composer until the first send, when the server resolves the assignment.
  */
 export function AgentDraftPicker(props: {
@@ -27,11 +27,11 @@ export function AgentDraftPicker(props: {
     <Menu>
       <MenuTrigger
         disabled={props.disabled}
-        aria-label="Start this task as a saved agent"
+        aria-label="Start this task as a persona"
         render={<ComposerControl type="button" size={props.size} />}
       >
         <ComposerControlIcon icon={BotIcon} size={props.size} />
-        Agent
+        Persona
       </MenuTrigger>
       <MenuPopup align="start">
         {agents.map((agent) => (

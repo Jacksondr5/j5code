@@ -4,15 +4,17 @@ import { collectComposerInlineTokens } from "../composerInlineTokens.ts";
 import { agentMentionReplacement, detectAgentMention } from "./agentMention.ts";
 
 describe("agent mention syntax", () => {
-  it("recognizes the same stable agent token anywhere in a prompt", () => {
-    const text = "Please ask @agent:team-researcher";
+  it("recognizes the same stable persona token anywhere in a prompt", () => {
+    const text = "Please ask @persona:team-researcher";
     expect(detectComposerTrigger(text, text.length)).toEqual({
       kind: "agent",
       query: "team-researcher",
       rangeStart: 11,
       rangeEnd: text.length,
     });
-    expect(detectComposerTrigger("@agent:", 7)?.query).toBe("");
+    expect(detectComposerTrigger("@persona:", 9)?.query).toBe("");
+    // The pre-rename spelling still resolves, so old drafts and habits keep working.
+    expect(detectComposerTrigger("@agent:scout", 12)?.query).toBe("scout");
   });
   it("preserves file mentions, skills and email text", () => {
     expect(detectComposerTrigger("@src/index", 10)?.kind).toBe("path");
@@ -20,17 +22,17 @@ describe("agent mention syntax", () => {
     expect(detectComposerTrigger("me@example.com", 14)).toBeNull();
   });
   it("keeps agent references editable text without mistaking them for files", () => {
-    expect(collectComposerInlineTokens("@agent:researcher @./src/index.ts ")).toEqual([
+    expect(collectComposerInlineTokens("@persona:researcher @agent:old @./src/index.ts ")).toEqual([
       expect.objectContaining({ type: "mention", value: "./src/index.ts" }),
     ]);
-    expect(collectComposerInlineTokens('@"agent:notes" ')).toEqual([
-      expect.objectContaining({ type: "mention", value: "agent:notes" }),
+    expect(collectComposerInlineTokens('@"persona:notes" ')).toEqual([
+      expect.objectContaining({ type: "mention", value: "persona:notes" }),
     ]);
   });
 
   it("round-trips the inserted replacement through the trigger detector", () => {
     const replacement = agentMentionReplacement("team-researcher");
-    expect(replacement).toBe("@agent:team-researcher ");
+    expect(replacement).toBe("@persona:team-researcher ");
     expect(detectAgentMention(replacement.trimEnd(), 0, replacement.length - 1)).toEqual({
       kind: "agent",
       query: "team-researcher",

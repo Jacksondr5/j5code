@@ -9,7 +9,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { selectDraftAgent } from "./agentDraftState";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 
-/** "Start as agent" for a new-task draft; lists launchable agents only. */
+/** "Start as persona" for a new-task draft; lists launchable personas only. */
 export function AgentDraftPicker(props: {
   readonly environmentId: EnvironmentId;
   readonly draftKey: string;
@@ -36,7 +36,7 @@ export function AgentDraftPicker(props: {
       >
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Start this task as a saved agent"
+          accessibilityLabel="Start this task as a persona"
           accessibilityState={{ disabled: props.disabled === true }}
           disabled={props.disabled}
           className="h-9 flex-row items-center gap-1.5 rounded-full border border-border px-3 disabled:opacity-40"
@@ -47,7 +47,7 @@ export function AgentDraftPicker(props: {
             tintColorClassName="accent-icon"
             type="monochrome"
           />
-          <Text className="text-sm text-foreground">Agent</Text>
+          <Text className="text-sm text-foreground">Persona</Text>
         </Pressable>
       </ControlPillMenu>
     </View>

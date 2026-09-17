@@ -103,7 +103,7 @@ export const crewLaunchReportText = (input: {
     .map((member) => {
       const verdict = verdicts.get(member.seatName);
       const isNew = member.addedVersion === instance.version && proposal.kind === "addition";
-      return `- ${member.seatName}: participant_id=${member.participantId} agent=${member.agentId ?? ""} thread_id=${member.threadId}${
+      return `- ${member.seatName}: participant_id=${member.participantId} persona=${member.agentId ?? ""} thread_id=${member.threadId}${
         verdict === undefined ? "" : ` start=${verdict.kind}`
       }${isNew ? " (new)" : ""}`;
     })

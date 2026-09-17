@@ -89,7 +89,7 @@ export const spawnFirstTurnText = (input: {
   const roster = crew.roster
     .map(
       (member) =>
-        `- ${member.seat}${member.seat === crew.seatName ? " (you)" : ""}: participant_id=${member.participantId} agent=${member.agentDisplayName}`,
+        `- ${member.seat}${member.seat === crew.seatName ? " (you)" : ""}: participant_id=${member.participantId} persona=${member.agentDisplayName}`,
     )
     .join("\n");
   const crewContext = `<j5_crew_context>\nPlatform-provided crew facts:\ncrew: ${crew.displayName}\ncrew_instance_id: ${crew.instanceId}\nyour_seat: ${crew.seatName}\ncaptain_participant_id: ${crew.captainParticipantId}\nroster:\n${roster}\n</j5_crew_context>`;

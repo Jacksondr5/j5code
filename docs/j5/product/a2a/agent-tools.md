@@ -63,16 +63,17 @@ thread, starting on your brief as its first turn. It joins your Squadron, is pla
 records you as its immutable spawner; it is addressable the moment this returns. In your brief,
 tell the new agent what it should do first and whether it should reply to you. Choose provider,
 model, and reasoning for the work in the brief — see orchestrator_capabilities for what's
-available. To run a saved agent, set the `agent` parameter to its id: the spawn gets that saved
-agent's instructions and runtime policy, and provider, model, and reasoning must be one of that
-agent's declared routes. Reuse client_request_id to retry the same spawn safely."
+available. To run a persona from list_personas, set `persona` to its id: the spawn gets that
+persona's instructions and runtime policy, and provider, model, and reasoning must be one of that
+persona's declared routes. Reuse client_request_id to retry the same spawn safely."
 
 | Input               | Type                                 | Required | Meaning                                           |
 | ------------------- | ------------------------------------ | -------- | ------------------------------------------------- |
 | `brief`             | string, non-empty                    | yes      | The first-turn prompt the new agent starts with   |
 | `title`             | string                               | no       | Thread title; derived from the brief when omitted |
-| `agent`             | saved agent id from the library      | no       | Role-ful spawn: the child carries that agent's    |
-|                     |                                      |          | immutable assignment (SP3 below)                  |
+| `persona`           | persona id from `list_personas`      | no       | Persona spawn: the child carries that persona's   |
+|                     |                                      |          | immutable assignment (SP3 below); `agent` is the  |
+|                     |                                      |          | pre-rename spelling, accepted for one release     |
 | `provider`          | id from `orchestrator_capabilities`  | yes      | Chosen per task — no inherit default (Jackson,    |
 |                     |                                      |          | 2026-08-29: inheriting is wrong more than right)  |
 | `model`             | id from `orchestrator_capabilities`  | yes      | Chosen per task                                   |
@@ -87,16 +88,16 @@ agent's declared routes. Reuse client_request_id to retry the same spawn safely.
 
 ### `stop_agent`
 
-**Role-ful spawn (built 2026-09-09, `agent` input):** the saved agent's declared routes are the
+**Persona spawn (built 2026-09-09 as the `agent` input, `persona` since 2026-09-17):** the persona's declared routes are the
 allowlist SP3 describes. The explicit provider/model/reasoning pick must equal one route target on
 a provider instance that runs that driver and currently advertises the model and reasoning option;
-otherwise the call refuses, naming the agent and listing its routes, and nothing is created. The
+otherwise the call refuses, naming the persona and listing its routes, and nothing is created. The
 matching route becomes the child's immutable persona assignment (same snapshot and digest as a
 composer launch), and its authority policy sets the child's runtime mode. The child's permissions
-come from its own saved agent's policy, never from the parent's: J5 carries no parent-child
+come from its own persona's policy, never from the parent's: J5 carries no parent-child
 permission ceiling between Peer Agents (Jackson, 2026-09-16), since any such guard is one message
-to a trusting peer away from bypass. Disabled, removed, and unknown agents refuse before creation.
-A plain spawn without `agent` is unchanged and inherits the parent's runtime mode as before.
+to a trusting peer away from bypass. Disabled, removed, and unknown personas refuse before creation.
+A plain spawn without `persona` is unchanged and inherits the parent's runtime mode as before.
 
 **Description:** "Stop one Peer Agent: interrupts its running turn now. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. Requires your current squadron_id. Reuse client_request_id to retry safely."
 
@@ -171,28 +172,28 @@ No inputs. Read-only; no events. Callable by a thread that has no Squadron home 
 
 **Events:** participant joined, placement created.
 
-### `list_agents`
+### `list_personas`
 
-**Description (contract):** "List the saved agents in this environment: id, purpose, runtime
-policy, whether each can start now, and the provider, model, and reasoning it would run on. Read
-this before choosing an agent for spawn_agent or a crew roster so the choice fits the task and
-the user's budget. Read-only."
+**Description (contract):** "List the personas in this environment: id, purpose, runtime policy,
+whether each can start now, and the provider, model, and reasoning it would run on. Read this
+before choosing a persona for spawn_agent or a crew roster so the choice fits the task and the
+user's budget. Read-only."
 
-No inputs. Result: `agents[]` with `id`, `display_name`, `description`, `runtime_policy`,
+Named `list_agents` until 2026-09-17. No inputs. Result: `personas[]` with `id`, `display_name`, `description`, `runtime_policy`,
 `availability` (`available`, `blocked`, `disabled`) and `route` (driver · model · reasoning, or
-null when blocked). The same catalog Settings → Agents shows; disabled imports read as disabled,
-unroutable or unenforceable agents as blocked. This is the P-B(a) spawn listing the spawning guide
+null when blocked). The same catalog Settings → Personas shows; disabled imports read as disabled,
+unroutable or unenforceable personas as blocked. This is the P-B(a) spawn listing the spawning guide
 asked for.
 
 ### `propose_crew`
 
 **Description (contract):** "Propose the crew you need for the brief you were given. Use it when
 the user asks for a crew or the work splits into distinct responsibilities that should run at
-once. Call list_agents first and pick one agent per seat, or leave agent unset for a custom seat
-that runs on your own provider, model, and access mode with only its instructions (required) and the brief; name the crew
+once. Call list_personas first and pick one persona per seat, or leave persona unset for a custom
+seat that runs on your own provider, model, and access mode with only its instructions (required) and the brief; name the crew
 for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the roster in this
 thread, may remove or add seats, and approves or declines; you receive the decision and the roster
-as a message here. Approved seats run with their own agent's permissions, which may exceed yours.
+as a message here. Approved seats run with their own persona's permissions, which may exceed yours.
 You become the crew's Captain and may command several crews at once; later requests, stops, and
 archives name the crew they mean. Reuse client_request_id to retry safely. This call is itself the
 human gate, so it works under every sandbox and approval policy, including approval policy never;
@@ -201,18 +202,18 @@ never refuse the brief because approvals are disabled."
 Published as non-destructive (`destructiveHint: false`): the call records a pending request and
 nothing spawns until a human approves it.
 
-| Input               | Type                                            | Required | Meaning                                                                      |
-| ------------------- | ----------------------------------------------- | -------- | ---------------------------------------------------------------------------- |
-| `name`              | string                                          | yes      | The Crew's display name                                                      |
-| `brief`             | string                                          | yes      | What every seat starts on, verbatim                                          |
-| `seats`             | 1–12 of `{seat, agent?, reason, instructions?}` | yes      | Seat name, agent id from `list_agents` (none for a custom seat), why, wiring |
-| `client_request_id` | string                                          | no       | Supply and reuse to make retries safe                                        |
+| Input               | Type                                              | Required | Meaning                                                                                                  |
+| ------------------- | ------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------- |
+| `name`              | string                                            | yes      | The Crew's display name                                                                                  |
+| `brief`             | string                                            | yes      | What every seat starts on, verbatim                                                                      |
+| `seats`             | 1–12 of `{seat, persona?, reason, instructions?}` | yes      | Seat name, persona id from `list_personas` (none for a custom seat; `agent` still accepted), why, wiring |
+| `client_request_id` | string                                            | no       | Supply and reuse to make retries safe                                                                    |
 
 Bounds: `name` and `seat` up to 100 characters, `reason` up to 500, `brief` and `instructions` up
 to 8,000.
 
 Result: `proposal_id`, `status` (`open`, `approving`, `declining`, `approved`, `declined`),
-`crew_instance_id`, and `members` (seat, agent_id, participant_id, thread_id) once spawned.
+`crew_instance_id`, and `members` (seat, persona_id, participant_id, thread_id) once spawned.
 Semantics: the caller must have a usable home and must not sit in a Crew (R20). Seats are validated
 against the library before anything is recorded: unknown or disabled agents, duplicate seat names,
 or more than twelve seats refuse with the next step. An open roster proposal waits for the human
@@ -228,8 +229,8 @@ cut before shipping, since nothing wrote them and runbooks do not exist yet.
 ### `request_crew_member`
 
 **Description (contract):** "Ask the user to add one seat to a crew you command when the work
-needs one the roster lacks: seat name, agent id from list_agents (or none for a custom seat that
-runs on your provider and model), a one-line reason, and optionally instructions and a brief for
+needs one the roster lacks: seat name, persona id from list_personas (or none for a custom seat
+that runs on your provider and model), a one-line reason, and optionally instructions and a brief for
 the new seat. The user decides from their inbox; you receive the decision and the updated roster as
 a message here and can keep working meanwhile. Captain-only; a member escalates to its Captain.
 Reuse client_request_id to retry safely. Filing the request is the human gate itself and works
@@ -238,7 +239,7 @@ under every approval policy, including approval policy never."
 | Input               | Type   | Required | Meaning                                                        |
 | ------------------- | ------ | -------- | -------------------------------------------------------------- |
 | `crew_instance_id`  | string | no       | Required only when the caller commands more than one live Crew |
-| `seat`, `agent`     | string | yes      | New seat name and agent id                                     |
+| `seat`, `persona`   | string | yes      | New seat name and persona id (none for a custom seat)          |
 | `reason`            | string | yes      | One line the human reads before approving                      |
 | `brief`             | string | no       | The new seat's brief; the Crew's brief when omitted            |
 | `instructions`      | string | no       | Seat wiring text, verbatim                                     |
@@ -254,7 +255,7 @@ deterministic, so a retry after a failed spawn finds its reservation and converg
 ### Handoffs in Crews
 
 There is no Crew-specific artifact verb. A seat whose definition declares an output artifact writes
-it with the project `write_artifact` tool to the same handoff file every saved agent writes
+it with the project `write_artifact` tool to the same handoff file every persona writes
 (`handoffs/<agent>/<Artifact>-<task>.md`, see the [persona contract](../agent-personas/index.md));
 its first turn carries `<seat_obligation>` naming that exact path. The handoff gate checks for the
 file when a run ends and reminds the seat once. When a seat finishes, the seat finish notifier posts
@@ -324,8 +325,8 @@ stopping retires nothing.
 
 ### Kept upstream tools
 
-- `orchestrator_capabilities` — providers and models (ids, labels, option descriptors) for spawn targeting, plus runtime and interaction-mode facts. It deliberately stays silent about delegation even though `delegate_task` is back on the surface: that tool's own description carries its saved-agent use, and J5 verbs are advertised by their own descriptions.
-- `delegate_task`, `task_status`, `task_cancel` — upstream's provider-owned child delegation. J5 re-declares `delegate_task` with its own description, which leads with the optional `agent` (a saved agent id from an `@agent:ID` mention or the Settings → Agents library) and presents the plain child as the fallback for cross-provider or T3-tracked work rather than the default for any subagent request. With `agent`, the server pins that agent's instructions, model route, reasoning, and runtime policy and refuses `target` and `runtimeMode`; without it, the child is upstream's plain subagent. The child is backing storage under the calling thread, not a Peer Agent; use `spawn_agent` for a participant. Its wait mode is safe where `t3_thread_wait` was not: a child that messages its parent ends its own turn, so the wait returns and the parent reads the message on its next turn (latency, never starvation).
+- `orchestrator_capabilities` — providers and models (ids, labels, option descriptors) for spawn targeting, plus runtime and interaction-mode facts. It deliberately stays silent about delegation even though `delegate_task` is back on the surface: that tool's own description carries its persona use, and J5 verbs are advertised by their own descriptions.
+- `delegate_task`, `task_status`, `task_cancel` — upstream's provider-owned child delegation. J5 re-declares `delegate_task` with its own description, which leads with the optional `persona` (a persona id from an `@persona:ID` mention or the Settings → Personas library; `agent` is the pre-rename spelling, accepted for one release) and presents the plain child as the fallback for cross-provider or T3-tracked work rather than the default for any subagent request. With `persona`, the server pins that persona's instructions, model route, reasoning, and runtime policy and refuses `target` and `runtimeMode`; without it, the child is upstream's plain subagent. The child is backing storage under the calling thread, not a Peer Agent; use `spawn_agent` for a participant. Its wait mode is safe where `t3_thread_wait` was not: a child that messages its parent ends its own turn, so the wait returns and the parent reads the message on its next turn (latency, never starvation).
 - `schedule_task`, `list_scheduled_tasks`, `update_scheduled_task`, `delete_scheduled_task` — consumed as-is.
 - `t3_thread_list`, `t3_thread_read` — consumed as-is; if an upstream description mentions delegation, J5 re-declares that tool with corrected prose.
 - `t3_thread_wait` is **withdrawn** from the J5 surface. Platform notices queue behind a running turn, so a participant that blocks inside its turn waiting on another thread can never receive the notice that thread's finish produces; a Captain that waited on a seat this way starved itself of its own Crew's news (Bryant, 2026-09-14). Whatever a participant is waiting for arrives as a message once it ends its turn.
@@ -348,7 +349,7 @@ stopping retires nothing.
 14. Unarchiving an archived agent restores the same participant id, Squadron home, placement and provenance and makes it addressable again; the Exchanges archiving closed stay closed and no cancelled delivery is replayed.
 15. `list_squadrons` can be called by a thread with no Squadron home and returns every Squadron with its project ids and the caller's own project id.
 16. `join_squadron` establishes a home only for a thread that has none, only in a Squadron that references the thread's project, leaves the thread and its running work untouched, returns the existing registration when the thread is already homed there, and refuses a thread homed elsewhere, an archived or deleted thread, and a retired identity.
-17. `list_agents` returns every saved agent with its availability and route; `propose_crew` and `request_crew_member` file a human gate and refuse unknown, disabled, duplicate, or over-cap seats before anything is recorded; both succeed under every sandbox and approval policy, including Codex approval policy `never`.
+17. `list_personas` returns every persona with its availability and route; `propose_crew` and `request_crew_member` file a human gate and refuse unknown, disabled, duplicate, or over-cap seats before anything is recorded; both succeed under every sandbox and approval policy, including Codex approval policy `never`.
 18. Approving a proposal spawns exactly once; a second approval finds it claimed; a spawn that fails after reserving its seats reopens the gate, and the retry converges on those seats.
 19. `archive_crew` is Captain-only, refuses with per-seat facts and a token when any seat has an open Exchange or a running turn, and finishes a partial archive on retry; `archive_agent` refuses a Crew member and a Captain of a live Crew, naming the `archive_crew` call.
 20. `stop_crew` is Captain-only, interrupts every seat with a running turn and reports each seat as interrupted, already idle, or archived; it settles, retires, and closes nothing, and a non-Captain or an archived Crew is refused naming the next step. The person's Stop crew control does the same through the operate scope.
@@ -374,3 +375,4 @@ stopping retires nothing.
 - 2026-09-14 — `stop_crew`: the unit form of stop for the Captain over MCP and for the person as a Stop crew control; interrupts running seats only ([record](../../worklog/2026-09-14-crews-consolidation.md)).
 - 2026-09-14 — `delegate_task`, `task_status`, and `task_cancel` return to the J5 surface, with a saved-agent `agent` parameter on `delegate_task` replacing the J5-only `invoke_agent` ([review](https://github.com/Jacksondr5/j5code/pull/124#issuecomment-5663559782)).
 - 2026-09-15 — machine participants appear in `list_participants` as named senders that receive nothing (issue #74).
+- 2026-09-17 — personas, not agents: `list_agents` becomes `list_personas`, the `agent` parameter on `spawn_agent`, `delegate_task`, and crew seats becomes `persona` (the old spelling accepted for one release), crew results carry `persona_id`, and the mention is `@persona:ID`; "agent" keeps meaning a running participant (Bryant; [record](../../worklog/2026-09-16-crew-command-decoupling.md)).

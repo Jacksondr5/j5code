@@ -181,9 +181,9 @@ const SettingsContentStack = createNativeStackNavigator({
     }),
     SettingsAgents: createNativeStackScreen({
       screen: SettingsAgentsRouteScreen,
-      linking: "agents",
+      linking: "personas",
       options: {
-        title: "Agents",
+        title: "Personas",
       },
     }),
     SettingsProjectGrouping: createNativeStackScreen({
