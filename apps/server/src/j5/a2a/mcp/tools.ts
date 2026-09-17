@@ -131,10 +131,12 @@ const NonEmptyString = Schema.String.check(Schema.isNonEmpty());
 export const J5SpawnAgentInput = Schema.Struct({
   brief: NonEmptyString,
   title: Schema.optional(NonEmptyString),
-  /** The persona to run as, from list_personas. */
-  persona: Schema.optional(AgentPersonaId),
-  /** Deprecated spelling of `persona`, accepted for one release (2026-09-17 rename). */
-  agent: Schema.optional(AgentPersonaId),
+  persona: Schema.optional(
+    AgentPersonaId.annotate({
+      description:
+        "Persona id from list_personas. The spawn runs with that persona's instructions and runtime policy, and provider, model, and reasoning must be one of its declared routes.",
+    }),
+  ),
   provider: ProviderInstanceId,
   model: NonEmptyString,
   reasoning: NonEmptyString,
@@ -186,13 +188,14 @@ const CrewSeatName = NonEmptyString.check(
 );
 const CrewReason = NonEmptyString.check(Schema.isMaxLength(CREW_REASON_MAX_CHARS));
 const CrewText = NonEmptyString.check(Schema.isMaxLength(CREW_TEXT_MAX_CHARS));
+const CrewSeatPersona = AgentPersonaId.annotate({
+  description:
+    "Persona id from list_personas. Omit for a custom seat, which runs on the Captain's provider, model, and access and needs instructions.",
+});
 
 export const J5CrewSeatInput = Schema.Struct({
   seat: CrewSeatName,
-  /** Omitted for a custom seat: no persona, it runs on the Captain's provider and model. */
-  persona: Schema.optional(AgentPersonaId),
-  /** Deprecated spelling of `persona`, accepted for one release (2026-09-17 rename). */
-  agent: Schema.optional(AgentPersonaId),
+  persona: Schema.optional(CrewSeatPersona),
   reason: CrewReason,
   instructions: Schema.optional(CrewText),
 });
@@ -211,9 +214,7 @@ export type J5ProposeCrewInput = typeof J5ProposeCrewInput.Type;
 export const J5RequestCrewMemberInput = Schema.Struct({
   crew_instance_id: Schema.optional(NonEmptyString),
   seat: CrewSeatName,
-  persona: Schema.optional(AgentPersonaId),
-  /** Deprecated spelling of `persona`, accepted for one release (2026-09-17 rename). */
-  agent: Schema.optional(AgentPersonaId),
+  persona: Schema.optional(CrewSeatPersona),
   reason: CrewReason,
   brief: Schema.optional(CrewText),
   instructions: Schema.optional(CrewText),

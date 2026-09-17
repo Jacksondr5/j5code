@@ -1694,8 +1694,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
         );
       const scout = {
         brief: "Collect evidence about the auth flow and report back.",
-        // The pre-rename spelling still resolves the same persona.
-        agent: "scout",
+        persona: "scout",
         provider: ProviderInstanceId.make("codex"),
         model: "gpt-5.6-terra",
         reasoning: "high",

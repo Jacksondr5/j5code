@@ -767,8 +767,7 @@ const handlers = {
             ),
           ),
         );
-      // `agent` is the pre-rename spelling of `persona`; both name the same library entry.
-      const personaId = input.persona ?? input.agent;
+      const personaId = input.persona;
       const persona =
         personaId === undefined
           ? undefined
@@ -897,7 +896,7 @@ const handlers = {
           brief: input.brief,
           seats: input.seats.map((seat) => ({
             seat: seat.seat,
-            agentId: seat.persona ?? seat.agent ?? null,
+            agentId: seat.persona ?? null,
             reason: seat.reason,
             ...(seat.instructions === undefined ? {} : { instructions: seat.instructions }),
           })),
@@ -918,7 +917,7 @@ const handlers = {
           crewInstanceId: input.crew_instance_id ?? null,
           seat: {
             seat: input.seat,
-            agentId: input.persona ?? input.agent ?? null,
+            agentId: input.persona ?? null,
             reason: input.reason,
             ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
           },
