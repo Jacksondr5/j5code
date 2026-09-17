@@ -42,7 +42,7 @@ export interface RegisterAtCreationInput {
   readonly commandId: CommCommandId;
 }
 
-export class A2AHomeNotFoundError extends Schema.TaggedErrorClass<A2AHomeNotFoundError>()(
+export class A2AHomeNotFoundError extends Schema.TaggedError<A2AHomeNotFoundError>()(
   "A2AHomeNotFoundError",
   { threadId: Schema.String },
 ) {
@@ -51,7 +51,7 @@ export class A2AHomeNotFoundError extends Schema.TaggedErrorClass<A2AHomeNotFoun
   }
 }
 
-export class A2AHomeConflictError extends Schema.TaggedErrorClass<A2AHomeConflictError>()(
+export class A2AHomeConflictError extends Schema.TaggedError<A2AHomeConflictError>()(
   "A2AHomeConflictError",
   {
     threadId: Schema.String,
@@ -64,7 +64,7 @@ export class A2AHomeConflictError extends Schema.TaggedErrorClass<A2AHomeConflic
   }
 }
 
-export class A2AHomeCommandConflictError extends Schema.TaggedErrorClass<A2AHomeCommandConflictError>()(
+export class A2AHomeCommandConflictError extends Schema.TaggedError<A2AHomeCommandConflictError>()(
   "A2AHomeCommandConflictError",
   {
     commandId: Schema.String,

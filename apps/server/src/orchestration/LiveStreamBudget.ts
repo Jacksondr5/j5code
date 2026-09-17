@@ -9,13 +9,13 @@ import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
-export class LiveStreamBufferError extends Schema.TaggedErrorClass<LiveStreamBufferError>()(
+export class LiveStreamBufferError extends Schema.TaggedError<LiveStreamBufferError>()(
   "LiveStreamBufferError",
   { message: Schema.String },
 ) {}
 
 export const LIVE_STREAM_MAX_ITEMS = 1_000;
-export const LIVE_STREAM_MAX_SERIALIZED_BYTES = 8 * 1024 * 1024;
+const LIVE_STREAM_MAX_SERIALIZED_BYTES = 8 * 1024 * 1024;
 
 export interface RetainedLiveItem<A> {
   readonly value: A;

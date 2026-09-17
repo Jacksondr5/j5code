@@ -25,7 +25,7 @@ export const QUEUED_RUN_WATCHDOG_DELAY_MS = 5 * 60 * 1000;
 export const QUEUED_RUN_WATCHDOG_POLL_MS = 60 * 1000;
 export const QUEUED_RUN_WATCHDOG_MAX_CANDIDATES = 100;
 
-export class QueuedRunWatchdogError extends Schema.TaggedErrorClass<QueuedRunWatchdogError>()(
+export class QueuedRunWatchdogError extends Schema.TaggedError<QueuedRunWatchdogError>()(
   "QueuedRunWatchdogError",
   { cause: Schema.optional(Schema.Defect()) },
 ) {}

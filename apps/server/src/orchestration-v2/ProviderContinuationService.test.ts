@@ -6,6 +6,7 @@ import {
   RunId,
   ThreadId,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2Notification,
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
@@ -106,15 +107,72 @@ function testLayer(input: {
 }
 
 describe("ProviderContinuationService", () => {
+  it.effect("recovers an unaccepted persisted steer using the same delivery identity", () =>
+    Effect.gen(function* () {
+      const dispatched = yield* Queue.unbounded<unknown>();
+      const original = delegatedProjection();
+      const interruptedRunId = RunId.make("interrupted-mailbox-run");
+      const recovered = {
+        ...original,
+        runs: [
+          ...original.runs,
+          {
+            id: interruptedRunId,
+            status: "interrupted",
+            userMessageId: MessageId.make("original-user-input"),
+          },
+        ],
+        messages: [
+          {
+            id: delegatedMessageId,
+            runId: interruptedRunId,
+            delegatedCompletion: { parentRunId, generation: 1, taskIds: [] },
+          },
+        ],
+      } as unknown as OrchestrationV2ThreadProjection;
+      yield* Effect.gen(function* () {
+        const requests = yield* ProviderContinuationRequests;
+        yield* requests.offer({
+          threadId,
+          providerThreadId,
+          driver,
+          detail: null,
+          delivery: "message_text",
+          delegatedCompletion: { parentRunId, generation: 1, messageId: delegatedMessageId },
+        });
+        const command = (yield* Queue.take(dispatched)) as {
+          messageId: MessageId;
+          delegatedCompletion: { generation: number; taskIds: readonly string[] };
+        };
+        assert.equal(command.messageId, delegatedMessageId);
+        assert.equal(command.delegatedCompletion.generation, 1);
+        assert.equal(command.delegatedCompletion.taskIds.length, 2);
+      }).pipe(
+        Effect.provide(
+          testLayer({ dispatched, getThreadProjection: () => Effect.succeed(recovered) }),
+        ),
+        Effect.scoped,
+      );
+    }),
+  );
+
   it.effect("marks an adapter-buffered wake with the provider creation source", () => {
     return Effect.gen(function* () {
       const dispatched = yield* Queue.unbounded<unknown>();
       yield* Effect.gen(function* () {
         const requests = yield* ProviderContinuationRequests;
         yield* requests.offer(request());
-        const command = (yield* Queue.take(dispatched)) as { readonly creationSource: string };
+        const command = (yield* Queue.take(dispatched)) as {
+          readonly creationSource: string;
+          readonly notification: OrchestrationV2Notification;
+        };
         // ClaudeAdapterV2 keys on this to attach buffered CLI output.
         assert.equal(command.creationSource, "provider");
+        assert.deepEqual(command.notification, {
+          source: { kind: "background_task" },
+          outcome: "updated",
+          summary: "Background activity updated",
+        });
       }).pipe(
         Effect.provide(
           testLayer({ dispatched, getThreadProjection: () => Effect.succeed(projection) }),
@@ -134,11 +192,17 @@ describe("ProviderContinuationService", () => {
           providerThreadId,
           driver,
           detail: "Delegated task completed.",
+          notification: {
+            source: { kind: "monitor" },
+            outcome: "updated",
+            summary: "Monitor updated",
+          },
           delivery: "message_text",
         });
         const command = (yield* Queue.take(dispatched)) as {
           readonly creationSource: string;
           readonly text: string;
+          readonly notification: OrchestrationV2Notification;
         };
         // An app-owned child buffers nothing in the adapter, so this text is
         // the whole wake. Marking it "provider" would make ClaudeAdapterV2
@@ -146,6 +210,11 @@ describe("ProviderContinuationService", () => {
         assert.notEqual(command.creationSource, "provider");
         assert.equal(command.creationSource, "server");
         assert.equal(command.text, "Delegated task completed.");
+        assert.deepEqual(command.notification, {
+          source: { kind: "monitor" },
+          outcome: "updated",
+          summary: "Monitor updated",
+        });
       }).pipe(
         Effect.provide(
           testLayer({ dispatched, getThreadProjection: () => Effect.succeed(projection) }),

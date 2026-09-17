@@ -1,12 +1,10 @@
 import {
   CommandId,
-  ModelSelection,
   ProjectId,
   type Project,
-  type ProjectIconOverride,
-  type ProjectScript,
+  type ProjectCreatePayload,
+  type ProjectUpdatePayload,
   type ProjectSnapshot,
-  type ThreadEnvMode,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -29,27 +27,14 @@ import * as ProjectionProjects from "../persistence/Services/ProjectionProjects.
 import { ProjectEnrichmentService, type ProjectEnrichment } from "./ProjectEnrichmentService.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 
-export interface ProjectCreateInput {
+export interface ProjectCreateInput extends ProjectCreatePayload {
   readonly commandId: CommandId;
   readonly projectId: ProjectId;
-  readonly title: string;
-  readonly workspaceRoot: string;
-  readonly createWorkspaceRootIfMissing?: boolean;
-  readonly defaultModelSelection?: ModelSelection | null;
-  readonly scripts?: ReadonlyArray<ProjectScript>;
 }
 
-export interface ProjectUpdateInput {
+export interface ProjectUpdateInput extends ProjectUpdatePayload {
   readonly commandId: CommandId;
   readonly projectId: ProjectId;
-  readonly title?: string;
-  readonly workspaceRoot?: string;
-  readonly defaultModelSelection?: ModelSelection | null;
-  readonly autoPull?: boolean;
-  readonly projectIcon?: ProjectIconOverride | null;
-  readonly faviconPath?: string | null;
-  readonly defaultThreadEnvMode?: ThreadEnvMode | null;
-  readonly scripts?: ReadonlyArray<ProjectScript>;
 }
 
 export interface ProjectBootstrapInput extends ProjectCreateInput {}
@@ -60,7 +45,7 @@ export interface ProjectDeleteInput {
   readonly force?: boolean;
 }
 
-export class ProjectNotFoundError extends Schema.TaggedErrorClass<ProjectNotFoundError>()(
+export class ProjectNotFoundError extends Schema.TaggedError<ProjectNotFoundError>()(
   "ProjectNotFoundError",
   { projectId: ProjectId },
 ) {
@@ -69,7 +54,7 @@ export class ProjectNotFoundError extends Schema.TaggedErrorClass<ProjectNotFoun
   }
 }
 
-export class ProjectConflictError extends Schema.TaggedErrorClass<ProjectConflictError>()(
+export class ProjectConflictError extends Schema.TaggedError<ProjectConflictError>()(
   "ProjectConflictError",
   {
     projectId: ProjectId,
@@ -82,7 +67,7 @@ export class ProjectConflictError extends Schema.TaggedErrorClass<ProjectConflic
   }
 }
 
-export class ProjectNotEmptyError extends Schema.TaggedErrorClass<ProjectNotEmptyError>()(
+export class ProjectNotEmptyError extends Schema.TaggedError<ProjectNotEmptyError>()(
   "ProjectNotEmptyError",
   { projectId: ProjectId },
 ) {
@@ -91,7 +76,7 @@ export class ProjectNotEmptyError extends Schema.TaggedErrorClass<ProjectNotEmpt
   }
 }
 
-export class ProjectOperationError extends Schema.TaggedErrorClass<ProjectOperationError>()(
+export class ProjectOperationError extends Schema.TaggedError<ProjectOperationError>()(
   "ProjectOperationError",
   {
     operation: Schema.Literals([

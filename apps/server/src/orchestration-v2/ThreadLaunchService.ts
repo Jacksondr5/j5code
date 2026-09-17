@@ -1,3 +1,4 @@
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   CommandId,
   type ChatAttachment,
@@ -5,12 +6,15 @@ import {
   type ModelSelection,
   type OrchestrationV2Actor,
   type OrchestrationV2CreationSource,
+  type OrchestrationV2ProviderThreadNativeMetadata,
   type OrchestrationV2ThreadProjection,
   type PlanId,
+  type ProviderDriverKind,
   type ProviderInteractionMode,
   ProjectId,
   type RunId,
   type RuntimeMode,
+  type ScheduledTaskId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -26,6 +30,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import { buildTemporaryWorktreeBranchName, isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 
+import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import { SquadronThreadCreationService } from "../j5/a2a/SquadronThreadCreationService.ts";
 import { resolveSquadronLaunchPolicy } from "../j5/a2a/SquadronLaunchPolicy.ts";
@@ -56,6 +61,7 @@ export type ThreadLaunchWorkspaceStrategy =
 
 export interface ThreadLaunchInitialMessage {
   readonly messageId?: MessageId;
+  readonly scheduledTaskId?: ScheduledTaskId;
   readonly text: string;
   readonly attachments: ReadonlyArray<ChatAttachment>;
 }
@@ -75,6 +81,14 @@ export interface ThreadLaunchInput {
   readonly initialMessage?: ThreadLaunchInitialMessage;
   /** Generic provenance for a child created from a proposed plan. */
   readonly sourcePlanRef?: { readonly threadId: ThreadId; readonly planId: PlanId };
+  readonly importedNativeThread?: {
+    readonly ref: {
+      readonly driver: ProviderDriverKind;
+      readonly nativeId: string;
+      readonly strength: "strong";
+    };
+    readonly metadata?: OrchestrationV2ProviderThreadNativeMetadata;
+  };
   readonly createdBy: OrchestrationV2Actor;
   readonly creationSource: OrchestrationV2CreationSource;
 }
@@ -85,7 +99,7 @@ export interface ThreadLaunchResult {
   readonly resumed: boolean;
 }
 
-export class ThreadLaunchError extends Schema.TaggedErrorClass<ThreadLaunchError>()(
+export class ThreadLaunchError extends Schema.TaggedError<ThreadLaunchError>()(
   "ThreadLaunchError",
   {
     operation: Schema.Literals([
@@ -135,9 +149,10 @@ function failureDetail(error: unknown): string {
   return `Workspace preparation failed: ${error instanceof Error ? error.message : String(error)}`;
 }
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const git = yield* GitWorkflow.GitWorkflowService;
+  const checkpointStore = yield* CheckpointStore.CheckpointStore;
   const setupScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
@@ -207,7 +222,10 @@ export const make = Effect.gen(function* () {
     const initialMessage = input.initialMessage;
     const generateBranchNameFor = (cwd: string, message: ThreadLaunchInitialMessage) =>
       Effect.gen(function* () {
-        const settings = yield* serverSettings.getSettings;
+        const settings = resolveProjectSettings(
+          yield* serverSettings.getSettings,
+          input.projectId,
+        ).settings;
         const modelSelection =
           settings.sourceControlWriterModelSelection === null
             ? settings.textGenerationModelSelection
@@ -343,6 +361,20 @@ export const make = Effect.gen(function* () {
     }
 
     const cwd = worktreePath ?? project.workspaceRoot;
+    // Warm the checkpoint object store while the provider session starts, so
+    // the first blocking baseline capture (measured ~10s cold on a large
+    // fresh worktree) reuses the hashed blobs instead of paying that on the
+    // prompt critical path. Best effort in the background.
+    yield* checkpointStore.warmCheckpoint({ cwd }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logDebug("Thread launch checkpoint warm-up failed", {
+          commandId: input.commandId,
+          threadId,
+          cause,
+        }),
+      ),
+      Effect.forkIn(preparationScope),
+    );
     if (runId !== null) {
       yield* threads
         .dispatch({
@@ -361,6 +393,7 @@ export const make = Effect.gen(function* () {
         projectCwd: project.workspaceRoot,
         worktreePath: cwd,
         project: {
+          id: project.id,
           workspaceRoot: project.workspaceRoot,
           scripts: project.scripts,
         },
@@ -488,6 +521,7 @@ export const make = Effect.gen(function* () {
                 type: "thread.metadata.update",
                 commandId: input.commandId,
                 threadId: candidateThreadId,
+                expectedEmpty: true,
               })
             : threads.dispatch({
                 type: "thread.create",
@@ -500,6 +534,9 @@ export const make = Effect.gen(function* () {
                 interactionMode: input.interactionMode,
                 branch: initialBranch,
                 worktreePath: initialWorktreePath,
+                ...(input.importedNativeThread === undefined
+                  ? {}
+                  : { importedNativeThread: input.importedNativeThread }),
                 createdBy: input.createdBy,
                 creationSource: input.creationSource,
               });
@@ -537,6 +574,9 @@ export const make = Effect.gen(function* () {
               threadId,
               messageId,
               text: input.initialMessage.text,
+              ...(input.initialMessage.scheduledTaskId === undefined
+                ? {}
+                : { scheduledTaskId: input.initialMessage.scheduledTaskId }),
               attachments: input.initialMessage.attachments,
               ...(input.generateTitle === true ? { titleSeed: input.title } : {}),
               modelSelection: input.modelSelection,

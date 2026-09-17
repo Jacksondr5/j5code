@@ -1,3 +1,4 @@
+import { J5SquadronCreationLayer } from "../j5/a2a/runtimeLayer.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -34,8 +35,15 @@ import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import { EventSinkV2 } from "./EventSink.ts";
 import { OrchestratorV2 } from "./Orchestrator.ts";
 import type { ProviderAdapterV2Shape } from "./ProviderAdapter.ts";
-import { OrchestrationV2EventSinkLayerLive, OrchestrationV2LayerLive } from "./runtimeLayer.ts";
+import {
+  OrchestrationV2EventSinkLayerLive,
+  OrchestrationV2LayerLive as UpstreamOrchestrationV2LayerLive,
+} from "./runtimeLayer.ts";
 import { worktreeRepairDependenciesTestLayer } from "./ProviderTurnStartService.testkit.ts";
+
+const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
+  Layer.provideMerge(J5SquadronCreationLayer),
+);
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-orchestration-v2-delegated-completion-",
@@ -278,6 +286,103 @@ const seedParentWithTerminalTask = (input: {
   });
 
 it.layer(TestLayer)("delegated completion delivery repairs", (it) => {
+  it.effect("acceptance batches pending siblings without acknowledging their results", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* OrchestratorV2;
+      const sink = yield* EventSinkV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("mailbox-batch");
+      const runId = RunId.make("mailbox-parent");
+      const taskId = NodeId.make("mailbox-first");
+      const messageId = MessageId.make(`message:delegated-delivery:${threadId}`);
+      yield* seedParentWithTerminalTask({
+        threadId,
+        runId,
+        projectId: ProjectId.make("mailbox-project"),
+        rootNodeId: NodeId.make("mailbox-root"),
+        taskId,
+        deliveryState: "claimed",
+        completionWake: "always",
+        deliveryTaskIds: [taskId],
+        now,
+      });
+      const projection = yield* orchestrator.getThreadProjection(threadId);
+      const task = projection.subagents[0]!;
+      const pendingIds = [NodeId.make("mailbox-second"), NodeId.make("mailbox-third")];
+      yield* sink.write({
+        events: [
+          {
+            id: EventId.make("mailbox-message"),
+            type: "message.updated",
+            threadId,
+            runId,
+            occurredAt: now,
+            payload: {
+              id: messageId,
+              threadId,
+              runId,
+              nodeId: task.parentNodeId,
+              role: "user",
+              text: "Background task finished",
+              attachments: [],
+              streaming: false,
+              createdBy: "agent",
+              creationSource: "server",
+              createdAt: now,
+              updatedAt: now,
+              delegatedCompletion: { parentRunId: runId, generation: 1, taskIds: [taskId] },
+            },
+          },
+          ...pendingIds.map((id) => ({
+            id: EventId.make(`event:${id}`),
+            type: "subagent.updated" as const,
+            threadId,
+            runId,
+            nodeId: id,
+            occurredAt: now,
+            payload: {
+              ...task,
+              id,
+              completionDelivery: { state: "pending" as const, observedByRunId: null },
+            },
+          })),
+        ],
+      });
+      yield* orchestrator.dispatch({
+        type: "notification.delivery.accept",
+        commandId: CommandId.make("accept-first"),
+        threadId,
+        messageId,
+      });
+      const accepted = yield* orchestrator.getThreadProjection(threadId);
+      assert.equal(
+        accepted.subagents.find((row) => row.id === taskId)?.completionDelivery?.state,
+        "delivered",
+      );
+      const cohort = accepted.runs.find((row) => row.id === runId)?.delegatedCompletion;
+      assert.deepEqual(cohort?.delivery?.taskIds, pendingIds);
+      assert.equal(cohort?.delivery?.generation, 2);
+      assert.equal(
+        cohort?.settledDeliveryCount,
+        projection.runs.find((row) => row.id === runId)?.delegatedCompletion?.settledDeliveryCount,
+      );
+      for (const id of pendingIds) {
+        assert.deepEqual(accepted.subagents.find((row) => row.id === id)?.completionDelivery, {
+          state: "claimed",
+          observedByRunId: null,
+        });
+      }
+      yield* orchestrator.dispatch({
+        type: "notification.delivery.accept",
+        commandId: CommandId.make("repeat-old-acceptance"),
+        threadId,
+        messageId,
+      });
+      const duplicate = yield* orchestrator.getThreadProjection(threadId);
+      assert.deepEqual(duplicate.runs.find((row) => row.id === runId)?.delegatedCompletion, cohort);
+    }),
+  );
+
   it.effect("builds completion text and metadata from the same live cohort", () =>
     Effect.gen(function* () {
       const orchestrator = yield* OrchestratorV2;

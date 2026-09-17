@@ -76,7 +76,7 @@ const IdentityResponse = Schema.Struct({
 const ErrorResponse = Schema.Struct({ message: Schema.String });
 const decodeErrorResponse = Schema.decodeUnknownOption(ErrorResponse);
 
-export class PreArchiveFactsHttpError extends Schema.TaggedErrorClass<PreArchiveFactsHttpError>()(
+export class PreArchiveFactsHttpError extends Schema.TaggedError<PreArchiveFactsHttpError>()(
   "PreArchiveFactsHttpError",
   { status: Schema.Number, detail: Schema.String },
 ) {

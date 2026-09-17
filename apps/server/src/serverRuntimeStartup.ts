@@ -2,12 +2,14 @@ import {
   CommandId,
   DEFAULT_MODEL,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  DEFAULT_SERVER_SETTINGS,
   type ModelSelection,
   type Project,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as Cause from "effect/Cause";
 import * as Console from "effect/Console";
 import * as Context from "effect/Context";
@@ -29,7 +31,6 @@ import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as EffectWorker from "./orchestration-v2/EffectWorker.ts";
 import * as LegacyV1ThreadImporter from "./orchestration-v2/LegacyV1ThreadImporter.ts";
-import * as ProjectionMaintenance from "./orchestration-v2/ProjectionMaintenance.ts";
 import * as ProviderRuntimeRecovery from "./orchestration-v2/ProviderRuntimeRecoveryService.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadLaunch from "./orchestration-v2/ThreadLaunchService.ts";
@@ -51,7 +52,7 @@ import {
   issueHeadlessServeAccessInfo,
 } from "./startupAccess.ts";
 
-export class ServerRuntimeStartupError extends Schema.TaggedErrorClass<ServerRuntimeStartupError>()(
+export class ServerRuntimeStartupError extends Schema.TaggedError<ServerRuntimeStartupError>()(
   "ServerRuntimeStartupError",
   {
     mode: ServerConfig.RuntimeMode,
@@ -140,7 +141,7 @@ export const makeCommandGate = Effect.gen(function* () {
   } satisfies CommandGate;
 });
 
-export const recordStartupHeartbeat = Effect.gen(function* () {
+const recordStartupHeartbeat = Effect.gen(function* () {
   const analytics = yield* AnalyticsService.AnalyticsService;
   const projects = yield* ProjectService.ProjectService;
   const threads = yield* ThreadManagement.ThreadManagementService;
@@ -171,14 +172,6 @@ export const recordStartupHeartbeat = Effect.gen(function* () {
   });
 });
 
-export const launchStartupHeartbeat = recordStartupHeartbeat.pipe(
-  Effect.annotateSpans({ "startup.phase": "heartbeat.record" }),
-  Effect.withSpan("server.startup.heartbeat.record"),
-  Effect.ignoreCause({ log: true }),
-  Effect.forkScoped,
-  Effect.asVoid,
-);
-
 export const getAutoBootstrapThreadModelSelection = (): ModelSelection => ({
   instanceId: ProviderInstanceId.make("codex"),
   model: DEFAULT_MODEL,
@@ -190,13 +183,14 @@ interface AutoBootstrapWelcomeTargets {
 }
 
 export const autoPullProjects = Effect.fn("autoPullProjects")(function* (
-  projects: ReadonlyArray<Pick<Project, "workspaceRoot" | "autoPull">>,
+  projects: ReadonlyArray<Pick<Project, "id" | "workspaceRoot" | "autoPull">>,
+  settings = DEFAULT_SERVER_SETTINGS,
 ) {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const workspaceRoots = [
     ...new Set(
       projects
-        .filter((project) => project.autoPull === true)
+        .filter((project) => resolveProjectSettings(settings, project.id).settings.defaultAutoPull)
         .map((project) => project.workspaceRoot),
     ),
   ];
@@ -259,7 +253,7 @@ export const resolveWelcomeBase = Effect.gen(function* () {
   } as const;
 });
 
-export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
+const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const randomUUID = crypto.randomUUIDv4;
   const serverConfig = yield* ServerConfig.ServerConfig;
@@ -287,11 +281,15 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
         thread.projectId === project.id && thread.lineage.relationshipToParent !== "subagent",
     );
     if (existingThread === undefined) {
+      const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const settings = yield* serverSettings.getSettings;
       const launched = yield* threadLaunch.launch({
         commandId: CommandId.make(yield* randomUUID),
         projectId: project.id,
         title: "New thread",
-        modelSelection: project.defaultModelSelection ?? threadModelSelection,
+        modelSelection:
+          resolveProjectSettings(settings, project.id, project).settings.defaultModelSelection ??
+          threadModelSelection,
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "full-access",
         workspaceStrategy: { type: "root" },
@@ -384,41 +382,24 @@ export const startEffectWorkerWithRelay = Effect.fn(
 
 export function runOrderedV2StartupPhases<
   Import,
-  Verification extends { readonly valid: boolean },
-  RebuildVerification extends { readonly valid: boolean },
   Recovery,
   Bootstrap,
   ImportError,
-  VerifyError,
-  RebuildError,
   RecoveryError,
   WorkerError,
   BootstrapError,
   ImportContext,
-  VerifyContext,
-  RebuildContext,
   RecoveryContext,
   WorkerContext,
   BootstrapContext,
 >(input: {
   readonly importLegacyShells: Effect.Effect<Import, ImportError, ImportContext>;
-  readonly verify: Effect.Effect<Verification, VerifyError, VerifyContext>;
-  readonly rebuild: Effect.Effect<RebuildVerification, RebuildError, RebuildContext>;
   readonly recover: Effect.Effect<Recovery, RecoveryError, RecoveryContext>;
   readonly startEffectWorker: Effect.Effect<void, WorkerError, WorkerContext>;
   readonly autoBootstrap: Effect.Effect<Bootstrap, BootstrapError, BootstrapContext>;
 }) {
   return Effect.gen(function* () {
     yield* input.importLegacyShells;
-    const verification = yield* input.verify;
-    if (!verification.valid) {
-      const rebuilt = yield* input.rebuild;
-      if (!rebuilt.valid) {
-        return yield* Effect.die(
-          new Error("V2 orchestration projection rebuild did not produce a valid projection."),
-        );
-      }
-    }
     const recovery = yield* input.recover;
     yield* input.startEffectWorker;
     const bootstrap = yield* input.autoBootstrap;
@@ -426,11 +407,10 @@ export function runOrderedV2StartupPhases<
   });
 }
 
-export const make = (options?: StartupOptions) =>
+const make = (options?: StartupOptions) =>
   Effect.gen(function* () {
     const serverConfig = yield* ServerConfig.ServerConfig;
     const keybindings = yield* Keybindings.Keybindings;
-    const projectionMaintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
     const legacyV1ThreadImporter = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
     const providerRuntimeRecovery = yield* ProviderRuntimeRecovery.ProviderRuntimeRecoveryService;
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
@@ -528,30 +508,6 @@ export const make = (options?: StartupOptions) =>
             ),
           ),
         ),
-        verify: runStartupPhase(
-          "orchestration-v2.projections.verify",
-          projectionMaintenance.verify.pipe(
-            Effect.tap((verification) =>
-              verification.valid
-                ? Effect.void
-                : Effect.logWarning(
-                    "V2 orchestration projection metadata or structure is invalid; rebuilding",
-                    {
-                      expectedSequence: verification.expectedSequence,
-                      projectionSequence: verification.projectionSequence,
-                      schemaVersion: verification.schemaVersion,
-                      missingThreadCount: verification.missingThreadIds.length,
-                      unexpectedThreadCount: verification.unexpectedThreadIds.length,
-                      unreadableThreadCount: verification.unreadableThreadIds.length,
-                    },
-                  ),
-            ),
-          ),
-        ),
-        rebuild: runStartupPhase(
-          "orchestration-v2.projections.rebuild",
-          projectionMaintenance.rebuild,
-        ),
         recover: runStartupPhase("orchestration-v2.recovery", providerRuntimeRecovery.recover),
         startEffectWorker: runStartupPhase(
           "orchestration-v2.effect-worker.start",
@@ -575,7 +531,8 @@ export const make = (options?: StartupOptions) =>
         Effect.gen(function* () {
           const snapshots = yield* ProjectionSnapshotQuery;
           const projects = yield* snapshots.getProjectShellsWithoutEnrichment();
-          yield* autoPullProjects(projects);
+          const settings = yield* serverSettings.getSettings;
+          yield* autoPullProjects(projects, settings);
         }),
       );
 
@@ -602,30 +559,6 @@ export const make = (options?: StartupOptions) =>
             )
           : importPendingTranscripts
       ).pipe(forkParked);
-
-      // Off the startup path: the first run after an upgrade deletes the whole
-      // superseded-event and legacy-v1 backlog (potentially millions of rows,
-      // paced in small batches), and nothing at boot depends on it.
-      yield* projectionMaintenance.compactEventStore.pipe(
-        Effect.tap((summary) =>
-          summary.deletedEventCount === 0 && summary.deletedReceiptCount === 0
-            ? Effect.void
-            : Effect.logInfo("Compacted orchestration event store", summary),
-        ),
-        Effect.tap((summary) =>
-          // Freed pages are reused, so the file stops growing regardless; only
-          // an offline VACUUM shrinks it, which is not safe to run on the
-          // synchronous sqlite connection while serving.
-          summary.reclaimableBytes >= 512 * 1024 * 1024
-            ? Effect.logInfo(
-                "state.sqlite has substantial reclaimable free space; an offline VACUUM would shrink the file",
-                { reclaimableBytes: summary.reclaimableBytes },
-              )
-            : Effect.void,
-        ),
-        Effect.catch((cause) => Effect.logWarning("Unable to compact the event store", { cause })),
-        forkParked,
-      );
 
       yield* forkParked(
         Effect.gen(function* () {
@@ -740,4 +673,4 @@ export const make = (options?: StartupOptions) =>
 export const layerWithOptions = (options?: StartupOptions) =>
   Layer.effect(ServerRuntimeStartup, make(options));
 
-export const layer = layerWithOptions();
+const layer = layerWithOptions();

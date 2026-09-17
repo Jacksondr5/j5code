@@ -27,7 +27,7 @@ import { readPreparedConnection } from "../../state/session";
 const ErrorResponse = Schema.Struct({ message: Schema.String });
 const decodeErrorResponse = Schema.decodeUnknownOption(ErrorResponse);
 
-export class ArtifactHttpError extends Schema.TaggedErrorClass<ArtifactHttpError>()(
+export class ArtifactHttpError extends Schema.TaggedError<ArtifactHttpError>()(
   "ArtifactHttpError",
   { status: Schema.Number, detail: Schema.String },
 ) {

@@ -113,29 +113,39 @@ export const ProjectChange = Schema.Union([
 ]);
 export type ProjectChange = typeof ProjectChange.Type;
 
+export const ProjectCreatePayload = Schema.Struct({
+  title: TrimmedNonEmptyString,
+  workspaceRoot: TrimmedNonEmptyString,
+  createWorkspaceRootIfMissing: Schema.optional(Schema.Boolean),
+  defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
+  scripts: Schema.optional(Schema.Array(ProjectScript)),
+});
+export type ProjectCreatePayload = typeof ProjectCreatePayload.Type;
+
+export const ProjectUpdatePayload = Schema.Struct({
+  title: Schema.optional(TrimmedNonEmptyString),
+  workspaceRoot: Schema.optional(TrimmedNonEmptyString),
+  defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
+  autoPull: Schema.optional(Schema.Boolean),
+  projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
+  scripts: Schema.optional(Schema.Array(ProjectScript)),
+});
+export type ProjectUpdatePayload = typeof ProjectUpdatePayload.Type;
+
 export const ProjectMutation = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("project.create"),
     commandId: CommandId,
     projectId: ProjectId,
-    title: TrimmedNonEmptyString,
-    workspaceRoot: TrimmedNonEmptyString,
-    createWorkspaceRootIfMissing: Schema.optional(Schema.Boolean),
-    defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
-    scripts: Schema.optional(Schema.Array(ProjectScript)),
+    ...ProjectCreatePayload.fields,
   }),
   Schema.Struct({
     type: Schema.Literal("project.update"),
     commandId: CommandId,
     projectId: ProjectId,
-    title: Schema.optional(TrimmedNonEmptyString),
-    workspaceRoot: Schema.optional(TrimmedNonEmptyString),
-    defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
-    autoPull: Schema.optional(Schema.Boolean),
-    projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
-    faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
-    defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
-    scripts: Schema.optional(Schema.Array(ProjectScript)),
+    ...ProjectUpdatePayload.fields,
   }),
   Schema.Struct({
     type: Schema.Literal("project.delete"),
@@ -146,7 +156,7 @@ export const ProjectMutation = Schema.Union([
 ]);
 export type ProjectMutation = typeof ProjectMutation.Type;
 
-export class ProjectMutationError extends Schema.TaggedErrorClass<ProjectMutationError>()(
+export class ProjectMutationError extends Schema.TaggedError<ProjectMutationError>()(
   "ProjectMutationError",
   {
     commandId: CommandId,
@@ -249,7 +259,7 @@ function decodedProjectErrorMessage(props: object): string | undefined {
   return typeof props.message === "string" ? props.message : undefined;
 }
 
-export class ProjectSearchEntriesError extends Schema.TaggedErrorClass<ProjectSearchEntriesError>()(
+export class ProjectSearchEntriesError extends Schema.TaggedError<ProjectSearchEntriesError>()(
   "ProjectSearchEntriesError",
   {
     cwd: Schema.optional(TrimmedNonEmptyString),
@@ -282,7 +292,7 @@ export class ProjectSearchEntriesError extends Schema.TaggedErrorClass<ProjectSe
   }
 }
 
-export class ProjectSearchContentsError extends Schema.TaggedErrorClass<ProjectSearchContentsError>()(
+export class ProjectSearchContentsError extends Schema.TaggedError<ProjectSearchContentsError>()(
   "ProjectSearchContentsError",
   {
     cwd: Schema.optional(TrimmedNonEmptyString),
@@ -313,7 +323,7 @@ export class ProjectSearchContentsError extends Schema.TaggedErrorClass<ProjectS
   }
 }
 
-export class ProjectListEntriesError extends Schema.TaggedErrorClass<ProjectListEntriesError>()(
+export class ProjectListEntriesError extends Schema.TaggedError<ProjectListEntriesError>()(
   "ProjectListEntriesError",
   {
     cwd: Schema.optional(TrimmedNonEmptyString),
@@ -383,7 +393,7 @@ type ProjectFileFailureContext = {
   readonly cause?: unknown;
 };
 
-export class ProjectReadFileError extends Schema.TaggedErrorClass<ProjectReadFileError>()(
+export class ProjectReadFileError extends Schema.TaggedError<ProjectReadFileError>()(
   "ProjectReadFileError",
   {
     cwd: Schema.optional(TrimmedNonEmptyString),
@@ -420,7 +430,7 @@ export const ProjectWriteFileResult = Schema.Struct({
 });
 export type ProjectWriteFileResult = typeof ProjectWriteFileResult.Type;
 
-export class ProjectWriteFileError extends Schema.TaggedErrorClass<ProjectWriteFileError>()(
+export class ProjectWriteFileError extends Schema.TaggedError<ProjectWriteFileError>()(
   "ProjectWriteFileError",
   {
     cwd: Schema.optional(TrimmedNonEmptyString),

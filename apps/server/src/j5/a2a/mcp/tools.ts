@@ -1,19 +1,12 @@
 import { Tool, Toolkit } from "effect/unstable/ai";
 import * as Schema from "effect/Schema";
 
-import {
-  OrchestrationV2RunStatus,
-  ProjectId,
-  ProviderInstanceId,
-  RunId,
-  ThreadId,
-} from "@t3tools/contracts";
+import { ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as McpInvocationContext from "../../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
-import { ArchiveAgentService } from "../ArchiveAgentService.ts";
 import {
   A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION,
   A2A_LIST_TOOL_DESCRIPTION,
@@ -146,45 +139,6 @@ export type J5StopAgentInput = typeof J5StopAgentInput.Type;
 
 export const J5StopAgentResult = Schema.Literals(["interrupt_requested", "already_idle"]);
 
-export const J5ArchiveAgentInput = Schema.Struct({
-  client_request_id: Schema.optional(NonEmptyString),
-  squadron_id: SquadronId,
-  participant_id: ParticipantId,
-  confirmation_token: Schema.optional(NonEmptyString),
-});
-export type J5ArchiveAgentInput = typeof J5ArchiveAgentInput.Type;
-
-export const J5ArchiveAgentResult = Schema.Literals(["archived", "already_archived"]);
-
-export const J5ArchiveAgentOpenExchangeFact = Schema.Struct({
-  exchange_id: ExchangeId,
-  direction: Schema.Literals(["inbound", "outbound"]),
-  reply_obligation: Schema.Literals(["participant-owes-reply", "counterparty-owes-reply"]),
-  counterparty_id: ParticipantId,
-  intent: Schema.String,
-  urgency: Schema.NullOr(Urgency),
-  opened_at: Schema.String,
-});
-
-export const J5ArchiveAgentRunningTurnFact = Schema.Struct({
-  run_id: RunId,
-  status: OrchestrationV2RunStatus,
-});
-
-export const J5ArchiveAgentFailure = Schema.Struct({
-  code: Schema.String,
-  message: Schema.String,
-  open_exchanges: Schema.optional(Schema.Array(J5ArchiveAgentOpenExchangeFact)),
-  running_turn: Schema.optional(Schema.NullOr(J5ArchiveAgentRunningTurnFact)),
-  confirmation_token: Schema.optional(Schema.NullOr(Schema.String)),
-  interrupt_requested: Schema.optional(Schema.Boolean),
-  thread_archive_committed: Schema.optional(Schema.Boolean),
-  participant_retired: Schema.optional(Schema.Boolean),
-  participant_archived: Schema.optional(Schema.Boolean),
-  pending_exchange_ids: Schema.optional(Schema.Array(ExchangeId)),
-});
-export type J5ArchiveAgentFailure = typeof J5ArchiveAgentFailure.Type;
-
 export const J5JoinSquadronInput = Schema.Struct({
   squadron_id: SquadronId,
   client_request_id: Schema.optional(NonEmptyString),
@@ -225,9 +179,6 @@ export const J5_SPAWN_AGENT_DESCRIPTION =
 
 export const J5_STOP_AGENT_DESCRIPTION =
   "Stop one Peer Agent: interrupts its running turn now. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. Requires your current squadron_id. Reuse client_request_id to retry safely.";
-
-export const J5_ARCHIVE_AGENT_DESCRIPTION =
-  "Archive one Peer Agent reversibly. Unarchive restores the same identity, but does not reopen Exchanges or replay cancelled messages. A clean archive — no open exchanges, no running turn — completes immediately. Otherwise the call refuses and lists exactly what archiving ends — the asks that will close, the turn that will stop — along with a confirmation_token; call again with that token to proceed. The archived agent leaves the active roster; its ledger and conversation stay readable forever. Requires your current squadron_id. Reuse client_request_id to retry safely.";
 
 const sendDependencies = [
   McpInvocationContext.McpInvocationContext,
@@ -276,15 +227,6 @@ const stopDependencies = [
   Crypto.Crypto,
   ParticipantPlacementService,
   ThreadManagementService,
-];
-
-const archiveDependencies = [
-  McpInvocationContext.McpInvocationContext,
-  A2ASendService,
-  Crypto.Crypto,
-  A2ALedger,
-  ParticipantPlacementService,
-  ArchiveAgentService,
 ];
 
 export const J5SendMessageTool = Tool.make("send_message", {
@@ -370,20 +312,6 @@ export const J5StopAgentTool = Tool.make("stop_agent", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, false);
 
-export const J5ArchiveAgentTool = Tool.make("archive_agent", {
-  description: J5_ARCHIVE_AGENT_DESCRIPTION,
-  parameters: J5ArchiveAgentInput,
-  success: J5ArchiveAgentResult,
-  failure: J5ArchiveAgentFailure,
-  failureMode: "return",
-  dependencies: archiveDependencies,
-})
-  .annotate(Tool.Title, "Archive one Peer Agent")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, true)
-  .annotate(Tool.Idempotent, false)
-  .annotate(Tool.OpenWorld, false);
-
 export const J5ClearOwnAskTool = Tool.make("clear_own_ask", {
   description: A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION,
   parameters: J5ClearOwnAskInput,
@@ -406,6 +334,5 @@ export const J5Toolkit = Toolkit.make(
   J5JoinSquadronTool,
   J5SpawnAgentTool,
   J5StopAgentTool,
-  J5ArchiveAgentTool,
   J5ClearOwnAskTool,
 );

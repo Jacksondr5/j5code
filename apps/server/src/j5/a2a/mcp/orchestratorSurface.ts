@@ -17,13 +17,14 @@ import { Tool, Toolkit } from "effect/unstable/ai";
 
 import * as McpInvocationContext from "../../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
-import {
-  DeleteScheduledTaskTool,
-  ListScheduledTasksTool,
-  ScheduleTaskTool,
-  ThreadListTool,
-  UpdateScheduledTaskTool,
-} from "../../../mcp/toolkits/orchestrator/tools.ts";
+import { OrchestratorToolkit, ScheduleTaskTool } from "../../../mcp/toolkits/orchestrator/tools.ts";
+
+const {
+  list_scheduled_tasks: ListScheduledTasksTool,
+  update_scheduled_task: UpdateScheduledTaskTool,
+  delete_scheduled_task: DeleteScheduledTaskTool,
+  t3_thread_list: ThreadListTool,
+} = OrchestratorToolkit.tools;
 
 const dependencies = [McpInvocationContext.McpInvocationContext, OrchestratorMcpService];
 

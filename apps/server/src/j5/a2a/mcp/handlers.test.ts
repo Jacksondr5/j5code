@@ -2,7 +2,6 @@ import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentId,
-  RunId,
   type ModelSelection,
   type OrchestrationV2ThreadShell,
   ProjectId,
@@ -28,11 +27,6 @@ import {
   OrchestratorV2,
 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
-import {
-  ArchiveAgentConfirmationRequiredError,
-  ArchiveAgentService,
-  type ArchiveAgentInput,
-} from "../ArchiveAgentService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import {
   A2AHomeNotFoundError,
@@ -58,7 +52,6 @@ import { J5ToolkitHandlersLive } from "./handlers.ts";
 import {
   J5ListParticipantsResult,
   J5Toolkit,
-  type J5ArchiveAgentInput,
   type J5SendMessageInput,
   type J5SpawnAgentInput,
   type J5StopAgentInput,
@@ -121,408 +114,13 @@ const unusedLifecycleDependencies = Layer.mergeAll(
   Layer.mock(SpawnCompositionService)({}),
   Layer.mock(ThreadManagementService)({}),
   Layer.mock(OrchestratorMcpService)({}),
-  Layer.mock(ArchiveAgentService)({}),
   Layer.mock(SquadronJoinService)({}),
   Layer.mock(SquadronProjectReferences)({}),
-);
-
-it.effect("refuses self-target archive before target resolution or archive side effects", () =>
-  Effect.gen(function* () {
-    const squadronId = SquadronId.make("squadron:j5:mcp-archive-self");
-    const callerParticipantId = ParticipantId.make("agent:j5:mcp-archive-self");
-    const placementReads = yield* Ref.make(0);
-    const historyReads = yield* Ref.make(0);
-    const archiveCalls = yield* Ref.make(0);
-    const callerRow = {
-      squadronId,
-      participantId: callerParticipantId,
-      participant: {
-        kind: "agent" as const,
-        id: callerParticipantId,
-        threadId: invocation.threadId,
-      },
-      archived: false,
-      canReceiveMessage: false,
-      canOpenExchange: false,
-      acceptsUrgency: false,
-    } satisfies ParticipantDirectoryRow;
-    const dependencies = Layer.mergeAll(
-      Layer.succeed(
-        A2ASendService,
-        A2ASendService.of({
-          send: () => Effect.die("unused"),
-          clearOwnAsk: () => Effect.die("unused"),
-          listParticipants: () => Effect.succeed([callerRow]),
-        }),
-      ),
-      Layer.mock(ParticipantPlacementService)({
-        listParticipants: () =>
-          Ref.update(placementReads, (count) => count + 1).pipe(Effect.as([])),
-      }),
-      Layer.mock(A2ALedger)({
-        readEvents: () =>
-          Ref.update(historyReads, (count) => count + 1).pipe(
-            Effect.andThen(Effect.die("self-target archive must not read history")),
-          ),
-      }),
-      Layer.mock(ArchiveAgentService)({
-        archive: () =>
-          Ref.update(archiveCalls, (count) => count + 1).pipe(Effect.as("archived" as const)),
-      }),
-      Layer.mock(A2AHomeRegistrar)({}),
-      Layer.mock(SpawnCompositionService)({}),
-      Layer.mock(ThreadManagementService)({}),
-      Layer.mock(OrchestratorMcpService)({}),
-      Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
-      Layer.mock(SquadronJoinService)({}),
-      Layer.mock(SquadronProjectReferences)({}),
-      NodeServices.layer,
-    );
-    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
-
-    const response = yield* Effect.gen(function* () {
-      return yield* (yield* J5Toolkit)
-        .handle("archive_agent", {
-          squadron_id: squadronId,
-          participant_id: callerParticipantId,
-        } satisfies J5ArchiveAgentInput)
-        .pipe(
-          Stream.unwrap,
-          Stream.run(Sink.last()),
-          Effect.flatMap(Effect.fromOption),
-          Effect.provideService(McpInvocationContext, invocation),
-        );
-    }).pipe(Effect.provide(layer));
-
-    assert.isTrue(response.isFailure);
-    assert.equal(
-      (response.result as unknown as { readonly message: string }).message,
-      `archive_agent cannot archive the caller ${callerParticipantId}. The operation is refused.`,
-    );
-    assert.equal(yield* Ref.get(placementReads), 0);
-    assert.equal(yield* Ref.get(historyReads), 0);
-    assert.equal(yield* Ref.get(archiveCalls), 0);
-  }),
-);
-
-it.effect("projects a consequential archive refusal for exactly one active participant", () =>
-  Effect.gen(function* () {
-    const squadronId = SquadronId.make("squadron:j5:mcp-archive-active");
-    const callerParticipantId = ParticipantId.make("agent:j5:mcp-archive-caller");
-    const targetParticipantId = ParticipantId.make("agent:j5:mcp-archive-target");
-    const targetThreadId = ThreadId.make("thread:j5:mcp-archive-target");
-    const exchangeId = ExchangeId.make("exchange:j5:mcp-archive-target");
-    const runId = RunId.make("run:j5:mcp-archive-target");
-    const calls = yield* Ref.make<ReadonlyArray<ArchiveAgentInput>>([]);
-    const callerRow = {
-      squadronId,
-      participantId: callerParticipantId,
-      participant: {
-        kind: "agent" as const,
-        id: callerParticipantId,
-        threadId: invocation.threadId,
-      },
-      archived: false,
-      canReceiveMessage: true,
-      canOpenExchange: true,
-      acceptsUrgency: false,
-    } satisfies ParticipantDirectoryRow;
-    const dependencies = Layer.mergeAll(
-      Layer.succeed(
-        A2ASendService,
-        A2ASendService.of({
-          send: () => Effect.die("unused"),
-          clearOwnAsk: () => Effect.die("unused"),
-          listParticipants: () => Effect.succeed([callerRow]),
-        }),
-      ),
-      Layer.mock(ParticipantPlacementService)({
-        listParticipants: () =>
-          Effect.succeed([
-            {
-              squadronId,
-              participantId: targetParticipantId,
-              participant: { kind: "agent", id: targetParticipantId, threadId: targetThreadId },
-              threadId: targetThreadId,
-              provenance: { kind: "unrecorded" },
-              placementParentId: callerParticipantId,
-            },
-          ]),
-        listSubtree: () => Effect.die("archive_agent must never resolve descendants"),
-      }),
-      Layer.mock(A2ALedger)({
-        readEvents: () => Effect.die("active archive target must not use historical fallback"),
-      }),
-      Layer.succeed(
-        ArchiveAgentService,
-        ArchiveAgentService.of({
-          archive: (input) =>
-            Ref.update(calls, (items) => [...items, input]).pipe(
-              Effect.andThen(
-                Effect.fail(
-                  new ArchiveAgentConfirmationRequiredError({
-                    facts: {
-                      openExchanges: [
-                        {
-                          exchangeId,
-                          direction: "inbound",
-                          replyObligation: "participant-owes-reply",
-                          counterpartyId: callerParticipantId,
-                          intent: "Return the final review",
-                          urgency: "blocking",
-                          openedAt: "2026-08-31T18:00:00.000Z",
-                        },
-                      ],
-                      runningTurn: { runId, status: "running" },
-                    },
-                    confirmationToken: "archive-confirmation-token",
-                  }),
-                ),
-              ),
-            ),
-        }),
-      ),
-      Layer.mock(A2AHomeRegistrar)({}),
-      Layer.mock(SpawnCompositionService)({}),
-      Layer.mock(ThreadManagementService)({}),
-      Layer.mock(OrchestratorMcpService)({}),
-      Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
-      Layer.mock(SquadronJoinService)({}),
-      Layer.mock(SquadronProjectReferences)({}),
-      NodeServices.layer,
-    );
-    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
-
-    const response = yield* Effect.gen(function* () {
-      return yield* (yield* J5Toolkit)
-        .handle("archive_agent", {
-          squadron_id: squadronId,
-          participant_id: targetParticipantId,
-          client_request_id: "archive-active",
-        } satisfies J5ArchiveAgentInput)
-        .pipe(
-          Stream.unwrap,
-          Stream.run(Sink.last()),
-          Effect.flatMap(Effect.fromOption),
-          Effect.provideService(McpInvocationContext, invocation),
-        );
-    }).pipe(Effect.provide(layer));
-
-    assert.isTrue(response.isFailure);
-    assert.deepInclude(response.result, {
-      code: "ArchiveAgentConfirmationRequiredError",
-      open_exchanges: [
-        {
-          exchange_id: exchangeId,
-          direction: "inbound",
-          reply_obligation: "participant-owes-reply",
-          counterparty_id: callerParticipantId,
-          intent: "Return the final review",
-          urgency: "blocking",
-          opened_at: "2026-08-31T18:00:00.000Z",
-        },
-      ],
-      running_turn: { run_id: runId, status: "running" },
-      confirmation_token: "archive-confirmation-token",
-    });
-    assert.deepStrictEqual(
-      (yield* Ref.get(calls)).map((call) => call.target),
-      [{ squadronId, participantId: targetParticipantId, threadId: targetThreadId }],
-    );
-  }),
-);
-
-it.effect("uses consume-only history only after the active archive row is absent", () =>
-  Effect.gen(function* () {
-    const squadronId = SquadronId.make("squadron:j5:mcp-archive-history");
-    const callerParticipantId = ParticipantId.make("agent:j5:mcp-archive-history-caller");
-    const targetParticipantId = ParticipantId.make("agent:j5:mcp-archive-history-target");
-    const targetThreadId = ThreadId.make("thread:j5:mcp-archive-history-target");
-    const calls = yield* Ref.make<ReadonlyArray<ArchiveAgentInput>>([]);
-    const callerRow = {
-      squadronId,
-      participantId: callerParticipantId,
-      participant: {
-        kind: "agent" as const,
-        id: callerParticipantId,
-        threadId: invocation.threadId,
-      },
-      archived: false,
-      canReceiveMessage: true,
-      canOpenExchange: true,
-      acceptsUrgency: false,
-    } satisfies ParticipantDirectoryRow;
-    const joined = {
-      seq: 1,
-      squadronId,
-      kind: "participant.joined" as const,
-      sender: null,
-      receiver: targetParticipantId,
-      exchangeId: null,
-      correlationId: null,
-      payload: {
-        participant: { kind: "agent" as const, id: targetParticipantId, threadId: targetThreadId },
-      },
-      createdAt: "2026-08-31T18:00:00.000Z",
-    };
-    const dependencies = Layer.mergeAll(
-      Layer.succeed(
-        A2ASendService,
-        A2ASendService.of({
-          send: () => Effect.die("unused"),
-          clearOwnAsk: () => Effect.die("unused"),
-          listParticipants: () => Effect.succeed([callerRow]),
-        }),
-      ),
-      Layer.mock(ParticipantPlacementService)({
-        listParticipants: () => Effect.succeed([]),
-        listSubtree: () => Effect.die("archive_agent must never resolve descendants"),
-      }),
-      Layer.mock(A2ALedger)({
-        readEvents: () =>
-          Effect.succeed({
-            events: [joined],
-            nextCursor: { afterSeq: 1, snapshotEnd: 1 },
-            complete: true,
-          }),
-      }),
-      Layer.succeed(
-        ArchiveAgentService,
-        ArchiveAgentService.of({
-          archive: (input) =>
-            Ref.update(calls, (items) => [...items, input]).pipe(
-              Effect.as("already_archived" as const),
-            ),
-        }),
-      ),
-      Layer.mock(A2AHomeRegistrar)({}),
-      Layer.mock(SpawnCompositionService)({}),
-      Layer.mock(ThreadManagementService)({}),
-      Layer.mock(OrchestratorMcpService)({}),
-      Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
-      Layer.mock(SquadronJoinService)({}),
-      Layer.mock(SquadronProjectReferences)({}),
-      NodeServices.layer,
-    );
-    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
-
-    const response = yield* Effect.gen(function* () {
-      return yield* (yield* J5Toolkit)
-        .handle("archive_agent", {
-          squadron_id: squadronId,
-          participant_id: targetParticipantId,
-          client_request_id: "archive-history",
-        } satisfies J5ArchiveAgentInput)
-        .pipe(
-          Stream.unwrap,
-          Stream.run(Sink.last()),
-          Effect.flatMap(Effect.fromOption),
-          Effect.provideService(McpInvocationContext, invocation),
-        );
-    }).pipe(Effect.provide(layer));
-
-    assert.isFalse(response.isFailure);
-    assert.equal(response.result, "already_archived");
-    assert.deepStrictEqual((yield* Ref.get(calls))[0]?.target, {
-      squadronId,
-      participantId: targetParticipantId,
-      threadId: targetThreadId,
-    });
-  }),
-);
-
-it.effect("refuses ambiguous historical archive identities without invoking the service", () =>
-  Effect.gen(function* () {
-    const squadronId = SquadronId.make("squadron:j5:mcp-archive-ambiguous");
-    const callerParticipantId = ParticipantId.make("agent:j5:mcp-archive-ambiguous-caller");
-    const targetParticipantId = ParticipantId.make("agent:j5:mcp-archive-ambiguous-target");
-    const archiveCalls = yield* Ref.make(0);
-    const callerRow = {
-      squadronId,
-      participantId: callerParticipantId,
-      participant: {
-        kind: "agent" as const,
-        id: callerParticipantId,
-        threadId: invocation.threadId,
-      },
-      archived: false,
-      canReceiveMessage: true,
-      canOpenExchange: true,
-      acceptsUrgency: false,
-    } satisfies ParticipantDirectoryRow;
-    const joined = (seq: number, threadId: ThreadId) => ({
-      seq,
-      squadronId,
-      kind: "participant.joined" as const,
-      sender: null,
-      receiver: targetParticipantId,
-      exchangeId: null,
-      correlationId: null,
-      payload: { participant: { kind: "agent" as const, id: targetParticipantId, threadId } },
-      createdAt: `2026-08-31T18:00:0${seq}.000Z`,
-    });
-    const dependencies = Layer.mergeAll(
-      Layer.succeed(
-        A2ASendService,
-        A2ASendService.of({
-          send: () => Effect.die("unused"),
-          clearOwnAsk: () => Effect.die("unused"),
-          listParticipants: () => Effect.succeed([callerRow]),
-        }),
-      ),
-      Layer.mock(ParticipantPlacementService)({ listParticipants: () => Effect.succeed([]) }),
-      Layer.mock(A2ALedger)({
-        readEvents: () =>
-          Effect.succeed({
-            events: [
-              joined(1, ThreadId.make("thread:j5:mcp-archive-ambiguous:a")),
-              joined(2, ThreadId.make("thread:j5:mcp-archive-ambiguous:b")),
-            ],
-            nextCursor: { afterSeq: 2, snapshotEnd: 2 },
-            complete: true,
-          }),
-      }),
-      Layer.mock(ArchiveAgentService)({
-        archive: () => Ref.update(archiveCalls, (count) => count + 1).pipe(Effect.as("archived")),
-      }),
-      Layer.mock(A2AHomeRegistrar)({}),
-      Layer.mock(SpawnCompositionService)({}),
-      Layer.mock(ThreadManagementService)({}),
-      Layer.mock(OrchestratorMcpService)({}),
-      Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
-      Layer.mock(SquadronJoinService)({}),
-      Layer.mock(SquadronProjectReferences)({}),
-      NodeServices.layer,
-    );
-    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
-
-    const response = yield* Effect.gen(function* () {
-      return yield* (yield* J5Toolkit)
-        .handle("archive_agent", {
-          squadron_id: squadronId,
-          participant_id: targetParticipantId,
-        } satisfies J5ArchiveAgentInput)
-        .pipe(
-          Stream.unwrap,
-          Stream.run(Sink.last()),
-          Effect.flatMap(Effect.fromOption),
-          Effect.provideService(McpInvocationContext, invocation),
-        );
-    }).pipe(Effect.provide(layer));
-
-    assert.isTrue(response.isFailure);
-    assert.include(
-      (response.result as unknown as { readonly message: string }).message,
-      "ambiguous historical participant.joined agent identity",
-    );
-    assert.equal(yield* Ref.get(archiveCalls), 0);
-  }),
 );
 
 it.effect("namespaces mutating-tool idempotency and sender identity from authenticated scope", () =>
   Effect.gen(function* () {
     assert.deepStrictEqual(Object.keys(J5Toolkit.tools).sort(), [
-      "archive_agent",
       "clear_own_ask",
       "join_squadron",
       "list_participants",
@@ -1162,7 +760,10 @@ it.effect("preflights home before creation and records facts before the one stab
                   {
                     homeCommandId: input.homeCommandId,
                     placementCommandId: input.placementCommandId,
-                    spawnedByParticipantId: input.spawnedByParticipantId,
+                    spawnedByParticipantId:
+                      input.provenance.kind === "spawned-by"
+                        ? input.provenance.spawnedByParticipantId
+                        : callerParticipantId,
                     threadId: input.threadId,
                   },
                 ]),
@@ -1265,7 +866,6 @@ it.effect("preflights home before creation and records facts before the one stab
       orchestrator,
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
-      Layer.mock(ArchiveAgentService)({}),
       Layer.mock(SquadronJoinService)({}),
       Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
@@ -1410,7 +1010,6 @@ it.effect("refuses spawn before thread creation when the caller has no home", ()
         dispatch: () => Ref.update(dispatches, (count) => count + 1).pipe(Effect.as({} as never)),
       }),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
-      Layer.mock(ArchiveAgentService)({}),
       Layer.mock(SquadronJoinService)({}),
       Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
@@ -1537,7 +1136,6 @@ it.effect("stops exactly one placed agent without consulting or touching descend
       Layer.mock(SpawnCompositionService)({}),
       Layer.mock(OrchestratorMcpService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
-      Layer.mock(ArchiveAgentService)({}),
       Layer.mock(SquadronJoinService)({}),
       Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,

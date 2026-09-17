@@ -1,7 +1,6 @@
 import * as Layer from "effect/Layer";
 
 import { layer as archiveFactsLayer, placementFactsLayer } from "./ArchiveFactsService.ts";
-import { layer as archiveAgentLayer } from "./ArchiveAgentService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import {
@@ -32,7 +31,9 @@ export const makeJ5SquadronCreationLayer = (
 ) => {
   const ledgerProvided = options.ledger ?? ledgerLayer;
   const registrarAndReferences = Layer.mergeAll(homeRegistrarLayer, squadronProjectReferencesLayer);
-  return squadronThreadCreationServiceLayer.pipe(
+  return Layer.merge(squadronThreadCreationServiceLayer, spawnCompositionLayer).pipe(
+    Layer.provideMerge(homeRegistrationTransactionLayer),
+    Layer.provideMerge(participantPlacementLayer),
     Layer.provideMerge(registrarAndReferences),
     Layer.provideMerge(ledgerProvided),
   );
@@ -54,13 +55,6 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(deliveryWorkerProvided),
   );
   const archiveFactsProvided = archiveFactsLayer.pipe(Layer.provide(placementFactsLayer));
-  const archiveAgentProvided = archiveAgentLayer.pipe(
-    Layer.provideMerge(archiveFactsProvided),
-    Layer.provideMerge(lifecycleServiceProvided),
-  );
-  const spawnCompositionProvided = spawnCompositionLayer.pipe(
-    Layer.provideMerge(homeRegistrationTransactionLayer),
-  );
   const squadronJoinProvided = squadronJoinLayer.pipe(
     Layer.provideMerge(homeRegistrationTransactionLayer),
   );
@@ -72,11 +66,9 @@ export const makeJ5A2AAuxiliaryLayer = (
     humanInboxLayer,
     lifecycleServiceProvided,
     archiveFactsProvided,
-    archiveAgentProvided,
     threadHomesServiceLayer,
-    spawnCompositionProvided,
     squadronJoinProvided,
-  ).pipe(Layer.provideMerge(participantPlacementLayer));
+  );
   return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };
 

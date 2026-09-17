@@ -1,3 +1,4 @@
+import { J5SquadronCreationLayer } from "../runtimeLayer.ts";
 import { AntigravityInstallation } from "../../../provider/AntigravityInstallation.ts";
 import * as ModelManifest from "../../../provider/ModelManifest.ts";
 import * as CodexResetCredit from "../../../provider/Layers/codexResetCredit.ts";
@@ -35,7 +36,7 @@ import * as OrchestratorMcpService from "../../../mcp/OrchestratorMcpService.ts"
 import { runDaemonWithOptions as runEffectWorkerDaemonWithOptions } from "../../../orchestration-v2/EffectWorker.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { layer as threadLifecycleServiceLayer } from "../../../orchestration-v2/ThreadLifecycleService.ts";
-import { OrchestrationV2LayerLive } from "../../../orchestration-v2/runtimeLayer.ts";
+import { OrchestrationV2LayerLive as UpstreamOrchestrationV2LayerLive } from "../../../orchestration-v2/runtimeLayer.ts";
 import { ProviderInstanceRegistryHydrationLive } from "../../../provider/Layers/ProviderInstanceRegistryHydration.ts";
 import { ProviderRegistryLive } from "../../../provider/Layers/ProviderRegistry.ts";
 import {
@@ -63,6 +64,10 @@ import {
   J5StopAgentResult,
   J5Toolkit,
 } from "./tools.ts";
+
+const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
+  Layer.provideMerge(J5SquadronCreationLayer),
+);
 
 const codexInstanceId = ProviderInstanceId.make("codex");
 const lunaSelection = {

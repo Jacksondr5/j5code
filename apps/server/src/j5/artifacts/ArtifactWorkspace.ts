@@ -21,7 +21,7 @@ export const MAX_ARTIFACT_BYTES = 5 * 1024 * 1024;
 export const artifactProjectDirectoryName = (projectId: ProjectId): string =>
   NodeCrypto.createHash("sha256").update(projectId).digest("hex");
 
-export class ArtifactWorkspaceError extends Schema.TaggedErrorClass<ArtifactWorkspaceError>()(
+export class ArtifactWorkspaceError extends Schema.TaggedError<ArtifactWorkspaceError>()(
   "ArtifactWorkspaceError",
   {
     operation: Schema.String,

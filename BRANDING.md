@@ -34,6 +34,7 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   `DesktopEarlyElectronStartup.ts`, and `DesktopAppIdentity.ts`.
 - Desktop OS integration: `electron-launcher.mjs`, `ElectronProtocol.ts`,
   `DesktopLinuxUrlHandler.ts`, and the server renderer-origin allowlist in `apps/server/src/http.ts`.
+- Linux capture: `apps/desktop/src/snapShot/{KdeSnapShot,HyprlandSnapShot,GnomeCaptureSetup,linuxCaptureSession}.ts` and `apps/desktop/gnome-extension/`. These newly adopted integrations still use upstream helper directories, desktop/extension identities and bus names. They can collide with an installed T3 Code; OS integration isolation is incomplete until [#138](https://github.com/Jacksondr5/j5code/issues/138) is resolved.
 - Desktop packaging: `apps/desktop/package.json`, `scripts/build-desktop-artifact.ts`, and both DMG
   background SVGs.
 - Mobile OS identity and links: `apps/mobile/app.config.ts`, mobile package scripts, `App.tsx`,

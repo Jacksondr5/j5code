@@ -25,7 +25,7 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 
-import { GitManager } from "../git/GitManager.ts";
+import { GitManager, type GitBranchPullRequest } from "../git/GitManager.ts";
 import {
   PullRequestService,
   type PullRequestMergeEvent,
@@ -130,13 +130,36 @@ describe("isAutoSettlementCandidate", () => {
       snoozedAt: at(-60 * 60 * 1_000),
     });
     expect(isAutoSettlementCandidate(snoozed, NOW_MS)).toBe(false);
-    expect(isAutoSettlementCandidate(shell({ ...snoozed, status: "failed" }), NOW_MS)).toBe(true);
+    expect(
+      isAutoSettlementCandidate(
+        shell({ ...snoozed, status: "failed", latestRunCompletedAt: at(-30 * 60 * 1_000) }),
+        NOW_MS,
+      ),
+    ).toBe(true);
     expect(
       isAutoSettlementCandidate(
         shell({ ...snoozed, latestRunCompletedAt: at(-30 * 60 * 1_000) }),
         NOW_MS,
       ),
     ).toBe(true);
+    expect(
+      isAutoSettlementCandidate(
+        shell({ ...snoozed, status: "failed", latestRunCompletedAt: at(-2 * 60 * 60 * 1_000) }),
+        NOW_MS,
+      ),
+    ).toBe(false);
+    expect(
+      isAutoSettlementCandidate(
+        shell({ ...snoozed, status: "failed", latestRunCompletedAt: snoozed.snoozedAt }),
+        NOW_MS,
+      ),
+    ).toBe(false);
+    expect(
+      isAutoSettlementCandidate(
+        shell({ ...snoozed, status: "failed", latestRunCompletedAt: null }),
+        NOW_MS,
+      ),
+    ).toBe(false);
     // Expired snooze is no longer a park.
     expect(isAutoSettlementCandidate(shell({ ...snoozed, snoozedUntil: at(-1) }), NOW_MS)).toBe(
       true,
@@ -213,7 +236,7 @@ describe("resolveAutoSettlementAt", () => {
       thread,
       pullRequest: {
         state: "merged" as const,
-        updatedAt: DateTime.formatIso(at(-60 * 60 * 1_000)),
+        mergedAt: DateTime.formatIso(at(-60 * 60 * 1_000)),
       },
       nowMs: NOW_MS,
       autoSettleAfterDays: null,
@@ -224,7 +247,7 @@ describe("resolveAutoSettlementAt", () => {
     expect(
       resolveAutoSettlementAt({
         ...input,
-        pullRequest: { state: "merged", updatedAt: DateTime.formatIso(at(-3 * 60 * 60 * 1_000)) },
+        pullRequest: { state: "merged", mergedAt: DateTime.formatIso(at(-3 * 60 * 60 * 1_000)) },
       }),
     ).toBeNull();
     // A thread without messages still has a stable timestamp when its PR closes.
@@ -232,7 +255,7 @@ describe("resolveAutoSettlementAt", () => {
       resolveAutoSettlementAt({
         ...input,
         thread: shell(),
-        pullRequest: { state: "closed", updatedAt: DateTime.formatIso(at(-1)) },
+        pullRequest: { state: "closed", closedAt: DateTime.formatIso(at(-1)) },
         autoSettleOnMerge: false,
       }),
     ).toEqual(shell().createdAt);
@@ -241,7 +264,7 @@ describe("resolveAutoSettlementAt", () => {
   it("settles inactive threads even when their pull request remains open", () => {
     const input = {
       thread: shell({ latestUserMessageAt: at(-30 * DAY_MS) }),
-      pullRequest: { state: "open" as const, updatedAt: DateTime.formatIso(at(0)) },
+      pullRequest: { state: "open" as const },
       nowMs: NOW_MS,
       autoSettleAfterDays: 2,
       autoSettleOnMerge: true,
@@ -331,6 +354,21 @@ function makePullRequestSummary(input: {
   };
 }
 
+function makeBranchPullRequest(state: "open" | "closed" | "merged") {
+  return {
+    number: 42,
+    title: "Pull request",
+    url: "https://example.test/owner/repository/pull/42",
+    baseRef: "main",
+    headRef: "feature",
+    state,
+    repositoryKey: "example.test/owner/repository",
+    updatedAt: NOW,
+    closedAt: state === "closed" ? NOW : null,
+    mergedAt: state === "merged" ? NOW : null,
+  } satisfies GitBranchPullRequest;
+}
+
 interface HarnessOptions {
   readonly snapshot: OrchestrationV2ShellSnapshot;
   readonly settings?: ServerSettings;
@@ -407,6 +445,8 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     ready: Effect.void,
     getSettings: Ref.get(settings),
     updateSettings,
+    updateProviderInstance: () => Effect.die("Unexpected provider mutation"),
+    withSettingsSnapshot: (use) => Ref.get(settings).pipe(Effect.flatMap(use)),
     streamChanges: Stream.fromPubSub(settingsChanges),
     subscribeChanges: PubSub.subscribe(settingsChanges).pipe(
       Effect.map((subscription) => Stream.fromSubscription(subscription)),
@@ -480,6 +520,33 @@ const startHarness = Effect.fn("startThreadSettlementHarness")(function* (
 });
 
 describe("ThreadSettlementServiceV2 worker", () => {
+  it.effect("settles only the project opted in while environment settlement is disabled", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const thread = makeThread("project-opt-in", {
+          latestRunCompletedAt: DateTime.makeUnsafe("2026-08-25T00:00:00.000Z"),
+        });
+        const other = makeThread("environment-off", { projectId: ProjectId.make("other-project") });
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([thread, other]),
+          settings: {
+            ...DEFAULT_SERVER_SETTINGS,
+            sidebarAutoSettleAfterDays: null,
+            sidebarAutoSettleOnMerge: false,
+            projectSettingsOverrides: { [PROJECT_ID]: { sidebarAutoSettleAfterDays: 2 } },
+          },
+        });
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          const commands = yield* Ref.get(fixture.commands);
+          expect(commands.map((command) => command.threadId)).toEqual([thread.id]);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
   it.effect("dispatches the last activity time with the v2 snapshot guard", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -491,7 +558,7 @@ describe("ThreadSettlementServiceV2 worker", () => {
         const fixture = yield* makeHarness({
           snapshot: makeSnapshot([thread]),
           settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 2 },
-          branchPullRequest: () => Effect.succeed({ state: "open", updatedAt: NOW }),
+          branchPullRequest: () => Effect.succeed(makeBranchPullRequest("open")),
         });
         yield* Effect.gen(function* () {
           const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
@@ -533,10 +600,10 @@ describe("ThreadSettlementServiceV2 worker", () => {
             Ref.updateAndGet(branchLookupCount, (count) => count + 1).pipe(
               Effect.flatMap((count) =>
                 count === 1
-                  ? Effect.succeed({ state: "open" as const, updatedAt: NOW })
+                  ? Effect.succeed(makeBranchPullRequest("open"))
                   : Deferred.succeed(periodicLookupStarted, undefined).pipe(
                       Effect.andThen(Deferred.await(releasePeriodicLookup)),
-                      Effect.as({ state: "open" as const, updatedAt: NOW }),
+                      Effect.as(makeBranchPullRequest("open")),
                     ),
               ),
             ),
@@ -578,10 +645,7 @@ describe("ThreadSettlementServiceV2 worker", () => {
                 latestUserMessageAt: DateTime.makeUnsafe("2026-08-27T00:00:00.000Z"),
               }),
             ]),
-            branchPullRequest: () =>
-              Ref.get(state).pipe(
-                Effect.map((pullRequestState) => ({ state: pullRequestState, updatedAt: NOW })),
-              ),
+            branchPullRequest: () => Ref.get(state).pipe(Effect.map(makeBranchPullRequest)),
             onDispatch: () => Deferred.succeed(mergedThreadSettled, undefined),
           });
 
@@ -696,6 +760,11 @@ describe("ThreadSettlementServiceV2 worker", () => {
             [makeProject(PROJECT_ID, "/workspace/project-root")],
           ),
           existingWorktreePaths: ["/workspace/project-root/.worktrees/live"],
+          settings: {
+            ...DEFAULT_SERVER_SETTINGS,
+            sidebarAutoSettleAfterDays: null,
+            sidebarAutoSettleOnMerge: true,
+          },
         });
 
         yield* Effect.gen(function* () {

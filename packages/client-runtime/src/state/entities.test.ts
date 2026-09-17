@@ -2,6 +2,7 @@ import {
   EnvironmentId,
   MessageId,
   NodeId,
+  ProviderInstanceId,
   ProviderSessionId,
   RunId,
   RuntimeRequestId,
@@ -16,7 +17,11 @@ import {
   parseProjectRefCollectionKey,
   parseThreadKey,
 } from "./entities.ts";
-import { presentThreadShell } from "./models.ts";
+import {
+  presentThreadShell,
+  resolveThreadProviderStack,
+  resolveThreadWorkingStartedAt,
+} from "./models.ts";
 import { v2Projection, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
 import { deriveLatestThreadRun, deriveThreadRuntime } from "./threadExecution.ts";
 import { derivePendingThreadRequests } from "./threadRequests.ts";
@@ -67,6 +72,26 @@ describe("V2 client presentation", () => {
     expect(shell.createdAt).toBe("2026-06-20T00:00:00.000Z");
     expect(shell.runtime).toBeNull();
     expect(shell.source).toBe(v2ThreadShell);
+  });
+
+  it("preserves active ordering and both pull-request sources", () => {
+    const linkedPullRequest = {
+      projectId: v2ThreadShell.projectId,
+      repository: "pingdotgg/t3code",
+      number: 42,
+      url: "https://github.com/pingdotgg/t3code/pull/42",
+    };
+    const branchPullRequest = { ...linkedPullRequest, number: 43 };
+    const shell = presentThreadShell(environmentId, {
+      ...v2ThreadShell,
+      activeOrderKey: "m",
+      linkedPullRequest,
+      branchPullRequest,
+    });
+
+    expect(shell.activeOrderKey).toBe("m");
+    expect(shell.linkedPullRequest).toEqual(linkedPullRequest);
+    expect(shell.branchPullRequest).toEqual(branchPullRequest);
   });
 
   it("presents provider errors carried by failed thread shells", () => {
@@ -124,6 +149,31 @@ describe("V2 client presentation", () => {
       activeRunId: null,
     });
     expect(shell.pendingBackgroundTasks).toEqual([{ taskId: "bg-1", description: "sleep 20" }]);
+  });
+
+  it("stacks earlier provider owners behind the current one, newest history first to go", () => {
+    const codex = ProviderInstanceId.make("codex");
+    const claude = ProviderInstanceId.make("claude");
+    const cursor = ProviderInstanceId.make("cursor");
+    const grok = ProviderInstanceId.make("grok");
+    const shell = presentThreadShell(environmentId, {
+      ...v2ThreadShell,
+      providerInstanceId: grok,
+      modelSelection: { instanceId: grok, model: "grok-4" },
+      providerInstanceHistory: [codex, claude, cursor, grok],
+    });
+
+    // Three slots: the two most recent earlier owners, then the current one.
+    expect(resolveThreadProviderStack(shell)).toEqual([claude, cursor, grok]);
+    expect(
+      resolveThreadProviderStack({ ...shell, providerInstanceHistory: [codex, grok] }),
+    ).toEqual([codex, grok]);
+    expect(resolveThreadProviderStack({ ...shell, providerInstanceHistory: [] })).toEqual([grok]);
+    // Servers that predate the field decode to an empty history.
+    expect(
+      presentThreadShell(environmentId, { ...v2ThreadShell, providerInstanceHistory: undefined })
+        .providerInstanceHistory,
+    ).toEqual([]);
   });
 
   it("keeps terminal runtime completed when there are no pending background tasks", () => {
@@ -303,6 +353,52 @@ describe("V2 client presentation", () => {
       activeRunId: runId,
       providerInstanceId: projection.thread.providerInstanceId,
     });
+    for (const status of ["queued", "cancelled"] as const) {
+      const later = DateTime.add(now, { hours: 1 });
+      const latest = {
+        ...projection.runs[0]!,
+        id: RunId.make("newer-run"),
+        ordinal: 2,
+        status,
+        requestedAt: later,
+        startedAt: null,
+        completedAt: status === "cancelled" ? later : null,
+      };
+      const detail = { ...projection, runs: [...projection.runs, latest], updatedAt: later };
+      const shell = presentThreadShell(environmentId, {
+        ...v2ThreadShell,
+        latestRunId: latest.id,
+        latestRunStartedAt: null,
+        latestRunRequestedAt: later,
+        latestRunCompletedAt: latest.completedAt,
+        status,
+        activeRunId: runId,
+        activityRunStatus: "running",
+        activityRunStartedAt: now,
+        updatedAt: later,
+      });
+      expect(resolveThreadWorkingStartedAt(shell)).toBe(DateTime.formatIso(now));
+      expect(
+        resolveThreadWorkingStartedAt({
+          latestRun: deriveLatestThreadRun(detail),
+          runtime: deriveThreadRuntime(detail),
+        }),
+      ).toBe(resolveThreadWorkingStartedAt(shell));
+      const stopped = {
+        ...detail,
+        runs: detail.runs.map((run) => ({
+          ...run,
+          status: "completed" as const,
+          completedAt: later,
+        })),
+      };
+      expect(
+        resolveThreadWorkingStartedAt({
+          latestRun: deriveLatestThreadRun(stopped),
+          runtime: deriveThreadRuntime(stopped),
+        }),
+      ).toBeNull();
+    }
   });
 
   it("parks waiting runtime for a post-settlement roster without hiding active running work", () => {

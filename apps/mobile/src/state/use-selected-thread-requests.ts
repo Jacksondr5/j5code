@@ -1,9 +1,22 @@
+import { useServerConfigs } from "./entities";
+import { Alert } from "react-native";
+import {
+  questionAttachmentDraftKey,
+  questionAttachmentDraftPrefix,
+  questionAttachmentPreparationAtom,
+} from "./question-attachments";
+import { composerDraftsAtom, clearComposerDraft } from "./use-composer-drafts";
+import {
+  composerAttachmentUploadsAtom,
+  composerAttachmentUploadBlockReason,
+  composerAttachmentsStillUploading,
+} from "./composer-attachment-uploads";
 import { useAtomValue } from "@effect/atom-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { type ProviderApprovalDecision, type RuntimeRequestId } from "@t3tools/contracts";
 import {
-  derivePendingThreadRequests,
+  type PendingThreadRequests,
   type ThreadUserInputQuestion,
 } from "@t3tools/client-runtime/state/thread-requests";
 import { Atom } from "effect/unstable/reactivity";
@@ -17,9 +30,11 @@ import {
   type PendingUserInputDraftAnswer,
 } from "../lib/threadActivity";
 import { appAtomRegistry } from "./atom-registry";
-import { useSelectedThreadProjection } from "./use-thread-detail";
+import { useSelectedThreadPendingRequests } from "./use-thread-detail";
 import { useThreadSelection } from "./use-thread-selection";
 import { useAtomCommand } from "./use-atom-command";
+
+const EMPTY_PENDING_REQUESTS: PendingThreadRequests = { approvals: [], userInputs: [] };
 
 const userInputDraftsByRequestKeyAtom = Atom.make<
   Record<string, Record<string, PendingUserInputDraftAnswer>>
@@ -72,28 +87,96 @@ export function useSelectedThreadRequests() {
     threadEnvironment.respondToUserInput,
     "thread user input response",
   );
+  const dismissUserInput = useAtomCommand(
+    threadEnvironment.dismissUserInput,
+    "thread user input dismissal",
+  );
   const { selectedThread: selectedThreadShell } = useThreadSelection();
-  const selectedThread = useSelectedThreadProjection();
+  const pendingRequests = useSelectedThreadPendingRequests();
   const userInputDraftsByRequestKey = useAtomValue(userInputDraftsByRequestKeyAtom);
+  const userInputResponsesInFlight = useRef(new Set<string>());
   const [respondingApprovalId, setRespondingApprovalId] = useState<RuntimeRequestId | null>(null);
   const [respondingUserInputId, setRespondingUserInputId] = useState<RuntimeRequestId | null>(null);
 
-  const pendingRequests = useMemo(
-    () =>
-      selectedThread === null
-        ? { approvals: [], userInputs: [] }
-        : derivePendingThreadRequests(selectedThread.projection),
-    [selectedThread],
-  );
-  const activePendingApprovals = pendingRequests.approvals;
+  const activePendingApprovals = pendingRequests?.approvals ?? EMPTY_PENDING_REQUESTS.approvals;
   const activePendingApproval = activePendingApprovals[0] ?? null;
-  const activePendingUserInputs = pendingRequests.userInputs;
+  const activePendingUserInputs = pendingRequests?.userInputs ?? EMPTY_PENDING_REQUESTS.userInputs;
   const activePendingUserInput = activePendingUserInputs[0] ?? null;
+  const questionServerConfigs = useServerConfigs();
+  const attachmentDrafts = useAtomValue(composerDraftsAtom);
+  const preparationCounts = useAtomValue(questionAttachmentPreparationAtom);
+  const uploadStates = useAtomValue(composerAttachmentUploadsAtom);
+  useEffect(() => {
+    if (!selectedThreadShell || !pendingRequests) return;
+    const prefix = questionAttachmentDraftPrefix(
+      selectedThreadShell.environmentId,
+      selectedThreadShell.id,
+    );
+    const retained = new Set(
+      activePendingUserInputs.flatMap((request) =>
+        request.questions.map((question) =>
+          questionAttachmentDraftKey(
+            selectedThreadShell.environmentId,
+            selectedThreadShell.id,
+            request.requestId,
+            question.id,
+          ),
+        ),
+      ),
+    );
+    const counts = { ...appAtomRegistry.get(questionAttachmentPreparationAtom) };
+    let changed = false;
+    for (const key of new Set([...Object.keys(attachmentDrafts), ...Object.keys(counts)])) {
+      if (!key.startsWith(prefix) || retained.has(key)) continue;
+      if (attachmentDrafts[key]) clearComposerDraft(key);
+      if (key in counts) {
+        delete counts[key];
+        changed = true;
+      }
+    }
+    if (changed) appAtomRegistry.set(questionAttachmentPreparationAtom, counts);
+  }, [activePendingUserInputs, attachmentDrafts, pendingRequests, selectedThreadShell]);
   const activePendingUserInputDrafts =
     activePendingUserInput && selectedThreadShell
-      ? (userInputDraftsByRequestKey[
-          scopedRequestKey(selectedThreadShell.environmentId, activePendingUserInput.requestId)
-        ] ?? {})
+      ? Object.fromEntries(
+          activePendingUserInput.questions.map((question) => {
+            const key = questionAttachmentDraftKey(
+              selectedThreadShell.environmentId,
+              selectedThreadShell.id,
+              activePendingUserInput.requestId,
+              question.id,
+            );
+            const attachments = attachmentDrafts[key]?.attachments ?? [];
+            const uploadInput = {
+              environmentId: selectedThreadShell.environmentId,
+              attachments,
+              serverConfig: questionServerConfigs.get(selectedThreadShell.environmentId) ?? null,
+              states: uploadStates,
+            };
+            return [
+              question.id,
+              {
+                ...userInputDraftsByRequestKey[
+                  scopedRequestKey(
+                    selectedThreadShell.environmentId,
+                    activePendingUserInput.requestId,
+                  )
+                ]?.[question.id],
+                attachmentCount: attachments.length,
+                attachmentsBlocked:
+                  (attachments.length > 0 &&
+                    questionServerConfigs.get(selectedThreadShell.environmentId)?.environment
+                      .capabilities.questionAttachments !== true) ||
+                  (preparationCounts[key] ?? 0) > 0 ||
+                  composerAttachmentsStillUploading(uploadInput) ||
+                  composerAttachmentUploadBlockReason({
+                    ...uploadInput,
+                    connected: true,
+                  }) !== null,
+              },
+            ];
+          }),
+        )
       : {};
   const activePendingUserInputAnswers = activePendingUserInput
     ? buildPendingUserInputAnswers(activePendingUserInput.questions, activePendingUserInputDrafts)
@@ -163,6 +246,52 @@ export function useSelectedThreadRequests() {
       return;
     }
 
+    const responseKey = questionAttachmentDraftKey(
+      selectedThreadShell.environmentId,
+      selectedThreadShell.id,
+      activePendingUserInput.requestId,
+      "",
+    );
+    if (userInputResponsesInFlight.current.has(responseKey)) return;
+    const attachmentsByQuestionId = new Map<
+      string,
+      import("@t3tools/contracts").UserInputAttachments[string]
+    >();
+    for (const question of activePendingUserInput.questions) {
+      const key = questionAttachmentDraftKey(
+        selectedThreadShell.environmentId,
+        selectedThreadShell.id,
+        activePendingUserInput.requestId,
+        question.id,
+      );
+      if ((appAtomRegistry.get(questionAttachmentPreparationAtom)[key] ?? 0) > 0) return;
+      const attachments = appAtomRegistry.get(composerDraftsAtom)[key]?.attachments ?? [];
+      if (attachments.length === 0) continue;
+      if (
+        attachments.some(
+          (attachment) =>
+            !attachment.uploadedAttachmentId ||
+            attachment.uploadEnvironmentId !== selectedThreadShell.environmentId,
+        )
+      ) {
+        Alert.alert(
+          "Attachments are not ready",
+          "Wait for uploads to finish, or retry failed uploads.",
+        );
+        return;
+      }
+      attachmentsByQuestionId.set(
+        question.id,
+        attachments.map((attachment) => ({
+          type: attachment.type,
+          id: attachment.uploadedAttachmentId!,
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+        })),
+      );
+    }
+    userInputResponsesInFlight.current.add(responseKey);
     setRespondingUserInputId(activePendingUserInput.requestId);
     const result = await respondToUserInput({
       environmentId: selectedThreadShell.environmentId,
@@ -170,8 +299,12 @@ export function useSelectedThreadRequests() {
         threadId: selectedThreadShell.id,
         requestId: activePendingUserInput.requestId,
         answers: activePendingUserInputAnswers,
+        ...(attachmentsByQuestionId.size > 0
+          ? { attachmentsByQuestionId: Object.fromEntries(attachmentsByQuestionId) }
+          : {}),
       },
     });
+    userInputResponsesInFlight.current.delete(responseKey);
     setRespondingUserInputId((current) =>
       current === activePendingUserInput.requestId ? null : current,
     );
@@ -182,6 +315,26 @@ export function useSelectedThreadRequests() {
     respondToUserInput,
     selectedThreadShell,
   ]);
+
+  // Closes an async question without messaging the agent.
+  const onDismissUserInput = useCallback(async () => {
+    if (!selectedThreadShell || !activePendingUserInput) {
+      return;
+    }
+
+    setRespondingUserInputId(activePendingUserInput.requestId);
+    const result = await dismissUserInput({
+      environmentId: selectedThreadShell.environmentId,
+      input: {
+        threadId: selectedThreadShell.id,
+        requestId: activePendingUserInput.requestId,
+      },
+    });
+    setRespondingUserInputId((current) =>
+      current === activePendingUserInput.requestId ? null : current,
+    );
+    return result;
+  }, [activePendingUserInput, dismissUserInput, selectedThreadShell]);
 
   return {
     activePendingApproval,
@@ -194,5 +347,6 @@ export function useSelectedThreadRequests() {
     onSelectUserInputOption,
     onChangeUserInputCustomAnswer,
     onSubmitUserInput,
+    onDismissUserInput,
   };
 }

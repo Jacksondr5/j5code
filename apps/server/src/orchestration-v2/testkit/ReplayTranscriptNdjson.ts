@@ -10,7 +10,7 @@ import * as Schema from "effect/Schema";
 
 import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
 
-export class ProviderReplayNdjsonLineParseError extends Schema.TaggedErrorClass<ProviderReplayNdjsonLineParseError>()(
+export class ProviderReplayNdjsonLineParseError extends Schema.TaggedError<ProviderReplayNdjsonLineParseError>()(
   "ProviderReplayNdjsonLineParseError",
   {
     lineNumber: Schema.Number,
@@ -23,7 +23,7 @@ export class ProviderReplayNdjsonLineParseError extends Schema.TaggedErrorClass<
   }
 }
 
-export class ProviderReplayNdjsonMissingHeaderError extends Schema.TaggedErrorClass<ProviderReplayNdjsonMissingHeaderError>()(
+export class ProviderReplayNdjsonMissingHeaderError extends Schema.TaggedError<ProviderReplayNdjsonMissingHeaderError>()(
   "ProviderReplayNdjsonMissingHeaderError",
   {},
 ) {
@@ -32,7 +32,7 @@ export class ProviderReplayNdjsonMissingHeaderError extends Schema.TaggedErrorCl
   }
 }
 
-export class ProviderReplayNdjsonEmptyError extends Schema.TaggedErrorClass<ProviderReplayNdjsonEmptyError>()(
+export class ProviderReplayNdjsonEmptyError extends Schema.TaggedError<ProviderReplayNdjsonEmptyError>()(
   "ProviderReplayNdjsonEmptyError",
   {},
 ) {
@@ -50,7 +50,7 @@ export type ProviderReplayNdjsonParseError = typeof ProviderReplayNdjsonParseErr
 
 export type ProviderReplayTranscriptMetadata = Omit<ProviderReplayTranscript, "entries">;
 
-export const REPLAY_TRANSCRIPT_WORKSPACE_PLACEHOLDER = "<workspace>";
+const REPLAY_TRANSCRIPT_WORKSPACE_PLACEHOLDER = "<workspace>";
 
 function materializeWorkspacePlaceholder(value: unknown, workspace: string): unknown {
   if (value === REPLAY_TRANSCRIPT_WORKSPACE_PLACEHOLDER) {

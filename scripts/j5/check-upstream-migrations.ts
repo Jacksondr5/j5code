@@ -1,8 +1,10 @@
 // @effect-diagnostics nodeBuiltinImport:off globalConsole:off - this synchronous Git audit is a standalone Node CLI that emits machine-readable JSON.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
+import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 
+import collapse from "../../apps/server/src/j5/persistence/reviewed-v2-collapse.v1.json" with { type: "json" };
 import reviewed from "../../apps/server/src/j5/persistence/legacy-upstream-migrations.v1.json" with { type: "json" };
 
 export interface MigrationRecord {
@@ -10,6 +12,7 @@ export interface MigrationRecord {
   readonly name: string;
   readonly path: string;
   readonly sha256: string;
+  readonly dependencies?: ReadonlyArray<{ readonly path: string; readonly sha256: string }>;
 }
 
 export interface MigrationChange {
@@ -53,7 +56,10 @@ export function inspectMigrationChanges(
     if (row.id !== next.id) {
       changes.push({ kind: "renumbered", name: row.name, oldId: row.id, newId: next.id });
     }
-    if (row.sha256 !== next.sha256) {
+    if (
+      row.sha256 !== next.sha256 ||
+      JSON.stringify(row.dependencies ?? []) !== JSON.stringify(next.dependencies ?? [])
+    ) {
       changes.push({
         kind: "implementation_changed",
         name: row.name,
@@ -76,6 +82,27 @@ export function matchesReviewedBridge(
   after: ReadonlyArray<MigrationRecord>,
   targetSha: string,
 ): boolean {
+  if (targetSha === collapse.targetRef) {
+    const same = (
+      actual: ReadonlyArray<MigrationRecord>,
+      expected: ReadonlyArray<MigrationRecord>,
+    ) =>
+      actual.length === expected.length &&
+      actual.every((row, index) => {
+        const other = expected[index];
+        return (
+          other !== undefined &&
+          row.id === other.id &&
+          row.name === other.name &&
+          row.sha256 === other.sha256 &&
+          JSON.stringify(row.dependencies ?? []) === JSON.stringify(other.dependencies ?? [])
+        );
+      });
+    return (
+      (same(before, reviewed.migrations) || same(before, collapse.sourceMigrations)) &&
+      same(after, collapse.targetMigrations)
+    );
+  }
   if (
     targetSha !== reviewed.targetRef ||
     before.length !== reviewed.migrations.length ||
@@ -116,6 +143,41 @@ const gitText = (cwd: string, ...args: ReadonlyArray<string>) =>
     maxBuffer: 8 * 1024 * 1024,
   });
 
+const composedPath = "apps/server/src/persistence/Migrations/051_OrchestrationV2.ts";
+const backfillPath = "apps/server/src/persistence/Migrations/050_ProjectionThreadPullRequests.ts";
+
+/**
+ * Hash the reviewed V2 setup and the functions reached by the PR backfill.
+ * This is a bounded dependency list, not a module resolver: implementation changes
+ * require reviewing these dependencies again before allowing another bridge.
+ */
+export function readMigrationDependencies(
+  cwd: string,
+  sha: string,
+  path: string,
+  implementation: string,
+): NonNullable<MigrationRecord["dependencies"]> {
+  if (path !== composedPath && path !== backfillPath) return [];
+  const imports = [...implementation.matchAll(/from "([^"\n]+)"/g)].map((match) => match[1]!);
+  if (/\bimport\s*\(/.test(implementation))
+    throw new Error("Unreviewed dynamic migration dependency");
+  const expected = collapse.targetMigrations.find((row) => row.path === path)?.dependencies ?? [];
+  const direct = imports.filter((name) => !name.startsWith("effect/"));
+  const expectedDirect =
+    path === composedPath
+      ? expected.map(({ path }) => `./OrchestrationV2/${NodePath.posix.basename(path)}`)
+      : ["@t3tools/shared/threadPullRequests"];
+  if (direct.toSorted().join("\n") !== expectedDirect.toSorted().join("\n")) {
+    throw new Error("Unreviewed migration composition; update its dependency audit first");
+  }
+  return expected.map(({ path }) => ({
+    path,
+    sha256: NodeCrypto.createHash("sha256")
+      .update(gitText(cwd, "show", `${sha}:${path}`))
+      .digest("hex"),
+  }));
+}
+
 /** Reads the repository's static manifest; unfamiliar syntax fails instead of producing an empty audit. */
 export function readMigrationManifest(cwd: string, sha: string): ReadonlyArray<MigrationRecord> {
   const source = gitText(cwd, "show", `${sha}:apps/server/src/persistence/Migrations.ts`);
@@ -140,6 +202,9 @@ export function readMigrationManifest(cwd: string, sha: string): ReadonlyArray<M
       name: match[2]!,
       path,
       sha256: NodeCrypto.createHash("sha256").update(implementation).digest("hex"),
+      ...(path === composedPath || path === backfillPath
+        ? { dependencies: readMigrationDependencies(cwd, sha, path, implementation) }
+        : {}),
     };
   });
 }

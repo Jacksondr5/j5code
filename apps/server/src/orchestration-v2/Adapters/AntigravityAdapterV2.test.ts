@@ -1,10 +1,9 @@
 import { assert, describe, it } from "@effect/vitest";
 import { ProviderInstanceId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import type * as EffectAcpSchema from "effect-acp/schema";
+import type * as EffectAcpSchema from "effect-acp/compat";
 
 import { ProviderAdapterV2RuntimePolicy } from "../ProviderAdapter.ts";
-import { acpNativeUserInputRequestMatches } from "./AcpAdapterV2.ts";
 import { makeAntigravityAcpAdapterFlavor } from "./AntigravityAdapterV2.ts";
 
 const flavor = makeAntigravityAcpAdapterFlavor({
@@ -59,6 +58,10 @@ describe("AntigravityAdapterV2 flavor", () => {
     assert.equal(mode("full-access"), "yolo");
   });
 
+  it("exposes Antigravity's /compact command through the v2 compaction path", () => {
+    assert.isTrue(flavor.supportsCompaction);
+  });
+
   it("routes interaction_* permission requests to the question card", () => {
     const question = flavor.extractPermissionQuestion?.(
       permissionRequest("interaction_1", [
@@ -79,26 +82,6 @@ describe("AntigravityAdapterV2 flavor", () => {
       flavor.extractPermissionQuestion?.(
         permissionRequest("tool_1", [{ optionId: "allow", name: "Allow", kind: "allow_once" }]),
       ),
-    );
-  });
-
-  it("correlates a native question with its session/request_permission transport", () => {
-    const request = {
-      nativeMethod: "session/request_permission",
-      nativeRequestId: "interaction_1",
-      nativeSessionId: "session-1",
-    };
-    assert.isTrue(
-      acpNativeUserInputRequestMatches(request, {
-        method: "session/request_permission",
-        payload: { sessionId: "session-1", toolCall: { toolCallId: "interaction_1" } },
-      }),
-    );
-    assert.isFalse(
-      acpNativeUserInputRequestMatches(request, {
-        method: "session/request_permission",
-        payload: { sessionId: "session-1", toolCall: { toolCallId: "interaction_2" } },
-      }),
     );
   });
 

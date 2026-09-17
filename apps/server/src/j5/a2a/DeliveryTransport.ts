@@ -1,4 +1,9 @@
-import { CommandId, MessageId, type OrchestrationV2ThreadProjection } from "@t3tools/contracts";
+import {
+  type ChatAttachment,
+  CommandId,
+  MessageId,
+  type OrchestrationV2ThreadProjection,
+} from "@t3tools/contracts";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -24,7 +29,7 @@ import {
   type LedgerMessageId,
 } from "./contracts.ts";
 
-export class A2ADeliveryTargetError extends Schema.TaggedErrorClass<A2ADeliveryTargetError>()(
+export class A2ADeliveryTargetError extends Schema.TaggedError<A2ADeliveryTargetError>()(
   "A2ADeliveryTargetError",
   {
     participantId: Schema.String,
@@ -36,7 +41,7 @@ export class A2ADeliveryTargetError extends Schema.TaggedErrorClass<A2ADeliveryT
   }
 }
 
-export class A2ADeliveryTransportError extends Schema.TaggedErrorClass<A2ADeliveryTransportError>()(
+export class A2ADeliveryTransportError extends Schema.TaggedError<A2ADeliveryTransportError>()(
   "A2ADeliveryTransportError",
   {
     operation: Schema.String,
@@ -53,6 +58,7 @@ export interface AgentDeliveryInput {
   readonly exchangeId: ExchangeId | null;
   readonly exchangeRole: "none" | "ask" | "followup" | "reply" | "terminal_notice";
   readonly message: string;
+  readonly attachments?: ReadonlyArray<ChatAttachment>;
   readonly envelopeChannel: DeliveryEnvelopeChannel;
 }
 
@@ -305,7 +311,7 @@ export const live: Layer.Layer<
             threadId: participant.threadId,
             messageId: deliveryMessageId(input.messageId),
             text: envelope,
-            attachments: [],
+            attachments: input.attachments ?? [],
             mode: "queue",
             createdBy:
               input.envelopeChannel === "silence_notice" ||
@@ -319,9 +325,8 @@ export const live: Layer.Layer<
           if (steeringRun === undefined) {
             yield* threads.sendToThread(sendInput);
           } else {
-            // Pin the checked run: sendToThread reselects the latest live run,
-            // which could now be a different model. Upstream rejects a stale
-            // target rather than steering/restarting an unchecked replacement.
+            // Pin the checked run and model. If it completed before admission,
+            // upstream can accept this same message as a queued follow-up.
             yield* orchestrator.dispatch({
               type: "message.dispatch",
               commandId: sendInput.commandId,
@@ -342,6 +347,8 @@ export const live: Layer.Layer<
           if (steer !== undefined) {
             yield* awaitSteeringOutcome(steer.id);
           } else if (steeringRun !== undefined) {
+            const accepted = yield* orchestrator.getThreadProjection(participant.threadId);
+            if (accepted.runs.some((run) => run.userMessageId === sendInput.messageId)) return;
             return yield* new A2ADeliveryTransportError({
               operation: "await peer steering",
               cause: "The committed command has no steering effect.",

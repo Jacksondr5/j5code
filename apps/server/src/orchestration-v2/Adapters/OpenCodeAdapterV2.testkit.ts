@@ -25,7 +25,6 @@ import {
 } from "../testkit/ProviderReplayHarness.ts";
 import {
   OPENCODE_DEFAULT_INSTANCE_ID,
-  OPENCODE_DRIVER_KIND,
   OPENCODE_PROVIDER,
   OPENCODE_SDK_PROTOCOL,
   OpenCodeAdapterV2Driver,
@@ -44,7 +43,7 @@ const OpenCodeSdkReplayTranscript = Schema.Struct({
 export type OpenCodeSdkReplayTranscript = typeof OpenCodeSdkReplayTranscript.Type;
 const decodeOpenCodeSdkReplayTranscript = Schema.decodeUnknownEffect(OpenCodeSdkReplayTranscript);
 
-export class OpenCodeReplayTranscriptDecodeError extends Schema.TaggedErrorClass<OpenCodeReplayTranscriptDecodeError>()(
+export class OpenCodeReplayTranscriptDecodeError extends Schema.TaggedError<OpenCodeReplayTranscriptDecodeError>()(
   "OpenCodeReplayTranscriptDecodeError",
   {
     driver: Schema.optional(Schema.String),
@@ -58,7 +57,7 @@ export class OpenCodeReplayTranscriptDecodeError extends Schema.TaggedErrorClass
   }
 }
 
-export class OpenCodeReplayMismatchError extends Schema.TaggedErrorClass<OpenCodeReplayMismatchError>()(
+export class OpenCodeReplayMismatchError extends Schema.TaggedError<OpenCodeReplayMismatchError>()(
   "OpenCodeReplayMismatchError",
   {
     scenario: Schema.String,
@@ -72,7 +71,7 @@ export class OpenCodeReplayMismatchError extends Schema.TaggedErrorClass<OpenCod
   }
 }
 
-export class OpenCodeReplayIncompleteError extends Schema.TaggedErrorClass<OpenCodeReplayIncompleteError>()(
+export class OpenCodeReplayIncompleteError extends Schema.TaggedError<OpenCodeReplayIncompleteError>()(
   "OpenCodeReplayIncompleteError",
   {
     scenario: Schema.String,
@@ -319,6 +318,7 @@ function makeReplayClient(controller: OpenCodeReplayController): OpencodeClient 
     session: {
       create: (input: unknown) => request("session.create", input),
       get: (input: unknown) => request("session.get", input),
+      children: (input: unknown) => request("session.children", input),
       update: (input: unknown) => request("session.update", input),
       messages: (input: unknown) => request("session.messages", input),
       promptAsync: (input: unknown) => request("session.promptAsync", input),
@@ -406,9 +406,7 @@ function makeOpenCodeReplayRuntimeLayer(transcript: OpenCodeSdkReplayTranscript)
   );
 }
 
-export function makeOpenCodeProviderAdapterRegistryReplayLayer(
-  transcript: OpenCodeSdkReplayTranscript,
-) {
+function makeOpenCodeProviderAdapterRegistryReplayLayer(transcript: OpenCodeSdkReplayTranscript) {
   const serverConfigLayer = Layer.effect(
     ServerConfig,
     makeReplayServerConfig(transcript.scenario).pipe(Effect.orDie),
@@ -417,7 +415,7 @@ export function makeOpenCodeProviderAdapterRegistryReplayLayer(
     drivers: [OpenCodeAdapterV2Driver],
     configMap: {
       [OPENCODE_DEFAULT_INSTANCE_ID]: {
-        driver: OPENCODE_DRIVER_KIND,
+        driver: OPENCODE_PROVIDER,
         config: { serverUrl: "replay://opencode" },
       },
     },

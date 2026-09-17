@@ -1,3 +1,4 @@
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
   type AssetCreateUrlInput,
@@ -15,9 +16,11 @@ import {
   type ServerProvider,
   type ScopedThreadRef,
   type ThreadId,
+  type ThreadLinkedPullRequest,
   type RunId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import {
   squashAtomCommandFailure,
@@ -50,6 +53,7 @@ import {
 import type { DraftThreadEnvMode } from "../composerDraftStore";
 import type { ComposerSubmissionIntent } from "../composer-logic";
 import type { TimelineEntry } from "../session-logic";
+import type { PreviewMiniPlayerSource } from "../previewMiniPlayerStore";
 import type { DesktopPreviewOverlay } from "../previewStateStore";
 import type { RightPanelSurface } from "../rightPanelStore";
 import {
@@ -86,16 +90,22 @@ export function agentControlledBrowserCloseConfirmation(
   ].join("\n");
 }
 
+/** The floating player hides only while the same source is rendered in the panel. */
 export function shouldRenderPreviewMiniPlayer(
-  miniPlayerTabId: string | null,
+  source: PreviewMiniPlayerSource | null,
   renderedRightPanelSurface: RightPanelSurface | null,
 ): boolean {
-  return (
-    miniPlayerTabId !== null &&
-    !(
+  if (source === null) return false;
+  if (source.kind === "browser") {
+    return !(
       renderedRightPanelSurface?.kind === "preview" &&
-      renderedRightPanelSurface.resourceId === miniPlayerTabId
-    )
+      renderedRightPanelSurface.resourceId === source.tabId
+    );
+  }
+  return !(
+    renderedRightPanelSurface?.kind === "device" &&
+    renderedRightPanelSurface.target?.hostId === source.hostId &&
+    renderedRightPanelSurface.target.deviceId === source.deviceId
   );
 }
 
@@ -103,7 +113,51 @@ export function shouldOpenProactivePullRequest(
   previousTargetKey: string | null | undefined,
   targetKey: string | null,
 ): boolean {
-  return previousTargetKey !== undefined && targetKey !== null && targetKey !== previousTargetKey;
+  return targetKey !== null && targetKey !== previousTargetKey;
+}
+
+interface ProactivePanelObservation {
+  threadKey: string;
+  runningTurnId: RunId | null | undefined;
+  targetKey: string | null | undefined;
+  userActionTurnId: RunId | null;
+  userActionRevision: number;
+}
+
+/** Capture user intent before loading or metadata writes can defer panel activation. */
+export function observeProactivePanelUserChoice(
+  previous: ProactivePanelObservation | null,
+  input: { threadKey: string; runningTurnId: RunId | null; userActionRevision: number },
+): ProactivePanelObservation {
+  const sameThread = previous?.threadKey === input.threadKey;
+  const newTurn =
+    sameThread && input.runningTurnId !== null && input.runningTurnId !== previous.userActionTurnId;
+  return {
+    threadKey: input.threadKey,
+    runningTurnId: sameThread ? previous.runningTurnId : undefined,
+    targetKey: sameThread ? previous.targetKey : undefined,
+    userActionTurnId: input.runningTurnId ?? (sameThread ? previous.userActionTurnId : null),
+    userActionRevision:
+      !sameThread || newTurn ? input.userActionRevision : previous.userActionRevision,
+  };
+}
+
+/** Follow a changed server link only when the panel still shows the previous linked PR. */
+export function shouldRetargetThreadPullRequestPanel(
+  previous: ThreadLinkedPullRequest | null,
+  current: ThreadLinkedPullRequest | null,
+  surface: RightPanelSurface | null,
+): boolean {
+  if (previous === null || current === null || surface?.kind !== "pull-request") return false;
+  const previousRepository = previous.repository.toLowerCase();
+  return (
+    (previous.projectId !== current.projectId ||
+      previousRepository !== current.repository.toLowerCase() ||
+      previous.number !== current.number) &&
+    surface.projectId === previous.projectId &&
+    surface.repository.toLowerCase() === previousRepository &&
+    surface.number === previous.number
+  );
 }
 
 export function shouldOpenProactiveTurnDiff(input: {
@@ -113,11 +167,11 @@ export function shouldOpenProactiveTurnDiff(input: {
   turnCompleted: boolean;
 }): boolean {
   return (
-    input.previousRunningTurnId !== undefined &&
-    input.previousRunningTurnId !== null &&
     input.runningTurnId === null &&
     input.turnCompleted &&
-    input.settledTurnId === input.previousRunningTurnId
+    input.settledTurnId !== null &&
+    (input.previousRunningTurnId === undefined ||
+      input.settledTurnId === input.previousRunningTurnId)
   );
 }
 
@@ -242,6 +296,144 @@ export function resolveDraftHeroState(input: {
     !input.isWorking &&
     !input.draftHeroDockRequested
   );
+}
+
+/**
+ * Keep painted timelines on screen across thread jumps. Remounting LegendList
+ * (or handing it an empty first paint) punches a hole through the chat pane —
+ * white in light mode — so cmd+1/2/3 spam flashes even when the destination
+ * is already cached.
+ *
+ * Stored at module scope because ChatView remounts when the thread route
+ * changes (same pattern as the thread-error banner session dismissals).
+ * Remember more than the last thread so jumping back to cmd+1 does not show
+ * cmd+3's messages, and so a cached destination can paint on the first frame.
+ */
+export type HeldThreadTimeline<T extends readonly unknown[]> = {
+  threadKey: string | null;
+  entries: T;
+  markdownCwd?: string | null;
+  workspaceRoot?: string | null;
+};
+
+const MAX_REMEMBERED_THREAD_TIMELINES = 16;
+
+let rememberedThreadTimelines = new Map<string, HeldThreadTimeline<readonly unknown[]>>();
+let rememberedThreadTimelineOrder: string[] = [];
+let lastReadyThreadKey: string | null = null;
+
+function rememberThreadTimelineEntries(held: HeldThreadTimeline<readonly unknown[]>): void {
+  if (held.threadKey === null) {
+    return;
+  }
+  rememberedThreadTimelines.set(held.threadKey, held);
+  rememberedThreadTimelineOrder = [
+    ...rememberedThreadTimelineOrder.filter((key) => key !== held.threadKey),
+    held.threadKey,
+  ];
+  while (rememberedThreadTimelineOrder.length > MAX_REMEMBERED_THREAD_TIMELINES) {
+    const evicted = rememberedThreadTimelineOrder.shift();
+    if (evicted !== undefined) {
+      rememberedThreadTimelines.delete(evicted);
+    }
+  }
+  lastReadyThreadKey = held.threadKey;
+}
+
+export function rememberReadyThreadTimeline<T extends readonly unknown[]>(
+  held: HeldThreadTimeline<T>,
+): void {
+  if (held.threadKey === null || held.entries.length === 0) {
+    return;
+  }
+  rememberThreadTimelineEntries(held);
+}
+
+export function peekRememberedThreadTimeline<T extends readonly unknown[]>(
+  threadKey: string | null,
+): T | null {
+  if (threadKey === null) {
+    return null;
+  }
+  return (rememberedThreadTimelines.get(threadKey)?.entries as T | undefined) ?? null;
+}
+
+export function peekHeldThreadTimeline<
+  T extends readonly unknown[],
+>(): HeldThreadTimeline<T> | null {
+  if (lastReadyThreadKey === null) {
+    return null;
+  }
+  const held = rememberedThreadTimelines.get(lastReadyThreadKey);
+  if (held === undefined || held.entries.length === 0) {
+    return null;
+  }
+  return held as HeldThreadTimeline<T>;
+}
+
+export function resetHeldThreadTimeline(): void {
+  rememberedThreadTimelines = new Map();
+  rememberedThreadTimelineOrder = [];
+  lastReadyThreadKey = null;
+}
+
+/** A selected Squadron owns its environment; only another Squadron selection may retarget it. */
+export function canSelectDraftEnvironment(
+  squadronId: string | null,
+  currentEnvironmentId: EnvironmentId,
+  nextEnvironmentId: EnvironmentId | "auto",
+): boolean {
+  return squadronId === null || nextEnvironmentId === currentEnvironmentId;
+}
+
+export function threadKeysShareEnvironment(left: string | null, right: string | null): boolean {
+  if (left === null || right === null) {
+    return false;
+  }
+  const leftRef = parseScopedThreadKey(left);
+  const rightRef = parseScopedThreadKey(right);
+  return leftRef !== null && rightRef !== null && leftRef.environmentId === rightRef.environmentId;
+}
+
+/** True while we still paint another thread's last snapshot. */
+export function isPaintOnlyThreadTimeline(
+  displayThreadKey: string | null,
+  activeThreadKey: string | null,
+): boolean {
+  return (
+    displayThreadKey !== null && activeThreadKey !== null && displayThreadKey !== activeThreadKey
+  );
+}
+
+export function resolveThreadSwitchTimeline<T extends readonly unknown[]>(input: {
+  loading: boolean;
+  activeThreadKey: string | null;
+  nextEntries: T;
+  rememberedForActive?: T | null;
+  lastReady?: HeldThreadTimeline<T> | null;
+}): { entries: T; displayThreadKey: string | null } {
+  if (input.nextEntries.length > 0) {
+    return { entries: input.nextEntries, displayThreadKey: input.activeThreadKey };
+  }
+
+  const rememberedForActive =
+    input.rememberedForActive ?? peekRememberedThreadTimeline<T>(input.activeThreadKey);
+  if (input.loading && rememberedForActive !== null && rememberedForActive.length > 0) {
+    return { entries: rememberedForActive, displayThreadKey: input.activeThreadKey };
+  }
+
+  const lastReady = input.lastReady ?? peekHeldThreadTimeline<T>();
+  if (
+    input.loading &&
+    lastReady !== null &&
+    lastReady.threadKey !== null &&
+    lastReady.threadKey !== input.activeThreadKey &&
+    lastReady.entries.length > 0 &&
+    threadKeysShareEnvironment(lastReady.threadKey, input.activeThreadKey)
+  ) {
+    return { entries: lastReady.entries, displayThreadKey: lastReady.threadKey };
+  }
+  return { entries: input.nextEntries, displayThreadKey: input.activeThreadKey };
 }
 
 export function resolveDraftPromotionNavigationTarget(input: {
@@ -562,6 +754,17 @@ export function revokeUserMessagePreviewUrls(message: ChatMessage): void {
   }
 }
 
+export function timelineHasEphemeralPreviewUrls(
+  entries: ReadonlyArray<Pick<TimelineEntry, "kind"> & { message?: ChatMessage }>,
+): boolean {
+  return entries.some(
+    (entry) =>
+      entry.kind === "message" &&
+      entry.message !== undefined &&
+      collectUserMessageBlobPreviewUrls(entry.message).length > 0,
+  );
+}
+
 export function collectUserMessageBlobPreviewUrls(message: ChatMessage): string[] {
   if (message.role !== "user" || !message.attachments) {
     return [];
@@ -602,19 +805,6 @@ export function resolveSendEnvMode(input: {
   isGitRepo: boolean;
 }): DraftThreadEnvMode {
   return input.isGitRepo ? input.requestedEnvMode : "local";
-}
-
-export function shouldShowComposerContextStrip(input: {
-  isDraftHeroState: boolean;
-  isGitRepo: boolean;
-  hasActiveProject: boolean;
-  persistInActiveThreads: boolean;
-}): boolean {
-  return (
-    input.isGitRepo &&
-    input.hasActiveProject &&
-    (input.isDraftHeroState || input.persistInActiveThreads)
-  );
 }
 
 export function resolveBackgroundDraftWorkspaceOptions(input: {
@@ -758,26 +948,63 @@ export function isBranchMismatchDismissedForSession(key: string | null): boolean
   return key !== null && sessionDismissedBranchMismatchKeys.has(key);
 }
 
+// Git status for a checkout arrives after the composer paints, and the branch
+// strip mounts on the assumption that a project is a Git repo. Without a
+// memory, a non-Git project would mount the strip and drop it on every visit.
+// Keyed by environment and checkout for the session; never persisted.
+const sessionCheckoutIsRepo = new Map<string, boolean>();
+
+function checkoutIsRepoKey(environmentId: EnvironmentId, cwd: string): string {
+  return JSON.stringify([environmentId, cwd]);
+}
+
+export function rememberCheckoutIsRepo(
+  environmentId: EnvironmentId,
+  cwd: string,
+  isRepo: boolean,
+): void {
+  sessionCheckoutIsRepo.set(checkoutIsRepoKey(environmentId, cwd), isRepo);
+}
+
+export function recallCheckoutIsRepo(
+  environmentId: EnvironmentId,
+  cwd: string | null,
+): boolean | undefined {
+  return cwd === null
+    ? undefined
+    : sessionCheckoutIsRepo.get(checkoutIsRepoKey(environmentId, cwd));
+}
+
 export function threadHasStarted(thread: Thread | null | undefined): boolean {
   return Boolean(thread && (thread.latestRun !== null || thread.itemCount > 0 || thread.runtime));
 }
 
-// `threadProvider` is the open branded driver kind carried by the session.
-// Unknown driver kinds degrade to `null` (i.e. "unlocked"), which is the safe
-// rollback / fork behavior — the routing layer is the right place to surface
-// "driver not installed" errors, not the lock state.
-//
-// `selectedProvider` takes the same open-string shape because the composer
-// now tracks the picker selection as a `ProviderInstanceId` (e.g.
-// `codex_personal`). Custom instance ids that don't directly match a
-// registered driver resolve to `null` here, which matches the existing
-// "unknown driver -> unlocked" semantics. Callers that want the lock to track
-// a custom instance's underlying driver kind should resolve the instance id
-// upstream and pass the correlated kind.
+/**
+ * Whether a thread ran at least one turn, judged from its shell alone.
+ *
+ * `threadHasStarted` needs the detail: a thread whose latest turn was cleared
+ * still has messages, and the loading shell carries none. The shell records
+ * when the last user message landed, which every started thread has.
+ */
+export function threadShellHasStarted(
+  shell:
+    | Pick<EnvironmentThreadShell, "latestRun" | "latestUserMessageAt" | "runtime">
+    | null
+    | undefined,
+): boolean {
+  return Boolean(
+    shell &&
+    (shell.latestRun !== null || shell.latestUserMessageAt !== null || shell.runtime !== null),
+  );
+}
+
+// Imported history has no session until its first prompt. Resolve its instance
+// through the environment's provider catalog before locking to a driver.
 export function deriveLockedProvider(input: {
   thread: Thread | null | undefined;
   selectedProvider: string | null;
   threadProvider: string | null;
+  providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "driver">>;
 }): ProviderDriverKind | null {
   if (!threadHasStarted(input.thread)) {
     return null;
@@ -786,14 +1013,18 @@ export function deriveLockedProvider(input: {
   if (sessionProvider && isProviderDriverKind(sessionProvider)) {
     return sessionProvider;
   }
+  // Preserve the existing lock while an instance is missing from the catalog;
+  // a started thread must not silently fall back to a different driver.
+  const threadProvider =
+    input.providers.find((provider) => provider.instanceId === input.threadProvider)?.driver ??
+    input.threadProvider;
+  const selectedProvider =
+    input.providers.find((provider) => provider.instanceId === input.selectedProvider)?.driver ??
+    input.selectedProvider;
   const narrowedThreadProvider =
-    input.threadProvider && isProviderDriverKind(input.threadProvider)
-      ? input.threadProvider
-      : null;
+    threadProvider && isProviderDriverKind(threadProvider) ? threadProvider : null;
   const narrowedSelectedProvider =
-    input.selectedProvider && isProviderDriverKind(input.selectedProvider)
-      ? input.selectedProvider
-      : null;
+    selectedProvider && isProviderDriverKind(selectedProvider) ? selectedProvider : null;
   return narrowedThreadProvider ?? narrowedSelectedProvider ?? null;
 }
 
@@ -965,5 +1196,31 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     latestRunChanged ||
     input.localDispatch.runtimeStatus !== (runtime?.status ?? null) ||
     input.localDispatch.runtimeUpdatedAt !== (runtime?.updatedAt ?? null)
+  );
+}
+
+// Returning to the window should land the caret in the composer, so the reader can type right
+// away. The exceptions are places where focus is deliberate: another text field, a terminal in
+// the drawer or the right panel, or an open dialog or popup. A focused button outside those is
+// not one of them, so it yields to the composer.
+export function shouldRefocusComposerOnWindowFocus(
+  activeElement:
+    | (Pick<Element, "tagName" | "closest" | "getAttribute"> & { isContentEditable?: boolean })
+    | null,
+): boolean {
+  if (activeElement === null || activeElement.tagName === "BODY") return true;
+  if (
+    activeElement.tagName === "INPUT" ||
+    activeElement.tagName === "TEXTAREA" ||
+    activeElement.tagName === "SELECT" ||
+    activeElement.isContentEditable === true ||
+    activeElement.getAttribute("role") === "textbox"
+  ) {
+    return false;
+  }
+  return (
+    activeElement.closest(
+      '[role="dialog"], [role="alertdialog"], [data-slot$="-popup"], [data-terminal-owner]',
+    ) === null
   );
 }

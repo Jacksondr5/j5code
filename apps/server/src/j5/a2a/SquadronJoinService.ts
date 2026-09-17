@@ -40,7 +40,7 @@ export interface JoinSquadronResult {
   readonly placement: ParticipantPlacement;
 }
 
-export class SquadronJoinProjectReferenceError extends Schema.TaggedErrorClass<SquadronJoinProjectReferenceError>()(
+export class SquadronJoinProjectReferenceError extends Schema.TaggedError<SquadronJoinProjectReferenceError>()(
   "SquadronJoinProjectReferenceError",
   {
     squadronId: Schema.String,
@@ -55,7 +55,7 @@ export class SquadronJoinProjectReferenceError extends Schema.TaggedErrorClass<S
   }
 }
 
-export class SquadronJoinRetiredError extends Schema.TaggedErrorClass<SquadronJoinRetiredError>()(
+export class SquadronJoinRetiredError extends Schema.TaggedError<SquadronJoinRetiredError>()(
   "SquadronJoinRetiredError",
   { threadId: Schema.String, squadronId: Schema.String, participantId: Schema.String },
 ) {
@@ -64,7 +64,7 @@ export class SquadronJoinRetiredError extends Schema.TaggedErrorClass<SquadronJo
   }
 }
 
-export class SquadronJoinHomeStateError extends Schema.TaggedErrorClass<SquadronJoinHomeStateError>()(
+export class SquadronJoinHomeStateError extends Schema.TaggedError<SquadronJoinHomeStateError>()(
   "SquadronJoinHomeStateError",
   {
     threadId: Schema.String,

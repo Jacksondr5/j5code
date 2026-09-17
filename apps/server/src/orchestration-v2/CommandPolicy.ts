@@ -1,6 +1,7 @@
 import {
   CommandId,
   ModelSelection,
+  type OrchestrationV2Command,
   OrchestrationV2ProviderCapabilities,
   OrchestrationV2ThreadProjection,
   ProviderInstanceId,
@@ -60,7 +61,7 @@ export const CommandPolicyCapability = Schema.Literals([
 ]);
 export type CommandPolicyCapability = typeof CommandPolicyCapability.Type;
 
-export class CommandPolicyMessageDispatchError extends Schema.TaggedErrorClass<CommandPolicyMessageDispatchError>()(
+export class CommandPolicyMessageDispatchError extends Schema.TaggedError<CommandPolicyMessageDispatchError>()(
   "CommandPolicyMessageDispatchError",
   {
     commandId: CommandId,
@@ -73,7 +74,7 @@ export class CommandPolicyMessageDispatchError extends Schema.TaggedErrorClass<C
   }
 }
 
-export class CommandPolicyUnsupportedError extends Schema.TaggedErrorClass<CommandPolicyUnsupportedError>()(
+export class CommandPolicyUnsupportedError extends Schema.TaggedError<CommandPolicyUnsupportedError>()(
   "CommandPolicyUnsupportedError",
   {
     commandId: CommandId,
@@ -87,7 +88,7 @@ export class CommandPolicyUnsupportedError extends Schema.TaggedErrorClass<Comma
   }
 }
 
-export class CommandPolicyCapabilityUnsupportedError extends Schema.TaggedErrorClass<CommandPolicyCapabilityUnsupportedError>()(
+export class CommandPolicyCapabilityUnsupportedError extends Schema.TaggedError<CommandPolicyCapabilityUnsupportedError>()(
   "CommandPolicyCapabilityUnsupportedError",
   {
     commandId: CommandId,
@@ -108,6 +109,56 @@ export const CommandPolicyV2Error = Schema.Union([
   CommandPolicyCapabilityUnsupportedError,
 ]);
 export type CommandPolicyV2Error = typeof CommandPolicyV2Error.Type;
+
+type MessageDispatchMode = Extract<
+  OrchestrationV2Command,
+  { readonly type: "message.dispatch" }
+>["dispatchMode"];
+
+/** Resolve client intent from the state serialized by the thread dispatch lock. */
+export function resolveMessageDispatchIntent(
+  projection: OrchestrationV2ThreadProjection,
+  requestedMode: MessageDispatchMode,
+  deliveryIntent?: "auto" | "steer" | "restart",
+): MessageDispatchMode {
+  if (deliveryIntent === undefined) return requestedMode;
+
+  const activeRun = projection.runs.findLast(
+    (run) =>
+      run.status === "preparing" ||
+      run.status === "starting" ||
+      run.status === "running" ||
+      run.status === "waiting",
+  );
+  if (activeRun === undefined) return { type: "start_immediately" };
+  if (deliveryIntent === "steer") {
+    return { type: "steer_active", targetRunId: activeRun.id };
+  }
+  if (deliveryIntent === "restart") {
+    return { type: "restart_active", targetRunId: activeRun.id };
+  }
+
+  const providerThread = projection.providerThreads.find(
+    (candidate) => candidate.id === activeRun.providerThreadId,
+  );
+  const providerSession =
+    providerThread?.providerSessionId == null
+      ? undefined
+      : projection.providerSessions.find(
+          (candidate) => candidate.id === providerThread.providerSessionId,
+        );
+  const capabilities = providerSession?.capabilities.turns;
+  if (capabilities?.supportsActiveSteering === true) {
+    return { type: "steer_active", targetRunId: activeRun.id };
+  }
+  if (capabilities?.supportsQueuedMessages === true) {
+    return { type: "queue_after_active" };
+  }
+  if (capabilities?.supportsSteeringByInterruptRestart === true) {
+    return { type: "restart_active", targetRunId: activeRun.id };
+  }
+  return { type: "queue_after_active" };
+}
 
 interface CapabilityCheckInput {
   readonly commandId: CommandId;

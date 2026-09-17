@@ -211,51 +211,16 @@ Result: exactly one of `interrupt_requested` (a running turn is being interrupte
 errors name the caller's actual Squadron and the corrected retry.
 
 **Amendment (Jackson, 2026-08-29):** the A6 build cascaded over the placement subtree; that blast
-radius makes the tool less useful, so `stop_agent` and `archive_agent` are single-target. The
+radius makes the tool less useful, so `stop_agent` and thread archive are single-target. The
 unit-cascade concept already has its home in the crew rulings (2026-08-21: crews spawn and archive
 as units) — `stop_crew`/`archive_crew` arrive with Crews, and the A6 `PlacementCascadeService`
 survives as their engine (a cascade of one is its degenerate case).
 
-## `archive_agent` — single-target, refuse-when-consequential with confirmation token
+## `t3_thread_organize` — archive and restore
 
-**Description (contract):** "Archive one Peer Agent reversibly. Unarchive restores the same identity, but does not reopen Exchanges or replay cancelled messages. A clean archive — no open exchanges,
-no running turn — completes immediately. Otherwise the call refuses and lists exactly what
-archiving ends — the asks that will close, the turn that will stop — along with a
-confirmation_token; call again with that token to proceed. The archived agent leaves the active
-roster; its ledger and conversation stay readable forever. Requires your current squadron_id.
-Reuse client_request_id to retry safely."
+Use `action: "archive"` with an agent's `threadId`, or omit it to archive the calling thread. The target must be in the calling project; archiving or restoring another registered agent additionally requires the same Squadron. The tool archives one thread, hides it from the active directory, and closes its open Exchanges through the shared lifecycle reactor. It does not interrupt an existing run. Use `stop_agent` when work must stop.
 
-| Input                | Type              | Required                               |
-| -------------------- | ----------------- | -------------------------------------- |
-| `client_request_id`  | string, non-empty | no (supply and reuse for safe retries) |
-| `squadron_id`        | SquadronId        | yes (must be the caller's Squadron)    |
-| `participant_id`     | ParticipantId     | yes (the one agent to archive)         |
-| `confirmation_token` | string            | only when confirming a refusal         |
-
-Semantics — the agent-facing form of the archive-flow rulings (AR1–AR4): the **quiet clean path**
-archives immediately when nothing would be cut short; the **loud path** is a refusal whose error
-lists the concrete consequences (open exchanges that will close as dropped, the running turn that
-will be interrupted) — the toolsmith rule doing the human dialog's job — plus a
-`confirmation_token`. The token is issued with the fact list and is bound to it: it proves the
-caller saw the consequences, so the confirmation cannot be short-circuited by a preemptive flag on
-the first call (Jackson, 2026-08-29). If the target's state changed since the refusal, the stale
-token is rejected and a fresh refusal lists the current facts. Result: exactly one of `archived`
-or `already_archived` (no side effect); a consequential target yields the refusal above — an error
-carrying the fact list and `confirmation_token` — never a partial outcome. Errors:
-not-caller's-Squadron, unknown participant, consequential-without-token (the refusal), stale token
-— each naming state and next command. Events: archive + the obligation-closure events for each
-ended exchange (loud in the ledger, not just the dialog).
-
-**2026-08-31 implementation alignment (Decisions #86 and #88):** the shipped J5 composition is
-single-target and never consumes the placement cascade. An interrupt acknowledgement and an
-observed terminal run state are separate facts; the tool does not claim a turn stopped merely
-because interruption was requested. Cross-store partial failure is forward-only: committed thread
-archive and ledger archive/terminal-notice facts are re-read on retry, and `already_archived`
-requires the archive timestamp (or legacy departure timestamp) plus completion of every terminal lifecycle notice. When
-an already-retired participant is absent from the active directory, the authorized Squadron's
-ledger is used only as a consume-only replay fallback and must contain exactly one matching
-`participant.joined` agent identity. Malformed or unknown-version confirmation tokens fail closed
-without disclosing target facts; a token for one target cannot authorize another.
+Use `action: "unarchive"` to restore the same identity and Squadron home. Old Exchanges remain closed and cancelled messages do not replay. Historical permanently retired agents remain retired. The human UI retains its archive warning; this tool uses upstream archive semantics without a separate confirmation-token flow. `archive_agent` has been retired.
 
 ## `clear_own_ask` — ruled, unbuilt (inbox IB1b; substrate.md "needed-but-unbuilt")
 

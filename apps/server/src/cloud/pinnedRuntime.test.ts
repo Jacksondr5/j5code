@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
 import * as ProcessRunner from "../processRunner.ts";
@@ -18,7 +19,11 @@ const successfulRunner = (fs: FileSystem.FileSystem, path: Path.Path) =>
   ProcessRunner.ProcessRunner.of({
     run: (input) =>
       Effect.gen(function* () {
-        assert.equal(input.command, "npm");
+        if (input.command === "pnpm") {
+          assert.deepEqual(input.args.slice(0, 3), ["--package=npm@11", "dlx", "npm"]);
+        } else {
+          assert.equal(input.command, "npm");
+        }
         assert.include(input.args, "@jacksondr5/j5code@1.2.3");
         assert.notInclude(input.args, "t3@1.2.3");
         const prefixIndex = input.args.indexOf("--prefix");
@@ -47,6 +52,84 @@ const successfulRunner = (fs: FileSystem.FileSystem, path: Path.Path) =>
   });
 
 it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
+  it.effect("installs through pnpm when its Node runtime has no npm executable", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-pnpm-" });
+      const commands: Array<ProcessRunner.ProcessRunInput> = [];
+      const install = successfulRunner(fs, path);
+      const paths = yield* ensurePinnedRuntimeInstalled({
+        baseDir,
+        version: "1.2.3",
+        fs,
+        path,
+        runner: ProcessRunner.ProcessRunner.of({
+          run: (input) => {
+            commands.push(input);
+            return input.command === "npm"
+              ? Effect.fail(
+                  new ProcessRunner.ProcessSpawnError({
+                    command: "npm",
+                    argumentCount: input.args.length,
+                    cause: PlatformError.systemError({
+                      _tag: "NotFound",
+                      module: "ChildProcess",
+                      method: "spawn",
+                    }),
+                  }),
+                )
+              : install.run(input);
+          },
+        }),
+        validate: (staging) =>
+          fs.exists(staging.entryPath).pipe(
+            Effect.flatMap((exists) => (exists ? Effect.void : Effect.die("missing runtime"))),
+            Effect.orDie,
+          ),
+      });
+      assert.deepEqual(
+        commands.map((command) => command.command),
+        ["npm", "pnpm"],
+      );
+      assert.deepEqual(commands[1]!.args, ["--package=npm@11", "dlx", "npm", ...commands[0]!.args]);
+      assert.equal(yield* fs.readFileString(paths.sentinelPath), "1.2.3\n");
+    }),
+  );
+
+  it.effect("does not try a different installer for npm permission failures", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-permission-" });
+      const commands: string[] = [];
+      yield* ensurePinnedRuntimeInstalled({
+        baseDir,
+        version: "1.2.3",
+        fs,
+        path,
+        runner: ProcessRunner.ProcessRunner.of({
+          run: (input) => {
+            commands.push(input.command);
+            return Effect.fail(
+              new ProcessRunner.ProcessSpawnError({
+                command: input.command,
+                argumentCount: input.args.length,
+                cause: PlatformError.systemError({
+                  _tag: "PermissionDenied",
+                  module: "ChildProcess",
+                  method: "spawn",
+                }),
+              }),
+            );
+          },
+        }),
+        validate: () => Effect.die("must not validate a failed install"),
+      }).pipe(Effect.flip);
+      assert.deepEqual(commands, ["npm"]);
+    }),
+  );
+
   it.effect("validates a staging tree before atomically publishing it", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
