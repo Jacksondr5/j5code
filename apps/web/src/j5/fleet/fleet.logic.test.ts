@@ -118,4 +118,31 @@ describe("fleet involvement", () => {
       ["env:a", "thread:spawner"],
     ]);
   });
+
+  it("keeps naming a Captain whose Crew retired, so its cached chip is re-read and cleared", () => {
+    const environmentId = EnvironmentId.make("env:a");
+    const refs = fleetInvolvedThreadRefs([
+      {
+        id: "squadron:alpha",
+        name: "Alpha",
+        environmentId,
+        // The read drops archived Crews from the agents' chips, so nothing here names the Captain.
+        agents: [agent("former-captain"), agent("solo")],
+        crews: [
+          {
+            crewInstanceId: "crew:done",
+            crewName: "Done",
+            captainParticipantId: "former-captain",
+            captainThreadId: "thread:former-captain",
+            brief: "b",
+            version: 1,
+            createdAt: "2026-09-17T00:00:00.000Z",
+            archivedAt: "2026-09-17T01:00:00.000Z",
+            roster: [],
+          },
+        ],
+      },
+    ]);
+    expect(refs.map((ref) => ref.threadId)).toEqual(["thread:former-captain"]);
+  });
 });

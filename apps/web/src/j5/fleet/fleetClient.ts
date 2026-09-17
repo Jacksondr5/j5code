@@ -42,11 +42,16 @@ export const refreshFleet = () =>
  * by the length of the thread list.
  */
 export const useFleetRefresh = createVisibleRefreshHook(() => {
-  void refreshJ5Sources(fleetSourcesAtom, fleetQueryAtom).then(() => {
-    const involved = fleetInvolvedThreadRefs(
-      mergeFleetSources(appAtomRegistry.get(fleetSourcesAtom)),
-    );
-    refreshCrewMembershipRows(involved);
-    refreshSpawnedChildrenRows(involved);
-  });
+  refreshJ5Sources(fleetSourcesAtom, fleetQueryAtom)
+    .then(() => {
+      const involved = fleetInvolvedThreadRefs(
+        mergeFleetSources(appAtomRegistry.get(fleetSourcesAtom)),
+      );
+      refreshCrewMembershipRows(involved);
+      refreshSpawnedChildrenRows(involved);
+    })
+    // A failed roster read skips this tick's row re-reads; the next tick tries again.
+    .catch((error: unknown) => {
+      console.warn("[j5] fleet refresh failed", error);
+    });
 }, FLEET_POLL_INTERVAL_MS);

@@ -103,9 +103,11 @@ export const originLabel = (origin: FleetAgent["origin"]) =>
 
 /**
  * The sidebar rows the roster says are involved in a Crew or a spawn: every seat, every Captain
- * a seat names, and every agent with a placed child. The Fleet poll re-reads Crew chips and
- * children for these rows only, so that read's cost follows involvement, not the thread list;
- * a Captain that gained a Crew on another device is named here on the next poll.
+ * a seat names, every agent with a placed child, and the Captain of every Crew the read returns,
+ * retired ones included. The Fleet poll re-reads Crew chips and children for these rows only, so
+ * that read's cost follows involvement, not the thread list; a Captain that gained a Crew on
+ * another device is named here on the next poll, and one whose last Crew retired is named by the
+ * retired Crew, so its cached chip is re-read and cleared rather than kept until reload.
  */
 export function fleetInvolvedThreadRefs(
   squadrons: ReadonlyArray<FleetSquadron & { readonly environmentId: EnvironmentId }>,
@@ -125,6 +127,11 @@ export function fleetInvolvedThreadRefs(
         involve(agent.crew.captainParticipantId);
       }
       if (agent.placementParentId !== null) involve(agent.placementParentId);
+    }
+    for (const crew of squadron.crews) {
+      if (crew.captainThreadId === null) continue;
+      const ref = scopeThreadRef(squadron.environmentId, ThreadId.make(crew.captainThreadId));
+      refs.set(`${ref.environmentId}\u0000${ref.threadId}`, ref);
     }
   }
   return [...refs.values()];
