@@ -191,10 +191,12 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
         return claimed.length === 0 ? null : yield* read(input.id);
       });
 
+      // The approved seats stay: they are the roster the human edited, and the card reseeds
+      // from them so a failed launch does not cost the person their edits.
       const reopen = Effect.fn("j5.a2a.agentCrewProposals.reopen")(function* (id: string) {
         yield* sql`
           UPDATE j5_agent_crew_proposal
-          SET status = 'open', approved_seats = NULL, resolved_at = NULL
+          SET status = 'open', resolved_at = NULL
           WHERE id = ${id} AND status <> 'declined'
         `;
         return yield* read(id);

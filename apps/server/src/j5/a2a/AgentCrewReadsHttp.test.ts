@@ -43,11 +43,12 @@ const instance = (id: string, archivedAt: string | null): AgentCrewInstance => (
   ],
 });
 
-it("projects one membership per involved thread, members before captains, nothing for outsiders", () => {
+it("projects one membership per involved thread, live members before captains, nothing for outsiders", () => {
   const outsider = ThreadId.make("thread:outsider");
   const projected = projectCrewMemberships(
     [captainThread, builderThread, outsider, builderThread],
-    [instance("crew:live", null), instance("crew:old", "2026-09-09T17:00:00.000Z")],
+    // The retired Crew is listed first: a retired seat must never win over the live one.
+    [instance("crew:old", "2026-09-09T17:00:00.000Z"), instance("crew:live", null)],
   );
   assert.deepStrictEqual(projected.entries, [
     {
@@ -56,14 +57,14 @@ it("projects one membership per involved thread, members before captains, nothin
         kind: "captain",
         crews: [
           {
-            crewInstanceId: "crew:live",
-            crewName: "Review Pair",
-            archived: false,
-          },
-          {
             crewInstanceId: "crew:old",
             crewName: "Review Pair",
             archived: true,
+          },
+          {
+            crewInstanceId: "crew:live",
+            crewName: "Review Pair",
+            archived: false,
           },
         ],
       },
@@ -74,10 +75,32 @@ it("projects one membership per involved thread, members before captains, nothin
         kind: "member",
         seat: "builder",
         crew: {
-          crewInstanceId: "crew:old",
+          crewInstanceId: "crew:live",
           crewName: "Review Pair",
-          archived: true,
+          archived: false,
         },
+      },
+    },
+  ]);
+});
+
+it("shows a former seat that now commands its own Crew as a captain", () => {
+  const promoted: AgentCrewInstance = {
+    ...instance("crew:by-builder", null),
+    captainParticipantId: participantIdForThread(builderThread),
+    captainThreadId: builderThread,
+    members: [],
+  };
+  const projected = projectCrewMemberships(
+    [builderThread],
+    [instance("crew:old", "2026-09-09T17:00:00.000Z"), promoted],
+  );
+  assert.deepStrictEqual(projected.entries, [
+    {
+      threadId: builderThread,
+      membership: {
+        kind: "captain",
+        crews: [{ crewInstanceId: "crew:by-builder", crewName: "Review Pair", archived: false }],
       },
     },
   ]);

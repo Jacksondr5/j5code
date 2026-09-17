@@ -57,6 +57,7 @@ const thread = (id: ThreadId): OrchestrationV2AppThread =>
     branch: null,
     worktreePath: null,
     createdAt,
+    archivedAt: null,
   }) as unknown as OrchestrationV2AppThread;
 const captain: CrewCaptain = {
   squadronId,
@@ -68,7 +69,11 @@ const captain: CrewCaptain = {
 const launchFailure = (cause: unknown) =>
   new CrewLaunchOperationError({ phase: "test launcher", seatName: null, createdSeats: [], cause });
 
-/** The launcher is exercised by its own test; here it records members so the gate can be proven. */
+/**
+ * The launcher is exercised by its own test; here it records members so the gate can be proven.
+ * Like the real one it records the Crew before any seat spawns and reports it through
+ * `onRecorded`; a display name of "Boom" fails before recording, "Boom after record" fails after.
+ */
 const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
   Layer.mock(CrewLaunchService)({
     launch: (input) =>
@@ -91,7 +96,15 @@ const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
                 reason: seat.reason,
               })),
             })
-            .pipe(Effect.mapError(launchFailure)),
+            .pipe(
+              Effect.mapError(launchFailure),
+              Effect.tap((instance) => input.onRecorded?.(instance) ?? Effect.void),
+              Effect.flatMap((instance) =>
+                input.displayName === "Boom after record"
+                  ? Effect.fail(launchFailure(new Error("second seat failed to spawn")))
+                  : Effect.succeed(instance),
+              ),
+            ),
     // Additions reserve rows under the real deterministic ids before spawning, like the launcher;
     // a brief of "fail once" then fails the spawn the first time to leave that reservation behind.
     addSeats: (input) =>
@@ -452,4 +465,110 @@ it.effect(
         assert.include(clash.message, "already has a seat named sentry");
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
+);
+
+it.effect("declining a roster whose launch failed partway retires what the launch created", () =>
+  Effect.gen(function* () {
+    const { layer, notices } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const gate = yield* CrewProposalService;
+      const proposals = yield* AgentCrewProposalService;
+      const crews = yield* AgentCrewInstanceService;
+      const opened = yield* gate.propose({
+        requestKey: "partial-1",
+        captain,
+        displayName: "Boom after record",
+        brief: "The second seat never spawns.",
+        seats: [
+          { seat: "builder", agentId: "builder", reason: "Builds" },
+          { seat: "critic", agentId: "critic", reason: "Reviews" },
+        ],
+      });
+      const edited = [
+        { seat: "builder", agentId: "builder", reason: "Builds" },
+        { seat: "reviewer", agentId: "critic", reason: "Renamed on the card" },
+      ];
+      const failed = yield* gate
+        .resolve({ proposalId: opened.proposal.id, decision: "approve", seats: edited })
+        .pipe(Effect.flip);
+      assert.equal(failed._tag, "CrewLaunchOperationError");
+      // The gate is handed back with the person's edits and the Crew it already names intact.
+      const reopened = (yield* proposals.read(opened.proposal.id))!;
+      assert.equal(reopened.status, "open");
+      assert.deepStrictEqual(reopened.approvedSeats, edited);
+      assert.equal(reopened.crewInstanceId, `crew:${opened.proposal.id}`);
+      assert.isNotNull(yield* crews.read(reopened.crewInstanceId!));
+
+      const declined = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "decline" });
+      assert.equal(declined.proposal.status, "declined");
+      const retired = (yield* crews.read(reopened.crewInstanceId!))!;
+      assert.isNotNull(retired.archivedAt);
+      // Every seat the failed launch created is archived, under its own stable command id.
+      const archived = (yield* Ref.get(notices)).filter(
+        (command) => command.type === "thread.archive",
+      );
+      assert.sameMembers(
+        archived.map((command) => command.threadId),
+        [ThreadId.make("thread:builder"), ThreadId.make("thread:reviewer")],
+      );
+      // Nothing of it is seated any more, and the Captain heard the decline.
+      assert.isNull(yield* crews.findMembership(ParticipantId.make("agent:j5:a2a:thread:builder")));
+      const notice = (yield* Ref.get(notices)).at(-1);
+      assert.equal(notice?.type, "message.dispatch");
+      if (notice?.type === "message.dispatch") assert.include(notice.text, "decision: declined");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("holds every door to the same seat shape and seats nobody into a retired Crew", () =>
+  Effect.gen(function* () {
+    const { layer } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const gate = yield* CrewProposalService;
+      const crews = yield* AgentCrewInstanceService;
+      const opened = yield* gate.propose({
+        requestKey: "shape-1",
+        captain,
+        displayName: "Shape Crew",
+        brief: "Mind the names.",
+        seats: [{ seat: "builder", agentId: "builder", reason: "Builds" }],
+      });
+      // The card can submit any string; the rule the MCP schema enforces holds here too.
+      for (const seat of ["", "Two Words", "colon:name", "x".repeat(101)]) {
+        const refused = yield* gate
+          .resolve({
+            proposalId: opened.proposal.id,
+            decision: "approve",
+            seats: [{ seat, agentId: "builder", reason: "Builds" }],
+          })
+          .pipe(Effect.flip);
+        assert.equal(refused._tag, "CrewProposalRequestError", seat);
+      }
+      const tooLong = yield* gate
+        .resolve({
+          proposalId: opened.proposal.id,
+          decision: "approve",
+          seats: [{ seat: "builder", agentId: "builder", reason: "r".repeat(501) }],
+        })
+        .pipe(Effect.flip);
+      assert.equal(tooLong._tag, "CrewProposalRequestError");
+
+      const approved = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" });
+      const addition = yield* gate.requestMember({
+        requestKey: "shape-add-1",
+        captain,
+        crewInstanceId: approved.instance!.id,
+        seat: { seat: "critic", agentId: "critic", reason: "Reviews" },
+        brief: null,
+      });
+      // archive_crew retires the Crew while the request still sits in the inbox.
+      yield* crews.markArchived(approved.instance!.id, "2026-09-09T17:00:00.000Z");
+      const late = yield* gate
+        .resolve({ proposalId: addition.proposal.id, decision: "approve" })
+        .pipe(Effect.flip);
+      assert.equal(late._tag, "CrewProposalRequestError");
+      assert.include(late.message, "retired");
+      assert.lengthOf((yield* crews.read(approved.instance!.id))!.members, 1);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
 );

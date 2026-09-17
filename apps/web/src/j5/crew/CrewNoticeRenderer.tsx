@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 
 import ChatMarkdown from "../../components/ChatMarkdown";
 import { Badge } from "../../components/ui/badge";
+import { deriveDisplayedUserMessageState } from "../../lib/terminalContext";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { presentParticipantIdentity } from "../a2a/ParticipantIdentity";
 import {
@@ -16,7 +17,13 @@ import {
 } from "./crewNotices.logic";
 
 export interface CrewNoticeRenderInput {
-  readonly message: CrewNoticeMessage & { readonly createdAt: string };
+  readonly message: CrewNoticeMessage & {
+    readonly createdAt: string;
+    /** What the person attached to the turn; the launch card lists them by name. */
+    readonly attachments?:
+      | ReadonlyArray<{ readonly type: string; readonly name?: string }>
+      | undefined;
+  };
   readonly timestampLabel?: string | undefined;
   readonly participantLabels?: ReadonlyMap<string, string> | undefined;
   /** The thread the timeline shows; seats open on its environment and markdown resolves against it. */
@@ -34,6 +41,12 @@ function CrewLaunchCard(props: {
   readonly input: CrewNoticeRenderInput;
 }) {
   const { notice, input } = props;
+  // Attached terminal and element contexts ride with the brief for the Captain; the card shows
+  // the brief the person typed, the way the ordinary user row hides its appended contexts.
+  const visibleBrief = deriveDisplayedUserMessageState(notice.brief).visibleText.trim();
+  const attachmentNames = (input.message.attachments ?? []).map(
+    (attachment) => attachment.name ?? attachment.type,
+  );
   return (
     <div className="flex justify-end">
       <section
@@ -50,13 +63,24 @@ function CrewLaunchCard(props: {
           ) : null}
         </div>
         <ChatMarkdown
-          text={notice.brief}
+          text={visibleBrief.length > 0 ? visibleBrief : notice.brief}
           cwd={input.markdownCwd}
           threadRef={input.threadRef ?? undefined}
           className="mt-1.5 text-sm text-foreground"
           lineBreaks
           parseRawHtml={false}
         />
+        {attachmentNames.length > 0 ? (
+          <ul className="mt-2 flex flex-wrap gap-1" aria-label="Attachments">
+            {attachmentNames.map((name, index) => (
+              <li key={`${name}-${index}`}>
+                <Badge variant="outline" className="max-w-56 truncate px-1.5 py-0 text-[11px]">
+                  {name}
+                </Badge>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <details className="mt-2">
           <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
             Guidance sent with the brief

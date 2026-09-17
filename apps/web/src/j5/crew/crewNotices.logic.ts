@@ -38,7 +38,11 @@ export type CrewNoticePresentation =
       readonly requestedSeats: ReadonlyArray<{ readonly seat: string; readonly agentId: string }>;
     };
 
-const LAUNCH_BLOCK = /^<j5_crew_launch>\n([\s\S]*?)\n<\/j5_crew_launch>\n\n([\s\S]*)$/;
+// The Claude effort prefix (`applyClaudePromptEffortPrefix`) is applied after the wrapper, so a
+// launch sent with ultrathink starts with that line; the card skips it rather than showing the
+// raw block.
+const LAUNCH_BLOCK =
+  /^(?:Ultrathink:\n)?<j5_crew_launch>\n([\s\S]*?)\n<\/j5_crew_launch>\n\n([\s\S]*)$/;
 const GATE_BLOCK = /^<j5_crew_gate>\n([\s\S]*?)\n<\/j5_crew_gate>/;
 const ROSTER_LINE = /^- ([^:]+): participant_id=(\S+) agent=(\S+) thread_id=(\S+)( \(new\))?$/;
 

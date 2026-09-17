@@ -468,9 +468,13 @@ const preflightCrewCaptain = Effect.fn("j5.a2a.mcp.preflightCrewCaptain")(functi
 const crewProposalNextStep = (error: { readonly _tag: string }) =>
   error._tag === "CrewProposalRequestError"
     ? "Correct the request and retry."
-    : error._tag === "CrewLaunchSeatUnavailableError" || error._tag === "CrewLaunchPermissionError"
+    : error._tag === "CrewLaunchSeatUnavailableError"
       ? "Choose a different agent from list_agents or ask the human to fix that agent, then retry."
-      : "Retry with the same client_request_id; recovery is forward-only.";
+      : error._tag === "CrewLaunchCapError"
+        ? "The crew is full. Work with the seats it has, or propose a new crew for the extra work."
+        : error._tag === "CrewLaunchSeatConflictError"
+          ? "Choose a seat name the crew does not already use, then retry."
+          : "Retry with the same client_request_id; recovery is forward-only.";
 
 const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
   proposal_id: outcome.proposal.id,

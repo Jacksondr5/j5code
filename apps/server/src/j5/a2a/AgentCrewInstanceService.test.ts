@@ -160,3 +160,44 @@ it.effect("decides concurrent additions inside one transaction so the cap holds"
     assert.equal(replay.instance?.version, 2);
   }).pipe(Effect.provide(testLayer)),
 );
+
+it.effect("refuses a same-name seat under a different identity, and any seat once retired", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const squadronId = SquadronId.make("squadron:crew-conflict");
+    yield* (yield* A2ALedger).createSquadron({
+      squadron: { id: squadronId, name: "Conflict Squadron", createdAt },
+    });
+    const service = yield* AgentCrewInstanceService;
+    const seat = (name: string, identity: string) => ({
+      seatName: name,
+      agentId: "scout",
+      participantId: ParticipantId.make(`agent:j5:a2a:thread:${identity}`),
+      threadId: ThreadId.make(`thread:${identity}`),
+      reason: null,
+    });
+    yield* service.record({
+      id: "crew:conflict",
+      squadronId,
+      captainParticipantId: ParticipantId.make("agent:j5:a2a:captain-conflict"),
+      captainThreadId: ThreadId.make("thread:captain-conflict"),
+      displayName: "Contested",
+      brief: "Hold the line.",
+      createdAt,
+      members: [seat("reviewer", "reviewer-a")],
+    });
+    // Two open additions named the same seat: the second is not the first replayed.
+    const clash = yield* service.addMembers("crew:conflict", [seat("reviewer", "reviewer-b")]);
+    assert.equal(clash.status, "conflict");
+    if (clash.status === "conflict") assert.deepStrictEqual(clash.conflicts, ["reviewer"]);
+    assert.lengthOf((yield* service.read("crew:conflict"))!.members, 1);
+    // The same identity replays as a no-op addition.
+    const replay = yield* service.addMembers("crew:conflict", [seat("reviewer", "reviewer-a")]);
+    assert.equal(replay.status, "added");
+    // A retired Crew seats nobody, whatever the request.
+    yield* service.markArchived("crew:conflict", "2026-09-09T17:00:00.000Z");
+    const late = yield* service.addMembers("crew:conflict", [seat("late", "late")]);
+    assert.equal(late.status, "archived");
+    assert.lengthOf((yield* service.read("crew:conflict"))!.members, 1);
+  }).pipe(Effect.provide(testLayer)),
+);
