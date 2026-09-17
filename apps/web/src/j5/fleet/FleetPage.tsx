@@ -19,6 +19,7 @@ import { cn } from "../../lib/utils";
 import { useThreadShells } from "../../state/entities";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
+import { CaptainMark } from "../squadron/CaptainMark";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { fleetSourcesAtom } from "../state";
 import { formatCrewStateSummary, summarizeCrewState } from "../crew/crewState";
@@ -211,7 +212,8 @@ function FleetNodeRows(
     <>
       <FleetRowItem
         row={node.row}
-        badge={seatBadge ?? (node.crews.length > 0 ? "Captain" : null)}
+        badge={seatBadge ?? null}
+        captainOf={node.crews.map((crew) => crew.crewName)}
         {...rows}
       />
       {node.crews.map((crew) => (
@@ -261,7 +263,12 @@ function FleetNodeRows(
 }
 
 function FleetRowItem(
-  props: FleetRowsProps & { readonly row: FleetRow; readonly badge: string | null },
+  props: FleetRowsProps & {
+    readonly row: FleetRow;
+    readonly badge: string | null;
+    /** Names of the live Crews this row commands; non-empty rows carry the Captain mark. */
+    readonly captainOf?: ReadonlyArray<string>;
+  },
 ) {
   const { agent } = props.row;
   const thread =
@@ -304,6 +311,9 @@ function FleetRowItem(
             <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
               {props.badge}
             </Badge>
+          ) : null}
+          {props.captainOf !== undefined && props.captainOf.length > 0 ? (
+            <CaptainMark title={`Commands ${props.captainOf.join(", ")}`} />
           ) : null}
         </span>
         <span className="flex items-center gap-1.5 text-xs">

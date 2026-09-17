@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { useNavigate } from "@tanstack/react-router";
@@ -6,8 +7,11 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 
 import { resolveThreadStatusPill } from "../../components/Sidebar.logic";
 import { Badge } from "../../components/ui/badge";
+import { ProviderInstanceIcon } from "../../components/chat/ProviderInstanceIcon";
 import { cn } from "../../lib/utils";
+import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../../providerInstances";
 import { useThreadShells } from "../../state/entities";
+import { environmentServerConfigsAtom } from "../../state/server";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { useSpawnedChildren, type SpawnedChild } from "./SpawnedChildrenClient";
@@ -87,6 +91,18 @@ function SpawnedChildrenRows(props: {
     [navigate],
   );
   const groups = useMemo(() => groupSpawnedChildren(rows), [rows]);
+  // Seat rows show their provider the way the parent card does; entries are the parent's
+  // environment's, since a child is placed where its parent runs.
+  const serverConfigs = useAtomValue(environmentServerConfigsAtom);
+  const providerEntries = useMemo(
+    () =>
+      new Map(
+        deriveProviderInstanceEntries(
+          serverConfigs.get(props.thread.environmentId)?.providers ?? [],
+        ).map((entry) => [entry.instanceId as string, entry] as const),
+      ),
+    [props.thread.environmentId, serverConfigs],
+  );
   if (groups.length === 0) return null;
   return (
     <div
@@ -97,6 +113,7 @@ function SpawnedChildrenRows(props: {
         <SpawnedChildGroupRows
           key={group.key}
           group={group}
+          providerEntries={providerEntries}
           isOpen={expandedSet.has(
             spawnedGroupExpansionKey(props.thread.environmentId, props.thread.id, group.key),
           )}
@@ -114,6 +131,7 @@ function SpawnedChildrenRows(props: {
 
 function SpawnedChildGroupRows(props: {
   readonly group: SpawnedChildGroup<EnvironmentThreadShell>;
+  readonly providerEntries: ReadonlyMap<string, ProviderInstanceEntry>;
   readonly isOpen: boolean;
   readonly onToggle: () => void;
   readonly onOpen: (child: EnvironmentThreadShell) => void;
@@ -152,6 +170,12 @@ function SpawnedChildGroupRows(props: {
           {group.rows.map(({ child, thread }) => {
             const status = resolveThreadStatusPill({ thread });
             const elapsed = formatElapsedDurationLabel(thread.updatedAt);
+            const providerEntry =
+              props.providerEntries.get(
+                thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId,
+              ) ?? null;
+            // A seat thread is titled by its seat, so the badge repeats it only once renamed.
+            const showSeat = child.seat !== null && child.seat.seat !== thread.title;
             return (
               <li key={child.threadId}>
                 <button
@@ -162,13 +186,19 @@ function SpawnedChildGroupRows(props: {
                     props.onOpen(thread);
                   }}
                 >
+                  {/* Same anatomy as the parent card: time on the top line, provider on the bottom. */}
                   <span className="flex min-w-0 items-center gap-1.5 text-xs">
-                    {child.seat ? (
+                    {showSeat && child.seat !== null ? (
                       <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
                         {child.seat.seat}
                       </Badge>
                     ) : null}
                     <span className="truncate text-foreground">{thread.title}</span>
+                    {elapsed ? (
+                      <span className="ms-auto shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                        {elapsed}
+                      </span>
+                    ) : null}
                   </span>
                   <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                     {status === null ? (
@@ -182,7 +212,17 @@ function SpawnedChildGroupRows(props: {
                         <span className={status.colorClass}>{status.label}</span>
                       </>
                     )}
-                    {elapsed ? <span className="ms-auto tabular-nums">{elapsed}</span> : null}
+                    {providerEntry === null ? null : (
+                      <span aria-hidden className="ms-auto inline-flex shrink-0 items-center">
+                        <ProviderInstanceIcon
+                          driverKind={providerEntry.driverKind}
+                          displayName={providerEntry.displayName}
+                          accentColor={providerEntry.accentColor}
+                          showBadge={false}
+                          iconClassName="size-3.5 opacity-60"
+                        />
+                      </span>
+                    )}
                   </span>
                 </button>
               </li>
