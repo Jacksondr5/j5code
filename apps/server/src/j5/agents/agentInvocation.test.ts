@@ -262,4 +262,43 @@ describe("saved agent subagent invocation", () => {
       );
     }).pipe(Effect.provide(testLayer)),
   );
+  it.effect(
+    "prevents constrained parents from delegating permission requests to an interactive persona",
+    () =>
+      Effect.gen(function* () {
+        const { library, parent, calls, invoke } = yield* fixture;
+        const writer = {
+          ...definition,
+          id: "writer",
+          authority: {
+            defaultPolicy: "workspace-write",
+            allowedPolicies: ["workspace-write"],
+          },
+        };
+        const interactive = {
+          ...definition,
+          id: "interactive",
+          authority: {
+            defaultPolicy: "user-approved",
+            allowedPolicies: ["user-approved"],
+          },
+        };
+        yield* library.importFiles({
+          files: [
+            { name: "writer.yaml", content: yaml(writer) },
+            { name: "interactive.yaml", content: yaml(interactive) },
+          ],
+          replaceExisting: false,
+        });
+        yield* invoke(writer.id);
+        parent.thread = {
+          ...parent.thread,
+          agentPersonaAssignment: calls[0]!.agentPersonaAssignment!,
+        };
+        calls.length = 0;
+        const result = yield* invoke(interactive.id);
+        assert.equal(result._tag, "Failure");
+        assert.lengthOf(calls, 0);
+      }).pipe(Effect.provide(testLayer)),
+  );
 });

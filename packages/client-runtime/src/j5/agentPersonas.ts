@@ -29,6 +29,7 @@ import type {
 const AUTHORITY_LABELS: Readonly<Record<AgentPersonaAuthorityPolicy, string>> = {
   "read-only": "Read only",
   "workspace-write": "Workspace write",
+  "user-approved": "User approved",
   "critic-review": "Review only",
   "critic-fix": "Targeted fixes",
   diagnostic: "Diagnostic writes",
@@ -209,6 +210,7 @@ export async function prepareAgentPersonaImport(
 export const AGENT_PERSONA_POLICY_OPTIONS = [
   { value: "read-only", label: "Read only" },
   { value: "workspace-write", label: "Workspace write" },
+  { value: "user-approved", label: "User approved (provider permissions)" },
   { value: "critic-review", label: "Review only" },
   { value: "critic-fix", label: "Targeted fixes" },
   { value: "diagnostic", label: "Diagnostic writes (not yet supported)" },

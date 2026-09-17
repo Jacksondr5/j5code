@@ -23,6 +23,8 @@ const isImportConflict = Schema.is(AgentPersonaImportConflictError);
 
 const json = (value: unknown) => JSON.stringify(value);
 
+const skillManager = BUILT_IN_AGENT_PERSONAS["skill-manager"];
+
 const custom = decodeAgentPersonaDefinition({
   ...BUILT_IN_AGENT_PERSONAS.scout,
   id: "team-researcher",
@@ -62,22 +64,82 @@ const assignmentFor = (digest: string | undefined): OrchestrationV2AgentPersonaA
 });
 
 describe("folder-backed persona library", () => {
+  it.effect(
+    "keeps Skill Manager removable, restorable, and overridable with a custom library",
+    () =>
+      Effect.gen(function* () {
+        const { library, fs, path, stateDir, write } = yield* fixture;
+        yield* fs.writeFileString(
+          path.join(stateDir, "agent-personas.json"),
+          json({ folders: [] }),
+        );
+        assert.deepEqual(yield* library.load(), [skillManager]);
+        yield* library.setEnabled(skillManager.id, false);
+        assert.deepEqual(yield* library.load(), []);
+        yield* library.setEnabled(skillManager.id, true);
+        yield* library.removeAgent(skillManager.id);
+        assert.deepEqual(yield* library.load(), []);
+        assert.deepEqual((yield* library.catalog()).removedSources, [skillManager]);
+        yield* library.restoreSource(skillManager.id);
+        const override = {
+          ...skillManager,
+          version: 2,
+          instructions: "Team installer instructions.",
+        };
+        yield* write("manager.yaml", override);
+        yield* library.setFolders({ folders: ["personas"] });
+        assert.deepEqual(yield* library.load(), [override]);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "pins Skill Manager instructions and requires user approval even from a full-access draft",
+    () =>
+      Effect.gen(function* () {
+        const { library } = yield* fixture;
+        const assignment: OrchestrationV2AgentPersonaAssignment = {
+          ...assignmentFor(yield* library.snapshot(skillManager)),
+          personaId: skillManager.id,
+          displayName: skillManager.displayName,
+          definitionVersion: skillManager.version,
+          authorityPolicy: "user-approved",
+          resolvedModelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: skillManager.modelRoute[0].model,
+            options: [{ id: "reasoningEffort", value: skillManager.modelRoute[0].reasoningEffort }],
+          },
+        };
+        yield* library.removeAgent(skillManager.id);
+        const policy = yield* resolveAgentPersonaRuntime(
+          { agentPersonaAssignment: assignment, runtimeMode: "full-access" },
+          library,
+        );
+        assert.equal(policy.runtimeMode, "approval-required");
+        assert.isUndefined("approvalPolicy" in policy ? policy.approvalPolicy : undefined);
+        assert.isUndefined("sandboxPolicy" in policy ? policy.sandboxPolicy : undefined);
+        assert.include(
+          "agentPersonaInstructions" in policy ? policy.agentPersonaInstructions : "",
+          skillManager.instructions,
+        );
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("loads examples only when no library has been configured", () =>
     Effect.gen(function* () {
       const { library, fs, folder, stateDir, path } = yield* fixture;
-      assert.lengthOf(yield* library.load(), 11);
+      assert.lengthOf(yield* library.load(), 12);
       yield* fs.makeDirectory(folder);
-      assert.deepEqual(yield* library.load(), []);
+      assert.deepEqual(yield* library.load(), [skillManager]);
       yield* fs.writeFileString(path.join(stateDir, "agent-personas.json"), json({ folders: [] }));
-      assert.deepEqual(yield* library.load(), []);
+      assert.deepEqual(yield* library.load(), [skillManager]);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("loads arbitrary persona ids and custom artifacts without adding built-ins", () =>
+  it.effect("loads custom personas alongside Skill Manager without adding the other examples", () =>
     Effect.gen(function* () {
       const { library, write } = yield* fixture;
       yield* write("researcher.yaml", custom);
-      assert.deepEqual(yield* library.load(), [custom]);
+      assert.deepEqual(yield* library.load(), [custom, skillManager]);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
@@ -94,10 +156,10 @@ describe("folder-backed persona library", () => {
       );
       assert.deepEqual(
         (yield* library.load()).map(({ id }) => id),
-        [custom.id, "another"],
+        [custom.id, "another", skillManager.id],
       );
       yield* fs.writeFileString(path.join(folder, "README.md"), "Not a definition");
-      assert.lengthOf(yield* library.load(), 2);
+      assert.lengthOf(yield* library.load(), 3);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
@@ -216,7 +278,7 @@ describe("imported persona library", () => {
       const restarted = createAgentPersonaLibrary({ fs, path, stateDir });
       const catalog = yield* restarted.catalog();
       assert.deepEqual(catalog.importedIds, result.importedIds);
-      assert.lengthOf(catalog.definitions, 13);
+      assert.lengthOf(catalog.definitions, 14);
       assert.deepEqual(
         catalog.definitions.find(({ id }) => id === custom.id),
         custom,
@@ -251,9 +313,9 @@ describe("imported persona library", () => {
       const input = { files: [file(changed)], replaceExisting: false };
       assert.include(String(yield* library.importFiles(input).pipe(Effect.flip)), "already exist");
       yield* library.importFiles({ ...input, replaceExisting: true });
-      assert.deepEqual(yield* library.load(), [changed]);
+      assert.deepEqual(yield* library.load(), [changed, skillManager]);
       yield* library.removeImported(custom.id);
-      assert.deepEqual(yield* library.load(), [custom]);
+      assert.deepEqual(yield* library.load(), [custom, skillManager]);
       assert.deepEqual((yield* library.catalog()).importedIds, []);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -329,13 +391,13 @@ describe("imported persona library", () => {
         replaceExisting: true,
       });
       assert.deepEqual((yield* library.catalog()).disabledIds, [custom.id]);
-      assert.deepEqual(yield* library.load(), []);
+      assert.deepEqual(yield* library.load(), [skillManager]);
       yield* library
         .importFiles({ files: [file(custom)], replaceExisting: false })
         .pipe(Effect.flip);
       yield* library.removeImported(custom.id);
       assert.deepEqual((yield* library.catalog()).disabledIds, []);
-      assert.deepEqual(yield* library.load(), [custom]);
+      assert.deepEqual(yield* library.load(), [custom, skillManager]);
       yield* library.setImportedEnabled(custom.id, false).pipe(Effect.flip);
       yield* library.importFiles({ files: [file(custom)], replaceExisting: true });
       assert.deepEqual((yield* library.catalog()).disabledIds, []);
@@ -396,7 +458,7 @@ describe("removing folder-loaded agents", () => {
         const restarted = createAgentPersonaLibrary({ fs, path, stateDir });
         assert.deepEqual(
           (yield* restarted.load()).map(({ id }) => id),
-          ["other-agent"],
+          ["other-agent", skillManager.id],
         );
         assert.equal(yield* fs.readFileString(path.join(folder, "local-scout.yaml")), yaml(scout));
         const error = yield* prepareAgentPersonaLaunch({ personaId: scout.id }, [], restarted).pipe(
@@ -813,7 +875,7 @@ describe("YAML agent definitions", () => {
       const { library, fs, path, folder, write } = yield* fixture;
       yield* fs.makeDirectory(folder, { recursive: true });
       yield* fs.writeFileString(path.join(folder, "agent.yml"), yaml(custom));
-      assert.deepEqual(yield* library.load(), [custom]);
+      assert.deepEqual(yield* library.load(), [custom, skillManager]);
       yield* write("agent.yaml", custom);
       assert.include(String(yield* library.load().pipe(Effect.flip)), "Duplicate persona id");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -871,7 +933,7 @@ describe("YAML agent definitions", () => {
       yield* fs.writeFileString(path.join(folder, "agent.yaml"), yaml({ ...custom, id: "kept" }));
       assert.deepEqual(
         (yield* library.load()).map(({ id }) => id),
-        ["kept"],
+        ["kept", skillManager.id],
       );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -1062,11 +1124,11 @@ describe("library sources", () => {
       );
       assert.deepEqual(
         (yield* library.load()).map(({ id }) => id),
-        ["another"],
+        ["another", skillManager.id],
       );
 
       yield* library.setFolders({ folders: [] });
-      assert.deepEqual(yield* library.load(), []);
+      assert.deepEqual(yield* library.load(), [skillManager]);
       assert.deepEqual((yield* library.sources()).folders, []);
       yield* fs.remove(team, { recursive: true });
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -1114,7 +1176,7 @@ describe("nested source folders", () => {
       yield* fs.writeFileString(path.join(folder, "team-a", "README.md"), "docs");
       assert.deepEqual(
         (yield* library.load()).map(({ id }) => id),
-        ["team-a-agent", "team-b-agent", "top"],
+        ["team-a-agent", "team-b-agent", "top", skillManager.id],
       );
       assert.equal(
         (yield* library.catalog()).sourcePaths.get("team-b-agent"),
@@ -1141,13 +1203,13 @@ describe("switching source and bundled agents off", () => {
       yield* write("researcher.yaml", custom);
       yield* library.setEnabled(custom.id, false);
       assert.deepEqual((yield* library.catalog()).disabledIds, [custom.id]);
-      assert.deepEqual(yield* library.load(), []);
+      assert.deepEqual(yield* library.load(), [skillManager]);
       // The exclusion is a file, so a fresh library over the same state directory sees it.
       const reopened = createAgentPersonaLibrary({ fs, path, stateDir });
       assert.deepEqual((yield* reopened.catalog()).disabledIds, [custom.id]);
       yield* reopened.setEnabled(custom.id, true);
       assert.deepEqual((yield* library.catalog()).disabledIds, []);
-      assert.deepEqual(yield* library.load(), [custom]);
+      assert.deepEqual(yield* library.load(), [custom, skillManager]);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

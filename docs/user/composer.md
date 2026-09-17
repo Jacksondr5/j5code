@@ -108,6 +108,33 @@ composer when it is empty, and is discarded otherwise.
 
 ## Commands and skills
 
+To manage shared skill groups, open **Settings → Skills** and choose a project
+on the machine where you want to install them. Enter the local catalog folder
+once — it is remembered for that environment. **Open installer** runs the
+catalog wizard in the thread terminal: pick groups with Space, confirm once,
+and read the result there. No agent chat is involved.
+
+The wizard uses `catalog.yaml` and `skills/<name>/SKILL.md` in the catalog folder.
+It resolves group dependencies and installs links into the environment user's skill
+directories with no agent approvals. Existing project skills and provider disable
+settings remain in effect. Run the wizard again to change the selection, remove
+installed groups, or explicitly update the catalog checkout. Keep the catalog folder
+in place while its skills are installed. Refresh the provider's skill list or start
+a new session after changes.
+
+The catalog lists groups, their skills, and optional dependencies:
+
+```yaml
+groups:
+  core:
+    description: General guidance
+    skills: [explain]
+  review:
+    description: Code review
+    skills: [review]
+    depends: [core]
+```
+
 Type `/` for commands or `$` to add a skill from the selected environment and
 provider. On mobile, both are also available before starting a thread on
 **New task**.

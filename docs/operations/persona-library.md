@@ -16,7 +16,7 @@ The **Create agent** dialog submits `createAgentPersona` (orchestration-operate)
 
 ## Read server folders directly
 
-By default, the server reads `.yaml` and `.yml` files anywhere under `<stateDir>/personas`, walking subfolders in sorted order and skipping dot-directories such as `.git`. If neither that folder nor explicit configuration exists, it offers the bundled examples. An existing empty folder is an intentionally empty library.
+By default, the server reads `.yaml` and `.yml` files anywhere under `<stateDir>/personas`, walking subfolders in sorted order and skipping dot-directories such as `.git`. If neither that folder nor explicit configuration exists, it offers the bundled examples. An existing empty folder suppresses those examples, except Skill Manager.
 
 To select other folders, create `<stateDir>/agent-personas.json`:
 
@@ -26,7 +26,7 @@ To select other folders, create `<stateDir>/agent-personas.json`:
 }
 ```
 
-Relative paths resolve from the state directory. Explicit configuration replaces the default/example catalog. An empty `folders` list disables source definitions; client imports remain available. The server never clones, fetches, pulls, or commits; maintain the folders using an editor and git as desired.
+Relative paths resolve from the state directory. Explicit configuration replaces the default/example catalog. An empty `folders` list disables folder definitions; client imports and the bundled Skill Manager remain available. Skill Manager is included unless a source or import supplies `skill-manager`; normal disable, remove, and restore controls still apply. The library service never clones, fetches, pulls, or commits; maintain the folders using an editor and git as desired.
 
 Settings → Agents → **Library sources** edits the same file through `getAgentPersonaLibrarySources` (orchestration-read) and `setAgentPersonaLibraryFolders` (orchestration-operate). The read RPC reports each configured entry with its resolved path, whether it exists, and a count of YAML files in its tree, plus a read-only git summary when `git` is on the server's PATH and the folder is inside a repository: the repository root, whether `git status -- .` shows uncommitted changes under that folder, and how many commits the tracked upstream is ahead (from the last fetch; the server does not fetch). The write RPC deduplicates entries, creates missing folders that resolve inside the state directory, rejects missing folders elsewhere and any non-directory before writing, and replaces the file atomically under the shared mutation permit. The catalog marks every entry's origin as `bundled`, `imported`, or `folder` with its source file path.
 

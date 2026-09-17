@@ -19,6 +19,7 @@ import { ProviderDriverKind } from "../providerInstance.ts";
  * `OrchestrationV2AgentPersonaAssignment` and `OrchestrationV2AgentPersonaRequest`
  * through additive-optional fields; everything else stays here.
  */
+export const SKILL_MANAGER_PERSONA_ID = "skill-manager";
 export const BUILT_IN_AGENT_PERSONA_IDS = [
   "scout",
   "navigator",
@@ -31,6 +32,7 @@ export const BUILT_IN_AGENT_PERSONA_IDS = [
   "investigator",
   "prosecutor",
   "herald",
+  SKILL_MANAGER_PERSONA_ID,
 ] as const;
 
 export const AgentPersonaId = TrimmedNonEmptyString.check(
@@ -44,6 +46,7 @@ export type BuiltInAgentPersonaId = typeof BuiltInAgentPersonaId.Type;
 export const AgentPersonaAuthorityPolicy = Schema.Literals([
   "read-only",
   "workspace-write",
+  "user-approved",
   "critic-review",
   "critic-fix",
   "diagnostic",

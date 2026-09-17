@@ -62,6 +62,10 @@ describe("agent persona provider policy", () => {
       ["critic-fix", "claudeAgent"],
       ["diagnostic", "codex"],
       ["publish-only", "codex"],
+      ["user-approved", "cursor"],
+      ["user-approved", "grok"],
+      ["user-approved", "opencode"],
+      ["user-approved", "antigravity"],
     ] as const) {
       assert.isFalse(
         providerCanEnforceAgentPersonaAuthority(ProviderDriverKind.make(driver), authorityPolicy),
@@ -97,6 +101,7 @@ describe("agent persona provider policy", () => {
       const readOnly = yield* build("critic-review");
       const workspaceWrite = yield* build("critic-fix");
       const publish = yield* build("publish-only");
+      const interactive = yield* build("user-approved");
 
       assert.equal(readOnly.approvalPolicy, "never");
       assert.equal(readOnly.sandboxPolicy?.type, "readOnly");
@@ -104,10 +109,17 @@ describe("agent persona provider policy", () => {
       assert.equal(workspaceWrite.sandboxPolicy?.type, "workspaceWrite");
       assert.equal(publish.approvalPolicy, "never");
       assert.equal(publish.sandboxPolicy?.type, "readOnly");
+      assert.equal(interactive.approvalPolicy, "untrusted");
+      assert.equal(interactive.approvalsReviewer, "user");
+      assert.equal(interactive.sandboxPolicy?.type, "readOnly");
     }),
   );
 
   it("compiles the canonical policies into Claude permission modes", () => {
+    assert.deepEqual(
+      claudeRuntimeQueryPolicyForRuntimePolicy(runtimePolicy("user-approved", "claudeAgent")),
+      { permissionMode: "default", installPermissionCallback: true },
+    );
     assert.deepEqual(claudeRuntimeQueryPolicyForRuntimePolicy(runtimePolicy("critic-review")), {
       permissionMode: "dontAsk",
       tools: CLAUDE_READ_ONLY_ALLOWED_TOOLS,
