@@ -30,6 +30,8 @@ export const answeredInboxQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.inbox({ environmentId, input: { status: "answered" } });
 export const inboxCountQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.openCount({ environmentId, input: {} });
+export const peersQueryAtom = (environmentId: EnvironmentId) =>
+  j5Environment.peers({ environmentId, input: {} });
 
 export const squadronSourcesAtom = createJ5ReadSourcesAtom({
   ...sourcesInput,
