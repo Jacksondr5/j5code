@@ -306,3 +306,55 @@ it.effect(
       }).pipe(Effect.provide(makeTestLayer(delivered)));
     }),
 );
+
+it.effect(
+  "drops the local Exchange the same way the origin did when a terminal notice arrives",
+  () =>
+    Effect.gen(function* () {
+      const delivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
+      yield* Effect.gen(function* () {
+        yield* setup();
+        const inbound = yield* PeerInboundService;
+        const worker = yield* A2ADeliveryWorker;
+        const sql = yield* SqlClient.SqlClient;
+        // The remote agent asked triage; the remote agent is then archived over there.
+        yield* inbound.receive(ask);
+        yield* inbound.receive({
+          ...askWithoutIntent,
+          messageId: "message:j5:a2a:lifecycle:drop:remote",
+          senderId: "platform:lifecycle",
+          correlationId: "correlation:j5:a2a:lifecycle:drop:remote",
+          exchangeRole: "terminal_notice",
+          envelopeChannel: "lifecycle_notice",
+          text: "[Cross-agent messaging system notice: exchange dropped]",
+          terminal: {
+            disposition: "sender-retired",
+            cause: {
+              kind: "participant-archived",
+              participantId: remoteAsker,
+              squadronId: homeSquadron,
+            },
+          },
+        });
+        const exchange = yield* sql<{ readonly status: string }>`
+        SELECT status FROM j5_a2a_exchange WHERE exchange_id = ${ask.exchangeId}
+      `;
+        assert.deepStrictEqual(exchange, [{ status: "dropped" }]);
+        const dropped = yield* sql<{ readonly disposition: string; readonly notice: string }>`
+        SELECT json_extract(payload, '$.disposition') AS disposition,
+               json_extract(payload, '$.noticeMessageId') AS notice
+        FROM j5_a2a_comm_event WHERE kind = 'exchange.dropped' AND exchange_id = ${ask.exchangeId}
+      `;
+        assert.deepStrictEqual(dropped, [
+          { disposition: "sender-retired", notice: "message:j5:a2a:lifecycle:drop:remote" },
+        ]);
+        // Both the ask and the notice still reach the agent's thread.
+        assert.equal((yield* worker.runOnce)?.state, "delivered");
+        assert.equal((yield* worker.runOnce)?.state, "delivered");
+        assert.deepStrictEqual(
+          (yield* Ref.get(delivered)).map((row) => row.envelopeChannel),
+          ["peer", "lifecycle_notice"],
+        );
+      }).pipe(Effect.provide(makeTestLayer(delivered)));
+    }),
+);
