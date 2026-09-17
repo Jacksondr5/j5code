@@ -153,8 +153,19 @@ export const layer = Layer.effect(
           ),
         );
         if (!gone) continue;
-        yield* retire(instance.captainThreadId, instance);
-        retired.push(instance.id);
+        // One Crew's failed retirement (a seat that would not archive, a store hiccup) is logged
+        // and left for the next boot; the sweep still reaches every other orphaned Crew.
+        const done = yield* retire(instance.captainThreadId, instance).pipe(
+          Effect.as(true),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("J5 Captain archive sweep could not retire a Crew", {
+              captainThreadId: instance.captainThreadId,
+              crewInstanceId: instance.id,
+              cause,
+            }).pipe(Effect.as(false)),
+          ),
+        );
+        if (done) retired.push(instance.id);
       }
       if (retired.length > 0)
         yield* Effect.logInfo("J5 Captain archive sweep retired orphaned Crews", { retired });
