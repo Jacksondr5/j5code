@@ -10,24 +10,28 @@ import { runtime } from "../../lib/runtime";
 
 export type { CrewMembershipEntry, ThreadCrewMembership } from "@t3tools/contracts/j5";
 
-/** Sidebar chip copy: a member names its seat, a Captain names how many live Crews it runs. */
+/**
+ * Sidebar identity for a Crew relation: a member's chip names its Crew and seat; a Captain gets
+ * the anchor mark, with the live Crews it commands in the tooltip.
+ */
 export function presentCrewMembership(
   membership: ThreadCrewMembership | undefined,
-): { readonly label: string; readonly title: string } | null {
+):
+  | { readonly kind: "seat"; readonly label: string; readonly title: string }
+  | { readonly kind: "captain"; readonly title: string }
+  | null {
   if (membership === undefined) return null;
   if (membership.kind === "member") {
     if (membership.crew.archived) return null;
     return {
+      kind: "seat",
       label: `${membership.crew.crewName} · ${membership.seat}`,
       title: `Seat ${membership.seat} of crew ${membership.crew.crewName}`,
     };
   }
   const live = membership.crews.filter((crew) => !crew.archived);
   if (live.length === 0) return null;
-  return {
-    label: "Captain",
-    title: `Commands ${live.map((crew) => crew.crewName).join(", ")}`,
-  };
+  return { kind: "captain", title: `Commands ${live.map((crew) => crew.crewName).join(", ")}` };
 }
 
 /** The visible rows are the whole truth: a thread that left every Crew loses its chip on the next read. */
