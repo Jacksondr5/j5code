@@ -24,7 +24,8 @@ import {
   layer as crewInstanceLayer,
 } from "./AgentCrewInstanceService.ts";
 import { CrewLaunchService, layer as crewLaunchLayer } from "./CrewLaunchService.ts";
-import { participantIdForThread } from "./HomeRegistrar.ts";
+import { A2AHomeConflictError, participantIdForThread } from "./HomeRegistrar.ts";
+import { crewSeatRequestKey, spawnCrewInstanceId, spawnThreadId } from "./spawnIds.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
@@ -79,6 +80,7 @@ const thread = (id: ThreadId): OrchestrationV2AppThread =>
     branch: "main",
     worktreePath: "/repo",
     createdAt,
+    archivedAt: null,
   }) as unknown as OrchestrationV2AppThread;
 
 const fixture = Effect.gen(function* () {
@@ -111,6 +113,8 @@ const fixture = Effect.gen(function* () {
 const dependencies = (
   commands: Ref.Ref<ReadonlyArray<OrchestrationV2Command>>,
   providers: ReadonlyArray<ServerProvider>,
+  /** Seat threads whose first home registration fails, to leave a launch half done. */
+  failHomeOnce: Set<string> = new Set(),
 ) =>
   Layer.mergeAll(
     Layer.mock(ThreadManagementService)({
@@ -123,21 +127,29 @@ const dependencies = (
     }),
     Layer.mock(SpawnCompositionService)({
       recordFacts: (input) =>
-        Effect.succeed({
-          home: { squadronId, participantId: participantIdForThread(input.threadId) },
-          placement: {
-            squadronId,
-            participantId: participantIdForThread(input.threadId),
-            provenance: {
-              kind: "spawned-by" as const,
-              spawnedByParticipantId: input.spawnedByParticipantId,
-              source: "j5_spawn" as const,
-            },
-            placementParentId: input.spawnedByParticipantId,
-            createdEventSeq: 1,
-            updatedEventSeq: 1,
-          },
-        }),
+        failHomeOnce.delete(input.threadId)
+          ? Effect.fail(
+              new A2AHomeConflictError({
+                threadId: input.threadId,
+                existingSquadronId: "squadron:elsewhere",
+                requestedSquadronId: input.squadronId,
+              }),
+            )
+          : Effect.succeed({
+              home: { squadronId, participantId: participantIdForThread(input.threadId) },
+              placement: {
+                squadronId,
+                participantId: participantIdForThread(input.threadId),
+                provenance: {
+                  kind: "spawned-by" as const,
+                  spawnedByParticipantId: input.spawnedByParticipantId,
+                  source: "j5_spawn" as const,
+                },
+                placementParentId: input.spawnedByParticipantId,
+                createdEventSeq: 1,
+                updatedEventSeq: 1,
+              },
+            }),
     }),
     Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed(providers) }),
   );
@@ -240,4 +252,81 @@ it.effect("launches an approved roster whole, records it, briefs each seat, then
       }
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a retry after the person renamed a seat retires the seat the failed launch created",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const codex = provider("codex", "codex", [
+        { slug: "gpt-5.6-sol", options: ["high"] },
+        { slug: "gpt-5.6-terra", options: ["high"] },
+      ]);
+      const seatThread = (seat: string) =>
+        spawnThreadId({
+          providerSessionId: "session",
+          requestKey: crewSeatRequestKey("retry-1", seat),
+        });
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(dependencies(commands, [codex], new Set([seatThread("critic")]))),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-launch-" })),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const crews = yield* AgentCrewInstanceService;
+        const seats = (second: string) => [
+          { name: "builder", agentId: "builder", reason: "Implements" },
+          { name: second, agentId: "critic", reason: "Reviews" },
+        ];
+        const launch = (second: string) =>
+          launcher.launch({
+            providerSessionId: "session",
+            requestKey: "retry-1",
+            captain,
+            displayName: "Review Pair",
+            seats: seats(second),
+            brief: "Ship the login fix.",
+          });
+        // The critic's thread is created, then its home registration fails: the record names both
+        // seats and the critic has a thread with no brief.
+        const failed = yield* launch("critic").pipe(Effect.flip);
+        assert.equal(failed._tag, "CrewLaunchOperationError");
+        const crewId = spawnCrewInstanceId({ providerSessionId: "session", requestKey: "retry-1" });
+        assert.sameMembers(
+          (yield* crews.read(crewId))!.members.map(({ seatName }) => seatName),
+          ["builder", "critic"],
+        );
+        assert.include(
+          (yield* Ref.get(commands))
+            .filter((command) => command.type === "thread.create")
+            .map((command) => command.threadId),
+          seatThread("critic"),
+        );
+
+        // The person renames the seat on the card and approves again.
+        const instance = yield* launch("reviewer");
+        assert.deepStrictEqual(
+          instance.members.map(({ seatName }) => seatName),
+          ["builder", "reviewer"],
+        );
+        const archived = (yield* Ref.get(commands))
+          .filter((command) => command.type === "thread.archive")
+          .map((command) => command.threadId);
+        assert.deepStrictEqual(archived, [seatThread("critic")]);
+        assert.isNull(yield* crews.findMembership(participantIdForThread(seatThread("critic"))));
+        // Every seat that launches was briefed, and the roster in the brief is the one that launched.
+        const briefs = (yield* Ref.get(commands)).filter(
+          (command) => command.type === "message.dispatch",
+        );
+        assert.lengthOf(briefs, 2);
+        const reviewerBrief = briefs.at(-1);
+        if (reviewerBrief?.type === "message.dispatch") {
+          assert.include(reviewerBrief.text, "your_seat: reviewer");
+          assert.notInclude(reviewerBrief.text, "- critic:");
+        }
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
 );

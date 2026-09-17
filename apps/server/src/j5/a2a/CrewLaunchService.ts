@@ -8,6 +8,7 @@ import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
@@ -367,15 +368,52 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const resolved = yield* resolveSeats(input.captain, input.seats);
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
+        const recordError = (phase: string) => (cause: unknown) =>
+          new CrewLaunchOperationError({ phase, seatName: null, createdSeats: [], cause });
+        const crewInstanceId = spawnCrewInstanceId({
+          providerSessionId: input.providerSessionId,
+          requestKey: input.requestKey,
+        });
+        // A retry after the person renamed a seat on the card finds the earlier name still on the
+        // record, possibly with a thread the failed launch created. Retire it before recording the
+        // roster that launches: archive the thread if one exists and drop the row, so no member
+        // lingers with a thread and no brief, and the record never holds more seats than the cap.
+        const earlier = yield* crews
+          .read(crewInstanceId)
+          .pipe(Effect.mapError(recordError("reading the earlier attempt")));
+        const stale = (earlier?.members ?? []).filter(
+          (member) => !planned.some((entry) => entry.seat.name === member.seatName),
+        );
+        for (const member of stale) {
+          const seat = yield* threadManagement
+            .getThreadProjection(member.threadId)
+            .pipe(Effect.option);
+          if (Option.isSome(seat) && seat.value.thread.archivedAt === null)
+            yield* threadManagement
+              .dispatch({
+                type: "thread.archive",
+                commandId: lifecycleCommandId({
+                  providerSessionId: input.providerSessionId,
+                  requestKey: crewSeatRequestKey(input.requestKey, member.seatName),
+                  operation: "retry-archive",
+                }),
+                threadId: member.threadId,
+              })
+              .pipe(Effect.mapError(recordError(`retiring renamed seat ${member.seatName}`)));
+        }
+        if (stale.length > 0)
+          yield* crews
+            .removeMembers(
+              crewInstanceId,
+              stale.map((member) => member.seatName),
+            )
+            .pipe(Effect.mapError(recordError("releasing renamed seats")));
         // Record the unit before any seat exists: every planned seat is named under its
         // deterministic ids, so a spawn that fails partway leaves nothing a Crew record does not
         // know, and a member's own crew request is refused from its first turn.
-        const recorded = yield* crews
+        const instance = yield* crews
           .record({
-            id: spawnCrewInstanceId({
-              providerSessionId: input.providerSessionId,
-              requestKey: input.requestKey,
-            }),
+            id: crewInstanceId,
             squadronId: input.captain.squadronId,
             captainParticipantId: input.captain.participantId,
             captainThreadId: input.captain.thread.id,
@@ -390,38 +428,7 @@ export const layer = Layer.effect(
               reason: member.seat.reason,
             })),
           })
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new CrewLaunchOperationError({
-                  phase: "recording the crew",
-                  seatName: null,
-                  createdSeats: [],
-                  cause,
-                }),
-            ),
-          );
-        // A retry after the human renamed a seat finds the earlier name still reserved with no
-        // agent behind it; drop it so the roster the seats read matches the one that launches.
-        const stale = recorded.members
-          .filter((member) => !planned.some((entry) => entry.seat.name === member.seatName))
-          .map((member) => member.seatName);
-        const instance =
-          stale.length === 0
-            ? recorded
-            : yield* crews.removeUnregisteredMembers(recorded.id, stale).pipe(
-                Effect.andThen(crews.read(recorded.id)),
-                Effect.map((current) => current ?? recorded),
-                Effect.mapError(
-                  (cause) =>
-                    new CrewLaunchOperationError({
-                      phase: "releasing renamed seats",
-                      seatName: null,
-                      createdSeats: [],
-                      cause,
-                    }),
-                ),
-              );
+          .pipe(Effect.mapError(recordError("recording the crew")));
         if (input.onRecorded !== undefined) yield* input.onRecorded(instance);
         yield* spawnSeats(input.captain, planned);
         yield* startBriefs(input.captain, instance, planned, input.brief);

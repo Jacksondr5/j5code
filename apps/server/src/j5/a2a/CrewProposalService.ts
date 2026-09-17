@@ -1,4 +1,4 @@
-import { MessageId } from "@t3tools/contracts";
+import { MessageId, type ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -445,21 +445,24 @@ export const layer = Layer.effect(
         return { proposal, instance };
       });
 
-    /**
-     * A roster launch records its Crew before any seat spawns, so a launch that failed partway
-     * leaves a record naming seats that may or may not have threads. Declining that proposal
-     * retires the lot: seat threads that exist are archived, reserved names with no thread are
-     * dropped, and the record is stamped retired.
-     */
-    const retireFailedLaunch = Effect.fn("j5.a2a.crewProposal.retireFailedLaunch")(function* (
+    /** Whether a member row was minted by this proposal: its ids derive from the proposal id. */
+    const reservedByProposal =
+      (proposalId: string) =>
+      (member: { readonly participantId: string; readonly seatName: string }) =>
+        member.participantId ===
+        participantIdForThread(
+          spawnThreadId({
+            providerSessionId: PROPOSAL_SESSION,
+            requestKey: crewSeatRequestKey(proposalId, member.seatName),
+          }),
+        );
+
+    /** Archive every seat thread that exists behind these members; names with no thread pass. */
+    const archiveSeatThreads = Effect.fn("j5.a2a.crewProposal.archiveSeatThreads")(function* (
       proposal: CrewProposal,
-      crewInstanceId: string,
+      members: ReadonlyArray<{ readonly seatName: string; readonly threadId: ThreadId }>,
     ) {
-      const instance = yield* crews
-        .read(crewInstanceId)
-        .pipe(Effect.mapError(operationError("reading the crew")));
-      if (instance === null || instance.archivedAt !== null) return;
-      for (const member of instance.members) {
+      for (const member of members) {
         const seat = yield* threadManagement
           .getThreadProjection(member.threadId)
           .pipe(Effect.option);
@@ -476,15 +479,49 @@ export const layer = Layer.effect(
           })
           .pipe(Effect.mapError(operationError(`archiving seat ${member.seatName}`)));
       }
-      yield* crews
-        .removeUnregisteredMembers(
-          instance.id,
-          instance.members.map((member) => member.seatName),
-        )
-        .pipe(Effect.mapError(operationError("releasing reserved seats")));
+    });
+
+    /**
+     * A roster launch records its Crew before any seat spawns, so a launch that failed partway
+     * leaves a record naming seats that may or may not have threads. Declining that proposal
+     * retires the lot: seat threads that exist are archived and the record is stamped retired.
+     */
+    const retireFailedLaunch = Effect.fn("j5.a2a.crewProposal.retireFailedLaunch")(function* (
+      proposal: CrewProposal,
+      crewInstanceId: string,
+    ) {
+      const instance = yield* crews
+        .read(crewInstanceId)
+        .pipe(Effect.mapError(operationError("reading the crew")));
+      if (instance === null || instance.archivedAt !== null) return;
+      yield* archiveSeatThreads(proposal, instance.members);
       yield* crews
         .markArchived(instance.id, DateTime.formatIso(yield* DateTime.now))
         .pipe(Effect.mapError(operationError("retiring the crew")));
+    });
+
+    /**
+     * An addition reserves its rows in the live Crew before spawning, under names the person may
+     * have changed between attempts. Declining releases every row this proposal ever minted, not
+     * only the last set of names, archiving any thread a partial spawn left behind them.
+     */
+    const retireFailedAddition = Effect.fn("j5.a2a.crewProposal.retireFailedAddition")(function* (
+      proposal: CrewProposal,
+      crewInstanceId: string,
+    ) {
+      const instance = yield* crews
+        .read(crewInstanceId)
+        .pipe(Effect.mapError(operationError("reading the crew")));
+      if (instance === null) return;
+      const reserved = instance.members.filter(reservedByProposal(proposal.id));
+      if (reserved.length === 0) return;
+      yield* archiveSeatThreads(proposal, reserved);
+      yield* crews
+        .removeMembers(
+          instance.id,
+          reserved.map((member) => member.seatName),
+        )
+        .pipe(Effect.mapError(operationError("releasing reserved seats")));
     });
 
     const resolve: CrewProposalServiceShape["resolve"] = (input) =>
@@ -500,6 +537,16 @@ export const layer = Layer.effect(
             status: proposal.status,
           });
         if (input.decision === "decline") {
+          // An earlier approval may have failed partway and handed the gate back. Clean up first
+          // and record the decline last: a cleanup that fails leaves the gate open, so the person
+          // can decline again, rather than a declined proposal nobody can retry over seats that
+          // linger. For an addition, every row this proposal reserved is released; for a roster,
+          // the Crew record and any seat threads the failed launch created are retired.
+          if (proposal.crewInstanceId !== null) {
+            if (proposal.kind === "addition")
+              yield* retireFailedAddition(proposal, proposal.crewInstanceId);
+            else yield* retireFailedLaunch(proposal, proposal.crewInstanceId);
+          }
           const declined = yield* proposals
             .resolve({
               id: proposal.id,
@@ -514,21 +561,6 @@ export const layer = Layer.effect(
               proposalId: proposal.id,
               status: "declined",
             });
-          // An earlier approval may have failed partway and handed the gate back. For an
-          // addition, the seats it reserved (under the names the human approved, which may differ
-          // from the requested ones) are released. For a roster, the Crew record and any seat
-          // threads the failed launch created are retired, so nothing lives on that no Crew
-          // record knows.
-          if (proposal.crewInstanceId !== null) {
-            if (proposal.kind === "addition")
-              yield* crews
-                .removeUnregisteredMembers(
-                  proposal.crewInstanceId,
-                  (proposal.approvedSeats ?? proposal.requestedSeats).map((seat) => seat.seat),
-                )
-                .pipe(Effect.mapError(operationError("releasing reserved seats")));
-            else yield* retireFailedLaunch(proposal, proposal.crewInstanceId);
-          }
           yield* notifyCaptain(declined, null, "declined");
           return { proposal: declined, instance: null };
         }
@@ -556,17 +588,7 @@ export const layer = Layer.effect(
         // and the gate was handed back, the rows are still there under this proposal's own
         // deterministic ids; they are the reservation the retry converges on, not a clash
         // (Critic Q2, 2026-09-14).
-        const reservedHere = (member: {
-          readonly participantId: string;
-          readonly seatName: string;
-        }) =>
-          member.participantId ===
-          participantIdForThread(
-            spawnThreadId({
-              providerSessionId: PROPOSAL_SESSION,
-              requestKey: crewSeatRequestKey(proposal.id, member.seatName),
-            }),
-          );
+        const reservedHere = reservedByProposal(proposal.id);
         yield* validateSeats(seats, {
           seatNames: existingMembers
             .filter((member) => !reservedHere(member))

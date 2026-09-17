@@ -79,11 +79,12 @@ export interface AgentCrewInstanceServiceShape {
   ) => Effect.Effect<AddMembersOutcome, SqlError>;
   readonly read: (id: string) => Effect.Effect<AgentCrewInstance | null, SqlError>;
   /**
-   * Remove reserved seats that never became agents: rows whose participant has no Squadron
-   * membership, because the spawn failed before registering a home. Run when the person declines
-   * the request that reserved them, so a Crew never carries a seat with no thread.
+   * Drop seats from the roster by name, whether or not a thread was ever created for them. The
+   * caller has already archived any thread behind them: a failed launch or addition that the
+   * person declines, or a seat renamed on the card before a retry, leaves rows a Crew must not
+   * keep, and the store does not know which of them got as far as a home.
    */
-  readonly removeUnregisteredMembers: (
+  readonly removeMembers: (
     id: string,
     seatNames: ReadonlyArray<string>,
   ) => Effect.Effect<ReadonlyArray<string>, SqlError>;
@@ -362,25 +363,17 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
         `;
       });
 
-      const removeUnregisteredMembers = Effect.fn(
-        "j5.a2a.agentCrewInstances.removeUnregisteredMembers",
-      )(function* (id: string, seatNames: ReadonlyArray<string>) {
+      const removeMembers = Effect.fn("j5.a2a.agentCrewInstances.removeMembers")(function* (
+        id: string,
+        seatNames: ReadonlyArray<string>,
+      ) {
         if (seatNames.length === 0) return [];
         const rows = yield* sql<{ readonly seat_name: string }>`
-          SELECT seat_name FROM j5_agent_crew_member member
+          DELETE FROM j5_agent_crew_member
           WHERE crew_instance_id = ${id} AND seat_name IN ${sql.in([...seatNames])}
-            AND NOT EXISTS (
-              SELECT 1 FROM j5_a2a_squadron_membership home
-              WHERE home.participant_id = member.participant_id
-            )
+          RETURNING seat_name
         `;
-        const removed = rows.map((row) => row.seat_name);
-        if (removed.length > 0)
-          yield* sql`
-            DELETE FROM j5_agent_crew_member
-            WHERE crew_instance_id = ${id} AND seat_name IN ${sql.in(removed)}
-          `;
-        return removed;
+        return rows.map((row) => row.seat_name);
       });
 
       return AgentCrewInstanceService.of({
@@ -388,7 +381,7 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
         addMembers,
         read,
         findMembership,
-        removeUnregisteredMembers,
+        removeMembers,
         listForCaptain,
         listForSquadron,
         listInvolving,
