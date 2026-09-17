@@ -32,8 +32,10 @@ const crewRef = (instance: AgentCrewInstance) => ({
 });
 
 /**
- * Pure projection: every requested thread that is a member or a Captain gets one entry; threads
- * outside any Crew get none. A member's entry wins over a captain's, since a member cannot launch.
+ * Pure projection: every requested thread that is a live member or a Captain gets one entry;
+ * threads outside any Crew get none. A live member's entry wins over a captain's, since a member
+ * cannot launch; a retired Crew's seat is a plain agent again, so its old membership never hides
+ * the Crews that agent now commands.
  */
 export const projectCrewMemberships = (
   threadIds: ReadonlyArray<ThreadId>,
@@ -45,7 +47,10 @@ export const projectCrewMemberships = (
     let member: ThreadCrewMembership | undefined;
     const commanded: Array<ReturnType<typeof crewRef>> = [];
     for (const instance of instances) {
-      const seat = instance.members.find((candidate) => candidate.threadId === threadId);
+      const seat =
+        instance.archivedAt === null
+          ? instance.members.find((candidate) => candidate.threadId === threadId)
+          : undefined;
       if (seat !== undefined)
         member = { kind: "member", seat: seat.seatName, crew: crewRef(instance) };
       if (instance.captainParticipantId === participantId) commanded.push(crewRef(instance));

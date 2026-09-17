@@ -66,9 +66,9 @@ export interface CrewLaunchInput {
   readonly seats: ReadonlyArray<CrewLaunchSeat>;
   readonly brief: string;
   /**
-   * Runs once the Crew is recorded and before any brief starts, so the caller can bind its own
-   * record (the proposal) to the instance; a brief that fails afterwards then hands the gate back
-   * to a proposal that already names its Crew, and the retry converges on the same seats.
+   * Runs once the Crew is recorded and before any seat spawns, so the caller can bind its own
+   * record (the proposal) to the instance; a spawn or brief that fails afterwards then hands the
+   * gate back to a proposal that already names its Crew, and a decline can retire what exists.
    */
   readonly onRecorded?: (instance: AgentCrewInstance) => Effect.Effect<void>;
 }
@@ -91,12 +91,25 @@ export class CrewLaunchSeatUnavailableError extends Data.TaggedError(
   }
 }
 
-export class CrewLaunchPermissionError extends Data.TaggedError("CrewLaunchPermissionError")<{
-  readonly seatName: string;
-  readonly detail: string;
+/** The Crew is full; the seats it holds already reach the cap once the request is counted. */
+export class CrewLaunchCapError extends Data.TaggedError("CrewLaunchCapError")<{
+  readonly crewInstanceId: string;
+  readonly held: number;
+  readonly adding: number;
+  readonly cap: number;
 }> {
   override get message(): string {
-    return `Seat ${this.seatName} does not fit the Captain's permissions: ${this.detail} Nothing was spawned.`;
+    return `Crew ${this.crewInstanceId} holds ${this.held} seats; adding ${this.adding} would exceed the cap of ${this.cap}. Nothing was spawned.`;
+  }
+}
+
+/** A seat name the reservation could not take: another participant already holds it. */
+export class CrewLaunchSeatConflictError extends Data.TaggedError("CrewLaunchSeatConflictError")<{
+  readonly crewInstanceId: string;
+  readonly seatNames: ReadonlyArray<string>;
+}> {
+  override get message(): string {
+    return `Crew ${this.crewInstanceId} already holds ${this.seatNames.length === 1 ? "a seat" : "seats"} named ${this.seatNames.join(", ")} filled by a different agent. Nothing was spawned.`;
   }
 }
 
@@ -115,13 +128,16 @@ export class CrewLaunchOperationError extends Data.TaggedError("CrewLaunchOperat
 
 export type CrewLaunchError =
   | CrewLaunchSeatUnavailableError
-  | CrewLaunchPermissionError
+  | CrewLaunchCapError
+  | CrewLaunchSeatConflictError
   | CrewLaunchOperationError;
 
 export interface CrewLaunchServiceShape {
   /**
    * Launch an approved roster as persona-backed Peer Agents under the Captain, whole or not at
-   * all: seats resolve first, spawn in order, the instance is recorded, then briefs start.
+   * all: seats resolve first, the instance is recorded with every planned seat, the seats spawn
+   * in order, then briefs start. Recording first means a spawn that fails partway leaves seats a
+   * Crew record knows about, so a decline can retire them and a retry converges on them.
    */
   readonly launch: (input: CrewLaunchInput) => Effect.Effect<AgentCrewInstance, CrewLaunchError>;
   /** Spawn approved additional seats under the Captain of an existing Crew and bump its version. */
@@ -351,9 +367,10 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const resolved = yield* resolveSeats(input.captain, input.seats);
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
-        const members = yield* spawnSeats(input.captain, input.displayName, planned);
-        // Record the unit before any member starts, so a member's own crew request is refused.
-        const instance = yield* crews
+        // Record the unit before any seat exists: every planned seat is named under its
+        // deterministic ids, so a spawn that fails partway leaves nothing a Crew record does not
+        // know, and a member's own crew request is refused from its first turn.
+        const recorded = yield* crews
           .record({
             id: spawnCrewInstanceId({
               providerSessionId: input.providerSessionId,
@@ -365,7 +382,13 @@ export const layer = Layer.effect(
             displayName: input.displayName,
             brief: input.brief,
             createdAt: DateTime.formatIso(yield* DateTime.now),
-            members,
+            members: planned.map((member) => ({
+              seatName: member.seat.name,
+              agentId: member.seat.agentId,
+              participantId: member.participantId,
+              threadId: member.threadId,
+              reason: member.seat.reason,
+            })),
           })
           .pipe(
             Effect.mapError(
@@ -373,12 +396,34 @@ export const layer = Layer.effect(
                 new CrewLaunchOperationError({
                   phase: "recording the crew",
                   seatName: null,
-                  createdSeats: members.map(({ seatName }) => seatName),
+                  createdSeats: [],
                   cause,
                 }),
             ),
           );
+        // A retry after the human renamed a seat finds the earlier name still reserved with no
+        // agent behind it; drop it so the roster the seats read matches the one that launches.
+        const stale = recorded.members
+          .filter((member) => !planned.some((entry) => entry.seat.name === member.seatName))
+          .map((member) => member.seatName);
+        const instance =
+          stale.length === 0
+            ? recorded
+            : yield* crews.removeUnregisteredMembers(recorded.id, stale).pipe(
+                Effect.andThen(crews.read(recorded.id)),
+                Effect.map((current) => current ?? recorded),
+                Effect.mapError(
+                  (cause) =>
+                    new CrewLaunchOperationError({
+                      phase: "releasing renamed seats",
+                      seatName: null,
+                      createdSeats: [],
+                      cause,
+                    }),
+                ),
+              );
         if (input.onRecorded !== undefined) yield* input.onRecorded(instance);
+        yield* spawnSeats(input.captain, input.displayName, planned);
         yield* startBriefs(input.captain, instance, planned, input.brief);
         return instance;
       });
@@ -420,10 +465,24 @@ export const layer = Layer.effect(
             createdSeats: [],
             cause: `crew ${input.instance.id} no longer exists`,
           });
+        if (reservation.status === "archived")
+          return yield* new CrewLaunchOperationError({
+            phase: "reserving the added seats",
+            seatName: null,
+            createdSeats: [],
+            cause: `crew ${input.instance.id} is retired`,
+          });
+        if (reservation.status === "conflict")
+          return yield* new CrewLaunchSeatConflictError({
+            crewInstanceId: input.instance.id,
+            seatNames: reservation.conflicts,
+          });
         if (reservation.status === "cap-exceeded")
-          return yield* new CrewLaunchPermissionError({
-            seatName: planned[0]?.seat.name ?? "",
-            detail: `Crew ${input.instance.id} holds ${reservation.instance.members.length} seats; adding ${planned.length} would exceed the cap of ${CREW_SEAT_CAP}.`,
+          return yield* new CrewLaunchCapError({
+            crewInstanceId: input.instance.id,
+            held: reservation.instance.members.length,
+            adding: planned.length,
+            cap: CREW_SEAT_CAP,
           });
         yield* spawnSeats(input.captain, input.instance.displayName, planned);
         yield* startBriefs(

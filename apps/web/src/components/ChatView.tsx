@@ -7062,8 +7062,12 @@ export default function ChatView(props: ChatViewProps) {
     const composerElementContextsSnapshot = [...composerElementContexts];
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations];
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments];
+    // J5: a `/crew` turn sends the wrapped brief in place of the raw command; the attached
+    // contexts below still ride along, so the Captain reads them with the brief.
+    const promptBodyForSend =
+      j5Crew?.kind === "launch" ? crewLaunchPrompt(j5Crew.brief) : promptForSend;
     const messageTextWithContexts = appendElementContextsToPrompt(
-      appendTerminalContextsToPrompt(promptForSend, composerTerminalContextsSnapshot),
+      appendTerminalContextsToPrompt(promptBodyForSend, composerTerminalContextsSnapshot),
       composerElementContextsSnapshot,
     );
     const messageTextWithPreviewAnnotations = composerPreviewAnnotationsSnapshot.reduce(
@@ -7082,10 +7086,7 @@ export default function ChatView(props: ChatViewProps) {
       model: ctxSelectedModel,
       models: ctxSelectedProviderModels,
       effort: ctxSelectedPromptEffort,
-      text:
-        j5Crew?.kind === "launch"
-          ? crewLaunchPrompt(j5Crew.brief)
-          : messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
+      text: messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
     });
     if (composerRef.current?.validateProviderInput(outgoingMessageText) === false) {
       return;

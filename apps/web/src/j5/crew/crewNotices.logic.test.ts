@@ -37,6 +37,16 @@ describe("crew notices in the Captain's thread", () => {
       presentCrewNotice({ role: "user", text: "<j5_crew_launch>\nx\n</j5_crew_launch>\n\n" }),
     ).toBeNull();
     expect(presentCrewNotice({ role: "assistant", text: crewLaunchPrompt("x") })).toBeNull();
+    // Claude's effort prefix lands ahead of the wrapper; the card still recognizes the turn, and
+    // contexts appended after the brief stay part of what the Captain received.
+    const prefixed = presentCrewNotice({
+      role: "user",
+      createdBy: "user",
+      text: `Ultrathink:\n${crewLaunchPrompt("Fix it.")}\n\n<terminal_context>\n$ ls\n</terminal_context>`,
+    });
+    expect(prefixed).toMatchObject({ kind: "launch" });
+    expect(prefixed?.kind === "launch" && prefixed.brief).toContain("Fix it.");
+    expect(prefixed?.kind === "launch" && prefixed.brief).toContain("terminal_context");
   });
 
   it("presents an approved roster with its seats and names the seats for the identity read", () => {

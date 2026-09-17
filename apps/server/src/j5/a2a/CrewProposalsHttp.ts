@@ -39,7 +39,9 @@ const failureResponse = (cause: unknown) => {
       ? 404
       : tag === "CrewProposalNotOpenError" || tag === "CrewProposalRequestError"
         ? 409
-        : tag === "CrewLaunchSeatUnavailableError" || tag === "CrewLaunchPermissionError"
+        : tag === "CrewLaunchSeatUnavailableError" ||
+            tag === "CrewLaunchCapError" ||
+            tag === "CrewLaunchSeatConflictError"
           ? 409
           : 500;
   const message =

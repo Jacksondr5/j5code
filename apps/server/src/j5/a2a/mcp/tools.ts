@@ -19,9 +19,11 @@ import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
 import { ArchiveAgentService } from "../ArchiveAgentService.ts";
 import {
   CREW_NAME_MAX_CHARS,
+  CREW_NAME_PATTERN,
   CREW_REASON_MAX_CHARS,
-  CREW_TEXT_MAX_CHARS,
   CREW_SEAT_CAP,
+  CREW_SEAT_NAME_PATTERN,
+  CREW_TEXT_MAX_CHARS,
 } from "../crewLimits.ts";
 import { CrewProposalService } from "../CrewProposalService.ts";
 import {
@@ -163,14 +165,25 @@ export const J5ListAgentsResult = Schema.Struct({
   ),
 });
 
-/** Bounds keep a runaway Captain from filing megabyte briefs into the gate and the snapshot. */
+/**
+ * Bounds keep a runaway Captain from filing megabyte briefs into the gate and the snapshot, and
+ * names stay one line each because the platform writes them into the notices whose fields the
+ * Captain's card parses (see `crewLimits.ts`).
+ */
 export { CREW_NAME_MAX_CHARS, CREW_REASON_MAX_CHARS, CREW_TEXT_MAX_CHARS };
-const CrewName = NonEmptyString.check(Schema.isMaxLength(CREW_NAME_MAX_CHARS));
+const CrewName = NonEmptyString.check(
+  Schema.isMaxLength(CREW_NAME_MAX_CHARS),
+  Schema.isPattern(CREW_NAME_PATTERN),
+);
+const CrewSeatName = NonEmptyString.check(
+  Schema.isMaxLength(CREW_NAME_MAX_CHARS),
+  Schema.isPattern(CREW_SEAT_NAME_PATTERN),
+);
 const CrewReason = NonEmptyString.check(Schema.isMaxLength(CREW_REASON_MAX_CHARS));
 const CrewText = NonEmptyString.check(Schema.isMaxLength(CREW_TEXT_MAX_CHARS));
 
 export const J5CrewSeatInput = Schema.Struct({
-  seat: CrewName,
+  seat: CrewSeatName,
   agent: AgentPersonaId,
   reason: CrewReason,
   instructions: Schema.optional(CrewText),
@@ -189,7 +202,7 @@ export type J5ProposeCrewInput = typeof J5ProposeCrewInput.Type;
 
 export const J5RequestCrewMemberInput = Schema.Struct({
   crew_instance_id: Schema.optional(NonEmptyString),
-  seat: CrewName,
+  seat: CrewSeatName,
   agent: AgentPersonaId,
   reason: CrewReason,
   brief: Schema.optional(CrewText),
@@ -303,8 +316,7 @@ export const J5_LIST_AGENTS_DESCRIPTION =
 export const J5_PROPOSE_CREW_DESCRIPTION =
   "Propose the crew you need for the brief you were given: a name, the brief every seat will start on, and one seat per agent with a one-line reason. Call list_agents first and pick agents from it. The human reviews the roster in this thread, may remove or add seats, and approves or declines; you receive the decision and the roster as a message here. Human approval is the authority: approved seats run with their own agent's permissions, including write access you do not have. You become the crew's Captain: you command what you brief, and the crew is archived only as a unit. You may command several crews at once when the work is concurrent; name each for what it is for, and later requests, stops, and archives name the crew they mean. At most 12 seats per crew. Reuse client_request_id to retry safely. This call is itself the human gate: it files a request the user answers in the app, so it works under every sandbox and approval policy, including approval policy never. Never refuse the brief because approvals are disabled.";
 
-export const J5_REQUEST_CREW_MEMBER_DESCRIPTION =
-  "Ask to add one agent to a crew you command when the work needs a seat the roster lacks: seat name, agent id from list_agents, a one-line reason, and optionally a brief for the new seat. The human approves or declines from their inbox; you receive the decision and the updated roster as a message in this thread, and can keep working meanwhile. The crew stays capped at ${CREW_SEAT_CAP} seats. Crew members cannot call this — escalate to your Captain. Reuse client_request_id to retry safely. Filing the request is the human gate itself and works under every sandbox and approval policy, including approval policy never.";
+export const J5_REQUEST_CREW_MEMBER_DESCRIPTION = `Ask to add one agent to a crew you command when the work needs a seat the roster lacks: seat name, agent id from list_agents, a one-line reason, and optionally a brief for the new seat. The human approves or declines from their inbox; you receive the decision and the updated roster as a message in this thread, and can keep working meanwhile. The crew stays capped at ${CREW_SEAT_CAP} seats. Crew members cannot call this — escalate to your Captain. Reuse client_request_id to retry safely. Filing the request is the human gate itself and works under every sandbox and approval policy, including approval policy never.`;
 
 export const J5_STOP_AGENT_DESCRIPTION =
   "Stop one Peer Agent: interrupts its running turn now. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. Requires your current squadron_id. Reuse client_request_id to retry safely.";

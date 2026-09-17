@@ -48,19 +48,29 @@ export interface AgentCrewMembership {
   readonly seatName: string;
 }
 
-export interface AddMembersOutcome {
-  /** `cap-exceeded` wrote nothing; `missing` means the Crew is gone. */
-  readonly status: "added" | "cap-exceeded" | "missing";
-  readonly instance: AgentCrewInstance | null;
-}
+export type AddMembersOutcome =
+  | { readonly status: "added"; readonly instance: AgentCrewInstance }
+  /** Wrote nothing: the seats would pass the cap. */
+  | { readonly status: "cap-exceeded"; readonly instance: AgentCrewInstance }
+  /** Wrote nothing: a requested seat name is already held by a different participant. */
+  | {
+      readonly status: "conflict";
+      readonly instance: AgentCrewInstance;
+      readonly conflicts: ReadonlyArray<string>;
+    }
+  /** Wrote nothing: the Crew is retired, so nothing joins it. */
+  | { readonly status: "archived"; readonly instance: AgentCrewInstance }
+  | { readonly status: "missing"; readonly instance: null };
 
 export interface AgentCrewInstanceServiceShape {
   /** Idempotent by instance id: a launch retry with the same request key records nothing new. */
   readonly record: (input: RecordAgentCrewInput) => Effect.Effect<AgentCrewInstance, SqlError>;
   /**
-   * Append approved seats and bump the version; idempotent per seat name. The count, the cap,
-   * the version bump, and the ordinal base are all decided inside one transaction with an
-   * optimistic version check, so two additions approved at once cannot both slip under the cap.
+   * Append approved seats and bump the version; idempotent per seat identity, so a replay of the
+   * same seats reports `added` and writes nothing. The count, the cap, a same-name clash with a
+   * different participant, the retired stamp, the version bump, and the ordinal base are all
+   * decided inside one transaction with an optimistic version check, so two additions approved
+   * at once cannot both slip under the cap or both take one name.
    */
   readonly addMembers: (
     id: string,
@@ -228,6 +238,19 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
           Effect.gen(function* () {
             const current = yield* read(id);
             if (current === null) return { status: "missing", instance: null } as const;
+            if (current.archivedAt !== null)
+              return { status: "archived", instance: current } as const;
+            const conflicts = members
+              .filter((member) =>
+                current.members.some(
+                  (existing) =>
+                    existing.seatName === member.seatName &&
+                    existing.participantId !== member.participantId,
+                ),
+              )
+              .map((member) => member.seatName);
+            if (conflicts.length > 0)
+              return { status: "conflict", instance: current, conflicts } as const;
             const fresh = members.filter(
               (member) =>
                 !current.members.some((existing) => existing.seatName === member.seatName),
@@ -250,7 +273,7 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
               WHERE crew_instance_id = ${id}
             `;
             yield* insertMembers(id, fresh, version, Number(ordinals[0]?.next ?? 0));
-            return { status: "added", instance: yield* read(id) } as const;
+            return { status: "added", instance: (yield* read(id))! } as const;
           }),
         );
         for (let tries = 0; tries < 4; tries += 1) {
