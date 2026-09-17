@@ -457,7 +457,7 @@ export function AgentLibrarySettings() {
               onClick={() => setCreating({})}
             >
               <PlusIcon aria-hidden="true" className="size-4" />
-              Create agent
+              Create persona
             </Button>
             <Menu>
               <MenuTrigger
