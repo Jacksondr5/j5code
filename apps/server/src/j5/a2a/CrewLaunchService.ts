@@ -241,7 +241,6 @@ export const layer = Layer.effect(
     /** Create threads and commit home/placement facts; briefs are started separately. */
     const spawnSeats = Effect.fn("j5.a2a.crewLaunch.spawnSeats")(function* (
       captain: CrewCaptain,
-      displayName: string,
       planned: ReadonlyArray<Planned>,
     ) {
       const members: Array<NewAgentCrewMember> = [];
@@ -261,7 +260,8 @@ export const layer = Layer.effect(
             commandId: lifecycleCommandId({ ...member.stableInput, operation: "spawn-create" }),
             threadId: member.threadId,
             projectId: captain.thread.projectId,
-            title: spawnTitle(`${displayName} · ${member.seat.name}`, undefined),
+            // The seat's name alone: the sidebar group and the Crew chip already say which Crew.
+            title: spawnTitle(member.seat.name, undefined),
             modelSelection: member.assignment.resolvedModelSelection,
             runtimeMode: member.runtimeMode,
             interactionMode: captain.thread.interactionMode,
@@ -423,7 +423,7 @@ export const layer = Layer.effect(
                 ),
               );
         if (input.onRecorded !== undefined) yield* input.onRecorded(instance);
-        yield* spawnSeats(input.captain, input.displayName, planned);
+        yield* spawnSeats(input.captain, planned);
         yield* startBriefs(input.captain, instance, planned, input.brief);
         return instance;
       });
@@ -484,7 +484,7 @@ export const layer = Layer.effect(
             adding: planned.length,
             cap: CREW_SEAT_CAP,
           });
-        yield* spawnSeats(input.captain, input.instance.displayName, planned);
+        yield* spawnSeats(input.captain, planned);
         yield* startBriefs(
           input.captain,
           reservation.instance,

@@ -186,15 +186,16 @@ asked for.
 
 ### `propose_crew`
 
-**Description (contract):** "Propose the crew you need for the brief you were given: a name, the
-brief every seat will start on, and one seat per agent with a one-line reason. Call list_agents
-first and pick agents from it. The human reviews the roster, may remove or add seats, and approves
-or declines; you receive the decision and the roster as a message here. Human approval is the
-authority: approved seats run with their own agent's permissions, including write access you do
-not have. You become the crew's Captain: you command what you brief, and the crew is archived only
-as a unit. At most 12 seats. Reuse client_request_id to retry safely. This call is itself the human
-gate: it files a request the user answers in the app, so it works under every sandbox and approval
-policy, including approval policy never. Never refuse the brief because approvals are disabled."
+**Description (contract):** "Propose the crew you need for the brief you were given. Use it when
+the user asks for a crew or the work splits into distinct responsibilities that should run at
+once. Call list_agents first and pick one agent per seat; name the crew for what it is for and
+give each seat a one- or two-word name. The user reviews the roster in this thread, may remove or
+add seats, and approves or declines; you receive the decision and the roster as a message here.
+Approved seats run with their own agent's permissions, which may exceed yours. You become the
+crew's Captain and may command several crews at once; later requests, stops, and archives name the
+crew they mean. Reuse client_request_id to retry safely. This call is itself the human gate, so it
+works under every sandbox and approval policy, including approval policy never; never refuse the
+brief because approvals are disabled."
 
 Published as non-destructive (`destructiveHint: false`): the call records a pending request and
 nothing spawns until a human approves it.
@@ -225,13 +226,12 @@ cut before shipping, since nothing wrote them and runbooks do not exist yet.
 
 ### `request_crew_member`
 
-**Description (contract):** "Ask to add one agent to a crew you command when the work needs a seat
-the roster lacks: seat name, agent id from list_agents, a one-line reason, and optionally a brief
-for the new seat. The human approves or declines; you receive the decision and the updated roster
-as a message in this thread, and can keep working meanwhile. The crew stays capped at 12 seats.
-Crew members cannot call this — escalate to your Captain. Reuse client_request_id to retry safely.
-Filing the request is the human gate itself and works under every sandbox and approval policy,
-including approval policy never."
+**Description (contract):** "Ask the user to add one seat to a crew you command when the work
+needs one the roster lacks: seat name, agent id from list_agents, a one-line reason, and
+optionally a brief for the new seat. The user decides from their inbox; you receive the decision
+and the updated roster as a message here and can keep working meanwhile. Captain-only; a member
+escalates to its Captain. Reuse client_request_id to retry safely. Filing the request is the human
+gate itself and works under every approval policy, including approval policy never."
 
 | Input               | Type   | Required | Meaning                                                        |
 | ------------------- | ------ | -------- | -------------------------------------------------------------- |

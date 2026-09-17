@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
+import { Textarea } from "../../components/ui/textarea";
 import { useEnvironmentQuery } from "../../state/query";
 import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import type { CrewProposal, CrewProposalSeat } from "./crewProposalsClient";
@@ -23,7 +24,7 @@ export const removeSeat = (seats: ReadonlyArray<CrewProposalSeat>, seatName: str
 
 export const addSeat = (
   seats: ReadonlyArray<CrewProposalSeat>,
-  draft: { readonly seat: string; readonly agentId: string; readonly reason: string },
+  draft: { readonly seat: string; readonly agentId: string; readonly instructions: string },
 ): { readonly seats: ReadonlyArray<CrewProposalSeat>; readonly error: string | null } => {
   const seatName = draft.seat.trim().toLowerCase().replace(/\s+/g, "-");
   if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(seatName))
@@ -37,7 +38,8 @@ export const addSeat = (
       {
         seat: seatName,
         agentId: draft.agentId,
-        reason: draft.reason.trim() || "Added by the user",
+        reason: "Added by the user",
+        ...(draft.instructions.trim() ? { instructions: draft.instructions.trim() } : {}),
       },
     ],
     error: null,
@@ -76,7 +78,7 @@ export function CrewProposalCard(props: {
 }) {
   const { proposal } = props;
   const [seats, setSeats] = useState<ReadonlyArray<CrewProposalSeat>>(proposal.requestedSeats);
-  const [draft, setDraft] = useState({ seat: "", agentId: "", reason: "" });
+  const [draft, setDraft] = useState({ seat: "", agentId: "", instructions: "" });
   const [error, setError] = useState<string | null>(null);
   const catalog = useEnvironmentQuery(
     props.environmentId === null
@@ -157,7 +159,7 @@ export function CrewProposalCard(props: {
           </li>
         ))}
       </ul>
-      <div className="mt-3 grid gap-2 sm:grid-cols-[8rem_minmax(0,1fr)_minmax(0,1fr)_auto]">
+      <div className="mt-3 grid gap-2 sm:grid-cols-[8rem_minmax(0,1fr)_auto]">
         <Input
           aria-label="New seat name"
           disabled={props.busy}
@@ -183,13 +185,6 @@ export function CrewProposalCard(props: {
             ))}
           </SelectPopup>
         </Select>
-        <Input
-          aria-label="Reason for the new seat"
-          disabled={props.busy}
-          placeholder="why this seat"
-          value={draft.reason}
-          onChange={(event) => setDraft({ ...draft, reason: event.currentTarget.value })}
-        />
         <Button
           aria-label="Add seat"
           disabled={props.busy}
@@ -201,13 +196,22 @@ export function CrewProposalCard(props: {
             setError(next.error);
             if (next.error === null) {
               setSeats(next.seats);
-              setDraft({ seat: "", agentId: "", reason: "" });
+              setDraft({ seat: "", agentId: "", instructions: "" });
             }
           }}
         >
           <PlusIcon className="size-4" />
           Add
         </Button>
+        {/* What the new seat should do, beyond the crew's brief; the Captain's seats carry theirs. */}
+        <Textarea
+          aria-label="Instructions for the new seat"
+          className="min-h-16 sm:col-span-3"
+          disabled={props.busy}
+          placeholder="Instructions for this seat (optional)"
+          value={draft.instructions}
+          onChange={(event) => setDraft({ ...draft, instructions: event.currentTarget.value })}
+        />
       </div>
       {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
       <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
