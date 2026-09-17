@@ -328,7 +328,7 @@ export const J5StopCrewResult = Schema.Struct({
 });
 
 export const J5_STOP_CREW_DESCRIPTION =
-  "Stop a Crew you command: interrupts the running turn of every seat now. Seats that are idle are untouched, nothing settles or is retired, and every seat can be messaged again afterwards. The result says, seat by seat, whether an interrupt was requested or the seat was already idle. Only the Captain may call this; a member escalates to its Captain instead. Requires your current squadron_id. Reuse client_request_id to retry safely.";
+  "Stop a Crew you command: interrupts the running turn of every seat now. Nothing settles or is retired, and every seat can be messaged again afterwards. Captain-only. Reuse client_request_id to retry safely.";
 
 export const J5ArchiveCrewInput = Schema.Struct({
   client_request_id: Schema.optional(NonEmptyString),
@@ -387,7 +387,7 @@ export const J5_ARCHIVE_AGENT_DESCRIPTION =
   "Archive one Peer Agent reversibly. Unarchive restores the same identity, but does not reopen Exchanges or replay cancelled messages. A clean archive — no open exchanges, no running turn — completes immediately. Otherwise the call refuses and lists exactly what archiving ends — the asks that will close, the turn that will stop — along with a confirmation_token; call again with that token to proceed. The archived agent leaves the active roster; its ledger and conversation stay readable forever. Requires your current squadron_id. Reuse client_request_id to retry safely.";
 
 export const J5_ARCHIVE_CREW_DESCRIPTION =
-  "Retire a whole Crew you command, for good. Crews archive only as a unit — members are never retired one by one. A clean archive (no open exchanges, no running turns on any seat) completes immediately. Otherwise the call refuses and lists, seat by seat, exactly what archiving ends — who is waiting on which ask, which turns will stop — along with a confirmation_token. Before retrying with that token, check with the human: a Crew others are waiting on is a judgment call, and a successor Crew needs a fresh brief you write. Nothing is destroyed: worktrees, branches, and ledgers stay readable. Requires your current squadron_id. Reuse client_request_id to retry safely.";
+  "Retire a whole Crew you command. Crews archive only as a unit — members are never retired one by one. A clean archive completes immediately; otherwise the call refuses with the facts and a confirmation_token. Before retrying with that token, check with the user. Nothing is destroyed: worktrees, branches, and ledgers stay readable. Reuse client_request_id to retry safely.";
 
 const sendDependencies = [
   McpInvocationContext.McpInvocationContext,

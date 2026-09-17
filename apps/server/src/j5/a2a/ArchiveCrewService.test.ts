@@ -170,7 +170,7 @@ it.effect("refuses until the captain confirms every member's facts, then retires
         ],
       );
       assert.include(refusal.message, "1 open exchange(s) and 1 running turn(s)");
-      assert.include(refusal.message, "check with the human");
+      assert.include(refusal.message, "check with the user");
       assert.lengthOf(yield* Ref.get(archived), 0);
 
       const notCaptain = yield* service

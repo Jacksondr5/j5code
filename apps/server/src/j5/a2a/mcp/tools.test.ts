@@ -79,7 +79,7 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
   ]);
   assert.include(J5ArchiveCrewTool.description ?? "", "only as a unit");
   assert.include(J5ArchiveCrewTool.description ?? "", "confirmation_token");
-  assert.include(J5ArchiveCrewTool.description ?? "", "check with the human");
+  assert.include(J5ArchiveCrewTool.description ?? "", "check with the user");
   assert.isTrue(Context.get(J5ArchiveCrewTool.annotations, Tool.Destructive));
   // Proposals only file a human-gated request, and must say so: read-only Captains run with
   // approval policy never and have refused the brief when the gate looked like a shell approval.

@@ -268,10 +268,8 @@ the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `rea
 ### `stop_crew`
 
 **Description (contract):** "Stop a Crew you command: interrupts the running turn of every seat
-now. Seats that are idle are untouched, nothing settles or is retired, and every seat can be
-messaged again afterwards. The result says, seat by seat, whether an interrupt was requested or the
-seat was already idle. Only the Captain may call this; a member escalates to its Captain instead.
-Requires your current squadron_id. Reuse client_request_id to retry safely."
+now. Nothing settles or is retired, and every seat can be messaged again afterwards. Captain-only.
+Reuse client_request_id to retry safely."
 
 | Input               | Type              | Required | Meaning                                        |
 | ------------------- | ----------------- | -------- | ---------------------------------------------- |
@@ -291,13 +289,10 @@ participant, so no Captain check applies to it (Bryant, 2026-09-14).
 
 ### `archive_crew`
 
-**Description (contract):** "Retire a whole Crew you command, for good. Crews archive only as a
-unit — members are never retired one by one. A clean archive (no open exchanges, no running turns
-on any seat) completes immediately. Otherwise the call refuses and lists, seat by seat, exactly
-what archiving ends — who is waiting on which ask, which turns will stop — along with a
-confirmation_token. Before retrying with that token, check with the human: a Crew others are
-waiting on is a judgment call, and a successor Crew needs a fresh brief you write. Nothing is
-destroyed: worktrees, branches, and ledgers stay readable. Requires your current squadron_id. Reuse
+**Description (contract):** "Retire a whole Crew you command. Crews archive only as a unit —
+members are never retired one by one. A clean archive completes immediately; otherwise the call
+refuses with the facts and a confirmation_token. Before retrying with that token, check with the
+user. Nothing is destroyed: worktrees, branches, and ledgers stay readable. Reuse
 client_request_id to retry safely."
 
 | Input                | Type              | Required | Meaning                                              |
@@ -321,8 +316,8 @@ the job; new work on any seat makes it stale and yields a fresh token. Partial f
 seats retired so far and the seat that failed; retry with the same `client_request_id` and token.
 
 **Members are never archived one by one (R14):** `archive_agent` refuses a target that sits in a
-Crew and names the `archive_crew` call to make instead. Members settle automatically when a run
-ends with nothing owed; settlement is not archive. `stop_agent` on a member is still allowed;
+Crew and names the `archive_crew` call to make instead. A member that finishes with nothing owed is
+reported to its Captain; the platform settles no seat, and settlement is not archive. `stop_agent` on a member is still allowed;
 stopping retires nothing.
 
 ### Kept upstream tools

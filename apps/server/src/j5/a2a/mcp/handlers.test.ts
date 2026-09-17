@@ -2015,7 +2015,7 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
         ]),
         [["builder", memberParticipantId, false, ["exchange:j5:mcp-archive-crew"], null]],
       );
-      assert.include(message(refused), "check with the human");
+      assert.include(message(refused), "check with the user");
 
       const confirmed = yield* run("archive_crew", {
         squadron_id: squadronId,

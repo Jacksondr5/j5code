@@ -617,7 +617,7 @@ it.effect(
     }).pipe(Effect.scoped),
 );
 
-it.effect("the boot sweep settles a finished seat nothing settled and tells its Captain", () =>
+it.effect("the boot sweep tells the Captain about a finished seat nothing reported", () =>
   Effect.gen(function* () {
     const database = NodeSqliteClient.layerMemory();
     const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
@@ -637,7 +637,7 @@ it.effect("the boot sweep settles a finished seat nothing settled and tells its 
       brief: "Finish the work.",
       createdAt: DateTime.formatIso(createdAt),
       members: [
-        // Finished while the server was down: settles now.
+        // Finished while the server was down: reported now.
         {
           seatName: "scout",
           agentId: "scout",
@@ -674,7 +674,7 @@ it.effect("the boot sweep settles a finished seat nothing settled and tells its 
           },
         ],
       }) as unknown as OrchestrationV2ThreadProjection;
-    const layer = settlerLayer.pipe(
+    const layer = notifierLayer.pipe(
       Layer.provideMerge(
         Layer.mock(ThreadManagementService)({
           getThreadProjection: (threadId) =>
@@ -698,12 +698,12 @@ it.effect("the boot sweep settles a finished seat nothing settled and tells its 
       Layer.provideMerge(NodeServices.layer),
     );
     yield* Effect.gen(function* () {
-      const settler = yield* CrewMemberSettler;
-      assert.deepStrictEqual(yield* settler.reconcile, [scoutThread]);
+      const notifier = yield* CrewSeatFinishNotifier;
+      assert.deepStrictEqual(yield* notifier.reconcile, [scoutThread]);
       const commands = yield* Ref.get(dispatched);
       assert.deepStrictEqual(
         commands.map((command) => command.type),
-        ["message.dispatch", "thread.settle"],
+        ["message.dispatch"],
       );
       const notice = commands[0];
       if (notice?.type === "message.dispatch") {
@@ -712,8 +712,6 @@ it.effect("the boot sweep settles a finished seat nothing settled and tells its 
         // The newest finish is the one reported.
         assert.include(notice.text, "run_status: failed");
       }
-      const settle = commands[1];
-      if (settle?.type === "thread.settle") assert.equal(settle.threadId, scoutThread);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );
