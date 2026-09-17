@@ -347,7 +347,7 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
           assert.equal(projection.thread.modelSelection.model, lunaSelection.model);
           assert.equal(projection.thread.runtimeMode, "approval-required");
           assert.equal(projection.thread.worktreePath, isolatedWorkspace);
-          const firstTurnText = `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${spawned.participant_id}\nsquadron_id: ${squadronId}\nsquadron_name: J5 Luna verb E2E\n</j5_spawn_context>\n\n<spawner_brief>\n${brief}\n</spawner_brief>`;
+          const firstTurnText = `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${spawned.participant_id}\nsquadron_id: ${squadronId}\nsquadron_name: J5 Luna verb E2E\nspawned_by: ${parentHome.participantId}\nspawner_thread_id: ${parentThreadId}\n</j5_spawn_context>\n\n<spawner_brief>\n${brief}\n</spawner_brief>`;
           assert.equal(
             projection.messages.filter((message) => message.text === firstTurnText).length,
             1,
