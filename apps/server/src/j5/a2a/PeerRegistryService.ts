@@ -76,7 +76,16 @@ export type AddPeerError =
   | PeerCredentialMismatchError
   | PeerIsSelfError;
 
+/** A peer record plus the credential this server presents to it; never leaves the process. */
+export interface PeerConnection extends PeerRecord {
+  readonly credential: string;
+}
+
 export interface PeerRegistryServiceShape {
+  /** This server's environment id, the identity a peer's credential must name. */
+  readonly selfEnvironmentId: Effect.Effect<EnvironmentId>;
+  /** Every peer with the credential to reach it, for the outbound transport and directory reads. */
+  readonly connections: () => Effect.Effect<ReadonlyArray<PeerConnection>, SqlError>;
   /** Proves the credential at the origin, then upserts; re-adding the same peer rotates its origin and credential. */
   readonly add: (
     input: AddPeerInput,
@@ -97,6 +106,10 @@ interface PeerRow {
   readonly label: string;
   readonly origin: string;
   readonly created_at: string;
+}
+
+interface PeerConnectionRow extends PeerRow {
+  readonly credential: string;
 }
 
 const recordFromRow = (row: PeerRow): PeerRecord => ({
@@ -219,6 +232,17 @@ export const layer: Layer.Layer<
         };
       });
 
+    const connections: PeerRegistryServiceShape["connections"] = () =>
+      sql<PeerConnectionRow>`
+        SELECT environment_id, label, origin, credential, created_at
+        FROM j5_a2a_peer
+        ORDER BY label, environment_id
+      `.pipe(
+        Effect.map((rows) =>
+          rows.map((row) => ({ ...recordFromRow(row), credential: row.credential })),
+        ),
+      );
+
     const list: PeerRegistryServiceShape["list"] = () =>
       sql<PeerRow>`
         SELECT environment_id, label, origin, created_at
@@ -234,6 +258,12 @@ export const layer: Layer.Layer<
         return { removed: true };
       });
 
-    return PeerRegistryService.of({ add, list, remove });
+    return PeerRegistryService.of({
+      selfEnvironmentId: identity.getEnvironmentId,
+      connections,
+      add,
+      list,
+      remove,
+    });
   }),
 );

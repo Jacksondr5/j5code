@@ -22,6 +22,7 @@ import {
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
 import { A2ALedger } from "../LedgerService.ts";
+import { PeerDirectory } from "../PeerDirectory.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
@@ -108,8 +109,15 @@ export const J5ParticipantDirectoryRow = Schema.Struct({
 });
 export type J5ParticipantDirectoryRow = typeof J5ParticipantDirectoryRow.Type;
 
+/** A peer server whose address book could not be read; its agents are absent, not gone. */
+export const J5UnreadPeer = Schema.Struct({
+  label: Schema.String,
+  reason: Schema.String,
+});
+
 export const J5ListParticipantsResult = Schema.Struct({
   participants: Schema.Array(J5ParticipantDirectoryRow),
+  unread_peers: Schema.Array(J5UnreadPeer),
 });
 
 const NonEmptyString = Schema.String.check(Schema.isNonEmpty());
@@ -244,6 +252,7 @@ const placementDependencies = [
   A2ASendService,
   ParticipantPlacementService,
   OrchestratorV2,
+  PeerDirectory,
 ];
 
 const spawnDependencies = [

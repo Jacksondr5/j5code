@@ -16,10 +16,11 @@ import Migration0010 from "./migrations/010_OpenInboxCountIndex.ts";
 import Migration0013 from "./migrations/013_MachineParticipants.ts";
 import Migration0014 from "./migrations/014_Peers.ts";
 import Migration0015 from "./migrations/015_PeerDeliveryOrigin.ts";
+import Migration0016 from "./migrations/016_PeerDeliveryReceiver.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
-// Entries 1 through 15 are persisted migration history. Keep their file and manifest names unchanged;
+// Entries 1 through 16 are persisted migration history. Keep their file and manifest names unchanged;
 // applied migrations are skipped by id and never rerun.
 export const migrationEntries = [
   [1, "EpicCommunicationLedger", Migration0001],
@@ -37,6 +38,7 @@ export const migrationEntries = [
   [13, "MachineParticipants", Migration0013],
   [14, "Peers", Migration0014],
   [15, "PeerDeliveryOrigin", Migration0015],
+  [16, "PeerDeliveryReceiver", Migration0016],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>
