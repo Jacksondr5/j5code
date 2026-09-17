@@ -1801,7 +1801,7 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
           readonly route: string | null;
         }>;
       };
-      assert.lengthOf(agents, 12);
+      assert.lengthOf(agents, 11);
       const scout = agents.find((agent) => agent.id === "scout");
       assert.deepStrictEqual(
         [scout?.runtime_policy, scout?.availability, scout?.route],
