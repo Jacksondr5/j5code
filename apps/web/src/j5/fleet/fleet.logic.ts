@@ -1,3 +1,6 @@
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { ThreadId, type EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
+
 import type { FleetAgent, FleetSquadron } from "./fleetClient";
 
 /** One rendered row of the Roster tree. Crew members hang under their Captain as one unit. */
@@ -97,3 +100,32 @@ export const countFleetAlerts = (squadrons: ReadonlyArray<FleetSquadron>) =>
 /** Origin copy for the Roster row; unknown renders as `?` rather than a plausible guess. */
 export const originLabel = (origin: FleetAgent["origin"]) =>
   origin === "human" ? "Human-created" : origin === "agent" ? "Agent-spawned" : "?";
+
+/**
+ * The sidebar rows the roster says are involved in a Crew or a spawn: every seat, every Captain
+ * a seat names, and every agent with a placed child. The Fleet poll re-reads Crew chips and
+ * children for these rows only, so that read's cost follows involvement, not the thread list;
+ * a Captain that gained a Crew on another device is named here on the next poll.
+ */
+export function fleetInvolvedThreadRefs(
+  squadrons: ReadonlyArray<FleetSquadron & { readonly environmentId: EnvironmentId }>,
+): ReadonlyArray<ScopedThreadRef> {
+  const refs = new Map<string, ScopedThreadRef>();
+  for (const squadron of squadrons) {
+    const byId = new Map(squadron.agents.map((agent) => [agent.participantId, agent]));
+    const involve = (participantId: string) => {
+      const threadId = byId.get(participantId)?.threadId ?? null;
+      if (threadId === null) return;
+      const ref = scopeThreadRef(squadron.environmentId, ThreadId.make(threadId));
+      refs.set(`${ref.environmentId}\u0000${ref.threadId}`, ref);
+    };
+    for (const agent of squadron.agents) {
+      if (agent.crew !== null) {
+        involve(agent.participantId);
+        involve(agent.crew.captainParticipantId);
+      }
+      if (agent.placementParentId !== null) involve(agent.placementParentId);
+    }
+  }
+  return [...refs.values()];
+}

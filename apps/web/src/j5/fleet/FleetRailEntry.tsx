@@ -33,7 +33,9 @@ export function FleetRailEntry({ onBackdrop }: { readonly onBackdrop: boolean })
     <Link
       aria-label={label}
       className={cn(
-        "relative z-10 flex size-7 shrink-0 items-center justify-center rounded-md outline-hidden transition-colors [-webkit-app-region:no-drag] focus-visible:ring-2 focus-visible:ring-ring",
+        // The gap to the inbox bell beside it is this element's own margin, so the upstream
+        // wrapper keeps its spacing classes.
+        "relative z-10 me-0.5 flex size-7 shrink-0 items-center justify-center rounded-md outline-hidden transition-colors [-webkit-app-region:no-drag] focus-visible:ring-2 focus-visible:ring-ring",
         onBackdrop
           ? "text-white/80 hover:bg-white/15 hover:text-white"
           : "text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground",

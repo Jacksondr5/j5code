@@ -97,8 +97,14 @@ function SpawnedChildrenRows(props: {
         <SpawnedChildGroupRows
           key={group.key}
           group={group}
-          isOpen={expandedSet.has(spawnedGroupExpansionKey(props.thread.id, group.key))}
-          onToggle={() => toggleExpansion(spawnedGroupExpansionKey(props.thread.id, group.key))}
+          isOpen={expandedSet.has(
+            spawnedGroupExpansionKey(props.thread.environmentId, props.thread.id, group.key),
+          )}
+          onToggle={() =>
+            toggleExpansion(
+              spawnedGroupExpansionKey(props.thread.environmentId, props.thread.id, group.key),
+            )
+          }
           onOpen={open}
         />
       ))}

@@ -93,7 +93,12 @@ describe("spawned children under a sidebar row", () => {
     expect(groups.map((group) => group.needsAttention)).toEqual([false, true, false]);
     expect(groups[1]!.rows.map(({ child }) => child.threadId)).toEqual(["critic", "builder"]);
     expect(groupSpawnedChildren([])).toEqual([]);
-    expect(spawnedGroupExpansionKey("captain", "crew:crew:1")).toBe("captain/crew:crew:1");
+    expect(spawnedGroupExpansionKey("env:a", "captain", "crew:crew:1")).toBe(
+      "env:a/captain/crew:crew:1",
+    );
+    expect(spawnedGroupExpansionKey("env:b", "captain", "crew:crew:1")).not.toBe(
+      spawnedGroupExpansionKey("env:a", "captain", "crew:crew:1"),
+    );
   });
 
   it("remembers expansion per parent and tolerates broken or missing storage", () => {
