@@ -9,7 +9,8 @@ import { ParticipantId, type SquadronId } from "./contracts.ts";
 
 export interface AgentCrewMember {
   readonly seatName: string;
-  readonly agentId: string;
+  /** The saved agent the seat runs as; null for a custom seat that runs as the Captain. */
+  readonly agentId: string | null;
   readonly participantId: ParticipantId;
   readonly threadId: ThreadId;
   /** The instance version this seat joined at; 1 for the approved roster. */
@@ -130,7 +131,7 @@ interface InstanceRow {
 interface MemberRow {
   readonly crew_instance_id: string;
   readonly seat_name: string;
-  readonly agent_id: string;
+  readonly agent_id: string | null;
   readonly participant_id: string;
   readonly thread_id: string;
   readonly ordinal: number;

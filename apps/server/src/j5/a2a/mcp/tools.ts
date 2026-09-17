@@ -186,7 +186,8 @@ const CrewText = NonEmptyString.check(Schema.isMaxLength(CREW_TEXT_MAX_CHARS));
 
 export const J5CrewSeatInput = Schema.Struct({
   seat: CrewSeatName,
-  agent: AgentPersonaId,
+  /** Omitted for a custom seat: no saved agent, it runs on the Captain's provider and model. */
+  agent: Schema.optional(AgentPersonaId),
   reason: CrewReason,
   instructions: Schema.optional(CrewText),
 });
@@ -205,7 +206,7 @@ export type J5ProposeCrewInput = typeof J5ProposeCrewInput.Type;
 export const J5RequestCrewMemberInput = Schema.Struct({
   crew_instance_id: Schema.optional(NonEmptyString),
   seat: CrewSeatName,
-  agent: AgentPersonaId,
+  agent: Schema.optional(AgentPersonaId),
   reason: CrewReason,
   brief: Schema.optional(CrewText),
   instructions: Schema.optional(CrewText),
@@ -220,7 +221,7 @@ export const J5CrewProposalResult = Schema.Struct({
   members: Schema.Array(
     Schema.Struct({
       seat: NonEmptyString,
-      agent_id: AgentPersonaId,
+      agent_id: Schema.NullOr(AgentPersonaId),
       participant_id: ParticipantId,
       thread_id: ThreadId,
     }),
@@ -375,10 +376,10 @@ export const J5_LIST_AGENTS_DESCRIPTION =
   "List the saved agents in this environment: id, purpose, runtime policy, whether each can start now, and the provider, model, and reasoning it would run on. Read this before choosing an agent for spawn_agent or a crew roster so the choice fits the task and the user's budget. Read-only.";
 
 export const J5_PROPOSE_CREW_DESCRIPTION =
-  "Propose the crew you need for the brief you were given. Use it when the user asks for a crew or the work splits into distinct responsibilities that should run at once. Call list_agents first and pick one agent per seat; name the crew for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the roster in this thread, may remove or add seats, and approves or declines; you receive the decision and the roster as a message here. Approved seats run with their own agent's permissions, which may exceed yours. You become the crew's Captain and may command several crews at once; later requests, stops, and archives name the crew they mean. Reuse client_request_id to retry safely. This call is itself the human gate, so it works under every sandbox and approval policy, including approval policy never; never refuse the brief because approvals are disabled.";
+  "Propose the crew you need for the brief you were given. Use it when the user asks for a crew or the work splits into distinct responsibilities that should run at once. Call list_agents first and pick one agent per seat, or leave agent unset for a custom seat that runs on your own provider and model with only its instructions and the brief; name the crew for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the roster in this thread, may remove or add seats, and approves or declines; you receive the decision and the roster as a message here. Approved seats run with their own agent's permissions, which may exceed yours. You become the crew's Captain and may command several crews at once; later requests, stops, and archives name the crew they mean. Reuse client_request_id to retry safely. This call is itself the human gate, so it works under every sandbox and approval policy, including approval policy never; never refuse the brief because approvals are disabled.";
 
 export const J5_REQUEST_CREW_MEMBER_DESCRIPTION =
-  "Ask the user to add one seat to a crew you command when the work needs one the roster lacks: seat name, agent id from list_agents, a one-line reason, and optionally a brief for the new seat. The user decides from their inbox; you receive the decision and the updated roster as a message here and can keep working meanwhile. Captain-only; a member escalates to its Captain. Reuse client_request_id to retry safely. Filing the request is the human gate itself and works under every approval policy, including approval policy never.";
+  "Ask the user to add one seat to a crew you command when the work needs one the roster lacks: seat name, agent id from list_agents (or none for a custom seat that runs on your provider and model), a one-line reason, and optionally instructions and a brief for the new seat. The user decides from their inbox; you receive the decision and the updated roster as a message here and can keep working meanwhile. Captain-only; a member escalates to its Captain. Reuse client_request_id to retry safely. Filing the request is the human gate itself and works under every approval policy, including approval policy never.";
 
 export const J5_STOP_AGENT_DESCRIPTION =
   "Stop one Peer Agent: interrupts its running turn now. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. Requires your current squadron_id. Reuse client_request_id to retry safely.";

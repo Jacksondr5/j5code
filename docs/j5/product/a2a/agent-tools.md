@@ -188,24 +188,25 @@ asked for.
 
 **Description (contract):** "Propose the crew you need for the brief you were given. Use it when
 the user asks for a crew or the work splits into distinct responsibilities that should run at
-once. Call list_agents first and pick one agent per seat; name the crew for what it is for and
-give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the roster in this thread, may remove or
-add seats, and approves or declines; you receive the decision and the roster as a message here.
-Approved seats run with their own agent's permissions, which may exceed yours. You become the
-crew's Captain and may command several crews at once; later requests, stops, and archives name the
-crew they mean. Reuse client_request_id to retry safely. This call is itself the human gate, so it
-works under every sandbox and approval policy, including approval policy never; never refuse the
-brief because approvals are disabled."
+once. Call list_agents first and pick one agent per seat, or leave agent unset for a custom seat
+that runs on your own provider and model with only its instructions and the brief; name the crew
+for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the roster in this
+thread, may remove or add seats, and approves or declines; you receive the decision and the roster
+as a message here. Approved seats run with their own agent's permissions, which may exceed yours.
+You become the crew's Captain and may command several crews at once; later requests, stops, and
+archives name the crew they mean. Reuse client_request_id to retry safely. This call is itself the
+human gate, so it works under every sandbox and approval policy, including approval policy never;
+never refuse the brief because approvals are disabled."
 
 Published as non-destructive (`destructiveHint: false`): the call records a pending request and
 nothing spawns until a human approves it.
 
-| Input               | Type                                           | Required | Meaning                                             |
-| ------------------- | ---------------------------------------------- | -------- | --------------------------------------------------- |
-| `name`              | string                                         | yes      | The Crew's display name                             |
-| `brief`             | string                                         | yes      | What every seat starts on, verbatim                 |
-| `seats`             | 1–12 of `{seat, agent, reason, instructions?}` | yes      | Seat name, agent id from `list_agents`, why, wiring |
-| `client_request_id` | string                                         | no       | Supply and reuse to make retries safe               |
+| Input               | Type                                            | Required | Meaning                                                                      |
+| ------------------- | ----------------------------------------------- | -------- | ---------------------------------------------------------------------------- |
+| `name`              | string                                          | yes      | The Crew's display name                                                      |
+| `brief`             | string                                          | yes      | What every seat starts on, verbatim                                          |
+| `seats`             | 1–12 of `{seat, agent?, reason, instructions?}` | yes      | Seat name, agent id from `list_agents` (none for a custom seat), why, wiring |
+| `client_request_id` | string                                          | no       | Supply and reuse to make retries safe                                        |
 
 Bounds: `name` and `seat` up to 100 characters, `reason` up to 500, `brief` and `instructions` up
 to 8,000.
@@ -227,11 +228,12 @@ cut before shipping, since nothing wrote them and runbooks do not exist yet.
 ### `request_crew_member`
 
 **Description (contract):** "Ask the user to add one seat to a crew you command when the work
-needs one the roster lacks: seat name, agent id from list_agents, a one-line reason, and
-optionally a brief for the new seat. The user decides from their inbox; you receive the decision
-and the updated roster as a message here and can keep working meanwhile. Captain-only; a member
-escalates to its Captain. Reuse client_request_id to retry safely. Filing the request is the human
-gate itself and works under every approval policy, including approval policy never."
+needs one the roster lacks: seat name, agent id from list_agents (or none for a custom seat that
+runs on your provider and model), a one-line reason, and optionally instructions and a brief for
+the new seat. The user decides from their inbox; you receive the decision and the updated roster as
+a message here and can keep working meanwhile. Captain-only; a member escalates to its Captain.
+Reuse client_request_id to retry safely. Filing the request is the human gate itself and works
+under every approval policy, including approval policy never."
 
 | Input               | Type   | Required | Meaning                                                        |
 | ------------------- | ------ | -------- | -------------------------------------------------------------- |

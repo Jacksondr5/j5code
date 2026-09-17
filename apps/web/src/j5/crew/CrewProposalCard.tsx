@@ -18,6 +18,9 @@ import { useEnvironmentQuery } from "../../state/query";
 import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import type { CrewProposal, CrewProposalSeat } from "./crewProposalsClient";
 
+/** The agent choice for a seat that runs without a saved agent: named and briefed on the card. */
+export const CUSTOM_AGENT = "__custom__";
+
 /** Pure roster edits so the card's behavior is testable without rendering. */
 export const removeSeat = (seats: ReadonlyArray<CrewProposalSeat>, seatName: string) =>
   seats.filter((seat) => seat.seat !== seatName);
@@ -31,30 +34,40 @@ export const addSeat = (
     return { seats, error: "Seat names are lowercase words joined by hyphens." };
   if (seats.some((seat) => seat.seat === seatName))
     return { seats, error: `Seat ${seatName} already exists.` };
-  if (draft.agentId.length === 0) return { seats, error: "Pick an agent for the seat." };
+  if (draft.agentId.length === 0)
+    return { seats, error: "Pick an agent for the seat, or Custom agent." };
+  const custom = draft.agentId === CUSTOM_AGENT;
+  const instructions = draft.instructions.trim();
+  // A custom seat has no definition; its instructions are all it will know beyond the brief.
+  if (custom && instructions.length === 0)
+    return { seats, error: "Give the custom agent its instructions." };
   return {
     seats: [
       ...seats,
       {
         seat: seatName,
-        agentId: draft.agentId,
+        agentId: custom ? null : draft.agentId,
         reason: "Added by the user",
-        ...(draft.instructions.trim() ? { instructions: draft.instructions.trim() } : {}),
+        ...(instructions ? { instructions } : {}),
       },
     ],
     error: null,
   };
 };
 
-/** What the human is approving for a seat beyond its name: the agent and the access it runs with. */
+/**
+ * What the human is approving for a seat beyond its name: the agent and the access it runs with.
+ * A custom seat has no agent and runs with the Captain's own access.
+ */
 export const describeSeatAgent = (
   rows: ReadonlyArray<{
     readonly personaId: string;
     readonly displayName: string;
     readonly authority: string;
   }>,
-  agentId: string,
+  agentId: string | null,
 ): { readonly name: string; readonly authority: string | null } => {
+  if (agentId === null) return { name: "Custom agent", authority: "Runs as the Captain" };
   const row = rows.find((candidate) => candidate.personaId === agentId);
   return row === undefined
     ? { name: agentId, authority: null }
@@ -63,7 +76,8 @@ export const describeSeatAgent = (
 
 /**
  * The human gate for one Crew request. The Captain's seats arrive with reasons; the user may drop
- * seats, add agents from the library, then approve the final roster or decline the whole request.
+ * seats, add agents from the library or a custom seat with its own instructions, then approve the
+ * final roster or decline the whole request.
  */
 export function CrewProposalCard(props: {
   readonly proposal: CrewProposal;
@@ -97,7 +111,8 @@ export function CrewProposalCard(props: {
     [catalog.data],
   );
   const agents = useMemo(() => rows.filter((agent) => agent.availability === "available"), [rows]);
-  const agentName = (agentId: string) => describeSeatAgent(rows, agentId).name;
+  const agentName = (agentId: string | null) => describeSeatAgent(rows, agentId).name;
+  const customDraft = draft.agentId === CUSTOM_AGENT;
 
   return (
     <li
@@ -172,16 +187,22 @@ export function CrewProposalCard(props: {
           onChange={(event) => setDraft({ ...draft, seat: event.currentTarget.value })}
         />
         <Select
-          disabled={props.busy || agents.length === 0}
+          disabled={props.busy}
           value={draft.agentId || undefined}
           onValueChange={(value) => setDraft({ ...draft, agentId: value ?? "" })}
         >
           <SelectTrigger aria-label="Agent for the new seat">
             <SelectValue>
-              {draft.agentId ? agentName(draft.agentId) : "Choose an agent"}
+              {customDraft
+                ? "Custom agent"
+                : draft.agentId
+                  ? agentName(draft.agentId)
+                  : "Choose an agent"}
             </SelectValue>
           </SelectTrigger>
           <SelectPopup align="start" alignItemWithTrigger={false}>
+            {/* First, so a Crew need not fit a saved mold (Jackson, 2026-09-17). */}
+            <SelectItem value={CUSTOM_AGENT}>Custom agent</SelectItem>
             {agents.map((agent) => (
               <SelectItem key={agent.personaId} value={agent.personaId}>
                 {agent.displayName}
@@ -212,7 +233,11 @@ export function CrewProposalCard(props: {
           aria-label="Instructions for the new seat"
           className="min-h-16 sm:col-span-3"
           disabled={props.busy}
-          placeholder="Instructions for this seat (optional)"
+          placeholder={
+            customDraft
+              ? "What this custom agent should do"
+              : "Instructions for this seat (optional)"
+          }
           value={draft.instructions}
           onChange={(event) => setDraft({ ...draft, instructions: event.currentTarget.value })}
         />

@@ -895,7 +895,7 @@ const handlers = {
           brief: input.brief,
           seats: input.seats.map((seat) => ({
             seat: seat.seat,
-            agentId: seat.agent,
+            agentId: seat.agent ?? null,
             reason: seat.reason,
             ...(seat.instructions === undefined ? {} : { instructions: seat.instructions }),
           })),
@@ -916,7 +916,7 @@ const handlers = {
           crewInstanceId: input.crew_instance_id ?? null,
           seat: {
             seat: input.seat,
-            agentId: input.agent,
+            agentId: input.agent ?? null,
             reason: input.reason,
             ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
           },

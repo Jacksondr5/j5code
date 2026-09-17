@@ -144,7 +144,10 @@ export const layer = Layer.effect(
     const operationError = (phase: string) => (cause: unknown) =>
       new CrewProposalOperationError({ phase, cause });
 
-    /** Seats must name known, enabled agents; the library is the source of truth, not the Captain. */
+    /**
+     * Saved-agent seats must name known, enabled agents; the library is the source of truth, not
+     * the Captain. A custom seat names none and is checked for shape only.
+     */
     const validateSeats = Effect.fn("j5.a2a.crewProposal.validateSeats")(function* (
       seats: ReadonlyArray<CrewProposalSeat>,
       existing: { readonly seatNames: ReadonlyArray<string>; readonly pendingSeats: number },
@@ -186,6 +189,7 @@ export const layer = Layer.effect(
         .pipe(Effect.mapError(operationError("reading the agent library")));
       const disabled = new Set(catalog.disabledIds);
       for (const seat of seats) {
+        if (seat.agentId === null) continue;
         const definition = catalog.definitions.find(({ id }) => id === seat.agentId);
         if (definition === undefined)
           return yield* new CrewProposalRequestError({
