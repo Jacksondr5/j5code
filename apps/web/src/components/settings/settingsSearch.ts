@@ -6,6 +6,7 @@ export type SettingsPath =
   | "/settings/appearance"
   | "/settings/keybindings"
   | "/settings/agents"
+  | "/settings/skills"
   | "/settings/providers"
   | "/settings/integrations"
   | "/settings/scheduled-tasks"
@@ -53,6 +54,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/agents": "Agents",
+  "/settings/skills": "Skills",
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
   "/settings/scheduled-tasks": "Schedule Tasks",
@@ -331,6 +333,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "agents",
     title: "Agents",
     to: "/settings/agents",
+  },
+  {
+    id: "skills",
+    title: "Skills",
+    to: "/settings/skills",
+    searchTerms: ["catalog yaml folder groups global user install skills"],
   },
   {
     id: "providers",

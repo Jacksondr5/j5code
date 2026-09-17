@@ -32,6 +32,7 @@ export * from "./orchestration.ts";
 export * from "./orchestrationProject.ts";
 export * from "./orchestrationV2.ts";
 export * from "./j5/agentPersona.ts";
+export * from "./j5/skillCatalog.ts";
 export * from "./applicationEvent.ts";
 export * from "./orchestratorMcp.ts";
 export * from "./orchestration.ts";

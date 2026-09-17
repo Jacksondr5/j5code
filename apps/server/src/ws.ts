@@ -134,6 +134,7 @@ import {
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import { makeAgentPersonaRpcHandlers } from "./j5/agents/agentPersonaRpc.ts";
+import { makeSkillCatalogRpcHandlers } from "./j5/skills/skillCatalogRpc.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
@@ -1319,6 +1320,7 @@ const makeWsRpcLayer = (
         observe: observeRpcEffect,
         observeStream: observeRpcStream,
       });
+      const skillCatalogRpcHandlers = yield* makeSkillCatalogRpcHandlers(observeRpcEffect);
       const handlers = ServerWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
@@ -1389,6 +1391,7 @@ const makeWsRpcLayer = (
             },
           ),
         ...agentPersonaRpcHandlers,
+        ...skillCatalogRpcHandlers,
         [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.getWorkflowScript,

@@ -108,6 +108,35 @@ composer when it is empty, and is discarded otherwise.
 
 ## Commands and skills
 
+To install shared skill groups, open **Settings → Skills**, choose the environment,
+and select a folder containing `catalog.yaml` and `skills/<name>/SKILL.md` files.
+Load the catalog, select one or more groups, and apply the selection. Required groups
+are included automatically. Clear the selection and apply to remove this catalog's
+installed skills.
+
+Installation uses the environment machine's global user skill directories for
+Claude and Codex; Cursor can read these directories too. Environments running under
+the same OS user share the selection. Existing skills and provider disable settings
+are preserved, and project skills remain available independently. Custom provider
+home directories, Grok, and Antigravity are not configured by this installer.
+
+Keep the catalog folder in place. To update a Git checkout, pull its changes, then
+reload the catalog and apply the selection to reconcile added or removed skills.
+Refresh the provider's skills or start a new agent session to see the result.
+
+The catalog lists groups, their skills, and optional dependencies:
+
+```yaml
+groups:
+  core:
+    description: General guidance
+    skills: [explain]
+  review:
+    description: Code review
+    skills: [review]
+    depends: [core]
+```
+
 Type `/` for commands or `$` to add a skill from the selected environment and
 provider. On mobile, both are also available before starting a thread on
 **New task**.
