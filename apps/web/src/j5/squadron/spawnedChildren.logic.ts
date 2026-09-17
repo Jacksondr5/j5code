@@ -93,9 +93,16 @@ export const groupSpawnedChildren = <T extends SpawnedChildThread>(
   ];
 };
 
-/** Expansion is remembered per group under its parent, so the Crew you watch stays open on reload. */
-export const spawnedGroupExpansionKey = (parentThreadId: string, groupKey: string) =>
-  `${parentThreadId}/${groupKey}`;
+/**
+ * Expansion is remembered per group under its parent, so the Crew you watch stays open on
+ * reload; the environment is part of the key because the same local thread id on two
+ * environments is two different rows.
+ */
+export const spawnedGroupExpansionKey = (
+  environmentId: string,
+  parentThreadId: string,
+  groupKey: string,
+) => `${environmentId}/${parentThreadId}/${groupKey}`;
 
 const STORAGE_KEY = "j5:sidebar:spawned-children:expanded";
 

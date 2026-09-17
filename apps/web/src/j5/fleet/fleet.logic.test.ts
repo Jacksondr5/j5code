@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildFleetTree, countFleetAlerts, originLabel } from "./fleet.logic";
+import { EnvironmentId } from "@t3tools/contracts";
+
+import {
+  buildFleetTree,
+  countFleetAlerts,
+  fleetInvolvedThreadRefs,
+  originLabel,
+} from "./fleet.logic";
 import type { FleetAgent, FleetSquadron } from "./fleetClient";
 
 const agent = (participantId: string, overrides: Partial<FleetAgent> = {}): FleetAgent => ({
@@ -78,5 +85,37 @@ describe("fleet tree", () => {
     expect(roots.map((node) => node.row.agent.participantId).length).toBeGreaterThan(0);
     expect(countFleetAlerts([squadron])).toBe(1);
     expect(originLabel("unknown")).toBe("?");
+  });
+});
+
+describe("fleet involvement", () => {
+  it("names seats, their Captains, and spawners with placed children, once each, per environment", () => {
+    const environmentId = EnvironmentId.make("env:a");
+    const refs = fleetInvolvedThreadRefs([
+      {
+        id: "squadron:alpha",
+        name: "Alpha",
+        crews: [],
+        environmentId,
+        agents: [
+          agent("captain"),
+          agent("builder", { placementParentId: "captain", crew: seat("builder", "captain") }),
+          agent("critic", { placementParentId: "captain", crew: seat("critic", "captain") }),
+          // A plain spawner with one placed child, and the child itself is not involved.
+          agent("spawner"),
+          agent("helper", { placementParentId: "spawner" }),
+          // Human-created rows with no Crew and no children are never re-read on the poll.
+          agent("solo"),
+          // A seat whose thread is unknown cannot name a row.
+          agent("ghost", { threadId: null, crew: seat("ghost", "captain") }),
+        ],
+      },
+    ]);
+    expect(refs.map((ref) => [ref.environmentId, ref.threadId]).toSorted()).toEqual([
+      ["env:a", "thread:builder"],
+      ["env:a", "thread:captain"],
+      ["env:a", "thread:critic"],
+      ["env:a", "thread:spawner"],
+    ]);
   });
 });

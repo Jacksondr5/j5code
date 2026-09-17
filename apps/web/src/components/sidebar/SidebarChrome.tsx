@@ -82,7 +82,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           {pillLabel}
         </Badge>
       ) : null}
-      <div className="relative z-10 -me-1 ms-auto flex shrink-0 items-center justify-center gap-0.5 md:me-[var(--sidebar-content-inset)]">
+      <div className="relative z-10 -me-1 ms-auto flex h-8 shrink-0 items-center justify-center md:me-[var(--sidebar-content-inset)]">
         <FleetRailEntry onBackdrop={backdropVariant !== null} />
         <HumanInboxBell onBackdrop={backdropVariant !== null} />
       </div>

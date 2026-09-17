@@ -30,7 +30,10 @@ const store = createScopedThreadReadStore<ReadonlyArray<SpawnedChild>, SpawnedCh
   replace: replaceSpawnedChildren,
 });
 
-/** Incremental beside the thread-home read; `refreshSpawnedChildren` re-reads every requested row. */
+/**
+ * Incremental beside the thread-home read; `refreshSpawnedChildren` re-reads every requested row
+ * after a launch or decision on this device, the Fleet poll only the involved ones.
+ */
 export const requestSpawnedChildren = (
   refs: ReadonlyArray<ScopedThreadRef>,
   connections: ReadonlyMap<EnvironmentId, PreparedConnection | null>,
@@ -41,6 +44,9 @@ export const requestSpawnedChildren = (
 };
 
 export const refreshSpawnedChildren = () => store.refreshRequested();
+/** The Fleet poll's re-read: only the rows the roster says have placed children or sit in a Crew. */
+export const refreshSpawnedChildrenRows = (refs: ReadonlyArray<ScopedThreadRef>) =>
+  store.refreshRows(refs);
 
 const EMPTY: ReadonlyArray<SpawnedChild> = [];
 
