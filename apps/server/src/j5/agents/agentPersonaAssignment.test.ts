@@ -75,7 +75,7 @@ describe("agent persona assignment", () => {
           options: [{ id: "reasoningEffort", value: "high" }],
         },
       }),
-      "Agent persona assignment uses an authority policy outside its definition.",
+      "Persona assignment uses an authority policy outside its definition.",
     );
   });
 

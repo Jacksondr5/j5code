@@ -83,7 +83,8 @@ describe("agent mention selection", () => {
       return true;
     });
     expect(applied).toBe(true);
-    expect(calls).toEqual([[4, 13, "@agent:scout ", { expectedText: "@agent:sc" }]]);
+    // A trigger typed with the older @agent: spelling is replaced by the current @persona: form.
+    expect(calls).toEqual([[4, 13, "@persona:scout ", { expectedText: "@agent:sc" }]]);
     expect(applyAgentMentionSelection({ personaId: "scout" }, trigger, text, () => false)).toBe(
       false,
     );
