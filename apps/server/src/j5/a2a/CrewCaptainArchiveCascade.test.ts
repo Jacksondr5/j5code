@@ -123,9 +123,14 @@ it.effect(
                 ]),
             }),
             Layer.mock(ArchiveCrewService)({
+              // The first orphaned Crew will not retire; the sweep must still reach the second.
               archive: (input) =>
                 Ref.update(calls, (items) => [...items, input]).pipe(
-                  Effect.as({ status: "archived" as const, members: [] }),
+                  Effect.flatMap(() =>
+                    input.crewInstanceId === "crew:archived-captain"
+                      ? Effect.die(new Error("a seat refused to archive"))
+                      : Effect.succeed({ status: "archived" as const, members: [] }),
+                  ),
                 ),
             }),
             Layer.mock(ThreadManagementService)({
@@ -144,7 +149,9 @@ it.effect(
       yield* Effect.gen(function* () {
         const cascade = yield* CrewCaptainArchiveCascade;
         const retired = yield* cascade.reconcile;
-        assert.deepStrictEqual(retired, ["crew:archived-captain", "crew:gone-captain"]);
+        // Both orphaned Crews were attempted; the one whose archive failed is left for the next
+        // boot rather than aborting the sweep before the second.
+        assert.deepStrictEqual(retired, ["crew:gone-captain"]);
         assert.deepStrictEqual(
           (yield* Ref.get(calls)).map((call) => call.crewInstanceId),
           ["crew:archived-captain", "crew:gone-captain"],
