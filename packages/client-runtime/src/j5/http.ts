@@ -1,4 +1,5 @@
 import {
+  AddPeerResponse,
   AnswerHumanExchangeResponse,
   AssignImportedThreadsResponse,
   type AssignImportedThreadsRequest,
@@ -11,17 +12,24 @@ import {
   CrewStopResponse,
   FleetResponse,
   HumanInboxResponse,
+  IssuePeerCredentialResponse,
   J5_API_PATHS,
+  J5_PEER_API_PATHS,
   OpenInboxCountResponse,
   SpawnedChildrenResponse,
+  PeerListResponse,
+  RemovePeerResponse,
   SquadronListResponse,
   ThreadHomesResponse,
+  type AddPeerRequest,
   type AnswerHumanExchangeRequest,
   type CrewProposalResolveRequest,
   type CrewProposalPreviewRequest,
   type CrewArchiveRequest,
   type CrewStopRequest,
   type FleetReadRequest,
+  type IssuePeerCredentialRequest,
+  type RemovePeerRequest,
 } from "@t3tools/contracts/j5";
 import type { ProjectId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -277,4 +285,48 @@ export const stopCrew = Effect.fn("j5.http.stopCrew")(function* (
   );
   const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
   return yield* HttpClientResponse.schemaBodyJson(CrewStopResponse)(response);
+});
+
+/** Peering: the client introduces two servers it is connected to with administrative scope. */
+export const listPeers = Effect.fn("j5.http.listPeers")(function* (prepared: PreparedConnection) {
+  const response = yield* executeJ5Request(
+    prepared,
+    HttpClientRequest.get(J5_PEER_API_PATHS.peers),
+    READ_TIMEOUT_MS,
+  );
+  return (yield* HttpClientResponse.schemaBodyJson(PeerListResponse)(response)).peers;
+});
+
+export const issuePeerCredential = Effect.fn("j5.http.issuePeerCredential")(function* (
+  prepared: PreparedConnection,
+  input: IssuePeerCredentialRequest,
+) {
+  const request = yield* HttpClientRequest.post(J5_PEER_API_PATHS.credentials).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(IssuePeerCredentialResponse)(response);
+});
+
+/** The server proves the credential at the origin before recording, so this can take a while. */
+export const addPeer = Effect.fn("j5.http.addPeer")(function* (
+  prepared: PreparedConnection,
+  input: AddPeerRequest,
+) {
+  const request = yield* HttpClientRequest.post(J5_PEER_API_PATHS.peers).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(AddPeerResponse)(response);
+});
+
+export const removePeer = Effect.fn("j5.http.removePeer")(function* (
+  prepared: PreparedConnection,
+  input: RemovePeerRequest,
+) {
+  const request = yield* HttpClientRequest.post(J5_PEER_API_PATHS.remove).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(RemovePeerResponse)(response);
 });
