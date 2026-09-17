@@ -36,6 +36,8 @@ export const fleetQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.fleet({ environmentId, input: {} });
 export const fleetDetailQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.fleet({ environmentId, input: { includeRetired: true } });
+export const peersQueryAtom = (environmentId: EnvironmentId) =>
+  j5Environment.peers({ environmentId, input: {} });
 
 export const squadronSourcesAtom = createJ5ReadSourcesAtom({
   ...sourcesInput,

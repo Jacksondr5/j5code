@@ -7,6 +7,9 @@ import type {
   CrewArchiveRequest,
   CrewStopRequest,
   FleetReadRequest,
+  AddPeerRequest,
+  IssuePeerCredentialRequest,
+  RemovePeerRequest,
 } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -117,6 +120,29 @@ export function createJ5EnvironmentAtoms<R, E>(
         preparedConnection.pipe(
           Effect.flatMap((prepared) => J5Http.answerHumanExchange(prepared, input)),
         ),
+    }),
+    peers: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:peers",
+      staleTimeMs: 30_000,
+      execute: (_input: Record<string, never>) =>
+        preparedConnection.pipe(Effect.flatMap(J5Http.listPeers)),
+    }),
+    issuePeerCredential: createEnvironmentCommand(runtime, {
+      label: "j5:issue-peer-credential",
+      execute: (input: IssuePeerCredentialRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.issuePeerCredential(prepared, input)),
+        ),
+    }),
+    addPeer: createEnvironmentCommand(runtime, {
+      label: "j5:add-peer",
+      execute: (input: AddPeerRequest) =>
+        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.addPeer(prepared, input))),
+    }),
+    removePeer: createEnvironmentCommand(runtime, {
+      label: "j5:remove-peer",
+      execute: (input: RemovePeerRequest) =>
+        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.removePeer(prepared, input))),
     }),
   };
 }
