@@ -13,6 +13,7 @@ import * as Layer from "effect/Layer";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { prepareAgentPersonaLaunch } from "../agents/agentPersonaLaunch.ts";
+import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
 import { agentHandoffArtifactPath } from "../agents/agentPersonaArtifacts.ts";
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { translateAgentPersonaProviderPolicy } from "../agents/agentPersonaProviderPolicy.ts";
@@ -41,7 +42,7 @@ import {
 /**
  * One approved seat: who fills it, why, and any wiring text its brief carries verbatim. A null
  * agent is a custom seat, approved by name and instructions alone; it runs on the Captain's own
- * provider, model, and runtime mode because it has no policy of its own.
+ * provider, model, and access mode because it has no policy of its own.
  */
 export interface CrewLaunchSeat {
   readonly name: string;
@@ -182,16 +183,34 @@ export const layer = Layer.effect(
     ) {
       const providers = yield* registry.getProviders;
       const resolved: Array<ResolvedSeat> = [];
+      // What the Captain actually runs with. A persona Captain's stored mode is whatever the
+      // person picked at launch; its effective access comes from the persona policy, so a custom
+      // seat that "runs as the Captain" takes that, not the stored mode.
+      const captainAccess = seats.some((seat) => seat.agentId === null)
+        ? yield* resolveAgentPersonaRuntime(captain.thread, agents).pipe(
+            Effect.mapError(
+              (cause) =>
+                new CrewLaunchOperationError({
+                  phase: "resolving the Captain's access for a custom seat",
+                  seatName: null,
+                  createdSeats: [],
+                  cause,
+                }),
+            ),
+          )
+        : null;
       for (const seat of seats) {
         const agentId = seat.agentId;
         if (agentId === null) {
           // The human approved this seat by its name and instructions; with no definition to run
-          // as, it takes the Captain's provider, model, and runtime mode.
+          // as, it takes the Captain's provider, model, and effective access mode. The Captain's
+          // sandbox is not carried: only a persona assignment can convey one, and this seat has
+          // none. The gate copy promises the access mode alone for the same reason.
           resolved.push({
             seat,
             assignment: null,
             modelSelection: captain.thread.modelSelection,
-            runtimeMode: captain.thread.runtimeMode,
+            runtimeMode: captainAccess?.runtimeMode ?? captain.thread.runtimeMode,
             outputArtifact: null,
             agentDisplayName: "custom",
           });

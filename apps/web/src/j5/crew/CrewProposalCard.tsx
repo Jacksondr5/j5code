@@ -67,7 +67,8 @@ export const describeSeatAgent = (
   }>,
   agentId: string | null,
 ): { readonly name: string; readonly authority: string | null } => {
-  if (agentId === null) return { name: "Custom agent", authority: "Runs as the Captain" };
+  if (agentId === null)
+    return { name: "Custom agent", authority: "Runs with the Captain's model and access" };
   const row = rows.find((candidate) => candidate.personaId === agentId);
   return row === undefined
     ? { name: agentId, authority: null }

@@ -371,68 +371,104 @@ it.effect(
         }
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
+);
 
-it.effect("a custom seat runs on the Captain's model and mode with no saved agent behind it", () =>
-  Effect.gen(function* () {
-    const { context, commands, captain } = yield* fixture;
-    const codex = provider("codex", "codex", [
-      { slug: "gpt-5.6-sol", options: ["high"] },
-      { slug: "gpt-5.6-terra", options: ["high"] },
-    ]);
-    const layer = crewLaunchLayer.pipe(
-      Layer.provideMerge(dependencies(commands, [codex])),
-      Layer.provideMerge(Layer.succeedContext(context)),
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-custom-" })),
-      Layer.provideMerge(NodeServices.layer),
-    );
-    yield* Effect.gen(function* () {
-      const launcher = yield* CrewLaunchService;
-      const instance = yield* launcher.launch({
-        providerSessionId: "session",
-        requestKey: "launch-custom",
-        captain,
-        displayName: "Notes Crew",
-        seats: [
-          { name: "critic", agentId: "critic", reason: "Reviews" },
-          {
-            name: "scribe",
-            agentId: null,
-            reason: "Keeps notes",
-            instructions: "Write the running notes.",
-          },
-        ],
-        brief: "Review the login fix.",
-      });
-      assert.deepStrictEqual(
-        instance.members.map((member) => [member.seatName, member.agentId]),
-        [
-          ["critic", "critic"],
-          ["scribe", null],
-        ],
+it.effect(
+  "a custom seat runs on the Captain's model and access with no saved agent behind it",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const codex = provider("codex", "codex", [
+        { slug: "gpt-5.6-sol", options: ["high"] },
+        { slug: "gpt-5.6-terra", options: ["high"] },
+      ]);
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(dependencies(commands, [codex])),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-custom-" })),
+        Layer.provideMerge(NodeServices.layer),
       );
-      const captured = yield* Ref.get(commands);
-      const created = captured.find(
-        (command) => command.type === "thread.create" && command.title === "scribe",
-      );
-      assert.equal(created?.type, "thread.create");
-      if (created?.type === "thread.create") {
-        // No definition to run as: the Captain's own route and access, and no persona assignment.
-        assert.isUndefined(created.agentPersonaAssignment);
-        assert.deepStrictEqual(created.modelSelection, captain.thread.modelSelection);
-        assert.equal(created.runtimeMode, captain.thread.runtimeMode);
-      }
-      const brief = captured.find(
-        (command) =>
-          command.type === "message.dispatch" && command.text.includes("your_seat: scribe"),
-      );
-      assert.equal(brief?.type, "message.dispatch");
-      if (brief?.type === "message.dispatch") {
-        assert.include(brief.text, "<seat_instructions>\nWrite the running notes.");
-        assert.notInclude(brief.text, "<seat_obligation>");
-        assert.include(brief.text, "agent=custom");
-      }
-    }).pipe(Effect.provide(layer));
-  }).pipe(Effect.scoped),
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const instance = yield* launcher.launch({
+          providerSessionId: "session",
+          requestKey: "launch-custom",
+          captain,
+          displayName: "Notes Crew",
+          seats: [
+            { name: "critic", agentId: "critic", reason: "Reviews" },
+            {
+              name: "scribe",
+              agentId: null,
+              reason: "Keeps notes",
+              instructions: "Write the running notes.",
+            },
+          ],
+          brief: "Review the login fix.",
+        });
+        assert.deepStrictEqual(
+          instance.members.map((member) => [member.seatName, member.agentId]),
+          [
+            ["critic", "critic"],
+            ["scribe", null],
+          ],
+        );
+        const captured = yield* Ref.get(commands);
+        const created = captured.find(
+          (command) => command.type === "thread.create" && command.title === "scribe",
+        );
+        assert.equal(created?.type, "thread.create");
+        if (created?.type === "thread.create") {
+          // No definition to run as: the Captain's own route and access, and no persona assignment.
+          assert.isUndefined(created.agentPersonaAssignment);
+          assert.deepStrictEqual(created.modelSelection, captain.thread.modelSelection);
+          assert.equal(created.runtimeMode, captain.thread.runtimeMode);
+        }
+        const brief = captured.find(
+          (command) =>
+            command.type === "message.dispatch" && command.text.includes("your_seat: scribe"),
+        );
+        assert.equal(brief?.type, "message.dispatch");
+        if (brief?.type === "message.dispatch") {
+          assert.include(brief.text, "<seat_instructions>\nWrite the running notes.");
+          assert.notInclude(brief.text, "<seat_obligation>");
+          assert.include(brief.text, "agent=custom");
+        }
+
+        // A persona Captain stores the mode the person picked at launch (full-access here) but runs
+        // under its persona's policy; its custom seat takes that effective access, not the stored mode.
+        const personaCaptain = {
+          ...captain,
+          thread: {
+            ...captain.thread,
+            agentPersonaAssignment: {
+              personaId: "builder",
+              definitionVersion: 1,
+              authorityPolicy: "workspace-write",
+              resolvedRoute: "primary",
+              resolvedDriver: "codex",
+              resolvedModelSelection: captain.thread.modelSelection,
+            },
+          } as typeof captain.thread,
+        };
+        yield* launcher.launch({
+          providerSessionId: "session",
+          requestKey: "launch-custom-2",
+          captain: personaCaptain,
+          displayName: "Notes Crew 2",
+          seats: [{ name: "scribe", agentId: null, reason: "Keeps notes", instructions: "Notes." }],
+          brief: "Review the login fix.",
+        });
+        const underPersona = (yield* Ref.get(commands)).findLast(
+          (command) => command.type === "thread.create" && command.title === "scribe",
+        );
+        assert.equal(underPersona?.type, "thread.create");
+        if (underPersona?.type === "thread.create") {
+          assert.equal(captain.thread.runtimeMode, "full-access");
+          assert.equal(underPersona.runtimeMode, "auto-accept-edits");
+        }
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
 );
 
 it.effect(

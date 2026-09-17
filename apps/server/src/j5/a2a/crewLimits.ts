@@ -25,6 +25,7 @@ export type CrewSeatShapeProblem =
 /** The bound a seat breaks, if any; checked at every door so human-edited seats meet the same rule. */
 export const crewSeatShapeProblem = (seat: {
   readonly seat: string;
+  readonly agentId: string | null;
   readonly reason: string;
   readonly instructions?: string | undefined;
 }): CrewSeatShapeProblem | null => {
@@ -47,6 +48,13 @@ export const crewSeatShapeProblem = (seat: {
     return {
       field: "instructions",
       detail: `Seat instructions are 1 to ${CREW_TEXT_MAX_CHARS} characters.`,
+    };
+  // A custom seat has no definition behind it, so its instructions are all it runs on; the card
+  // requires them and so does every other door.
+  if (seat.agentId === null && seat.instructions === undefined)
+    return {
+      field: "instructions",
+      detail: "A custom seat needs instructions, since no saved agent supplies them.",
     };
   return null;
 };

@@ -189,7 +189,7 @@ asked for.
 **Description (contract):** "Propose the crew you need for the brief you were given. Use it when
 the user asks for a crew or the work splits into distinct responsibilities that should run at
 once. Call list_agents first and pick one agent per seat, or leave agent unset for a custom seat
-that runs on your own provider and model with only its instructions and the brief; name the crew
+that runs on your own provider, model, and access with only its instructions (required) and the brief; name the crew
 for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the roster in this
 thread, may remove or add seats, and approves or declines; you receive the decision and the roster
 as a message here. Approved seats run with their own agent's permissions, which may exceed yours.
