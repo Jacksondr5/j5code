@@ -7,6 +7,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import { isPlaybookThread } from "@j5/playbook-contracts/sidebar";
 
 import { ServerSettingsService } from "../serverSettings.ts";
 import { ThreadManagementService } from "./ThreadManagementService.ts";
@@ -20,6 +21,7 @@ function hasInterruptRequest(projection: OrchestrationV2ThreadProjection, runId:
 export function restartContinuationRun(
   projection: OrchestrationV2ThreadProjection,
 ): OrchestrationV2Run | undefined {
+  if (isPlaybookThread(projection.thread.id)) return;
   if (projection.thread.archivedAt !== null || projection.thread.deletedAt !== null) return;
   const run = projection.runs.reduce<OrchestrationV2Run | undefined>(
     (latest, candidate) => (!latest || candidate.ordinal > latest.ordinal ? candidate : latest),
@@ -73,6 +75,7 @@ export function restartContinuationRun(
 
 export const continueRestartedRun = Effect.fn("RestartContinuation.continueRestartedRun")(
   function* (input: { readonly threadId: ThreadId; readonly sourceRunId: RunId }) {
+    if (isPlaybookThread(input.threadId)) return;
     const settings = yield* ServerSettingsService;
     const enabled = yield* settings.getSettings.pipe(
       Effect.map((value) => value.continueThreadsAfterServerUpdate),
