@@ -166,7 +166,7 @@ function CrewGateCard(props: {
       {approved ? (
         <ul className="mt-2 flex flex-col gap-1">
           {notice.roster.map((seat) => {
-            const label = seat.agentId;
+            const label = seat.agentId || "Custom seat";
             const failure = notice.failures.find((entry) => entry.seat === seat.seat) ?? null;
             return (
               <li key={seat.seat}>

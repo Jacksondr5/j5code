@@ -1,4 +1,6 @@
+import { isProviderAvailable } from "@t3tools/contracts";
 import type {
+  ModelSelection,
   OrchestrationV2AgentPersonaAssignment,
   OrchestrationV2AppThread,
   RuntimeMode,
@@ -12,6 +14,7 @@ import * as Layer from "effect/Layer";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { prepareAgentPersonaLaunch } from "../agents/agentPersonaLaunch.ts";
+import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
 import { agentHandoffArtifactPath } from "../agents/agentPersonaArtifacts.ts";
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { translateAgentPersonaProviderPolicy } from "../agents/agentPersonaProviderPolicy.ts";
@@ -37,10 +40,14 @@ import {
   spawnTitle,
 } from "./spawnIds.ts";
 
-/** One approved seat: who fills it, why, and any wiring text its brief carries verbatim. */
+/**
+ * One approved seat: who fills it, why, and any wiring text its brief carries verbatim. A null
+ * agent is a custom seat, approved by name and instructions alone; it runs on the Captain's own
+ * provider, model, and access mode because it has no policy of its own.
+ */
 export interface CrewLaunchSeat {
   readonly name: string;
-  readonly agentId: string;
+  readonly agentId: string | null;
   readonly reason: string | null;
   readonly instructions?: string | undefined;
 }
@@ -162,9 +169,12 @@ export const layer = Layer.effect(
 
     interface ResolvedSeat {
       readonly seat: CrewLaunchSeat;
-      readonly assignment: OrchestrationV2AgentPersonaAssignment;
+      /** Null for a custom seat: no saved agent, so no assignment and no handoff obligation. */
+      readonly assignment: OrchestrationV2AgentPersonaAssignment | null;
+      readonly modelSelection: ModelSelection;
       readonly runtimeMode: RuntimeMode;
       readonly outputArtifact: string | null;
+      readonly agentDisplayName: string;
     }
 
     // Resolve every seat before creating anything: a Crew launches whole or not at all.
@@ -174,11 +184,69 @@ export const layer = Layer.effect(
     ) {
       const providers = yield* registry.getProviders;
       const resolved: Array<ResolvedSeat> = [];
+      // What the Captain actually runs with. A persona Captain's stored mode is whatever the
+      // person picked at launch; its effective access comes from the persona policy, so a custom
+      // seat that "runs as the Captain" takes that, not the stored mode.
+      const captainAccess = seats.some((seat) => seat.agentId === null)
+        ? yield* resolveAgentPersonaRuntime(captain.thread, agents).pipe(
+            Effect.mapError(
+              (cause) =>
+                new CrewLaunchOperationError({
+                  phase: "resolving the Captain's access for a custom seat",
+                  seatName: null,
+                  createdSeats: [],
+                  cause,
+                }),
+            ),
+          )
+        : null;
       for (const seat of seats) {
+        const agentId = seat.agentId;
+        if (agentId === null) {
+          const selection = captain.thread.modelSelection;
+          const provider = providers.find(
+            (candidate) => candidate.instanceId === selection.instanceId,
+          );
+          const problem =
+            provider === undefined
+              ? "is no longer configured"
+              : !isProviderAvailable(provider)
+                ? "is unavailable"
+                : !provider.enabled || provider.status === "disabled"
+                  ? "is disabled"
+                  : !provider.installed
+                    ? "is not installed"
+                    : provider.status === "error"
+                      ? "reports an error"
+                      : provider.auth.status === "unauthenticated"
+                        ? "is signed out"
+                        : !provider.models.some((model) => model.slug === selection.model)
+                          ? `does not advertise ${selection.model}`
+                          : null;
+          if (problem !== null)
+            return yield* new CrewLaunchSeatUnavailableError({
+              seatName: seat.name,
+              agentId: "custom seat",
+              detail: `The Captain's provider ${selection.instanceId} ${problem}.`,
+            });
+          // The human approved this seat by its name and instructions; with no definition to run
+          // as, it takes the Captain's provider, model, and effective access mode. The Captain's
+          // sandbox is not carried: only a persona assignment can convey one, and this seat has
+          // none. The gate copy promises the access mode alone for the same reason.
+          resolved.push({
+            seat,
+            assignment: null,
+            modelSelection: captain.thread.modelSelection,
+            runtimeMode: captainAccess?.runtimeMode ?? captain.thread.runtimeMode,
+            outputArtifact: null,
+            agentDisplayName: "custom",
+          });
+          continue;
+        }
         // Resolved at spawn, against the providers as they are now: a signed-out, disabled, or
         // missing provider refuses the seat here with that reason, before anything is created.
         const assignment = yield* prepareAgentPersonaLaunch(
-          { personaId: seat.agentId },
+          { personaId: agentId },
           providers,
           agents,
         ).pipe(
@@ -186,7 +254,7 @@ export const layer = Layer.effect(
             (error) =>
               new CrewLaunchSeatUnavailableError({
                 seatName: seat.name,
-                agentId: seat.agentId,
+                agentId,
                 detail: error.message,
               }),
           ),
@@ -205,7 +273,7 @@ export const layer = Layer.effect(
             (error) =>
               new CrewLaunchSeatUnavailableError({
                 seatName: seat.name,
-                agentId: seat.agentId,
+                agentId,
                 detail: error.message,
               }),
           ),
@@ -213,8 +281,10 @@ export const layer = Layer.effect(
         resolved.push({
           seat,
           assignment,
+          modelSelection: assignment.resolvedModelSelection,
           runtimeMode: policy.runtimeMode,
           outputArtifact: definition.outputArtifact ?? null,
+          agentDisplayName: assignment.displayName ?? agentId,
         });
       }
       return resolved;
@@ -236,7 +306,6 @@ export const layer = Layer.effect(
           stableInput,
           threadId,
           participantId: participantIdForThread(threadId),
-          agentDisplayName: entry.assignment.displayName ?? entry.seat.agentId,
         };
       });
     type Planned = ReturnType<typeof plan>[number];
@@ -265,10 +334,10 @@ export const layer = Layer.effect(
             projectId: captain.thread.projectId,
             // The seat's name alone: the sidebar group and the Crew chip already say which Crew.
             title: spawnTitle(member.seat.name, undefined),
-            modelSelection: member.assignment.resolvedModelSelection,
+            modelSelection: member.modelSelection,
             runtimeMode: member.runtimeMode,
             interactionMode: captain.thread.interactionMode,
-            agentPersonaAssignment: member.assignment,
+            ...(member.assignment === null ? {} : { agentPersonaAssignment: member.assignment }),
             branch: captain.thread.branch,
             worktreePath: captain.thread.worktreePath,
           })
@@ -312,7 +381,8 @@ export const layer = Layer.effect(
         participantId: member.participantId,
         agentDisplayName:
           planned.find((entry) => entry.seat.name === member.seatName)?.agentDisplayName ??
-          member.agentId,
+          member.agentId ??
+          "custom",
       }));
       for (const member of planned) {
         yield* threadManagement
@@ -335,7 +405,7 @@ export const layer = Layer.effect(
                 seatInstructions: member.seat.instructions,
                 captainParticipantId: captain.participantId,
                 obligation:
-                  member.outputArtifact === null
+                  member.outputArtifact === null || member.assignment === null
                     ? undefined
                     : {
                         kind: member.outputArtifact,
@@ -349,7 +419,7 @@ export const layer = Layer.effect(
               },
             }),
             attachments: [],
-            modelSelection: member.assignment.resolvedModelSelection,
+            modelSelection: member.modelSelection,
             dispatchMode: { type: "start_immediately" },
           })
           .pipe(

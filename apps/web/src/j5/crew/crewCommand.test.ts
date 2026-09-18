@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { addSeat, describeSeatAgent, removeSeat } from "./CrewProposalCard";
+import { CUSTOM_AGENT, addSeat, describeSeatAgent, removeSeat } from "./CrewProposalCard";
 import { crewCommandRefusal, crewLaunchPrompt, parseCrewCommand } from "./crewCommand";
 import { j5CrewSlashCommandItems } from "./crewSlashCommand";
 import { ProviderDriverKind } from "@t3tools/contracts";
@@ -69,6 +69,28 @@ describe("crew proposal roster edits", () => {
       authority: "Workspace write",
     });
     expect(describeSeatAgent(rows, "ghost")).toEqual({ name: "ghost", authority: null });
+    expect(describeSeatAgent(rows, null)).toEqual({
+      name: "Custom agent",
+      authority: "Runs with the Captain's model and access mode",
+    });
+  });
+
+  it("adds a custom seat with no agent behind it once it has instructions", () => {
+    expect(
+      addSeat(seats, { seat: "scribe", agentId: CUSTOM_AGENT, instructions: " " }).error,
+    ).toContain("Give the custom agent");
+    const custom = addSeat(seats, {
+      seat: "scribe",
+      agentId: CUSTOM_AGENT,
+      instructions: "Keep the running notes.",
+    });
+    expect(custom.error).toBeNull();
+    expect(custom.seats.at(-1)).toEqual({
+      seat: "scribe",
+      agentId: null,
+      reason: "Added by the user",
+      instructions: "Keep the running notes.",
+    });
   });
 
   it("rejects duplicate or malformed seat names and a missing agent", () => {
