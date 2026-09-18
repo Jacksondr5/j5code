@@ -1,6 +1,6 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { CrewProposalSeat, CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Button } from "../../components/ui/button";
 import {
@@ -12,13 +12,16 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../../components/ui/dialog";
+import { useCrewProposalPreview } from "./useCrewProposalPreview";
 import { CUSTOM_AGENT } from "./crewProposalDraft";
 import { CrewSeatEditor } from "./CrewSeatEditor";
-import { crewSeatDraft, resolvedCustomDraft, type CrewSeatDraft } from "./crewSeatRuntime";
+import { crewSeatDraft, resolvedCrewSeatDraft, type CrewSeatDraft } from "./crewSeatRuntime";
 
 /** Local drafts are published only by Save/Add; closing the dialog leaves approval unchanged. */
 export function CrewSeatDialog(props: {
   readonly seat: CrewProposalSeat | null;
+  readonly proposalId: string;
+  readonly previewSeatName: string;
   readonly runtime?: CrewProposalSeatRuntime | undefined;
   readonly environmentId: EnvironmentId | null;
   readonly agents: ReadonlyArray<{ readonly personaId: string; readonly displayName: string }>;
@@ -29,16 +32,33 @@ export function CrewSeatDialog(props: {
   const [draft, setDraft] = useState<CrewSeatDraft>(() => {
     if (props.seat === null) return { seat: "", agentId: CUSTOM_AGENT, instructions: "" };
     const initial = crewSeatDraft(props.seat);
-    return props.seat.agentId === null ? resolvedCustomDraft(initial, props.runtime) : initial;
+    return props.seat.agentId === null ? resolvedCrewSeatDraft(initial, props.runtime) : initial;
   });
   const [error, setError] = useState<string | null>(null);
-  const matchingRuntime =
-    props.seat !== null &&
-    draft.agentId === (props.seat.agentId ?? CUSTOM_AGENT) &&
-    (draft.agentId !== CUSTOM_AGENT ||
-      JSON.stringify(draft.modelSelection) === JSON.stringify(props.runtime?.modelSelection))
+  const originalRuntime =
+    props.seat !== null && draft.agentId === (props.seat.agentId ?? CUSTOM_AGENT)
       ? props.runtime
       : undefined;
+  // Resolve persona defaults before editing a new selection. This does not save the draft or
+  // authorize approval; the full roster gets a fresh preview when the user saves the member.
+  const previewSeats = useMemo(
+    () => [
+      {
+        seat: props.previewSeatName,
+        agentId: draft.agentId === CUSTOM_AGENT ? null : draft.agentId,
+        reason: "Member runtime preview",
+        ...(draft.agentId === CUSTOM_AGENT ? { instructions: "Crew member" } : {}),
+      },
+    ],
+    [props.previewSeatName, draft.agentId],
+  );
+  const preview = useCrewProposalPreview(
+    props.environmentId,
+    props.proposalId,
+    previewSeats,
+    props.disabled || originalRuntime !== undefined,
+  );
+  const matchingRuntime = originalRuntime ?? preview.data?.seats[0];
   const adding = props.seat === null;
   return (
     <Dialog
@@ -77,6 +97,21 @@ export function CrewSeatDialog(props: {
               existing={!adding}
               onChange={setDraft}
             />
+            {originalRuntime === undefined && preview.error ? (
+              <div className="flex items-center gap-2">
+                <p role="alert" className="text-sm text-destructive">
+                  {preview.error}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={props.disabled}
+                  onClick={preview.refresh}
+                >
+                  Retry runtime
+                </Button>
+              </div>
+            ) : null}
             {error ? (
               <p role="alert" className="text-sm text-destructive">
                 {error}

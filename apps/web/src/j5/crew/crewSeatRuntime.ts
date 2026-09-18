@@ -49,13 +49,14 @@ export const crewSeatDraft = (seat: CrewProposalSeat): CrewSeatDraft => ({
   ...(seat.runtimeMode === undefined ? {} : { runtimeMode: seat.runtimeMode }),
 });
 
-/** Freeze the resolved custom runtime before changing one field, so unrelated settings stay put. */
-export const resolvedCustomDraft = (
+/** Freeze the resolved runtime before changing one field, so unrelated settings stay put. */
+export const resolvedCrewSeatDraft = (
   draft: CrewSeatDraft,
   runtime?: CrewProposalSeatRuntime,
 ): CrewSeatDraft => {
   const modelSelection = draft.modelSelection ?? runtime?.modelSelection;
-  const runtimeMode = draft.runtimeMode ?? runtime?.runtimeMode;
+  const runtimeMode =
+    draft.runtimeMode ?? (draft.agentId === CUSTOM_AGENT ? runtime?.runtimeMode : undefined);
   return {
     ...draft,
     ...(modelSelection ? { modelSelection } : {}),
@@ -63,7 +64,7 @@ export const resolvedCustomDraft = (
   };
 };
 
-/** Saved personas own their runtime; custom overrides must not follow a persona selection. */
+/** A newly selected persona starts from its own defaults; overrides belong to the previous member. */
 export const chooseCrewSeatPersona = (draft: CrewSeatDraft, agentId: string): CrewSeatDraft => ({
   seat: draft.seat,
   instructions: draft.instructions,
@@ -122,10 +123,6 @@ export const applyCrewSeatDraft = (
   reason: seat.reason,
   agentId: draft.agentId === CUSTOM_AGENT ? null : draft.agentId,
   ...(draft.instructions ? { instructions: draft.instructions } : {}),
-  ...(draft.agentId === CUSTOM_AGENT && draft.modelSelection
-    ? { modelSelection: draft.modelSelection }
-    : {}),
-  ...(draft.agentId === CUSTOM_AGENT && draft.runtimeMode
-    ? { runtimeMode: draft.runtimeMode }
-    : {}),
+  ...(draft.modelSelection ? { modelSelection: draft.modelSelection } : {}),
+  ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
 });

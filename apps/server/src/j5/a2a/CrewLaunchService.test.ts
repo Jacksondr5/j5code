@@ -15,6 +15,9 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 
+import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
+import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
+import { guardAgentPersonaThreadCreate } from "../agents/agentPersonaOrchestration.ts";
 import { ServerConfig } from "../../config.ts";
 import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
 import {
@@ -681,6 +684,22 @@ it.effect(
         assert.equal(saved[0]?.assignment?.resolvedDriver, "codex");
         assert.equal(saved[0]?.runtime.harness, "Codex");
         assert.equal(saved[0]?.runtime.access, "Repository write");
+        const accessOnly = (yield* launcher.resolveSeats(captain, [
+          { name: "builder", agentId: "builder", reason: "Build", runtimeMode: "full-access" },
+        ]))[0]!;
+        assert.deepStrictEqual(accessOnly.modelSelection, saved[0]?.modelSelection);
+        assert.equal(accessOnly.assignment?.resolvedRoute, saved[0]?.assignment?.resolvedRoute);
+        assert.equal(accessOnly.runtime.access, "Full access");
+        const accessPolicy = yield* resolveAgentPersonaRuntime(
+          {
+            agentPersonaAssignment: accessOnly.assignment!,
+            runtimeMode: accessOnly.runtimeMode,
+          },
+          yield* makeAgentPersonaLibrary,
+        );
+        assert.equal(accessPolicy.runtimeMode, "full-access");
+        assert.notProperty(accessPolicy, "sandboxPolicy");
+
         assert.equal(
           saved[0]?.modelSelection.model,
           saved[0]?.assignment?.resolvedModelSelection.model,
@@ -827,10 +846,72 @@ it.effect(
           .pipe(Effect.flip);
         assert.equal(invalidAccess._tag, "CrewLaunchSeatUnavailableError");
         assert.include(invalidAccess.message, "Choose Approval required or Full access");
-        const personaOverride = yield* launcher
-          .resolveSeats(captain, [{ ...custom, agentId: "critic" }])
-          .pipe(Effect.flip);
-        assert.equal(personaOverride._tag, "CrewLaunchSeatUnavailableError");
+        // Neither configured provider advertises Critic's saved model: the human override
+        // still launches, preserving its snapshot and behavior on the selected harness.
+        const personaSeat = {
+          ...custom,
+          name: "saved-reviewer",
+          agentId: "critic",
+          runtimeMode: "full-access" as const,
+        };
+        const personaOverride = yield* launcher.resolveSeats(captain, [personaSeat]);
+        const saved = personaOverride[0]!;
+        assert.equal(saved.assignment?.resolvedRoute, "override");
+        assert.deepStrictEqual(saved.modelSelection, custom.modelSelection);
+        assert.equal(saved.runtime.access, "Full access");
+        const library = yield* makeAgentPersonaLibrary;
+        const policy = yield* resolveAgentPersonaRuntime(
+          { agentPersonaAssignment: saved.assignment!, runtimeMode: saved.runtimeMode },
+          library,
+        );
+        assert.equal(policy.runtimeMode, "full-access");
+        assert.notProperty(policy, "sandboxPolicy");
+        assert.notProperty(policy, "approvalPolicy");
+        assert.include(policy.agentPersonaInstructions!, "Selected behavior: critic-review");
+        assert.include(policy.agentPersonaInstructions!, "Never commit or push.");
+        const original = yield* library.readSnapshot(saved.assignment!);
+        assert.include(policy.agentPersonaInstructions!, original.instructions);
+        yield* launcher.addSeats({
+          providerSessionId: "session",
+          requestKey: "saved-override-add",
+          captain,
+          instance,
+          seats: [personaSeat],
+          resolvedSeats: personaOverride,
+        });
+        const savedCommand = (yield* Ref.get(commands)).findLast(
+          (command) => command.type === "thread.create",
+        );
+        assert.equal(savedCommand?.type, "thread.create");
+        if (savedCommand?.type === "thread.create") {
+          assert.deepStrictEqual(savedCommand.modelSelection, personaSeat.modelSelection);
+          assert.equal(savedCommand.runtimeMode, "full-access");
+          assert.deepStrictEqual(savedCommand.agentPersonaAssignment, saved.assignment);
+          yield* guardAgentPersonaThreadCreate(savedCommand, library, () =>
+            Effect.succeed("claudeAgent"),
+          );
+        }
+        for (const selection of [
+          { ...custom.modelSelection, model: "missing" },
+          { ...custom.modelSelection, options: [{ id: "effort", value: "unsupported" }] },
+        ]) {
+          const invalid = yield* launcher
+            .resolveSeats(captain, [{ ...personaSeat, modelSelection: selection }])
+            .pipe(Effect.flip);
+          assert.equal(invalid._tag, "CrewLaunchSeatUnavailableError");
+        }
+        const modelOnly = (yield* launcher.resolveSeats(captain, [
+          { ...personaSeat, runtimeMode: undefined },
+        ]))[0]!;
+        const defaultPolicy = yield* resolveAgentPersonaRuntime(
+          { agentPersonaAssignment: modelOnly.assignment!, runtimeMode: modelOnly.runtimeMode },
+          library,
+        );
+        assert.equal(modelOnly.runtime.access, "Read only");
+        assert.equal(
+          "sandboxPolicy" in defaultPolicy ? defaultPolicy.sandboxPolicy?.type : undefined,
+          "readOnly",
+        );
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );

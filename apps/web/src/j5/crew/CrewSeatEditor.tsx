@@ -21,7 +21,7 @@ import {
   chooseCrewHarness,
   crewModelSelection,
   crewReasoningDescriptor,
-  resolvedCustomDraft,
+  resolvedCrewSeatDraft,
   setCrewReasoning,
   type CrewSeatDraft,
 } from "./crewSeatRuntime";
@@ -42,7 +42,7 @@ export function CrewSeatEditor(props: CrewSeatEditorProps) {
   const custom = value.agentId === CUSTOM_AGENT;
   const changeInstructions = (instructions: string) =>
     props.onChange({
-      ...(custom ? resolvedCustomDraft(value, props.runtime) : value),
+      ...value,
       instructions,
     });
   return (
@@ -83,35 +83,12 @@ export function CrewSeatEditor(props: CrewSeatEditorProps) {
           </Select>
         </div>
       </div>
-      {custom ? (
-        props.environmentId === null ? (
-          <p className="text-xs text-muted-foreground">
-            Connect to the crew’s environment to choose its runtime.
-          </p>
-        ) : (
-          <CrewSeatRuntimeFields {...props} environmentId={props.environmentId} />
-        )
+      {props.environmentId === null ? (
+        <p className="text-xs text-muted-foreground">
+          Connect to the crew’s environment to choose its runtime.
+        </p>
       ) : (
-        <div className="grid gap-2">
-          <p className="text-xs text-muted-foreground">Uses the saved persona’s configuration.</p>
-          <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {(
-              [
-                ["Harness", props.runtime?.harness],
-                ["Model", props.runtime?.model],
-                ["Reasoning", props.runtime?.reasoning],
-                ["Access", props.runtime?.access],
-              ] as const
-            ).map(([label, text]) => (
-              <div key={label} className="min-w-0 text-xs">
-                <dt className="text-muted-foreground">{label}</dt>
-                <dd className="mt-1 break-words text-foreground">
-                  {text ?? (props.existing ? "Awaiting preview" : "Shown after adding")}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        </div>
+        <CrewSeatRuntimeFields {...props} environmentId={props.environmentId} />
       )}
       <label className="grid gap-1 text-xs text-muted-foreground">
         Instructions
@@ -142,7 +119,7 @@ function CrewSeatRuntimeFields(props: CrewSeatEditorProps & { environmentId: Env
       provider.availability !== "unavailable" &&
       provider.models.length > 0,
   );
-  const value = resolvedCustomDraft(props.value, props.runtime);
+  const value = resolvedCrewSeatDraft(props.value, props.runtime);
   const selection = value.modelSelection;
   const provider = providers.find(({ instanceId }) => instanceId === selection?.instanceId);
   const model = provider?.models.find(({ slug }) => slug === selection?.model);
@@ -186,8 +163,7 @@ function CrewSeatRuntimeFields(props: CrewSeatEditorProps & { environmentId: Env
         >
           <SelectTrigger aria-label={`${label} harness`}>
             <SelectValue>
-              {providerName ??
-                (choices.length === 0 ? "No available harnesses" : "Use Captain’s harness")}
+              {providerName ?? (choices.length === 0 ? "No available harnesses" : "Choose harness")}
             </SelectValue>
           </SelectTrigger>
           <SelectPopup alignItemWithTrigger={false}>
@@ -211,7 +187,7 @@ function CrewSeatRuntimeFields(props: CrewSeatEditorProps & { environmentId: Env
           }}
         >
           <SelectTrigger aria-label={`${label} model`}>
-            <SelectValue>{model?.name ?? selection?.model ?? "Use Captain’s model"}</SelectValue>
+            <SelectValue>{model?.name ?? selection?.model ?? "Choose model"}</SelectValue>
           </SelectTrigger>
           <SelectPopup alignItemWithTrigger={false}>
             {provider?.models.map((candidate) => (
@@ -242,8 +218,10 @@ function CrewSeatRuntimeFields(props: CrewSeatEditorProps & { environmentId: Env
           <SelectTrigger aria-label={`${label} reasoning`}>
             <SelectValue>
               {reasoningChoices.find(({ id }) => id === String(reasoningValue))?.label ??
-                props.runtime?.reasoning ??
-                (selection ? "Provider default" : "Use Captain’s reasoning")}
+                (selection?.model === props.runtime?.modelSelection.model
+                  ? props.runtime?.reasoning
+                  : undefined) ??
+                (selection ? "Provider default" : "Choose model first")}
             </SelectValue>
           </SelectTrigger>
           <SelectPopup alignItemWithTrigger={false}>
@@ -258,17 +236,28 @@ function CrewSeatRuntimeFields(props: CrewSeatEditorProps & { environmentId: Env
       <div className="grid min-w-0 gap-1 text-xs text-muted-foreground">
         <span>Access</span>
         <Select
-          value={value.runtimeMode ?? null}
+          value={value.runtimeMode ?? (value.agentId === CUSTOM_AGENT ? null : "persona-default")}
           disabled={props.disabled}
           onValueChange={(next) => {
+            if (next === "persona-default") {
+              const { runtimeMode: _runtimeMode, ...inherited } = props.value;
+              props.onChange(inherited);
+              return;
+            }
             const option = accessOptions.find(({ value }) => value === next);
             if (option) props.onChange({ ...value, runtimeMode: option.value });
           }}
         >
           <SelectTrigger aria-label={`${label} access`}>
-            <SelectValue>{mode?.label ?? "Use Captain’s access"}</SelectValue>
+            <SelectValue>
+              {mode?.label ??
+                (value.agentId === CUSTOM_AGENT ? "Choose access" : "Persona default")}
+            </SelectValue>
           </SelectTrigger>
           <SelectPopup alignItemWithTrigger={false}>
+            {value.agentId !== CUSTOM_AGENT ? (
+              <SelectItem value="persona-default">Persona default</SelectItem>
+            ) : null}
             {accessOptions.map((option) => (
               <SelectItem key={option.value} value={option.value}>
                 <span className="grid gap-0.5">

@@ -12,6 +12,7 @@ import {
   TrimmedNonEmptyString,
 } from "../baseSchemas.ts";
 import { ModelSelection } from "../modelSelection.ts";
+import { RuntimeMode } from "../providerPolicy.ts";
 import { ProviderDriverKind } from "../providerInstance.ts";
 
 /**
@@ -79,9 +80,11 @@ export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
   definitionDigest: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
   displayName: Schema.optional(TrimmedNonEmptyString),
   authorityPolicy: AgentPersonaAuthorityPolicy,
-  resolvedRoute: Schema.Literals(["primary", "fallback"]),
+  resolvedRoute: Schema.Literals(["primary", "fallback", "override"]),
   resolvedDriver: ProviderDriverKind,
   resolvedModelSelection: ModelSelection,
+  /** Human-approved crew access, independent of the persona behavior instructions. */
+  runtimeModeOverride: Schema.optional(RuntimeMode),
 });
 export type OrchestrationV2AgentPersonaAssignment =
   typeof OrchestrationV2AgentPersonaAssignment.Type;
