@@ -53,8 +53,8 @@ The platform ships the machinery — propose, gate, spawn, render, remind, settl
 
 ### The unit
 
-6. Approval spawns every seat as a Peer Agent placed under the Captain and records the roster snapshot with each member's approver and reason; a second approval of the same proposal spawns nothing.
-7. A spawn that fails hands the gate back to the person; retrying converges on the same seats rather than refusing them as taken.
+6. Approval spawns every seat as a Peer Agent placed under the Captain and records the roster snapshot with each member's approver and reason; a second approval of the same proposal spawns nothing, and a decision that races another device's on the same gate is refused rather than undoing it.
+7. A spawn that fails hands the gate back to the person; retrying converges on the same seats rather than refusing them as taken. A decision the server lost mid-way is settled at the next boot: a decline is finished, an approval is handed back.
 8. A Crew lives in exactly one Squadron and renders as one node under its Captain with its members beneath it.
 9. Every member can message any participant in the Squadron; the Crew's contact with the person goes through the inbox or its Captain rather than chat — a plain send to the person is refused by the [human-ask rule](../a2a/agent-tools.md), so a seat reaches the person only with an ask that lands in the Inbox or a reply on an open Exchange.
 

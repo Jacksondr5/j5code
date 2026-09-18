@@ -15,7 +15,14 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 
 import { ServerConfig } from "../../config.ts";
-import { OrchestratorDispatchError } from "../../orchestration-v2/Orchestrator.ts";
+import {
+  OrchestratorDispatchError,
+  OrchestratorProjectionError,
+} from "../../orchestration-v2/Orchestrator.ts";
+import {
+  ProjectionStoreReadError,
+  ProjectionStoreThreadNotFoundError,
+} from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import {
@@ -162,14 +169,28 @@ const fixture = Effect.gen(function* () {
   const notices = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
   // Seat threads whose archive the store refuses, to prove a decline whose cleanup fails stays open.
   const archiveFailures = yield* Ref.make<ReadonlySet<string>>(new Set());
+  // Seat threads that never came to exist (a not-found), and ones whose read the store cannot answer.
+  const missingThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
+  const unreadableThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
   const layer = crewProposalLayer.pipe(
     Layer.provideMerge(fakeLauncher(crews)),
     Layer.provideMerge(
       Layer.mock(ThreadManagementService)({
         getThreadProjection: (threadId) =>
-          Effect.succeed({
-            thread: thread(threadId),
-          } as unknown as OrchestrationV2ThreadProjection),
+          Effect.gen(function* () {
+            // The orchestrator wraps the store's failure either way; the cause tells them apart.
+            if ((yield* Ref.get(missingThreads)).has(threadId))
+              return yield* new OrchestratorProjectionError({
+                threadId,
+                cause: new ProjectionStoreThreadNotFoundError({ threadId }),
+              });
+            if ((yield* Ref.get(unreadableThreads)).has(threadId))
+              return yield* new OrchestratorProjectionError({
+                threadId,
+                cause: new ProjectionStoreReadError({ threadId }),
+              });
+            return { thread: thread(threadId) } as unknown as OrchestrationV2ThreadProjection;
+          }),
         dispatch: (command) =>
           Effect.gen(function* () {
             if (
@@ -191,7 +212,7 @@ const fixture = Effect.gen(function* () {
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-proposal-" })),
     Layer.provideMerge(NodeServices.layer),
   );
-  return { layer, notices, archiveFailures };
+  return { layer, notices, archiveFailures, missingThreads, unreadableThreads };
 });
 
 it.effect(
@@ -683,6 +704,181 @@ it.effect("holds every door to the same seat shape and seats nobody into a retir
       assert.equal(late._tag, "CrewProposalRequestError");
       assert.include(late.message, "retired");
       assert.lengthOf((yield* crews.read(approved.instance!.id))!.members, 1);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a decision that races another device's on the same gate is refused, not undone", () =>
+  Effect.gen(function* () {
+    const { layer } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const gate = yield* CrewProposalService;
+      const proposals = yield* AgentCrewProposalService;
+      const crews = yield* AgentCrewInstanceService;
+
+      // A roster whose launch failed partway, handed back with its Crew already recorded: the
+      // shape both devices see when they resolve the reopened gate at once.
+      const roster = yield* gate.propose({
+        requestKey: "race-1",
+        captain,
+        displayName: "Boom after record",
+        brief: "The second seat never spawns.",
+        seats: [
+          { seat: "builder", agentId: "builder", reason: "Builds" },
+          { seat: "critic", agentId: "critic", reason: "Reviews" },
+        ],
+      });
+      yield* gate
+        .resolve({ proposalId: roster.proposal.id, decision: "approve" })
+        .pipe(Effect.flip);
+      const crewId = (yield* proposals.read(roster.proposal.id))!.crewInstanceId!;
+
+      // Device A's approval holds the claim while its launch runs; device B's decline arrives.
+      const held = yield* proposals.claim({
+        id: roster.proposal.id,
+        decision: "approve",
+        approvedSeats: null,
+      });
+      assert.equal(held?.status, "approving");
+      const refused = yield* gate
+        .resolve({ proposalId: roster.proposal.id, decision: "decline" })
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewProposalNotOpenError");
+      if (refused._tag === "CrewProposalNotOpenError") assert.equal(refused.status, "approving");
+      // The decline did no cleanup over the approval: the Crew A is launching is still live.
+      assert.isNull((yield* crews.read(crewId))!.archivedAt);
+      assert.equal((yield* proposals.read(roster.proposal.id))!.status, "approving");
+
+      // The mirror image: a decline holds the claim while it cleans up; an approval arrives.
+      yield* proposals.reopen(roster.proposal.id);
+      const declining = yield* proposals.claim({
+        id: roster.proposal.id,
+        decision: "decline",
+        approvedSeats: null,
+      });
+      assert.equal(declining?.status, "declining");
+      const lateApproval = yield* gate
+        .resolve({ proposalId: roster.proposal.id, decision: "approve" })
+        .pipe(Effect.flip);
+      assert.equal(lateApproval._tag, "CrewProposalNotOpenError");
+      // Only the claim holder can write the final status; a second claim finds nothing open.
+      assert.isNull(
+        yield* proposals.claim({
+          id: roster.proposal.id,
+          decision: "approve",
+          approvedSeats: null,
+        }),
+      );
+
+      // Once the claim is released the person decides again and the decline goes through whole.
+      yield* proposals.reopen(roster.proposal.id);
+      const declined = yield* gate.resolve({ proposalId: roster.proposal.id, decision: "decline" });
+      assert.equal(declined.proposal.status, "declined");
+      assert.isNotNull((yield* crews.read(crewId))!.archivedAt);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("the boot sweep finishes a decline the server lost and hands a lost approval back", () =>
+  Effect.gen(function* () {
+    const { layer, notices } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const gate = yield* CrewProposalService;
+      const proposals = yield* AgentCrewProposalService;
+      const crews = yield* AgentCrewInstanceService;
+
+      // A decline claimed, then the server died before the cleanup and the final status landed.
+      const lost = yield* gate.propose({
+        requestKey: "sweep-1",
+        captain,
+        displayName: "Boom after record",
+        brief: "The second seat never spawns.",
+        seats: [
+          { seat: "builder", agentId: "builder", reason: "Builds" },
+          { seat: "critic", agentId: "critic", reason: "Reviews" },
+        ],
+      });
+      yield* gate.resolve({ proposalId: lost.proposal.id, decision: "approve" }).pipe(Effect.flip);
+      yield* proposals.claim({ id: lost.proposal.id, decision: "decline", approvedSeats: null });
+      // An approval claimed, then lost the same way; its launch converges on a retry, so the
+      // gate is handed back rather than guessed at.
+      const handedBack = yield* gate.propose({
+        requestKey: "sweep-2",
+        captain,
+        displayName: "Sweep Crew",
+        brief: "Build it.",
+        seats: [{ seat: "maker", agentId: "builder", reason: "Builds" }],
+      });
+      yield* proposals.claim({
+        id: handedBack.proposal.id,
+        decision: "approve",
+        approvedSeats: handedBack.proposal.requestedSeats,
+      });
+
+      assert.sameMembers([...(yield* gate.reconcile)], [lost.proposal.id, handedBack.proposal.id]);
+      const declined = (yield* proposals.read(lost.proposal.id))!;
+      assert.equal(declined.status, "declined");
+      assert.isNotNull((yield* crews.read(declined.crewInstanceId!))!.archivedAt);
+      const notice = (yield* Ref.get(notices)).findLast(
+        (command) => command.type === "message.dispatch",
+      );
+      if (notice?.type === "message.dispatch") assert.include(notice.text, "decision: declined");
+      const reopened = (yield* proposals.read(handedBack.proposal.id))!;
+      assert.equal(reopened.status, "open");
+      assert.deepStrictEqual(reopened.approvedSeats, handedBack.proposal.requestedSeats);
+      // Nothing left claimed; a second sweep is a no-op.
+      assert.deepStrictEqual(yield* gate.reconcile, []);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a seat thread that never existed is skipped; a store that cannot answer is not", () =>
+  Effect.gen(function* () {
+    const { layer, notices, missingThreads, unreadableThreads } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const gate = yield* CrewProposalService;
+      const proposals = yield* AgentCrewProposalService;
+      const crews = yield* AgentCrewInstanceService;
+      const roster = yield* gate.propose({
+        requestKey: "reads-1",
+        captain,
+        displayName: "Boom after record",
+        brief: "The second seat never spawns.",
+        seats: [
+          { seat: "builder", agentId: "builder", reason: "Builds" },
+          { seat: "critic", agentId: "critic", reason: "Reviews" },
+        ],
+      });
+      yield* gate
+        .resolve({ proposalId: roster.proposal.id, decision: "approve" })
+        .pipe(Effect.flip);
+      const crewId = (yield* proposals.read(roster.proposal.id))!.crewInstanceId!;
+
+      // The store cannot read the builder's thread: the decline fails, the gate is handed back,
+      // and no row is dropped from under a thread that may well be live.
+      yield* Ref.set(unreadableThreads, new Set(["thread:builder"]));
+      const failed = yield* gate
+        .resolve({ proposalId: roster.proposal.id, decision: "decline" })
+        .pipe(Effect.flip);
+      assert.equal(failed._tag, "CrewProposalOperationError");
+      assert.include(failed.message, "reading seat builder");
+      assert.equal((yield* proposals.read(roster.proposal.id))!.status, "open");
+      assert.isNull((yield* crews.read(crewId))!.archivedAt);
+      assert.lengthOf((yield* crews.read(crewId))!.members, 2);
+
+      // The critic's thread never came to exist: that is a fact, so the decline passes it by and
+      // archives only the builder's.
+      yield* Ref.set(unreadableThreads, new Set());
+      yield* Ref.set(missingThreads, new Set(["thread:critic"]));
+      const declined = yield* gate.resolve({ proposalId: roster.proposal.id, decision: "decline" });
+      assert.equal(declined.proposal.status, "declined");
+      assert.isNotNull((yield* crews.read(crewId))!.archivedAt);
+      assert.deepStrictEqual(
+        (yield* Ref.get(notices))
+          .filter((command) => command.type === "thread.archive")
+          .map((command) => command.threadId),
+        [ThreadId.make("thread:builder")],
+      );
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );

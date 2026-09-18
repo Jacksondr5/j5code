@@ -16,6 +16,8 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 
 import { ServerConfig } from "../../config.ts";
+import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
+import { ProjectionStoreReadError } from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -115,11 +117,22 @@ const dependencies = (
   providers: ReadonlyArray<ServerProvider>,
   /** Seat threads whose first home registration fails, to leave a launch half done. */
   failHomeOnce: Set<string> = new Set(),
+  /** Seat threads whose projection the store cannot read, once; a not-found is not among them. */
+  unreadableOnce: Set<string> = new Set(),
 ) =>
   Layer.mergeAll(
     Layer.mock(ThreadManagementService)({
       getThreadProjection: (threadId) =>
-        Effect.succeed({ thread: thread(threadId) } as unknown as OrchestrationV2ThreadProjection),
+        unreadableOnce.delete(threadId)
+          ? Effect.fail(
+              new OrchestratorProjectionError({
+                threadId,
+                cause: new ProjectionStoreReadError({ threadId }),
+              }),
+            )
+          : Effect.succeed({
+              thread: thread(threadId),
+            } as unknown as OrchestrationV2ThreadProjection),
       dispatch: (command) =>
         Ref.update(commands, (items) => [...items, command]).pipe(
           Effect.as({ events: [], effects: [] } as never),
@@ -268,8 +281,13 @@ it.effect(
           providerSessionId: "session",
           requestKey: crewSeatRequestKey("retry-1", seat),
         });
+      // Filled after the first launch, so the failed spawn's own read of the created thread
+      // still succeeds and only the retry's read of the earlier seat is refused.
+      const unreadable = new Set<string>();
       const layer = crewLaunchLayer.pipe(
-        Layer.provideMerge(dependencies(commands, [codex], new Set([seatThread("critic")]))),
+        Layer.provideMerge(
+          dependencies(commands, [codex], new Set([seatThread("critic")]), unreadable),
+        ),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-launch-" })),
         Layer.provideMerge(NodeServices.layer),
@@ -306,7 +324,17 @@ it.effect(
           seatThread("critic"),
         );
 
-        // The person renames the seat on the card and approves again.
+        // The person renames the seat on the card and approves again. The first retry cannot
+        // read the critic's thread: it fails rather than dropping the row from under a thread
+        // that may be live, and the record still names the critic.
+        unreadable.add(seatThread("critic"));
+        const refused = yield* launch("reviewer").pipe(Effect.flip);
+        assert.equal(refused._tag, "CrewLaunchOperationError");
+        assert.include(refused.message, "reading the earlier seat critic");
+        assert.sameMembers(
+          (yield* crews.read(crewId))!.members.map(({ seatName }) => seatName),
+          ["builder", "critic"],
+        );
         const instance = yield* launch("reviewer");
         assert.deepStrictEqual(
           instance.members.map(({ seatName }) => seatName),

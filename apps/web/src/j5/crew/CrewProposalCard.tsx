@@ -167,7 +167,7 @@ export function CrewProposalCard(props: {
         <Input
           aria-label="New seat name"
           disabled={props.busy}
-          placeholder="seat"
+          placeholder="name"
           value={draft.seat}
           onChange={(event) => setDraft({ ...draft, seat: event.currentTarget.value })}
         />

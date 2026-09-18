@@ -8,7 +8,6 @@ import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
@@ -23,6 +22,7 @@ import {
 } from "./AgentCrewInstanceService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
+import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 import { CREW_SEAT_CAP } from "./crewLimits.ts";
 import type { ParticipantId, SquadronId } from "./contracts.ts";
 import {
@@ -385,10 +385,12 @@ export const layer = Layer.effect(
           (member) => !planned.some((entry) => entry.seat.name === member.seatName),
         );
         for (const member of stale) {
-          const seat = yield* threadManagement
-            .getThreadProjection(member.threadId)
-            .pipe(Effect.option);
-          if (Option.isSome(seat) && seat.value.thread.archivedAt === null)
+          // Only a thread that never came to exist is skipped; a store that cannot answer fails
+          // the retry, or the row below would be dropped from under a live seat thread.
+          const seat = yield* getThreadProjectionIfPresent(threadManagement, member.threadId).pipe(
+            Effect.mapError(recordError(`reading the earlier seat ${member.seatName}`)),
+          );
+          if (seat !== null && seat.thread.archivedAt === null)
             yield* threadManagement
               .dispatch({
                 type: "thread.archive",

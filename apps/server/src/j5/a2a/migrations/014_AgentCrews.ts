@@ -63,7 +63,10 @@ export default Effect.gen(function* () {
       captain_thread_id TEXT NOT NULL,
       crew_instance_id TEXT,
       kind TEXT NOT NULL CHECK (kind IN ('roster', 'addition')),
-      status TEXT NOT NULL CHECK (status IN ('open', 'approved', 'declined')),
+      -- A resolution claims the row first (approving or declining), does its work, then writes the
+      -- final status; a claim the server lost mid-way is finished or handed back at boot.
+      status TEXT NOT NULL
+        CHECK (status IN ('open', 'approving', 'declining', 'approved', 'declined')),
       brief TEXT NOT NULL,
       display_name TEXT NOT NULL,
       requested_seats TEXT NOT NULL,
