@@ -70,9 +70,13 @@ export const requestCrewMemberships = (
 };
 
 export const refreshCrewMemberships = () => store.refreshRequested();
-/** The Fleet poll's re-read: only the rows the roster says sit in or command a Crew. */
+/**
+ * The Fleet poll's re-read: the rows the roster says sit in or command a Crew, plus every row
+ * still showing a chip, so a Captain whose last Crew retired (here or on another device) is
+ * re-read once more and its chip clears rather than staying until reload.
+ */
 export const refreshCrewMembershipRows = (refs: ReadonlyArray<ScopedThreadRef>) =>
-  store.refreshRows(refs);
+  store.refreshRows(refs, { held: true });
 
 export function useCrewMembership(
   ref: ScopedThreadRef | undefined,

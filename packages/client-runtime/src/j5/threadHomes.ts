@@ -159,9 +159,15 @@ export function createScopedThreadReadStore<Value, Entry>(options: {
   /**
    * Re-read only these rows, and only where a caller asked for them: the periodic poll names the
    * rows some other read says are involved, so its cost follows that involvement rather than the
-   * length of the thread list.
+   * length of the thread list. With `held`, every requested row that currently holds a value is
+   * re-read as well: a row whose relation ended (its Crew retired, its last child archived) is
+   * named by no live read any more, and only a re-read can clear what it still shows. The cost
+   * still follows involvement, since a row holds a value only while it was involved.
    */
-  const refreshRows = (refs: ReadonlyArray<ScopedThreadRef>) => {
+  const refreshRows = (
+    refs: ReadonlyArray<ScopedThreadRef>,
+    options: { readonly held?: boolean } = {},
+  ) => {
     const touched = new Set<EnvironmentId>();
     for (const ref of refs) {
       const state = environments.get(ref.environmentId);
@@ -169,6 +175,13 @@ export function createScopedThreadReadStore<Value, Entry>(options: {
       state.pending.add(ref.threadId);
       touched.add(ref.environmentId);
     }
+    if (options.held === true)
+      for (const [environmentId, state] of environments)
+        for (const threadId of state.requested) {
+          if (!values.has(scopedThreadKey(scopeThreadRef(environmentId, threadId)))) continue;
+          state.pending.add(threadId);
+          touched.add(environmentId);
+        }
     for (const environmentId of touched)
       readPending(environmentId, environments.get(environmentId)!);
   };

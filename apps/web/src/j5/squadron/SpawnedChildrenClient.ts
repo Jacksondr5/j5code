@@ -44,9 +44,12 @@ export const requestSpawnedChildren = (
 };
 
 export const refreshSpawnedChildren = () => store.refreshRequested();
-/** The Fleet poll's re-read: only the rows the roster says have placed children or sit in a Crew. */
+/**
+ * The Fleet poll's re-read: the rows the roster says have placed children or sit in a Crew, plus
+ * every row still showing children, so a parent whose children all archived loses them.
+ */
 export const refreshSpawnedChildrenRows = (refs: ReadonlyArray<ScopedThreadRef>) =>
-  store.refreshRows(refs);
+  store.refreshRows(refs, { held: true });
 
 const EMPTY: ReadonlyArray<SpawnedChild> = [];
 

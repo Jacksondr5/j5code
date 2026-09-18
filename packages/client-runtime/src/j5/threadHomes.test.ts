@@ -186,3 +186,40 @@ it("keeps a negative answer loaded, re-reads only named rows, and keeps the snap
   store.refreshRows([scopeThreadRef(alpha, ThreadId.make("thread:unrequested"))]);
   expect(load.mock.calls).toHaveLength(2);
 });
+
+it("re-reads the rows still holding a value on a held refresh, so an ended relation clears", async () => {
+  const one = ThreadId.make("thread:one");
+  const two = ThreadId.make("thread:two");
+  let crews: ReadonlyArray<ThreadId> = [one];
+  const load = vi.fn(async (_: PreparedConnection, ids: ReadonlyArray<ThreadId>) =>
+    ids.filter((id) => crews.includes(id)).map((id) => ({ threadId: id, value: "seat" })),
+  );
+  const store = createScopedThreadReadStore<string, { threadId: ThreadId; value: string }>({
+    load,
+    replace: (current, environmentId, requested, entries) => {
+      const next = new Map(current);
+      for (const id of requested) next.delete(scopedThreadKey(scopeThreadRef(environmentId, id)));
+      for (const entry of entries)
+        next.set(scopedThreadKey(scopeThreadRef(environmentId, entry.threadId)), entry.value);
+      return next;
+    },
+  });
+  store.setConnections(new Map([[alpha, prepared(alpha)]]));
+  store.request([scopeThreadRef(alpha, one), scopeThreadRef(alpha, two)]);
+  await waitForChange(store, () => store.getSnapshot().size === 1);
+  // The Crew retires elsewhere: the live roster names nobody, yet `one` still shows its chip. The
+  // held refresh re-reads it, and only it, and the chip clears.
+  crews = [];
+  let reads = 0;
+  store.subscribe(() => {
+    reads += 1;
+  });
+  store.refreshRows([], { held: true });
+  await waitForChange(store, () => reads > 0);
+  expect(load.mock.calls).toHaveLength(2);
+  expect(load.mock.calls[1]?.[1]).toEqual([one]);
+  expect(store.getSnapshot().size).toBe(0);
+  // Nothing holds a value now, so a held refresh with no named rows reads nothing at all.
+  store.refreshRows([], { held: true });
+  expect(load.mock.calls).toHaveLength(2);
+});
