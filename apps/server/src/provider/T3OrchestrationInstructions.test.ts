@@ -46,6 +46,28 @@ describe("T3 orchestration provider instructions", () => {
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "bindToCurrentThread=false");
   });
 
+  it("creates mixed crews from chat and keeps coordination independent of approvals and artifacts", () => {
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "asks for a crew in ordinary chat");
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "saved personas from `list_personas` with custom seats",
+    );
+    assert.notInclude(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`list_agents`");
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "resolved provider, model, reasoning, and access",
+    );
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Captains of other crews");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Do not wait for an artifact");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`request_crew_member`");
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "reason naming the concern and needed responsibility",
+    );
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "while that request is pending");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "otherwise they queue for its next turn");
+  });
+
   it("routes durable planning outputs into artifacts and excludes working files", () => {
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "durable, user-consumable planning outputs");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`write_artifact`");
