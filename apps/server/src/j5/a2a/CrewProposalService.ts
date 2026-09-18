@@ -1,3 +1,8 @@
+import type {
+  CrewProposalPreviewRequest,
+  CrewProposalPreviewResponse,
+} from "@t3tools/contracts/j5";
+import { crewApprovalToken } from "./crewRuntimePreview.ts";
 import { MessageId, type ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
@@ -19,6 +24,7 @@ import {
   CrewLaunchService,
   type CrewCaptain,
   type CrewLaunchError,
+  type ResolvedCrewLaunchSeat,
 } from "./CrewLaunchService.ts";
 import { crewDeclinedNoticeText } from "./crewGateNotice.ts";
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
@@ -95,6 +101,7 @@ export interface RequestCrewMemberInput {
 export interface ResolveCrewProposalInput {
   readonly proposalId: string;
   readonly decision: "approve" | "decline";
+  readonly approvalToken?: string | undefined;
   /** The human's final roster on approval; the requested seats when omitted. */
   readonly seats?: ReadonlyArray<CrewProposalSeat> | undefined;
 }
@@ -105,6 +112,9 @@ export interface CrewProposalOutcome {
 }
 
 export interface CrewProposalServiceShape {
+  readonly preview: (
+    input: CrewProposalPreviewRequest,
+  ) => Effect.Effect<CrewProposalPreviewResponse, CrewProposalError>;
   readonly propose: (
     input: ProposeCrewInput,
   ) => Effect.Effect<CrewProposalOutcome, CrewProposalError>;
@@ -252,6 +262,7 @@ export const layer = Layer.effect(
       proposal: CrewProposal,
       captain: CrewCaptain,
       seats: ReadonlyArray<CrewProposalSeat>,
+      resolvedSeats: ReadonlyArray<ResolvedCrewLaunchSeat>,
     ) {
       const launchSeats = seats.map((seat) => ({
         name: seat.seat,
@@ -266,6 +277,7 @@ export const layer = Layer.effect(
           captain,
           displayName: proposal.displayName,
           seats: launchSeats,
+          resolvedSeats,
           brief: proposal.brief,
           onRecorded: (instance) =>
             proposals.attachInstance(proposal.id, instance.id).pipe(Effect.ignore),
@@ -288,6 +300,7 @@ export const layer = Layer.effect(
         captain,
         instance,
         seats: launchSeats,
+        resolvedSeats,
         brief: proposal.brief,
       });
     });
@@ -345,8 +358,9 @@ export const layer = Layer.effect(
       claimed: CrewProposal,
       captain: CrewCaptain,
       seats: ReadonlyArray<CrewProposalSeat>,
+      resolvedSeats: ReadonlyArray<ResolvedCrewLaunchSeat>,
     ) {
-      const instance = yield* fulfil(claimed, captain, seats).pipe(
+      const instance = yield* fulfil(claimed, captain, seats, resolvedSeats).pipe(
         // A failed spawn hands the gate back to the human rather than recording a phantom crew;
         // onError also fires on a defect, so an unexpected failure cannot leave it claimed.
         Effect.onError(() => proposals.reopen(claimed.id).pipe(Effect.ignore)),
@@ -543,6 +557,41 @@ export const layer = Layer.effect(
       return { proposal: declined, instance: null } satisfies CrewProposalOutcome;
     });
 
+    const resolveRuntime = (captain: CrewCaptain, seats: ReadonlyArray<CrewProposalSeat>) =>
+      launcher.resolveSeats(
+        captain,
+        seats.map((seat) => ({
+          name: seat.seat,
+          agentId: seat.agentId,
+          reason: seat.reason,
+          instructions: seat.instructions,
+        })),
+      );
+
+    const preview: CrewProposalServiceShape["preview"] = Effect.fn("j5.a2a.crewProposal.preview")(
+      function* (input) {
+        const proposal = yield* proposals
+          .read(input.proposalId)
+          .pipe(Effect.mapError(operationError("reading the proposal")));
+        if (proposal === null)
+          return yield* new CrewProposalNotFoundError({ proposalId: input.proposalId });
+        if (proposal.status !== "open")
+          return yield* new CrewProposalNotOpenError({
+            proposalId: proposal.id,
+            status: proposal.status,
+          });
+        const seats = input.seats ?? proposal.approvedSeats ?? proposal.requestedSeats;
+        yield* validateSeats(seats, { seatNames: [], pendingSeats: 0 });
+        const captain = yield* captainFor(proposal);
+        const resolved = yield* resolveRuntime(captain, seats);
+        return {
+          proposalId: proposal.id,
+          approvalToken: crewApprovalToken(proposal, captain, resolved),
+          seats: resolved.map((entry) => entry.runtime),
+        };
+      },
+    );
+
     const resolve: CrewProposalServiceShape["resolve"] = (input) =>
       Effect.gen(function* () {
         const proposal = yield* proposals
@@ -563,7 +612,7 @@ export const layer = Layer.effect(
             Effect.onError(() => proposals.reopen(claimed.id).pipe(Effect.ignore)),
           );
         }
-        const seats = input.seats ?? proposal.requestedSeats;
+        const seats = input.seats ?? proposal.approvedSeats ?? proposal.requestedSeats;
         // The human may have renamed or added seats on the card; check them against the live
         // roster, or an approved duplicate would spawn a seat the snapshot cannot record.
         const existingCrew =
@@ -595,8 +644,14 @@ export const layer = Layer.effect(
           pendingSeats: 0,
         });
         const captain = yield* captainFor(proposal);
+        const resolved = yield* resolveRuntime(captain, seats);
+        if (input.approvalToken !== crewApprovalToken(proposal, captain, resolved))
+          return yield* new CrewProposalRequestError({
+            detail: "The crew runtime preview is missing or has changed since it was shown.",
+            nextStep: "Refresh the preview and review the current settings before approving.",
+          });
         const claimed = yield* claim(proposal, "approve", seats);
-        return yield* settle(claimed, captain, seats);
+        return yield* settle(claimed, captain, seats, resolved);
       });
 
     const reconcile: CrewProposalServiceShape["reconcile"] = Effect.gen(function* () {
@@ -634,7 +689,7 @@ export const layer = Layer.effect(
         Effect.logError("J5 crew proposal sweep failed", { cause }).pipe(Effect.as([])),
       ),
     );
-    return CrewProposalService.of({ propose, requestMember, resolve, reconcile });
+    return CrewProposalService.of({ propose, requestMember, preview, resolve, reconcile });
   }),
 );
 

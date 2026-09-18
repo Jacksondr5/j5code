@@ -445,6 +445,7 @@ export function HumanInboxPage() {
     proposal: ScopedCrewProposal,
     decision: "approve" | "decline",
     seats: ReadonlyArray<CrewProposalSeat>,
+    approvalToken?: string,
   ) => {
     setResolvingProposalId(proposal.id);
     setError(null);
@@ -452,7 +453,7 @@ export function HumanInboxPage() {
       await resolveCrewProposal(proposal.environmentId, {
         proposalId: proposal.id,
         decision,
-        ...(decision === "approve" ? { seats } : {}),
+        ...(decision === "approve" ? { seats, approvalToken } : {}),
       });
       notifyHumanInboxChanged(proposal.environmentId);
       await refreshCrewProposals(proposal.environmentId).catch(() => undefined);
@@ -566,8 +567,8 @@ export function HumanInboxPage() {
                       proposal={proposal}
                       environmentId={proposal.environmentId}
                       busy={resolvingProposalId === proposal.id}
-                      onResolve={(decision, seats) =>
-                        void resolveProposal(proposal, decision, seats)
+                      onResolve={(decision, seats, approvalToken) =>
+                        void resolveProposal(proposal, decision, seats, approvalToken)
                       }
                       onOpenCaptain={() => openCaptain(proposal)}
                     />

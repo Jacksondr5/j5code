@@ -1,3 +1,9 @@
+import {
+  describeCrewSeatRuntime,
+  materializeCrewModelSelection,
+  sameCrewRuntime,
+} from "./crewRuntimePreview.ts";
+import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
 import { isProviderAvailable } from "@t3tools/contracts";
 import type {
   ModelSelection,
@@ -66,12 +72,24 @@ export interface CrewCaptain {
   readonly thread: OrchestrationV2AppThread;
 }
 
+/** One immutable resolution shared by preview, approval validation, and thread creation. */
+export interface ResolvedCrewLaunchSeat {
+  readonly seat: CrewLaunchSeat;
+  readonly assignment: OrchestrationV2AgentPersonaAssignment | null;
+  readonly modelSelection: ModelSelection;
+  readonly runtimeMode: RuntimeMode;
+  readonly outputArtifact: string | null;
+  readonly agentDisplayName: string;
+  readonly runtime: CrewProposalSeatRuntime;
+}
+
 export interface CrewLaunchInput {
   readonly providerSessionId: string;
   readonly requestKey: string;
   readonly captain: CrewCaptain;
   readonly displayName: string;
   readonly seats: ReadonlyArray<CrewLaunchSeat>;
+  readonly resolvedSeats?: ReadonlyArray<ResolvedCrewLaunchSeat>;
   readonly brief: string;
   /**
    * Runs once the Crew is recorded and before any seat spawns, so the caller can bind its own
@@ -87,6 +105,7 @@ export interface CrewAddSeatsInput {
   readonly captain: CrewCaptain;
   readonly instance: AgentCrewInstance;
   readonly seats: ReadonlyArray<CrewLaunchSeat>;
+  readonly resolvedSeats?: ReadonlyArray<ResolvedCrewLaunchSeat>;
   /** The brief the new seats start on; defaults to the Crew's original brief. */
   readonly brief?: string | undefined;
 }
@@ -141,6 +160,10 @@ export type CrewLaunchError =
   | CrewLaunchOperationError;
 
 export interface CrewLaunchServiceShape {
+  readonly resolveSeats: (
+    captain: CrewCaptain,
+    seats: ReadonlyArray<CrewLaunchSeat>,
+  ) => Effect.Effect<ReadonlyArray<ResolvedCrewLaunchSeat>, CrewLaunchError>;
   /**
    * Launch an approved roster as persona-backed Peer Agents under the Captain, whole or not at
    * all: seats resolve first, the instance is recorded with every planned seat, the seats spawn
@@ -167,23 +190,13 @@ export const layer = Layer.effect(
     const registry = yield* ProviderRegistry;
     const agents = yield* makeAgentPersonaLibrary;
 
-    interface ResolvedSeat {
-      readonly seat: CrewLaunchSeat;
-      /** Null for a custom seat: no saved agent, so no assignment and no handoff obligation. */
-      readonly assignment: OrchestrationV2AgentPersonaAssignment | null;
-      readonly modelSelection: ModelSelection;
-      readonly runtimeMode: RuntimeMode;
-      readonly outputArtifact: string | null;
-      readonly agentDisplayName: string;
-    }
-
     // Resolve every seat before creating anything: a Crew launches whole or not at all.
     const resolveSeats = Effect.fn("j5.a2a.crewLaunch.resolveSeats")(function* (
       captain: CrewCaptain,
       seats: ReadonlyArray<CrewLaunchSeat>,
     ) {
       const providers = yield* registry.getProviders;
-      const resolved: Array<ResolvedSeat> = [];
+      const resolved: Array<ResolvedCrewLaunchSeat> = [];
       // What the Captain actually runs with. A persona Captain's stored mode is whatever the
       // person picked at launch; its effective access comes from the persona policy, so a custom
       // seat that "runs as the Captain" takes that, not the stored mode.
@@ -236,7 +249,14 @@ export const layer = Layer.effect(
           resolved.push({
             seat,
             assignment: null,
-            modelSelection: captain.thread.modelSelection,
+            modelSelection: materializeCrewModelSelection(selection, provider!),
+            runtime: describeCrewSeatRuntime(
+              seat.name,
+              selection,
+              provider!,
+              captainAccess?.runtimeMode ?? captain.thread.runtimeMode,
+              null,
+            ),
             runtimeMode: captainAccess?.runtimeMode ?? captain.thread.runtimeMode,
             outputArtifact: null,
             agentDisplayName: "custom",
@@ -282,6 +302,15 @@ export const layer = Layer.effect(
           seat,
           assignment,
           modelSelection: assignment.resolvedModelSelection,
+          runtime: describeCrewSeatRuntime(
+            seat.name,
+            assignment.resolvedModelSelection,
+            providers.find(
+              (provider) => provider.instanceId === assignment.resolvedModelSelection.instanceId,
+            )!,
+            policy.runtimeMode,
+            assignment,
+          ),
           runtimeMode: policy.runtimeMode,
           outputArtifact: definition.outputArtifact ?? null,
           agentDisplayName: assignment.displayName ?? agentId,
@@ -293,7 +322,7 @@ export const layer = Layer.effect(
     const plan = (
       providerSessionId: string,
       requestKey: string,
-      seats: ReadonlyArray<ResolvedSeat>,
+      seats: ReadonlyArray<ResolvedCrewLaunchSeat>,
     ) =>
       seats.map((entry) => {
         const stableInput = {
@@ -438,6 +467,7 @@ export const layer = Layer.effect(
 
     const assertReusableSeats = Effect.fn("j5.a2a.crewLaunch.assertReusableSeats")(function* (
       planned: ReadonlyArray<Planned>,
+      approved: boolean,
     ) {
       for (const member of planned) {
         const existing = yield* getThreadProjectionIfPresent(
@@ -454,6 +484,13 @@ export const layer = Layer.effect(
               }),
           ),
         );
+        if (approved && existing !== null && !sameCrewRuntime(existing.thread, member))
+          return yield* new CrewLaunchSeatUnavailableError({
+            seatName: member.seat.name,
+            agentId: member.seat.agentId ?? "custom seat",
+            detail:
+              "An earlier attempt created this seat with different runtime settings. Restore those settings, rename the seat, or decline and create a fresh proposal.",
+          });
         if (
           existing !== null &&
           (existing.thread.archivedAt !== null || existing.thread.deletedAt != null)
@@ -469,9 +506,9 @@ export const layer = Layer.effect(
 
     const launch: CrewLaunchServiceShape["launch"] = (input) =>
       Effect.gen(function* () {
-        const resolved = yield* resolveSeats(input.captain, input.seats);
+        const resolved = input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats));
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
-        yield* assertReusableSeats(planned);
+        yield* assertReusableSeats(planned, input.resolvedSeats !== undefined);
         const recordError = (phase: string) => (cause: unknown) =>
           new CrewLaunchOperationError({ phase, seatName: null, createdSeats: [], cause });
         const crewInstanceId = spawnCrewInstanceId({
@@ -543,9 +580,9 @@ export const layer = Layer.effect(
 
     const addSeats: CrewLaunchServiceShape["addSeats"] = (input) =>
       Effect.gen(function* () {
-        const resolved = yield* resolveSeats(input.captain, input.seats);
+        const resolved = input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats));
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
-        yield* assertReusableSeats(planned);
+        yield* assertReusableSeats(planned, input.resolvedSeats !== undefined);
         // Reserve the seats before anything spawns: the store decides the cap and the version in
         // one transaction, so two approvals landing together cannot both pass. Seat ids are
         // deterministic, so a retry after a failed spawn finds its reservation and converges.
@@ -608,6 +645,6 @@ export const layer = Layer.effect(
         return reservation.instance;
       });
 
-    return CrewLaunchService.of({ launch, addSeats });
+    return CrewLaunchService.of({ launch, addSeats, resolveSeats });
   }),
 );

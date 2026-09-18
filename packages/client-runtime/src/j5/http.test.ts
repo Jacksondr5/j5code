@@ -19,6 +19,7 @@ import {
   J5HttpError,
   listHumanInbox,
   listSquadrons,
+  previewCrewProposal,
   readOpenInboxCount,
 } from "./http.ts";
 
@@ -280,3 +281,41 @@ it("does not mistake a missing person or rejected credential for a missing J5 ro
   );
   expect(isJ5UnsupportedError(new J5HttpError({ status: 403, detail: "Read-only" }))).toBe(false);
 });
+
+it.effect("previews custom crew seats on their remote environment with its own authorization", () =>
+  Effect.gen(function* () {
+    const requests: Request[] = [];
+    const result = {
+      proposalId: "proposal:1",
+      approvalToken: "runtime:1",
+      seats: [
+        {
+          seat: "reviewer",
+          provider: "OpenAI",
+          harness: "Codex",
+          model: "GPT-6-Astra",
+          reasoning: "High",
+          access: "Repository write",
+        },
+      ],
+    };
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      requests.push(new Request(input, init));
+      return Response.json(result);
+    };
+    const input = {
+      proposalId: "proposal:1",
+      seats: [
+        { seat: "reviewer", agentId: null, reason: "Review", instructions: "Check the patch" },
+      ],
+    };
+    const preview = yield* previewCrewProposal(
+      prepared("crew-server", { _tag: "Bearer", token: "crew-token" }),
+      input,
+    ).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+    expect(preview).toEqual(result);
+    expect(requests[0]?.url).toBe("https://crew-server.test/api/j5/a2a/crews/proposals/preview");
+    expect(requests[0]?.headers.get("authorization")).toBe("Bearer crew-token");
+    expect(yield* Effect.promise(() => requests[0]!.json())).toEqual(input);
+  }),
+);

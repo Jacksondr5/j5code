@@ -17,7 +17,10 @@ import * as Ref from "effect/Ref";
 
 import { ServerConfig } from "../../config.ts";
 import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
-import { ProjectionStoreReadError } from "../../orchestration-v2/ProjectionStore.ts";
+import {
+  ProjectionStoreReadError,
+  ProjectionStoreThreadNotFoundError,
+} from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -120,23 +123,42 @@ const dependencies = (
   /** Seat threads whose projection the store cannot read, once; a not-found is not among them. */
   unreadableOnce: Set<string> = new Set(),
   archived: Set<string> = new Set(),
+  realThreads = false,
 ) =>
   Layer.mergeAll(
     Layer.mock(ThreadManagementService)({
       getThreadProjection: (threadId) =>
-        unreadableOnce.delete(threadId)
-          ? Effect.fail(
-              new OrchestratorProjectionError({
-                threadId,
-                cause: new ProjectionStoreReadError({ threadId }),
+        realThreads
+          ? Ref.get(commands).pipe(
+              Effect.flatMap((commands) => {
+                const created = commands.find(
+                  (command) => command.type === "thread.create" && command.threadId === threadId,
+                );
+                return created?.type === "thread.create"
+                  ? Effect.succeed({
+                      thread: { ...thread(threadId), ...created },
+                    } as unknown as OrchestrationV2ThreadProjection)
+                  : Effect.fail(
+                      new OrchestratorProjectionError({
+                        threadId,
+                        cause: new ProjectionStoreThreadNotFoundError({ threadId }),
+                      }),
+                    );
               }),
             )
-          : Effect.succeed({
-              thread: {
-                ...thread(threadId),
-                archivedAt: archived.has(threadId) ? createdAt : null,
-              },
-            } as unknown as OrchestrationV2ThreadProjection),
+          : unreadableOnce.delete(threadId)
+            ? Effect.fail(
+                new OrchestratorProjectionError({
+                  threadId,
+                  cause: new ProjectionStoreReadError({ threadId }),
+                }),
+              )
+            : Effect.succeed({
+                thread: {
+                  ...thread(threadId),
+                  archivedAt: archived.has(threadId) ? createdAt : null,
+                },
+              } as unknown as OrchestrationV2ThreadProjection),
       dispatch: (command) =>
         Ref.update(commands, (items) => {
           if (command.type === "thread.archive") archived.add(command.threadId);
@@ -543,4 +565,119 @@ it.effect("custom seats refuse unavailable providers before recording or spawnin
       }).pipe(Effect.provide(testLayer));
     }
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "previews actual routes and pins custom defaults; approved launches and retries keep that exact runtime",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high", "low"] }]);
+      const withDefaults: ServerProvider = {
+        ...codex,
+        models: codex.models.map((model) => ({
+          ...model,
+          capabilities: {
+            optionDescriptors: [
+              {
+                id: "reasoningEffort",
+                label: "Reasoning",
+                type: "select",
+                currentValue: "high",
+                options: [
+                  { id: "high", label: "High" },
+                  { id: "low", label: "Low" },
+                ],
+              },
+            ],
+          },
+        })),
+      };
+      const providers = [withDefaults];
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(commands, providers, new Set(), new Set(), new Set(), true),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(
+          ServerConfig.layerTest(process.cwd(), { prefix: "j5-preview-runtime-" }),
+        ),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const seats = [
+          { name: "scribe", agentId: null, reason: "Notes", instructions: "Take notes" },
+        ];
+        const resolvedSeats = yield* launcher.resolveSeats(captain, seats);
+        assert.deepStrictEqual(resolvedSeats[0]?.runtime, {
+          seat: "scribe",
+          provider: "OpenAI",
+          harness: "Codex",
+          model: "gpt-5.6-sol",
+          reasoning: "High",
+          access: "Full access",
+        });
+        assert.deepStrictEqual(resolvedSeats[0]?.modelSelection.options, [
+          { id: "reasoningEffort", value: "high" },
+        ]);
+        const input = {
+          providerSessionId: "session",
+          requestKey: "runtime-pinned",
+          captain,
+          displayName: "Notes",
+          seats,
+          resolvedSeats,
+          brief: "Review",
+        };
+        // A changed provider default after validation cannot alter the approved launch.
+        providers[0] = {
+          ...withDefaults,
+          models: withDefaults.models.map((model) => ({
+            ...model,
+            capabilities: {
+              optionDescriptors: [
+                {
+                  id: "reasoningEffort",
+                  label: "Reasoning",
+                  type: "select",
+                  currentValue: "low",
+                  options: [
+                    { id: "high", label: "High" },
+                    { id: "low", label: "Low" },
+                  ],
+                },
+              ],
+            },
+          })),
+        };
+        const launched = yield* launcher.launch(input);
+        const create = (yield* Ref.get(commands)).find(
+          (command) => command.type === "thread.create",
+        );
+        assert.equal(create?.type, "thread.create");
+        if (create?.type === "thread.create")
+          assert.deepStrictEqual(create.modelSelection, resolvedSeats[0]?.modelSelection);
+        const retried = yield* launcher.launch(input);
+        assert.equal(retried.id, launched.id);
+        const changedSeats = yield* launcher.resolveSeats(captain, seats);
+        assert.equal(changedSeats[0]?.runtime.reasoning, "Low");
+        const before = (yield* Ref.get(commands)).length;
+        const changed = yield* launcher
+          .launch({ ...input, resolvedSeats: changedSeats })
+          .pipe(Effect.flip);
+        assert.equal(changed._tag, "CrewLaunchSeatUnavailableError");
+        assert.lengthOf(yield* Ref.get(commands), before);
+        const saved = yield* launcher.resolveSeats(captain, [
+          { name: "builder", agentId: "builder", reason: "Build" },
+        ]);
+        assert.equal(saved[0]?.assignment?.resolvedDriver, "codex");
+        assert.equal(saved[0]?.runtime.harness, "Codex");
+        assert.equal(saved[0]?.runtime.access, "Repository write");
+        assert.equal(
+          saved[0]?.modelSelection.model,
+          saved[0]?.assignment?.resolvedModelSelection.model,
+        );
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
 );
