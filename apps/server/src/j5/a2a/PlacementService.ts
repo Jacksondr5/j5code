@@ -229,6 +229,7 @@ interface ParticipantRow {
   readonly provenance_participant_id: string | null;
   readonly provenance_source: "upstream_lineage" | "j5_spawn" | null;
   readonly placement_parent_id: string | null;
+  readonly archived_at: string | null;
 }
 
 const decodeEvent = Schema.decodeUnknownEffect(PlacementEvent);
@@ -728,6 +729,7 @@ export const layer: Layer.Layer<
               m.payload,
               m.squadron_id,
               m.participant_id,
+              m.archived_at,
               p.provenance_kind,
               p.provenance_participant_id,
               p.provenance_source,
@@ -767,6 +769,7 @@ export const layer: Layer.Layer<
                   : row.placement_parent_id === null
                     ? null
                     : ParticipantId.make(row.placement_parent_id),
+              archivedAt: row.archived_at,
             } satisfies ParticipantPlacementView;
           }),
         { concurrency: 1 },

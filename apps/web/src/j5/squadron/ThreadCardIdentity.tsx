@@ -8,6 +8,7 @@ import type {
 import { Badge } from "../../components/ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { AgentIdentityChip } from "../agents/AgentIdentityChip";
+import { CaptainMark } from "./CaptainMark";
 import {
   presentCrewMembership,
   useCrewMembership,
@@ -20,7 +21,7 @@ import type { ThreadHome } from "./ThreadHomesClient";
  * Native threads have no Registrar home, so their existing folder label stays
  * as the honest fallback rather than inventing a Squadron. A thread launched as
  * a saved agent shows that agent beside its home; a Crew member adds a seat chip
- * and a Captain adds a Captain chip. The list itself stays flat by recency, and
+ * and a Captain adds the anchor mark. The list itself stays flat by recency, and
  * the grouped org tree belongs to the Roster.
  */
 export function ThreadCardIdentity(props: {
@@ -67,7 +68,9 @@ export function ThreadCardIdentityView(props: {
           <TooltipPopup>{label}</TooltipPopup>
         </Tooltip>
       )}
-      {chip === null ? null : (
+      {chip === null ? null : chip.kind === "captain" ? (
+        <CaptainMark title={chip.title} />
+      ) : (
         <Badge
           variant="outline"
           className="max-w-[14ch] shrink-0 truncate px-1.5 py-0 text-[10px] font-medium"

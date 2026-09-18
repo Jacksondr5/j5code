@@ -17,6 +17,7 @@ const live = {
 it("labels members by seat and captains by their live crews", () => {
   expect(presentCrewMembership(undefined)).toBeNull();
   expect(presentCrewMembership({ kind: "member", seat: "critic", crew: live })).toEqual({
+    kind: "seat",
     label: "Review Pair · critic",
     title: "Seat critic of crew Review Pair",
   });
@@ -28,7 +29,7 @@ it("labels members by seat and captains by their live crews", () => {
       kind: "captain",
       crews: [live, { ...live, crewInstanceId: "crew:2", crewName: "Old", archived: true }],
     }),
-  ).toEqual({ label: "Captain", title: "Commands Review Pair" });
+  ).toEqual({ kind: "captain", title: "Commands Review Pair" });
   expect(
     presentCrewMembership({ kind: "captain", crews: [{ ...live, archived: true }] }),
   ).toBeNull();
