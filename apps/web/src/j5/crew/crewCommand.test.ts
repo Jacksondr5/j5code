@@ -71,7 +71,7 @@ describe("crew proposal roster edits", () => {
     expect(describeSeatAgent(rows, "ghost")).toEqual({ name: "ghost", authority: null });
     expect(describeSeatAgent(rows, null)).toEqual({
       name: "Custom agent",
-      authority: "Runs with the Captain's model and access",
+      authority: "Runs with the Captain's model and access mode",
     });
   });
 

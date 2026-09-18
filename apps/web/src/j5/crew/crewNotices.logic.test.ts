@@ -345,3 +345,23 @@ it("keeps finish identity and multiline failure details separate", () => {
     ],
   });
 });
+
+it("keeps an empty custom-seat id distinct from a persona called custom", () => {
+  const notice = presentCrewNotice({
+    role: "user",
+    createdBy: "system",
+    text: `<j5_crew_gate>
+proposal_id: proposal:custom
+kind: roster
+decision: approved
+crew_instance_id: crew:custom
+crew_version: 1
+roster:
+- notes: participant_id=agent:notes agent= thread_id=thread:notes
+- review: participant_id=agent:review agent=custom thread_id=thread:review
+</j5_crew_gate>`,
+  });
+  expect(notice?.kind).toBe("gate");
+  if (notice?.kind === "gate")
+    expect(notice.roster.map((seat) => seat.agentId)).toEqual(["", "custom"]);
+});

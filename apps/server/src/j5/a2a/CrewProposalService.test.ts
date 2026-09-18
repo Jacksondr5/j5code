@@ -378,6 +378,17 @@ it.effect("gates every roster on the human and gates additions with the seat cap
         .pipe(Effect.flip);
       assert.include(bare.message, "A custom seat needs instructions");
 
+      const blank = yield* gate
+        .requestMember({
+          requestKey: "add-custom-blank",
+          captain,
+          crewInstanceId: instance.id,
+          seat: { seat: "scribe", agentId: null, reason: "Keeps notes", instructions: " \n\t " },
+          brief: null,
+        })
+        .pipe(Effect.flip);
+      assert.include(blank.message, "Seat instructions");
+
       // A custom seat names no agent, so the library is not consulted; it is filed like any other.
       const custom = yield* gate.requestMember({
         requestKey: "add-custom",

@@ -504,3 +504,43 @@ it.effect(
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );
+
+it.effect("custom seats refuse unavailable providers before recording or spawning", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const available = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
+    for (const providers of [
+      [],
+      [{ ...available, auth: { status: "unauthenticated" as const } }],
+      [{ ...available, enabled: false }],
+      [{ ...available, models: [] }],
+    ]) {
+      const testLayer = crewLaunchLayer.pipe(
+        Layer.provideMerge(dependencies(commands, providers)),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(
+          ServerConfig.layerTest(process.cwd(), { prefix: "j5-custom-unavailable-" }),
+        ),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const error = yield* launcher
+          .launch({
+            providerSessionId: "session",
+            requestKey: "unavailable-custom",
+            captain,
+            displayName: "Notes",
+            seats: [
+              { name: "scribe", agentId: null, reason: "Notes", instructions: "Take notes." },
+            ],
+            brief: "Review.",
+          })
+          .pipe(Effect.flip);
+        assert.equal(error._tag, "CrewLaunchSeatUnavailableError");
+        assert.lengthOf(yield* Ref.get(commands), 0);
+        assert.lengthOf(yield* (yield* AgentCrewInstanceService).listLive(), 0);
+      }).pipe(Effect.provide(testLayer));
+    }
+  }).pipe(Effect.scoped),
+);

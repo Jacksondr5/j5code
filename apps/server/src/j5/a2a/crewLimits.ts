@@ -43,7 +43,7 @@ export const crewSeatShapeProblem = (seat: {
     };
   if (
     seat.instructions !== undefined &&
-    (seat.instructions.length === 0 || seat.instructions.length > CREW_TEXT_MAX_CHARS)
+    (seat.instructions.trim().length === 0 || seat.instructions.length > CREW_TEXT_MAX_CHARS)
   )
     return {
       field: "instructions",
