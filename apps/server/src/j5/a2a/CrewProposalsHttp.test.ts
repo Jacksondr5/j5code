@@ -2,6 +2,7 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthSessionId,
+  ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
@@ -32,7 +33,24 @@ const proposal: CrewProposal = {
   reportedAt: null,
 };
 
-const paths = { list: "/raw/crews/proposals", resolve: "/raw/crews/proposals/resolve" } as const;
+const customSeat = {
+  seat: "critic",
+  agentId: null,
+  reason: "Human added review",
+  instructions: "Review the proposed fix.",
+  modelSelection: {
+    instanceId: ProviderInstanceId.make("claudeAgent"),
+    model: "claude-fable-5-1",
+    options: [{ id: "effort", value: "high" }],
+  },
+  runtimeMode: "approval-required" as const,
+};
+
+const paths = {
+  list: "/raw/crews/proposals",
+  resolve: "/raw/crews/proposals/resolve",
+  preview: "/raw/crews/proposals/preview",
+} as const;
 
 const authWith = (scopes: ReadonlyArray<string>) =>
   Layer.mock(EnvironmentAuth.EnvironmentAuth)({
@@ -46,8 +64,33 @@ const authWith = (scopes: ReadonlyArray<string>) =>
   });
 
 it("lists open proposals for readers and resolves them only for operators", async () => {
-  const resolved: Array<{ proposalId: string; decision: string; seats?: unknown }> = [];
+  const resolved: Array<{
+    proposalId: string;
+    decision: string;
+    seats?: unknown;
+    approvalToken?: string | undefined;
+  }> = [];
+  const previewed: unknown[] = [];
   const gate = Layer.mock(CrewProposalService)({
+    preview: (input) => {
+      previewed.push(input);
+      return Effect.succeed({
+        proposalId: input.proposalId,
+        approvalToken: "runtime-token",
+        seats: [
+          {
+            seat: "critic",
+            provider: "Anthropic",
+            harness: "Claude Code",
+            model: "Claude Fable 5.1",
+            reasoning: "High",
+            access: "Approval required",
+            modelSelection: customSeat.modelSelection,
+            runtimeMode: customSeat.runtimeMode,
+          },
+        ],
+      });
+    },
     resolve: (input) => {
       resolved.push(input);
       return input.proposalId === proposal.id
@@ -93,6 +136,32 @@ it("lists open proposals for readers and resolves them only for operators", asyn
     assert.equal(body.proposals[0]?.id, proposal.id);
     assert.lengthOf(body.proposals[0]?.requestedSeats ?? [], 1);
 
+    const preview = await reader.handler(
+      new Request(`http://environment.test${paths.preview}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ proposalId: proposal.id, seats: [customSeat] }),
+      }),
+    );
+    assert.equal(preview.status, 200);
+    assert.deepStrictEqual(previewed, [{ proposalId: proposal.id, seats: [customSeat] }]);
+    assert.deepStrictEqual(await preview.json(), {
+      proposalId: proposal.id,
+      approvalToken: "runtime-token",
+      seats: [
+        {
+          seat: "critic",
+          provider: "Anthropic",
+          harness: "Claude Code",
+          model: "Claude Fable 5.1",
+          reasoning: "High",
+          access: "Approval required",
+          modelSelection: customSeat.modelSelection,
+          runtimeMode: customSeat.runtimeMode,
+        },
+      ],
+    });
+
     const approved = await operator.handler(
       new Request(`http://environment.test${paths.resolve}`, {
         method: "POST",
@@ -100,19 +169,22 @@ it("lists open proposals for readers and resolves them only for operators", asyn
         body: JSON.stringify({
           proposalId: proposal.id,
           decision: "approve",
-          seats: [
-            ...proposal.requestedSeats,
-            { seat: "critic", agentId: "critic", reason: "Human added review" },
-          ],
+          approvalToken: "runtime-token",
+          seats: [...proposal.requestedSeats, customSeat],
         }),
       }),
     );
     assert.equal(approved.status, 200);
+    assert.equal(resolved[0]?.approvalToken, "runtime-token");
+    assert.deepStrictEqual(resolved[0]?.seats, [...proposal.requestedSeats, customSeat]);
     const approvedBody = (await approved.json()) as {
       proposal: { status: string; approvedSeats: unknown[] };
     };
     assert.equal(approvedBody.proposal.status, "approved");
-    assert.lengthOf(approvedBody.proposal.approvedSeats, 2);
+    assert.deepStrictEqual(approvedBody.proposal.approvedSeats, [
+      ...proposal.requestedSeats,
+      customSeat,
+    ]);
 
     const stale = await operator.handler(
       new Request(`http://environment.test${paths.resolve}`, {

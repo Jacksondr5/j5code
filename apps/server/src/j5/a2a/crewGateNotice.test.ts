@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { ThreadId } from "@t3tools/contracts";
+import { ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 
 import type { AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import type { CrewProposal } from "./AgentCrewProposalService.ts";
@@ -26,12 +26,58 @@ describe("crew roster changes", () => {
       added: ["sentry"],
       removed: ["sitter"],
       renamed: [{ from: "critic", to: "reviewer" }],
+      runtimeChanged: [],
+      instructionsChanged: [],
     });
+    assert.deepStrictEqual(
+      crewRosterChanges(
+        [seat("reviewer", "scout", "Reviews")],
+        [seat("reviewer", "critic", "Reviews")],
+      ).runtimeChanged,
+      ["reviewer"],
+    );
     assert.deepStrictEqual(crewRosterChanges([seat("a", "x")], [seat("a", "x")]), {
       added: [],
       removed: [],
       renamed: [],
+      runtimeChanged: [],
+      instructionsChanged: [],
     });
+  });
+
+  it("compares runtime options semantically and reports saved instruction edits across renames", () => {
+    const requested = {
+      ...seat("reviewer", "custom"),
+      instructions: "Review",
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-6-astra",
+        options: [
+          { id: "reasoningEffort", value: "high" },
+          { id: "serviceTier", value: "priority" },
+        ],
+      },
+      runtimeMode: "approval-required" as const,
+    };
+    const reordered = {
+      ...requested,
+      modelSelection: {
+        ...requested.modelSelection,
+        options: requested.modelSelection.options.toReversed(),
+      },
+    };
+    assert.deepStrictEqual(crewRosterChanges([requested], [reordered]).runtimeChanged, []);
+    const renamed = crewRosterChanges(
+      [requested],
+      [{ ...reordered, seat: "critic", instructions: "Review tests" }],
+    );
+    assert.deepStrictEqual(renamed.runtimeChanged, []);
+    assert.deepStrictEqual(renamed.instructionsChanged, ["critic"]);
+    assert.deepStrictEqual(renamed.renamed, [{ from: "reviewer", to: "critic" }]);
+    assert.deepStrictEqual(
+      crewRosterChanges([requested], [{ ...requested, runtimeMode: "full-access" }]).runtimeChanged,
+      ["reviewer"],
+    );
   });
 });
 
@@ -139,6 +185,34 @@ describe("crew launch report", () => {
     assert.include(text, "1 of 3 seats failed to start");
     assert.include(text, "1 seat has no confirmed provider activity after 60s");
     assert.notInclude(text, "Your crew is running");
+  });
+
+  it("tells the Captain when the human pins a custom seat to a different runtime", () => {
+    const requested = {
+      seat: "reviewer",
+      agentId: null,
+      reason: "Reviews",
+      instructions: "Review changes",
+    };
+    const approved = {
+      ...requested,
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("claude"),
+        model: "claude-sonnet",
+        options: [{ id: "effort", value: "high" }],
+      },
+      runtimeMode: "approval-required" as const,
+      instructions: "Review tests first",
+    };
+    const text = crewLaunchReportText({
+      proposal: { ...proposal, requestedSeats: [requested], approvedSeats: [approved] },
+      instance: { ...instance, members: [{ ...member("reviewer", "custom"), agentId: null }] },
+      verdicts: new Map([["reviewer", { kind: "started" }]]),
+      windowMs: 60_000,
+    });
+    assert.include(text, "changes: runtime changed: reviewer; instructions changed: reviewer");
+    assert.notInclude(text, "changes: none");
+    assert.deepStrictEqual(crewRosterChanges([requested], [requested]).runtimeChanged, []);
   });
 
   it("reads as a running crew when every seat started, with no change against the proposal", () => {

@@ -1,3 +1,10 @@
+import {
+  describeCrewSeatRuntime,
+  materializeCrewModelSelection,
+  crewModelSelectionProblem,
+  sameCrewRuntime,
+} from "./crewRuntimePreview.ts";
+import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
 import { isProviderAvailable } from "@t3tools/contracts";
 import type {
   ModelSelection,
@@ -17,7 +24,10 @@ import { prepareAgentPersonaLaunch } from "../agents/agentPersonaLaunch.ts";
 import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
 import { agentHandoffArtifactPath } from "../agents/agentPersonaArtifacts.ts";
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
-import { translateAgentPersonaProviderPolicy } from "../agents/agentPersonaProviderPolicy.ts";
+import {
+  providerCanEnforceAgentPersonaAuthority,
+  translateAgentPersonaProviderPolicy,
+} from "../agents/agentPersonaProviderPolicy.ts";
 import {
   AgentCrewInstanceService,
   type AgentCrewInstance,
@@ -42,14 +52,15 @@ import {
 
 /**
  * One approved seat: who fills it, why, and any wiring text its brief carries verbatim. A null
- * agent is a custom seat, approved by name and instructions alone; it runs on the Captain's own
- * provider, model, and access mode because it has no policy of its own.
+ * agent is a custom seat: the human can override its runtime; omitted settings inherit the Captain.
  */
 export interface CrewLaunchSeat {
   readonly name: string;
   readonly agentId: string | null;
   readonly reason: string | null;
   readonly instructions?: string | undefined;
+  readonly modelSelection?: ModelSelection | undefined;
+  readonly runtimeMode?: RuntimeMode | undefined;
 }
 
 /**
@@ -66,12 +77,24 @@ export interface CrewCaptain {
   readonly thread: OrchestrationV2AppThread;
 }
 
+/** One immutable resolution shared by preview, approval validation, and thread creation. */
+export interface ResolvedCrewLaunchSeat {
+  readonly seat: CrewLaunchSeat;
+  readonly assignment: OrchestrationV2AgentPersonaAssignment | null;
+  readonly modelSelection: ModelSelection;
+  readonly runtimeMode: RuntimeMode;
+  readonly outputArtifact: string | null;
+  readonly agentDisplayName: string;
+  readonly runtime: CrewProposalSeatRuntime;
+}
+
 export interface CrewLaunchInput {
   readonly providerSessionId: string;
   readonly requestKey: string;
   readonly captain: CrewCaptain;
   readonly displayName: string;
   readonly seats: ReadonlyArray<CrewLaunchSeat>;
+  readonly resolvedSeats?: ReadonlyArray<ResolvedCrewLaunchSeat>;
   readonly brief: string;
   /**
    * Runs once the Crew is recorded and before any seat spawns, so the caller can bind its own
@@ -87,6 +110,7 @@ export interface CrewAddSeatsInput {
   readonly captain: CrewCaptain;
   readonly instance: AgentCrewInstance;
   readonly seats: ReadonlyArray<CrewLaunchSeat>;
+  readonly resolvedSeats?: ReadonlyArray<ResolvedCrewLaunchSeat>;
   /** The brief the new seats start on; defaults to the Crew's original brief. */
   readonly brief?: string | undefined;
 }
@@ -141,6 +165,10 @@ export type CrewLaunchError =
   | CrewLaunchOperationError;
 
 export interface CrewLaunchServiceShape {
+  readonly resolveSeats: (
+    captain: CrewCaptain,
+    seats: ReadonlyArray<CrewLaunchSeat>,
+  ) => Effect.Effect<ReadonlyArray<ResolvedCrewLaunchSeat>, CrewLaunchError>;
   /**
    * Launch an approved roster as persona-backed Peer Agents under the Captain, whole or not at
    * all: seats resolve first, the instance is recorded with every planned seat, the seats spawn
@@ -167,27 +195,19 @@ export const layer = Layer.effect(
     const registry = yield* ProviderRegistry;
     const agents = yield* makeAgentPersonaLibrary;
 
-    interface ResolvedSeat {
-      readonly seat: CrewLaunchSeat;
-      /** Null for a custom seat: no saved agent, so no assignment and no handoff obligation. */
-      readonly assignment: OrchestrationV2AgentPersonaAssignment | null;
-      readonly modelSelection: ModelSelection;
-      readonly runtimeMode: RuntimeMode;
-      readonly outputArtifact: string | null;
-      readonly agentDisplayName: string;
-    }
-
     // Resolve every seat before creating anything: a Crew launches whole or not at all.
     const resolveSeats = Effect.fn("j5.a2a.crewLaunch.resolveSeats")(function* (
       captain: CrewCaptain,
       seats: ReadonlyArray<CrewLaunchSeat>,
     ) {
       const providers = yield* registry.getProviders;
-      const resolved: Array<ResolvedSeat> = [];
+      const resolved: Array<ResolvedCrewLaunchSeat> = [];
       // What the Captain actually runs with. A persona Captain's stored mode is whatever the
       // person picked at launch; its effective access comes from the persona policy, so a custom
       // seat that "runs as the Captain" takes that, not the stored mode.
-      const captainAccess = seats.some((seat) => seat.agentId === null)
+      const captainAccess = seats.some(
+        (seat) => seat.agentId === null && seat.runtimeMode === undefined,
+      )
         ? yield* resolveAgentPersonaRuntime(captain.thread, agents).pipe(
             Effect.mapError(
               (cause) =>
@@ -200,56 +220,140 @@ export const layer = Layer.effect(
             ),
           )
         : null;
+      const resolveSelection = Effect.fn("j5.a2a.crewLaunch.resolveSelection")(function* (
+        seat: CrewLaunchSeat,
+        selection: ModelSelection,
+      ) {
+        const provider = providers.find(
+          (candidate) => candidate.instanceId === selection.instanceId,
+        );
+        const problem =
+          provider === undefined
+            ? "is no longer configured"
+            : !isProviderAvailable(provider)
+              ? "is unavailable"
+              : !provider.enabled || provider.status === "disabled"
+                ? "is disabled"
+                : !provider.installed
+                  ? "is not installed"
+                  : provider.status === "error"
+                    ? "reports an error"
+                    : provider.auth.status === "unauthenticated"
+                      ? "is signed out"
+                      : !provider.models.some((model) => model.slug === selection.model)
+                        ? `does not advertise ${selection.model}`
+                        : null;
+        if (problem !== null)
+          return yield* new CrewLaunchSeatUnavailableError({
+            seatName: seat.name,
+            agentId: seat.agentId ?? "custom seat",
+            detail: `Provider ${selection.instanceId} ${problem}.`,
+          });
+        const modelSelection = materializeCrewModelSelection(selection, provider!);
+        const optionProblem =
+          seat.modelSelection === undefined
+            ? null
+            : crewModelSelectionProblem(modelSelection, provider!);
+        if (optionProblem !== null)
+          return yield* new CrewLaunchSeatUnavailableError({
+            seatName: seat.name,
+            agentId: seat.agentId ?? "custom seat",
+            detail: optionProblem,
+          });
+        return { modelSelection, provider: provider! };
+      });
       for (const seat of seats) {
         const agentId = seat.agentId;
         if (agentId === null) {
-          const selection = captain.thread.modelSelection;
-          const provider = providers.find(
-            (candidate) => candidate.instanceId === selection.instanceId,
-          );
-          const problem =
-            provider === undefined
-              ? "is no longer configured"
-              : !isProviderAvailable(provider)
-                ? "is unavailable"
-                : !provider.enabled || provider.status === "disabled"
-                  ? "is disabled"
-                  : !provider.installed
-                    ? "is not installed"
-                    : provider.status === "error"
-                      ? "reports an error"
-                      : provider.auth.status === "unauthenticated"
-                        ? "is signed out"
-                        : !provider.models.some((model) => model.slug === selection.model)
-                          ? `does not advertise ${selection.model}`
-                          : null;
-          if (problem !== null)
+          const selection = seat.modelSelection ?? captain.thread.modelSelection;
+          const { modelSelection, provider } = yield* resolveSelection(seat, selection);
+          const runtimeMode =
+            seat.runtimeMode ?? captainAccess?.runtimeMode ?? captain.thread.runtimeMode;
+          if (
+            provider!.driver === "acpRegistry" &&
+            (seat.runtimeMode === "auto" || seat.runtimeMode === "auto-accept-edits")
+          )
             return yield* new CrewLaunchSeatUnavailableError({
               seatName: seat.name,
               agentId: "custom seat",
-              detail: `The Captain's provider ${selection.instanceId} ${problem}.`,
+              detail:
+                "This ACP harness cannot enforce the selected access mode. Choose Approval required or Full access.",
             });
-          // The human approved this seat by its name and instructions; with no definition to run
-          // as, it takes the Captain's provider, model, and effective access mode. The Captain's
-          // sandbox is not carried: only a persona assignment can convey one, and this seat has
-          // none. The gate copy promises the access mode alone for the same reason.
+          // Custom seats carry the selected access mode, without a persona sandbox assignment.
           resolved.push({
             seat,
             assignment: null,
-            modelSelection: captain.thread.modelSelection,
-            runtimeMode: captainAccess?.runtimeMode ?? captain.thread.runtimeMode,
+            modelSelection,
+            runtime: describeCrewSeatRuntime(
+              seat.name,
+              modelSelection,
+              provider!,
+              runtimeMode,
+              null,
+            ),
+            runtimeMode,
             outputArtifact: null,
             agentDisplayName: "custom",
           });
           continue;
         }
-        // Resolved at spawn, against the providers as they are now: a signed-out, disabled, or
-        // missing provider refuses the seat here with that reason, before anything is created.
-        const assignment = yield* prepareAgentPersonaLaunch(
-          { personaId: agentId },
-          providers,
-          agents,
-        ).pipe(
+        const assignment = yield* Effect.gen(function* () {
+          if (seat.modelSelection === undefined) {
+            const prepared = yield* prepareAgentPersonaLaunch(
+              { personaId: agentId },
+              providers,
+              agents,
+            );
+            return {
+              ...prepared,
+              ...(seat.runtimeMode === undefined ? {} : { runtimeModeOverride: seat.runtimeMode }),
+            };
+          }
+          const { modelSelection, provider } = yield* resolveSelection(seat, seat.modelSelection);
+          const catalog = yield* agents.catalog();
+          const definition = catalog.definitions.find(({ id }) => id === agentId);
+          if (definition === undefined || catalog.disabledIds.includes(agentId))
+            return yield* new CrewLaunchSeatUnavailableError({
+              seatName: seat.name,
+              agentId,
+              detail: "The selected persona is unknown or disabled in this environment.",
+            });
+          if (
+            seat.runtimeMode === undefined &&
+            !providerCanEnforceAgentPersonaAuthority(
+              provider.driver,
+              definition.authority.defaultPolicy,
+            )
+          )
+            return yield* new CrewLaunchSeatUnavailableError({
+              seatName: seat.name,
+              agentId,
+              detail:
+                "This harness cannot enforce the persona's default access. Select an explicit access mode.",
+            });
+          if (
+            provider.driver === "acpRegistry" &&
+            (seat.runtimeMode === "auto" || seat.runtimeMode === "auto-accept-edits")
+          )
+            return yield* new CrewLaunchSeatUnavailableError({
+              seatName: seat.name,
+              agentId,
+              detail:
+                "This ACP harness cannot enforce the selected access mode. Choose Approval required or Full access.",
+            });
+          const definitionDigest = yield* agents.snapshot(definition);
+          return {
+            personaId: agentId,
+            definitionVersion: definition.version,
+            definitionDigest,
+            displayName: definition.displayName,
+            authorityPolicy: definition.authority.defaultPolicy,
+            resolvedRoute: "override" as const,
+            resolvedDriver: provider.driver,
+            resolvedModelSelection: modelSelection,
+            ...(seat.runtimeMode === undefined ? {} : { runtimeModeOverride: seat.runtimeMode }),
+          };
+        }).pipe(
           Effect.mapError(
             (error) =>
               new CrewLaunchSeatUnavailableError({
@@ -260,12 +364,13 @@ export const layer = Layer.effect(
           ),
         );
         // Every seat reaching this point was approved by a human, and that approval is the
-        // authority: the seat runs with its own agent's policy rather than inheriting the
-        // Captain's read-only ceiling the way an agent-initiated spawn_agent child would.
+        // authority: explicit runtime choices override the persona sandbox while its behavior
+        // instructions remain pinned to the original snapshot.
         const policy = translateAgentPersonaProviderPolicy(
           assignment.authorityPolicy,
           assignment.resolvedDriver,
         );
+        const runtimeMode = seat.runtimeMode ?? policy.runtimeMode;
         // The obligation is read from the same immutable snapshot the seat will run on, so a
         // later library edit cannot change what a running seat owes.
         const definition = yield* agents.readSnapshot(assignment).pipe(
@@ -282,7 +387,16 @@ export const layer = Layer.effect(
           seat,
           assignment,
           modelSelection: assignment.resolvedModelSelection,
-          runtimeMode: policy.runtimeMode,
+          runtime: describeCrewSeatRuntime(
+            seat.name,
+            assignment.resolvedModelSelection,
+            providers.find(
+              (provider) => provider.instanceId === assignment.resolvedModelSelection.instanceId,
+            )!,
+            runtimeMode,
+            assignment,
+          ),
+          runtimeMode,
           outputArtifact: definition.outputArtifact ?? null,
           agentDisplayName: assignment.displayName ?? agentId,
         });
@@ -293,7 +407,7 @@ export const layer = Layer.effect(
     const plan = (
       providerSessionId: string,
       requestKey: string,
-      seats: ReadonlyArray<ResolvedSeat>,
+      seats: ReadonlyArray<ResolvedCrewLaunchSeat>,
     ) =>
       seats.map((entry) => {
         const stableInput = {
@@ -438,6 +552,7 @@ export const layer = Layer.effect(
 
     const assertReusableSeats = Effect.fn("j5.a2a.crewLaunch.assertReusableSeats")(function* (
       planned: ReadonlyArray<Planned>,
+      approved: boolean,
     ) {
       for (const member of planned) {
         const existing = yield* getThreadProjectionIfPresent(
@@ -454,6 +569,13 @@ export const layer = Layer.effect(
               }),
           ),
         );
+        if (approved && existing !== null && !sameCrewRuntime(existing.thread, member))
+          return yield* new CrewLaunchSeatUnavailableError({
+            seatName: member.seat.name,
+            agentId: member.seat.agentId ?? "custom seat",
+            detail:
+              "An earlier attempt created this seat with different runtime settings. Restore those settings, rename the seat, or decline and create a fresh proposal.",
+          });
         if (
           existing !== null &&
           (existing.thread.archivedAt !== null || existing.thread.deletedAt != null)
@@ -469,9 +591,9 @@ export const layer = Layer.effect(
 
     const launch: CrewLaunchServiceShape["launch"] = (input) =>
       Effect.gen(function* () {
-        const resolved = yield* resolveSeats(input.captain, input.seats);
+        const resolved = input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats));
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
-        yield* assertReusableSeats(planned);
+        yield* assertReusableSeats(planned, input.resolvedSeats !== undefined);
         const recordError = (phase: string) => (cause: unknown) =>
           new CrewLaunchOperationError({ phase, seatName: null, createdSeats: [], cause });
         const crewInstanceId = spawnCrewInstanceId({
@@ -543,9 +665,9 @@ export const layer = Layer.effect(
 
     const addSeats: CrewLaunchServiceShape["addSeats"] = (input) =>
       Effect.gen(function* () {
-        const resolved = yield* resolveSeats(input.captain, input.seats);
+        const resolved = input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats));
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
-        yield* assertReusableSeats(planned);
+        yield* assertReusableSeats(planned, input.resolvedSeats !== undefined);
         // Reserve the seats before anything spawns: the store decides the cap and the version in
         // one transaction, so two approvals landing together cannot both pass. Seat ids are
         // deterministic, so a retry after a failed spawn finds its reservation and converges.
@@ -608,6 +730,6 @@ export const layer = Layer.effect(
         return reservation.instance;
       });
 
-    return CrewLaunchService.of({ launch, addSeats });
+    return CrewLaunchService.of({ launch, addSeats, resolveSeats });
   }),
 );

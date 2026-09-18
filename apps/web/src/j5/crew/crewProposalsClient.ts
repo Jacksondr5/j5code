@@ -3,6 +3,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import type {
   CrewProposal,
   CrewProposalResolveRequest,
+  CrewProposalPreviewRequest,
   ScopedCrewProposal,
 } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
@@ -27,6 +28,19 @@ export const mergeCrewProposalSources = (
   sources.sources.flatMap((source) =>
     (source.data ?? []).map((proposal) => ({ ...proposal, environmentId: source.environmentId })),
   );
+
+/** Resolve runtime settings on the environment that will launch these exact seats. */
+export async function previewCrewProposal(
+  environmentId: EnvironmentId,
+  input: CrewProposalPreviewRequest,
+) {
+  const result = await j5Environment.previewCrewProposal.run(appAtomRegistry, {
+    environmentId,
+    input,
+  });
+  if (result._tag === "Failure") throw Cause.squash(result.cause);
+  return result.value;
+}
 
 /** Approve (with the final seats) or decline one proposal on the environment that holds it. */
 export async function resolveCrewProposal(

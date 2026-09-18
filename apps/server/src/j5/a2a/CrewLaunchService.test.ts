@@ -15,9 +15,15 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 
+import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
+import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
+import { guardAgentPersonaThreadCreate } from "../agents/agentPersonaOrchestration.ts";
 import { ServerConfig } from "../../config.ts";
 import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
-import { ProjectionStoreReadError } from "../../orchestration-v2/ProjectionStore.ts";
+import {
+  ProjectionStoreReadError,
+  ProjectionStoreThreadNotFoundError,
+} from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -25,6 +31,7 @@ import {
   AgentCrewInstanceService,
   layer as crewInstanceLayer,
 } from "./AgentCrewInstanceService.ts";
+import { describeCrewSeatRuntime } from "./crewRuntimePreview.ts";
 import { CrewLaunchService, layer as crewLaunchLayer } from "./CrewLaunchService.ts";
 import { A2AHomeConflictError, participantIdForThread } from "./HomeRegistrar.ts";
 import { crewSeatRequestKey, spawnCrewInstanceId, spawnThreadId } from "./spawnIds.ts";
@@ -120,23 +127,42 @@ const dependencies = (
   /** Seat threads whose projection the store cannot read, once; a not-found is not among them. */
   unreadableOnce: Set<string> = new Set(),
   archived: Set<string> = new Set(),
+  realThreads = false,
 ) =>
   Layer.mergeAll(
     Layer.mock(ThreadManagementService)({
       getThreadProjection: (threadId) =>
-        unreadableOnce.delete(threadId)
-          ? Effect.fail(
-              new OrchestratorProjectionError({
-                threadId,
-                cause: new ProjectionStoreReadError({ threadId }),
+        realThreads
+          ? Ref.get(commands).pipe(
+              Effect.flatMap((commands) => {
+                const created = commands.find(
+                  (command) => command.type === "thread.create" && command.threadId === threadId,
+                );
+                return created?.type === "thread.create"
+                  ? Effect.succeed({
+                      thread: { ...thread(threadId), ...created },
+                    } as unknown as OrchestrationV2ThreadProjection)
+                  : Effect.fail(
+                      new OrchestratorProjectionError({
+                        threadId,
+                        cause: new ProjectionStoreThreadNotFoundError({ threadId }),
+                      }),
+                    );
               }),
             )
-          : Effect.succeed({
-              thread: {
-                ...thread(threadId),
-                archivedAt: archived.has(threadId) ? createdAt : null,
-              },
-            } as unknown as OrchestrationV2ThreadProjection),
+          : unreadableOnce.delete(threadId)
+            ? Effect.fail(
+                new OrchestratorProjectionError({
+                  threadId,
+                  cause: new ProjectionStoreReadError({ threadId }),
+                }),
+              )
+            : Effect.succeed({
+                thread: {
+                  ...thread(threadId),
+                  archivedAt: archived.has(threadId) ? createdAt : null,
+                },
+              } as unknown as OrchestrationV2ThreadProjection),
       dispatch: (command) =>
         Ref.update(commands, (items) => {
           if (command.type === "thread.archive") archived.add(command.threadId);
@@ -544,3 +570,404 @@ it.effect("custom seats refuse unavailable providers before recording or spawnin
     }
   }).pipe(Effect.scoped),
 );
+
+it.effect(
+  "previews actual routes and pins custom defaults; approved launches and retries keep that exact runtime",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high", "low"] }]);
+      const withDefaults: ServerProvider = {
+        ...codex,
+        displayName: "Codex",
+        models: codex.models.map((model) => ({
+          ...model,
+          capabilities: {
+            optionDescriptors: [
+              {
+                id: "reasoningEffort",
+                label: "Reasoning",
+                type: "select",
+                currentValue: "high",
+                options: [
+                  { id: "high", label: "High" },
+                  { id: "low", label: "Low" },
+                ],
+              },
+            ],
+          },
+        })),
+      };
+      const providers = [withDefaults];
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(commands, providers, new Set(), new Set(), new Set(), true),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(
+          ServerConfig.layerTest(process.cwd(), { prefix: "j5-preview-runtime-" }),
+        ),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const seats = [
+          { name: "scribe", agentId: null, reason: "Notes", instructions: "Take notes" },
+        ];
+        const resolvedSeats = yield* launcher.resolveSeats(captain, seats);
+        assert.deepStrictEqual(resolvedSeats[0]?.runtime, {
+          seat: "scribe",
+          provider: "OpenAI",
+          harness: "Codex",
+          model: "gpt-5.6-sol",
+          reasoning: "High",
+          access: "Full access",
+          modelSelection: {
+            ...captain.thread.modelSelection,
+            options: [{ id: "reasoningEffort", value: "high" }],
+          },
+          runtimeMode: "full-access",
+        });
+        assert.deepStrictEqual(resolvedSeats[0]?.modelSelection.options, [
+          { id: "reasoningEffort", value: "high" },
+        ]);
+        const input = {
+          providerSessionId: "session",
+          requestKey: "runtime-pinned",
+          captain,
+          displayName: "Notes",
+          seats,
+          resolvedSeats,
+          brief: "Review",
+        };
+        // A changed provider default after validation cannot alter the approved launch.
+        providers[0] = {
+          ...withDefaults,
+          models: withDefaults.models.map((model) => ({
+            ...model,
+            capabilities: {
+              optionDescriptors: [
+                {
+                  id: "reasoningEffort",
+                  label: "Reasoning",
+                  type: "select",
+                  currentValue: "low",
+                  options: [
+                    { id: "high", label: "High" },
+                    { id: "low", label: "Low" },
+                  ],
+                },
+              ],
+            },
+          })),
+        };
+        const launched = yield* launcher.launch(input);
+        const create = (yield* Ref.get(commands)).find(
+          (command) => command.type === "thread.create",
+        );
+        assert.equal(create?.type, "thread.create");
+        if (create?.type === "thread.create")
+          assert.deepStrictEqual(create.modelSelection, resolvedSeats[0]?.modelSelection);
+        const retried = yield* launcher.launch(input);
+        assert.equal(retried.id, launched.id);
+        const changedSeats = yield* launcher.resolveSeats(captain, seats);
+        assert.equal(changedSeats[0]?.runtime.reasoning, "Low");
+        const before = (yield* Ref.get(commands)).length;
+        const changed = yield* launcher
+          .launch({ ...input, resolvedSeats: changedSeats })
+          .pipe(Effect.flip);
+        assert.equal(changed._tag, "CrewLaunchSeatUnavailableError");
+        assert.lengthOf(yield* Ref.get(commands), before);
+        const saved = yield* launcher.resolveSeats(captain, [
+          { name: "builder", agentId: "builder", reason: "Build" },
+        ]);
+        assert.equal(saved[0]?.assignment?.resolvedDriver, "codex");
+        assert.equal(saved[0]?.runtime.harness, "Codex");
+        assert.equal(saved[0]?.runtime.access, "Repository write");
+        const accessOnly = (yield* launcher.resolveSeats(captain, [
+          { name: "builder", agentId: "builder", reason: "Build", runtimeMode: "full-access" },
+        ]))[0]!;
+        assert.deepStrictEqual(accessOnly.modelSelection, saved[0]?.modelSelection);
+        assert.equal(accessOnly.assignment?.resolvedRoute, saved[0]?.assignment?.resolvedRoute);
+        assert.equal(accessOnly.runtime.access, "Full access");
+        const accessPolicy = yield* resolveAgentPersonaRuntime(
+          {
+            agentPersonaAssignment: accessOnly.assignment!,
+            runtimeMode: accessOnly.runtimeMode,
+          },
+          yield* makeAgentPersonaLibrary,
+        );
+        assert.equal(accessPolicy.runtimeMode, "full-access");
+        assert.notProperty(accessPolicy, "sandboxPolicy");
+
+        assert.equal(
+          saved[0]?.modelSelection.model,
+          saved[0]?.assignment?.resolvedModelSelection.model,
+        );
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.each([
+  ["codex", "Codex", undefined, "OpenAI", "Codex"],
+  ["claudeAgent", "Claude", undefined, "Anthropic", "Claude Code"],
+  ["claudeAgent", "Claude Code", undefined, "Anthropic", "Claude Code"],
+  ["codex", "Work account", undefined, "OpenAI (Work account)", "Codex"],
+  ["codex", "Codex", "Other vendor", "Other vendor", "Codex"],
+  ["opencode", "Team account", "OpenAI", "OpenAI (Team account)", "OpenCode"],
+])(
+  "runtime provider label for %s / %s respects the model vendor and configured instance",
+  (driver, displayName, subProvider, expectedProvider, expectedHarness) => {
+    const configured = provider("instance", driver!, [{ slug: "model", options: ["high"] }]);
+    const runtime = describeCrewSeatRuntime(
+      "seat",
+      { instanceId: configured.instanceId, model: "model" },
+      {
+        ...configured,
+        displayName: displayName!,
+        models: configured.models.map((model) => ({
+          ...model,
+          ...(subProvider === undefined ? {} : { subProvider }),
+        })),
+      },
+      "full-access",
+      null,
+    );
+    assert.equal(runtime.provider, expectedProvider);
+    assert.equal(runtime.harness, expectedHarness);
+  },
+);
+
+it.effect(
+  "custom runtime overrides select the advertised harness, model, reasoning, and access without fallback",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const providers = [
+        provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]),
+        provider("claude-work", "claudeAgent", [
+          { slug: "claude-sonnet", options: ["high", "low"] },
+        ]),
+        provider("acp", "acpRegistry", [{ slug: "model", options: [] }]),
+      ];
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(commands, providers, new Set(), new Set(), new Set(), true),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-custom-runtime-" })),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const custom = {
+          name: "reviewer",
+          agentId: null,
+          reason: "Review",
+          instructions: "Read changes",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("claude-work"),
+            model: "claude-sonnet",
+            options: [{ id: "effort", value: "low" }],
+          },
+          runtimeMode: "approval-required" as const,
+        };
+        const resolvedSeats = yield* launcher.resolveSeats(captain, [custom]);
+        const resolved = resolvedSeats[0]!;
+        assert.deepStrictEqual(resolved.modelSelection, custom.modelSelection);
+        assert.equal(resolved.runtimeMode, "approval-required");
+        assert.equal(resolved.runtime.harness, "Claude Code");
+        assert.equal(resolved.runtime.reasoning, "low");
+        assert.equal(resolved.runtime.access, "Approval required");
+        assert.deepStrictEqual(resolved.runtime.modelSelection, custom.modelSelection);
+        assert.equal(resolved.runtime.runtimeMode, custom.runtimeMode);
+        const instance = yield* launcher.launch({
+          providerSessionId: "session",
+          requestKey: "custom-override",
+          captain,
+          displayName: "Review",
+          seats: [custom],
+          resolvedSeats,
+          brief: "Review",
+        });
+        const created = (yield* Ref.get(commands)).find(
+          (command) => command.type === "thread.create",
+        );
+        assert.equal(created?.type, "thread.create");
+        if (created?.type === "thread.create") {
+          assert.deepStrictEqual(created.modelSelection, custom.modelSelection);
+          assert.equal(created.runtimeMode, custom.runtimeMode);
+          assert.isUndefined(created.agentPersonaAssignment);
+        }
+        const additional = { ...custom, name: "scribe", runtimeMode: "full-access" as const };
+        const addedResolved = yield* launcher.resolveSeats(captain, [additional]);
+        yield* launcher.addSeats({
+          providerSessionId: "session",
+          requestKey: "custom-override-add",
+          captain,
+          instance,
+          seats: [additional],
+          resolvedSeats: addedResolved,
+        });
+        const added = (yield* Ref.get(commands)).findLast(
+          (command) => command.type === "thread.create",
+        );
+        if (added?.type === "thread.create") {
+          assert.deepStrictEqual(added.modelSelection, additional.modelSelection);
+          assert.equal(added.runtimeMode, "full-access");
+        }
+        for (const modelSelection of [
+          { ...custom.modelSelection, instanceId: ProviderInstanceId.make("missing") },
+          { ...custom.modelSelection, model: "missing" },
+          { ...custom.modelSelection, options: [{ id: "effort", value: "unsupported" }] },
+          { ...custom.modelSelection, options: [{ id: "effort", value: true }] },
+          { ...custom.modelSelection, options: [{ id: "unknown", value: "high" }] },
+          {
+            ...custom.modelSelection,
+            options: [
+              { id: "effort", value: "low" },
+              { id: "effort", value: "high" },
+            ],
+          },
+        ]) {
+          const invalid = yield* launcher
+            .resolveSeats(captain, [{ ...custom, modelSelection }])
+            .pipe(Effect.flip);
+          assert.equal(invalid._tag, "CrewLaunchSeatUnavailableError");
+        }
+        const invalidAccess = yield* launcher
+          .resolveSeats(captain, [
+            {
+              ...custom,
+              modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
+              runtimeMode: "auto-accept-edits",
+            },
+          ])
+          .pipe(Effect.flip);
+        assert.equal(invalidAccess._tag, "CrewLaunchSeatUnavailableError");
+        assert.include(invalidAccess.message, "Choose Approval required or Full access");
+        // Neither configured provider advertises Critic's saved model: the human override
+        // still launches, preserving its snapshot and behavior on the selected harness.
+        const personaSeat = {
+          ...custom,
+          name: "saved-reviewer",
+          agentId: "critic",
+          runtimeMode: "full-access" as const,
+        };
+        const personaOverride = yield* launcher.resolveSeats(captain, [personaSeat]);
+        const saved = personaOverride[0]!;
+        assert.equal(saved.assignment?.resolvedRoute, "override");
+        assert.deepStrictEqual(saved.modelSelection, custom.modelSelection);
+        assert.equal(saved.runtime.access, "Full access");
+        const library = yield* makeAgentPersonaLibrary;
+        const policy = yield* resolveAgentPersonaRuntime(
+          { agentPersonaAssignment: saved.assignment!, runtimeMode: saved.runtimeMode },
+          library,
+        );
+        assert.equal(policy.runtimeMode, "full-access");
+        assert.notProperty(policy, "sandboxPolicy");
+        assert.notProperty(policy, "approvalPolicy");
+        assert.include(policy.agentPersonaInstructions!, "Selected behavior: critic-review");
+        assert.include(policy.agentPersonaInstructions!, "Never commit or push.");
+        const original = yield* library.readSnapshot(saved.assignment!);
+        assert.include(policy.agentPersonaInstructions!, original.instructions);
+        yield* launcher.addSeats({
+          providerSessionId: "session",
+          requestKey: "saved-override-add",
+          captain,
+          instance,
+          seats: [personaSeat],
+          resolvedSeats: personaOverride,
+        });
+        const savedCommand = (yield* Ref.get(commands)).findLast(
+          (command) => command.type === "thread.create",
+        );
+        assert.equal(savedCommand?.type, "thread.create");
+        if (savedCommand?.type === "thread.create") {
+          assert.deepStrictEqual(savedCommand.modelSelection, personaSeat.modelSelection);
+          assert.equal(savedCommand.runtimeMode, "full-access");
+          assert.deepStrictEqual(savedCommand.agentPersonaAssignment, saved.assignment);
+          yield* guardAgentPersonaThreadCreate(savedCommand, library, () =>
+            Effect.succeed("claudeAgent"),
+          );
+        }
+        for (const selection of [
+          { ...custom.modelSelection, model: "missing" },
+          { ...custom.modelSelection, options: [{ id: "effort", value: "unsupported" }] },
+        ]) {
+          const invalid = yield* launcher
+            .resolveSeats(captain, [{ ...personaSeat, modelSelection: selection }])
+            .pipe(Effect.flip);
+          assert.equal(invalid._tag, "CrewLaunchSeatUnavailableError");
+        }
+        const modelOnly = (yield* launcher.resolveSeats(captain, [
+          { ...personaSeat, runtimeMode: undefined },
+        ]))[0]!;
+        const defaultPolicy = yield* resolveAgentPersonaRuntime(
+          { agentPersonaAssignment: modelOnly.assignment!, runtimeMode: modelOnly.runtimeMode },
+          library,
+        );
+        assert.equal(modelOnly.runtime.access, "Read only");
+        assert.equal(
+          "sandboxPolicy" in defaultPolicy ? defaultPolicy.sandboxPolicy?.type : undefined,
+          "readOnly",
+        );
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it("runtime previews show advertised variant and boolean thinking choices", () => {
+  const configured = provider("instance", "opencode", [{ slug: "model", options: [] }]);
+  const selected = { instanceId: configured.instanceId, model: "model" };
+  const variantProvider: ServerProvider = {
+    ...configured,
+    models: configured.models.map((model) => ({
+      ...model,
+      capabilities: {
+        optionDescriptors: [
+          {
+            id: "variant",
+            label: "Reasoning",
+            type: "select",
+            options: [{ id: "deep", label: "Deep reasoning" }],
+          },
+        ],
+      },
+    })),
+  };
+  assert.equal(
+    describeCrewSeatRuntime(
+      "seat",
+      { ...selected, options: [{ id: "variant", value: "deep" }] },
+      variantProvider,
+      "auto",
+      null,
+    ).reasoning,
+    "Deep reasoning",
+  );
+  const thinkingProvider: ServerProvider = {
+    ...configured,
+    models: configured.models.map((model) => ({
+      ...model,
+      capabilities: {
+        optionDescriptors: [
+          { id: "thinking", label: "Thinking", type: "boolean", currentValue: false },
+        ],
+      },
+    })),
+  };
+  assert.equal(
+    describeCrewSeatRuntime(
+      "seat",
+      { ...selected, options: [{ id: "thinking", value: true }] },
+      thinkingProvider,
+      "auto",
+      null,
+    ).reasoning,
+    "On",
+  );
+  assert.equal(
+    describeCrewSeatRuntime("seat", selected, thinkingProvider, "auto", null).reasoning,
+    "Off",
+  );
+});

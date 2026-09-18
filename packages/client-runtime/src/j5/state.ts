@@ -2,6 +2,7 @@ import type { ProjectId } from "@t3tools/contracts";
 import type {
   AnswerHumanExchangeRequest,
   CrewProposalResolveRequest,
+  CrewProposalPreviewRequest,
   CrewArchiveRequest,
   CrewStopRequest,
   FleetReadRequest,
@@ -70,6 +71,13 @@ export function createJ5EnvironmentAtoms<R, E>(
       staleTimeMs: 7_500,
       execute: (_input: Record<string, never>) =>
         preparedConnection.pipe(Effect.flatMap(J5Http.listCrewProposals)),
+    }),
+    previewCrewProposal: createEnvironmentCommand(runtime, {
+      label: "j5:preview-crew-proposal",
+      execute: (input: CrewProposalPreviewRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.previewCrewProposal(prepared, input)),
+        ),
     }),
     resolveCrewProposal: createEnvironmentCommand(runtime, {
       label: "j5:resolve-crew-proposal",

@@ -36,6 +36,7 @@ export function CrewRosterGate(props: {
       proposal: CrewProposal,
       decision: "approve" | "decline",
       seats: ReadonlyArray<CrewProposalSeat>,
+      approvalToken?: string,
     ) => {
       if (environmentId === undefined) return;
       setBusyId(proposal.id);
@@ -44,7 +45,7 @@ export function CrewRosterGate(props: {
         await resolveCrewProposal(environmentId, {
           proposalId: proposal.id,
           decision,
-          ...(decision === "approve" ? { seats } : {}),
+          ...(decision === "approve" ? { seats, approvalToken } : {}),
         });
         notifyHumanInboxChanged(environmentId);
         await refreshCrewProposals(environmentId).catch(() => undefined);
@@ -73,7 +74,9 @@ export function CrewRosterGate(props: {
             proposal={proposal}
             environmentId={environmentId}
             busy={busyId === proposal.id}
-            onResolve={(decision, seats) => void resolve(proposal, decision, seats)}
+            onResolve={(decision, seats, approvalToken) =>
+              void resolve(proposal, decision, seats, approvalToken)
+            }
           />
         ))}
       </ul>

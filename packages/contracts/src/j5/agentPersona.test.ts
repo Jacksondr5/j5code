@@ -54,6 +54,13 @@ describe("agent persona contracts", () => {
       resolvedModelSelection: { instanceId: "codex", model: "research-model" },
     };
     expect(decodePersonaAssignment(assignment)).toEqual(assignment);
+    const override = {
+      ...assignment,
+      resolvedRoute: "override",
+      runtimeModeOverride: "full-access",
+    };
+    expect(decodePersonaAssignment(override)).toEqual(override);
+
     expect(() =>
       decodePersonaAssignment({
         ...assignment,

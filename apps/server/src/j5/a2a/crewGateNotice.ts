@@ -1,3 +1,4 @@
+import { modelSelectionsEqual } from "@t3tools/shared/model";
 import type { OrchestrationV2ProviderFailure } from "@t3tools/contracts";
 
 import type { AgentCrewInstance } from "./AgentCrewInstanceService.ts";
@@ -23,11 +24,13 @@ export interface CrewRosterChanges {
   readonly added: ReadonlyArray<string>;
   readonly removed: ReadonlyArray<string>;
   readonly renamed: ReadonlyArray<{ readonly from: string; readonly to: string }>;
+  readonly runtimeChanged: ReadonlyArray<string>;
+  readonly instructionsChanged: ReadonlyArray<string>;
 }
 
 /**
- * What the person changed against the Captain's request: seats they added, dropped, or renamed on
- * the card. A rename is a dropped seat and an added seat that keep the same persona and reason.
+ * What the person changed against the Captain's request, using the saved edits rather than
+ * materialized runtime defaults. A rename keeps the same persona and reason.
  */
 export const crewRosterChanges = (
   requested: ReadonlyArray<CrewProposalSeat>,
@@ -49,10 +52,32 @@ export const crewRosterChanges = (
   }
   const renamedFrom = new Set(renamed.map(({ from }) => from));
   const renamedTo = new Set(renamed.map(({ to }) => to));
+  const retained = approved.flatMap((seat) => {
+    const previousName = renamed.find(({ to }) => to === seat.seat)?.from ?? seat.seat;
+    const previous = requested.find(({ seat: name }) => name === previousName);
+    return previous === undefined ? [] : [{ previous, seat }];
+  });
+  const runtimeChanged = retained
+    .filter(({ previous, seat }) => {
+      const sameSelection =
+        previous.modelSelection === undefined || seat.modelSelection === undefined
+          ? previous.modelSelection === seat.modelSelection
+          : modelSelectionsEqual(previous.modelSelection, seat.modelSelection);
+      return (
+        previous.agentId !== seat.agentId ||
+        !sameSelection ||
+        previous.runtimeMode !== seat.runtimeMode
+      );
+    })
+    .map(({ seat }) => seat.seat);
   return {
     added: added.filter(({ seat }) => !renamedTo.has(seat)).map(({ seat }) => seat),
     removed: removed.filter(({ seat }) => !renamedFrom.has(seat)).map(({ seat }) => seat),
     renamed,
+    runtimeChanged,
+    instructionsChanged: retained
+      .filter(({ previous, seat }) => previous.instructions !== seat.instructions)
+      .map(({ seat }) => seat.seat),
   };
 };
 
@@ -61,6 +86,12 @@ const changesLine = (changes: CrewRosterChanges) => {
     ...(changes.added.length > 0 ? [`added ${changes.added.join(", ")}`] : []),
     ...(changes.removed.length > 0 ? [`removed ${changes.removed.join(", ")}`] : []),
     ...changes.renamed.map(({ from, to }) => `renamed ${from}→${to}`),
+    ...(changes.runtimeChanged.length > 0
+      ? [`runtime changed: ${changes.runtimeChanged.join(", ")}`]
+      : []),
+    ...(changes.instructionsChanged.length > 0
+      ? [`instructions changed: ${changes.instructionsChanged.join(", ")}`]
+      : []),
   ];
   return parts.length === 0 ? "none" : parts.join("; ");
 };

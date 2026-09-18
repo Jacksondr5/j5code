@@ -39,11 +39,13 @@ import {
   CrewLaunchOperationError,
   CrewLaunchService,
   type CrewCaptain,
+  type ResolvedCrewLaunchSeat,
 } from "./CrewLaunchService.ts";
 import {
   CREW_SEAT_CAP,
   CrewProposalService,
   layer as crewProposalLayer,
+  type ResolveCrewProposalInput,
 } from "./CrewProposalService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
@@ -85,6 +87,30 @@ const launchFailure = (cause: unknown) =>
  */
 const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
   Layer.mock(CrewLaunchService)({
+    resolveSeats: (captain, seats) =>
+      Effect.succeed(
+        seats.map(
+          (seat) =>
+            ({
+              seat,
+              assignment: null,
+              modelSelection: seat.modelSelection ?? captain.thread.modelSelection,
+              runtimeMode: seat.runtimeMode ?? captain.thread.runtimeMode,
+              outputArtifact: null,
+              agentDisplayName: seat.agentId ?? "custom",
+              runtime: {
+                seat: seat.name,
+                provider: "Codex",
+                harness: "Codex",
+                model: (seat.modelSelection ?? captain.thread.modelSelection).model,
+                reasoning: "High",
+                access: "Full access",
+                modelSelection: seat.modelSelection ?? captain.thread.modelSelection,
+                runtimeMode: seat.runtimeMode ?? captain.thread.runtimeMode,
+              },
+            }) satisfies ResolvedCrewLaunchSeat,
+        ),
+      ),
     launch: (input) =>
       input.displayName === "Boom"
         ? Effect.fail(launchFailure(new Error("provider unavailable")))
@@ -147,6 +173,19 @@ const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
 /** How many times each addition request has failed so far; briefs "fail once" and "fail twice". */
 const failures = new Map<string, number>();
 
+const withPreview = (gate: CrewProposalService["Service"]): CrewProposalService["Service"] => ({
+  ...gate,
+  resolve: (input: ResolveCrewProposalInput) =>
+    Effect.gen(function* () {
+      if (input.decision === "decline") return yield* gate.resolve(input);
+      const preview = yield* gate.preview({
+        proposalId: input.proposalId,
+        ...(input.seats === undefined ? {} : { seats: input.seats }),
+      });
+      return yield* gate.resolve({ ...input, approvalToken: preview.approvalToken });
+    }),
+});
+
 const fixture = Effect.gen(function* () {
   const database = NodeSqliteClient.layerMemory();
   const storage = Layer.mergeAll(crewInstanceLayer, proposalStoreLayer, ledgerLayer).pipe(
@@ -167,6 +206,7 @@ const fixture = Effect.gen(function* () {
     }),
     context,
   );
+  const captainModel = yield* Ref.make("gpt-5.6-sol");
   const notices = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
   // Seat threads whose archive the store refuses, to prove a decline whose cleanup fails stays open.
   const archiveFailures = yield* Ref.make<ReadonlySet<string>>(new Set());
@@ -198,7 +238,15 @@ const fixture = Effect.gen(function* () {
                 threadId,
                 cause: new ProjectionStoreReadError({ threadId }),
               });
-            return { thread: thread(threadId) } as unknown as OrchestrationV2ThreadProjection;
+            return {
+              thread: {
+                ...thread(threadId),
+                modelSelection: {
+                  ...thread(threadId).modelSelection,
+                  model: yield* Ref.get(captainModel),
+                },
+              },
+            } as unknown as OrchestrationV2ThreadProjection;
           }),
         dispatch: (command) =>
           Effect.gen(function* () {
@@ -221,7 +269,15 @@ const fixture = Effect.gen(function* () {
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-proposal-" })),
     Layer.provideMerge(NodeServices.layer),
   );
-  return { layer, notices, watched, archiveFailures, missingThreads, unreadableThreads };
+  return {
+    layer,
+    notices,
+    watched,
+    archiveFailures,
+    missingThreads,
+    unreadableThreads,
+    captainModel,
+  };
 });
 
 it.effect(
@@ -230,7 +286,7 @@ it.effect(
     Effect.gen(function* () {
       const { layer, notices, watched } = yield* fixture;
       yield* Effect.gen(function* () {
-        const gate = yield* CrewProposalService;
+        const gate = withPreview(yield* CrewProposalService);
         const store = yield* AgentCrewProposalService;
         const seats = [
           { seat: "builder", agentId: "builder", reason: "Implements the fix" },
@@ -292,7 +348,7 @@ it.effect("gates every roster on the human and gates additions with the seat cap
   Effect.gen(function* () {
     const { layer, notices } = yield* fixture;
     yield* Effect.gen(function* () {
-      const gate = yield* CrewProposalService;
+      const gate = withPreview(yield* CrewProposalService);
       const opened = yield* gate.propose({
         requestKey: "gate-1",
         captain,
@@ -427,7 +483,7 @@ it.effect(
     Effect.gen(function* () {
       const { layer } = yield* fixture;
       yield* Effect.gen(function* () {
-        const gate = yield* CrewProposalService;
+        const gate = withPreview(yield* CrewProposalService);
         const proposals = yield* AgentCrewProposalService;
 
         // A failed spawn hands the gate back instead of recording a phantom approval.
@@ -554,7 +610,7 @@ it.effect("declining a roster whose launch failed partway retires what the launc
   Effect.gen(function* () {
     const { layer, notices } = yield* fixture;
     yield* Effect.gen(function* () {
-      const gate = yield* CrewProposalService;
+      const gate = withPreview(yield* CrewProposalService);
       const proposals = yield* AgentCrewProposalService;
       const crews = yield* AgentCrewInstanceService;
       const opened = yield* gate.propose({
@@ -607,7 +663,7 @@ it.effect("a decline cleans up before it is recorded, and releases every name it
   Effect.gen(function* () {
     const { layer, notices, archiveFailures } = yield* fixture;
     yield* Effect.gen(function* () {
-      const gate = yield* CrewProposalService;
+      const gate = withPreview(yield* CrewProposalService);
       const proposals = yield* AgentCrewProposalService;
       const crews = yield* AgentCrewInstanceService;
 
@@ -703,7 +759,7 @@ it.effect("holds every door to the same seat shape and seats nobody into a retir
   Effect.gen(function* () {
     const { layer } = yield* fixture;
     yield* Effect.gen(function* () {
-      const gate = yield* CrewProposalService;
+      const gate = withPreview(yield* CrewProposalService);
       const crews = yield* AgentCrewInstanceService;
       const opened = yield* gate.propose({
         requestKey: "shape-1",
@@ -740,6 +796,17 @@ it.effect("holds every door to the same seat shape and seats nobody into a retir
         seat: { seat: "critic", agentId: "critic", reason: "Reviews" },
         brief: null,
       });
+      const rawGate = yield* CrewProposalService;
+      const duplicateSeats = [{ seat: "builder", agentId: "critic", reason: "Already held" }];
+      const duplicatePreview = yield* rawGate
+        .preview({ proposalId: addition.proposal.id, seats: duplicateSeats })
+        .pipe(Effect.flip);
+      const duplicateApproval = yield* rawGate
+        .resolve({ proposalId: addition.proposal.id, decision: "approve", seats: duplicateSeats })
+        .pipe(Effect.flip);
+      assert.equal(duplicatePreview._tag, "CrewProposalRequestError");
+      assert.include(duplicatePreview.message, "already has a seat named builder");
+      assert.equal(duplicateApproval.message, duplicatePreview.message);
       // archive_crew retires the Crew while the request still sits in the inbox.
       yield* crews.markArchived(approved.instance!.id, "2026-09-09T17:00:00.000Z");
       const late = yield* gate
@@ -747,6 +814,15 @@ it.effect("holds every door to the same seat shape and seats nobody into a retir
         .pipe(Effect.flip);
       assert.equal(late._tag, "CrewProposalRequestError");
       assert.include(late.message, "retired");
+      const retiredPreview = yield* rawGate
+        .preview({ proposalId: addition.proposal.id })
+        .pipe(Effect.flip);
+      const retiredApproval = yield* rawGate
+        .resolve({ proposalId: addition.proposal.id, decision: "approve" })
+        .pipe(Effect.flip);
+      assert.equal(retiredPreview._tag, "CrewProposalRequestError");
+      assert.equal(retiredPreview.message, late.message);
+      assert.equal(retiredApproval.message, retiredPreview.message);
       assert.lengthOf((yield* crews.read(approved.instance!.id))!.members, 1);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
@@ -756,7 +832,7 @@ it.effect("a decision that races another device's on the same gate is refused, n
   Effect.gen(function* () {
     const { layer } = yield* fixture;
     yield* Effect.gen(function* () {
-      const gate = yield* CrewProposalService;
+      const gate = withPreview(yield* CrewProposalService);
       const proposals = yield* AgentCrewProposalService;
       const crews = yield* AgentCrewInstanceService;
 
@@ -827,7 +903,7 @@ it.effect("the boot sweep finishes a decline the server lost and hands a lost ap
   Effect.gen(function* () {
     const { layer, notices } = yield* fixture;
     yield* Effect.gen(function* () {
-      const gate = yield* CrewProposalService;
+      const gate = withPreview(yield* CrewProposalService);
       const proposals = yield* AgentCrewProposalService;
       const crews = yield* AgentCrewInstanceService;
 
@@ -880,7 +956,7 @@ it.effect("a seat thread that never existed is skipped; a store that cannot answ
   Effect.gen(function* () {
     const { layer, notices, missingThreads, unreadableThreads } = yield* fixture;
     yield* Effect.gen(function* () {
-      const gate = yield* CrewProposalService;
+      const gate = withPreview(yield* CrewProposalService);
       const proposals = yield* AgentCrewProposalService;
       const crews = yield* AgentCrewInstanceService;
       const roster = yield* gate.propose({
@@ -925,4 +1001,174 @@ it.effect("a seat thread that never existed is skipped; a store that cannot answ
       );
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "requires the displayed runtime token and refuses changed defaults or edited seats before claiming approval",
+  () =>
+    Effect.gen(function* () {
+      const { layer, captainModel } = yield* fixture;
+      yield* Effect.gen(function* () {
+        const gate = yield* CrewProposalService;
+        const store = yield* AgentCrewProposalService;
+        const crews = yield* AgentCrewInstanceService;
+        const open = yield* gate.propose({
+          requestKey: "preview-token",
+          captain,
+          displayName: "Review",
+          brief: "Review changes",
+          seats: [{ seat: "reader", agentId: null, reason: "Read", instructions: "Read changes" }],
+        });
+        const proposalId = open.proposal.id;
+        const preview = yield* gate.preview({ proposalId });
+        assert.equal(preview.seats[0]?.model, "gpt-5.6-sol");
+        const missing = yield* gate.resolve({ proposalId, decision: "approve" }).pipe(Effect.flip);
+        assert.equal(missing._tag, "CrewProposalRequestError");
+        const edited = yield* gate
+          .resolve({
+            proposalId,
+            decision: "approve",
+            approvalToken: preview.approvalToken,
+            seats: [{ ...open.proposal.requestedSeats[0]!, instructions: "Write changes" }],
+          })
+          .pipe(Effect.flip);
+        assert.equal(edited._tag, "CrewProposalRequestError");
+        yield* Ref.set(captainModel, "gpt-6-astra");
+        const stale = yield* gate
+          .resolve({ proposalId, decision: "approve", approvalToken: preview.approvalToken })
+          .pipe(Effect.flip);
+        assert.equal(stale._tag, "CrewProposalRequestError");
+        assert.equal((yield* store.read(proposalId))?.status, "open");
+        assert.lengthOf(yield* crews.listLive(), 0);
+        const refreshed = yield* gate.preview({ proposalId });
+        assert.equal(refreshed.seats[0]?.model, "gpt-6-astra");
+        const approved = yield* gate.resolve({
+          proposalId,
+          decision: "approve",
+          approvalToken: refreshed.approvalToken,
+        });
+        assert.equal(approved.proposal.status, "approved");
+        const addition = yield* gate.requestMember({
+          requestKey: "preview-addition",
+          captain,
+          crewInstanceId: approved.instance!.id,
+          brief: null,
+          seat: { seat: "writer", agentId: null, reason: "Write", instructions: "Write notes" },
+        });
+        const additionPreview = yield* gate.preview({ proposalId: addition.proposal.id });
+        yield* Ref.set(captainModel, "gpt-5.6-sol");
+        const staleAddition = yield* gate
+          .resolve({
+            proposalId: addition.proposal.id,
+            decision: "approve",
+            approvalToken: additionPreview.approvalToken,
+          })
+          .pipe(Effect.flip);
+        assert.equal(staleAddition._tag, "CrewProposalRequestError");
+        assert.lengthOf((yield* crews.read(approved.instance!.id))!.members, 1);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "persists custom runtime overrides through proposal storage, human edits, and failed-launch recovery",
+  () =>
+    Effect.gen(function* () {
+      const { layer } = yield* fixture;
+      yield* Effect.gen(function* () {
+        const gate = yield* CrewProposalService;
+        const store = yield* AgentCrewProposalService;
+        const proposed = {
+          seat: "custom-reviewer",
+          agentId: null,
+          reason: "Reviews",
+          instructions: "Review the change",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("claude-work"),
+            model: "claude-sonnet",
+            options: [{ id: "effort", value: "high" }],
+          },
+          runtimeMode: "approval-required" as const,
+        };
+        const open = yield* gate.propose({
+          requestKey: "custom-config-recovery",
+          captain,
+          displayName: "Boom",
+          brief: "Review",
+          seats: [proposed],
+        });
+        assert.deepStrictEqual((yield* store.read(open.proposal.id))?.requestedSeats, [proposed]);
+        const first = yield* gate.preview({ proposalId: open.proposal.id });
+        assert.deepStrictEqual(first.seats[0]?.modelSelection, proposed.modelSelection);
+        assert.equal(first.seats[0]?.runtimeMode, "approval-required");
+        const edited = {
+          ...proposed,
+          runtimeMode: "full-access" as const,
+          modelSelection: { ...proposed.modelSelection, options: [{ id: "effort", value: "low" }] },
+        };
+        const stale = yield* gate
+          .resolve({
+            proposalId: open.proposal.id,
+            decision: "approve",
+            seats: [edited],
+            approvalToken: first.approvalToken,
+          })
+          .pipe(Effect.flip);
+        assert.equal(stale._tag, "CrewProposalRequestError");
+        const current = yield* gate.preview({ proposalId: open.proposal.id, seats: [edited] });
+        const failed = yield* gate
+          .resolve({
+            proposalId: open.proposal.id,
+            decision: "approve",
+            seats: [edited],
+            approvalToken: current.approvalToken,
+          })
+          .pipe(Effect.flip);
+        assert.equal(failed._tag, "CrewLaunchOperationError");
+        const reopened = (yield* store.read(open.proposal.id))!;
+        assert.equal(reopened.status, "open");
+        assert.deepStrictEqual(reopened.approvedSeats, [edited]);
+        const retry = yield* gate.preview({ proposalId: open.proposal.id });
+        assert.equal(retry.approvalToken, current.approvalToken);
+        assert.deepStrictEqual(retry.seats[0]?.modelSelection, edited.modelSelection);
+        assert.equal(retry.seats[0]?.runtimeMode, edited.runtimeMode);
+        const savedSeat = { ...edited, agentId: "critic" };
+        const savedOverride = yield* gate.preview({
+          proposalId: open.proposal.id,
+          seats: [savedSeat],
+        });
+        assert.deepStrictEqual(savedOverride.seats[0]?.modelSelection, edited.modelSelection);
+        assert.equal(savedOverride.seats[0]?.runtimeMode, edited.runtimeMode);
+        assert.notEqual(savedOverride.approvalToken, current.approvalToken);
+        const stalePersona = yield* gate
+          .resolve({
+            proposalId: open.proposal.id,
+            seats: [savedSeat],
+            decision: "approve",
+            approvalToken: current.approvalToken,
+          })
+          .pipe(Effect.flip);
+        assert.equal(stalePersona._tag, "CrewProposalRequestError");
+        yield* gate
+          .resolve({
+            proposalId: open.proposal.id,
+            seats: [savedSeat],
+            decision: "approve",
+            approvalToken: savedOverride.approvalToken,
+          })
+          .pipe(Effect.flip);
+        assert.deepStrictEqual((yield* store.read(open.proposal.id))?.approvedSeats, [savedSeat]);
+        const agentOverride = yield* gate
+          .propose({
+            requestKey: "agent-saved-override",
+            captain,
+            displayName: "Review",
+            brief: "Review",
+            seats: [savedSeat],
+          })
+          .pipe(Effect.flip);
+        assert.equal(agentOverride._tag, "CrewProposalRequestError");
+        assert.include(agentOverride.message, "only the human can override");
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
 );
