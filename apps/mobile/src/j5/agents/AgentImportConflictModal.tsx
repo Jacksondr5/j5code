@@ -22,7 +22,7 @@ export function AgentImportConflictModal(props: {
     >
       <SafeAreaView className="flex-1 bg-sheet">
         <View className="flex-row items-center justify-between gap-3 px-5 py-3">
-          <Text className="flex-1 text-xl font-t3-semibold">Replace existing agents?</Text>
+          <Text className="flex-1 text-xl font-t3-semibold">Replace existing personas?</Text>
           <Pressable
             accessibilityRole="button"
             className="px-3 py-2"

@@ -402,7 +402,7 @@ describe("removing folder-loaded agents", () => {
         const error = yield* prepareAgentPersonaLaunch({ personaId: scout.id }, [], restarted).pipe(
           Effect.flip,
         );
-        assert.include(String(error), "Unknown agent persona");
+        assert.include(String(error), "Unknown persona");
         assert.deepEqual(yield* restarted.readSnapshot(assignment), scout);
         yield* restarted.importFiles({
           files: [{ name: "local-scout.yaml", content: yaml(scout) }],

@@ -20,8 +20,8 @@ const approvedGate = [
   "crew_instance_id: crew:1",
   "crew_version: 1",
   "roster:",
-  "- builder: participant_id=agent:j5:a2a:b agent=builder thread_id=thread:b",
-  "- critic: participant_id=agent:j5:a2a:c agent=critic thread_id=thread:c",
+  "- builder: participant_id=agent:j5:a2a:b persona=builder thread_id=thread:b",
+  "- critic: participant_id=agent:j5:a2a:c persona=critic thread_id=thread:c",
   "</j5_crew_gate>",
   "",
   "Your crew is running. Each seat has your brief and this roster.",
@@ -95,6 +95,15 @@ describe("crew notices in the Captain's thread", () => {
     if (notice?.kind === "gate") expect(crewGateTitle(notice)).toBe("Crew launched");
     // Only the platform posts gate notices; the same text from a person is not one.
     expect(presentCrewNotice({ role: "user", createdBy: "user", text: approvedGate })).toBeNull();
+    // A roster line the parser does not understand leaves the whole message raw, rather than an
+    // approved card with that seat silently missing.
+    expect(
+      presentCrewNotice({
+        role: "user",
+        createdBy: "system",
+        text: approvedGate.replace("thread_id=thread:c", "thread_id=thread:c tail=junk"),
+      }),
+    ).toBeNull();
   });
 
   it("presents a launch report: what the person changed and how each seat's first turn went", () => {
@@ -111,9 +120,9 @@ describe("crew notices in the Captain's thread", () => {
       "seat_failed: punchline | failed | provider_error — API Error: Can't reach the API server | check DNS",
       "seat_pending: prosecutor",
       "roster:",
-      "- setup: participant_id=agent:j5:a2a:s agent=scout thread_id=thread:s start=started",
-      "- punchline: participant_id=agent:j5:a2a:p agent=advocate thread_id=thread:p start=failed",
-      "- prosecutor: participant_id=agent:j5:a2a:q agent=prosecutor thread_id=thread:q start=pending",
+      "- setup: participant_id=agent:j5:a2a:s persona=scout thread_id=thread:s start=started",
+      "- punchline: participant_id=agent:j5:a2a:p persona=advocate thread_id=thread:p start=failed",
+      "- prosecutor: participant_id=agent:j5:a2a:q persona=prosecutor thread_id=thread:q start=pending",
       "</j5_crew_gate>",
       "",
       "1 of 3 seats failed to start.",
@@ -286,8 +295,8 @@ decision: approved
 crew_instance_id: crew:custom
 crew_version: 1
 roster:
-- notes: participant_id=agent:notes agent= thread_id=thread:notes
-- review: participant_id=agent:review agent=custom thread_id=thread:review
+- notes: participant_id=agent:notes persona= thread_id=thread:notes
+- review: participant_id=agent:review persona=custom thread_id=thread:review
 </j5_crew_gate>`,
   });
   expect(notice?.kind).toBe("gate");

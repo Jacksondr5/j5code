@@ -393,7 +393,7 @@ export function createAgentPersonaLibrary(storage?: {
         Effect.mapError(
           (cause) =>
             new AgentPersonaLibraryError({
-              message: `Invalid agent definition: ${file.name}`,
+              message: `Invalid persona definition: ${file.name}`,
               cause,
             }),
         ),

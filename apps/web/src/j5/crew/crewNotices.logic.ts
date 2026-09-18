@@ -88,7 +88,7 @@ const LAUNCH_BLOCK =
   /^(?:Ultrathink:\n)?<j5_crew_launch>\n([\s\S]*?)\n<\/j5_crew_launch>\n\n([\s\S]*)$/;
 const GATE_BLOCK = /^<j5_crew_gate>\n([\s\S]*?)\n<\/j5_crew_gate>/;
 const ROSTER_LINE =
-  /^- ([^:]+): participant_id=(\S+) agent=(\S*) thread_id=(\S+)(?: start=(started|failed|pending))?( \(new\))?$/;
+  /^- ([^:]+): participant_id=(\S+) persona=(\S*) thread_id=(\S+)(?: start=(started|failed|pending))?( \(new\))?$/;
 
 const field = (block: string, name: string) =>
   new RegExp(`^${name}: (.*)$`, "m").exec(block)?.[1]?.trim() ?? null;
@@ -119,27 +119,29 @@ const parseGate = (text: string): CrewNoticePresentation | null => {
   )
     return null;
   const rosterStart = block.indexOf("\nroster:\n");
-  const roster =
+  const rosterLines =
     rosterStart === -1
       ? []
       : block
           .slice(rosterStart + "\nroster:\n".length)
           .split("\n")
-          .map((line) => ROSTER_LINE.exec(line.trim()))
-          .flatMap((seat) =>
-            seat === null
-              ? []
-              : [
-                  {
-                    seat: seat[1]!,
-                    participantId: seat[2]!,
-                    agentId: seat[3]!,
-                    threadId: seat[4]!,
-                    isNew: seat[6] !== undefined,
-                    start: seatStart(seat[5]),
-                  },
-                ],
-          );
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0);
+  const roster: Array<CrewRosterSeat> = [];
+  for (const line of rosterLines) {
+    const seat = ROSTER_LINE.exec(line);
+    // A roster line this parser does not understand means the block is not one it understands:
+    // the message stays raw rather than rendering as an approved card with seats missing.
+    if (seat === null) return null;
+    roster.push({
+      seat: seat[1]!,
+      participantId: seat[2]!,
+      agentId: seat[3]!,
+      threadId: seat[4]!,
+      isNew: seat[6] !== undefined,
+      start: seatStart(seat[5]),
+    });
+  }
   // `seat_failed: <seat> | <run status> | <error>`; the error may itself contain the separator.
   const failures = fields(block, "seat_failed").flatMap((entry) => {
     const [seat, runStatus, ...rest] = entry.split(" | ");

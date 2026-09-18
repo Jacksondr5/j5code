@@ -147,7 +147,7 @@ export function AgentLibrarySettings() {
   ): Promise<ReadonlyArray<AgentPersonaImportConflict> | null> {
     let selected = error.conflicts;
     const confirmation = requestConfirmDialog(
-      "Replace existing agents?",
+      "Replace existing personas?",
       { variant: "destructive" },
       {
         confirmLabel: "Import selected",
@@ -198,7 +198,7 @@ export function AgentLibrarySettings() {
     } catch (error) {
       toastManager.add({
         type: "error",
-        title: "Agent action failed",
+        title: "Persona action failed",
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -257,13 +257,13 @@ export function AgentLibrarySettings() {
       if (result === null) return;
       toastManager.add({
         type: "success",
-        title: `Imported ${result.importedIds.length} agent(s).`,
+        title: `Imported ${result.importedIds.length} persona(s).`,
       });
       catalog.refresh();
     } catch (error) {
       toastManager.add({
         type: "error",
-        title: "Agent action failed",
+        title: "Persona action failed",
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -284,7 +284,7 @@ export function AgentLibrarySettings() {
     } catch (error) {
       toastManager.add({
         type: "error",
-        title: "Agent action failed",
+        title: "Persona action failed",
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -301,12 +301,12 @@ export function AgentLibrarySettings() {
         input: { personaId },
       });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-      toastManager.add({ type: "success", title: "Agent removed" });
+      toastManager.add({ type: "success", title: "Persona removed" });
       catalog.refresh();
     } catch (error) {
       toastManager.add({
         type: "error",
-        title: "Agent action failed",
+        title: "Persona action failed",
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -331,7 +331,7 @@ export function AgentLibrarySettings() {
     } catch (error) {
       toastManager.add({
         type: "error",
-        title: "Agent action failed",
+        title: "Persona action failed",
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -353,7 +353,7 @@ export function AgentLibrarySettings() {
     } catch (error) {
       toastManager.add({
         type: "error",
-        title: "Agent action failed",
+        title: "Persona action failed",
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -367,12 +367,12 @@ export function AgentLibrarySettings() {
     try {
       const result = await restoreAgent({ environmentId, input: { personaId } });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-      toastManager.add({ type: "success", title: "Agent restored" });
+      toastManager.add({ type: "success", title: "Persona restored" });
       catalog.refresh();
     } catch (error) {
       toastManager.add({
         type: "error",
-        title: "Agent action failed",
+        title: "Persona action failed",
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -386,10 +386,10 @@ export function AgentLibrarySettings() {
 
   return (
     <SettingsPageContainer>
-      <SettingsSection title="Agents">
+      <SettingsSection title="Personas">
         <SettingsRow
-          title="Agent library"
-          description="In a Codex or Claude conversation, type @agent:id, or @ and the start of an agent’s name, to run a saved agent as a subagent. Edit imported agents here."
+          title="Persona library"
+          description="In a Codex or Claude conversation, type @persona:id, or @ and the start of a persona’s name, to run a persona as a subagent. Edit imported personas here."
         />
         {orderedEnvironments.length > 1 ? (
           <SettingsRow
@@ -406,7 +406,7 @@ export function AgentLibrarySettings() {
                   if (environment) setSelectedEnvironmentId(environment.environmentId);
                 }}
               >
-                <SelectTrigger className="w-full sm:w-56" aria-label="Agent environment">
+                <SelectTrigger className="w-full sm:w-56" aria-label="Persona environment">
                   <SelectValue>{selectedEnvironment?.label}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -426,7 +426,7 @@ export function AgentLibrarySettings() {
           hidden
           multiple
           {...{ webkitdirectory: "" }}
-          aria-label="Choose agent folder"
+          aria-label="Choose persona folder"
           onChange={(event) => {
             const files = Array.from(event.currentTarget.files ?? []);
             event.currentTarget.value = "";
@@ -438,7 +438,7 @@ export function AgentLibrarySettings() {
           type="file"
           hidden
           accept=".yaml,.yml,application/yaml,text/yaml"
-          aria-label="Choose agent YAML file"
+          aria-label="Choose persona YAML file"
           onChange={(event) => {
             const files = Array.from(event.currentTarget.files ?? []);
             event.currentTarget.value = "";
@@ -448,7 +448,7 @@ export function AgentLibrarySettings() {
       </SettingsSection>
 
       <SettingsSection
-        title="Scoped agents"
+        title="Scoped personas"
         headerAction={
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -457,7 +457,7 @@ export function AgentLibrarySettings() {
               onClick={() => setCreating({})}
             >
               <PlusIcon aria-hidden="true" className="size-4" />
-              Create agent
+              Create persona
             </Button>
             <Menu>
               <MenuTrigger
@@ -472,7 +472,7 @@ export function AgentLibrarySettings() {
                   disabled={busy || effectiveEnvironmentId === null}
                   onClick={() => fileInput.current?.click()}
                 >
-                  Agent file
+                  Persona file
                 </MenuItem>
                 <MenuItem
                   disabled={busy || effectiveEnvironmentId === null}
@@ -488,12 +488,12 @@ export function AgentLibrarySettings() {
         {effectiveEnvironmentId === null ? (
           <SettingsRow
             title={isReady ? "No connected environments" : "Loading environments"}
-            description="Connect an environment to inspect its agent library."
+            description="Connect an environment to inspect its persona library."
           />
         ) : catalog.isPending ? (
-          <SettingsRow title="Loading agents" description="Reading the agent library." />
+          <SettingsRow title="Loading personas" description="Reading the persona library." />
         ) : catalog.error ? (
-          <SettingsRow title="Agents unavailable" description={catalog.error} />
+          <SettingsRow title="Personas unavailable" description={catalog.error} />
         ) : personas.length === 0 ? (
           <SettingsRow
             title="No personas"
@@ -596,7 +596,7 @@ export function AgentLibrarySettings() {
                         title={
                           persona.edit
                             ? `Edit ${persona.displayName}`
-                            : "Duplicate this agent to edit a copy"
+                            : "Duplicate this persona to edit a copy"
                         }
                         onClick={() => {
                           if (persona.edit && effectiveEnvironmentId)
@@ -620,7 +620,7 @@ export function AgentLibrarySettings() {
                     </MenuTrigger>
                     <MenuPopup align="end">
                       <MenuItem onClick={() => void duplicatePersona(persona.personaId)}>
-                        Duplicate as personal agent
+                        Duplicate as personal persona
                       </MenuItem>
                       <MenuItem onClick={() => void exportPersona(persona.personaId)}>
                         Export YAML
@@ -680,7 +680,7 @@ export function AgentLibrarySettings() {
               {librarySources.data.folders.length === 0 ? (
                 <SettingsRow
                   title="No source folders"
-                  description="Only personal and imported agents are available."
+                  description="Only personal and imported personas are available."
                 />
               ) : null}
               {librarySources.data.folders.map((folder) => {

@@ -582,8 +582,8 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       "archive_crew",
       "clear_own_ask",
       "join_squadron",
-      "list_agents",
       "list_participants",
+      "list_personas",
       "list_squadrons",
       "propose_crew",
       "request_crew_member",
@@ -1694,7 +1694,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
         );
       const scout = {
         brief: "Collect evidence about the auth flow and report back.",
-        agent: "scout",
+        persona: "scout",
         provider: ProviderInstanceId.make("codex"),
         model: "gpt-5.6-terra",
         reasoning: "high",
@@ -1760,11 +1760,11 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       assert.isTrue(outOfRoute.isFailure);
       assert.include(failureMessage(outOfRoute), "Agent scout allows only");
       assert.include(failureMessage(outOfRoute), "outside its declared routes");
-      assert.include(failureMessage(outOfRoute), "or omit agent");
+      assert.include(failureMessage(outOfRoute), "or omit persona");
 
       const unenforceable = yield* call({
         ...scout,
-        agent: "builder",
+        persona: "builder",
         provider: ProviderInstanceId.make("claudeAgent"),
         model: "claude-opus-5",
         client_request_id: "spawn-persona-unenforceable",
@@ -1777,7 +1777,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
 
       const unknown = yield* call({
         ...scout,
-        agent: "nobody",
+        persona: "nobody",
         client_request_id: "spawn-persona-unknown",
       });
       assert.isTrue(unknown.isFailure);
@@ -2075,7 +2075,7 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
       const response = yield* toolkit
-        .handle("list_agents", {})
+        .handle("list_personas", {})
         .pipe(
           Stream.unwrap,
           Stream.run(Sink.last()),
@@ -2083,22 +2083,22 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
           Effect.provideService(McpInvocationContext, invocation),
         );
       assert.isFalse(response.isFailure);
-      const { agents } = response.result as {
-        readonly agents: ReadonlyArray<{
+      const { personas } = response.result as {
+        readonly personas: ReadonlyArray<{
           readonly id: string;
           readonly runtime_policy: string;
           readonly availability: string;
           readonly route: string | null;
         }>;
       };
-      assert.lengthOf(agents, 11);
-      const scout = agents.find((agent) => agent.id === "scout");
+      assert.lengthOf(personas, 11);
+      const scout = personas.find((persona) => persona.id === "scout");
       assert.deepStrictEqual(
         [scout?.runtime_policy, scout?.availability, scout?.route],
         ["read-only", "available", "codex · gpt-5.6-terra · high"],
       );
       // Publisher's publish-only policy has no enforceable provider yet, so it cannot start.
-      const publisher = agents.find((agent) => agent.id === "publisher");
+      const publisher = personas.find((persona) => persona.id === "publisher");
       assert.deepStrictEqual([publisher?.availability, publisher?.route], ["blocked", null]);
     }).pipe(Effect.provide(layer));
   }),
@@ -2233,7 +2233,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       const proposed = yield* run("propose_crew", {
         name: "Login Fix Crew",
         brief: "Fix the flaky login test.",
-        seats: [{ seat: "builder", agent: "builder", reason: "Implements" }],
+        seats: [{ seat: "builder", persona: "builder", reason: "Implements" }],
         client_request_id: "propose-1",
       });
       assert.isFalse(proposed.isFailure, message(proposed));
@@ -2246,7 +2246,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
 
       const added = yield* run("request_crew_member", {
         seat: "sentry",
-        agent: "sentry",
+        persona: "sentry",
         reason: "Security pass",
         client_request_id: "add-1",
       });
@@ -2264,7 +2264,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       const refused = yield* run("propose_crew", {
         name: "Nested",
         brief: "x",
-        seats: [{ seat: "s", agent: "scout", reason: "r" }],
+        seats: [{ seat: "s", persona: "scout", reason: "r" }],
       });
       assert.isTrue(refused.isFailure);
       assert.include(message(refused), "crew members cannot request crews or seats");

@@ -137,7 +137,7 @@ export function AgentLibrarySettingsScreen() {
     } catch (error) {
       setNotification({
         type: "error",
-        title: "Agent action failed",
+        title: "Persona action failed",
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -182,13 +182,13 @@ export function AgentLibrarySettingsScreen() {
       if (result === null) return;
       setNotification({
         type: "success",
-        title: `Imported ${result.importedIds.length} agent(s).`,
+        title: `Imported ${result.importedIds.length} persona(s).`,
       });
       catalog.refresh();
     } catch (error) {
       setNotification({
         type: "error",
-        title: "Agent action failed",
+        title: "Persona action failed",
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -209,7 +209,7 @@ export function AgentLibrarySettingsScreen() {
     } catch (error) {
       setNotification({
         type: "error",
-        title: "Agent action failed",
+        title: "Persona action failed",
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -226,12 +226,12 @@ export function AgentLibrarySettingsScreen() {
         input: { personaId },
       });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-      setNotification({ type: "success", title: "Agent removed" });
+      setNotification({ type: "success", title: "Persona removed" });
       catalog.refresh();
     } catch (error) {
       setNotification({
         type: "error",
-        title: "Agent action failed",
+        title: "Persona action failed",
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -256,7 +256,7 @@ export function AgentLibrarySettingsScreen() {
     } catch (error) {
       setNotification({
         type: "error",
-        title: "Agent action failed",
+        title: "Persona action failed",
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -283,7 +283,7 @@ export function AgentLibrarySettingsScreen() {
     } catch (error) {
       setNotification({
         type: "error",
-        title: "Agent action failed",
+        title: "Persona action failed",
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -297,12 +297,12 @@ export function AgentLibrarySettingsScreen() {
     try {
       const result = await restoreAgent({ environmentId, input: { personaId } });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-      setNotification({ type: "success", title: "Agent restored" });
+      setNotification({ type: "success", title: "Persona restored" });
       catalog.refresh();
     } catch (error) {
       setNotification({
         type: "error",
-        title: "Agent action failed",
+        title: "Persona action failed",
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -329,7 +329,7 @@ export function AgentLibrarySettingsScreen() {
       {Platform.OS === "android" ? (
         <>
           <NativeStackScreenOptions options={{ headerShown: false }} />
-          <AndroidScreenHeader title="Agents" onBack={() => navigation.goBack()} />
+          <AndroidScreenHeader title="Personas" onBack={() => navigation.goBack()} />
         </>
       ) : null}
       <ScrollView
@@ -339,11 +339,11 @@ export function AgentLibrarySettingsScreen() {
         contentContainerClassName="gap-6 px-5 pt-4"
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
       >
-        <SettingsSection title="Agent library">
+        <SettingsSection title="Persona library">
           <View className="rounded-2xl bg-card px-4 py-3">
             <Text className="text-base text-foreground">
-              In a Codex or Claude conversation, type @agent:id, or @ and the start of an agent’s
-              name, to run a saved agent as a subagent. Edit imported agents here.
+              In a Codex or Claude conversation, type @persona:id, or @ and the start of a persona’s
+              name, to run a persona as a subagent. Edit imported personas here.
             </Text>
           </View>
         </SettingsSection>
@@ -379,11 +379,11 @@ export function AgentLibrarySettingsScreen() {
         ) : null}
 
         <View className="flex-row flex-wrap items-center justify-between gap-3 px-2">
-          <Text className="text-sm font-t3-medium text-foreground-muted">Scoped agents</Text>
+          <Text className="text-sm font-t3-medium text-foreground-muted">Scoped personas</Text>
           <View className="flex-row flex-wrap items-center gap-2">
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Create agent"
+              accessibilityLabel="Create persona"
               accessibilityState={{ disabled: busy || effectiveEnvironmentId === null }}
               disabled={busy || effectiveEnvironmentId === null}
               className="flex-row items-center gap-2 rounded-lg border border-border px-4 py-3 disabled:opacity-40"
@@ -399,7 +399,7 @@ export function AgentLibrarySettingsScreen() {
             </Pressable>
             {Platform.OS === "web" ? (
               <Text className="text-sm text-foreground-muted">
-                Use Settings → Agents in the web app to import files.
+                Use Settings → Personas in the web app to import files.
               </Text>
             ) : (
               <View
@@ -410,7 +410,7 @@ export function AgentLibrarySettingsScreen() {
                   actions={[
                     {
                       id: "agent",
-                      title: "Agent file",
+                      title: "Persona file",
                       attributes: { disabled: busy || effectiveEnvironmentId === null },
                     },
                     {
@@ -426,7 +426,7 @@ export function AgentLibrarySettingsScreen() {
                 >
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel="Import agents"
+                    accessibilityLabel="Import personas"
                     accessibilityState={{ disabled: busy || effectiveEnvironmentId === null }}
                     disabled={busy || effectiveEnvironmentId === null}
                     className="flex-row items-center gap-2 rounded-lg border border-border px-4 py-3 disabled:opacity-40"
@@ -449,7 +449,7 @@ export function AgentLibrarySettingsScreen() {
             {effectiveEnvironmentId === null ? (
               <AgentMessage title="No connected environments" />
             ) : catalog.isPending ? (
-              <AgentMessage title="Loading agents" />
+              <AgentMessage title="Loading personas" />
             ) : catalog.error ? (
               <AgentMessage title={catalog.error} />
             ) : personas.length === 0 ? (
@@ -516,7 +516,7 @@ export function AgentLibrarySettingsScreen() {
                               accessibilityHint={
                                 persona.edit
                                   ? "Edit this imported copy"
-                                  : "Duplicate this agent to edit a copy"
+                                  : "Duplicate this persona to edit a copy"
                               }
                               accessibilityState={{ disabled: busy || persona.edit === null }}
                               disabled={busy || persona.edit === null}
@@ -542,7 +542,7 @@ export function AgentLibrarySettingsScreen() {
                           actions={[
                             {
                               id: "duplicate",
-                              title: "Duplicate as personal agent",
+                              title: "Duplicate as personal persona",
                               attributes: { disabled: busy },
                             },
                             { id: "export", title: "Export YAML", attributes: { disabled: busy } },
@@ -654,7 +654,7 @@ export function AgentLibrarySettingsScreen() {
               ) : librarySources.data ? (
                 <>
                   {librarySources.data.folders.length === 0 ? (
-                    <AgentMessage title="No source folders. Only personal and imported agents are available." />
+                    <AgentMessage title="No source folders. Only personal and imported personas are available." />
                   ) : null}
                   {librarySources.data.folders.map((folder) => {
                     const nudges = agentPersonaFolderNudges(folder.git);

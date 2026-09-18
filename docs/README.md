@@ -10,7 +10,7 @@
 - [Source control](./user/source-control.md)
 - [Project settings](./user/project-settings.md)
 - [Appearance and themes](./user/appearance.md)
-- [Agents and subagent activity](./user/agents.md)
+- [Personas, crews, and subagent activity](./user/personas.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Import browser sessions](./user/browser-import.md)
 - [Usage and limits](./user/usage.md)

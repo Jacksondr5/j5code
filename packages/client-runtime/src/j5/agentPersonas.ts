@@ -193,10 +193,10 @@ export async function prepareAgentPersonaImport(
 ) {
   const definitions = files.filter((file) => isAgentPersonaDefinitionFile(file.name));
   if (definitions.length === 0)
-    throw new Error("No YAML agent definitions found in the selection.");
+    throw new Error("No YAML persona definitions found in the selection.");
   if (definitions.length > AGENT_PERSONA_IMPORT_MAX_FILES)
     throw new Error(
-      `Select at most ${AGENT_PERSONA_IMPORT_MAX_FILES} agent definitions at a time.`,
+      `Select at most ${AGENT_PERSONA_IMPORT_MAX_FILES} persona definitions at a time.`,
     );
   const result: Array<{ name: string; content: string }> = [];
   for (const file of definitions) {
@@ -395,7 +395,7 @@ export function agentPersonaDrift(
 }
 
 export const AGENT_PERSONA_DRIFT_MESSAGE =
-  "This agent's definition changed after this task launched. The task keeps the definition it started with; start a new task to use the current one.";
+  "This persona's definition changed after this task launched. The task keeps the definition it started with; start a new task to use the current one.";
 
 /** Short origin for a catalog row; folder origins name the file's parent folder only. */
 export function agentPersonaOriginLabel(origin: AgentPersonaOrigin): string {

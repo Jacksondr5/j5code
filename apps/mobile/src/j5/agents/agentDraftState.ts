@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-/** Which saved agent a new-task draft launches as, keyed by the composer draft key. Session-local. */
+/** Which persona a new-task draft launches as, keyed by the composer draft key. Session-local. */
 let snapshot: Readonly<Record<string, string>> = {};
 const listeners = new Set<() => void>();
 const notify = () => listeners.forEach((listener) => listener());

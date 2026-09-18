@@ -310,7 +310,7 @@ it.effect("launches one persona directly without requiring workflow sequencing",
         .pipe(Effect.flip);
       assert.equal(
         switchError.cause,
-        `Agent persona thread ${launched.threadId} has an immutable model route.`,
+        `Persona thread ${launched.threadId} has an immutable model route.`,
       );
 
       const messageOverrideError = yield* threads
@@ -329,7 +329,7 @@ it.effect("launches one persona directly without requiring workflow sequencing",
         .pipe(Effect.flip);
       assert.equal(
         messageOverrideError.cause,
-        `Agent persona thread ${launched.threadId} has an immutable model route.`,
+        `Persona thread ${launched.threadId} has an immutable model route.`,
       );
 
       const publisherError = yield* launches
@@ -343,7 +343,7 @@ it.effect("launches one persona directly without requiring workflow sequencing",
         .pipe(Effect.flip);
       assert.equal(
         publisherError.message,
-        "Agent persona publisher is blocked because neither route can enforce its authority policy.",
+        "Persona publisher is blocked because neither route can enforce its authority policy.",
       );
 
       const invalidAuthorityError = yield* launches
@@ -382,7 +382,7 @@ it.effect("blocks a direct persona launch when both declared model routes are un
       assert.equal(error.operation, "resolve-agent-persona");
       assert.include(
         error.message,
-        "Agent persona scout is blocked because its primary and fallback models are unavailable: ",
+        "Persona scout is blocked because its primary and fallback models are unavailable: ",
       );
     }).pipe(Effect.provide(harness.layer));
   }),
@@ -497,7 +497,7 @@ it.effect(
         })
         .pipe(Effect.flip);
       assert.equal(error.operation, "resolve-agent-persona");
-      assert.include(error.message, "Unknown agent persona");
+      assert.include(error.message, "Unknown persona");
     }).pipe(
       Effect.provide(
         harness.layer.pipe(Layer.provideMerge(environment), Layer.provideMerge(NodeServices.layer)),

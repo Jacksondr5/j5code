@@ -78,7 +78,7 @@ export function AgentEditorModal(props: {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <View className="flex-row items-center justify-between px-5 py-3">
-            <Text className="text-xl font-t3-semibold">Edit agent</Text>
+            <Text className="text-xl font-t3-semibold">Edit persona</Text>
             <Pressable
               accessibilityRole="button"
               disabled={saving}
