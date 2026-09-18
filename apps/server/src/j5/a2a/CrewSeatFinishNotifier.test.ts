@@ -656,20 +656,23 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
       ],
     });
     const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+    let newestStatus: "failed" | "interrupted" = "interrupted";
     const finished = (threadId: ThreadId) =>
       ({
         ...projection(threadId),
         runs: [
           {
             id: RunId.make("run:old"),
+            ordinal: 1,
             threadId,
             status: "completed",
             completedAt: DateTime.makeUnsafe("2026-09-09T16:05:00.000Z"),
           },
           {
             id: RunId.make("run:newest"),
+            ordinal: 2,
             threadId,
-            status: "failed",
+            status: newestStatus,
             completedAt: DateTime.makeUnsafe("2026-09-09T16:09:00.000Z"),
           },
         ],
@@ -702,6 +705,9 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
     );
     yield* Effect.gen(function* () {
       const notifier = yield* CrewSeatFinishNotifier;
+      assert.deepStrictEqual(yield* notifier.reconcile, []);
+      assert.deepStrictEqual(yield* Ref.get(dispatched), []);
+      newestStatus = "failed";
       assert.deepStrictEqual(yield* notifier.reconcile, [scoutThread]);
       const commands = yield* Ref.get(dispatched);
       assert.deepStrictEqual(

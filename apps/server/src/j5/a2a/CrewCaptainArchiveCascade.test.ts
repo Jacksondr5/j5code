@@ -154,8 +154,46 @@ it.effect(
         assert.deepStrictEqual(retired, ["crew:gone-captain"]);
         assert.deepStrictEqual(
           (yield* Ref.get(calls)).map((call) => call.crewInstanceId),
-          ["crew:archived-captain", "crew:gone-captain"],
+          [
+            "crew:archived-captain",
+            "crew:archived-captain",
+            "crew:archived-captain",
+            "crew:gone-captain",
+          ],
         );
       }).pipe(Effect.provide(layer));
     }),
+);
+
+it.effect("retries a transient event cascade in-session with the same commands", () =>
+  Effect.gen(function* () {
+    const calls: Array<ArchiveCrewInput> = [];
+    const testLayer = cascadeLayer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(AgentCrewInstanceService)({
+            listInvolving: () => Effect.succeed([crew("retry", null)]),
+          }),
+          Layer.mock(ArchiveCrewService)({
+            archive: (input) =>
+              Effect.suspend(() => {
+                calls.push(input);
+                return calls.length === 1
+                  ? Effect.die("transient archive failure")
+                  : Effect.succeed({ status: "archived" as const, members: [] });
+              }),
+          }),
+          noThreads,
+        ),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const cascade = yield* CrewCaptainArchiveCascade;
+      assert.deepStrictEqual(yield* cascade.handleStoredEvent(archivedEvent(captainThread)), [
+        "retry",
+      ]);
+      assert.lengthOf(calls, 2);
+      assert.deepStrictEqual(calls[0]!.commandIds("builder"), calls[1]!.commandIds("builder"));
+    }).pipe(Effect.provide(testLayer));
+  }),
 );
