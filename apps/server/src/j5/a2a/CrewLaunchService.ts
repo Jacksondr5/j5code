@@ -1,6 +1,7 @@
 import {
   describeCrewSeatRuntime,
   materializeCrewModelSelection,
+  crewModelSelectionProblem,
   sameCrewRuntime,
 } from "./crewRuntimePreview.ts";
 import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
@@ -48,14 +49,15 @@ import {
 
 /**
  * One approved seat: who fills it, why, and any wiring text its brief carries verbatim. A null
- * agent is a custom seat, approved by name and instructions alone; it runs on the Captain's own
- * provider, model, and access mode because it has no policy of its own.
+ * agent is a custom seat: the human can override its runtime; omitted settings inherit the Captain.
  */
 export interface CrewLaunchSeat {
   readonly name: string;
   readonly agentId: string | null;
   readonly reason: string | null;
   readonly instructions?: string | undefined;
+  readonly modelSelection?: ModelSelection | undefined;
+  readonly runtimeMode?: RuntimeMode | undefined;
 }
 
 /**
@@ -200,7 +202,9 @@ export const layer = Layer.effect(
       // What the Captain actually runs with. A persona Captain's stored mode is whatever the
       // person picked at launch; its effective access comes from the persona policy, so a custom
       // seat that "runs as the Captain" takes that, not the stored mode.
-      const captainAccess = seats.some((seat) => seat.agentId === null)
+      const captainAccess = seats.some(
+        (seat) => seat.agentId === null && seat.runtimeMode === undefined,
+      )
         ? yield* resolveAgentPersonaRuntime(captain.thread, agents).pipe(
             Effect.mapError(
               (cause) =>
@@ -216,7 +220,7 @@ export const layer = Layer.effect(
       for (const seat of seats) {
         const agentId = seat.agentId;
         if (agentId === null) {
-          const selection = captain.thread.modelSelection;
+          const selection = seat.modelSelection ?? captain.thread.modelSelection;
           const provider = providers.find(
             (candidate) => candidate.instanceId === selection.instanceId,
           );
@@ -240,29 +244,56 @@ export const layer = Layer.effect(
             return yield* new CrewLaunchSeatUnavailableError({
               seatName: seat.name,
               agentId: "custom seat",
-              detail: `The Captain's provider ${selection.instanceId} ${problem}.`,
+              detail: `Provider ${selection.instanceId} ${problem}.`,
             });
-          // The human approved this seat by its name and instructions; with no definition to run
-          // as, it takes the Captain's provider, model, and effective access mode. The Captain's
-          // sandbox is not carried: only a persona assignment can convey one, and this seat has
-          // none. The gate copy promises the access mode alone for the same reason.
+          const modelSelection = materializeCrewModelSelection(selection, provider!);
+          const optionProblem =
+            seat.modelSelection === undefined
+              ? null
+              : crewModelSelectionProblem(modelSelection, provider!);
+          if (optionProblem !== null)
+            return yield* new CrewLaunchSeatUnavailableError({
+              seatName: seat.name,
+              agentId: "custom seat",
+              detail: optionProblem,
+            });
+          const runtimeMode =
+            seat.runtimeMode ?? captainAccess?.runtimeMode ?? captain.thread.runtimeMode;
+          if (
+            provider!.driver === "acpRegistry" &&
+            (seat.runtimeMode === "auto" || seat.runtimeMode === "auto-accept-edits")
+          )
+            return yield* new CrewLaunchSeatUnavailableError({
+              seatName: seat.name,
+              agentId: "custom seat",
+              detail:
+                "This ACP harness cannot enforce the selected access mode. Choose Supervised or Full access.",
+            });
+          // Custom seats carry the selected access mode, without a persona sandbox assignment.
           resolved.push({
             seat,
             assignment: null,
-            modelSelection: materializeCrewModelSelection(selection, provider!),
+            modelSelection,
             runtime: describeCrewSeatRuntime(
               seat.name,
-              selection,
+              modelSelection,
               provider!,
-              captainAccess?.runtimeMode ?? captain.thread.runtimeMode,
+              runtimeMode,
               null,
             ),
-            runtimeMode: captainAccess?.runtimeMode ?? captain.thread.runtimeMode,
+            runtimeMode,
             outputArtifact: null,
             agentDisplayName: "custom",
           });
           continue;
         }
+        if (seat.modelSelection !== undefined || seat.runtimeMode !== undefined)
+          return yield* new CrewLaunchSeatUnavailableError({
+            seatName: seat.name,
+            agentId,
+            detail:
+              "Runtime overrides apply only to custom seats. Saved personas use their configured route and access policy.",
+          });
         // Resolved at spawn, against the providers as they are now: a signed-out, disabled, or
         // missing provider refuses the seat here with that reason, before anything is created.
         const assignment = yield* prepareAgentPersonaLaunch(

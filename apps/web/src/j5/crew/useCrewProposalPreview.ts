@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { previewCrewProposal } from "./crewProposalsClient";
 
 interface PreviewState {
+  readonly scopeKey: string;
   readonly requestKey: { readonly value: string };
   readonly data: CrewProposalPreviewResponse | null;
   readonly error: string | null;
@@ -19,7 +20,8 @@ export function useCrewProposalPreview(
 ) {
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<PreviewState | null>(null);
-  const requestJson = JSON.stringify([environmentId, proposalId, seats, revision, busy]);
+  const scopeKey = JSON.stringify([environmentId, proposalId, seats]);
+  const requestJson = JSON.stringify([scopeKey, revision, busy]);
   const requestKey = useMemo(() => ({ value: requestJson }), [requestJson]);
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
 
@@ -36,6 +38,7 @@ export function useCrewProposalPreview(
           data.seats.length === seats.length &&
           seats.every((seat) => data.seats.filter((row) => row.seat === seat.seat).length === 1);
         setState({
+          scopeKey,
           requestKey,
           data: complete ? data : null,
           error: complete ? null : "Runtime preview is incomplete. Refresh it before approving.",
@@ -44,6 +47,7 @@ export function useCrewProposalPreview(
       (cause: unknown) => {
         if (!current) return;
         setState({
+          scopeKey,
           requestKey,
           data: null,
           error: cause instanceof Error ? cause.message : "Could not load the runtime preview.",
@@ -53,11 +57,16 @@ export function useCrewProposalPreview(
     return () => {
       current = false;
     };
-  }, [environmentId, proposalId, seats, busy, requestKey]);
+  }, [environmentId, proposalId, seats, busy, requestKey, scopeKey]);
 
   const active = state?.requestKey === requestKey ? state : null;
   return {
     data: active?.data ?? null,
+    // Keep the approved settings readable during the request, without retaining approval authority.
+    runtimeSeats:
+      active?.data?.seats ??
+      (busy && state?.scopeKey === scopeKey ? state.data?.seats : null) ??
+      null,
     error:
       environmentId === null
         ? "Connect to the crew's environment to preview its runtime."

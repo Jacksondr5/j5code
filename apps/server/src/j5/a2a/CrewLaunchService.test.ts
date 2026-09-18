@@ -28,6 +28,7 @@ import {
   AgentCrewInstanceService,
   layer as crewInstanceLayer,
 } from "./AgentCrewInstanceService.ts";
+import { describeCrewSeatRuntime } from "./crewRuntimePreview.ts";
 import { CrewLaunchService, layer as crewLaunchLayer } from "./CrewLaunchService.ts";
 import { A2AHomeConflictError, participantIdForThread } from "./HomeRegistrar.ts";
 import { crewSeatRequestKey, spawnCrewInstanceId, spawnThreadId } from "./spawnIds.ts";
@@ -575,6 +576,7 @@ it.effect(
       const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high", "low"] }]);
       const withDefaults: ServerProvider = {
         ...codex,
+        displayName: "Codex",
         models: codex.models.map((model) => ({
           ...model,
           capabilities: {
@@ -617,6 +619,11 @@ it.effect(
           model: "gpt-5.6-sol",
           reasoning: "High",
           access: "Full access",
+          modelSelection: {
+            ...captain.thread.modelSelection,
+            options: [{ id: "reasoningEffort", value: "high" }],
+          },
+          runtimeMode: "full-access",
         });
         assert.deepStrictEqual(resolvedSeats[0]?.modelSelection.options, [
           { id: "reasoningEffort", value: "high" },
@@ -681,3 +688,205 @@ it.effect(
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );
+
+it.each([
+  ["codex", "Codex", undefined, "OpenAI", "Codex"],
+  ["claudeAgent", "Claude", undefined, "Anthropic", "Claude Code"],
+  ["claudeAgent", "Claude Code", undefined, "Anthropic", "Claude Code"],
+  ["codex", "Work account", undefined, "OpenAI (Work account)", "Codex"],
+  ["codex", "Codex", "Other vendor", "Other vendor", "Codex"],
+  ["opencode", "Team account", "OpenAI", "OpenAI (Team account)", "OpenCode"],
+])(
+  "runtime provider label for %s / %s respects the model vendor and configured instance",
+  (driver, displayName, subProvider, expectedProvider, expectedHarness) => {
+    const configured = provider("instance", driver!, [{ slug: "model", options: ["high"] }]);
+    const runtime = describeCrewSeatRuntime(
+      "seat",
+      { instanceId: configured.instanceId, model: "model" },
+      {
+        ...configured,
+        displayName: displayName!,
+        models: configured.models.map((model) => ({
+          ...model,
+          ...(subProvider === undefined ? {} : { subProvider }),
+        })),
+      },
+      "full-access",
+      null,
+    );
+    assert.equal(runtime.provider, expectedProvider);
+    assert.equal(runtime.harness, expectedHarness);
+  },
+);
+
+it.effect(
+  "custom runtime overrides select the advertised harness, model, reasoning, and access without fallback",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const providers = [
+        provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]),
+        provider("claude-work", "claudeAgent", [
+          { slug: "claude-sonnet", options: ["high", "low"] },
+        ]),
+        provider("acp", "acpRegistry", [{ slug: "model", options: [] }]),
+      ];
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(commands, providers, new Set(), new Set(), new Set(), true),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-custom-runtime-" })),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const custom = {
+          name: "reviewer",
+          agentId: null,
+          reason: "Review",
+          instructions: "Read changes",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("claude-work"),
+            model: "claude-sonnet",
+            options: [{ id: "effort", value: "low" }],
+          },
+          runtimeMode: "approval-required" as const,
+        };
+        const resolvedSeats = yield* launcher.resolveSeats(captain, [custom]);
+        const resolved = resolvedSeats[0]!;
+        assert.deepStrictEqual(resolved.modelSelection, custom.modelSelection);
+        assert.equal(resolved.runtimeMode, "approval-required");
+        assert.equal(resolved.runtime.harness, "Claude Code");
+        assert.equal(resolved.runtime.reasoning, "low");
+        assert.equal(resolved.runtime.access, "Approval required");
+        assert.deepStrictEqual(resolved.runtime.modelSelection, custom.modelSelection);
+        assert.equal(resolved.runtime.runtimeMode, custom.runtimeMode);
+        const instance = yield* launcher.launch({
+          providerSessionId: "session",
+          requestKey: "custom-override",
+          captain,
+          displayName: "Review",
+          seats: [custom],
+          resolvedSeats,
+          brief: "Review",
+        });
+        const created = (yield* Ref.get(commands)).find(
+          (command) => command.type === "thread.create",
+        );
+        assert.equal(created?.type, "thread.create");
+        if (created?.type === "thread.create") {
+          assert.deepStrictEqual(created.modelSelection, custom.modelSelection);
+          assert.equal(created.runtimeMode, custom.runtimeMode);
+          assert.isUndefined(created.agentPersonaAssignment);
+        }
+        const additional = { ...custom, name: "scribe", runtimeMode: "full-access" as const };
+        const addedResolved = yield* launcher.resolveSeats(captain, [additional]);
+        yield* launcher.addSeats({
+          providerSessionId: "session",
+          requestKey: "custom-override-add",
+          captain,
+          instance,
+          seats: [additional],
+          resolvedSeats: addedResolved,
+        });
+        const added = (yield* Ref.get(commands)).findLast(
+          (command) => command.type === "thread.create",
+        );
+        if (added?.type === "thread.create") {
+          assert.deepStrictEqual(added.modelSelection, additional.modelSelection);
+          assert.equal(added.runtimeMode, "full-access");
+        }
+        for (const modelSelection of [
+          { ...custom.modelSelection, instanceId: ProviderInstanceId.make("missing") },
+          { ...custom.modelSelection, model: "missing" },
+          { ...custom.modelSelection, options: [{ id: "effort", value: "unsupported" }] },
+          { ...custom.modelSelection, options: [{ id: "effort", value: true }] },
+          { ...custom.modelSelection, options: [{ id: "unknown", value: "high" }] },
+          {
+            ...custom.modelSelection,
+            options: [
+              { id: "effort", value: "low" },
+              { id: "effort", value: "high" },
+            ],
+          },
+        ]) {
+          const invalid = yield* launcher
+            .resolveSeats(captain, [{ ...custom, modelSelection }])
+            .pipe(Effect.flip);
+          assert.equal(invalid._tag, "CrewLaunchSeatUnavailableError");
+        }
+        const invalidAccess = yield* launcher
+          .resolveSeats(captain, [
+            {
+              ...custom,
+              modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
+              runtimeMode: "auto-accept-edits",
+            },
+          ])
+          .pipe(Effect.flip);
+        assert.equal(invalidAccess._tag, "CrewLaunchSeatUnavailableError");
+        assert.include(invalidAccess.message, "Choose Supervised or Full access");
+        const personaOverride = yield* launcher
+          .resolveSeats(captain, [{ ...custom, agentId: "critic" }])
+          .pipe(Effect.flip);
+        assert.equal(personaOverride._tag, "CrewLaunchSeatUnavailableError");
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it("runtime previews show advertised variant and boolean thinking choices", () => {
+  const configured = provider("instance", "opencode", [{ slug: "model", options: [] }]);
+  const selected = { instanceId: configured.instanceId, model: "model" };
+  const variantProvider: ServerProvider = {
+    ...configured,
+    models: configured.models.map((model) => ({
+      ...model,
+      capabilities: {
+        optionDescriptors: [
+          {
+            id: "variant",
+            label: "Reasoning",
+            type: "select",
+            options: [{ id: "deep", label: "Deep reasoning" }],
+          },
+        ],
+      },
+    })),
+  };
+  assert.equal(
+    describeCrewSeatRuntime(
+      "seat",
+      { ...selected, options: [{ id: "variant", value: "deep" }] },
+      variantProvider,
+      "auto",
+      null,
+    ).reasoning,
+    "Deep reasoning",
+  );
+  const thinkingProvider: ServerProvider = {
+    ...configured,
+    models: configured.models.map((model) => ({
+      ...model,
+      capabilities: {
+        optionDescriptors: [
+          { id: "thinking", label: "Thinking", type: "boolean", currentValue: false },
+        ],
+      },
+    })),
+  };
+  assert.equal(
+    describeCrewSeatRuntime(
+      "seat",
+      { ...selected, options: [{ id: "thinking", value: true }] },
+      thinkingProvider,
+      "auto",
+      null,
+    ).reasoning,
+    "On",
+  );
+  assert.equal(
+    describeCrewSeatRuntime("seat", selected, thinkingProvider, "auto", null).reasoning,
+    "Off",
+  );
+});

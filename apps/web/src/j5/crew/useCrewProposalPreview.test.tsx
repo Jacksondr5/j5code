@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
 import type { CrewProposalPreviewResponse, CrewProposalSeat } from "@t3tools/contracts/j5";
 import { act, useEffect } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
@@ -18,11 +18,17 @@ const response: CrewProposalPreviewResponse = {
   seats: [
     {
       seat: "reviewer",
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-6-astra",
+        options: [{ id: "reasoningEffort", value: "high" }],
+      },
+      runtimeMode: "full-access",
       provider: "OpenAI",
       harness: "Codex",
       model: "GPT-6-Astra",
       reasoning: "High",
-      access: "Repository write",
+      access: "Full access",
     },
   ],
 };
@@ -41,10 +47,11 @@ function Surface(props: {
   seats: ReadonlyArray<CrewProposalSeat>;
   environmentId: EnvironmentId | null;
   busy?: boolean;
+  proposalId?: string;
 }) {
   const preview = useCrewProposalPreview(
     props.environmentId,
-    "proposal:1",
+    props.proposalId ?? "proposal:1",
     props.seats,
     props.busy ?? false,
   );
@@ -94,6 +101,45 @@ describe("crew runtime preview lifecycle", () => {
     });
   });
 
+  it.each([
+    [
+      "harness",
+      {
+        modelSelection: {
+          ...response.seats[0]!.modelSelection,
+          instanceId: ProviderInstanceId.make("codex-other"),
+        },
+      },
+    ],
+    ["model", { modelSelection: { ...response.seats[0]!.modelSelection, model: "other-model" } }],
+    [
+      "reasoning",
+      {
+        modelSelection: {
+          ...response.seats[0]!.modelSelection,
+          options: [{ id: "reasoningEffort", value: "medium" }],
+        },
+      },
+    ],
+    ["access", { runtimeMode: "approval-required" as const }],
+  ])("invalidates approval when the custom %s changes", async (_field, change) => {
+    const next = deferred<CrewProposalPreviewResponse>();
+    previewCrewProposal.mockResolvedValueOnce(response).mockReturnValueOnce(next.promise);
+    await render();
+    expect(result.data).toEqual(response);
+    const edited = [{ ...seats[0]!, ...change }];
+    await render(edited);
+    expect(result.data).toBeNull();
+    expect(result.runtimeSeats).toBeNull();
+    expect(result.loading).toBe(true);
+    expect(previewCrewProposal).toHaveBeenLastCalledWith(environmentId, {
+      proposalId: "proposal:1",
+      seats: edited,
+    });
+    await act(async () => next.resolve({ ...response, approvalToken: "updated-runtime" }));
+    expect(result.data?.approvalToken).toBe("updated-runtime");
+  });
+
   it("invalidates displayed runtime on environment changes and failed previews can retry", async () => {
     previewCrewProposal
       .mockResolvedValueOnce(response)
@@ -108,16 +154,44 @@ describe("crew runtime preview lifecycle", () => {
     expect(result.data).toEqual(response);
   });
 
-  it("requires a fresh preview after an approval attempt and does not resolve while busy", async () => {
-    previewCrewProposal.mockResolvedValue(response);
+  it("retains runtime disclosure while approving but requires a fresh token afterward", async () => {
+    const next = deferred<CrewProposalPreviewResponse>();
+    previewCrewProposal.mockResolvedValueOnce(response).mockReturnValueOnce(next.promise);
     await render();
-    await act(async () => result.refresh());
-    await render(seats, environmentId, true);
+    // Match the card: invalidate the approval token, then enter busy in the same event.
+    await act(async () => {
+      result.refresh();
+      renderer!.update(<Surface seats={seats} environmentId={environmentId} busy />);
+    });
     expect(result.data).toBeNull();
-    const calls = previewCrewProposal.mock.calls.length;
+    expect(result.runtimeSeats).toEqual(response.seats);
+    expect(result.loading).toBe(false);
+    expect(previewCrewProposal).toHaveBeenCalledTimes(1);
     await render(seats, environmentId, false);
-    expect(previewCrewProposal).toHaveBeenCalledTimes(calls + 1);
-    expect(result.data).toEqual(response);
+    expect(previewCrewProposal).toHaveBeenCalledTimes(2);
+    expect(result.data).toBeNull();
+    expect(result.runtimeSeats).toBeNull();
+    expect(result.loading).toBe(true);
+    await act(async () => next.resolve({ ...response, approvalToken: "preview:2" }));
+    expect(result.data?.approvalToken).toBe("preview:2");
+    expect(result.runtimeSeats).toEqual(response.seats);
+  });
+
+  it("never retains busy runtime disclosure for a changed roster, environment, or proposal", async () => {
+    previewCrewProposal.mockResolvedValueOnce(response);
+    await render();
+    await render([{ ...seats[0]!, instructions: "Changed instructions" }], environmentId, true);
+    expect(result.runtimeSeats).toBeNull();
+    expect(result.data).toBeNull();
+    await render(seats, EnvironmentId.make("another-environment"), true);
+    expect(result.runtimeSeats).toBeNull();
+    await act(async () => {
+      renderer!.update(
+        <Surface seats={seats} environmentId={environmentId} proposalId="proposal:2" busy />,
+      );
+    });
+    expect(result.runtimeSeats).toBeNull();
+    expect(previewCrewProposal).toHaveBeenCalledTimes(1);
   });
 
   it("never accepts incomplete runtime rows or an unavailable environment", async () => {

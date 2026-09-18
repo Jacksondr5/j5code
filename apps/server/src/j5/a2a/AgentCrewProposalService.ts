@@ -1,4 +1,4 @@
-import { ThreadId } from "@t3tools/contracts";
+import { ModelSelection, RuntimeMode, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -20,6 +20,8 @@ export const CrewProposalSeat = Schema.Struct({
   agentId: Schema.NullOr(bounded(CREW_NAME_MAX_CHARS)),
   reason: bounded(CREW_REASON_MAX_CHARS),
   instructions: Schema.optional(bounded(CREW_TEXT_MAX_CHARS)),
+  modelSelection: Schema.optional(ModelSelection),
+  runtimeMode: Schema.optional(RuntimeMode),
 });
 export type CrewProposalSeat = typeof CrewProposalSeat.Type;
 

@@ -1,4 +1,5 @@
 import type { CrewProposalSeat } from "@t3tools/contracts/j5";
+import type { CrewSeatDraft } from "./crewSeatRuntime";
 
 /** The persona choice for a seat that runs without a persona: named and briefed on the card. */
 export const CUSTOM_AGENT = "__custom__";
@@ -9,7 +10,7 @@ export const removeSeat = (seats: ReadonlyArray<CrewProposalSeat>, seatName: str
 
 export const addSeat = (
   seats: ReadonlyArray<CrewProposalSeat>,
-  draft: { readonly seat: string; readonly agentId: string; readonly instructions: string },
+  draft: CrewSeatDraft,
 ): { readonly seats: ReadonlyArray<CrewProposalSeat>; readonly error: string | null } => {
   const seatName = draft.seat.trim().toLowerCase().replace(/\s+/g, "-");
   if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(seatName))
@@ -31,8 +32,27 @@ export const addSeat = (
         agentId: custom ? null : draft.agentId,
         reason: "Added by the user",
         ...(instructions ? { instructions } : {}),
+        ...(custom && draft.modelSelection ? { modelSelection: draft.modelSelection } : {}),
+        ...(custom && draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
       },
     ],
+    error: null,
+  };
+};
+
+/** Validate a modal edit without mutating the current roster or the Captain's reason. */
+export const saveSeat = (
+  seats: ReadonlyArray<CrewProposalSeat>,
+  seatName: string,
+  draft: CrewSeatDraft,
+): { readonly seats: ReadonlyArray<CrewProposalSeat>; readonly error: string | null } => {
+  const current = seats.find((seat) => seat.seat === seatName);
+  if (!current) return { seats, error: "This seat is no longer in the roster." };
+  const validated = addSeat(removeSeat(seats, seatName), { ...draft, seat: seatName });
+  if (validated.error !== null) return { seats, error: validated.error };
+  const updated = { ...validated.seats[validated.seats.length - 1]!, reason: current.reason };
+  return {
+    seats: seats.map((seat) => (seat.seat === seatName ? updated : seat)),
     error: null,
   };
 };
