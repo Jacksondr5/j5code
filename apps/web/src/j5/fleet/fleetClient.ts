@@ -35,11 +35,12 @@ export const refreshFleet = () =>
   refreshJ5Sources(fleetSourcesAtom, fleetQueryAtom, { force: true });
 
 /**
- * The rail badge and the page share this one foreground poll. Once the roster is read, the
- * sidebar's Crew chips and children re-read for the rows the roster names as involved (seats,
- * their Captains, spawners with placed children) and no others, so a Crew change reaches every
- * surface within one poll while the per-thread reads stay bounded by Crew activity rather than
- * by the length of the thread list.
+ * The always-mounted rail badge polls the live roster only (no retired Crews, no rosters). Once
+ * that roster is read, the sidebar's Crew chips and children re-read for the rows it names as
+ * involved (seats, their Captains, spawners with placed children) and for the rows still showing
+ * a chip or children, and no others. A Crew change reaches every surface within one poll, a
+ * relation that ended clears on the next, and the per-thread reads stay bounded by Crew activity
+ * rather than by the length of the thread list.
  */
 export const useFleetRefresh = createVisibleRefreshHook(() => {
   refreshJ5Sources(fleetSourcesAtom, fleetQueryAtom)
