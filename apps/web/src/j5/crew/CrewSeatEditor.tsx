@@ -18,6 +18,7 @@ import { CUSTOM_AGENT, describeSeatAgent } from "./crewProposalDraft";
 import {
   CREW_ACCESS_OPTIONS,
   chooseCrewSeatPersona,
+  chooseCrewHarness,
   crewModelSelection,
   crewReasoningDescriptor,
   resolvedCustomDraft,
@@ -180,8 +181,7 @@ function CrewSeatRuntimeFields(props: CrewSeatEditorProps & { environmentId: Env
             const next = choices.find((candidate) => candidate.instanceId === instanceId);
             const nextModel =
               next?.models.find((candidate) => candidate.isDefault) ?? next?.models[0];
-            if (next && nextModel)
-              props.onChange({ ...value, modelSelection: crewModelSelection(next, nextModel) });
+            if (next && nextModel) props.onChange(chooseCrewHarness(value, next, nextModel));
           }}
         >
           <SelectTrigger aria-label={`${label} harness`}>

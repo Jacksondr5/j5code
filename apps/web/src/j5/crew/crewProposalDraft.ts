@@ -18,12 +18,12 @@ export const addSeat = (
   if (seats.some((seat) => seat.seat === seatName))
     return { seats, error: `Seat ${seatName} already exists.` };
   if (draft.agentId.length === 0)
-    return { seats, error: "Pick a persona for the seat, or Custom seat." };
+    return { seats, error: "Pick a persona for the seat, or Custom crew member." };
   const custom = draft.agentId === CUSTOM_AGENT;
   const instructions = draft.instructions.trim();
   // A custom seat has no persona; its instructions are all it will know beyond the brief.
   if (custom && instructions.length === 0)
-    return { seats, error: "Give the custom seat its instructions." };
+    return { seats, error: "Give the custom crew member its instructions." };
   return {
     seats: [
       ...seats,
@@ -65,7 +65,7 @@ export const describeSeatAgent = (
   }>,
   agentId: string | null,
 ): string => {
-  if (agentId === null) return "Custom seat";
+  if (agentId === null) return "Custom crew member";
   const row = rows.find((candidate) => candidate.personaId === agentId);
   return row?.displayName ?? agentId;
 };

@@ -267,7 +267,7 @@ export const layer = Layer.effect(
               seatName: seat.name,
               agentId: "custom seat",
               detail:
-                "This ACP harness cannot enforce the selected access mode. Choose Supervised or Full access.",
+                "This ACP harness cannot enforce the selected access mode. Choose Approval required or Full access.",
             });
           // Custom seats carry the selected access mode, without a persona sandbox assignment.
           resolved.push({

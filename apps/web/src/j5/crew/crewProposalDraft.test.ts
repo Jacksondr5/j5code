@@ -38,13 +38,13 @@ describe("crew proposal roster edits", () => {
     ];
     expect(describeSeatAgent(rows, "builder")).toBe("Builder");
     expect(describeSeatAgent(rows, "ghost")).toBe("ghost");
-    expect(describeSeatAgent(rows, null)).toBe("Custom seat");
+    expect(describeSeatAgent(rows, null)).toBe("Custom crew member");
   });
 
   it("adds a custom seat with no persona behind it once it has instructions", () => {
     expect(
       addSeat(seats, { seat: "scribe", agentId: CUSTOM_AGENT, instructions: " " }).error,
-    ).toContain("Give the custom seat");
+    ).toContain("Give the custom crew member");
     const custom = addSeat(seats, {
       seat: "scribe",
       agentId: CUSTOM_AGENT,
