@@ -15,6 +15,7 @@ import Migration0012 from "./migrations/012_AgentHandoffs.ts";
 import Migration0010 from "./migrations/010_OpenInboxCountIndex.ts";
 import Migration0013 from "./migrations/013_MachineParticipants.ts";
 import Migration0014 from "./migrations/014_AgentCrews.ts";
+import Migration0016 from "./migrations/016_CrewProposalClaims.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
@@ -35,6 +36,11 @@ export const migrationEntries = [
   [12, "AgentHandoffs", Migration0012],
   [13, "MachineParticipants", Migration0013],
   [14, "AgentCrews", Migration0014],
+  // 15 is CustomCrewSeats, added by the custom-seats change above this one in the stack. Ids are
+  // never renumbered once a development database has run them: the migrator skips every id at or
+  // below the latest applied, so a claims migration renumbered to 15 would never reach a database
+  // that already ran the custom-seats 15.
+  [16, "CrewProposalClaims", Migration0016],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>
