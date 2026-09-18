@@ -1,3 +1,4 @@
+import { makeCrewFailureAlert } from "./crewFailureAlert.ts";
 import {
   MessageId,
   type OrchestrationV2Run,
@@ -102,7 +103,7 @@ export const latestSeatNotice = (
   participantId: string,
 ): string | null => {
   const newestFirst = captain.messages
-    .filter((message) => message.role === "user")
+    .filter((message) => message.role === "user" && message.createdBy === "system")
     .toSorted((a, b) => DateTime.toEpochMillis(b.createdAt) - DateTime.toEpochMillis(a.createdAt));
   for (const message of newestFirst) {
     const sections = seatNoticeSections(message.text).filter(
@@ -119,7 +120,12 @@ export const queuedSeatDigest = (captain: OrchestrationV2ThreadProjection) => {
   for (const run of captain.runs) {
     if (run.status !== "queued") continue;
     const message = captain.messages.find((item) => item.id === run.userMessageId);
-    if (message !== undefined && message.text.startsWith(NOTICE_OPEN)) return { run, message };
+    if (
+      message?.role === "user" &&
+      message.createdBy === "system" &&
+      message.text.startsWith(NOTICE_OPEN)
+    )
+      return { run, message };
   }
   return null;
 };
@@ -187,6 +193,7 @@ const makeLayer = (daemon: boolean) =>
     CrewSeatFinishNotifier,
     Effect.gen(function* () {
       const threads = yield* ThreadManagement.ThreadManagementService;
+      const alertHumanOfCrewFailure = yield* makeCrewFailureAlert;
       const crews = yield* AgentCrewInstanceService;
       const reporter = yield* CrewLaunchReporter;
       const workspace = yield* ArtifactWorkspace;
@@ -303,6 +310,13 @@ const makeLayer = (daemon: boolean) =>
         const projection = yield* threads.getThreadProjection(threadId);
         if (projection.thread.archivedAt !== null) return null;
         if (ThreadManagement.latestActiveRun(projection) !== undefined) return null;
+        if (run.status === "failed")
+          yield* alertHumanOfCrewFailure({
+            instance,
+            seatName: membership.seatName,
+            runId: run.id,
+            failure: runFailureDetail(projection, run.id),
+          });
         // A failed first turn belongs to an owed launch report, or to the exact run ids in
         // its durable message. This remains true after the report posts and after restart.
         if (run.status === "failed" && (yield* reporter.coversFailure(threadId, run))) return null;
@@ -318,8 +332,8 @@ const makeLayer = (daemon: boolean) =>
             ? null
             : ((yield* agents.readSnapshot(assignment)).outputArtifact ?? null);
         const handoff = yield* handoffFact(projection, owedKind);
-        // A notice that fails is logged and left for the next pass (the seat's next finish), so
-        // the Captain is never silently left unaware.
+        // A failed dispatch is logged. Retry is passive: a later finish or the boot sweep;
+        // there is no guarantee of prompt delivery while the seat stays idle.
         yield* notifyCaptain(instance, membership.seatName, projection, run, handoff);
         return threadId;
       });

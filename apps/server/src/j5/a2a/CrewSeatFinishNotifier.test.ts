@@ -142,6 +142,7 @@ const captainProjection = (input: {
       id: message.id,
       threadId: captainThread,
       role: "user",
+      createdBy: "system",
       text: message.text,
       createdAt: DateTime.makeUnsafe(message.at),
     })),
