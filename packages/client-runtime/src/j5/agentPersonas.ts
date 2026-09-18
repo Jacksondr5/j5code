@@ -193,10 +193,10 @@ export async function prepareAgentPersonaImport(
 ) {
   const definitions = files.filter((file) => isAgentPersonaDefinitionFile(file.name));
   if (definitions.length === 0)
-    throw new Error("No YAML agent definitions found in the selection.");
+    throw new Error("No YAML persona definitions found in the selection.");
   if (definitions.length > AGENT_PERSONA_IMPORT_MAX_FILES)
     throw new Error(
-      `Select at most ${AGENT_PERSONA_IMPORT_MAX_FILES} agent definitions at a time.`,
+      `Select at most ${AGENT_PERSONA_IMPORT_MAX_FILES} persona definitions at a time.`,
     );
   const result: Array<{ name: string; content: string }> = [];
   for (const file of definitions) {
