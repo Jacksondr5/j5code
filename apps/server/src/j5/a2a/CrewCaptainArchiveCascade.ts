@@ -23,8 +23,8 @@ export interface CrewCaptainArchiveCascadeShape {
   ) => Effect.Effect<ReadonlyArray<string> | null>;
   /**
    * The boot sweep: retire every live Crew whose Captain thread is already archived or gone.
-   * Covers a cascade that failed partway (the loop logs and moves on, so nothing else retries
-   * it) and an archive that landed while the server was down, since the event stream resumes
+   * Covers a cascade that exhausted its in-session attempts and an archive that landed
+   * while the server was down, since the event stream resumes
    * from its high-water mark. Returns the ids retired.
    */
   readonly reconcile: Effect.Effect<ReadonlyArray<string>>;
@@ -86,6 +86,29 @@ export const layer = Layer.effect(
       });
     });
 
+    // Retry transient failures in this session with the same command identities. Keep the
+    // bound small so a broken Crew cannot prevent other Captains' events from being handled.
+    const retireWithRetry = Effect.fn("j5.a2a.captainArchiveCascade.retireWithRetry")(function* (
+      captainThreadId: ThreadId,
+      instance: AgentCrewInstance,
+    ) {
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const done = yield* retire(captainThreadId, instance).pipe(
+          Effect.as(true),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("J5 Captain archive attempt failed", {
+              captainThreadId,
+              crewInstanceId: instance.id,
+              attempt,
+              cause,
+            }).pipe(Effect.as(false)),
+          ),
+        );
+        if (done) return true;
+      }
+      return false;
+    });
+
     const handleStoredEvent: CrewCaptainArchiveCascadeShape["handleStoredEvent"] = (stored) =>
       Effect.gen(function* () {
         const event = stored.event;
@@ -101,18 +124,11 @@ export const layer = Layer.effect(
           (instance) => instance.captainThreadId === threadId && instance.archivedAt === null,
         );
         if (commanded.length === 0) return null;
+        const retired: Array<string> = [];
         for (const instance of commanded) {
-          yield* retire(threadId, instance).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logError("J5 Captain archive cascade failed; the Crew stays live", {
-                captainThreadId: threadId,
-                crewInstanceId: instance.id,
-                cause,
-              }),
-            ),
-          );
+          if (yield* retireWithRetry(threadId, instance)) retired.push(instance.id);
         }
-        return commanded.map((instance) => instance.id);
+        return retired;
       }).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("J5 Captain archive cascade skipped", { cause }).pipe(Effect.as(null)),
@@ -155,16 +171,7 @@ export const layer = Layer.effect(
         if (!gone) continue;
         // One Crew's failed retirement (a seat that would not archive, a store hiccup) is logged
         // and left for the next boot; the sweep still reaches every other orphaned Crew.
-        const done = yield* retire(instance.captainThreadId, instance).pipe(
-          Effect.as(true),
-          Effect.catchCause((cause) =>
-            Effect.logWarning("J5 Captain archive sweep could not retire a Crew", {
-              captainThreadId: instance.captainThreadId,
-              crewInstanceId: instance.id,
-              cause,
-            }).pipe(Effect.as(false)),
-          ),
-        );
+        const done = yield* retireWithRetry(instance.captainThreadId, instance);
         if (done) retired.push(instance.id);
       }
       if (retired.length > 0)

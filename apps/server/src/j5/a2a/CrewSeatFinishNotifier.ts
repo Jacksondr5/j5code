@@ -346,16 +346,11 @@ const makeLayer = (daemon: boolean) =>
         return threadId;
       });
 
-      /** The run a sweep would report: the newest finish, only when nothing is running. */
+      /** Only report the latest run, never an older finish hidden behind a later interruption. */
       const outstandingFinish = (projection: OrchestrationV2ThreadProjection) => {
         if (ThreadManagement.latestActiveRun(projection) !== undefined) return undefined;
-        return projection.runs
-          .filter((run) => run.status === "completed" || run.status === "failed")
-          .toSorted(
-            (a, b) =>
-              (b.completedAt === null ? 0 : DateTime.toEpochMillis(b.completedAt)) -
-              (a.completedAt === null ? 0 : DateTime.toEpochMillis(a.completedAt)),
-          )[0];
+        const newest = projection.runs.toSorted((a, b) => b.ordinal - a.ordinal)[0];
+        return newest?.status === "completed" || newest?.status === "failed" ? newest : undefined;
       };
 
       const reconcile: CrewSeatFinishNotifierShape["reconcile"] = Effect.gen(function* () {
