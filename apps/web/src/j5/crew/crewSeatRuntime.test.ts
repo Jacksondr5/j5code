@@ -14,7 +14,7 @@ import {
   crewModelSelection,
   crewReasoningDescriptor,
   crewSeatDraft,
-  resolvedCustomDraft,
+  resolvedCrewSeatDraft,
   setCrewReasoning,
 } from "./crewSeatRuntime";
 
@@ -60,9 +60,9 @@ const model: ServerProviderModel = {
   },
 };
 
-describe("custom crew member edits", () => {
+describe("crew member edits", () => {
   it("initializes edits from the resolved runtime and preserves unrelated settings", () => {
-    const initialized = resolvedCustomDraft(crewSeatDraft(seat), runtime);
+    const initialized = resolvedCrewSeatDraft(crewSeatDraft(seat), runtime);
     const edited = applyCrewSeatDraft(seat, {
       ...initialized,
       runtimeMode: "approval-required",
@@ -74,12 +74,24 @@ describe("custom crew member edits", () => {
       modelSelection: runtime.modelSelection,
       runtimeMode: "approval-required",
     });
-    const refreshed = resolvedCustomDraft(crewSeatDraft(edited), runtime);
+    const refreshed = resolvedCrewSeatDraft(crewSeatDraft(edited), runtime);
     expect(refreshed.runtimeMode).toBe("approval-required");
   });
 
+  it("keeps the saved persona and unrelated settings when editing its runtime", () => {
+    const saved = { ...seat, agentId: "sentry" };
+    const draft = resolvedCrewSeatDraft(crewSeatDraft(saved), runtime);
+    expect(draft.runtimeMode).toBeUndefined();
+    expect(applyCrewSeatDraft(saved, draft)).not.toHaveProperty("runtimeMode");
+    expect(applyCrewSeatDraft(saved, { ...draft, runtimeMode: "approval-required" })).toEqual({
+      ...saved,
+      modelSelection: runtime.modelSelection,
+      runtimeMode: "approval-required",
+    });
+  });
+
   it("clears custom overrides when selecting a saved persona or returning to custom", () => {
-    const initialized = resolvedCustomDraft(crewSeatDraft(seat), runtime);
+    const initialized = resolvedCrewSeatDraft(crewSeatDraft(seat), runtime);
     const persona = chooseCrewSeatPersona(initialized, "sentry");
     expect(applyCrewSeatDraft(seat, persona)).toEqual({ ...seat, agentId: "sentry" });
     expect(chooseCrewSeatPersona(persona, CUSTOM_AGENT)).toEqual(crewSeatDraft(seat));
@@ -160,8 +172,11 @@ describe("custom crew member edits", () => {
     ).toBe("thinking");
   });
 
-  it("manual additions preserve the same chosen runtime and strip it for saved personas", () => {
-    const draft = { ...resolvedCustomDraft(crewSeatDraft(seat), runtime), seat: "Second Reviewer" };
+  it("manual additions preserve the chosen runtime for custom and saved-persona members", () => {
+    const draft = {
+      ...resolvedCrewSeatDraft(crewSeatDraft(seat), runtime),
+      seat: "Second Reviewer",
+    };
     const added = addSeat([seat], draft);
     expect(added.error).toBeNull();
     expect(added.seats[1]).toEqual({
@@ -172,7 +187,7 @@ describe("custom crew member edits", () => {
       runtimeMode: "full-access",
     });
     const saved = addSeat([seat], { ...draft, agentId: "sentry" });
-    expect(saved.seats[1]).not.toHaveProperty("modelSelection");
-    expect(saved.seats[1]).not.toHaveProperty("runtimeMode");
+    expect(saved.seats[1]?.modelSelection).toEqual(runtime.modelSelection);
+    expect(saved.seats[1]?.runtimeMode).toBe("full-access");
   });
 });

@@ -91,7 +91,8 @@ export const CREW_SEAT_CAP = 12;
 
 /**
  * One requested or approved Crew seat, as the Captain proposed it or the human edited it. A null
- * agent is a custom seat: runtime overrides apply only to custom seats; omitted fields inherit the Captain.
+ * agent is a custom seat. Human runtime edits apply to every seat; omitted fields use the persona
+ * defaults or, for a custom seat, inherit the Captain.
  */
 export const CrewProposalSeat = Schema.Struct({
   seat: Schema.String,

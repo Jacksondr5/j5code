@@ -1132,11 +1132,43 @@ it.effect(
         assert.equal(retry.approvalToken, current.approvalToken);
         assert.deepStrictEqual(retry.seats[0]?.modelSelection, edited.modelSelection);
         assert.equal(retry.seats[0]?.runtimeMode, edited.runtimeMode);
-        const savedOverride = yield* gate
-          .preview({ proposalId: open.proposal.id, seats: [{ ...edited, agentId: "critic" }] })
+        const savedSeat = { ...edited, agentId: "critic" };
+        const savedOverride = yield* gate.preview({
+          proposalId: open.proposal.id,
+          seats: [savedSeat],
+        });
+        assert.deepStrictEqual(savedOverride.seats[0]?.modelSelection, edited.modelSelection);
+        assert.equal(savedOverride.seats[0]?.runtimeMode, edited.runtimeMode);
+        assert.notEqual(savedOverride.approvalToken, current.approvalToken);
+        const stalePersona = yield* gate
+          .resolve({
+            proposalId: open.proposal.id,
+            seats: [savedSeat],
+            decision: "approve",
+            approvalToken: current.approvalToken,
+          })
           .pipe(Effect.flip);
-        assert.equal(savedOverride._tag, "CrewProposalRequestError");
-        assert.include(savedOverride.message, "only to custom seats");
+        assert.equal(stalePersona._tag, "CrewProposalRequestError");
+        yield* gate
+          .resolve({
+            proposalId: open.proposal.id,
+            seats: [savedSeat],
+            decision: "approve",
+            approvalToken: savedOverride.approvalToken,
+          })
+          .pipe(Effect.flip);
+        assert.deepStrictEqual((yield* store.read(open.proposal.id))?.approvedSeats, [savedSeat]);
+        const agentOverride = yield* gate
+          .propose({
+            requestKey: "agent-saved-override",
+            captain,
+            displayName: "Review",
+            brief: "Review",
+            seats: [savedSeat],
+          })
+          .pipe(Effect.flip);
+        assert.equal(agentOverride._tag, "CrewProposalRequestError");
+        assert.include(agentOverride.message, "only the human can override");
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );

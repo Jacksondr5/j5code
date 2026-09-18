@@ -158,6 +158,8 @@ export function CrewProposalCard(props: {
       {editor !== null ? (
         <CrewSeatDialog
           seat={editor.seat}
+          proposalId={proposal.id}
+          previewSeatName={editor.seat?.seat ?? proposal.requestedSeats[0]!.seat}
           runtime={editor.runtime}
           environmentId={props.environmentId}
           agents={agents}

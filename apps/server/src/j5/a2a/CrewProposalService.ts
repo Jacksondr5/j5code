@@ -161,6 +161,7 @@ export const layer = Layer.effect(
     const validateSeats = Effect.fn("j5.a2a.crewProposal.validateSeats")(function* (
       seats: ReadonlyArray<CrewProposalSeat>,
       existing: { readonly seatNames: ReadonlyArray<string>; readonly pendingSeats: number },
+      humanReview = false,
     ) {
       const existingSeatCount = existing.seatNames.length + existing.pendingSeats;
       if (seats.length === 0)
@@ -172,12 +173,14 @@ export const layer = Layer.effect(
       // through HTTP, so every door meets the rule here rather than surfacing a storage error.
       for (const seat of seats) {
         if (
+          !humanReview &&
           seat.agentId !== null &&
           (seat.modelSelection !== undefined || seat.runtimeMode !== undefined)
         )
           return yield* new CrewProposalRequestError({
-            detail: `Seat ${seat.seat} is a saved persona; runtime overrides apply only to custom seats.`,
-            nextStep: "Use the persona's configured runtime or choose a custom seat.",
+            detail: `Seat ${seat.seat} is a saved persona; only the human can override its runtime.`,
+            nextStep:
+              "Propose the persona with its defaults; the human may edit its runtime before approval.",
           });
         const problem = crewSeatShapeProblem(seat);
         if (problem !== null)
@@ -605,12 +608,16 @@ export const layer = Layer.effect(
       // deterministic ids; they are the reservation the retry converges on, not a clash
       // (Critic Q2, 2026-09-14).
       const reservedHere = reservedByProposal(proposal.id);
-      yield* validateSeats(seats, {
-        seatNames: existingMembers
-          .filter((member) => !reservedHere(member))
-          .map(({ seatName }) => seatName),
-        pendingSeats: 0,
-      });
+      yield* validateSeats(
+        seats,
+        {
+          seatNames: existingMembers
+            .filter((member) => !reservedHere(member))
+            .map(({ seatName }) => seatName),
+          pendingSeats: 0,
+        },
+        true,
+      );
     });
 
     const preview: CrewProposalServiceShape["preview"] = Effect.fn("j5.a2a.crewProposal.preview")(
