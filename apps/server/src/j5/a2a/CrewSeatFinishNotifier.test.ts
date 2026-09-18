@@ -703,6 +703,9 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
       }) as unknown as OrchestrationV2ThreadProjection;
     const layer = notifierLayer.pipe(
       Layer.provideMerge(
+        Layer.mock(CrewLaunchReporter)({ coversFailure: () => Effect.succeed(false) }),
+      ),
+      Layer.provideMerge(
         Layer.mock(ThreadManagementService)({
           getThreadProjection: (threadId) =>
             Effect.succeed(
