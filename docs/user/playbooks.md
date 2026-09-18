@@ -44,7 +44,8 @@ Use one sequence: metadata preparation → publication approval → commit → p
 Each code phase has one task with `operation: metadata`, `commit`, `push`, or `draft`.
 Preparation selects one developer report phase through `evidence`; that phase must have one
 report task and run before preparation. Include preparation in the gate's evidence. Only
-`approve` may enter commit, and draft creation ends at `$complete`. Phase names are yours to choose.
+`approve` may enter commit. Draft creation may end at `$complete` or continue to review feedback.
+Phase names are yours to choose.
 
 Preparation captures the candidate diff and publication text. Edit the commit message and PR
 text at the approval gate, save, then approve the new gate version. Changed code needs fresh
@@ -52,6 +53,18 @@ preparation and approval. Route `request_changes` and `changed` back through dev
 preparation, and give revisited phases enough visits. Custom playbooks use developer reports
 for verification evidence; `workspace`, `validation`, and `repair_capacity` operations are
 reserved for built-in implementations.
+
+For post-publication review, add a code task with `operation: feedback` after the draft phase,
+then pass its evidence to a reviewer such as Herald. Collection reads the exact published PR
+head, conversation comments, reviews, and inline threads without granting the persona network
+or publication permissions. Large inline threads report collection limits; unavailable GitHub
+access or a changed PR head stops the step. A human finish/refresh gate can send `request_changes`
+back to feedback collection while waiting for reviews.
+
+Rework must pass through preparation and fresh publication approval again. Each approved update
+appends a commit and updates the same open draft PR; unexpected local or remote commits stop
+publication. Give each repeated phase a suitable `visitLimit`. No polling, force-push, or merge
+is performed.
 
 ### Validation
 

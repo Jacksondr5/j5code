@@ -34,6 +34,7 @@ const Task = Schema.Struct({
       "commit",
       "push",
       "draft",
+      "feedback",
     ]),
   ),
   instructions: Schema.optional(NonEmpty),
@@ -97,6 +98,7 @@ const codeOutput = {
   commit: Schema.decodeUnknownSync(Handoff.CommitResult),
   push: Schema.decodeUnknownSync(Handoff.PushResult),
   draft: Schema.decodeUnknownSync(Handoff.PullRequestResult),
+  feedback: Schema.decodeUnknownSync(Handoff.PullRequestFeedback),
 };
 const outputInstruction = {
   report:
@@ -222,8 +224,6 @@ function publicationPhases(source: YamlPlaybook, file: string): PublicationPhase
     const phase = source.phases.find((item) => item.id === id);
     pending.push(...Object.values(phase?.transitions ?? {}));
   }
-  if (draft.transitions.pass !== "$complete")
-    fail(`phases.${draft.id}.transitions.pass`, "draft publication must complete the playbook");
   return {
     metadata: metadata.id,
     approval: gate.id,
@@ -348,6 +348,32 @@ export function compileYamlPlaybook(
         );
   }
   const publication = publicationPhases(source, file);
+  for (const feedback of source.phases.filter((phase) =>
+    phase.tasks?.some((task) => task.operation === "feedback"),
+  )) {
+    if (!publication)
+      throw new PlaybookDefinitionSourceError(
+        file,
+        `phases.${feedback.id}.tasks`,
+        "feedback requires a publication sequence",
+      );
+    const pending = [source.initial];
+    const visited = new Set<string>();
+    while (pending.length) {
+      const id = pending.pop()!;
+      if (id === publication.draft || visited.has(id)) continue;
+      if (id === feedback.id)
+        throw new PlaybookDefinitionSourceError(
+          file,
+          `phases.${feedback.id}.tasks`,
+          "draft publication must run before feedback on every path",
+        );
+      visited.add(id);
+      pending.push(
+        ...Object.values(source.phases.find((phase) => phase.id === id)?.transitions ?? {}),
+      );
+    }
+  }
   for (const phase of source.phases)
     if (
       phase.capabilities?.some((capability) =>
@@ -438,6 +464,18 @@ export function compileYamlPlaybook(
   ];
   const taskSource = (phaseId: string, taskId: string) =>
     source.phases.find((phase) => phase.id === phaseId)?.tasks?.find((task) => task.id === taskId);
+  const phaseArtifacts = (run: Run, phaseId: string): Artifact[] => {
+    const tasks = source.phases.find((phase) => phase.id === phaseId)?.tasks ?? [];
+    // A reviewer pair contributes both outputs, including corrected attempts on later visits.
+    // Single-task phases also allow human-edited publication metadata to supersede the output.
+    return (
+      tasks.length > 1
+        ? tasks.map((task) =>
+            run.artifacts.findLast((item) => item.phase === phaseId && item.producer === task.id),
+          )
+        : [latest(run, phaseId)]
+    ).filter((item): item is Artifact => item !== undefined);
+  };
   const canonicalSource = stringify(source, { sortMapEntries: true, lineWidth: 0 });
   const implementation = `yaml-runtime/v1:${runtimeBuildHash}`;
   const definition: Omit<Definition, "hash"> = {
@@ -471,11 +509,14 @@ export function compileYamlPlaybook(
         return { inputs: run.inputs, selectedEvidenceIds: [], selectedEvidenceHashes: [] };
       const authored = taskSource(phase.id, task.id)!;
       const authoredPhase = source.phases.find((item) => item.id === phase.id)!;
-      const publishing = publication && phase.kind === "code" && phase.id !== publication.metadata;
+      const feedback = authored.operation === "feedback";
+      const publishing =
+        publication && phase.kind === "code" && phase.id !== publication.metadata && !feedback;
       const evidenceIds = [...(authoredPhase.evidence ?? [])];
       const approvalIds = [...(authoredPhase.approvals ?? [])];
       if (publication && phase.kind === "code") {
         evidenceIds.push("__workspace");
+        if (feedback) evidenceIds.push(publication.draft);
         if (publishing) {
           evidenceIds.push(publication.metadata);
           approvalIds.push(publication.approval);
@@ -483,9 +524,7 @@ export function compileYamlPlaybook(
           if (phase.id === publication.draft) evidenceIds.push(publication.push);
         }
       }
-      const selected = [...new Set(evidenceIds)]
-        .map((id) => latest(run, id))
-        .filter((item): item is Artifact => item !== undefined);
+      const selected = [...new Set(evidenceIds)].flatMap((id) => phaseArtifacts(run, id));
       const decisions = run.approvals.filter((decision) =>
         approvalIds.includes(decision.phase ?? ""),
       );
@@ -557,7 +596,7 @@ export function compileYamlPlaybook(
     },
     gateArtifacts: (run, phase) => {
       const bindings = source.phases.find((item) => item.id === phase.id)?.evidence ?? [];
-      return bindings.map((id) => latest(run, id)).filter((item): item is Artifact => !!item);
+      return bindings.flatMap((id) => phaseArtifacts(run, id));
     },
   };
   const compiled = { ...definition, hash: hash([implementation, source]) };

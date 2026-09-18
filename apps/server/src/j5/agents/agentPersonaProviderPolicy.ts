@@ -38,11 +38,11 @@ export function providerCanEnforceAgentPersonaAuthority(
   switch (authorityPolicy) {
     case "read-only":
     case "critic-review":
+    case "diagnostic":
       return driver === "codex" || driver === "claudeAgent";
     case "workspace-write":
     case "critic-fix":
       return driver === "codex";
-    case "diagnostic":
     case "publish-only":
       return false;
   }
@@ -55,6 +55,9 @@ export function translateAgentPersonaProviderPolicy(
   if (!providerCanEnforceAgentPersonaAuthority(driver, authorityPolicy)) {
     return READ_ONLY_POLICY;
   }
+  // Providers cannot distinguish temporary instrumentation from a product fix.
+  // Support investigation with a strictly narrower, read-only boundary.
+  if (authorityPolicy === "diagnostic") return READ_ONLY_POLICY;
 
   switch (getAgentAuthorityRules(authorityPolicy).workspace) {
     case "read-only":

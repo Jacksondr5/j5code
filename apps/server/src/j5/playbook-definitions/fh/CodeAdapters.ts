@@ -18,6 +18,7 @@ import {
 } from "../../playbook/Definition.ts";
 import * as Workspace from "./GitWorkspace.ts";
 import * as Publication from "./Publication.ts";
+import { collectFeedback } from "./Feedback.ts";
 import { PlaybookError } from "../../playbook/Store.ts";
 import type { Adapter } from "../../playbook/Worker.ts";
 
@@ -30,6 +31,7 @@ const decodeReport = Schema.decodeUnknownSync(
 const decodePublicationMetadata = Schema.decodeUnknownSync(Handoff.PublicationMetadata);
 const decodePublication = Schema.decodeUnknownSync(Handoff.Publication);
 const decodePushResult = Schema.decodeUnknownSync(Handoff.PushResult);
+const decodePullRequestResult = Schema.decodeUnknownSync(Handoff.PullRequestResult);
 const decodeValidation = Schema.decodeUnknownSync(Handoff.Validation);
 const decodeVerificationDiagnosis = Schema.decodeUnknownSync(Handoff.VerificationDiagnosis);
 const decodeWorkspace = Schema.decodeUnknownSync(Handoff.Workspace);
@@ -37,6 +39,7 @@ export function makeCodeAdapters(
   root: string,
   github = Publication.github,
   definitionFor?: (run: Run) => Definition | undefined,
+  feedback = collectFeedback,
 ): Record<string, Adapter> {
   const running = new Map<string, AbortController>();
   const getWorkspace = (run: Run) => decodeWorkspace(latest(run, "workspace").content);
@@ -58,6 +61,11 @@ export function makeCodeAdapters(
     string,
     (run: Run, id: string, signal: AbortSignal) => Promise<unknown>
   > = {
+    custom_feedback: (run) => {
+      const phases = definitionFor?.(run)?.publication;
+      if (!phases) throw new Error("Custom publication definition is unavailable");
+      return feedback(decodePullRequestResult(latest(run, phases.draft).content));
+    },
     workspace: (run) => Workspace.workspace(run.repository, run.baseCommit, root, run.id),
     metadata: async (run) => {
       const validation = decodeValidation(latest(run, "validation").content);
@@ -143,8 +151,15 @@ export function makeCodeAdapters(
         );
         const current = await Workspace.candidate(workspace.worktree, run.baseCommit);
         const inputs = decodeDevelopmentInputs(run.inputs);
+        const published = run.artifacts.findLast((artifact) => artifact.phase === phases.draft);
+        const parentCommit = published
+          ? decodePullRequestResult(published.content).commit
+          : run.baseCommit;
+        if ((await Workspace.git(workspace.worktree, ["rev-parse", "HEAD"])) !== parentCommit)
+          throw new Error("Workspace HEAD differs from the last published commit or pinned base");
         return {
           ...current,
+          parentCommit,
           diff: await Workspace.git(workspace.worktree, [
             "diff",
             "--binary",

@@ -17,6 +17,7 @@ const files = [
   "apps/server/src/j5/playbook-definitions/fh/CodeAdapters.ts",
   "apps/server/src/j5/playbook-definitions/fh/GitWorkspace.ts",
   "apps/server/src/j5/playbook-definitions/fh/Publication.ts",
+  "apps/server/src/j5/playbook-definitions/fh/Feedback.ts",
   "packages/j5-playbook-contracts/src/fh.ts",
   "apps/server/src/j5/playbook-definitions/Yaml.ts",
   "apps/server/src/j5/playbook-definitions/Library.ts",
