@@ -7,6 +7,7 @@
     "apps/server/src/j5/playbook/AgentAdapter.ts",
     "apps/server/src/j5/playbook/Store.ts",
     "apps/server/src/j5/playbook/Migrations.ts",
+    "apps/server/src/j5/playbook-definitions/Service.ts",
     "apps/server/src/j5/playbook-definitions/manifest.ts",
     "packages/j5-playbook-contracts/src/index.ts",
     "apps/server/src/j5/playbook/decider.ts",
@@ -21,5 +22,5 @@
     "apps/server/src/j5/playbook-definitions/fh/development.yaml",
     "apps/server/scripts/copy-playbook-yaml.mjs"
   ],
-  "hash": "8a3a20d4d0bf22cf89b363986acc0f3b004d38555f47f69326cdf21f37ff3d5a"
+  "hash": "d77e78493260681ea84a39d1472c9080e88c5ce332d4fb2066a486d180a2df7c"
 }

@@ -9,6 +9,7 @@ const files = [
   "apps/server/src/j5/playbook/AgentAdapter.ts",
   "apps/server/src/j5/playbook/Store.ts",
   "apps/server/src/j5/playbook/Migrations.ts",
+  "apps/server/src/j5/playbook-definitions/Service.ts",
   "apps/server/src/j5/playbook-definitions/manifest.ts",
   "packages/j5-playbook-contracts/src/index.ts",
   "apps/server/src/j5/playbook/decider.ts",
