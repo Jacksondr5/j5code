@@ -84,7 +84,7 @@ The platform ships the machinery — propose, gate, spawn, render, remind, settl
 
 ### State
 
-22. A Crew's row on the Fleet page and its Captain's expander in the sidebar summarize the seats' states from measured facts (running, needing a person, settled, unknown); idle seats are the unspoken default, and no state is inferred from silence.
+22. A Crew's row on the Fleet page and its Captain's expander in the sidebar summarize the seats' states from measured facts (running, failed, needing a person, settled, unknown); a seat whose last run failed reads as failed rather than idle; idle seats are the unspoken default, and no state is inferred from silence.
 
 ## Scenarios
 

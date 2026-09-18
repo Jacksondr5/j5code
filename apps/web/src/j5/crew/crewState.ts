@@ -11,7 +11,14 @@ export interface CrewSeatThread {
   readonly updatedAt: string;
 }
 
-export type CrewSeatState = "running" | "needs-you" | "settled" | "idle" | "archived" | "unknown";
+export type CrewSeatState =
+  | "running"
+  | "failed"
+  | "needs-you"
+  | "settled"
+  | "idle"
+  | "archived"
+  | "unknown";
 
 export interface CrewStateSummary {
   readonly counts: Readonly<Record<CrewSeatState, number>>;
@@ -21,13 +28,17 @@ export interface CrewStateSummary {
 }
 
 /**
- * One seat's state from measured facts, in precedence order: a run in flight beats a pending
- * approval, which beats settlement. Nothing here is inferred from silence.
+ * One seat's state from measured facts, in precedence order: a run in flight beats a failed last
+ * run, which beats a pending approval, which beats settlement. A seat whose last run failed is
+ * said so rather than left as idle, the quiet default: a dead seat was invisible on the Fleet row
+ * and the expander until it read as failed (Jackson's dogfood, 2026-09-17). Nothing here is
+ * inferred from silence.
  */
 export const classifyCrewSeat = (thread: CrewSeatThread | undefined): CrewSeatState => {
   if (thread === undefined) return "unknown";
   if (thread.archivedAt !== null) return "archived";
   if (thread.runtime != null && threadRunStatusIsActive(thread.runtime.status)) return "running";
+  if (thread.runtime?.status === "failed") return "failed";
   if (thread.hasPendingApprovals || thread.hasPendingUserInput) return "needs-you";
   if (
     thread.settledOverride === "settled" ||
@@ -43,6 +54,7 @@ export const summarizeCrewState = (
 ): CrewStateSummary => {
   const counts: Record<CrewSeatState, number> = {
     running: 0,
+    failed: 0,
     "needs-you": 0,
     settled: 0,
     idle: 0,
@@ -60,6 +72,7 @@ export const summarizeCrewState = (
 
 const LABELS: ReadonlyArray<readonly [CrewSeatState, string]> = [
   ["running", "running"],
+  ["failed", "failed"],
   ["needs-you", "needs you"],
   ["settled", "settled"],
   ["unknown", "unknown"],
@@ -68,7 +81,7 @@ const LABELS: ReadonlyArray<readonly [CrewSeatState, string]> = [
 /** A Stop crew control is offered only while a seat has a turn to interrupt. */
 export const crewHasRunningSeat = (summary: CrewStateSummary) => summary.counts.running > 0;
 
-/** "2 running · 1 needs you · 1 settled"; idle and archived seats are the quiet default and stay unsaid. */
+/** "2 running · 1 failed · 1 needs you"; idle and archived seats are the quiet default and stay unsaid. */
 export const formatCrewStateSummary = (summary: CrewStateSummary): string | null => {
   const parts = LABELS.flatMap(([state, label]) =>
     summary.counts[state] === 0 ? [] : [`${summary.counts[state]} ${label}`],

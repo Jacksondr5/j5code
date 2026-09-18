@@ -26,6 +26,10 @@ describe("crew state", () => {
     expect(
       classifyCrewSeat(seat({ runtime: { status: "running" }, hasPendingApprovals: true })),
     ).toBe("running");
+    // A seat whose last run failed is said so, ahead of anything it may still owe the person.
+    expect(
+      classifyCrewSeat(seat({ runtime: { status: "failed" }, hasPendingApprovals: true })),
+    ).toBe("failed");
     expect(classifyCrewSeat(seat({ hasPendingUserInput: true, settledAt: "x" }))).toBe("needs-you");
     expect(classifyCrewSeat(seat({ settledAt: "2026-09-14T09:30:00.000Z" }))).toBe("settled");
     expect(classifyCrewSeat(seat({ settledOverride: "settled" }))).toBe("settled");
@@ -38,14 +42,16 @@ describe("crew state", () => {
     const summary = summarizeCrewState([
       seat({ runtime: { status: "running" }, updatedAt: "2026-09-14T12:00:00.000Z" }),
       seat({ runtime: { status: "waiting" } }),
+      seat({ runtime: { status: "failed" } }),
       seat({ hasPendingApprovals: true }),
       seat({ settledAt: "2026-09-14T09:30:00.000Z" }),
       seat(),
       undefined,
     ]);
-    expect(summary.total).toBe(6);
+    expect(summary.total).toBe(7);
     expect(summary.counts).toEqual({
       running: 2,
+      failed: 1,
       "needs-you": 1,
       settled: 1,
       idle: 1,
@@ -53,7 +59,9 @@ describe("crew state", () => {
       unknown: 1,
     });
     expect(summary.lastActivityAt).toBe("2026-09-14T12:00:00.000Z");
-    expect(formatCrewStateSummary(summary)).toBe("2 running · 1 needs you · 1 settled · 1 unknown");
+    expect(formatCrewStateSummary(summary)).toBe(
+      "2 running · 1 failed · 1 needs you · 1 settled · 1 unknown",
+    );
     expect(formatCrewStateSummary(summarizeCrewState([seat(), seat()]))).toBeNull();
     expect(crewHasRunningSeat(summary)).toBe(true);
     expect(
