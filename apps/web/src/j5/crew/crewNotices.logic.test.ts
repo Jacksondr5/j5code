@@ -295,8 +295,8 @@ decision: approved
 crew_instance_id: crew:custom
 crew_version: 1
 roster:
-- notes: participant_id=agent:notes agent= thread_id=thread:notes
-- review: participant_id=agent:review agent=custom thread_id=thread:review
+- notes: participant_id=agent:notes persona= thread_id=thread:notes
+- review: participant_id=agent:review persona=custom thread_id=thread:review
 </j5_crew_gate>`,
   });
   expect(notice?.kind).toBe("gate");

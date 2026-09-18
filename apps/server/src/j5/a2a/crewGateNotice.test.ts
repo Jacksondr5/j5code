@@ -94,8 +94,8 @@ describe("crew launch report", () => {
       verdicts: new Map(),
       windowMs: 60_000,
     });
-    assert.include(text, "agent= thread_id=thread:setup");
-    assert.include(text, "agent=custom thread_id=thread:punchline");
+    assert.include(text, "persona= thread_id=thread:setup");
+    assert.include(text, "persona=custom thread_id=thread:punchline");
   });
 
   it("says per seat what became of its first turn, and what the person changed", () => {

@@ -399,7 +399,7 @@ export function AgentLibrarySettingsScreen() {
             </Pressable>
             {Platform.OS === "web" ? (
               <Text className="text-sm text-foreground-muted">
-                Use Settings → Agents in the web app to import files.
+                Use Settings → Personas in the web app to import files.
               </Text>
             ) : (
               <View
