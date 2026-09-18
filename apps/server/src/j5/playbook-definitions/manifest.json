@@ -14,7 +14,12 @@
     "apps/server/src/j5/playbook-definitions/fh/CodeAdapters.ts",
     "apps/server/src/j5/playbook-definitions/fh/GitWorkspace.ts",
     "apps/server/src/j5/playbook-definitions/fh/Publication.ts",
-    "packages/j5-playbook-contracts/src/fh.ts"
+    "packages/j5-playbook-contracts/src/fh.ts",
+    "apps/server/src/j5/playbook-definitions/Yaml.ts",
+    "apps/server/src/j5/playbook-definitions/Library.ts",
+    "apps/server/src/j5/playbook-definitions/research-review.yaml",
+    "apps/server/src/j5/playbook-definitions/fh/development.yaml",
+    "apps/server/scripts/copy-playbook-yaml.mjs"
   ],
-  "hash": "3b75e8bb6d06cdc552e7e25e702fa818562141ace87263ce1267c6d8b1e4cad7"
+  "hash": "8a3a20d4d0bf22cf89b363986acc0f3b004d38555f47f69326cdf21f37ff3d5a"
 }
