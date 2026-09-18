@@ -17,63 +17,8 @@ import { Textarea } from "../../components/ui/textarea";
 import { useEnvironmentQuery } from "../../state/query";
 import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import type { CrewProposal, CrewProposalSeat } from "./crewProposalsClient";
-
-/** The persona choice for a seat that runs without a persona: named and briefed on the card. */
-export const CUSTOM_AGENT = "__custom__";
-
-/** Pure roster edits so the card's behavior is testable without rendering. */
-export const removeSeat = (seats: ReadonlyArray<CrewProposalSeat>, seatName: string) =>
-  seats.filter((seat) => seat.seat !== seatName);
-
-export const addSeat = (
-  seats: ReadonlyArray<CrewProposalSeat>,
-  draft: { readonly seat: string; readonly agentId: string; readonly instructions: string },
-): { readonly seats: ReadonlyArray<CrewProposalSeat>; readonly error: string | null } => {
-  const seatName = draft.seat.trim().toLowerCase().replace(/\s+/g, "-");
-  if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(seatName))
-    return { seats, error: "Seat names are lowercase words joined by hyphens." };
-  if (seats.some((seat) => seat.seat === seatName))
-    return { seats, error: `Seat ${seatName} already exists.` };
-  if (draft.agentId.length === 0)
-    return { seats, error: "Pick a persona for the seat, or Custom seat." };
-  const custom = draft.agentId === CUSTOM_AGENT;
-  const instructions = draft.instructions.trim();
-  // A custom seat has no persona; its instructions are all it will know beyond the brief.
-  if (custom && instructions.length === 0)
-    return { seats, error: "Give the custom seat its instructions." };
-  return {
-    seats: [
-      ...seats,
-      {
-        seat: seatName,
-        agentId: custom ? null : draft.agentId,
-        reason: "Added by the user",
-        ...(instructions ? { instructions } : {}),
-      },
-    ],
-    error: null,
-  };
-};
-
-/**
- * What the human is approving for a seat beyond its name: the persona and the access it runs
- * with. A custom seat has no persona and runs with the Captain's own access.
- */
-export const describeSeatAgent = (
-  rows: ReadonlyArray<{
-    readonly personaId: string;
-    readonly displayName: string;
-    readonly authority: string;
-  }>,
-  agentId: string | null,
-): { readonly name: string; readonly authority: string | null } => {
-  if (agentId === null)
-    return { name: "Custom seat", authority: "Runs with the Captain's model and access mode" };
-  const row = rows.find((candidate) => candidate.personaId === agentId);
-  return row === undefined
-    ? { name: agentId, authority: null }
-    : { name: row.displayName, authority: row.authority };
-};
+import { CUSTOM_AGENT, addSeat, describeSeatAgent, removeSeat } from "./crewProposalDraft";
+import { useCrewProposalPreview } from "./useCrewProposalPreview";
 
 /**
  * The human gate for one Crew request. The Captain's seats arrive with reasons; the user may drop
@@ -87,6 +32,7 @@ export function CrewProposalCard(props: {
   readonly onResolve: (
     decision: "approve" | "decline",
     seats: ReadonlyArray<CrewProposalSeat>,
+    approvalToken?: string,
   ) => void;
   /** Omitted when the card already sits in the Captain's thread. */
   readonly onOpenCaptain?: (() => void) | undefined;
@@ -112,7 +58,8 @@ export function CrewProposalCard(props: {
     [catalog.data],
   );
   const agents = useMemo(() => rows.filter((agent) => agent.availability === "available"), [rows]);
-  const agentName = (agentId: string | null) => describeSeatAgent(rows, agentId).name;
+  const agentName = (agentId: string | null) => describeSeatAgent(rows, agentId);
+  const preview = useCrewProposalPreview(props.environmentId, proposal.id, seats, props.busy);
   const customDraft = draft.agentId === CUSTOM_AGENT;
 
   return (
@@ -140,44 +87,57 @@ export function CrewProposalCard(props: {
         {proposal.brief}
       </p>
       <ul className="mt-4 space-y-2">
-        {seats.map((seat) => (
-          <li
-            key={seat.seat}
-            className="flex items-start justify-between gap-3 rounded-md bg-muted/40 px-3 py-2 text-sm"
-          >
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium">{seat.seat}</span>
-                <Badge variant="outline">{agentName(seat.agentId)}</Badge>
-                {/* Approval is the authority (2026-09-10), so the access being granted is shown. */}
-                <span className="text-xs text-muted-foreground">
-                  {describeSeatAgent(rows, seat.agentId).authority ?? "Access unknown"}
-                </span>
-              </div>
-              <p className="mt-0.5 text-xs text-muted-foreground">{seat.reason}</p>
-              {seat.instructions ? (
-                <details className="mt-1 text-xs">
-                  <summary className="cursor-pointer text-muted-foreground">
-                    Seat instructions from the Captain
-                  </summary>
-                  <pre className="mt-1 whitespace-pre-wrap break-words rounded-md border border-border/60 bg-background/60 p-2 font-sans text-xs leading-relaxed">
-                    {seat.instructions}
-                  </pre>
-                </details>
-              ) : null}
-            </div>
-            <Button
-              aria-label={`Remove seat ${seat.seat}`}
-              disabled={props.busy || seats.length === 1}
-              size="icon-sm"
-              type="button"
-              variant="ghost"
-              onClick={() => setSeats(removeSeat(seats, seat.seat))}
+        {seats.map((seat) => {
+          const runtime = preview.data?.seats.find((row) => row.seat === seat.seat);
+          return (
+            <li
+              key={seat.seat}
+              className="flex items-start justify-between gap-3 rounded-md bg-muted/40 px-3 py-2 text-sm"
             >
-              <XIcon className="size-4" />
-            </Button>
-          </li>
-        ))}
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{seat.seat}</span>
+                  <Badge variant="outline">{agentName(seat.agentId)}</Badge>
+                </div>
+                <p className="mt-0.5 text-xs text-muted-foreground">{seat.reason}</p>
+                {runtime ? (
+                  <div className="mt-1 text-xs text-foreground/90">
+                    <p>
+                      {[runtime.provider, runtime.model, runtime.reasoning, runtime.access].join(
+                        " · ",
+                      )}
+                    </p>
+                    <p className="text-muted-foreground">Harness: {runtime.harness}</p>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {preview.loading ? "Loading runtime…" : "Runtime unavailable"}
+                  </p>
+                )}
+                {seat.instructions ? (
+                  <details className="mt-1 text-xs">
+                    <summary className="cursor-pointer text-muted-foreground">
+                      Seat instructions
+                    </summary>
+                    <pre className="mt-1 whitespace-pre-wrap break-words rounded-md border border-border/60 bg-background/60 p-2 font-sans text-xs leading-relaxed">
+                      {seat.instructions}
+                    </pre>
+                  </details>
+                ) : null}
+              </div>
+              <Button
+                aria-label={`Remove seat ${seat.seat}`}
+                disabled={props.busy || seats.length === 1}
+                size="icon-sm"
+                type="button"
+                variant="ghost"
+                onClick={() => setSeats(removeSeat(seats, seat.seat))}
+              >
+                <XIcon className="size-4" />
+              </Button>
+            </li>
+          );
+        })}
       </ul>
       <div className="mt-3 grid gap-2 sm:grid-cols-[8rem_minmax(0,1fr)_auto]">
         <Input
@@ -243,7 +203,27 @@ export function CrewProposalCard(props: {
           onChange={(event) => setDraft({ ...draft, instructions: event.currentTarget.value })}
         />
       </div>
-      {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
+      {error ? (
+        <p className="mt-2 text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {preview.error ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <p className="text-xs text-destructive" role="alert">
+            {preview.error}
+          </p>
+          <Button
+            disabled={props.busy || props.environmentId === null}
+            size="sm"
+            type="button"
+            variant="outline"
+            onClick={preview.refresh}
+          >
+            Refresh runtime
+          </Button>
+        </div>
+      ) : null}
       <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
         <Button
           disabled={props.busy}
@@ -255,14 +235,21 @@ export function CrewProposalCard(props: {
           Decline
         </Button>
         <Button
-          disabled={props.busy || seats.length === 0}
+          disabled={props.busy || seats.length === 0 || preview.data === null}
           size="sm"
           type="button"
-          onClick={() => props.onResolve("approve", seats)}
+          onClick={() => {
+            if (preview.data === null) return;
+            const approvalToken = preview.data.approvalToken;
+            preview.refresh();
+            props.onResolve("approve", seats, approvalToken);
+          }}
         >
           {props.busy
             ? "Working…"
-            : `Approve ${seats.length} ${seats.length === 1 ? "seat" : "seats"}`}
+            : preview.loading
+              ? "Loading runtime…"
+              : `Approve ${seats.length} ${seats.length === 1 ? "seat" : "seats"}`}
         </Button>
       </div>
     </li>

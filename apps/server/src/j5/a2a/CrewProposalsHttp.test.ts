@@ -32,7 +32,11 @@ const proposal: CrewProposal = {
   reportedAt: null,
 };
 
-const paths = { list: "/raw/crews/proposals", resolve: "/raw/crews/proposals/resolve" } as const;
+const paths = {
+  list: "/raw/crews/proposals",
+  resolve: "/raw/crews/proposals/resolve",
+  preview: "/raw/crews/proposals/preview",
+} as const;
 
 const authWith = (scopes: ReadonlyArray<string>) =>
   Layer.mock(EnvironmentAuth.EnvironmentAuth)({
@@ -46,8 +50,28 @@ const authWith = (scopes: ReadonlyArray<string>) =>
   });
 
 it("lists open proposals for readers and resolves them only for operators", async () => {
-  const resolved: Array<{ proposalId: string; decision: string; seats?: unknown }> = [];
+  const resolved: Array<{
+    proposalId: string;
+    decision: string;
+    seats?: unknown;
+    approvalToken?: string | undefined;
+  }> = [];
   const gate = Layer.mock(CrewProposalService)({
+    preview: (input) =>
+      Effect.succeed({
+        proposalId: input.proposalId,
+        approvalToken: "runtime-token",
+        seats: [
+          {
+            seat: "builder",
+            provider: "OpenAI",
+            harness: "Codex",
+            model: "GPT-6-Astra",
+            reasoning: "High",
+            access: "Repository write",
+          },
+        ],
+      }),
     resolve: (input) => {
       resolved.push(input);
       return input.proposalId === proposal.id
@@ -93,6 +117,29 @@ it("lists open proposals for readers and resolves them only for operators", asyn
     assert.equal(body.proposals[0]?.id, proposal.id);
     assert.lengthOf(body.proposals[0]?.requestedSeats ?? [], 1);
 
+    const preview = await reader.handler(
+      new Request(`http://environment.test${paths.preview}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ proposalId: proposal.id, seats: proposal.requestedSeats }),
+      }),
+    );
+    assert.equal(preview.status, 200);
+    assert.deepStrictEqual(await preview.json(), {
+      proposalId: proposal.id,
+      approvalToken: "runtime-token",
+      seats: [
+        {
+          seat: "builder",
+          provider: "OpenAI",
+          harness: "Codex",
+          model: "GPT-6-Astra",
+          reasoning: "High",
+          access: "Repository write",
+        },
+      ],
+    });
+
     const approved = await operator.handler(
       new Request(`http://environment.test${paths.resolve}`, {
         method: "POST",
@@ -100,6 +147,7 @@ it("lists open proposals for readers and resolves them only for operators", asyn
         body: JSON.stringify({
           proposalId: proposal.id,
           decision: "approve",
+          approvalToken: "runtime-token",
           seats: [
             ...proposal.requestedSeats,
             { seat: "critic", agentId: "critic", reason: "Human added review" },
@@ -108,6 +156,7 @@ it("lists open proposals for readers and resolves them only for operators", asyn
       }),
     );
     assert.equal(approved.status, 200);
+    assert.equal(resolved[0]?.approvalToken, "runtime-token");
     const approvedBody = (await approved.json()) as {
       proposal: { status: string; approvedSeats: unknown[] };
     };

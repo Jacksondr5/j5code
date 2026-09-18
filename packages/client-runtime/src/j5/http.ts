@@ -3,6 +3,7 @@ import {
   CreateSquadronResponse,
   CrewMembershipsResponse,
   CrewProposalResolveResponse,
+  CrewProposalPreviewResponse,
   CrewProposalsResponse,
   CrewArchiveResponse,
   CrewStopResponse,
@@ -15,6 +16,7 @@ import {
   ThreadHomesResponse,
   type AnswerHumanExchangeRequest,
   type CrewProposalResolveRequest,
+  type CrewProposalPreviewRequest,
   type CrewArchiveRequest,
   type CrewStopRequest,
   type FleetReadRequest,
@@ -185,6 +187,17 @@ export const listCrewProposals = Effect.fn("j5.http.listCrewProposals")(function
   );
   const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
   return (yield* HttpClientResponse.schemaBodyJson(CrewProposalsResponse)(response)).proposals;
+});
+
+export const previewCrewProposal = Effect.fn("j5.http.previewCrewProposal")(function* (
+  prepared: PreparedConnection,
+  input: CrewProposalPreviewRequest,
+) {
+  const request = yield* HttpClientRequest.post(J5_API_PATHS.crewProposalPreview).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(CrewProposalPreviewResponse)(response);
 });
 
 export const resolveCrewProposal = Effect.fn("j5.http.resolveCrewProposal")(function* (
