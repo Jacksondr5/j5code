@@ -5,6 +5,7 @@ import {
   type ModelSelection,
   type OrchestrationV2Actor,
   type OrchestrationV2AgentPersonaRequest,
+  type OrchestrationV2AgentPersonaAssignment,
   type OrchestrationV2CreationSource,
   type OrchestrationV2ThreadProjection,
   type PlanId,
@@ -78,6 +79,8 @@ export interface ThreadLaunchInput {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly agentPersona?: OrchestrationV2AgentPersonaRequest;
+  /** Server-only assignment captured by a Playbook before it becomes runnable. */
+  readonly preparedPersonaAssignment?: OrchestrationV2AgentPersonaAssignment;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
   readonly initialMessage?: ThreadLaunchInitialMessage;
   /** Generic provenance for a child created from a proposed plan. */
