@@ -184,7 +184,7 @@ export const crewGateFooter = (notice: Extract<CrewNoticePresentation, { kind: "
     );
   if (notice.pendingSeats.length > 0)
     parts.push(
-      `${notice.pendingSeats.length} ${notice.pendingSeats.length === 1 ? "seat had" : "seats had"} not started after a minute.`,
+      `${notice.pendingSeats.length} ${notice.pendingSeats.length === 1 ? "seat has" : "seats have"} no confirmed provider activity after a minute.`,
     );
   if (parts.length > 0) return parts.join(" ");
   return notice.requestKind === "roster"
