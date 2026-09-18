@@ -54,6 +54,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 12, name: "AgentHandoffs" },
       { migration_id: 13, name: "MachineParticipants" },
       { migration_id: 14, name: "AgentCrews" },
+      { migration_id: 16, name: "CrewProposalClaims" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -72,6 +73,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [12, "AgentHandoffs"],
         [13, "MachineParticipants"],
         [14, "AgentCrews"],
+        [16, "CrewProposalClaims"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
@@ -1179,7 +1181,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
     `;
     assert.deepStrictEqual(
       applied.map((row) => row.migration_id),
-      [13, 14],
+      [13, 14, 16],
     );
     const memberColumns = yield* sql<{ readonly name: string }>`
       SELECT name FROM pragma_table_info('j5_agent_crew_member') ORDER BY cid
@@ -1196,4 +1198,52 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
       "runbook_declared",
     );
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect(
+  "16 rebuilds the proposal table with claim states and marks past approvals reported",
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runJ5A2AMigrations({ toMigrationInclusive: 14 });
+      yield* sql`
+      INSERT INTO j5_a2a_squadron (id, name, created_at)
+      VALUES ('squadron:claims', 'Claims', '2026-09-17T00:00:00.000Z')
+    `;
+      const insert = (id: string, status: string, resolvedAt: string | null) => sql`
+      INSERT INTO j5_agent_crew_proposal (
+        id, squadron_id, captain_participant_id, captain_thread_id, crew_instance_id, kind, status,
+        brief, display_name, requested_seats, approved_seats, created_at, resolved_at
+      ) VALUES (
+        ${id}, 'squadron:claims', 'agent:captain', 'thread:captain', NULL, 'roster', ${status},
+        'Build it.', 'Claims Crew', '[]', NULL, '2026-09-17T00:00:00.000Z', ${resolvedAt}
+      )
+    `;
+      yield* insert("proposal:approved", "approved", "2026-09-17T00:01:00.000Z");
+      yield* insert("proposal:open", "open", null);
+      // Before the rebuild the claim states are refused.
+      const refused = yield* Effect.result(insert("proposal:claimed", "approving", null));
+      assert.isTrue(refused._tag === "Failure");
+
+      yield* runJ5A2AMigrations();
+      const rows = yield* sql<{
+        readonly id: string;
+        readonly status: string;
+        readonly reported_at: string | null;
+      }>`SELECT id, status, reported_at FROM j5_agent_crew_proposal ORDER BY id`;
+      // Rows survive; an approval from before the report existed counts as reported, so the boot
+      // sweep does not re-announce it to its Captain.
+      assert.deepStrictEqual(rows, [
+        { id: "proposal:approved", status: "approved", reported_at: "2026-09-17T00:01:00.000Z" },
+        { id: "proposal:open", status: "open", reported_at: null },
+      ]);
+      yield* insert("proposal:claimed", "approving", null);
+      const indexes = yield* sql<{ readonly name: string }>`
+      SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'j5_agent_crew_proposal'
+    `;
+      assert.include(
+        indexes.map((row) => row.name),
+        "j5_agent_crew_proposal_open_idx",
+      );
+    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );

@@ -63,19 +63,13 @@ export default Effect.gen(function* () {
       captain_thread_id TEXT NOT NULL,
       crew_instance_id TEXT,
       kind TEXT NOT NULL CHECK (kind IN ('roster', 'addition')),
-      -- A resolution claims the row first (approving or declining), does its work, then writes the
-      -- final status; a claim the server lost mid-way is finished or handed back at boot.
-      status TEXT NOT NULL
-        CHECK (status IN ('open', 'approving', 'declining', 'approved', 'declined')),
+      status TEXT NOT NULL CHECK (status IN ('open', 'approved', 'declined')),
       brief TEXT NOT NULL,
       display_name TEXT NOT NULL,
       requested_seats TEXT NOT NULL,
       approved_seats TEXT,
       created_at TEXT NOT NULL,
       resolved_at TEXT,
-      -- When the Captain was told how the approved seats launched; NULL until the launch report
-      -- posts, which is what the boot sweep looks for.
-      reported_at TEXT,
       FOREIGN KEY (squadron_id) REFERENCES j5_a2a_squadron(id) ON DELETE CASCADE
     )
   `;
