@@ -165,12 +165,18 @@ function CrewGateCard(props: {
                   className="flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm outline-hidden hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:hover:bg-transparent"
                   onClick={() => openSeat(seat.threadId)}
                 >
-                  <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
-                    {seat.seat}
-                  </Badge>
                   <Tooltip>
                     <TooltipTrigger
-                      render={<span className="truncate text-foreground">{label}</span>}
+                      render={
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
+                            {seat.seat}
+                          </Badge>
+                          {label.toLowerCase() !== seat.seat.toLowerCase() ? (
+                            <span className="truncate text-foreground">{label}</span>
+                          ) : null}
+                        </span>
+                      }
                     />
                     <TooltipPopup>{seat.participantId}</TooltipPopup>
                   </Tooltip>
