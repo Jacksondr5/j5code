@@ -303,8 +303,8 @@ const makeLayer = (daemon: boolean) =>
         const projection = yield* threads.getThreadProjection(threadId);
         if (projection.thread.archivedAt !== null) return null;
         if (ThreadManagement.latestActiveRun(projection) !== undefined) return null;
-        // A first turn that failed is a launch outcome: the launch report carries it, with the
-        // run's error, so it is not also a finish.
+        // A failed first turn belongs to an owed launch report, or to the exact run ids in
+        // its durable message. This remains true after the report posts and after restart.
         if (run.status === "failed" && (yield* reporter.coversFailure(threadId, run))) return null;
         // A completed run whose seat still owes a reply is left to that reply and the silence
         // detector. A failed run is reported whatever the seat owes: the silence detector stays
