@@ -12,7 +12,6 @@ import {
   layer as crewProposalLayer,
 } from "./CrewProposalService.ts";
 import { layer as crewSeatFinishNotifierLayer } from "./CrewSeatFinishNotifier.ts";
-import { layer as crewProposalLayer } from "./CrewProposalService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import {
