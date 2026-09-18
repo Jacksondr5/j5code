@@ -2,6 +2,7 @@ import {
   MessageId,
   type OrchestrationV2Run,
   type OrchestrationV2StoredEvent,
+  type OrchestrationV2ProviderFailure,
   type OrchestrationV2ThreadProjection,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -23,7 +24,9 @@ import {
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { ArtifactWorkspace } from "../artifacts/ArtifactWorkspace.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
+import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
+import { formatRunFailure, runFailureDetail } from "./runFailures.ts";
 import { lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
 
 /**
@@ -158,6 +161,8 @@ export const seatFinishedNoticeText = (input: {
   readonly participantId: string;
   readonly threadId: string;
   readonly runStatus: string;
+  /** The run's recorded error when it failed; the notice leads with it, not the handoff lines. */
+  readonly failure: OrchestrationV2ProviderFailure | null;
   readonly handoff: SeatHandoffFact;
 }) => {
   const handoffLine =
@@ -166,7 +171,11 @@ export const seatFinishedNoticeText = (input: {
       : input.handoff.status === "missing"
         ? `handoff: missing (${input.handoff.kind})\nartifact: ${agentHandoffLogicalPath(input.handoff.path)}`
         : `handoff: written (${input.handoff.kind})\nartifact: ${agentHandoffLogicalPath(input.handoff.path)}\nhandoff_chars: ${input.handoff.body?.length ?? 0}\nhandoff_digest: ${input.handoff.body === null ? "binary" : handoffDigest(input.handoff.body)}`;
-  const head = `<j5_seat_finished>\nseat: ${input.seatName}\ncrew: ${input.crewName}\nparticipant_id: ${input.participantId}\nthread_id: ${input.threadId}\nrun_status: ${input.runStatus}\n${handoffLine}\n</j5_seat_finished>`;
+  // The outcome first: a seat that died read as "finished, forgot its handoff" when the failure
+  // was one line among the handoff lines (Jackson's dogfood, 2026-09-17).
+  const failureLine =
+    input.runStatus === "failed" ? `\nfailure: ${formatRunFailure(input.failure)}` : "";
+  const head = `<j5_seat_finished>\nrun_status: ${input.runStatus}${failureLine}\nseat: ${input.seatName}\ncrew: ${input.crewName}\nparticipant_id: ${input.participantId}\nthread_id: ${input.threadId}\n${handoffLine}\n</j5_seat_finished>`;
   if (input.handoff.status !== "written") return head;
   return input.handoff.body !== null && input.handoff.body.length <= INLINE_HANDOFF_MAX_CHARS
     ? `${head}\n\n<handoff_body>\n${noticeBody(input.handoff.body)}\n</handoff_body>`
@@ -179,6 +188,7 @@ const makeLayer = (daemon: boolean) =>
     Effect.gen(function* () {
       const threads = yield* ThreadManagement.ThreadManagementService;
       const crews = yield* AgentCrewInstanceService;
+      const reporter = yield* CrewLaunchReporter;
       const workspace = yield* ArtifactWorkspace;
       const agents = yield* makeAgentPersonaLibrary;
       const sql = yield* SqlClient.SqlClient;
@@ -246,6 +256,7 @@ const makeLayer = (daemon: boolean) =>
           participantId: participantIdForThread(threadId),
           threadId,
           runStatus: run.status,
+          failure: run.status === "failed" ? runFailureDetail(projection, run.id) : null,
           handoff,
         });
         if (latestSeatNotice(captain, participantIdForThread(threadId)) === text.trim())
@@ -292,7 +303,13 @@ const makeLayer = (daemon: boolean) =>
         const projection = yield* threads.getThreadProjection(threadId);
         if (projection.thread.archivedAt !== null) return null;
         if (ThreadManagement.latestActiveRun(projection) !== undefined) return null;
-        if ((yield* owedReplies(participantId)) > 0) return null;
+        // A first turn that failed is a launch outcome: the launch report carries it, with the
+        // run's error, so it is not also a finish.
+        if (run.status === "failed" && (yield* reporter.coversFailure(threadId, run))) return null;
+        // A completed run whose seat still owes a reply is left to that reply and the silence
+        // detector. A failed run is reported whatever the seat owes: the silence detector stays
+        // quiet about a seat's failure to its Captain, so this is where the Captain hears it.
+        if (run.status === "completed" && (yield* owedReplies(participantId)) > 0) return null;
         // What the seat owes comes from its immutable snapshot, not today's library. A snapshot
         // that cannot be read leaves the seat unreported and logged rather than quietly finished.
         const assignment = projection.thread.agentPersonaAssignment;
@@ -328,12 +345,16 @@ const makeLayer = (daemon: boolean) =>
             SELECT COALESCE(MAX(sequence), 0) AS sequence FROM orchestration_v2_events
           `;
           let afterSequence = rows[0]?.sequence ?? 0;
+          // Launches the server lost mid-report are reported first, so a first turn that failed
+          // while it was down is a launch outcome rather than a finish.
+          yield* reporter.reconcile;
           // Suspended so each resume after a stream failure starts from the last handled
           // sequence rather than from the daemon's start.
           return yield* Effect.forever(
             Stream.suspend(() => threads.streamStoredEventsFrom({ afterSequence })).pipe(
               Stream.runForEach((event) =>
-                handleStoredEvent(event).pipe(
+                reporter.handleStoredEvent(event).pipe(
+                  Effect.andThen(handleStoredEvent(event)),
                   Effect.tap(() => Effect.sync(() => (afterSequence = event.sequence))),
                 ),
               ),

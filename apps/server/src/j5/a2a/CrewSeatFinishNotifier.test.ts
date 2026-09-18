@@ -34,6 +34,7 @@ import {
   seatNoticeSections,
   seatFinishedNoticeText,
 } from "./CrewSeatFinishNotifier.ts";
+import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
@@ -97,6 +98,23 @@ const projection = (
     runs: overrides.running
       ? [{ id: RunId.make("run:live"), threadId, status: "running", completedAt: null }]
       : [],
+    // The scout's failed run left its provider error behind, so its notice can carry it.
+    turnItems:
+      threadId === scoutThread
+        ? [
+            {
+              runId: RunId.make("run:s1"),
+              type: "error",
+              status: "failed",
+              failure: {
+                class: "provider_error",
+                message: "API Error: Can't reach the API server",
+                code: "sdk_result_error",
+                retryable: null,
+              },
+            },
+          ]
+        : [],
     messages: [],
   }) as unknown as OrchestrationV2ThreadProjection;
 
@@ -202,7 +220,15 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
       )
     `;
     const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+    // The launch report covers a failed first turn while it is pending; here the builder's.
+    const covered = yield* Ref.make<ReadonlySet<string>>(new Set());
     const layer = notifierLayer.pipe(
+      Layer.provideMerge(
+        Layer.mock(CrewLaunchReporter)({
+          coversFailure: (threadId) =>
+            Ref.get(covered).pipe(Effect.map((set) => set.has(threadId))),
+        }),
+      ),
       Layer.provideMerge(
         Layer.mock(ThreadManagementService)({
           getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
@@ -279,10 +305,29 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
       const scoutNotice = (yield* Ref.get(dispatched))[1];
       assert.equal(scoutNotice?.type, "message.dispatch");
       if (scoutNotice?.type === "message.dispatch") {
+        // The outcome leads, and the run's error rides with it (none was recorded here).
+        assert.match(scoutNotice.text, /^<j5_seat_finished>\nrun_status: failed\nfailure: /);
+        assert.include(
+          scoutNotice.text,
+          "failure: provider_error — API Error: Can't reach the API server",
+        );
         assert.include(scoutNotice.text, "seat: scout");
-        assert.include(scoutNotice.text, "run_status: failed");
         assert.include(scoutNotice.text, "handoff: none declared");
       }
+      // A failed run is reported even while the seat owes a reply: the silence detector says
+      // nothing about a seat's failure to its Captain, so this is the one telling.
+      assert.equal(
+        yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:2f", "failed")),
+        criticThread,
+      );
+      assert.lengthOf(yield* Ref.get(dispatched), 3);
+      // A first turn that failed while the launch report is pending is that report's to tell.
+      yield* Ref.set(covered, new Set([builderThread]));
+      assert.isNull(
+        yield* notifier.handleStoredEvent(terminalRunEvent(builderThread, "run:1f", "failed")),
+      );
+      assert.lengthOf(yield* Ref.get(dispatched), 3);
+      yield* Ref.set(covered, new Set());
 
       // Once the critic's reply is closed and its ReviewHandoff file exists, its notice carries
       // the body inline.
@@ -303,8 +348,8 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
         criticThread,
       );
       const commands = yield* Ref.get(dispatched);
-      assert.lengthOf(commands, 3);
-      const notice = commands[2];
+      assert.lengthOf(commands, 4);
+      const notice = commands[3];
       assert.equal(notice?.type, "message.dispatch");
       if (notice?.type === "message.dispatch") {
         assert.equal(notice.threadId, captainThread);
@@ -344,6 +389,7 @@ it.effect(
         participantId: scout,
         threadId: scoutThread,
         runStatus: "completed",
+        failure: null,
         handoff: { status: "none declared" },
       });
       yield* Context.get(context, AgentCrewInstanceService).record({
@@ -393,9 +439,13 @@ it.effect(
         participantId: participantIdForThread(ThreadId.make("thread:other-scout")),
         threadId: ThreadId.make("thread:other-scout"),
         runStatus: "failed",
+        failure: null,
         handoff: { status: "none declared" },
       });
       const layer = notifierLayer.pipe(
+        Layer.provideMerge(
+          Layer.mock(CrewLaunchReporter)({ coversFailure: () => Effect.succeed(false) }),
+        ),
         Layer.provideMerge(
           Layer.mock(ThreadManagementService)({
             getThreadProjection: (threadId) =>
@@ -521,6 +571,9 @@ it.effect(
       const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
       const noticesFail = yield* Ref.make(true);
       const layer = notifierLayer.pipe(
+        Layer.provideMerge(
+          Layer.mock(CrewLaunchReporter)({ coversFailure: () => Effect.succeed(false) }),
+        ),
         Layer.provideMerge(
           Layer.mock(ThreadManagementService)({
             getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),

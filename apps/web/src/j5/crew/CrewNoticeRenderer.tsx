@@ -14,6 +14,7 @@ import { presentParticipantIdentity } from "../a2a/ParticipantIdentity";
 import {
   artifactPanelPath,
   crewGateFooter,
+  crewSeatsTitle,
   crewGateTitle,
   presentCrewNotice,
   seatRunStatusLabel,
@@ -254,7 +255,7 @@ function CrewSeatsCard(props: {
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
         <span className="inline-flex items-center gap-1.5 text-muted-foreground">
           <UsersIcon className="size-3.5 shrink-0" aria-hidden />
-          {notice.seats.length === 1 ? "Seat finished" : `${notice.seats.length} seats finished`}
+          {crewSeatsTitle(notice.seats)}
         </span>
         {crews.size === 1 && notice.seats[0]!.crewName !== null ? (
           <span className="font-medium text-foreground">{notice.seats[0]!.crewName}</span>
@@ -280,17 +281,17 @@ function CrewSeatsCard(props: {
                 className="flex w-full min-w-0 flex-wrap items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm outline-hidden hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:hover:bg-transparent"
                 onClick={() => openSeat(seat.threadId)}
               >
+                <span
+                  className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${TONE_CLASS[status.tone]}`}
+                >
+                  {status.label}
+                </span>
                 <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
                   {seat.seat}
                 </Badge>
                 {crews.size > 1 && seat.crewName !== null ? (
                   <span className="truncate text-xs text-muted-foreground">{seat.crewName}</span>
                 ) : null}
-                <span
-                  className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${TONE_CLASS[status.tone]}`}
-                >
-                  {status.label}
-                </span>
                 {handoff.status === "none declared" ? null : (
                   <span
                     className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${
@@ -302,6 +303,9 @@ function CrewSeatsCard(props: {
                   </span>
                 )}
               </button>
+              {seat.failure !== null ? (
+                <p className="ms-1.5 text-xs text-muted-foreground">{seat.failure}</p>
+              ) : null}
               {handoff.status === "written" && handoff.artifactPath !== null ? (
                 <div className="ms-1.5 flex flex-col gap-1">
                   <button
