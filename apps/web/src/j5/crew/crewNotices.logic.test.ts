@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { crewLaunchPrompt } from "./crewCommand";
 import {
   artifactPanelPath,
   crewGateFooter,
@@ -26,6 +25,9 @@ const approvedGate = [
   "",
   "Your crew is running. Each seat has your brief and this roster.",
 ].join("\n");
+
+const crewLaunchPrompt = (brief: string) =>
+  `<j5_crew_launch>\nCompose a Crew with propose_crew, then end your turn.\n</j5_crew_launch>\n\n${brief}`;
 
 describe("crew notices in the Captain's thread", () => {
   it("presents the person's /crew turn as its brief with the guidance set aside", () => {
