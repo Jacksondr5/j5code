@@ -132,7 +132,7 @@ describe("crew launch report", () => {
     assert.include(text, "seat_pending: prosecutor");
     assert.include(
       text,
-      "- setup: participant_id=agent:setup agent=scout thread_id=thread:setup start=started",
+      "- setup: participant_id=agent:setup persona=scout thread_id=thread:setup start=started",
     );
     assert.include(text, "thread_id=thread:punchline start=failed");
     assert.include(text, "thread_id=thread:prosecutor start=pending");
