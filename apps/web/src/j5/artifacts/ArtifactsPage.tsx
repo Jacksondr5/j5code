@@ -29,7 +29,6 @@ import { usePreparedConnection } from "../../state/session";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { artifactEnvironment } from "./artifactChanges";
 import { listArtifacts, readArtifact, trashArtifact } from "./artifactClient";
-import { canFetchArtifacts } from "./artifactConnection.logic";
 import { artifactPreviewRevision } from "./artifactPreview.logic";
 import { nextArtifactRefreshGeneration } from "./artifactRefresh";
 
@@ -180,13 +179,7 @@ export function ArtifactsPage({
       setListState("ready");
       return;
     }
-    if (
-      !canFetchArtifacts({
-        environmentId: selectedEnvironmentId,
-        projectId: selectedProjectId,
-        connected,
-      })
-    ) {
+    if (!connected) {
       setListState("loading");
       setError(null);
       return;
