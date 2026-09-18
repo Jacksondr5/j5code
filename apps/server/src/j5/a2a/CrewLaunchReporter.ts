@@ -1,0 +1,316 @@
+import {
+  MessageId,
+  type OrchestrationV2Run,
+  type OrchestrationV2StoredEvent,
+  type OrchestrationV2ThreadProjection,
+  type ThreadId,
+} from "@t3tools/contracts";
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
+import * as Scope from "effect/Scope";
+import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
+import { AgentCrewProposalService, type CrewProposal } from "./AgentCrewProposalService.ts";
+import { crewLaunchReportText, type SeatStartVerdict } from "./crewGateNotice.ts";
+import {
+  CREW_PROPOSAL_SESSION,
+  crewSeatBriefMessageId,
+  crewSeatReservedBy,
+} from "./crewSeatIds.ts";
+import { runFailureDetail } from "./runFailures.ts";
+import { lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
+import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
+
+/**
+ * A seat's provider usually opens its first turn within seconds; a seat still queued after this
+ * long is reported as not started and heard from when it finishes.
+ */
+export const CREW_LAUNCH_REPORT_WINDOW_MS = 60_000;
+
+/**
+ * The launch report: the one notice a Captain gets for an approval, posted when every seat this
+ * proposal launched has produced its first run update (running, or ended without running) or the
+ * window closed. Dispatching a brief commits intent only; before this, "your crew is running" was
+ * said the moment the briefs were dispatched, and two seats that died on a signed-out provider
+ * arrived later as finishes with no reason (Jackson's dogfood, 2026-09-17).
+ */
+export interface CrewLaunchReporterShape {
+  /**
+   * Watch an approved proposal's seats. Takes a verdict for each seat from what its thread already
+   * shows, then waits on the stored-event stream for the rest; posts the report and stamps the
+   * proposal reported. Idempotent per proposal while a watch is pending.
+   */
+  readonly watch: (proposalId: string) => Effect.Effect<void>;
+  /** Returns the proposal id whose report this event completed, or null. */
+  readonly handleStoredEvent: (stored: OrchestrationV2StoredEvent) => Effect.Effect<string | null>;
+  /**
+   * Whether a failed run is a launch outcome a pending report will carry: the run is a watched
+   * seat's first turn. The seat finish notifier stays quiet for those, so the Captain hears of a
+   * dead seat once.
+   */
+  readonly coversFailure: (threadId: ThreadId, run: OrchestrationV2Run) => Effect.Effect<boolean>;
+  /** The boot sweep: watch every approved proposal whose report never reached its Captain. */
+  readonly reconcile: Effect.Effect<ReadonlyArray<string>>;
+}
+
+export class CrewLaunchReporter extends Context.Service<
+  CrewLaunchReporter,
+  CrewLaunchReporterShape
+>()("t3/j5/a2a/CrewLaunchReporter") {}
+
+interface WatchedSeat {
+  readonly seatName: string;
+  readonly threadId: ThreadId;
+  readonly briefMessageId: string;
+}
+
+interface PendingLaunch {
+  readonly proposal: CrewProposal;
+  readonly instance: AgentCrewInstance;
+  readonly seats: ReadonlyArray<WatchedSeat>;
+  readonly verdicts: Map<string, SeatStartVerdict>;
+  timer: Fiber.Fiber<void> | null;
+}
+
+const isFirstTurnRun = (seat: WatchedSeat, run: OrchestrationV2Run) =>
+  run.threadId === seat.threadId && run.userMessageId === seat.briefMessageId;
+
+const verdictFor = (
+  run: OrchestrationV2Run | undefined,
+  projection: OrchestrationV2ThreadProjection | null,
+): SeatStartVerdict => {
+  if (run === undefined) return { kind: "pending" };
+  switch (run.status) {
+    case "running":
+    case "waiting":
+    case "completed":
+      return { kind: "started" };
+    case "failed":
+    case "interrupted":
+    case "cancelled":
+    case "rolled_back":
+      return {
+        kind: "failed",
+        runStatus: run.status,
+        failure: projection === null ? null : runFailureDetail(projection, run.id),
+      };
+    default:
+      return { kind: "pending" };
+  }
+};
+
+const makeLayer = (daemon: boolean) =>
+  Layer.effect(
+    CrewLaunchReporter,
+    Effect.gen(function* () {
+      const threads = yield* ThreadManagementService;
+      const proposals = yield* AgentCrewProposalService;
+      const crews = yield* AgentCrewInstanceService;
+      const sql = yield* SqlClient.SqlClient;
+      const timers = yield* Scope.make("sequential");
+      yield* Effect.addFinalizer(() => Scope.close(timers, Exit.void));
+      const pending = new Map<string, PendingLaunch>();
+      // One resolver at a time: a window closing and a final run update must not both post.
+      const gate = yield* Semaphore.make(1);
+
+      /** Posts the report and stamps the proposal; ids derive from the proposal, so a replay converges. */
+      const post = Effect.fn("j5.a2a.crewLaunchReporter.post")(function* (launch: PendingLaunch) {
+        const proposal = launch.proposal;
+        const stable = { providerSessionId: CREW_PROPOSAL_SESSION, requestKey: proposal.id };
+        const captain = yield* threads.getThreadProjection(proposal.captainThreadId);
+        yield* threads.dispatch({
+          type: "message.dispatch",
+          createdBy: "system",
+          creationSource: "server",
+          commandId: lifecycleCommandId({ ...stable, operation: "proposal-notice" }),
+          threadId: proposal.captainThreadId,
+          messageId: MessageId.make(
+            lifecycleId({ ...stable, kind: "message", operation: "proposal-notice" }),
+          ),
+          text: crewLaunchReportText({
+            proposal,
+            instance: launch.instance,
+            verdicts: launch.verdicts,
+            windowMs: CREW_LAUNCH_REPORT_WINDOW_MS,
+          }),
+          attachments: [],
+          modelSelection: captain.thread.modelSelection,
+          dispatchMode: { type: "start_immediately" },
+        });
+        yield* proposals.markReported(proposal.id, DateTime.formatIso(yield* DateTime.now));
+      });
+
+      /**
+       * Settles a pending launch under the permit; a launch already settled is a no-op. The window
+       * closing settles from the timer fiber itself, which must not interrupt its own fiber.
+       */
+      const settle = (proposalId: string, cause: "verdicts" | "window") =>
+        gate.withPermit(
+          Effect.gen(function* () {
+            const launch = pending.get(proposalId);
+            if (launch === undefined) return null;
+            pending.delete(proposalId);
+            if (cause === "verdicts" && launch.timer !== null) yield* Fiber.interrupt(launch.timer);
+            // A report that will not post is logged and left for the boot sweep, which finds the
+            // proposal still unreported; the Captain is never told twice.
+            yield* post(launch).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("J5 crew launch report could not be posted", {
+                  proposalId,
+                  cause,
+                }),
+              ),
+            );
+            return proposalId;
+          }),
+        );
+
+      const allDecided = (launch: PendingLaunch) =>
+        launch.seats.every((seat) => launch.verdicts.get(seat.seatName)?.kind !== "pending");
+
+      const watch: CrewLaunchReporterShape["watch"] = (proposalId) =>
+        Effect.gen(function* () {
+          if (pending.has(proposalId)) return;
+          const proposal = yield* proposals.read(proposalId);
+          if (
+            proposal === null ||
+            proposal.status !== "approved" ||
+            proposal.crewInstanceId === null
+          )
+            return;
+          const instance = yield* crews.read(proposal.crewInstanceId);
+          if (instance === null) return;
+          const members =
+            proposal.kind === "roster"
+              ? instance.members
+              : instance.members.filter(crewSeatReservedBy(proposal.id));
+          const seats: Array<WatchedSeat> = members.map((member) => ({
+            seatName: member.seatName,
+            threadId: member.threadId,
+            briefMessageId: crewSeatBriefMessageId(proposal.id, member.seatName),
+          }));
+          const verdicts = new Map<string, SeatStartVerdict>();
+          // What each seat's thread already shows decides first; the stream carries the rest.
+          for (const seat of seats) {
+            const projection = yield* getThreadProjectionIfPresent(threads, seat.threadId);
+            const run = projection?.runs.find((candidate) => isFirstTurnRun(seat, candidate));
+            verdicts.set(seat.seatName, verdictFor(run, projection));
+          }
+          const launch: PendingLaunch = { proposal, instance, seats, verdicts, timer: null };
+          pending.set(proposalId, launch);
+          if (allDecided(launch)) {
+            yield* settle(proposalId, "verdicts");
+            return;
+          }
+          launch.timer = yield* Effect.sleep(Duration.millis(CREW_LAUNCH_REPORT_WINDOW_MS)).pipe(
+            Effect.andThen(settle(proposalId, "window")),
+            Effect.asVoid,
+            // Started at once so the window is armed before `watch` returns.
+            Effect.forkIn(timers, { startImmediately: true }),
+          );
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("J5 crew launch report could not start watching", {
+              proposalId,
+              cause,
+            }),
+          ),
+        );
+
+      const handleStoredEvent: CrewLaunchReporterShape["handleStoredEvent"] = (stored) =>
+        Effect.gen(function* () {
+          if (stored.event.type !== "run.updated") return null;
+          const run = stored.event.payload;
+          for (const [proposalId, launch] of pending) {
+            const seat = launch.seats.find((candidate) => isFirstTurnRun(candidate, run));
+            if (seat === undefined) continue;
+            const projection =
+              run.status === "failed" ||
+              run.status === "interrupted" ||
+              run.status === "cancelled" ||
+              run.status === "rolled_back"
+                ? yield* threads.getThreadProjection(run.threadId)
+                : null;
+            const verdict = verdictFor(run, projection);
+            if (verdict.kind === "pending") return null;
+            launch.verdicts.set(seat.seatName, verdict);
+            return allDecided(launch) ? yield* settle(proposalId, "verdicts") : null;
+          }
+          return null;
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("J5 crew launch report skipped an event", { cause }).pipe(
+              Effect.as(null),
+            ),
+          ),
+        );
+
+      const coversFailure: CrewLaunchReporterShape["coversFailure"] = (threadId, run) =>
+        Effect.sync(() => {
+          for (const launch of pending.values()) {
+            if (
+              launch.seats.some((seat) => seat.threadId === threadId && isFirstTurnRun(seat, run))
+            )
+              return true;
+          }
+          return false;
+        });
+
+      const reconcile: CrewLaunchReporterShape["reconcile"] = Effect.gen(function* () {
+        const unreported = yield* proposals.listUnreported();
+        for (const proposal of unreported) yield* watch(proposal.id);
+        if (unreported.length > 0)
+          yield* Effect.logInfo("J5 crew launch report sweep picked up unreported launches", {
+            proposalIds: unreported.map(({ id }) => id),
+          });
+        return unreported.map(({ id }) => id);
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logError("J5 crew launch report sweep failed", { cause }).pipe(Effect.as([])),
+        ),
+      );
+
+      if (daemon) {
+        // From the current high-water mark, so a launch approved while the server was down is
+        // reported by the sweep and everything after by the stream.
+        const runDaemon = Effect.gen(function* () {
+          const rows = yield* sql<{ readonly sequence: number }>`
+            SELECT COALESCE(MAX(sequence), 0) AS sequence FROM orchestration_v2_events
+          `;
+          let afterSequence = rows[0]?.sequence ?? 0;
+          yield* reconcile;
+          return yield* Effect.forever(
+            Stream.suspend(() => threads.streamStoredEventsFrom({ afterSequence })).pipe(
+              Stream.runForEach((event) =>
+                handleStoredEvent(event).pipe(
+                  Effect.tap(() => Effect.sync(() => (afterSequence = event.sequence))),
+                ),
+              ),
+              Effect.catchCause((cause) =>
+                Effect.logWarning("J5 crew launch report stream failed; resuming", { cause }).pipe(
+                  Effect.andThen(Effect.sleep(Duration.seconds(1))),
+                ),
+              ),
+            ),
+          );
+        });
+        yield* Effect.forkScoped(runDaemon);
+      }
+
+      return CrewLaunchReporter.of({ watch, handleStoredEvent, coversFailure, reconcile });
+    }),
+  );
+
+/** Production: the sweep and the stream run once the layer is built. */
+export const layer = makeLayer(true);
+/** For tests and for a runtime whose own stream feeds `handleStoredEvent`. */
+export const manualLayer = makeLayer(false);

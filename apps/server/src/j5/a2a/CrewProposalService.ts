@@ -20,17 +20,18 @@ import {
   type CrewCaptain,
   type CrewLaunchError,
 } from "./CrewLaunchService.ts";
+import { crewDeclinedNoticeText } from "./crewGateNotice.ts";
+import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import { crewSeatShapeProblem } from "./crewLimits.ts";
-import { participantIdForThread } from "./HomeRegistrar.ts";
+import { CREW_PROPOSAL_SESSION, crewSeatReservedBy } from "./crewSeatIds.ts";
 import { A2ALedger } from "./LedgerService.ts";
-import { crewSeatRequestKey, lifecycleCommandId, lifecycleId, spawnThreadId } from "./spawnIds.ts";
+import { crewSeatRequestKey, lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
 import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 
 /** Hard cap on seats per Crew, initial roster and additions together. */
 export { CREW_SEAT_CAP } from "./CrewLaunchService.ts";
 
-/** Resolution-time spawns key off the proposal id so a retried approval replays the same seats. */
-const PROPOSAL_SESSION = "j5-crew-proposal";
+const PROPOSAL_SESSION = CREW_PROPOSAL_SESSION;
 
 export class CrewProposalRequestError extends Data.TaggedError("CrewProposalRequestError")<{
   readonly detail: string;
@@ -129,35 +130,13 @@ export class CrewProposalService extends Context.Service<
 const seatNamesUnique = (seats: ReadonlyArray<CrewProposalSeat>) =>
   new Set(seats.map(({ seat }) => seat)).size === seats.length;
 
-/** The platform-composed notice a Captain receives when its gate resolves: measured facts only. */
-export const crewGateNoticeText = (input: {
-  readonly proposal: CrewProposal;
-  readonly instance: AgentCrewInstance | null;
-  readonly status: "approved" | "declined";
-}) => {
-  const head = `<j5_crew_gate>\nproposal_id: ${input.proposal.id}\nkind: ${input.proposal.kind}\ndecision: ${input.status}\ncrew_name: ${input.proposal.displayName}`;
-  if (input.instance === null || input.status === "declined") {
-    return `${head}\nrequested_seats: ${input.proposal.requestedSeats.map(({ seat, agentId }) => `${seat}=${agentId}`).join(", ")}\n</j5_crew_gate>\n\nThe human declined this crew request. Continue with the agents you have, or revise the request and propose again with a clearer reason.`;
-  }
-  const roster = input.instance.members
-    .map(
-      (member) =>
-        `- ${member.seatName}: participant_id=${member.participantId} agent=${member.agentId} thread_id=${member.threadId}${
-          member.addedVersion === input.instance!.version && input.proposal.kind === "addition"
-            ? " (new)"
-            : ""
-        }`,
-    )
-    .join("\n");
-  return `${head}\ncrew_instance_id: ${input.instance.id}\ncrew_version: ${input.instance.version}\nroster:\n${roster}\n</j5_crew_gate>\n\nYour crew is running. Each seat has your brief and this roster; coordinate with send_message, and ask the human through the inbox for decisions you cannot make from the brief.`;
-};
-
 export const layer = Layer.effect(
   CrewProposalService,
   Effect.gen(function* () {
     const proposals = yield* AgentCrewProposalService;
     const crews = yield* AgentCrewInstanceService;
     const launcher = yield* CrewLaunchService;
+    const reporter = yield* CrewLaunchReporter;
     const threadManagement = yield* ThreadManagementService;
     const ledger = yield* A2ALedger;
     const agents = yield* makeAgentPersonaLibrary;
@@ -222,10 +201,9 @@ export const layer = Layer.effect(
       }
     });
 
-    const notifyCaptain = Effect.fn("j5.a2a.crewProposal.notifyCaptain")(function* (
+    /** The decline is told at once; an approval is told by the launch report, once the seats are up. */
+    const notifyDeclined = Effect.fn("j5.a2a.crewProposal.notifyDeclined")(function* (
       proposal: CrewProposal,
-      instance: AgentCrewInstance | null,
-      status: "approved" | "declined",
     ) {
       const stable = { providerSessionId: PROPOSAL_SESSION, requestKey: proposal.id };
       const captain = yield* threadManagement
@@ -241,7 +219,7 @@ export const layer = Layer.effect(
           messageId: MessageId.make(
             lifecycleId({ ...stable, kind: "message", operation: "proposal-notice" }),
           ),
-          text: crewGateNoticeText({ proposal, instance, status }),
+          text: crewDeclinedNoticeText(proposal),
           attachments: [],
           modelSelection: captain.thread.modelSelection,
           dispatchMode: { type: "start_immediately" },
@@ -371,7 +349,9 @@ export const layer = Layer.effect(
         Effect.onError(() => proposals.reopen(claimed.id).pipe(Effect.ignore)),
       );
       const final = yield* complete(claimed, "approve", instance.id);
-      yield* notifyCaptain(final, instance, "approved");
+      // The Captain hears once the seats have started or failed to start, not now: a dispatched
+      // brief is intent, and the report says what became of it.
+      yield* reporter.watch(final.id);
       return { proposal: final, instance } satisfies CrewProposalOutcome;
     });
 
@@ -472,17 +452,7 @@ export const layer = Layer.effect(
         return { proposal, instance };
       });
 
-    /** Whether a member row was minted by this proposal: its ids derive from the proposal id. */
-    const reservedByProposal =
-      (proposalId: string) =>
-      (member: { readonly participantId: string; readonly seatName: string }) =>
-        member.participantId ===
-        participantIdForThread(
-          spawnThreadId({
-            providerSessionId: PROPOSAL_SESSION,
-            requestKey: crewSeatRequestKey(proposalId, member.seatName),
-          }),
-        );
+    const reservedByProposal = crewSeatReservedBy;
 
     /** Archive every seat thread that exists behind these members; names with no thread pass. */
     const archiveSeatThreads = Effect.fn("j5.a2a.crewProposal.archiveSeatThreads")(function* (
@@ -566,7 +536,7 @@ export const layer = Layer.effect(
         else yield* retireFailedLaunch(claimed, claimed.crewInstanceId);
       }
       const declined = yield* complete(claimed, "decline", null);
-      yield* notifyCaptain(declined, null, "declined");
+      yield* notifyDeclined(declined);
       return { proposal: declined, instance: null } satisfies CrewProposalOutcome;
     });
 

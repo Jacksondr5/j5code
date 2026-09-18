@@ -1847,6 +1847,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       approvedSeats: null,
       createdAt: "2026-09-09T16:00:00.000Z",
       resolvedAt: null,
+      reportedAt: null,
     });
     const dependencies = Layer.mergeAll(
       Layer.mock(A2ASendService)({ listParticipants: () => Effect.succeed([callerRow]) }),

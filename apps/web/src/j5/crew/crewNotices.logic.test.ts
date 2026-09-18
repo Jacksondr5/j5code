@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { crewLaunchPrompt } from "./crewCommand";
-import { crewGateTitle, participantIdsForCrewNotice, presentCrewNotice } from "./crewNotices.logic";
+import {
+  crewGateFooter,
+  crewGateTitle,
+  participantIdsForCrewNotice,
+  presentCrewNotice,
+} from "./crewNotices.logic";
 
 const approvedGate = [
   "<j5_crew_gate>",
@@ -67,6 +72,7 @@ describe("crew notices in the Captain's thread", () => {
           agentId: "builder",
           threadId: "thread:b",
           isNew: false,
+          start: null,
         },
         {
           seat: "critic",
@@ -74,14 +80,65 @@ describe("crew notices in the Captain's thread", () => {
           agentId: "critic",
           threadId: "thread:c",
           isNew: false,
+          start: null,
         },
       ],
       requestedSeats: [],
+      changes: null,
+      failures: [],
+      pendingSeats: [],
     });
     expect(participantIdsForCrewNotice(message)).toEqual(["agent:j5:a2a:b", "agent:j5:a2a:c"]);
-    if (notice?.kind === "gate") expect(crewGateTitle(notice)).toBe("Crew approved");
+    if (notice?.kind === "gate") expect(crewGateTitle(notice)).toBe("Crew launched");
     // Only the platform posts gate notices; the same text from a person is not one.
     expect(presentCrewNotice({ role: "user", createdBy: "user", text: approvedGate })).toBeNull();
+  });
+
+  it("presents a launch report: what the person changed and how each seat's first turn went", () => {
+    const report = [
+      "<j5_crew_gate>",
+      "proposal_id: crew:j5:a2a:mcp:s:proposal:r2",
+      "kind: roster",
+      "decision: approved",
+      "crew_name: Comedy",
+      "crew_instance_id: crew:2",
+      "crew_version: 1",
+      "changes: added prosecutor; removed sitter",
+      "launch: 1 started, 1 failed to start, 1 not started after 60s",
+      "seat_failed: punchline | failed | provider_error — API Error: Can't reach the API server | check DNS",
+      "seat_pending: prosecutor",
+      "roster:",
+      "- setup: participant_id=agent:j5:a2a:s agent=scout thread_id=thread:s start=started",
+      "- punchline: participant_id=agent:j5:a2a:p agent=advocate thread_id=thread:p start=failed",
+      "- prosecutor: participant_id=agent:j5:a2a:q agent=prosecutor thread_id=thread:q start=pending",
+      "</j5_crew_gate>",
+      "",
+      "1 of 3 seats failed to start.",
+    ].join("\n");
+    const notice = presentCrewNotice({ role: "user", createdBy: "system", text: report });
+    expect(notice).toMatchObject({
+      kind: "gate",
+      changes: "added prosecutor; removed sitter",
+      failures: [
+        {
+          seat: "punchline",
+          runStatus: "failed",
+          detail: "provider_error — API Error: Can't reach the API server | check DNS",
+        },
+      ],
+      pendingSeats: ["prosecutor"],
+    });
+    expect(notice?.kind === "gate" && notice.roster.map((seat) => seat.start)).toEqual([
+      "started",
+      "failed",
+      "pending",
+    ]);
+    if (notice?.kind === "gate") {
+      expect(crewGateTitle(notice)).toBe("Crew launched, 1 seat failed to start");
+      expect(crewGateFooter(notice)).toBe(
+        "1 seat failed to start; the Captain has each reason. 1 seat had not started after a minute.",
+      );
+    }
   });
 
   it("presents an added seat as new and a decline with what was requested", () => {

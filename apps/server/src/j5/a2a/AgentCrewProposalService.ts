@@ -63,6 +63,8 @@ export interface CrewProposal {
   readonly approvedSeats: ReadonlyArray<CrewProposalSeat> | null;
   readonly createdAt: string;
   readonly resolvedAt: string | null;
+  /** When the Captain received the launch report for an approval; null until it posts. */
+  readonly reportedAt: string | null;
 }
 
 export interface CreateCrewProposalInput {
@@ -111,6 +113,9 @@ export interface AgentCrewProposalServiceShape {
   readonly reopen: (id: string) => Effect.Effect<CrewProposal | null, SqlError>;
   /** Proposals still claimed: what a crash mid-resolution leaves for the boot sweep. */
   readonly listClaimed: () => Effect.Effect<ReadonlyArray<CrewProposal>, SqlError>;
+  /** Approved proposals whose launch report has not reached the Captain yet. */
+  readonly listUnreported: () => Effect.Effect<ReadonlyArray<CrewProposal>, SqlError>;
+  readonly markReported: (id: string, reportedAt: string) => Effect.Effect<void, SqlError>;
   /** Records the crew a claimed roster proposal produced. */
   readonly attachInstance: (
     id: string,
@@ -137,6 +142,7 @@ interface Row {
   readonly approved_seats: string | null;
   readonly created_at: string;
   readonly resolved_at: string | null;
+  readonly reported_at: string | null;
 }
 
 const fromRow = (row: Row): CrewProposal => ({
@@ -153,6 +159,7 @@ const fromRow = (row: Row): CrewProposal => ({
   approvedSeats: row.approved_seats === null ? null : decodeSeats(row.approved_seats),
   createdAt: row.created_at,
   resolvedAt: row.resolved_at,
+  reportedAt: row.reported_at,
 });
 
 export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlClient> =
@@ -174,12 +181,13 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
         yield* sql`
           INSERT OR IGNORE INTO j5_agent_crew_proposal (
             id, squadron_id, captain_participant_id, captain_thread_id, crew_instance_id, kind,
-            status, brief, display_name, requested_seats, approved_seats, created_at, resolved_at
+            status, brief, display_name, requested_seats, approved_seats, created_at, resolved_at,
+            reported_at
           ) VALUES (
             ${input.id}, ${input.squadronId}, ${input.captainParticipantId},
             ${input.captainThreadId}, ${input.crewInstanceId}, ${input.kind}, 'open',
             ${input.brief}, ${input.displayName}, ${encodeSeats(input.requestedSeats)}, NULL,
-            ${input.createdAt}, NULL
+            ${input.createdAt}, NULL, NULL
           )
         `;
         return (yield* read(input.id))!;
@@ -249,6 +257,25 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
         return yield* read(id);
       });
 
+      const listUnreported = Effect.fn("j5.a2a.agentCrewProposals.listUnreported")(function* () {
+        const rows = yield* sql<Row>`
+          SELECT * FROM j5_agent_crew_proposal
+          WHERE status = 'approved' AND reported_at IS NULL
+          ORDER BY created_at, id
+        `;
+        return rows.map(fromRow);
+      });
+
+      const markReported = Effect.fn("j5.a2a.agentCrewProposals.markReported")(function* (
+        id: string,
+        reportedAt: string,
+      ) {
+        yield* sql`
+          UPDATE j5_agent_crew_proposal SET reported_at = ${reportedAt}
+          WHERE id = ${id} AND reported_at IS NULL
+        `;
+      });
+
       const listClaimed = Effect.fn("j5.a2a.agentCrewProposals.listClaimed")(function* () {
         const rows = yield* sql<Row>`
           SELECT * FROM j5_agent_crew_proposal
@@ -277,6 +304,8 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
         complete,
         reopen,
         listClaimed,
+        listUnreported,
+        markReported,
         attachInstance,
       });
     }),

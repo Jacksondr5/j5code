@@ -10,6 +10,7 @@ import { deriveDisplayedUserMessageState } from "../../lib/terminalContext";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { presentParticipantIdentity } from "../a2a/ParticipantIdentity";
 import {
+  crewGateFooter,
   crewGateTitle,
   presentCrewNotice,
   type CrewNoticeMessage,
@@ -147,6 +148,11 @@ function CrewGateCard(props: {
           </time>
         ) : null}
       </div>
+      {approved && notice.changes !== null ? (
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          You changed the roster: {notice.changes}.
+        </p>
+      ) : null}
       {approved ? (
         <ul className="mt-2 flex flex-col gap-1">
           {notice.roster.map((seat) => {
@@ -155,6 +161,7 @@ function CrewGateCard(props: {
               participantLabels: input.participantLabels ?? new Map(),
             });
             const label = identity.tooltipParticipantId === null ? identity.label : seat.agentId;
+            const failure = notice.failures.find((entry) => entry.seat === seat.seat) ?? null;
             return (
               <li key={seat.seat}>
                 <button
@@ -172,7 +179,19 @@ function CrewGateCard(props: {
                       New
                     </span>
                   ) : null}
+                  {seat.start === "failed" ? (
+                    <span className="ms-auto shrink-0 rounded-md bg-red-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-red-700 dark:text-red-300">
+                      Failed to start
+                    </span>
+                  ) : seat.start === "pending" ? (
+                    <span className="ms-auto shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+                      Not started
+                    </span>
+                  ) : null}
                 </button>
+                {failure !== null ? (
+                  <p className="ps-1.5 text-xs text-muted-foreground">{failure.detail}</p>
+                ) : null}
               </li>
             );
           })}
@@ -183,13 +202,7 @@ function CrewGateCard(props: {
           {notice.requestedSeats.map((seat) => `${seat.seat} (${seat.agentId})`).join(", ")}
         </p>
       ) : null}
-      <p className="mt-2 text-xs text-muted-foreground">
-        {approved
-          ? notice.requestKind === "roster"
-            ? "Every seat started with the brief and this roster."
-            : "The new seat started with the brief and the current roster."
-          : "The Captain can revise the request and propose again."}
-      </p>
+      <p className="mt-2 text-xs text-muted-foreground">{crewGateFooter(notice)}</p>
     </section>
   );
 }

@@ -9,6 +9,8 @@ export interface CrewNoticeMessage {
   readonly createdBy?: string | undefined;
 }
 
+export type SeatStart = "started" | "failed" | "pending";
+
 export interface CrewRosterSeat {
   readonly seat: string;
   readonly participantId: string;
@@ -16,6 +18,15 @@ export interface CrewRosterSeat {
   readonly threadId: string;
   /** Joined at the version this notice announces (an approved addition). */
   readonly isNew: boolean;
+  /** How this seat's first turn went, for the seats this launch report watched; null otherwise. */
+  readonly start: SeatStart | null;
+}
+
+/** A seat that failed to start, with the run's recorded error as the report carried it. */
+export interface SeatStartFailure {
+  readonly seat: string;
+  readonly runStatus: string;
+  readonly detail: string;
 }
 
 export type CrewNoticePresentation =
@@ -36,6 +47,11 @@ export type CrewNoticePresentation =
       readonly crewVersion: number | null;
       readonly roster: ReadonlyArray<CrewRosterSeat>;
       readonly requestedSeats: ReadonlyArray<{ readonly seat: string; readonly agentId: string }>;
+      /** What the person changed against the proposal, as the report words it; null when nothing. */
+      readonly changes: string | null;
+      readonly failures: ReadonlyArray<SeatStartFailure>;
+      /** Seats whose first turn had not started when the report's window closed. */
+      readonly pendingSeats: ReadonlyArray<string>;
     };
 
 // The Claude effort prefix (`applyClaudePromptEffortPrefix`) is applied after the wrapper, so a
@@ -44,10 +60,16 @@ export type CrewNoticePresentation =
 const LAUNCH_BLOCK =
   /^(?:Ultrathink:\n)?<j5_crew_launch>\n([\s\S]*?)\n<\/j5_crew_launch>\n\n([\s\S]*)$/;
 const GATE_BLOCK = /^<j5_crew_gate>\n([\s\S]*?)\n<\/j5_crew_gate>/;
-const ROSTER_LINE = /^- ([^:]+): participant_id=(\S+) agent=(\S+) thread_id=(\S+)( \(new\))?$/;
+const ROSTER_LINE =
+  /^- ([^:]+): participant_id=(\S+) agent=(\S+) thread_id=(\S+)(?: start=(started|failed|pending))?( \(new\))?$/;
 
 const field = (block: string, name: string) =>
   new RegExp(`^${name}: (.*)$`, "m").exec(block)?.[1]?.trim() ?? null;
+/** Every line of a repeated field, in order: the report has one `seat_failed` line per seat. */
+const fields = (block: string, name: string) =>
+  [...block.matchAll(new RegExp(`^${name}: (.*)$`, "gm"))].map((match) => match[1]!.trim());
+const seatStart = (value: string | undefined): SeatStart | null =>
+  value === "started" || value === "failed" || value === "pending" ? value : null;
 
 const parseLaunch = (text: string): CrewNoticePresentation | null => {
   const match = LAUNCH_BLOCK.exec(text);
@@ -86,10 +108,19 @@ const parseGate = (text: string): CrewNoticePresentation | null => {
                     participantId: seat[2]!,
                     agentId: seat[3]!,
                     threadId: seat[4]!,
-                    isNew: seat[5] !== undefined,
+                    isNew: seat[6] !== undefined,
+                    start: seatStart(seat[5]),
                   },
                 ],
           );
+  // `seat_failed: <seat> | <run status> | <error>`; the error may itself contain the separator.
+  const failures = fields(block, "seat_failed").flatMap((entry) => {
+    const [seat, runStatus, ...rest] = entry.split(" | ");
+    return seat === undefined || runStatus === undefined || rest.length === 0
+      ? []
+      : [{ seat, runStatus, detail: rest.join(" | ") }];
+  });
+  const changes = field(block, "changes");
   const requestedSeats = (field(block, "requested_seats") ?? "")
     .split(",")
     .map((entry) => entry.trim())
@@ -110,6 +141,9 @@ const parseGate = (text: string): CrewNoticePresentation | null => {
     crewVersion: version === null || !/^\d+$/.test(version) ? null : Number(version),
     roster,
     requestedSeats,
+    changes: changes === null || changes === "none" ? null : changes,
+    failures,
+    pendingSeats: fields(block, "seat_pending"),
   };
 };
 
@@ -128,12 +162,32 @@ export const participantIdsForCrewNotice = (message: CrewNoticeMessage): Readonl
   return notice?.kind === "gate" ? notice.roster.map((seat) => seat.participantId) : [];
 };
 
-/** The card's title: what was decided, about what. */
-export const crewGateTitle = (notice: Extract<CrewNoticePresentation, { kind: "gate" }>) =>
-  notice.decision === "approved"
-    ? notice.requestKind === "roster"
-      ? "Crew approved"
-      : "Seat added"
-    : notice.requestKind === "roster"
-      ? "Crew declined"
-      : "Seat declined";
+/** The card's title: what was decided and, for an approval, whether the launch went whole. */
+export const crewGateTitle = (notice: Extract<CrewNoticePresentation, { kind: "gate" }>) => {
+  if (notice.decision === "declined")
+    return notice.requestKind === "roster" ? "Crew declined" : "Seat declined";
+  if (notice.failures.length > 0)
+    return notice.requestKind === "roster"
+      ? `Crew launched, ${notice.failures.length} ${notice.failures.length === 1 ? "seat" : "seats"} failed to start`
+      : "Seat failed to start";
+  return notice.requestKind === "roster" ? "Crew launched" : "Seat added";
+};
+
+/** The card's last line: what is true of the seats now that the report has been read. */
+export const crewGateFooter = (notice: Extract<CrewNoticePresentation, { kind: "gate" }>) => {
+  if (notice.decision === "declined")
+    return "The Captain can revise the request and propose again.";
+  const parts: Array<string> = [];
+  if (notice.failures.length > 0)
+    parts.push(
+      `${notice.failures.length} ${notice.failures.length === 1 ? "seat" : "seats"} failed to start; the Captain has each reason.`,
+    );
+  if (notice.pendingSeats.length > 0)
+    parts.push(
+      `${notice.pendingSeats.length} ${notice.pendingSeats.length === 1 ? "seat had" : "seats had"} not started after a minute.`,
+    );
+  if (parts.length > 0) return parts.join(" ");
+  return notice.requestKind === "roster"
+    ? "Every seat started with the brief and this roster."
+    : "The new seat started with the brief and the current roster.";
+};

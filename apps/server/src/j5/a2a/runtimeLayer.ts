@@ -4,6 +4,7 @@ import { layer as agentCrewInstanceLayer } from "./AgentCrewInstanceService.ts";
 import { layer as archiveFactsLayer, placementFactsLayer } from "./ArchiveFactsService.ts";
 import { layer as archiveAgentLayer } from "./ArchiveAgentService.ts";
 import { layer as agentCrewProposalLayer } from "./AgentCrewProposalService.ts";
+import { layer as crewLaunchReporterLayer } from "./CrewLaunchReporter.ts";
 import { layer as crewLaunchLayer } from "./CrewLaunchService.ts";
 import {
   bootSweepLayer as crewProposalBootSweepLayer,
@@ -85,9 +86,14 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(spawnCompositionProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
   );
+  // The report watches the seats an approval launched and tells the Captain how they started.
+  const crewLaunchReporterProvided = crewLaunchReporterLayer.pipe(
+    Layer.provideMerge(agentCrewProposalLayer),
+    Layer.provideMerge(agentCrewInstanceLayer),
+  );
   const crewProposalProvided = crewProposalLayer.pipe(
     Layer.provideMerge(crewLaunchProvided),
-    Layer.provideMerge(agentCrewProposalLayer),
+    Layer.provideMerge(crewLaunchReporterProvided),
   );
   // Same layer object, so the sweep runs against the one gate instance the routes use.
   const crewProposalBootSweepProvided = crewProposalBootSweepLayer.pipe(

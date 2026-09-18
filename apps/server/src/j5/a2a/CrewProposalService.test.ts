@@ -34,6 +34,7 @@ import {
   AgentCrewProposalService,
   layer as proposalStoreLayer,
 } from "./AgentCrewProposalService.ts";
+import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import {
   CrewLaunchOperationError,
   CrewLaunchService,
@@ -172,8 +173,16 @@ const fixture = Effect.gen(function* () {
   // Seat threads that never came to exist (a not-found), and ones whose read the store cannot answer.
   const missingThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
   const unreadableThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
+  // An approval is told to the Captain by the launch report, once its seats have started; here the
+  // reporter records which proposals it was handed.
+  const watched = yield* Ref.make<ReadonlyArray<string>>([]);
   const layer = crewProposalLayer.pipe(
     Layer.provideMerge(fakeLauncher(crews)),
+    Layer.provideMerge(
+      Layer.mock(CrewLaunchReporter)({
+        watch: (proposalId) => Ref.update(watched, (items) => [...items, proposalId]),
+      }),
+    ),
     Layer.provideMerge(
       Layer.mock(ThreadManagementService)({
         getThreadProjection: (threadId) =>
@@ -212,14 +221,14 @@ const fixture = Effect.gen(function* () {
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-proposal-" })),
     Layer.provideMerge(NodeServices.layer),
   );
-  return { layer, notices, archiveFailures, missingThreads, unreadableThreads };
+  return { layer, notices, watched, archiveFailures, missingThreads, unreadableThreads };
 });
 
 it.effect(
-  "holds a roster until the human approves, honours human-added seats, and notifies the Captain",
+  "holds a roster until the human approves, honours human-added seats, and hands the launch to the report",
   () =>
     Effect.gen(function* () {
-      const { layer, notices } = yield* fixture;
+      const { layer, notices, watched } = yield* fixture;
       yield* Effect.gen(function* () {
         const gate = yield* CrewProposalService;
         const store = yield* AgentCrewProposalService;
@@ -263,15 +272,13 @@ it.effect(
           ["builder", "critic", "sentry"],
         );
         assert.lengthOf(yield* store.listOpen(), 0);
-        const notice = (yield* Ref.get(notices))[0];
-        assert.equal(notice?.type, "message.dispatch");
-        if (notice?.type === "message.dispatch") {
-          assert.equal(notice.threadId, captainThread);
-          assert.equal(notice.createdBy, "system");
-          assert.include(notice.text, "decision: approved");
-          assert.include(notice.text, `crew_instance_id: ${approved.instance?.id}`);
-          assert.include(notice.text, "- sentry: participant_id=");
-        }
+        // Nothing is said to the Captain yet: the launch report speaks once the seats are up.
+        assert.lengthOf(
+          (yield* Ref.get(notices)).filter((command) => command.type === "message.dispatch"),
+          0,
+        );
+        assert.deepStrictEqual(yield* Ref.get(watched), [open.proposal.id]);
+        assert.isNull((yield* store.read(open.proposal.id))!.reportedAt);
 
         const again = yield* gate
           .resolve({ proposalId: open.proposal.id, decision: "approve" })
@@ -300,9 +307,6 @@ it.effect("gates every roster on the human and gates additions with the seat cap
         decision: "approve",
       });
       assert.equal(approvedOutcome.proposal.status, "approved");
-      const approvedNotice = (yield* Ref.get(notices))[0];
-      if (approvedNotice?.type === "message.dispatch")
-        assert.include(approvedNotice.text, "decision: approved");
       const instance = approvedOutcome.instance as AgentCrewInstance;
 
       const request = yield* gate.requestMember({

@@ -217,7 +217,7 @@ against the library before anything is recorded: unknown or disabled agents, dup
 or more than twelve seats refuse with the next step. An open roster proposal waits for the human
 gate inline above the Captain's composer (additions wait in the Inbox); approval spawns the approved roster (the human may have edited it) as persona-backed Peer
 Agents under the caller, records the Crew snapshot with each member's approver and reason, and posts
-a `<j5_crew_gate>` notice with the roster into the caller's thread. Declines post the decline.
+a `<j5_crew_gate>` launch report into the caller's thread once every seat has started or failed to start (or a minute has passed): the roster, what the user changed against the proposal, and per seat `start=started|failed|pending`, with a `seat_failed` line carrying the run's error. Declines post the decline at once.
 Human approval is the authority (Bryant, 2026-09-10): seats run with their own agent's runtime
 policy, so a read-only Captain may command writing seats once a person approved them; a seat's
 permissions never come from its Captain's.

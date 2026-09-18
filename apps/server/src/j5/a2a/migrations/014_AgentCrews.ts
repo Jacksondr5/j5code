@@ -73,6 +73,9 @@ export default Effect.gen(function* () {
       approved_seats TEXT,
       created_at TEXT NOT NULL,
       resolved_at TEXT,
+      -- When the Captain was told how the approved seats launched; NULL until the launch report
+      -- posts, which is what the boot sweep looks for.
+      reported_at TEXT,
       FOREIGN KEY (squadron_id) REFERENCES j5_a2a_squadron(id) ON DELETE CASCADE
     )
   `;
