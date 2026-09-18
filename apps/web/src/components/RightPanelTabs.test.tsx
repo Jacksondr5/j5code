@@ -122,6 +122,7 @@ function renderTabs(
       onAddFiles={() => undefined}
       onAddArtifacts={() => undefined}
       onAddAgents={() => undefined}
+      onAddPlaybooks={() => undefined}
       liveAgentCount={0}
       browserAvailable
       terminalAvailable={false}
@@ -130,6 +131,7 @@ function renderTabs(
       artifactsAvailable
       pullRequestAvailable={false}
       agentsAvailable={false}
+      playbooksAvailable={false}
     >
       <div>content</div>
     </RightPanelTabs>,
