@@ -27,6 +27,10 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import {
+  AgentCrewInstanceService,
+  layer as crewInstanceLayer,
+} from "./AgentCrewInstanceService.ts";
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { A2ADeliveryTransport, type A2ADeliveryTransportShape } from "./DeliveryTransport.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
@@ -121,6 +125,7 @@ const makeTestLayer = () => {
     Layer.provide(ledger),
     Layer.provide(database),
     Layer.provide(threads),
+    Layer.provideMerge(crewInstanceLayer.pipe(Layer.provide(database))),
     Layer.provideMerge(worker),
   );
   return Layer.mergeAll(database, ledger, send, detector);
@@ -189,6 +194,7 @@ const makeDaemonTestLayer = (
     Layer.provide(ledger),
     Layer.provide(database),
     Layer.provide(threads),
+    Layer.provideMerge(crewInstanceLayer.pipe(Layer.provide(database))),
     Layer.provideMerge(worker),
   );
   return Layer.mergeAll(database, ledger, send, detector);
@@ -745,6 +751,35 @@ it.effect("attaches the persisted provider detail to an errored notice", () =>
     const notices = yield* readNotices();
     assert.equal(notices[0]?.state, "errored");
     if (notices[0]?.state === "errored") assert.deepStrictEqual(notices[0].detail, failureDetail);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("stays quiet about a seat's failed run when the asker is its Captain", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    // The waiter commands a live Crew the subject sits in: the launch report or the seat's finish
+    // notice tells it about the failure, with the run's error, so no errored notice is posted here.
+    yield* (yield* AgentCrewInstanceService).record({
+      id: "crew:silence",
+      squadronId,
+      captainParticipantId: waiter.id,
+      captainThreadId: waiter.threadId,
+      displayName: "Silence Crew",
+      brief: "Prove the rule.",
+      createdAt: iso(0),
+      members: [
+        {
+          seatName: "subject",
+          agentId: "subject",
+          participantId: subject.id,
+          threadId: subject.threadId,
+          reason: null,
+        },
+      ],
+    });
+    yield* seedInbound(0);
+    yield* (yield* A2ASilenceDetector).handleStoredEvent(terminalEvent("failed"));
+    assert.deepStrictEqual(yield* readNotices(), []);
   }).pipe(Effect.provide(makeTestLayer())),
 );
 

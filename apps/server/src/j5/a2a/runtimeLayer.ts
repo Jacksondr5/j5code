@@ -5,7 +5,7 @@ import { layer as agentCrewInstanceLayer } from "./AgentCrewInstanceService.ts";
 import { layer as archiveFactsLayer, placementFactsLayer } from "./ArchiveFactsService.ts";
 import { layer as archiveAgentLayer } from "./ArchiveAgentService.ts";
 import { layer as agentCrewProposalLayer } from "./AgentCrewProposalService.ts";
-import { layer as crewLaunchReporterLayer } from "./CrewLaunchReporter.ts";
+import { manualLayer as crewLaunchReporterLayer } from "./CrewLaunchReporter.ts";
 import { layer as crewLaunchLayer } from "./CrewLaunchService.ts";
 import {
   bootSweepLayer as crewProposalBootSweepLayer,
@@ -62,8 +62,10 @@ export const makeJ5A2AAuxiliaryLayer = (
   const deliveryWorkerProvided = deliveryWorkerLayer.pipe(
     Layer.provideMerge(deliveryTransportProvided),
   );
+  // The detector reads Crew membership to stay quiet about a seat failure its Captain hears elsewhere.
   const silenceDetectorProvided = silenceDetectorLayer.pipe(
     Layer.provideMerge(deliveryWorkerProvided),
+    Layer.provideMerge(agentCrewInstanceLayer),
   );
   const lifecycleServiceProvided = lifecycleServiceLayer.pipe(
     Layer.provideMerge(deliveryWorkerProvided),
@@ -88,7 +90,8 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(spawnCompositionProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
   );
-  // The report watches the seats an approval launched and tells the Captain how they started.
+  // The report watches the seats an approval launched and tells the Captain how they started; the
+  // finish notifier's stream feeds it, so one stream serves every Crew reaction.
   const crewLaunchReporterProvided = crewLaunchReporterLayer.pipe(
     Layer.provideMerge(agentCrewProposalLayer),
     Layer.provideMerge(agentCrewInstanceLayer),
@@ -103,6 +106,7 @@ export const makeJ5A2AAuxiliaryLayer = (
   );
   // The finish notifier tells a Captain when a seat's handoff file appears, so it reads the workspace.
   const crewSeatFinishNotifierProvided = crewSeatFinishNotifierLayer.pipe(
+    Layer.provideMerge(crewLaunchReporterProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
     Layer.provide(artifactWorkspaceLayer),
   );

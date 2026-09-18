@@ -46,6 +46,8 @@ export interface FinishedSeat {
   readonly participantId: string;
   readonly threadId: string;
   readonly runStatus: string;
+  /** The run's recorded error when it failed, as the notice carried it. */
+  readonly failure: string | null;
   readonly handoff: SeatHandoff;
 }
 
@@ -207,7 +209,15 @@ const parseSeatSection = (section: string): FinishedSeat | null => {
               .replace(/<\\j5_seat_finished>/g, "<j5_seat_finished>"),
     };
   }
-  return { seat, crewName: field(block, "crew"), participantId, threadId, runStatus, handoff };
+  return {
+    seat,
+    crewName: field(block, "crew"),
+    participantId,
+    threadId,
+    runStatus,
+    failure: field(block, "failure"),
+    handoff,
+  };
 };
 
 const parseSeats = (text: string): CrewNoticePresentation | null => {
@@ -236,6 +246,15 @@ export const participantIdsForCrewNotice = (message: CrewNoticeMessage): Readonl
   if (notice?.kind === "gate") return notice.roster.map((seat) => seat.participantId);
   if (notice?.kind === "seats") return notice.seats.map((seat) => seat.participantId);
   return [];
+};
+
+/** The seats card's title leads with what ended how: "Seat failed", "2 seats finished, 1 failed". */
+export const crewSeatsTitle = (seats: ReadonlyArray<FinishedSeat>) => {
+  const failed = seats.filter((seat) => seat.runStatus === "failed").length;
+  const finished = seats.length - failed;
+  if (failed === 0) return seats.length === 1 ? "Seat finished" : `${seats.length} seats finished`;
+  if (finished === 0) return failed === 1 ? "Seat failed" : `${failed} seats failed`;
+  return `${finished} ${finished === 1 ? "seat" : "seats"} finished, ${failed} failed`;
 };
 
 /** "Completed", "Failed", "Interrupted": the run's measured end, with a tone for the pill. */

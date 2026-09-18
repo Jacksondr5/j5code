@@ -5,6 +5,7 @@ import {
   artifactPanelPath,
   crewGateFooter,
   crewGateTitle,
+  crewSeatsTitle,
   participantIdsForCrewNotice,
   presentCrewNotice,
   seatRunStatusLabel,
@@ -201,6 +202,7 @@ describe("crew notices in the Captain's thread", () => {
       "participant_id: agent:j5:a2a:b",
       "thread_id: thread:b",
       "run_status: failed",
+      "failure: provider_error — API Error: Can't reach the API server",
       "handoff: none declared",
       "</j5_seat_finished>",
     ].join("\n");
@@ -218,6 +220,7 @@ describe("crew notices in the Captain's thread", () => {
           participantId: "agent:j5:a2a:c",
           threadId: "thread:c",
           runStatus: "completed",
+          failure: null,
           handoff: {
             status: "written",
             kind: "ReviewHandoff",
@@ -231,10 +234,16 @@ describe("crew notices in the Captain's thread", () => {
           participantId: "agent:j5:a2a:b",
           threadId: "thread:b",
           runStatus: "failed",
+          failure: "provider_error — API Error: Can't reach the API server",
           handoff: { status: "none declared" },
         },
       ],
     });
+    if (notice?.kind === "seats") {
+      expect(crewSeatsTitle(notice.seats)).toBe("1 seat finished, 1 failed");
+      expect(crewSeatsTitle([notice.seats[1]!])).toBe("Seat failed");
+      expect(crewSeatsTitle([notice.seats[0]!])).toBe("Seat finished");
+    }
     expect(
       participantIdsForCrewNotice({ role: "user", createdBy: "system", text: builder }),
     ).toEqual(["agent:j5:a2a:b"]);
