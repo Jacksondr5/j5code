@@ -19,7 +19,7 @@ Threads launched as a persona show the persona beside their home in the thread l
 
 ## Persona library
 
-To run a persona inside a conversation, type `@persona:` followed by its ID, or type `@` and the start of the persona's ID or name; matching personas appear above the file results. Choosing one inserts the mention, and the next message runs that persona as a subagent of the conversation. The older `@agent:` spelling still works.
+To run a persona inside a conversation, type `@persona:` followed by its ID, or type `@` and the start of the persona's ID or name; matching personas appear above the file results. Choosing one inserts the mention, and the next message runs that persona as a subagent of the conversation.
 
 Open **Settings → Personas** on web, desktop, or mobile to see the reusable personas in a connected environment. Select an environment to inspect its library and available model routes. Personas can be authored in folders and shared through git; supplied examples are starting points you can customize.
 
