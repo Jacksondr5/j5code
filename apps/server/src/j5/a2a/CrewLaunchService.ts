@@ -175,6 +175,8 @@ export const layer = Layer.effect(
       const providers = yield* registry.getProviders;
       const resolved: Array<ResolvedSeat> = [];
       for (const seat of seats) {
+        // Resolved at spawn, against the providers as they are now: a signed-out, disabled, or
+        // missing provider refuses the seat here with that reason, before anything is created.
         const assignment = yield* prepareAgentPersonaLaunch(
           { personaId: seat.agentId },
           providers,

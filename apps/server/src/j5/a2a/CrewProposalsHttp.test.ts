@@ -29,6 +29,7 @@ const proposal: CrewProposal = {
   approvedSeats: null,
   createdAt: "2026-09-09T16:00:00.000Z",
   resolvedAt: null,
+  reportedAt: null,
 };
 
 const paths = { list: "/raw/crews/proposals", resolve: "/raw/crews/proposals/resolve" } as const;

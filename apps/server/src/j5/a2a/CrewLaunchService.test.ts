@@ -358,3 +358,37 @@ it.effect(
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );
+
+it.effect(
+  "a seat whose provider is signed out is refused at spawn, before anything is created",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const signedOut = {
+        ...provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]),
+        auth: { status: "unauthenticated" as const },
+      };
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(dependencies(commands, [signedOut])),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-launch-" })),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const refused = yield* launcher
+          .launch({
+            providerSessionId: "session",
+            requestKey: "signed-out-1",
+            captain,
+            displayName: "Signed Out",
+            seats: [{ name: "builder", agentId: "builder", reason: "Implements" }],
+            brief: "Ship it.",
+          })
+          .pipe(Effect.flip);
+        assert.equal(refused._tag, "CrewLaunchSeatUnavailableError");
+        assert.include(refused.message, "signed out");
+        assert.lengthOf(yield* Ref.get(commands), 0);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
