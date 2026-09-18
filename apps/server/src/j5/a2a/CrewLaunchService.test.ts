@@ -119,6 +119,7 @@ const dependencies = (
   failHomeOnce: Set<string> = new Set(),
   /** Seat threads whose projection the store cannot read, once; a not-found is not among them. */
   unreadableOnce: Set<string> = new Set(),
+  archived: Set<string> = new Set(),
 ) =>
   Layer.mergeAll(
     Layer.mock(ThreadManagementService)({
@@ -131,12 +132,16 @@ const dependencies = (
               }),
             )
           : Effect.succeed({
-              thread: thread(threadId),
+              thread: {
+                ...thread(threadId),
+                archivedAt: archived.has(threadId) ? createdAt : null,
+              },
             } as unknown as OrchestrationV2ThreadProjection),
       dispatch: (command) =>
-        Ref.update(commands, (items) => [...items, command]).pipe(
-          Effect.as({ events: [], effects: [] } as never),
-        ),
+        Ref.update(commands, (items) => {
+          if (command.type === "thread.archive") archived.add(command.threadId);
+          return [...items, command];
+        }).pipe(Effect.as({ events: [], effects: [] } as never)),
     }),
     Layer.mock(SpawnCompositionService)({
       recordFacts: (input) =>
@@ -344,6 +349,15 @@ it.effect(
           .filter((command) => command.type === "thread.archive")
           .map((command) => command.threadId);
         assert.deepStrictEqual(archived, [seatThread("critic")]);
+        const beforeRetry = (yield* Ref.get(commands)).length;
+        const retiredSeat = yield* launch("critic").pipe(Effect.flip);
+        assert.equal(retiredSeat._tag, "CrewLaunchOperationError");
+        assert.include(retiredSeat.message, "reusing a retired seat");
+        assert.equal((yield* Ref.get(commands)).length, beforeRetry);
+        assert.sameMembers(
+          (yield* crews.read(crewId))!.members.map((member) => member.seatName),
+          ["builder", "reviewer"],
+        );
         assert.isNull(yield* crews.findMembership(participantIdForThread(seatThread("critic"))));
         // Every seat that launches was briefed, and the roster in the brief is the one that launched.
         const briefs = (yield* Ref.get(commands)).filter(

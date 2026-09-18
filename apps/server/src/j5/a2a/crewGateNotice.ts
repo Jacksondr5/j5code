@@ -125,7 +125,7 @@ export const crewLaunchReportText = (input: {
   const prose: Array<string> = [];
   if (failed.length > 0)
     prose.push(
-      `${failed.length} of ${verdicts.size} seats failed to start; each seat_failed line carries the run's error. A seat whose provider is signed out or unreachable needs the user: raise it through the inbox, then re-brief the seat with send_message once the provider works. Seats that started have your brief and this roster.`,
+      `${failed.length} of ${verdicts.size} seats failed to start; each seat_failed line carries the run's error. The platform raises provider sign-in and permission failures in the human inbox. Re-brief the seat with send_message once the provider works; ask the user about other failures when their help is needed. Seats that started have your brief and this roster.`,
     );
   if (pending.length > 0)
     prose.push(

@@ -1,3 +1,4 @@
+import { makeCrewFailureAlert } from "./crewFailureAlert.ts";
 import {
   MessageId,
   type OrchestrationV2Run,
@@ -152,6 +153,7 @@ const makeLayer = (daemon: boolean) =>
     CrewLaunchReporter,
     Effect.gen(function* () {
       const threads = yield* ThreadManagementService;
+      const alertHumanOfCrewFailure = yield* makeCrewFailureAlert;
       const proposals = yield* AgentCrewProposalService;
       const crews = yield* AgentCrewInstanceService;
       const sql = yield* SqlClient.SqlClient;
@@ -166,6 +168,15 @@ const makeLayer = (daemon: boolean) =>
         const proposal = launch.proposal;
         const stable = { providerSessionId: CREW_PROPOSAL_SESSION, requestKey: proposal.id };
         const captain = yield* threads.getThreadProjection(proposal.captainThreadId);
+        for (const [seatName, verdict] of launch.verdicts) {
+          if (verdict.kind === "failed")
+            yield* alertHumanOfCrewFailure({
+              instance: launch.instance,
+              seatName,
+              runId: verdict.runId,
+              failure: verdict.failure,
+            });
+        }
         // Dispatch can commit before the report stamp fails. Replay the already-persisted
         // outcome instead of recomputing it from runs that may have changed since that report.
         if (captain.messages.some((message) => message.id === noticeMessageId(proposal.id))) {

@@ -366,10 +366,42 @@ export const layer = Layer.effect(
       }
     });
 
+    const assertReusableSeats = Effect.fn("j5.a2a.crewLaunch.assertReusableSeats")(function* (
+      planned: ReadonlyArray<Planned>,
+    ) {
+      for (const member of planned) {
+        const existing = yield* getThreadProjectionIfPresent(
+          threadManagement,
+          member.threadId,
+        ).pipe(
+          Effect.mapError(
+            (cause) =>
+              new CrewLaunchOperationError({
+                phase: "checking an earlier seat identity",
+                seatName: member.seat.name,
+                createdSeats: [],
+                cause,
+              }),
+          ),
+        );
+        if (
+          existing !== null &&
+          (existing.thread.archivedAt !== null || existing.thread.deletedAt != null)
+        )
+          return yield* new CrewLaunchOperationError({
+            phase: "reusing a retired seat",
+            seatName: member.seat.name,
+            createdSeats: [],
+            cause: `Seat ${member.seat.name} was retired by an earlier attempt. Use a new seat name or decline and create a fresh proposal.`,
+          });
+      }
+    });
+
     const launch: CrewLaunchServiceShape["launch"] = (input) =>
       Effect.gen(function* () {
         const resolved = yield* resolveSeats(input.captain, input.seats);
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
+        yield* assertReusableSeats(planned);
         const recordError = (phase: string) => (cause: unknown) =>
           new CrewLaunchOperationError({ phase, seatName: null, createdSeats: [], cause });
         const crewInstanceId = spawnCrewInstanceId({
@@ -443,6 +475,7 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const resolved = yield* resolveSeats(input.captain, input.seats);
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
+        yield* assertReusableSeats(planned);
         // Reserve the seats before anything spawns: the store decides the cap and the version in
         // one transaction, so two approvals landing together cannot both pass. Seat ids are
         // deterministic, so a retry after a failed spawn finds its reservation and converges.

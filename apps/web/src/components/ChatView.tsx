@@ -1,3 +1,4 @@
+import { CrewRosterGate } from "../j5/crew/CrewRosterGate";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import * as Schema from "effect/Schema";
 import { confirmTerminalClose, isTerminalCloseConfirmPending } from "../lib/terminalCloseConfirm";
@@ -8570,6 +8571,10 @@ export default function ChatView(props: ChatViewProps) {
                               />
                             </div>
                           ) : null}
+                          <CrewRosterGate
+                            environmentId={environmentId}
+                            threadId={isServerThread ? activeThreadId : null}
+                          />
                           <ChatComposer
                             composerRef={composerRef}
                             composerDraftTarget={composerDraftTarget}
