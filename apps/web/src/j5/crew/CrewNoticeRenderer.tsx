@@ -10,7 +10,6 @@ import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/toolt
 import { deriveDisplayedUserMessageState } from "../../lib/terminalContext";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { useRightPanelStore } from "../../rightPanelStore";
-import { presentParticipantIdentity } from "../a2a/ParticipantIdentity";
 import {
   artifactPanelPath,
   crewGateFooter,
