@@ -11,6 +11,7 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import trash from "trash";
 
 import { writeFileStringAtomically } from "../../atomicWrite.ts";
 import { ServerConfig } from "../../config.ts";
@@ -46,6 +47,10 @@ export interface ArtifactWorkspaceShape {
     readonly projectId: ProjectId;
     readonly relativePath: string;
   }) => Effect.Effect<ArtifactContent, ArtifactWorkspaceError>;
+  readonly trash: (input: {
+    readonly projectId: ProjectId;
+    readonly relativePath: string;
+  }) => Effect.Effect<void, ArtifactWorkspaceError>;
   readonly write: (input: {
     readonly projectId: ProjectId;
     readonly relativePath: string;
@@ -490,6 +495,76 @@ export const layer = Layer.effect(
       },
     );
 
+    const trashArtifact: ArtifactWorkspaceShape["trash"] = Effect.fn("ArtifactWorkspace.trash")(
+      function* (input) {
+        const workspace = yield* resolveExistingArtifactRoot(input.projectId);
+        if (workspace.realArtifactRoot === null) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "trash-artifact",
+            detail: "The artifact does not exist.",
+            reason: "not_found",
+          });
+        }
+        const relativePath = normalizeArtifactRelativePath(input.relativePath);
+        if (relativePath.trim().length === 0 || path.isAbsolute(relativePath)) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "trash-artifact",
+            detail: "Artifact paths must be relative to the artifacts directory.",
+          });
+        }
+        const requestedPath = path.resolve(workspace.realArtifactRoot, relativePath);
+        if (!isPathWithin(path, workspace.realArtifactRoot, requestedPath)) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "trash-artifact",
+            detail: "Artifact paths cannot leave the artifacts directory.",
+          });
+        }
+        const realPath = yield* fileSystem.realPath(requestedPath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ArtifactWorkspaceError({
+                operation: "trash-artifact",
+                detail: "The artifact does not exist.",
+                reason: "not_found",
+                cause,
+              }),
+          ),
+        );
+        if (!isPathWithin(path, workspace.realArtifactRoot, realPath)) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "trash-artifact",
+            detail: "Artifact links cannot leave the artifacts directory.",
+          });
+        }
+        if (realPath !== requestedPath) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "trash-artifact",
+            detail: "Artifact links cannot be moved to the Trash.",
+          });
+        }
+        const info = yield* fileSystem
+          .stat(realPath)
+          .pipe(
+            Effect.mapError(
+              workspaceError("trash-artifact", "The artifact could not be inspected."),
+            ),
+          );
+        if (info.type !== "File") {
+          return yield* new ArtifactWorkspaceError({
+            operation: "trash-artifact",
+            detail: "Only artifact files can be moved to the Trash.",
+          });
+        }
+        // Use the already-validated canonical path. Symlink entries are rejected above, so a
+        // local writer cannot redirect this operation by swapping a requested ancestor.
+        yield* Effect.tryPromise(() => trash(realPath, { glob: false })).pipe(
+          Effect.mapError(
+            workspaceError("trash-artifact", "The artifact could not be moved to the Trash."),
+          ),
+        );
+      },
+    );
+
     const write: ArtifactWorkspaceShape["write"] = Effect.fn("ArtifactWorkspace.write")(
       function* (input) {
         const relativePath = normalizeArtifactRelativePath(input.relativePath);
@@ -555,7 +630,10 @@ export const layer = Layer.effect(
           });
         }
 
-        yield* writeFileStringAtomically({ filePath: requestedPath, contents: input.content }).pipe(
+        yield* writeFileStringAtomically({
+          filePath: requestedPath,
+          contents: input.content,
+        }).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
           Effect.mapError(workspaceError("write-artifact", "The artifact could not be written.")),
@@ -668,6 +746,15 @@ export const layer = Layer.effect(
         ),
       );
 
-    return ArtifactWorkspace.of({ prepare, list, read, write, writeVersioned, exportPlan, watch });
+    return ArtifactWorkspace.of({
+      prepare,
+      list,
+      read,
+      trash: trashArtifact,
+      write,
+      writeVersioned,
+      exportPlan,
+      watch,
+    });
   }),
 );

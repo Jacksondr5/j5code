@@ -11,6 +11,7 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as ProjectService from "../../project/ProjectService.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
+import { layer as agentHandoffRefreshesLayer } from "../agents/agentHandoffRefreshes.ts";
 import { ClientReadsService } from "./ClientReadsService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import {
@@ -348,6 +349,7 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
       ),
     ),
     Layer.provide(NodeSqliteClient.layerMemory()),
+    Layer.provide(agentHandoffRefreshesLayer),
     Layer.provideMerge(auth),
     Layer.provide(HttpServer.layerServices),
   );

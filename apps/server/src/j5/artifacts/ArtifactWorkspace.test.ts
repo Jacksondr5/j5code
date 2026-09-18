@@ -7,9 +7,13 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
+import { expect, vi } from "vite-plus/test";
 
 import * as ServerConfig from "../../config.ts";
 import * as ArtifactWorkspace from "./ArtifactWorkspace.ts";
+
+const trashMock = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("trash", () => ({ default: trashMock }));
 
 const TestLayer = ArtifactWorkspace.layer.pipe(
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-artifacts-state-" })),
@@ -91,6 +95,38 @@ describe("ArtifactWorkspace", () => {
         const listed = yield* artifacts.list(projectId);
         assert.equal(listed[0]?.path, "diagrams/flow.html");
         assert.equal(listed[0]?.byteLength, 17);
+      }).pipe(Effect.provide(TestLayer)),
+    ),
+  );
+
+  it.effect("moves an artifact to trash without affecting other project artifacts", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        trashMock.mockClear();
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const serverConfig = yield* ServerConfig.ServerConfig;
+        const artifacts = yield* ArtifactWorkspace.ArtifactWorkspace;
+        yield* artifacts.write({ projectId, relativePath: "notes/old.md", content: "old" });
+        yield* artifacts.write({ projectId, relativePath: "notes/keep.md", content: "keep" });
+
+        yield* artifacts.trash({ projectId, relativePath: "notes/old.md" });
+
+        const artifactRoot = path.join(
+          serverConfig.stateDir,
+          ArtifactWorkspace.ARTIFACT_DIRECTORY_NAME,
+          ArtifactWorkspace.artifactProjectDirectoryName(projectId),
+        );
+        const realArtifactRoot = yield* fileSystem.realPath(artifactRoot);
+        expect(trashMock).toHaveBeenCalledExactlyOnceWith(
+          path.join(realArtifactRoot, "notes/old.md"),
+          { glob: false },
+        );
+        assert.equal(
+          (yield* artifacts.read({ projectId, relativePath: "notes/keep.md" })).content,
+          "keep",
+        );
+        assert.isTrue(yield* fileSystem.exists(path.join(artifactRoot, "notes/old.md")));
       }).pipe(Effect.provide(TestLayer)),
     ),
   );
@@ -293,6 +329,14 @@ describe("ArtifactWorkspace", () => {
           artifacts.write({ projectId, relativePath: "..\\outside.txt", content: "nope" }),
         );
         assert.isTrue(windowsWriteResult._tag === "Failure");
+        const trashResult = yield* Effect.exit(
+          artifacts.trash({ projectId, relativePath: "../outside.txt" }),
+        );
+        assert.isTrue(trashResult._tag === "Failure");
+        const windowsTrashResult = yield* Effect.exit(
+          artifacts.trash({ projectId, relativePath: "..\\outside.txt" }),
+        );
+        assert.isTrue(windowsTrashResult._tag === "Failure");
       }).pipe(Effect.provide(TestLayer)),
     ),
   );
@@ -330,6 +374,37 @@ describe("ArtifactWorkspace", () => {
           assert.isFalse(yield* fileSystem.exists(path.join(outside, "new-directory")));
         }).pipe(Effect.provide(TestLayer)),
       ),
+  );
+
+  it.effect.skipIf(!symlinksSupported)("does not trash through an artifact symlink", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        trashMock.mockClear();
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const serverConfig = yield* ServerConfig.ServerConfig;
+        const artifacts = yield* ArtifactWorkspace.ArtifactWorkspace;
+        yield* artifacts.write({ projectId, relativePath: "target.md", content: "keep" });
+        const artifactRoot = path.join(
+          serverConfig.stateDir,
+          ArtifactWorkspace.ARTIFACT_DIRECTORY_NAME,
+          ArtifactWorkspace.artifactProjectDirectoryName(projectId),
+        );
+        yield* fileSystem.symlink(
+          path.join(artifactRoot, "target.md"),
+          path.join(artifactRoot, "link.md"),
+        );
+
+        const result = yield* Effect.exit(artifacts.trash({ projectId, relativePath: "link.md" }));
+
+        assert.isTrue(result._tag === "Failure");
+        expect(trashMock).not.toHaveBeenCalled();
+        assert.equal(
+          (yield* artifacts.read({ projectId, relativePath: "target.md" })).content,
+          "keep",
+        );
+      }).pipe(Effect.provide(TestLayer)),
+    ),
   );
 
   it.effect("watches for files created in the artifacts directory", () =>
