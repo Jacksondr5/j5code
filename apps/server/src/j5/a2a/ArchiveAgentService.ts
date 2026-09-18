@@ -75,6 +75,11 @@ export interface ArchiveAgentInput {
   readonly target: ArchiveAgentTarget;
   readonly clientRequestKey: string;
   readonly confirmationToken?: string;
+  /**
+   * The Crew archive path has already shown the unit's facts and holds a valid crew token, so
+   * per-member confirmation is satisfied; never set from the single-agent tool.
+   */
+  readonly confirmationSatisfied?: boolean;
   readonly archivedAt: string;
   readonly interruptCommandId: CommandId;
   readonly archiveCommandId: CommandId;
@@ -306,10 +311,20 @@ const isForwardOnlyRecovery = (confirmed: TokenPayload, current: TokenPayload): 
   return current.thread_archived || current.retired;
 };
 
+export interface ArchiveAgentTargetFacts {
+  readonly facts: ArchiveAgentConsequenceFacts;
+  readonly threadArchived: boolean;
+  readonly retired: boolean;
+}
+
 export interface ArchiveAgentServiceShape {
   readonly archive: (
     input: ArchiveAgentInput,
   ) => Effect.Effect<ArchiveAgentResult, ArchiveAgentError>;
+  /** Consequence facts without side effects, so a unit archive can warn about every member at once. */
+  readonly readFacts: (
+    target: ArchiveAgentTarget,
+  ) => Effect.Effect<ArchiveAgentTargetFacts, ArchiveAgentError>;
 }
 
 export class ArchiveAgentService extends Context.Service<
@@ -542,13 +557,18 @@ export const layer = Layer.effect(
           target: input.target,
           state: before,
         });
-        if (decodedToken === undefined && stateHasConsequences(before)) {
+        if (
+          input.confirmationSatisfied !== true &&
+          decodedToken === undefined &&
+          stateHasConsequences(before)
+        ) {
           return yield* new ArchiveAgentConfirmationRequiredError({
             facts: before.facts,
             confirmationToken: yield* issueToken(payload),
           });
         }
         if (
+          input.confirmationSatisfied !== true &&
           decodedToken !== undefined &&
           canonicalPayload(decodedToken) !== canonicalPayload(payload) &&
           !isForwardOnlyRecovery(decodedToken, payload)
@@ -612,6 +632,15 @@ export const layer = Layer.effect(
         return "archived" as const;
       });
 
-    return ArchiveAgentService.of({ archive });
+    const readFacts: ArchiveAgentServiceShape["readFacts"] = (target) =>
+      readState(target).pipe(
+        Effect.map((state) => ({
+          facts: state.facts,
+          threadArchived: state.projection.thread.archivedAt !== null,
+          retired: state.retired,
+        })),
+      );
+
+    return ArchiveAgentService.of({ archive, readFacts });
   }),
 );

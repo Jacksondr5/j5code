@@ -17,6 +17,7 @@ import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagem
 import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
 import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
 import { ArchiveAgentService } from "../ArchiveAgentService.ts";
+import { ArchiveCrewService } from "../ArchiveCrewService.ts";
 import {
   CREW_NAME_MAX_CHARS,
   CREW_NAME_PATTERN,
@@ -26,6 +27,7 @@ import {
   CREW_TEXT_MAX_CHARS,
 } from "../crewLimits.ts";
 import { CrewProposalService } from "../CrewProposalService.ts";
+import { CrewStopService } from "../CrewStopService.ts";
 import {
   A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION,
   A2A_LIST_TOOL_DESCRIPTION,
@@ -307,6 +309,65 @@ export const J5_JOIN_SQUADRON_DESCRIPTION =
 
 export const J5_LIST_SQUADRONS_DESCRIPTION =
   "The Squadron directory for this environment: every Squadron's squadron_id, name, and the project ids it references, plus your own thread's project id so you can see which Squadron can home you. Use it to obtain the exact squadron_id before join_squadron. Read-only.";
+export const J5StopCrewInput = Schema.Struct({
+  client_request_id: Schema.optional(NonEmptyString),
+  squadron_id: SquadronId,
+  crew_instance_id: NonEmptyString,
+});
+export type J5StopCrewInput = typeof J5StopCrewInput.Type;
+
+export const J5StopCrewResult = Schema.Struct({
+  crew_instance_id: NonEmptyString,
+  members: Schema.Array(
+    Schema.Struct({
+      seat: NonEmptyString,
+      participant_id: ParticipantId,
+      result: Schema.Literals(["interrupt_requested", "already_idle", "archived"]),
+    }),
+  ),
+});
+
+export const J5_STOP_CREW_DESCRIPTION =
+  "Stop a Crew you command: interrupts the running turn of every seat now. Nothing settles or is retired, and every seat can be messaged again afterwards. Captain-only. Reuse client_request_id to retry safely.";
+
+export const J5ArchiveCrewInput = Schema.Struct({
+  client_request_id: Schema.optional(NonEmptyString),
+  squadron_id: SquadronId,
+  crew_instance_id: NonEmptyString,
+  confirmation_token: Schema.optional(NonEmptyString),
+});
+export type J5ArchiveCrewInput = typeof J5ArchiveCrewInput.Type;
+
+export const J5ArchiveCrewResult = Schema.Struct({
+  status: J5ArchiveAgentResult,
+  crew_instance_id: NonEmptyString,
+  members: Schema.Array(
+    Schema.Struct({
+      seat: NonEmptyString,
+      participant_id: ParticipantId,
+      result: J5ArchiveAgentResult,
+    }),
+  ),
+});
+
+export const J5ArchiveCrewMemberFacts = Schema.Struct({
+  seat: NonEmptyString,
+  participant_id: ParticipantId,
+  already_archived: Schema.Boolean,
+  open_exchanges: Schema.Array(J5ArchiveAgentOpenExchangeFact),
+  running_turn: Schema.NullOr(J5ArchiveAgentRunningTurnFact),
+});
+
+export const J5ArchiveCrewFailure = Schema.Struct({
+  code: Schema.String,
+  message: Schema.String,
+  members: Schema.optional(Schema.Array(J5ArchiveCrewMemberFacts)),
+  confirmation_token: Schema.optional(Schema.NullOr(Schema.String)),
+  archived_seats: Schema.optional(Schema.Array(NonEmptyString)),
+  failed_seat: Schema.optional(NonEmptyString),
+});
+export type J5ArchiveCrewFailure = typeof J5ArchiveCrewFailure.Type;
+
 export const J5_SPAWN_AGENT_DESCRIPTION =
   "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. To run a saved agent, set the `agent` parameter to its id: the spawn gets that saved agent's instructions and runtime policy, and provider, model, and reasoning must be one of that agent's declared routes. Reuse client_request_id to retry the same spawn safely.";
 
@@ -324,6 +385,9 @@ export const J5_STOP_AGENT_DESCRIPTION =
 
 export const J5_ARCHIVE_AGENT_DESCRIPTION =
   "Archive one Peer Agent reversibly. Unarchive restores the same identity, but does not reopen Exchanges or replay cancelled messages. A clean archive — no open exchanges, no running turn — completes immediately. Otherwise the call refuses and lists exactly what archiving ends — the asks that will close, the turn that will stop — along with a confirmation_token; call again with that token to proceed. The archived agent leaves the active roster; its ledger and conversation stay readable forever. Requires your current squadron_id. Reuse client_request_id to retry safely.";
+
+export const J5_ARCHIVE_CREW_DESCRIPTION =
+  "Retire a whole Crew you command. Crews archive only as a unit — members are never retired one by one. A clean archive completes immediately; otherwise the call refuses with the facts and a confirmation_token. Before retrying with that token, check with the user. Nothing is destroyed: worktrees, branches, and ledgers stay readable. Reuse client_request_id to retry safely.";
 
 const sendDependencies = [
   McpInvocationContext.McpInvocationContext,
@@ -397,6 +461,23 @@ const archiveDependencies = [
   A2ALedger,
   ParticipantPlacementService,
   ArchiveAgentService,
+  AgentCrewInstanceService,
+];
+
+const stopCrewDependencies = [
+  McpInvocationContext.McpInvocationContext,
+  A2ASendService,
+  Crypto.Crypto,
+  A2ALedger,
+  CrewStopService,
+];
+
+const archiveCrewDependencies = [
+  McpInvocationContext.McpInvocationContext,
+  A2ASendService,
+  Crypto.Crypto,
+  A2ALedger,
+  ArchiveCrewService,
 ];
 
 export const J5SendMessageTool = Tool.make("send_message", {
@@ -532,6 +613,34 @@ export const J5ArchiveAgentTool = Tool.make("archive_agent", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, false);
 
+export const J5StopCrewTool = Tool.make("stop_crew", {
+  description: J5_STOP_CREW_DESCRIPTION,
+  parameters: J5StopCrewInput,
+  success: J5StopCrewResult,
+  failure: J5McpFailure,
+  failureMode: "return",
+  dependencies: stopCrewDependencies,
+})
+  .annotate(Tool.Title, "Stop a Crew's running seats")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, true)
+  .annotate(Tool.Idempotent, false)
+  .annotate(Tool.OpenWorld, false);
+
+export const J5ArchiveCrewTool = Tool.make("archive_crew", {
+  description: J5_ARCHIVE_CREW_DESCRIPTION,
+  parameters: J5ArchiveCrewInput,
+  success: J5ArchiveCrewResult,
+  failure: J5ArchiveCrewFailure,
+  failureMode: "return",
+  dependencies: archiveCrewDependencies,
+})
+  .annotate(Tool.Title, "Retire a Crew as a unit")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, true)
+  .annotate(Tool.Idempotent, false)
+  .annotate(Tool.OpenWorld, false);
+
 export const J5ClearOwnAskTool = Tool.make("clear_own_ask", {
   description: A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION,
   parameters: J5ClearOwnAskInput,
@@ -558,5 +667,7 @@ export const J5Toolkit = Toolkit.make(
   J5RequestCrewMemberTool,
   J5StopAgentTool,
   J5ArchiveAgentTool,
+  J5StopCrewTool,
+  J5ArchiveCrewTool,
   J5ClearOwnAskTool,
 );

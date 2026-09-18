@@ -1,4 +1,9 @@
-import { formatCrewStateSummary, summarizeCrewState, type CrewSeatThread } from "../crew/crewState";
+import {
+  crewHasRunningSeat,
+  formatCrewStateSummary,
+  summarizeCrewState,
+  type CrewSeatThread,
+} from "../crew/crewState";
 import type { SpawnedChild } from "./SpawnedChildrenClient";
 
 export interface SpawnedChildThread extends CrewSeatThread {
@@ -103,6 +108,18 @@ export const spawnedGroupExpansionKey = (
   parentThreadId: string,
   groupKey: string,
 ) => `${environmentId}/${parentThreadId}/${groupKey}`;
+
+/**
+ * The Crew a Stop control on a group's header would stop: the group is a Crew and at least one
+ * seat has a turn to interrupt. The solo-peer group and an idle Crew offer nothing.
+ */
+export const stoppableCrew = <T extends SpawnedChildThread>(
+  group: SpawnedChildGroup<T>,
+): { readonly crewInstanceId: string; readonly crewName: string } | null =>
+  group.crew !== null &&
+  crewHasRunningSeat(summarizeCrewState(group.rows.map(({ thread }) => thread)))
+    ? group.crew
+    : null;
 
 const STORAGE_KEY = "j5:sidebar:spawned-children:expanded";
 

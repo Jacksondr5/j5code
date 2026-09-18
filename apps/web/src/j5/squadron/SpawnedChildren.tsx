@@ -1,25 +1,29 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 
 import { resolveThreadStatusPill } from "../../components/Sidebar.logic";
 import { Badge } from "../../components/ui/badge";
 import { ProviderInstanceIcon } from "../../components/chat/ProviderInstanceIcon";
+import { toastManager } from "../../components/ui/toast";
 import { cn } from "../../lib/utils";
 import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../../providerInstances";
 import { useThreadShells } from "../../state/entities";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
+import { stopCrew } from "../crew/crewStopClient";
 import { useSpawnedChildren, type SpawnedChild } from "./SpawnedChildrenClient";
 import {
   groupSpawnedChildren,
   readExpandedSpawnParents,
   selectSpawnedChildRows,
   spawnedGroupExpansionKey,
+  stoppableCrew,
   writeExpandedSpawnParents,
   type SpawnedChildGroup,
 } from "./spawnedChildren.logic";
@@ -112,6 +116,7 @@ function SpawnedChildrenRows(props: {
       {groups.map((group) => (
         <SpawnedChildGroupRows
           key={group.key}
+          environmentId={props.thread.environmentId}
           group={group}
           providerEntries={providerEntries}
           isOpen={expandedSet.has(
@@ -130,6 +135,7 @@ function SpawnedChildrenRows(props: {
 }
 
 function SpawnedChildGroupRows(props: {
+  readonly environmentId: EnvironmentId;
   readonly group: SpawnedChildGroup<EnvironmentThreadShell>;
   readonly providerEntries: ReadonlyMap<string, ProviderInstanceEntry>;
   readonly isOpen: boolean;
@@ -137,6 +143,8 @@ function SpawnedChildGroupRows(props: {
   readonly onOpen: (child: EnvironmentThreadShell) => void;
 }) {
   const { group, isOpen } = props;
+  const stoppable = stoppableCrew(group);
+  const [stopping, setStopping] = useState(false);
   return (
     <div data-testid={`spawned-group-${group.key}`}>
       <div className="flex items-center gap-1">
@@ -164,6 +172,30 @@ function SpawnedChildGroupRows(props: {
             />
           ) : null}
         </button>
+        {stoppable !== null ? (
+          // The person's Stop for this Crew alone: interrupts its running seats, retires nothing.
+          <button
+            type="button"
+            aria-label={`Stop crew ${stoppable.crewName}`}
+            disabled={stopping}
+            className="shrink-0 rounded border border-border/60 px-1.5 py-px text-[10px] leading-4 text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            onClick={(event) => {
+              event.stopPropagation();
+              setStopping(true);
+              void stopCrew(props.environmentId, stoppable.crewInstanceId)
+                .catch((error: unknown) => {
+                  toastManager.add({
+                    type: "error",
+                    title: `Could not stop crew ${stoppable.crewName}`,
+                    description: error instanceof Error ? error.message : String(error),
+                  });
+                })
+                .finally(() => setStopping(false));
+            }}
+          >
+            Stop
+          </button>
+        ) : null}
       </div>
       {isOpen ? (
         <ul className="mt-0.5 flex flex-col gap-0.5 border-s border-border/60 ps-2">

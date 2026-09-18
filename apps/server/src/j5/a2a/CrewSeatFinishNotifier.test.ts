@@ -35,6 +35,7 @@ import {
   seatFinishedNoticeText,
 } from "./CrewSeatFinishNotifier.ts";
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
+import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
@@ -239,6 +240,7 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
             ),
         }),
       ),
+      Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
       Layer.provideMerge(artifactWorkspaceLayer),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-finish-" })),
@@ -457,6 +459,7 @@ it.effect(
               ),
           }),
         ),
+        Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
         Layer.provideMerge(artifactWorkspaceLayer),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-fold-" })),
@@ -590,6 +593,7 @@ it.effect(
               ),
           }),
         ),
+        Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
         Layer.provideMerge(artifactWorkspaceLayer),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-retry-" })),
@@ -611,4 +615,112 @@ it.effect(
         );
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
+);
+
+it.effect("the boot sweep tells the Captain about a finished seat nothing reported", () =>
+  Effect.gen(function* () {
+    const database = NodeSqliteClient.layerMemory();
+    const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
+      Layer.provideMerge(database),
+    );
+    const context = yield* Layer.build(storage);
+    yield* runJ5A2AMigrations().pipe(Effect.provide(context));
+    yield* Context.get(context, A2ALedger).createSquadron({
+      squadron: { id: squadronId, name: "Sweep", createdAt: DateTime.formatIso(createdAt) },
+    });
+    yield* Context.get(context, AgentCrewInstanceService).record({
+      id: "crew:sweep",
+      squadronId,
+      captainParticipantId: participantIdForThread(captainThread),
+      captainThreadId: captainThread,
+      displayName: "Sweep Crew",
+      brief: "Finish the work.",
+      createdAt: DateTime.formatIso(createdAt),
+      members: [
+        // Finished while the server was down: reported now.
+        {
+          seatName: "scout",
+          agentId: "scout",
+          participantId: participantIdForThread(scoutThread),
+          threadId: scoutThread,
+          reason: null,
+        },
+        // Still running: left alone.
+        {
+          seatName: "sitter",
+          agentId: "sitter",
+          participantId: participantIdForThread(strangerThread),
+          threadId: strangerThread,
+          reason: null,
+        },
+      ],
+    });
+    const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+    let newestStatus: "failed" | "interrupted" = "interrupted";
+    const finished = (threadId: ThreadId) =>
+      ({
+        ...projection(threadId),
+        runs: [
+          {
+            id: RunId.make("run:old"),
+            ordinal: 1,
+            threadId,
+            status: "completed",
+            completedAt: DateTime.makeUnsafe("2026-09-09T16:05:00.000Z"),
+          },
+          {
+            id: RunId.make("run:newest"),
+            ordinal: 2,
+            threadId,
+            status: newestStatus,
+            completedAt: DateTime.makeUnsafe("2026-09-09T16:09:00.000Z"),
+          },
+        ],
+      }) as unknown as OrchestrationV2ThreadProjection;
+    const layer = notifierLayer.pipe(
+      Layer.provideMerge(
+        Layer.mock(CrewLaunchReporter)({ coversFailure: () => Effect.succeed(false) }),
+      ),
+      Layer.provideMerge(
+        Layer.mock(ThreadManagementService)({
+          getThreadProjection: (threadId) =>
+            Effect.succeed(
+              threadId === scoutThread
+                ? finished(threadId)
+                : threadId === strangerThread
+                  ? projection(threadId, { running: true })
+                  : projection(threadId),
+            ),
+          dispatch: (command) =>
+            Ref.update(dispatched, (items) => [...items, command]).pipe(
+              Effect.as({ events: [], effects: [] } as never),
+            ),
+        }),
+      ),
+      Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+      Layer.provideMerge(artifactWorkspaceLayer),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-sweep-" })),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const notifier = yield* CrewSeatFinishNotifier;
+      assert.deepStrictEqual(yield* notifier.reconcile, []);
+      assert.deepStrictEqual(yield* Ref.get(dispatched), []);
+      newestStatus = "failed";
+      assert.deepStrictEqual(yield* notifier.reconcile, [scoutThread]);
+      const commands = yield* Ref.get(dispatched);
+      assert.deepStrictEqual(
+        commands.map((command) => command.type),
+        ["message.dispatch"],
+      );
+      const notice = commands[0];
+      if (notice?.type === "message.dispatch") {
+        assert.equal(notice.threadId, captainThread);
+        assert.include(notice.text, "seat: scout");
+        // The newest finish is the one reported.
+        assert.include(notice.text, "run_status: failed");
+      }
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
 );
