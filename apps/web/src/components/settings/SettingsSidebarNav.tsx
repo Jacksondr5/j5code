@@ -22,6 +22,7 @@ import {
   SearchIcon,
   Settings2Icon,
   UsersRoundIcon,
+  BookOpenIcon,
   XIcon,
 } from "lucide-react";
 import { useLocation, useNavigate, useRouterState } from "@tanstack/react-router";
@@ -76,6 +77,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/appearance": PaletteIcon,
   "/settings/keybindings": KeyboardIcon,
   "/settings/agents": UsersRoundIcon,
+  "/settings/playbooks": BookOpenIcon,
   "/settings/providers": BotIcon,
   "/settings/integrations": BlocksIcon,
   "/settings/scheduled-tasks": CalendarClockIcon,
