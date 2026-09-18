@@ -380,9 +380,9 @@ it.effect("blocks a direct persona launch when both declared model routes are un
 
       assert.instanceOf(error, ThreadLaunch.ThreadLaunchError);
       assert.equal(error.operation, "resolve-agent-persona");
-      assert.equal(
+      assert.include(
         error.message,
-        "Agent persona scout is blocked because its primary and fallback models are unavailable.",
+        "Agent persona scout is blocked because its primary and fallback models are unavailable: ",
       );
     }).pipe(Effect.provide(harness.layer));
   }),
