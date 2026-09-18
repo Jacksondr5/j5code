@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { CUSTOM_AGENT, addSeat, describeSeatAgent, removeSeat } from "./crewProposalDraft";
+import {
+  CUSTOM_AGENT,
+  addSeat,
+  describeSeatAgent,
+  removeSeat,
+  saveSeat,
+} from "./crewProposalDraft";
 
 describe("crew proposal roster edits", () => {
   const seats = [
@@ -63,5 +69,42 @@ describe("crew proposal roster edits", () => {
     expect(addSeat(seats, { seat: "eyes", agentId: "", instructions: "" }).error).toContain(
       "Pick a persona",
     );
+  });
+});
+
+describe("crew member modal saves", () => {
+  const original = {
+    seat: "reviewer",
+    agentId: null,
+    reason: "Independent review requested by the Captain",
+    instructions: "Review the patch",
+  };
+  const seats = [original, { seat: "builder", agentId: "builder", reason: "Implement" }];
+
+  it("validates custom instructions without changing the existing roster", () => {
+    const result = saveSeat(seats, "reviewer", {
+      seat: "reviewer",
+      agentId: CUSTOM_AGENT,
+      instructions: "  ",
+    });
+    expect(result.error).toContain("instructions");
+    expect(result.seats).toBe(seats);
+    expect(original.instructions).toBe("Review the patch");
+  });
+
+  it("saves a validated edit in place and preserves the Captain's reason and seat identity", () => {
+    const result = saveSeat(seats, "reviewer", {
+      seat: "renamed",
+      agentId: CUSTOM_AGENT,
+      instructions: "  Review authentication only  ",
+      runtimeMode: "approval-required",
+    });
+    expect(result.error).toBeNull();
+    expect(result.seats).toEqual([
+      { ...original, instructions: "Review authentication only", runtimeMode: "approval-required" },
+      seats[1],
+    ]);
+    expect(result.seats[1]).toBe(seats[1]);
+    expect(original.instructions).toBe("Review the patch");
   });
 });

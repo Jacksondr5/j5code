@@ -1,5 +1,7 @@
 import * as Schema from "effect/Schema";
 
+import { ModelSelection } from "./modelSelection.ts";
+import { RuntimeMode } from "./providerPolicy.ts";
 import { EnvironmentId, ProjectId, ThreadId } from "./baseSchemas.ts";
 
 export const ScopedSquadronRef = Schema.Struct({
@@ -89,13 +91,15 @@ export const CREW_SEAT_CAP = 12;
 
 /**
  * One requested or approved Crew seat, as the Captain proposed it or the human edited it. A null
- * agent is a custom seat: no saved agent, it runs on the Captain's provider, model, and mode.
+ * agent is a custom seat: runtime overrides apply only to custom seats; omitted fields inherit the Captain.
  */
 export const CrewProposalSeat = Schema.Struct({
   seat: Schema.String,
   agentId: Schema.NullOr(Schema.String),
   reason: Schema.String,
   instructions: Schema.optional(Schema.String),
+  modelSelection: Schema.optional(ModelSelection),
+  runtimeMode: Schema.optional(RuntimeMode),
 });
 export type CrewProposalSeat = typeof CrewProposalSeat.Type;
 
@@ -127,6 +131,8 @@ export const CrewProposalSeatRuntime = Schema.Struct({
   model: Schema.String,
   reasoning: Schema.String,
   access: Schema.String,
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
 });
 export type CrewProposalSeatRuntime = typeof CrewProposalSeatRuntime.Type;
 export const CrewProposalPreviewRequest = Schema.Struct({

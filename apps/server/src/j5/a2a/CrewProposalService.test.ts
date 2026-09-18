@@ -94,17 +94,19 @@ const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
             ({
               seat,
               assignment: null,
-              modelSelection: captain.thread.modelSelection,
-              runtimeMode: captain.thread.runtimeMode,
+              modelSelection: seat.modelSelection ?? captain.thread.modelSelection,
+              runtimeMode: seat.runtimeMode ?? captain.thread.runtimeMode,
               outputArtifact: null,
               agentDisplayName: seat.agentId ?? "custom",
               runtime: {
                 seat: seat.name,
                 provider: "Codex",
                 harness: "Codex",
-                model: captain.thread.modelSelection.model,
+                model: (seat.modelSelection ?? captain.thread.modelSelection).model,
                 reasoning: "High",
                 access: "Full access",
+                modelSelection: seat.modelSelection ?? captain.thread.modelSelection,
+                runtimeMode: seat.runtimeMode ?? captain.thread.runtimeMode,
               },
             }) satisfies ResolvedCrewLaunchSeat,
         ),
@@ -810,6 +812,17 @@ it.effect("holds every door to the same seat shape and seats nobody into a retir
         seat: { seat: "critic", agentId: "critic", reason: "Reviews" },
         brief: null,
       });
+      const rawGate = yield* CrewProposalService;
+      const duplicateSeats = [{ seat: "builder", agentId: "critic", reason: "Already held" }];
+      const duplicatePreview = yield* rawGate
+        .preview({ proposalId: addition.proposal.id, seats: duplicateSeats })
+        .pipe(Effect.flip);
+      const duplicateApproval = yield* rawGate
+        .resolve({ proposalId: addition.proposal.id, decision: "approve", seats: duplicateSeats })
+        .pipe(Effect.flip);
+      assert.equal(duplicatePreview._tag, "CrewProposalRequestError");
+      assert.include(duplicatePreview.message, "already has a seat named builder");
+      assert.equal(duplicateApproval.message, duplicatePreview.message);
       // archive_crew retires the Crew while the request still sits in the inbox.
       yield* crews.markArchived(approved.instance!.id, "2026-09-09T17:00:00.000Z");
       const late = yield* gate
@@ -817,6 +830,15 @@ it.effect("holds every door to the same seat shape and seats nobody into a retir
         .pipe(Effect.flip);
       assert.equal(late._tag, "CrewProposalRequestError");
       assert.include(late.message, "retired");
+      const retiredPreview = yield* rawGate
+        .preview({ proposalId: addition.proposal.id })
+        .pipe(Effect.flip);
+      const retiredApproval = yield* rawGate
+        .resolve({ proposalId: addition.proposal.id, decision: "approve" })
+        .pipe(Effect.flip);
+      assert.equal(retiredPreview._tag, "CrewProposalRequestError");
+      assert.equal(retiredPreview.message, late.message);
+      assert.equal(retiredApproval.message, retiredPreview.message);
       assert.lengthOf((yield* crews.read(approved.instance!.id))!.members, 1);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
@@ -1119,6 +1141,77 @@ it.effect(
           .pipe(Effect.flip);
         assert.equal(staleAddition._tag, "CrewProposalRequestError");
         assert.lengthOf((yield* crews.read(approved.instance!.id))!.members, 1);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "persists custom runtime overrides through proposal storage, human edits, and failed-launch recovery",
+  () =>
+    Effect.gen(function* () {
+      const { layer } = yield* fixture;
+      yield* Effect.gen(function* () {
+        const gate = yield* CrewProposalService;
+        const store = yield* AgentCrewProposalService;
+        const proposed = {
+          seat: "custom-reviewer",
+          agentId: null,
+          reason: "Reviews",
+          instructions: "Review the change",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("claude-work"),
+            model: "claude-sonnet",
+            options: [{ id: "effort", value: "high" }],
+          },
+          runtimeMode: "approval-required" as const,
+        };
+        const open = yield* gate.propose({
+          requestKey: "custom-config-recovery",
+          captain,
+          displayName: "Boom",
+          brief: "Review",
+          seats: [proposed],
+        });
+        assert.deepStrictEqual((yield* store.read(open.proposal.id))?.requestedSeats, [proposed]);
+        const first = yield* gate.preview({ proposalId: open.proposal.id });
+        assert.deepStrictEqual(first.seats[0]?.modelSelection, proposed.modelSelection);
+        assert.equal(first.seats[0]?.runtimeMode, "approval-required");
+        const edited = {
+          ...proposed,
+          runtimeMode: "full-access" as const,
+          modelSelection: { ...proposed.modelSelection, options: [{ id: "effort", value: "low" }] },
+        };
+        const stale = yield* gate
+          .resolve({
+            proposalId: open.proposal.id,
+            decision: "approve",
+            seats: [edited],
+            approvalToken: first.approvalToken,
+          })
+          .pipe(Effect.flip);
+        assert.equal(stale._tag, "CrewProposalRequestError");
+        const current = yield* gate.preview({ proposalId: open.proposal.id, seats: [edited] });
+        const failed = yield* gate
+          .resolve({
+            proposalId: open.proposal.id,
+            decision: "approve",
+            seats: [edited],
+            approvalToken: current.approvalToken,
+          })
+          .pipe(Effect.flip);
+        assert.equal(failed._tag, "CrewLaunchOperationError");
+        const reopened = (yield* store.read(open.proposal.id))!;
+        assert.equal(reopened.status, "open");
+        assert.deepStrictEqual(reopened.approvedSeats, [edited]);
+        const retry = yield* gate.preview({ proposalId: open.proposal.id });
+        assert.equal(retry.approvalToken, current.approvalToken);
+        assert.deepStrictEqual(retry.seats[0]?.modelSelection, edited.modelSelection);
+        assert.equal(retry.seats[0]?.runtimeMode, edited.runtimeMode);
+        const savedOverride = yield* gate
+          .preview({ proposalId: open.proposal.id, seats: [{ ...edited, agentId: "critic" }] })
+          .pipe(Effect.flip);
+        assert.equal(savedOverride._tag, "CrewProposalRequestError");
+        assert.include(savedOverride.message, "only to custom seats");
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );

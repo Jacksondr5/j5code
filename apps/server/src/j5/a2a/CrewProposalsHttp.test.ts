@@ -2,6 +2,7 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthSessionId,
+  ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
@@ -32,6 +33,19 @@ const proposal: CrewProposal = {
   reportedAt: null,
 };
 
+const customSeat = {
+  seat: "critic",
+  agentId: null,
+  reason: "Human added review",
+  instructions: "Review the proposed fix.",
+  modelSelection: {
+    instanceId: ProviderInstanceId.make("claudeAgent"),
+    model: "claude-fable-5-1",
+    options: [{ id: "effort", value: "high" }],
+  },
+  runtimeMode: "approval-required" as const,
+};
+
 const paths = {
   list: "/raw/crews/proposals",
   resolve: "/raw/crews/proposals/resolve",
@@ -56,22 +70,27 @@ it("lists open proposals for readers and resolves them only for operators", asyn
     seats?: unknown;
     approvalToken?: string | undefined;
   }> = [];
+  const previewed: unknown[] = [];
   const gate = Layer.mock(CrewProposalService)({
-    preview: (input) =>
-      Effect.succeed({
+    preview: (input) => {
+      previewed.push(input);
+      return Effect.succeed({
         proposalId: input.proposalId,
         approvalToken: "runtime-token",
         seats: [
           {
-            seat: "builder",
-            provider: "OpenAI",
-            harness: "Codex",
-            model: "GPT-6-Astra",
+            seat: "critic",
+            provider: "Anthropic",
+            harness: "Claude Code",
+            model: "Claude Fable 5.1",
             reasoning: "High",
-            access: "Repository write",
+            access: "Approval required",
+            modelSelection: customSeat.modelSelection,
+            runtimeMode: customSeat.runtimeMode,
           },
         ],
-      }),
+      });
+    },
     resolve: (input) => {
       resolved.push(input);
       return input.proposalId === proposal.id
@@ -121,21 +140,24 @@ it("lists open proposals for readers and resolves them only for operators", asyn
       new Request(`http://environment.test${paths.preview}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ proposalId: proposal.id, seats: proposal.requestedSeats }),
+        body: JSON.stringify({ proposalId: proposal.id, seats: [customSeat] }),
       }),
     );
     assert.equal(preview.status, 200);
+    assert.deepStrictEqual(previewed, [{ proposalId: proposal.id, seats: [customSeat] }]);
     assert.deepStrictEqual(await preview.json(), {
       proposalId: proposal.id,
       approvalToken: "runtime-token",
       seats: [
         {
-          seat: "builder",
-          provider: "OpenAI",
-          harness: "Codex",
-          model: "GPT-6-Astra",
+          seat: "critic",
+          provider: "Anthropic",
+          harness: "Claude Code",
+          model: "Claude Fable 5.1",
           reasoning: "High",
-          access: "Repository write",
+          access: "Approval required",
+          modelSelection: customSeat.modelSelection,
+          runtimeMode: customSeat.runtimeMode,
         },
       ],
     });
@@ -148,20 +170,21 @@ it("lists open proposals for readers and resolves them only for operators", asyn
           proposalId: proposal.id,
           decision: "approve",
           approvalToken: "runtime-token",
-          seats: [
-            ...proposal.requestedSeats,
-            { seat: "critic", agentId: "critic", reason: "Human added review" },
-          ],
+          seats: [...proposal.requestedSeats, customSeat],
         }),
       }),
     );
     assert.equal(approved.status, 200);
     assert.equal(resolved[0]?.approvalToken, "runtime-token");
+    assert.deepStrictEqual(resolved[0]?.seats, [...proposal.requestedSeats, customSeat]);
     const approvedBody = (await approved.json()) as {
       proposal: { status: string; approvedSeats: unknown[] };
     };
     assert.equal(approvedBody.proposal.status, "approved");
-    assert.lengthOf(approvedBody.proposal.approvedSeats, 2);
+    assert.deepStrictEqual(approvedBody.proposal.approvedSeats, [
+      ...proposal.requestedSeats,
+      customSeat,
+    ]);
 
     const stale = await operator.handler(
       new Request(`http://environment.test${paths.resolve}`, {

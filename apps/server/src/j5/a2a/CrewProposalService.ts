@@ -171,6 +171,14 @@ export const layer = Layer.effect(
       // The MCP schema already bounds a Captain's seats; the human's card submits the same shape
       // through HTTP, so every door meets the rule here rather than surfacing a storage error.
       for (const seat of seats) {
+        if (
+          seat.agentId !== null &&
+          (seat.modelSelection !== undefined || seat.runtimeMode !== undefined)
+        )
+          return yield* new CrewProposalRequestError({
+            detail: `Seat ${seat.seat} is a saved persona; runtime overrides apply only to custom seats.`,
+            nextStep: "Use the persona's configured runtime or choose a custom seat.",
+          });
         const problem = crewSeatShapeProblem(seat);
         if (problem !== null)
           return yield* new CrewProposalRequestError({
@@ -269,6 +277,8 @@ export const layer = Layer.effect(
         agentId: seat.agentId,
         reason: seat.reason,
         instructions: seat.instructions,
+        modelSelection: seat.modelSelection,
+        runtimeMode: seat.runtimeMode,
       }));
       if (proposal.kind === "roster") {
         return yield* launcher.launch({
@@ -572,8 +582,43 @@ export const layer = Layer.effect(
           agentId: seat.agentId,
           reason: seat.reason,
           instructions: seat.instructions,
+          modelSelection: seat.modelSelection,
+          runtimeMode: seat.runtimeMode,
         })),
       );
+
+    /** Preview and approval consult the same live roster, excluding this proposal's retry reservations. */
+    const validateProposalSeats = Effect.fn("j5.a2a.crewProposal.validateProposalSeats")(function* (
+      proposal: CrewProposal,
+      seats: ReadonlyArray<CrewProposalSeat>,
+    ) {
+      // The human may have renamed or added seats on the card; check them against the live
+      // roster, or an approved duplicate would spawn a seat the snapshot cannot record.
+      const existingCrew =
+        proposal.crewInstanceId === null
+          ? null
+          : yield* crews
+              .read(proposal.crewInstanceId)
+              .pipe(Effect.mapError(operationError("reading the crew")));
+      // A request left open past archive_crew must not seat agents into a retired Crew.
+      if (proposal.kind === "addition" && existingCrew !== null && existingCrew.archivedAt !== null)
+        return yield* new CrewProposalRequestError({
+          detail: `Proposal ${proposal.id} adds to crew ${existingCrew.id}, which has been retired.`,
+          nextStep: "Decline this proposal.",
+        });
+      const existingMembers = existingCrew?.members ?? [];
+      // An addition reserves its member rows before the seats spawn. When that spawn failed
+      // and the gate was handed back, the rows are still there under this proposal's own
+      // deterministic ids; they are the reservation the retry converges on, not a clash
+      // (Critic Q2, 2026-09-14).
+      const reservedHere = reservedByProposal(proposal.id);
+      yield* validateSeats(seats, {
+        seatNames: existingMembers
+          .filter((member) => !reservedHere(member))
+          .map(({ seatName }) => seatName),
+        pendingSeats: 0,
+      });
+    });
 
     const preview: CrewProposalServiceShape["preview"] = Effect.fn("j5.a2a.crewProposal.preview")(
       function* (input) {
@@ -588,7 +633,7 @@ export const layer = Layer.effect(
             status: proposal.status,
           });
         const seats = input.seats ?? proposal.approvedSeats ?? proposal.requestedSeats;
-        yield* validateSeats(seats, { seatNames: [], pendingSeats: 0 });
+        yield* validateProposalSeats(proposal, seats);
         const captain = yield* captainFor(proposal);
         const resolved = yield* resolveRuntime(captain, seats);
         return {
@@ -624,36 +669,7 @@ export const layer = Layer.effect(
           return { proposal: declined, instance: null } satisfies CrewProposalOutcome;
         }
         const seats = input.seats ?? proposal.approvedSeats ?? proposal.requestedSeats;
-        // The human may have renamed or added seats on the card; check them against the live
-        // roster, or an approved duplicate would spawn a seat the snapshot cannot record.
-        const existingCrew =
-          proposal.crewInstanceId === null
-            ? null
-            : yield* crews
-                .read(proposal.crewInstanceId)
-                .pipe(Effect.mapError(operationError("reading the crew")));
-        // A request left open past archive_crew must not seat agents into a retired Crew.
-        if (
-          proposal.kind === "addition" &&
-          existingCrew !== null &&
-          existingCrew.archivedAt !== null
-        )
-          return yield* new CrewProposalRequestError({
-            detail: `Proposal ${proposal.id} adds to crew ${existingCrew.id}, which has been retired.`,
-            nextStep: "Decline this proposal.",
-          });
-        const existingMembers = existingCrew?.members ?? [];
-        // An addition reserves its member rows before the seats spawn. When that spawn failed
-        // and the gate was handed back, the rows are still there under this proposal's own
-        // deterministic ids; they are the reservation the retry converges on, not a clash
-        // (Critic Q2, 2026-09-14).
-        const reservedHere = reservedByProposal(proposal.id);
-        yield* validateSeats(seats, {
-          seatNames: existingMembers
-            .filter((member) => !reservedHere(member))
-            .map(({ seatName }) => seatName),
-          pendingSeats: 0,
-        });
+        yield* validateProposalSeats(proposal, seats);
         const captain = yield* captainFor(proposal);
         const resolved = yield* resolveRuntime(captain, seats);
         if (input.approvalToken !== crewApprovalToken(proposal, captain, resolved))

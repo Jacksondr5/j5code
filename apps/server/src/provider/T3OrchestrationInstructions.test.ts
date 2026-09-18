@@ -55,6 +55,19 @@ describe("T3 orchestration provider instructions", () => {
     assert.notInclude(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`list_agents`");
     assert.include(
       T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "Custom seats inherit your configuration by default",
+    );
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "`model_selection` (instanceId, model, options)",
+    );
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`runtime_mode`");
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "Saved personas use their own configuration",
+    );
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
       "resolved provider, model, reasoning, and access",
     );
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Captains of other crews");

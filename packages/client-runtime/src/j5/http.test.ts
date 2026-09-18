@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
 import {
@@ -291,11 +291,17 @@ it.effect("previews custom crew seats on their remote environment with its own a
       seats: [
         {
           seat: "reviewer",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-6-astra",
+            options: [{ id: "reasoningEffort", value: "high" }],
+          },
+          runtimeMode: "full-access",
           provider: "OpenAI",
           harness: "Codex",
           model: "GPT-6-Astra",
           reasoning: "High",
-          access: "Repository write",
+          access: "Full access",
         },
       ],
     };
@@ -306,7 +312,18 @@ it.effect("previews custom crew seats on their remote environment with its own a
     const input = {
       proposalId: "proposal:1",
       seats: [
-        { seat: "reviewer", agentId: null, reason: "Review", instructions: "Check the patch" },
+        {
+          seat: "reviewer",
+          agentId: null,
+          reason: "Review",
+          instructions: "Check the patch",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-6-astra",
+            options: [{ id: "reasoningEffort", value: "high" }],
+          },
+          runtimeMode: "full-access" as const,
+        },
       ],
     };
     const preview = yield* previewCrewProposal(
