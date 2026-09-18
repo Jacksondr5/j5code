@@ -210,7 +210,7 @@ nothing spawns until a human approves it.
 Bounds: `name` and `seat` up to 100 characters, `reason` up to 500, `brief` and `instructions` up
 to 8,000.
 
-Result: `proposal_id`, `status` (`open`, `approved`, `declined`),
+Result: `proposal_id`, `status` (`open`, `approving`, `declining`, `approved`, `declined`),
 `crew_instance_id`, and `members` (seat, agent_id, participant_id, thread_id) once spawned.
 Semantics: the caller must have a usable home and must not sit in a Crew (R20). Seats are validated
 against the library before anything is recorded: unknown or disabled agents, duplicate seat names,

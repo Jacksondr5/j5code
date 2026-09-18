@@ -4,7 +4,6 @@ import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
@@ -12,6 +11,7 @@ import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewIns
 import {
   AgentCrewProposalService,
   type CrewProposal,
+  type CrewProposalDecision,
   type CrewProposalSeat,
 } from "./AgentCrewProposalService.ts";
 import {
@@ -24,6 +24,7 @@ import { crewSeatShapeProblem } from "./crewLimits.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { crewSeatRequestKey, lifecycleCommandId, lifecycleId, spawnThreadId } from "./spawnIds.ts";
+import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 
 /** Hard cap on seats per Crew, initial roster and additions together. */
 export { CREW_SEAT_CAP } from "./CrewLaunchService.ts";
@@ -112,6 +113,12 @@ export interface CrewProposalServiceShape {
   readonly resolve: (
     input: ResolveCrewProposalInput,
   ) => Effect.Effect<CrewProposalOutcome, CrewProposalError>;
+  /**
+   * The boot sweep for resolutions the server lost mid-way: a claimed decline is finished (its
+   * cleanup done and the decline recorded) and a claimed approval is handed back to the gate,
+   * since its launch converges on a retry. Returns the proposal ids it settled.
+   */
+  readonly reconcile: Effect.Effect<ReadonlyArray<string>>;
 }
 
 export class CrewProposalService extends Context.Service<
@@ -309,42 +316,62 @@ export const layer = Layer.effect(
      * decides who gets what access, so approved seats run with their own agent's permissions
      * even when the Captain is read-only. There is no other way through this gate.
      */
-    const settle = Effect.fn("j5.a2a.crewProposal.settle")(function* (
+    /**
+     * Claims the gate for this decision, compare-and-set from open. The claim is what a second
+     * device runs into: it finds the row approving or declining and is refused, so a decline can
+     * never retire the Crew an approval is launching, whichever order the two arrive in.
+     */
+    const claim = Effect.fn("j5.a2a.crewProposal.claim")(function* (
       proposal: CrewProposal,
-      captain: CrewCaptain,
-      seats: ReadonlyArray<CrewProposalSeat>,
+      decision: CrewProposalDecision,
+      approvedSeats: ReadonlyArray<CrewProposalSeat> | null,
     ) {
-      const status = "approved" as const;
-      // Claim first so a second approval finds the proposal taken instead of spawning again.
       const claimed = yield* proposals
-        .resolve({
+        .claim({ id: proposal.id, decision, approvedSeats })
+        .pipe(Effect.mapError(operationError("claiming the proposal")));
+      if (claimed !== null) return claimed;
+      const current = yield* proposals
+        .read(proposal.id)
+        .pipe(Effect.mapError(operationError("reading the proposal")));
+      return yield* new CrewProposalNotOpenError({
+        proposalId: proposal.id,
+        status: current?.status ?? "open",
+      });
+    });
+
+    const complete = Effect.fn("j5.a2a.crewProposal.complete")(function* (
+      proposal: CrewProposal,
+      decision: CrewProposalDecision,
+      crewInstanceId: string | null,
+    ) {
+      const final = yield* proposals
+        .complete({
           id: proposal.id,
-          status,
-          approvedSeats: seats,
-          crewInstanceId: proposal.crewInstanceId,
+          decision,
+          crewInstanceId,
           resolvedAt: DateTime.formatIso(yield* DateTime.now),
         })
         .pipe(Effect.mapError(operationError("recording the resolution")));
-      if (claimed === null) {
-        const current = yield* proposals
-          .read(proposal.id)
-          .pipe(Effect.mapError(operationError("reading the proposal")));
-        return yield* new CrewProposalNotOpenError({
-          proposalId: proposal.id,
-          status: current?.status ?? "open",
+      if (final === null)
+        return yield* new CrewProposalOperationError({
+          phase: "recording the resolution",
+          cause: new Error(`Proposal ${proposal.id} was no longer claimed for this decision.`),
         });
-      }
+      return final;
+    });
+
+    const settle = Effect.fn("j5.a2a.crewProposal.settle")(function* (
+      claimed: CrewProposal,
+      captain: CrewCaptain,
+      seats: ReadonlyArray<CrewProposalSeat>,
+    ) {
       const instance = yield* fulfil(claimed, captain, seats).pipe(
         // A failed spawn hands the gate back to the human rather than recording a phantom crew;
-        // onError also fires on a defect, so an unexpected failure cannot leave it approved.
-        Effect.onError(() => proposals.reopen(proposal.id).pipe(Effect.ignore)),
+        // onError also fires on a defect, so an unexpected failure cannot leave it claimed.
+        Effect.onError(() => proposals.reopen(claimed.id).pipe(Effect.ignore)),
       );
-      const final =
-        (yield* proposals
-          .attachInstance(proposal.id, instance.id)
-          .pipe(Effect.mapError(operationError("recording the crew")))) ??
-        ({ ...claimed, crewInstanceId: instance.id } satisfies CrewProposal);
-      yield* notifyCaptain(final, instance, status);
+      const final = yield* complete(claimed, "approve", instance.id);
+      yield* notifyCaptain(final, instance, "approved");
       return { proposal: final, instance } satisfies CrewProposalOutcome;
     });
 
@@ -463,10 +490,10 @@ export const layer = Layer.effect(
       members: ReadonlyArray<{ readonly seatName: string; readonly threadId: ThreadId }>,
     ) {
       for (const member of members) {
-        const seat = yield* threadManagement
-          .getThreadProjection(member.threadId)
-          .pipe(Effect.option);
-        if (Option.isNone(seat) || seat.value.thread.archivedAt !== null) continue;
+        const seat = yield* getThreadProjectionIfPresent(threadManagement, member.threadId).pipe(
+          Effect.mapError(operationError(`reading seat ${member.seatName}`)),
+        );
+        if (seat === null || seat.thread.archivedAt !== null) continue;
         yield* threadManagement
           .dispatch({
             type: "thread.archive",
@@ -524,6 +551,25 @@ export const layer = Layer.effect(
         .pipe(Effect.mapError(operationError("releasing reserved seats")));
     });
 
+    /**
+     * A claimed decline: an earlier approval may have failed partway and handed the gate back, so
+     * the cleanup runs first and the decline is recorded last. For an addition, every row this
+     * proposal reserved is released; for a roster, the Crew record and any seat threads the
+     * failed launch created are retired. Run from the gate and from the boot sweep alike.
+     */
+    const finishDecline = Effect.fn("j5.a2a.crewProposal.finishDecline")(function* (
+      claimed: CrewProposal,
+    ) {
+      if (claimed.crewInstanceId !== null) {
+        if (claimed.kind === "addition")
+          yield* retireFailedAddition(claimed, claimed.crewInstanceId);
+        else yield* retireFailedLaunch(claimed, claimed.crewInstanceId);
+      }
+      const declined = yield* complete(claimed, "decline", null);
+      yield* notifyCaptain(declined, null, "declined");
+      return { proposal: declined, instance: null } satisfies CrewProposalOutcome;
+    });
+
     const resolve: CrewProposalServiceShape["resolve"] = (input) =>
       Effect.gen(function* () {
         const proposal = yield* proposals
@@ -537,32 +583,12 @@ export const layer = Layer.effect(
             status: proposal.status,
           });
         if (input.decision === "decline") {
-          // An earlier approval may have failed partway and handed the gate back. Clean up first
-          // and record the decline last: a cleanup that fails leaves the gate open, so the person
-          // can decline again, rather than a declined proposal nobody can retry over seats that
-          // linger. For an addition, every row this proposal reserved is released; for a roster,
-          // the Crew record and any seat threads the failed launch created are retired.
-          if (proposal.crewInstanceId !== null) {
-            if (proposal.kind === "addition")
-              yield* retireFailedAddition(proposal, proposal.crewInstanceId);
-            else yield* retireFailedLaunch(proposal, proposal.crewInstanceId);
-          }
-          const declined = yield* proposals
-            .resolve({
-              id: proposal.id,
-              status: "declined",
-              approvedSeats: null,
-              crewInstanceId: null,
-              resolvedAt: DateTime.formatIso(yield* DateTime.now),
-            })
-            .pipe(Effect.mapError(operationError("recording the decline")));
-          if (declined === null)
-            return yield* new CrewProposalNotOpenError({
-              proposalId: proposal.id,
-              status: "declined",
-            });
-          yield* notifyCaptain(declined, null, "declined");
-          return { proposal: declined, instance: null };
+          const claimed = yield* claim(proposal, "decline", null);
+          return yield* finishDecline(claimed).pipe(
+            // A cleanup the store refused hands the gate back so the person can decline again,
+            // rather than leaving a claimed row only the next boot would finish.
+            Effect.onError(() => proposals.reopen(claimed.id).pipe(Effect.ignore)),
+          );
         }
         const seats = input.seats ?? proposal.requestedSeats;
         // The human may have renamed or added seats on the card; check them against the live
@@ -596,9 +622,56 @@ export const layer = Layer.effect(
           pendingSeats: 0,
         });
         const captain = yield* captainFor(proposal);
-        return yield* settle(proposal, captain, seats);
+        const claimed = yield* claim(proposal, "approve", seats);
+        return yield* settle(claimed, captain, seats);
       });
 
-    return CrewProposalService.of({ propose, requestMember, resolve });
+    const reconcile: CrewProposalServiceShape["reconcile"] = Effect.gen(function* () {
+      const claimed = yield* proposals.listClaimed();
+      const settled: Array<string> = [];
+      for (const proposal of claimed) {
+        // One proposal's failure is logged and left for the next boot; the sweep reaches the rest.
+        const done = yield* Effect.gen(function* () {
+          if (proposal.status === "declining") {
+            yield* finishDecline(proposal);
+            yield* Effect.logInfo("J5 crew proposal sweep finished a lost decline", {
+              proposalId: proposal.id,
+            });
+          } else {
+            yield* proposals.reopen(proposal.id);
+            yield* Effect.logInfo("J5 crew proposal sweep handed a lost approval back", {
+              proposalId: proposal.id,
+            });
+          }
+        }).pipe(
+          Effect.as(true),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("J5 crew proposal sweep could not settle a claimed proposal", {
+              proposalId: proposal.id,
+              status: proposal.status,
+              cause,
+            }).pipe(Effect.as(false)),
+          ),
+        );
+        if (done) settled.push(proposal.id);
+      }
+      return settled;
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logError("J5 crew proposal sweep failed", { cause }).pipe(Effect.as([])),
+      ),
+    );
+    return CrewProposalService.of({ propose, requestMember, resolve, reconcile });
+  }),
+);
+
+/**
+ * Runs the boot sweep once, in the background, when the runtime comes up; kept apart from the
+ * service so tests drive `reconcile` themselves.
+ */
+export const bootSweepLayer = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const gate = yield* CrewProposalService;
+    yield* Effect.forkScoped(gate.reconcile);
   }),
 );

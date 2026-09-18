@@ -5,7 +5,10 @@ import { layer as archiveFactsLayer, placementFactsLayer } from "./ArchiveFactsS
 import { layer as archiveAgentLayer } from "./ArchiveAgentService.ts";
 import { layer as agentCrewProposalLayer } from "./AgentCrewProposalService.ts";
 import { layer as crewLaunchLayer } from "./CrewLaunchService.ts";
-import { layer as crewProposalLayer } from "./CrewProposalService.ts";
+import {
+  bootSweepLayer as crewProposalBootSweepLayer,
+  layer as crewProposalLayer,
+} from "./CrewProposalService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import {
@@ -86,6 +89,10 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(crewLaunchProvided),
     Layer.provideMerge(agentCrewProposalLayer),
   );
+  // Same layer object, so the sweep runs against the one gate instance the routes use.
+  const crewProposalBootSweepProvided = crewProposalBootSweepLayer.pipe(
+    Layer.provide(crewProposalProvided),
+  );
   const runtimeWithoutClientReads = Layer.mergeAll(
     agentHandoffNudgeWorkerProvided,
     // Exported to the routes so the J5 WebSocket handler streams the same revision counter the
@@ -106,6 +113,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     squadronJoinProvided,
     agentCrewInstanceLayer,
     crewProposalProvided,
+    crewProposalBootSweepProvided,
   ).pipe(Layer.provideMerge(participantPlacementLayer));
   return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };

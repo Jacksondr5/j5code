@@ -28,7 +28,26 @@ const decodeSeats = Schema.decodeUnknownSync(Schema.fromJsonString(Seats));
 const encodeSeats = Schema.encodeSync(Schema.fromJsonString(Seats));
 
 export type CrewProposalKind = "roster" | "addition";
-export type CrewProposalStatus = "open" | "approved" | "declined";
+/**
+ * A resolution passes through a claimed state: `approving` while the seats launch, `declining`
+ * while a failed launch is cleaned up. The claim is what makes two devices resolving one reopened
+ * gate safe: the second finds the row claimed and is refused, so a decline can never retire the
+ * Crew an approval is launching. A claim the server lost mid-way is finished or handed back at
+ * boot (`reconcile` on CrewProposalService).
+ */
+export type CrewProposalStatus = "open" | "approving" | "declining" | "approved" | "declined";
+export type CrewProposalDecision = "approve" | "decline";
+export const CREW_PROPOSAL_STATUSES: ReadonlyArray<CrewProposalStatus> = [
+  "open",
+  "approving",
+  "declining",
+  "approved",
+  "declined",
+];
+const claimedStatus = (decision: CrewProposalDecision) =>
+  decision === "approve" ? ("approving" as const) : ("declining" as const);
+const finalStatus = (decision: CrewProposalDecision) =>
+  decision === "approve" ? ("approved" as const) : ("declined" as const);
 
 export interface CrewProposal {
   readonly id: string;
@@ -68,18 +87,30 @@ export interface AgentCrewProposalServiceShape {
     captainParticipantId: ParticipantId,
   ) => Effect.Effect<ReadonlyArray<CrewProposal>, SqlError>;
   /**
-   * Claims the open proposal for one resolution. Returns the proposal when this call won the
-   * claim and null when it was already resolved, so two approvals can never both spawn.
+   * Claims the open proposal for one resolution, compare-and-set from `open`. Returns the proposal
+   * when this call won the claim and null when another resolver already holds or finished it, so
+   * two approvals can never both spawn and a decline cannot undo a concurrent approval. An
+   * approval records the seats the person approved; a decline leaves them as they were.
    */
-  readonly resolve: (input: {
+  readonly claim: (input: {
     readonly id: string;
-    readonly status: Exclude<CrewProposalStatus, "open">;
+    readonly decision: CrewProposalDecision;
     readonly approvedSeats: ReadonlyArray<CrewProposalSeat> | null;
+  }) => Effect.Effect<CrewProposal | null, SqlError>;
+  /**
+   * Writes the final status of a claimed proposal, compare-and-set from its claimed state. Null
+   * when the row was not in that state, which means the claim was lost.
+   */
+  readonly complete: (input: {
+    readonly id: string;
+    readonly decision: CrewProposalDecision;
     readonly crewInstanceId: string | null;
     readonly resolvedAt: string;
   }) => Effect.Effect<CrewProposal | null, SqlError>;
-  /** Hands a claimed proposal back to the gate after its spawn failed. */
+  /** Hands a claimed proposal back to the gate after its spawn or cleanup failed. */
   readonly reopen: (id: string) => Effect.Effect<CrewProposal | null, SqlError>;
+  /** Proposals still claimed: what a crash mid-resolution leaves for the boot sweep. */
+  readonly listClaimed: () => Effect.Effect<ReadonlyArray<CrewProposal>, SqlError>;
   /** Records the crew a claimed roster proposal produced. */
   readonly attachInstance: (
     id: string,
@@ -115,7 +146,7 @@ const fromRow = (row: Row): CrewProposal => ({
   captainThreadId: ThreadId.make(row.captain_thread_id),
   crewInstanceId: row.crew_instance_id,
   kind: row.kind === "addition" ? "addition" : "roster",
-  status: row.status === "approved" || row.status === "declined" ? row.status : "open",
+  status: CREW_PROPOSAL_STATUSES.find((status) => status === row.status) ?? "open",
   brief: row.brief,
   displayName: row.display_name,
   requestedSeats: decodeSeats(row.requested_seats),
@@ -172,23 +203,39 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
         return rows.map(fromRow);
       });
 
-      const resolve = Effect.fn("j5.a2a.agentCrewProposals.resolve")(function* (input: {
+      const claim = Effect.fn("j5.a2a.agentCrewProposals.claim")(function* (input: {
         readonly id: string;
-        readonly status: Exclude<CrewProposalStatus, "open">;
+        readonly decision: CrewProposalDecision;
         readonly approvedSeats: ReadonlyArray<CrewProposalSeat> | null;
-        readonly crewInstanceId: string | null;
-        readonly resolvedAt: string;
       }) {
         const claimed = yield* sql<{ readonly id: string }>`
           UPDATE j5_agent_crew_proposal
-          SET status = ${input.status},
-              approved_seats = ${input.approvedSeats === null ? null : encodeSeats(input.approvedSeats)},
-              crew_instance_id = COALESCE(${input.crewInstanceId}, crew_instance_id),
-              resolved_at = ${input.resolvedAt}
+          SET status = ${claimedStatus(input.decision)},
+              approved_seats = COALESCE(${input.approvedSeats === null ? null : encodeSeats(input.approvedSeats)}, approved_seats)
           WHERE id = ${input.id} AND status = 'open'
           RETURNING id
         `;
         return claimed.length === 0 ? null : yield* read(input.id);
+      });
+
+      // A declined proposal keeps its Crew id (the retired record stays readable) and drops the
+      // approved seats, which belonged to the approval that never was.
+      const complete = Effect.fn("j5.a2a.agentCrewProposals.complete")(function* (input: {
+        readonly id: string;
+        readonly decision: CrewProposalDecision;
+        readonly crewInstanceId: string | null;
+        readonly resolvedAt: string;
+      }) {
+        const done = yield* sql<{ readonly id: string }>`
+          UPDATE j5_agent_crew_proposal
+          SET status = ${finalStatus(input.decision)},
+              approved_seats = CASE WHEN ${input.decision === "approve" ? 1 : 0} = 1 THEN approved_seats ELSE NULL END,
+              crew_instance_id = COALESCE(${input.crewInstanceId}, crew_instance_id),
+              resolved_at = ${input.resolvedAt}
+          WHERE id = ${input.id} AND status = ${claimedStatus(input.decision)}
+          RETURNING id
+        `;
+        return done.length === 0 ? null : yield* read(input.id);
       });
 
       // The approved seats stay: they are the roster the human edited, and the card reseeds
@@ -197,9 +244,18 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
         yield* sql`
           UPDATE j5_agent_crew_proposal
           SET status = 'open', resolved_at = NULL
-          WHERE id = ${id} AND status <> 'declined'
+          WHERE id = ${id} AND status IN ('approving', 'declining')
         `;
         return yield* read(id);
+      });
+
+      const listClaimed = Effect.fn("j5.a2a.agentCrewProposals.listClaimed")(function* () {
+        const rows = yield* sql<Row>`
+          SELECT * FROM j5_agent_crew_proposal
+          WHERE status IN ('approving', 'declining')
+          ORDER BY created_at, id
+        `;
+        return rows.map(fromRow);
       });
 
       const attachInstance = Effect.fn("j5.a2a.agentCrewProposals.attachInstance")(function* (
@@ -217,8 +273,10 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
         read,
         listOpen,
         listForCaptain,
-        resolve,
+        claim,
+        complete,
         reopen,
+        listClaimed,
         attachInstance,
       });
     }),

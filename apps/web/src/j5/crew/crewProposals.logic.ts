@@ -1,5 +1,5 @@
 interface GateLike {
-  readonly status: "open" | "approved" | "declined";
+  readonly status: "open" | "approving" | "declining" | "approved" | "declined";
   readonly kind: "roster" | "addition";
   readonly captainThreadId: string;
 }
