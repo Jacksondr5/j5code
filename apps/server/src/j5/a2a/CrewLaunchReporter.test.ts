@@ -22,6 +22,7 @@ import * as Ref from "effect/Ref";
 import * as TestClock from "effect/testing/TestClock";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
+import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
 import { ServerConfig } from "../../config.ts";
 import { ArtifactWorkspace } from "../artifacts/ArtifactWorkspace.ts";
 import { CrewSeatFinishNotifier, manualLayer as notifierLayer } from "./CrewSeatFinishNotifier.ts";
@@ -576,6 +577,7 @@ it.effect(
       const event = runEvent(threadId, facts);
       const integrated = notifierLayer.pipe(
         Layer.provideMerge(layer),
+        Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
         Layer.provideMerge(Layer.mock(ArtifactWorkspace)({})),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-launch-notice-" })),
         Layer.provideMerge(NodeServices.layer),
