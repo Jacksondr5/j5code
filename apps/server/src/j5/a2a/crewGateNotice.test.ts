@@ -92,6 +92,7 @@ describe("crew launch report", () => {
           {
             kind: "failed",
             runStatus: "failed",
+            runId: "run:failed",
             failure: {
               class: "provider_error",
               message: "API Error: Can't reach the API server",
@@ -106,7 +107,7 @@ describe("crew launch report", () => {
     });
     assert.include(text, "decision: approved");
     assert.include(text, "changes: added prosecutor");
-    assert.include(text, "launch: 1 started, 1 failed to start, 1 not started after 60s");
+    assert.include(text, "launch: 1 started, 1 failed to start, 1 start unconfirmed after 60s");
     assert.include(
       text,
       "seat_failed: punchline | failed | provider_error — API Error: Can't reach the API server",
@@ -119,7 +120,7 @@ describe("crew launch report", () => {
     assert.include(text, "thread_id=thread:punchline start=failed");
     assert.include(text, "thread_id=thread:prosecutor start=pending");
     assert.include(text, "1 of 3 seats failed to start");
-    assert.include(text, "1 seat had not started after 60s");
+    assert.include(text, "1 seat has no confirmed provider activity after 60s");
     assert.notInclude(text, "Your crew is running");
   });
 
@@ -134,7 +135,7 @@ describe("crew launch report", () => {
       windowMs: 60_000,
     });
     assert.include(text, "changes: none");
-    assert.include(text, "launch: 2 started, 0 failed to start, 0 not started after 60s");
+    assert.include(text, "launch: 2 started, 0 failed to start, 0 start unconfirmed after 60s");
     assert.include(text, "Your crew is running.");
     assert.notInclude(text, "seat_failed");
   });

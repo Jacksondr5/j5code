@@ -5,14 +5,15 @@ import type { CrewProposal, CrewProposalSeat } from "./AgentCrewProposalService.
 import { formatRunFailure } from "./runFailures.ts";
 
 /**
- * How a seat's first turn went, measured from its run: `started` once the provider opened a
- * turn (or the turn already finished), `failed` when the run ended without running, `pending`
+ * How a seat's first turn went, measured from its run: `started` once provider activity is recorded
+ * (or the run completed), `failed` when the run failed before the report, `pending`
  * when the report's window closed before either.
  */
 export type SeatStartVerdict =
   | { readonly kind: "started" }
   | {
       readonly kind: "failed";
+      readonly runId: string;
       readonly runStatus: string;
       readonly failure: OrchestrationV2ProviderFailure | null;
     }
@@ -92,7 +93,7 @@ export const crewLaunchReportText = (input: {
   const failed = [...verdicts].filter(([, verdict]) => verdict.kind === "failed");
   const pending = [...verdicts].filter(([, verdict]) => verdict.kind === "pending");
   const windowSeconds = Math.round(input.windowMs / 1000);
-  const launch = `launch: ${started} started, ${failed.length} failed to start, ${pending.length} not started after ${windowSeconds}s`;
+  const launch = `launch: ${started} started, ${failed.length} failed to start, ${pending.length} start unconfirmed after ${windowSeconds}s`;
   const failedLines = failed.map(
     ([seat, verdict]) =>
       `seat_failed: ${seat} | ${verdict.kind === "failed" ? verdict.runStatus : ""} | ${formatRunFailure(verdict.kind === "failed" ? verdict.failure : null)}`,
@@ -114,6 +115,9 @@ export const crewLaunchReportText = (input: {
     `changes: ${changesLine(changes)}`,
     launch,
     ...failedLines,
+    ...failed.flatMap(([, verdict]) =>
+      verdict.kind === "failed" ? [`failed_run: ${verdict.runId}`] : [],
+    ),
     ...pendingLines,
     `roster:\n${roster}`,
     "</j5_crew_gate>",
@@ -125,7 +129,7 @@ export const crewLaunchReportText = (input: {
     );
   if (pending.length > 0)
     prose.push(
-      `${pending.length} ${pending.length === 1 ? "seat had" : "seats had"} not started after ${windowSeconds}s; its first turn may still be queued, and you will hear from it when it finishes.`,
+      `${pending.length} ${pending.length === 1 ? "seat has" : "seats have"} no confirmed provider activity after ${windowSeconds}s; its first turn may still be queued, and you will hear from it when it finishes.`,
     );
   if (failed.length === 0 && pending.length === 0)
     prose.push(

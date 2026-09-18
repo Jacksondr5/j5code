@@ -136,7 +136,7 @@ describe("crew notices in the Captain's thread", () => {
     if (notice?.kind === "gate") {
       expect(crewGateTitle(notice)).toBe("Crew launched, 1 seat failed to start");
       expect(crewGateFooter(notice)).toBe(
-        "1 seat failed to start; the Captain has each reason. 1 seat had not started after a minute.",
+        "1 seat failed to start; the Captain has each reason. 1 seat has no confirmed provider activity after a minute.",
       );
     }
   });
