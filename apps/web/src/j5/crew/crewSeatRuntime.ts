@@ -81,6 +81,20 @@ export const crewModelSelection = (
   return { instanceId: provider.instanceId, model: model.slug, ...(options ? { options } : {}) };
 };
 
+/** ACP cannot enforce Auto or Accept edits; a harness switch visibly chooses its supervised mode. */
+export const chooseCrewHarness = (
+  draft: CrewSeatDraft,
+  provider: Pick<ServerProvider, "instanceId" | "driver">,
+  model: ServerProviderModel,
+): CrewSeatDraft => ({
+  ...draft,
+  modelSelection: crewModelSelection(provider, model),
+  ...(provider.driver === "acpRegistry" &&
+  (draft.runtimeMode === "auto" || draft.runtimeMode === "auto-accept-edits")
+    ? { runtimeMode: "approval-required" }
+    : {}),
+});
+
 export const crewReasoningDescriptor = (
   model: ServerProviderModel | undefined,
 ): ProviderOptionDescriptor | undefined =>

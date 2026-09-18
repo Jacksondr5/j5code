@@ -826,7 +826,7 @@ it.effect(
           ])
           .pipe(Effect.flip);
         assert.equal(invalidAccess._tag, "CrewLaunchSeatUnavailableError");
-        assert.include(invalidAccess.message, "Choose Supervised or Full access");
+        assert.include(invalidAccess.message, "Choose Approval required or Full access");
         const personaOverride = yield* launcher
           .resolveSeats(captain, [{ ...custom, agentId: "critic" }])
           .pipe(Effect.flip);

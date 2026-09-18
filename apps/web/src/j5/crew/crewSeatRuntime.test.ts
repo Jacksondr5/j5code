@@ -1,4 +1,8 @@
-import { ProviderInstanceId, type ServerProviderModel } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProviderModel,
+} from "@t3tools/contracts";
 import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -6,6 +10,7 @@ import { CUSTOM_AGENT, addSeat } from "./crewProposalDraft";
 import {
   applyCrewSeatDraft,
   chooseCrewSeatPersona,
+  chooseCrewHarness,
   crewModelSelection,
   crewReasoningDescriptor,
   crewSeatDraft,
@@ -95,6 +100,40 @@ describe("custom crew member edits", () => {
       { ...model, capabilities: null },
     );
     expect(noOptions).not.toHaveProperty("options");
+  });
+
+  it.each(["auto", "auto-accept-edits"] as const)(
+    "switches unsupported ACP %s access to explicit Approval required",
+    (runtimeMode) => {
+      const draft = { ...crewSeatDraft(seat), runtimeMode };
+      const acp = {
+        instanceId: ProviderInstanceId.make("acp-work"),
+        driver: ProviderDriverKind.make("acpRegistry"),
+      };
+      const next = chooseCrewHarness(draft, acp, model);
+      expect(next.runtimeMode).toBe("approval-required");
+      expect(next.modelSelection).toEqual(crewModelSelection(acp, model));
+      expect(next.instructions).toBe(seat.instructions);
+      expect(
+        chooseCrewHarness(draft, { ...acp, driver: ProviderDriverKind.make("codex") }, model)
+          .runtimeMode,
+      ).toBe(runtimeMode);
+    },
+  );
+
+  it("retains supported explicit access when switching to ACP", () => {
+    const acp = {
+      instanceId: ProviderInstanceId.make("acp-work"),
+      driver: ProviderDriverKind.make("acpRegistry"),
+    };
+    expect(
+      chooseCrewHarness({ ...crewSeatDraft(seat), runtimeMode: "full-access" }, acp, model)
+        .runtimeMode,
+    ).toBe("full-access");
+    expect(
+      chooseCrewHarness({ ...crewSeatDraft(seat), runtimeMode: "approval-required" }, acp, model)
+        .runtimeMode,
+    ).toBe("approval-required");
   });
 
   it("changes reasoning without discarding other model options", () => {
