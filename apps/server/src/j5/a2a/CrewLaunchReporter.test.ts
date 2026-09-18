@@ -1,3 +1,4 @@
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -123,6 +124,8 @@ const fixture = Effect.gen(function* () {
   yield* runJ5A2AMigrations().pipe(Effect.provide(context));
   yield* Effect.provide(
     Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at) VALUES ('human:operator', 1, ${at})`;
       yield* (yield* A2ALedger).createSquadron({
         squadron: { id: squadronId, name: "Launch Report Squadron", createdAt: at },
       });

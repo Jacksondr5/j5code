@@ -6,9 +6,9 @@ import type { ReactNode } from "react";
 
 import ChatMarkdown from "../../components/ChatMarkdown";
 import { Badge } from "../../components/ui/badge";
+import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import { deriveDisplayedUserMessageState } from "../../lib/terminalContext";
 import { buildThreadRouteParams } from "../../threadRoutes";
-import { presentParticipantIdentity } from "../a2a/ParticipantIdentity";
 import {
   crewGateFooter,
   crewGateTitle,
@@ -97,8 +97,7 @@ function CrewLaunchCard(props: {
 
 /**
  * The gate's decision as the Captain received it: what was decided, about which Crew, and the
- * roster seat by seat. Every seat opens its thread; names come from the timeline's one identity
- * read and fall back to the agent id rather than a guess.
+ * roster seat by seat. Every seat opens its thread; its label names the saved agent, not the thread title.
  */
 function CrewGateCard(props: {
   readonly notice: Extract<CrewNoticePresentation, { kind: "gate" }>;
@@ -156,11 +155,7 @@ function CrewGateCard(props: {
       {approved ? (
         <ul className="mt-2 flex flex-col gap-1">
           {notice.roster.map((seat) => {
-            const identity = presentParticipantIdentity({
-              participantId: seat.participantId,
-              participantLabels: input.participantLabels ?? new Map(),
-            });
-            const label = identity.tooltipParticipantId === null ? identity.label : seat.agentId;
+            const label = seat.agentId;
             const failure = notice.failures.find((entry) => entry.seat === seat.seat) ?? null;
             return (
               <li key={seat.seat}>
@@ -173,7 +168,12 @@ function CrewGateCard(props: {
                   <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
                     {seat.seat}
                   </Badge>
-                  <span className="truncate text-foreground">{label}</span>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<span className="truncate text-foreground">{label}</span>}
+                    />
+                    <TooltipPopup>{seat.participantId}</TooltipPopup>
+                  </Tooltip>
                   {seat.isNew ? (
                     <span className="rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
                       New
@@ -185,7 +185,7 @@ function CrewGateCard(props: {
                     </span>
                   ) : seat.start === "pending" ? (
                     <span className="ms-auto shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
-                      Not started
+                      Start unconfirmed
                     </span>
                   ) : null}
                 </button>

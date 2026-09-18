@@ -821,7 +821,6 @@ import { resolveComposerDispatchMode, type ComposerDispatchMode } from "./compos
 import { SteerUnavailableNotice } from "../../j5/composer/SteerUnavailableNotice";
 import { useJ5SteerState } from "../../j5/composer/useJ5SteerState";
 import { shouldRefuseComposerSteer } from "../../j5/composer/submitGuard";
-import { CrewRosterGate } from "../../j5/crew/CrewRosterGate";
 import { j5CrewSlashCommandItems } from "../../j5/crew/crewSlashCommand";
 import type { ContextWindowSnapshot } from "../../lib/contextWindow";
 import {
@@ -5594,10 +5593,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               message={providerInputSubmissionError ?? composerSubmissionError}
             />
 
-            <CrewRosterGate
-              environmentId={environmentId}
-              threadId={isServerThread ? activeThreadId : null}
-            />
             <SteerUnavailableNotice
               requested={j5SteerNoticeRequested}
               state={j5SteerState}
