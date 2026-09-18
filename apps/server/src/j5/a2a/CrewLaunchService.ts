@@ -1,3 +1,4 @@
+import { isProviderAvailable } from "@t3tools/contracts";
 import type {
   ModelSelection,
   OrchestrationV2AgentPersonaAssignment,
@@ -202,6 +203,32 @@ export const layer = Layer.effect(
       for (const seat of seats) {
         const agentId = seat.agentId;
         if (agentId === null) {
+          const selection = captain.thread.modelSelection;
+          const provider = providers.find(
+            (candidate) => candidate.instanceId === selection.instanceId,
+          );
+          const problem =
+            provider === undefined
+              ? "is no longer configured"
+              : !isProviderAvailable(provider)
+                ? "is unavailable"
+                : !provider.enabled || provider.status === "disabled"
+                  ? "is disabled"
+                  : !provider.installed
+                    ? "is not installed"
+                    : provider.status === "error"
+                      ? "reports an error"
+                      : provider.auth.status === "unauthenticated"
+                        ? "is signed out"
+                        : !provider.models.some((model) => model.slug === selection.model)
+                          ? `does not advertise ${selection.model}`
+                          : null;
+          if (problem !== null)
+            return yield* new CrewLaunchSeatUnavailableError({
+              seatName: seat.name,
+              agentId: "custom seat",
+              detail: `The Captain's provider ${selection.instanceId} ${problem}.`,
+            });
           // The human approved this seat by its name and instructions; with no definition to run
           // as, it takes the Captain's provider, model, and effective access mode. The Captain's
           // sandbox is not carried: only a persona assignment can convey one, and this seat has

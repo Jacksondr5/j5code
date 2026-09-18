@@ -81,6 +81,23 @@ describe("crew launch report", () => {
     ],
   } as unknown as AgentCrewInstance;
 
+  it("distinguishes a custom seat from a saved agent named custom", () => {
+    const text = crewLaunchReportText({
+      proposal,
+      instance: {
+        ...instance,
+        members: [
+          { ...instance.members[0]!, agentId: null },
+          { ...instance.members[1]!, agentId: "custom" },
+        ],
+      },
+      verdicts: new Map(),
+      windowMs: 60_000,
+    });
+    assert.include(text, "agent= thread_id=thread:setup");
+    assert.include(text, "agent=custom thread_id=thread:punchline");
+  });
+
   it("says per seat what became of its first turn, and what the person changed", () => {
     const text = crewLaunchReportText({
       proposal,

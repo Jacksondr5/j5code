@@ -70,7 +70,7 @@ const head = (proposal: CrewProposal, decision: "approved" | "declined") =>
 
 /** The platform-composed notice a Captain receives when the person declines: measured facts only. */
 export const crewDeclinedNoticeText = (proposal: CrewProposal) =>
-  `${head(proposal, "declined")}\nrequested_seats: ${proposal.requestedSeats.map(({ seat, agentId }) => `${seat}=${agentId ?? "custom"}`).join(", ")}\n</j5_crew_gate>\n\nThe user declined this crew request. Continue with the seats you have, or revise the request and propose again with a clearer reason.`;
+  `${head(proposal, "declined")}\nrequested_seats: ${proposal.requestedSeats.map(({ seat, agentId }) => `${seat}=${agentId ?? ""}`).join(", ")}\n</j5_crew_gate>\n\nThe user declined this crew request. Continue with the seats you have, or revise the request and propose again with a clearer reason.`;
 
 /**
  * The launch report: the approval, what the person changed, and how each seat's first turn went.
@@ -103,7 +103,7 @@ export const crewLaunchReportText = (input: {
     .map((member) => {
       const verdict = verdicts.get(member.seatName);
       const isNew = member.addedVersion === instance.version && proposal.kind === "addition";
-      return `- ${member.seatName}: participant_id=${member.participantId} agent=${member.agentId ?? "custom"} thread_id=${member.threadId}${
+      return `- ${member.seatName}: participant_id=${member.participantId} agent=${member.agentId ?? ""} thread_id=${member.threadId}${
         verdict === undefined ? "" : ` start=${verdict.kind}`
       }${isNew ? " (new)" : ""}`;
     })
