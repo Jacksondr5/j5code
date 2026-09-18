@@ -29,7 +29,34 @@ export interface SeatStartFailure {
   readonly detail: string;
 }
 
+export type SeatHandoff =
+  | { readonly status: "none declared" }
+  | {
+      readonly status: "written" | "missing";
+      readonly kind: string;
+      /** The logical path the notice names, `artifacts/handoffs/...`. */
+      readonly artifactPath: string | null;
+      /** The handoff text when the notice carried it inline. */
+      readonly body: string | null;
+    };
+
+export interface FinishedSeat {
+  readonly seat: string;
+  readonly crewName: string | null;
+  readonly participantId: string;
+  readonly threadId: string;
+  readonly runStatus: string;
+  /** The run's recorded error when it failed, as the notice carried it. */
+  readonly failure: string | null;
+  readonly handoff: SeatHandoff;
+}
+
 export type CrewNoticePresentation =
+  | {
+      /** One or more seats' finishes, folded into one message when the Captain was mid-turn. */
+      readonly kind: "seats";
+      readonly seats: ReadonlyArray<FinishedSeat>;
+    }
   | {
       /** The person's `/crew <brief>` turn: the brief, with the guidance block set aside. */
       readonly kind: "launch";
@@ -147,10 +174,67 @@ const parseGate = (text: string): CrewNoticePresentation | null => {
   };
 };
 
+const SEAT_OPEN = "<j5_seat_finished>";
+const SEAT_BLOCK = /^<j5_seat_finished>\n([\s\S]*?)\n<\/j5_seat_finished>([\s\S]*)$/;
+const HANDOFF_BODY = /<handoff_body>\n([\s\S]*?)\n<\/handoff_body>/;
+const HANDOFF_FIELD = /^(written|missing) \((.+)\)$/;
+
+const parseSeatSection = (section: string): FinishedSeat | null => {
+  const match = SEAT_BLOCK.exec(section);
+  if (match === null) return null;
+  const block = match[1]!;
+  const seat = field(block, "seat");
+  const participantId = field(block, "participant_id");
+  const threadId = field(block, "thread_id");
+  const runStatus = field(block, "run_status");
+  const handoffField = field(block, "handoff");
+  if (seat === null || participantId === null || threadId === null || runStatus === null)
+    return null;
+  let handoff: SeatHandoff;
+  if (handoffField === null || handoffField === "none declared") {
+    handoff = { status: "none declared" };
+  } else {
+    const parsed = HANDOFF_FIELD.exec(handoffField);
+    if (parsed === null) return null;
+    const bodyMatch = HANDOFF_BODY.exec(match[2]!);
+    handoff = {
+      status: parsed[1] as "written" | "missing",
+      kind: parsed[2]!,
+      artifactPath: field(block, "artifact"),
+      body:
+        bodyMatch === null
+          ? null
+          : bodyMatch[1]!
+              .replace(/<\\\/handoff_body>/g, "</handoff_body>")
+              .replace(/<\\j5_seat_finished>/g, "<j5_seat_finished>"),
+    };
+  }
+  return {
+    seat,
+    crewName: field(block, "crew"),
+    participantId,
+    threadId,
+    runStatus,
+    failure: field(block, "failure"),
+    handoff,
+  };
+};
+
+const parseSeats = (text: string): CrewNoticePresentation | null => {
+  if (!text.startsWith(SEAT_OPEN)) return null;
+  const seats = text
+    .split(SEAT_OPEN)
+    .slice(1)
+    .map((part) => parseSeatSection(`${SEAT_OPEN}${part}`.trim()));
+  return seats.length === 0 || seats.some((seat) => seat === null)
+    ? null
+    : { kind: "seats", seats: seats as ReadonlyArray<FinishedSeat> };
+};
+
 /** Null for anything that is not a Crew notice; the ordinary renderer then owns the message. */
 export const presentCrewNotice = (message: CrewNoticeMessage): CrewNoticePresentation | null => {
   if (message.role !== "user") return null;
-  if (message.createdBy === "system") return parseGate(message.text);
+  if (message.createdBy === "system") return parseGate(message.text) ?? parseSeats(message.text);
   if (message.createdBy === undefined || message.createdBy === "user")
     return parseLaunch(message.text);
   return null;
@@ -159,8 +243,41 @@ export const presentCrewNotice = (message: CrewNoticeMessage): CrewNoticePresent
 /** The seats a gate card names, so the timeline can resolve their labels in its one identity read. */
 export const participantIdsForCrewNotice = (message: CrewNoticeMessage): ReadonlyArray<string> => {
   const notice = presentCrewNotice(message);
-  return notice?.kind === "gate" ? notice.roster.map((seat) => seat.participantId) : [];
+  if (notice?.kind === "gate") return notice.roster.map((seat) => seat.participantId);
+  if (notice?.kind === "seats") return notice.seats.map((seat) => seat.participantId);
+  return [];
 };
+
+/** The seats card's title leads with what ended how: "Seat failed", "2 seats finished, 1 failed". */
+export const crewSeatsTitle = (seats: ReadonlyArray<FinishedSeat>) => {
+  const failed = seats.filter((seat) => seat.runStatus === "failed").length;
+  const finished = seats.length - failed;
+  if (failed === 0) return seats.length === 1 ? "Seat finished" : `${seats.length} seats finished`;
+  if (finished === 0) return failed === 1 ? "Seat failed" : `${failed} seats failed`;
+  return `${finished} ${finished === 1 ? "seat" : "seats"} finished, ${failed} failed`;
+};
+
+/** "Completed", "Failed", "Interrupted": the run's measured end, with a tone for the pill. */
+export const seatRunStatusLabel = (
+  runStatus: string,
+): { readonly label: string; readonly tone: "good" | "bad" | "warn" | "muted" } => {
+  switch (runStatus) {
+    case "completed":
+      return { label: "Completed", tone: "good" };
+    case "failed":
+    case "errored":
+      return { label: "Failed", tone: "bad" };
+    case "interrupted":
+    case "cancelled":
+      return { label: "Interrupted", tone: "warn" };
+    default:
+      return { label: runStatus, tone: "muted" };
+  }
+};
+
+/** The project-relative path the artifacts panel opens, from the notice's logical path. */
+export const artifactPanelPath = (logicalPath: string) =>
+  logicalPath.startsWith("artifacts/") ? logicalPath.slice("artifacts/".length) : logicalPath;
 
 /** The card's title: what was decided and, for an approval, whether the launch went whole. */
 export const crewGateTitle = (notice: Extract<CrewNoticePresentation, { kind: "gate" }>) => {

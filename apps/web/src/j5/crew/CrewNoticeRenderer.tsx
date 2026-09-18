@@ -1,7 +1,7 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { UsersIcon } from "lucide-react";
+import { FileTextIcon, UsersIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import ChatMarkdown from "../../components/ChatMarkdown";
@@ -9,13 +9,24 @@ import { Badge } from "../../components/ui/badge";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import { deriveDisplayedUserMessageState } from "../../lib/terminalContext";
 import { buildThreadRouteParams } from "../../threadRoutes";
+import { useRightPanelStore } from "../../rightPanelStore";
 import {
+  artifactPanelPath,
   crewGateFooter,
+  crewSeatsTitle,
   crewGateTitle,
   presentCrewNotice,
+  seatRunStatusLabel,
   type CrewNoticeMessage,
   type CrewNoticePresentation,
 } from "./crewNotices.logic";
+
+const TONE_CLASS = {
+  good: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  bad: "bg-red-500/15 text-red-700 dark:text-red-300",
+  warn: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  muted: "border border-border/70 text-muted-foreground",
+} as const;
 
 export interface CrewNoticeRenderInput {
   readonly message: CrewNoticeMessage & {
@@ -213,13 +224,132 @@ function CrewGateCard(props: {
   );
 }
 
+/**
+ * Seats' finishes as the Captain received them: each seat's measured end and where its handoff
+ * stands, the handoff opening in the artifacts panel and its text one click away when it rode
+ * inline. Several seats share one card when their notices folded into one message.
+ */
+function CrewSeatsCard(props: {
+  readonly notice: Extract<CrewNoticePresentation, { kind: "seats" }>;
+  readonly input: CrewNoticeRenderInput;
+}) {
+  const { notice, input } = props;
+  const navigate = useNavigate();
+  const threadRef = input.threadRef ?? null;
+  const crews = new Set(notice.seats.map((seat) => seat.crewName));
+  const openSeat = (threadId: string) => {
+    if (threadRef === null) return;
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(
+        scopeThreadRef(threadRef.environmentId, ThreadId.make(threadId)),
+      ),
+    });
+  };
+  return (
+    <section
+      className="max-w-[88%] rounded-[10px] border border-border/70 bg-muted/25 px-3.5 py-2.5"
+      data-j5-crew-renderer="seats"
+    >
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+          <UsersIcon className="size-3.5 shrink-0" aria-hidden />
+          {crewSeatsTitle(notice.seats)}
+        </span>
+        {crews.size === 1 && notice.seats[0]!.crewName !== null ? (
+          <span className="font-medium text-foreground">{notice.seats[0]!.crewName}</span>
+        ) : null}
+        {input.timestampLabel ? (
+          <time
+            className="ms-auto tabular-nums text-muted-foreground"
+            dateTime={input.message.createdAt}
+          >
+            {input.timestampLabel}
+          </time>
+        ) : null}
+      </div>
+      <ul className="mt-2 flex flex-col gap-1.5">
+        {notice.seats.map((seat) => {
+          const status = seatRunStatusLabel(seat.runStatus);
+          const handoff = seat.handoff;
+          return (
+            <li key={`${seat.participantId}:${seat.runStatus}`} className="flex flex-col gap-1">
+              <button
+                type="button"
+                disabled={threadRef === null}
+                className="flex w-full min-w-0 flex-wrap items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm outline-hidden hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:hover:bg-transparent"
+                onClick={() => openSeat(seat.threadId)}
+              >
+                <span
+                  className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${TONE_CLASS[status.tone]}`}
+                >
+                  {status.label}
+                </span>
+                <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
+                  {seat.seat}
+                </Badge>
+                {crews.size > 1 && seat.crewName !== null ? (
+                  <span className="truncate text-xs text-muted-foreground">{seat.crewName}</span>
+                ) : null}
+                {handoff.status === "none declared" ? null : (
+                  <span
+                    className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${
+                      handoff.status === "written" ? TONE_CLASS.muted : TONE_CLASS.warn
+                    }`}
+                  >
+                    {handoff.status === "written" ? "Handoff written" : "Handoff missing"} ·{" "}
+                    {handoff.kind}
+                  </span>
+                )}
+              </button>
+              {seat.failure !== null ? (
+                <p className="ms-1.5 text-xs text-muted-foreground">{seat.failure}</p>
+              ) : null}
+              {handoff.status === "written" && handoff.artifactPath !== null ? (
+                <div className="ms-1.5 flex flex-col gap-1">
+                  <button
+                    type="button"
+                    disabled={threadRef === null}
+                    className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:cursor-default"
+                    onClick={() => {
+                      if (threadRef === null) return;
+                      useRightPanelStore
+                        .getState()
+                        .openArtifact(threadRef, artifactPanelPath(handoff.artifactPath!));
+                    }}
+                  >
+                    <FileTextIcon className="size-3.5 shrink-0" aria-hidden />
+                    <span className="truncate">{handoff.artifactPath}</span>
+                  </button>
+                  {handoff.body !== null ? (
+                    <details>
+                      <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                        Show handoff
+                      </summary>
+                      <ChatMarkdown
+                        text={handoff.body}
+                        cwd={input.markdownCwd}
+                        threadRef={threadRef ?? undefined}
+                        className="mt-1 text-sm text-foreground"
+                        parseRawHtml={false}
+                      />
+                    </details>
+                  ) : null}
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 /** Null for anything that is not a Crew notice; the caller then falls through to its own rendering. */
 export function renderCrewNotice(input: CrewNoticeRenderInput): ReactNode {
   const notice = presentCrewNotice(input.message);
   if (notice === null) return null;
-  return notice.kind === "launch" ? (
-    <CrewLaunchCard notice={notice} input={input} />
-  ) : (
-    <CrewGateCard notice={notice} input={input} />
-  );
+  if (notice.kind === "launch") return <CrewLaunchCard notice={notice} input={input} />;
+  if (notice.kind === "seats") return <CrewSeatsCard notice={notice} input={input} />;
+  return <CrewGateCard notice={notice} input={input} />;
 }

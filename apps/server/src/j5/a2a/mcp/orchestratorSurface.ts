@@ -3,8 +3,6 @@ import {
   OrchestratorMcpFailure,
   OrchestratorMcpThreadReadInput,
   OrchestratorMcpThreadReadResult,
-  OrchestratorMcpThreadWaitInput,
-  OrchestratorMcpThreadWaitResult,
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderInteractionMode,
@@ -84,9 +82,6 @@ export const J5_ORCHESTRATOR_CAPABILITIES_DESCRIPTION =
 export const J5_THREAD_READ_DESCRIPTION =
   "Read durable state and a paginated timeline from a T3 thread in the calling project. The default messages view returns user messages, assistant messages, and proposed plans; activity returns all summarized timeline items. Continue with afterPosition=nextPosition.";
 
-export const J5_THREAD_WAIT_DESCRIPTION =
-  "Wait for a T3 thread run in the calling project to reach a terminal durable state. Without runId, the latest run at call time is selected; an idle thread returns immediately. Timeout does not interrupt work, so call again or use t3_thread_read or t3_thread_list after timedOut=true.";
-
 export const J5OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
   description: J5_ORCHESTRATOR_CAPABILITIES_DESCRIPTION,
   success: J5OrchestratorCapabilitiesResult,
@@ -112,19 +107,12 @@ export const J5ThreadReadTool = Tool.make("t3_thread_read", {
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true);
 
-export const J5ThreadWaitTool = Tool.make("t3_thread_wait", {
-  description: J5_THREAD_WAIT_DESCRIPTION,
-  parameters: OrchestratorMcpThreadWaitInput,
-  success: OrchestratorMcpThreadWaitResult,
-  failure: OrchestratorMcpFailure,
-  failureMode: "return",
-  dependencies,
-})
-  .annotate(Tool.Title, "Wait for a T3 thread")
-  .annotate(Tool.Readonly, true)
-  .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, true);
-
+/**
+ * Upstream's `t3_thread_wait` is deliberately absent. Platform notices queue behind a running
+ * turn, so a participant that blocks inside its turn waiting for another thread can never receive
+ * the notice that thread's finish produces; a Captain that waited on a seat starved itself of its
+ * own Crew's news (2026-09-14). A seat's finish arrives as a message once the turn ends.
+ */
 export const J5OrchestratorSurface = Toolkit.make(
   J5DelegateTaskTool,
   TaskStatusTool,
@@ -136,5 +124,4 @@ export const J5OrchestratorSurface = Toolkit.make(
   DeleteScheduledTaskTool,
   ThreadListTool,
   J5ThreadReadTool,
-  J5ThreadWaitTool,
 );

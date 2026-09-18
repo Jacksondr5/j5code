@@ -15,6 +15,7 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
+import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { deliveryMessageId } from "./DeliveryTransport.ts";
 import { formatSilenceNoticeEnvelope } from "./EnvelopeFormatter.ts";
@@ -207,7 +208,26 @@ const makeLayer = (daemon: boolean) =>
       const ledger = yield* A2ALedger;
       const deliveryWorker = yield* A2ADeliveryWorker;
       const threads = yield* ThreadManagement.ThreadManagementService;
+      const crews = yield* AgentCrewInstanceService;
       const sql = yield* SqlClient.SqlClient;
+
+      /**
+       * A seat's failed run reaches its Captain as a Crew fact, from the launch report or the
+       * seat's finish notice, with the run's error. The same failure framed here as an unanswered
+       * ask would be the Captain's third telling of one death (Jackson's dogfood, 2026-09-17).
+       */
+      const captainHearsFailureElsewhere = Effect.fn("j5.a2a.silence.captainHearsFailureElsewhere")(
+        function* (exchange: ExchangeRow) {
+          const membership = yield* crews.findMembership(ParticipantId.make(exchange.receiver_id));
+          if (membership === null) return false;
+          const instance = yield* crews.read(membership.crewInstanceId);
+          return (
+            instance !== null &&
+            instance.archivedAt === null &&
+            instance.captainParticipantId === exchange.sender_id
+          );
+        },
+      );
 
       const failureDetail = Effect.fn("j5.a2a.silence.failureDetail")(function* (
         threadId: ThreadId,
@@ -338,6 +358,8 @@ const makeLayer = (daemon: boolean) =>
         payload: SilenceNoticePayload,
       ) {
         yield* decodeSilenceNotice(payload);
+        if (payload.state === "errored" && (yield* captainHearsFailureElsewhere(exchange)))
+          return [];
         const prior = yield* sql<{ readonly count: number }>`
           SELECT COUNT(*) AS count
           FROM j5_a2a_comm_event

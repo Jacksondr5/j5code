@@ -22,6 +22,9 @@ import * as Ref from "effect/Ref";
 import * as TestClock from "effect/testing/TestClock";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
+import { ServerConfig } from "../../config.ts";
+import { ArtifactWorkspace } from "../artifacts/ArtifactWorkspace.ts";
+import { CrewSeatFinishNotifier, manualLayer as notifierLayer } from "./CrewSeatFinishNotifier.ts";
 import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
 import { ProjectionStoreThreadNotFoundError } from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
@@ -563,5 +566,54 @@ it.effect(
         assert.lengthOf(yield* reports(), 1);
         assert.include((yield* reports())[0]!, "launch: 1 started");
       }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "the real finish notifier is silent before, after, and on replay of a failed launch report",
+  () =>
+    Effect.gen(function* () {
+      const { layer, approvedLaunch, setSeat, reports } = yield* fixture;
+      const id = "proposal:notifier";
+      yield* approvedLaunch({
+        id,
+        requested: [seat("first", "scout")],
+        approved: [seat("first", "scout")],
+      });
+      const threadId = crewSeatThreadId(id, "first");
+      const userMessageId = crewSeatBriefMessageId(id, "first");
+      const facts = {
+        status: "failed" as const,
+        userMessageId,
+        failure: { class: "provider_error", message: "expired token" },
+      };
+      yield* setSeat(id, "first", [facts]);
+      const event = runEvent(threadId, facts);
+      const integrated = notifierLayer.pipe(
+        Layer.provideMerge(layer),
+        Layer.provideMerge(Layer.mock(ArtifactWorkspace)({})),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-launch-notice-" })),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const reporter = yield* CrewLaunchReporter;
+        const notifier = yield* CrewSeatFinishNotifier;
+        // A seat may die before all sibling briefs have even dispatched.
+        yield* notifier.handleStoredEvent(event);
+        assert.lengthOf(yield* reports(), 0);
+        yield* reporter.watch(id);
+        yield* reporter.handleStoredEvent(event);
+        yield* notifier.handleStoredEvent(event);
+        const texts = yield* reports();
+        assert.lengthOf(texts, 1);
+        assert.include(texts[0]!, "<j5_crew_gate>");
+        assert.include(texts[0]!, "expired token");
+      }).pipe(Effect.provide(integrated));
+      // New services against the same durable projection, as after a server restart.
+      yield* Effect.gen(function* () {
+        yield* (yield* CrewLaunchReporter).reconcile;
+        yield* (yield* CrewSeatFinishNotifier).handleStoredEvent(event);
+        assert.lengthOf(yield* reports(), 1);
+      }).pipe(Effect.provide(integrated));
     }).pipe(Effect.scoped),
 );
