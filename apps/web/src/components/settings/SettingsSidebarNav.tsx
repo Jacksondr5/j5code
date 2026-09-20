@@ -78,6 +78,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/keybindings": KeyboardIcon,
   "/settings/agents": UsersRoundIcon,
   "/settings/skills": LibraryIcon,
+  "/settings/skill-management": LibraryIcon,
   "/settings/providers": BotIcon,
   "/settings/integrations": BlocksIcon,
   "/settings/scheduled-tasks": CalendarClockIcon,

@@ -7,6 +7,7 @@ export type SettingsPath =
   | "/settings/keybindings"
   | "/settings/agents"
   | "/settings/skills"
+  | "/settings/skill-management"
   | "/settings/providers"
   | "/settings/integrations"
   | "/settings/scheduled-tasks"
@@ -55,6 +56,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/keybindings": "Keybindings",
   "/settings/agents": "Agents",
   "/settings/skills": "Skills",
+  "/settings/skill-management": "Skill Management",
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
   "/settings/scheduled-tasks": "Schedule Tasks",
@@ -69,6 +71,12 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
  * that may not be mounted point at their nearest stable section instead.
  */
 export const SETTINGS_SEARCH_ITEMS = [
+  {
+    id: "skill-management",
+    title: "Skill Management",
+    to: "/settings/skill-management",
+    searchTerms: ["inventory discovery availability enabled disabled plugins provider skills"],
+  },
   {
     id: "color-scheme",
     title: "Color scheme",

@@ -54,6 +54,7 @@ import {
 import type { ProviderInstance } from "../ProviderDriver.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 import type { ProviderSnapshotSource } from "../builtInProviderCatalog.ts";
+import { resolveProviderSkillPaths } from "../skillPaths.ts";
 
 const loadProviders = (
   providerSources: ReadonlyArray<ProviderSnapshotSource>,
@@ -278,6 +279,23 @@ export const ProviderRegistryLive = Layer.effect(
     const config = yield* ServerConfig;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
+    // Status-only emissions reuse inventory arrays. Avoid filesystem work on
+    // every provider status update; explicit refresh invalidates resolution.
+    const resolvedSkills = new WeakMap<ServerProvider["skills"], ServerProvider["skills"]>();
+    const resolveSkills = Effect.fn("resolveRegistrySkills")(function* (
+      provider: ServerProvider,
+    ): Effect.fn.Return<ServerProvider> {
+      let skills = resolvedSkills.get(provider.skills);
+      if (!skills) {
+        skills = yield* resolveProviderSkillPaths(provider.skills).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+        );
+        resolvedSkills.set(provider.skills, skills);
+      }
+      return { ...provider, skills };
+    });
+
     // Aggregator PubSub — consumers (WS gateway, etc.) subscribe here for
     // coalesced updates across every instance.
     const changesPubSub = yield* Effect.acquireRelease(
@@ -422,7 +440,7 @@ export const ProviderRegistryLive = Layer.effect(
     ) {
       const nextProvidersWithUpdateState = yield* Effect.forEach(
         nextProviders,
-        applyProviderUpdateState,
+        (provider) => resolveSkills(provider).pipe(Effect.flatMap(applyProviderUpdateState)),
         {
           concurrency: "unbounded",
         },
@@ -522,6 +540,7 @@ export const ProviderRegistryLive = Layer.effect(
     ) {
       yield* providerSource.refresh.pipe(
         Effect.flatMap((nextProvider) => {
+          resolvedSkills.delete(nextProvider.skills);
           return correlateSnapshotWithSource(providerSource, nextProvider).pipe(
             Effect.flatMap(syncProvider),
           );
@@ -872,6 +891,15 @@ export const ProviderRegistryLive = Layer.effect(
             message: "Workspace discovery failed.",
           });
         }),
+        Effect.flatMap((snapshot) =>
+          snapshot.status === "error"
+            ? Effect.succeed(snapshot)
+            : resolveProviderSkillPaths(snapshot.skills).pipe(
+                Effect.provideService(FileSystem.FileSystem, fileSystem),
+                Effect.provideService(Path.Path, path),
+                Effect.map((skills): ServerProvider => ({ ...snapshot, skills })),
+              ),
+        ),
         Effect.flatMap((scopedSnapshot) =>
           instanceRegistry.getInstance(input.instanceId).pipe(
             Effect.flatMap(

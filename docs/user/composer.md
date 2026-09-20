@@ -108,6 +108,13 @@ composer when it is empty, and is discarded otherwise.
 
 ## Commands and skills
 
+To inspect discovered skills, open **Settings → Skill Management** and select
+an environment and project. The inventory shows each provider
+instance's enabled state and invocation restrictions. **Refresh** checks the
+inventory again; failed checks retain cached results marked stale. **Not
+detected** describes that provider's discovery, not skill compatibility or
+everything a running session may load.
+
 To manage shared skill groups, open **Settings → Skills** and pick the
 environment whose machine should install them. Set the catalog source once per
 environment, then choose **Save source**: a Git URL is cloned into that

@@ -29,6 +29,28 @@ const baseProviderSnapshot = {
 };
 
 describe("ServerProvider", () => {
+  it("accepts old skill records and preserves optional inventory metadata and stale workspaces", () => {
+    const legacy = { name: "review", path: "/skills/review/SKILL.md", enabled: false };
+    const enriched = {
+      ...legacy,
+      linkTarget: "/catalog/review/SKILL.md",
+      pluginId: "tools@market",
+    };
+    const workspace = {
+      cwd: "/project",
+      checkedAt: baseProviderSnapshot.checkedAt,
+      skills: [enriched],
+      slashCommands: [],
+      refreshError: "Discovery failed",
+    };
+    const parsed = decodeServerProvider({
+      ...baseProviderSnapshot,
+      skills: [legacy, enriched],
+      workspaceSnapshots: [workspace],
+    });
+    expect(parsed.skills).toEqual([legacy, enriched]);
+    expect(parsed.workspaceSnapshots).toEqual([workspace]);
+  });
   it("defaults capability arrays when decoding provider snapshots", () => {
     const parsed = decodeServerProvider({
       instanceId: "codex",
