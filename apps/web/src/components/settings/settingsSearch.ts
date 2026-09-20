@@ -75,7 +75,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "skill-management",
     title: "Skill Management",
     to: "/settings/skill-management",
-    searchTerms: ["inventory discovery availability enabled disabled plugins provider skills"],
+    searchTerms: [
+      "inventory discovery availability enabled disabled plugins provider skills link unlink use in shared destination",
+    ],
   },
   {
     id: "color-scheme",

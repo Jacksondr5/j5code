@@ -91,6 +91,7 @@ import {
   ProviderUploadFeedbackResult,
 } from "./provider.ts";
 import { J5AgentPersonaRpcGroup } from "./j5/agentPersona.ts";
+import { J5SkillLinkRpcGroup } from "./j5/skillLinks.ts";
 import { J5SkillCatalogRpcGroup } from "./j5/skillCatalog.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
@@ -1431,4 +1432,5 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeThreadRpc,
 )
   .merge(J5AgentPersonaRpcGroup)
-  .merge(J5SkillCatalogRpcGroup);
+  .merge(J5SkillCatalogRpcGroup)
+  .merge(J5SkillLinkRpcGroup);

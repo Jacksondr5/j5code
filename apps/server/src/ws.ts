@@ -134,6 +134,8 @@ import {
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import { makeAgentPersonaRpcHandlers } from "./j5/agents/agentPersonaRpc.ts";
+import { SkillLinkError } from "@t3tools/contracts";
+import { makeSkillLinkRpcHandlers } from "./j5/skills/skillLinkRpc.ts";
 import { makeSkillCatalogRpcHandlers } from "./j5/skills/skillCatalogRpc.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
@@ -1323,6 +1325,16 @@ const makeWsRpcLayer = (
       const skillCatalogRpcHandlers = yield* makeSkillCatalogRpcHandlers({
         observe: observeRpcEffect,
       });
+      const skillLinkRpcHandlers = yield* makeSkillLinkRpcHandlers({
+        observe: observeRpcEffect,
+        getProjectRoot: (projectId) =>
+          projectionSnapshotQuery.getProjectShellById(projectId).pipe(
+            Effect.map((project) =>
+              Option.isSome(project) ? project.value.workspaceRoot : undefined,
+            ),
+            Effect.mapError((cause) => new SkillLinkError({ message: String(cause) })),
+          ),
+      });
       const handlers = ServerWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
@@ -1394,6 +1406,7 @@ const makeWsRpcLayer = (
           ),
         ...agentPersonaRpcHandlers,
         ...skillCatalogRpcHandlers,
+        ...skillLinkRpcHandlers,
         [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.getWorkflowScript,

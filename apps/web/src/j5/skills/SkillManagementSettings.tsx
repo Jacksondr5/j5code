@@ -5,6 +5,8 @@ import type {
   ServerProvider,
   ServerProviderSkill,
 } from "@t3tools/contracts";
+import { skillLinkUnavailableReason } from "@t3tools/contracts";
+import { SkillLinksPanel, type SkillLinkSelection } from "./SkillLinksPanel";
 import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -96,7 +98,7 @@ export function SkillManagementSettings() {
       <SettingsSection
         id="skill-management"
         title="Skill Management"
-        description="Inspect discovered skills across provider instances. Paths refer to the selected environment; ~ means its user home. Hover or focus a skill or provider status to see its exact source and resolved paths. Running sessions may discover additional skills."
+        description="Inspect discovered skills and link standalone skills to Codex or Claude. Paths refer to the selected environment; ~ means its user home. Hover or focus a skill or provider status to see its exact source and resolved paths. Running sessions may discover additional skills."
       >
         <div className="grid min-w-0 gap-4 p-4">
           <label className="grid gap-2 text-sm">
@@ -162,6 +164,7 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
     [selectedProvider, providers],
   );
   const [query, setQuery] = useState("");
+  const [linkSelection, setLinkSelection] = useState<SkillLinkSelection | null>(null);
   const [collapsedOrigins, setCollapsedOrigins] = useState<ReadonlySet<SkillOrigin>>(new Set());
   const connected = environment?.connection.phase === "connected";
   const refresh = useAtomCommand(serverEnvironment.refreshProviders, { reportFailure: false });
@@ -282,6 +285,7 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
             value={project?.id ?? ""}
             onValueChange={(value) => {
               setProjectId(value ?? "");
+              setLinkSelection(null);
             }}
           >
             <SelectTrigger aria-label="Skill inventory project">
@@ -490,6 +494,41 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
                                   <SkillRecordDetails skill={first} />
                                 </TooltipPopup>
                               </Tooltip>
+                              {skillLinkUnavailableReason(row.origin) ? (
+                                <Tooltip>
+                                  <TooltipTrigger
+                                    render={
+                                      <span
+                                        tabIndex={0}
+                                        className="text-xs text-muted-foreground"
+                                      />
+                                    }
+                                  >
+                                    Link unavailable
+                                  </TooltipTrigger>
+                                  <TooltipPopup className="max-w-md">
+                                    {skillLinkUnavailableReason(row.origin)}
+                                  </TooltipPopup>
+                                </Tooltip>
+                              ) : (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled={!connected}
+                                  onClick={() =>
+                                    setLinkSelection({
+                                      source: {
+                                        instanceId: selectedRecords[0]!.provider.instanceId,
+                                        path: first.path,
+                                        name: first.name,
+                                      },
+                                      origin: row.origin,
+                                    })
+                                  }
+                                >
+                                  Use in…
+                                </Button>
+                              )}
                             </TableCell>
                             <TableCell className="py-1">
                               <div className="flex min-w-0 items-center gap-1 overflow-hidden">
@@ -597,6 +636,14 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
           })}
         </div>
       ) : null}
+      <SkillLinksPanel
+        environmentId={environmentId}
+        connected={connected}
+        providers={providers}
+        {...(project ? { projectId: project.id, projectTitle: project.title } : {})}
+        selection={linkSelection}
+        onClose={() => setLinkSelection(null)}
+      />
       {!visibleRows.length ? (
         <p className="text-sm text-muted-foreground">
           No skills reported for this selection. Discovery status is shown above.

@@ -115,6 +115,19 @@ inventory again; failed checks retain cached results marked stale. **Not
 detected** describes that provider's discovery, not skill compatibility or
 everything a running session may load.
 
+To share a standalone Personal, Project, or Catalog skill with another Codex
+or Claude instance in the same environment, choose **Use in…**, select the
+instance and user or project scope, review the source and destination, then
+choose **Link skill**. The whole folder stays shared, including scripts and
+assets. The preview identifies shared destinations and recognized provider
+features or tool dependencies that need attention. Plugins must be installed
+separately. A created link can remain undetected until discovery or a running
+session is refreshed; detection does not verify that the skill works.
+
+**Managed links → Unlink** removes only a link created here that has not been
+replaced or changed. It never deletes the shared source. Broken links remain
+listed so you can remove them even if their source is gone.
+
 To manage shared skill groups, open **Settings → Skills** and pick the
 environment whose machine should install them. Set the catalog source once per
 environment, then choose **Save source**: a Git URL is cloned into that
