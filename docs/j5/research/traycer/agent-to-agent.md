@@ -1,6 +1,7 @@
 ---
 title: "Traycer A2A deep dive"
-kind: spec
+kind: research
+as_of: 2026-08-23
 ---
 
 # Deep dive: agent-to-agent messaging

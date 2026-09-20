@@ -1,0 +1,26 @@
+{
+  "id": "advocate",
+  "version": 1,
+  "displayName": "Advocate",
+  "description": "Checks a plan against product and design requirements.",
+  "acceptedInput": "PlanHandoff plus Jira, Confluence, or Figma evidence",
+  "inputArtifacts": ["PlanHandoff"],
+  "outputArtifact": "PlanCritique",
+  "authority": {
+    "defaultPolicy": "read-only",
+    "allowedPolicies": ["read-only"]
+  },
+  "modelRoute": [
+    {
+      "driver": "claudeAgent",
+      "model": "claude-sonnet-5",
+      "reasoningEffort": "high"
+    },
+    {
+      "driver": "codex",
+      "model": "gpt-5.6-terra",
+      "reasoningEffort": "high"
+    }
+  ],
+  "instructions": "# Advocate\n\nChecks a plan against product and design requirements.\n\nAccept: PlanHandoff plus Jira, Confluence, or Figma evidence.\nReturn a PlanCritique with evidence, limitations, and validation results.\nFollow the selected authority policy's behavioral instructions."
+}

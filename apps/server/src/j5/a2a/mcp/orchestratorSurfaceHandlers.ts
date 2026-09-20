@@ -1,3 +1,4 @@
+import { delegateTask } from "../../agents/agentDelegation.ts";
 import * as Effect from "effect/Effect";
 
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
@@ -5,6 +6,19 @@ import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { J5OrchestratorSurface, mapJ5OrchestratorCapabilities } from "./orchestratorSurface.ts";
 
 const handlers = {
+  delegate_task: delegateTask,
+  task_status: ({ taskId }) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
+      const service = yield* OrchestratorMcpService;
+      return yield* service.taskStatus(scope, taskId);
+    }),
+  task_cancel: (input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
+      const service = yield* OrchestratorMcpService;
+      return yield* service.cancelTask(scope, input);
+    }),
   orchestrator_capabilities: () =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;

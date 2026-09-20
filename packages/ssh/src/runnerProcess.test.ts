@@ -318,7 +318,7 @@ describe.skipIf(HostProcessPlatform.defaultValue() === "win32")(
         const bin = path.join(fixture, "bin");
         const cliPath = path.join(fixture, "installed cli.mjs");
         const callsPath = path.join(fixture, "installer-calls.jsonl");
-        const packageSpec = "t3@0.0.39-nightly.20260905.1286";
+        const packageSpec = "@jacksondr5/j5code@0.0.39";
         const args = ["serve", "a path with spaces"];
         yield* fs.makeDirectory(bin);
         yield* fs.symlink(process.execPath, path.join(bin, "node"));
@@ -349,7 +349,7 @@ if (mode === "etarget" || mode === "failed-with-path") {
 `,
         );
         yield* fs.chmod(path.join(bin, packageManager), 0o700);
-        if (mode === "existing-cli") yield* fs.symlink(cliPath, path.join(bin, "t3"));
+        if (mode === "existing-cli") yield* fs.symlink(cliPath, path.join(bin, "j5"));
 
         const child = yield* spawner.spawn(
           ChildProcess.make("/bin/sh", ["-s", "--", ...args], {
@@ -396,7 +396,7 @@ if (mode === "etarget" || mode === "failed-with-path") {
           assert.notInclude(stderr, "Install a C toolchain");
         } else if (missingExecutable) {
           assert.include(stderr, `Remote host installed ${packageSpec}`);
-          assert.include(stderr, "npm produced no t3 executable");
+          assert.include(stderr, "npm produced no j5 executable");
           assert.include(stderr, "Install a C toolchain");
         } else {
           assert.equal(stderr, "");
@@ -409,7 +409,7 @@ if (mode === "etarget" || mode === "failed-with-path") {
           "--",
           "sh",
           "-c",
-          "command -v t3",
+          "command -v j5",
         ];
         const usesInstaller = mode !== "existing-cli" && mode !== "node-override";
         const calls = yield* fs.readFileString(callsPath);

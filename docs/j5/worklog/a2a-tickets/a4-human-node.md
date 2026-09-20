@@ -1,7 +1,6 @@
 ---
 title: "A4 — Human node: person-scoped inbox, verbatim answers (M4)"
-kind: ticket
-status: 0
+kind: record
 ---
 
 # A4 — Human node
@@ -12,7 +11,7 @@ status: 0
 > 2. **Inbox purity (R5):** the inbox contains ONLY open Exchanges deliberately addressed to a person — nothing else. No merging of stall escalations / awaiting-input observability into the attention queue (that surface is item 4's; the older communication-graph idea of merging is superseded).
 > 3. Base SHA is whatever `j5/main` resolves to at staffing. "Cross-ledger" reads as "cross-Squadron, per person."
 
-**Governing artifacts:** `../../product/a2a/plan.md` (§Human node; grounding: human as first-class node; D2), design-review register R5/R9/R29 (`../../product/design-review-2026-08-21.md`).
+**Governing artifacts:** `../../plans/a2a.md` (§Human node; grounding: human as first-class node; D2), design-review register R5/R9/R29 (`../2026-08-21-design-review.md`).
 
 ## Goal
 

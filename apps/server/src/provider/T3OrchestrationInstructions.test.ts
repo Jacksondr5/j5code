@@ -21,8 +21,9 @@ describe("T3 orchestration provider instructions", () => {
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "expect_reply=true");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "open an Exchange");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "continue with other work");
+    // J5 re-declares delegate_task for saved agents; only its saved-agent use is advertised.
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`delegate_task` with agent=ID");
     for (const excluded of [
-      "delegate_task",
       "task_status",
       "task_cancel",
       "create_threads",
@@ -52,6 +53,9 @@ describe("T3 orchestration provider instructions", () => {
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "temporary scratch files");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Artifacts panel");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "outside the repository");
+    // Handoffs are the one place write_artifact appends instead of replacing; the model is told.
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Artifacts under `handoffs/` are versioned");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "rather than replacing it");
   });
 
   it("injects prompt fallback only for an MCP-enabled first run", () => {

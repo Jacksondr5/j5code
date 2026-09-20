@@ -1,3 +1,4 @@
+import type { OrchestrationV2AgentPersonaAssignment } from "@t3tools/contracts";
 import {
   CommandId,
   isProviderAvailable,
@@ -100,7 +101,9 @@ export interface OrchestratorMcpServiceShape {
   ) => Effect.Effect<OrchestratorMcpCapabilitiesResult, OrchestratorMcpFailure>;
   readonly delegateTask: (
     scope: McpInvocationScope,
-    input: OrchestratorMcpDelegateTaskInput,
+    input: OrchestratorMcpDelegateTaskInput & {
+      readonly agentPersonaAssignment?: OrchestrationV2AgentPersonaAssignment;
+    },
   ) => Effect.Effect<OrchestratorMcpDelegateTaskResult, OrchestratorMcpFailure>;
   readonly taskStatus: (
     scope: McpInvocationScope,
@@ -1263,6 +1266,9 @@ const make = Effect.gen(function* () {
             parentRunId: parentRun.id,
             parentNodeId: parentRun.rootNodeId,
             task: taskPrompt(input),
+            ...(input.agentPersonaAssignment === undefined
+              ? {}
+              : { agentPersonaAssignment: input.agentPersonaAssignment }),
             ...(input.title === undefined ? {} : { title: input.title }),
             modelSelection: target.modelSelection,
             runtimeMode,

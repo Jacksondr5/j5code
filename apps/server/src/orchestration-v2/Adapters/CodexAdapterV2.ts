@@ -125,6 +125,8 @@ import {
   makeSubagentConversationArtifacts,
   subagentThreadTitle,
 } from "../SubagentProjection.ts";
+import { withAgentPersonaInstructions } from "../../j5/agents/agentPersonaPrompts.ts";
+import { j5CodexT3McpServerConfig } from "../../j5/a2a/mcp/codexToolApproval.ts";
 
 const CODEX_PROVIDER = ProviderDriverKind.make("codex");
 export const CODEX_DRIVER_KIND = CODEX_PROVIDER;
@@ -666,7 +668,7 @@ export function buildCodexTurnStartParams(input: {
     const effort =
       selectedEffort === undefined ? undefined : yield* decodeTurnReasoningEffort(selectedEffort);
     const serviceTier = getCodexServiceTierOptionValue(input.modelSelection);
-    const developerInstructions =
+    const developerInstructions = withAgentPersonaInstructions(
       input.hasT3Mcp !== true
         ? undefined
         : buildCodexDeveloperInstructions(
@@ -679,7 +681,9 @@ export function buildCodexTurnStartParams(input: {
               browser: input.browserToolsAvailable ?? true,
               device: input.deviceToolsAvailable ?? false,
             },
-          );
+          ),
+      input.runtimePolicy.agentPersonaInstructions,
+    );
     const collaborationMode: CodexSchema.ClientRequest__CollaborationMode | undefined =
       input.runtimePolicy.interactionMode !== "plan" && developerInstructions === undefined
         ? undefined
@@ -1208,6 +1212,8 @@ export function codexThreadRuntimeParams(input: {
                 http_headers: {
                   Authorization: mcpSession.authorizationHeader,
                 },
+                // J5: saved agents run with approvals off; pre-approve their handoff write only.
+                ...j5CodexT3McpServerConfig(input.runtimePolicy),
               },
             },
           },

@@ -25,6 +25,7 @@ import {
   ClearOwnAskResult,
   ExchangeId,
   HumanParticipant,
+  MachineParticipant,
   ParticipantId,
   SendMessageResult,
   SquadronId,
@@ -65,7 +66,7 @@ const J5AgentParticipant = Schema.Struct({
   thread_id: AgentParticipant.fields.threadId,
 });
 
-const J5Participant = Schema.Union([J5AgentParticipant, HumanParticipant]);
+const J5Participant = Schema.Union([J5AgentParticipant, HumanParticipant, MachineParticipant]);
 
 export const J5ParticipantProvenanceView = Schema.Union([
   Schema.Struct({

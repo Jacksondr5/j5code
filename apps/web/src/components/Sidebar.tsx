@@ -1839,6 +1839,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 <ThreadCardIdentity
                   home={props.threadHome}
                   fallbackFolder={props.projectDisplayName}
+                  agentPersonaAssignment={thread.agentPersonaAssignment}
                 />
               </span>
               {pinIndicator}

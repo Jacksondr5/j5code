@@ -34,6 +34,19 @@ export const formatPeerEnvelope = (input: {
     exchangeInstruction: deliveryInstruction(input),
   });
 
+/** A machine sender never opens an exchange, so its envelope carries no reply instruction. */
+export const formatMachineEnvelope = (input: {
+  readonly senderId: ParticipantId;
+  readonly originSquadronId: SquadronId;
+  readonly message: string;
+}): string =>
+  render(config.machineMessage, {
+    senderId: input.senderId,
+    originSquadronId: input.originSquadronId,
+    message: input.message,
+    machineInstruction: config.machineInstruction,
+  });
+
 export const formatClosedPeerEnvelope = (input: {
   readonly senderId: ParticipantId;
   readonly originSquadronId: SquadronId;

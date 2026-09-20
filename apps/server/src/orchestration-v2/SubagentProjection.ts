@@ -58,6 +58,7 @@ export function makeSubagentChildThread(input: {
     historyOrigin: undefined,
     providerInstanceId: input.providerInstanceId,
     modelSelection: input.modelSelection,
+    agentPersonaAssignment: undefined,
     activeProviderThreadId: input.activeProviderThreadId,
     lineage: {
       parentThreadId: input.parentThread.id,

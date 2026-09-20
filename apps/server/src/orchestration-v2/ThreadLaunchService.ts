@@ -5,6 +5,7 @@ import {
   type MessageId,
   type ModelSelection,
   type OrchestrationV2Actor,
+  type OrchestrationV2AgentPersonaRequest,
   type OrchestrationV2CreationSource,
   type OrchestrationV2ProviderThreadNativeMetadata,
   type OrchestrationV2ThreadProjection,
@@ -39,6 +40,11 @@ import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.t
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import {
+  durableLaunchModelSelection,
+  resolveAgentPersonaLaunch,
+} from "../j5/agents/agentPersonaOrchestration.ts";
+import { makeAgentPersonaLibrary } from "../j5/agents/agentPersonaLibrary.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 import { makeProviderFailure } from "./ProviderFailure.ts";
@@ -77,6 +83,7 @@ export interface ThreadLaunchInput {
   readonly modelSelection: ModelSelection;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
+  readonly agentPersona?: OrchestrationV2AgentPersonaRequest;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
   readonly initialMessage?: ThreadLaunchInitialMessage;
   /** Generic provenance for a child created from a proposed plan. */
@@ -104,6 +111,7 @@ export class ThreadLaunchError extends Schema.TaggedError<ThreadLaunchError>()(
   {
     operation: Schema.Literals([
       "resolve-project",
+      "resolve-agent-persona",
       "read-receipt",
       "generate-metadata",
       "provision-worktree",
@@ -124,6 +132,9 @@ export class ThreadLaunchError extends Schema.TaggedError<ThreadLaunchError>()(
   override get message(): string {
     if (this.operation === "register-squadron" && this.threadId !== undefined) {
       return `Thread ${this.threadId} was created but could not be assigned its required Squadron home. Replay the same creation command to retry registration; the durable thread was not deleted.`;
+    }
+    if (this.operation === "resolve-agent-persona") {
+      return this.cause instanceof Error ? this.cause.message : String(this.cause);
     }
     return `Thread launch ${this.commandId} failed during ${this.operation}.`;
   }
@@ -149,7 +160,8 @@ function failureDetail(error: unknown): string {
   return `Workspace preparation failed: ${error instanceof Error ? error.message : String(error)}`;
 }
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
+  const personaLibrary = yield* makeAgentPersonaLibrary;
   const projects = yield* ProjectService.ProjectService;
   const git = yield* GitWorkflow.GitWorkflowService;
   const checkpointStore = yield* CheckpointStore.CheckpointStore;
@@ -499,6 +511,11 @@ const make = Effect.gen(function* () {
       }
 
       const launchReceipt = yield* readReceipt(input, input.commandId);
+      const personaLaunch = yield* resolveAgentPersonaLaunch(input, {
+        replay: Option.isSome(launchReceipt),
+        providers: providerRegistry.getProviders,
+        library: personaLibrary,
+      }).pipe(Effect.mapError(mapError(input, "resolve-agent-persona")));
       return yield* Effect.gen(function* () {
         const candidateThreadId =
           input.threadId ??
@@ -529,7 +546,7 @@ const make = Effect.gen(function* () {
                 threadId: candidateThreadId,
                 projectId: input.projectId,
                 title: input.title,
-                modelSelection: input.modelSelection,
+                ...personaLaunch,
                 runtimeMode: input.runtimeMode,
                 interactionMode: input.interactionMode,
                 branch: initialBranch,
@@ -552,6 +569,10 @@ const make = Effect.gen(function* () {
         const threadId =
           claimed.storedEvents.find((stored) => stored.event.type.startsWith("thread."))?.event
             .threadId ?? candidateThreadId;
+        const durableModelSelection = durableLaunchModelSelection(
+          claimed.storedEvents,
+          personaLaunch.modelSelection,
+        );
         if (project.id !== input.projectId) {
           return yield* mapError(input, "resolve-project", threadId)("Project identity changed.");
         }
@@ -579,7 +600,7 @@ const make = Effect.gen(function* () {
                 : { scheduledTaskId: input.initialMessage.scheduledTaskId }),
               attachments: input.initialMessage.attachments,
               ...(input.generateTitle === true ? { titleSeed: input.title } : {}),
-              modelSelection: input.modelSelection,
+              modelSelection: durableModelSelection,
               dispatchMode: { type: "defer_start" },
               createdBy: input.createdBy,
               creationSource: input.creationSource,

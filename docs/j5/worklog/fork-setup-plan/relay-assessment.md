@@ -1,6 +1,6 @@
 ---
 title: "Relay and PlanetScale assessment"
-kind: spec
+kind: record
 ---
 
 # Relay and PlanetScale assessment

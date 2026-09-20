@@ -1,0 +1,26 @@
+{
+  "id": "investigator",
+  "version": 1,
+  "displayName": "Investigator",
+  "description": "Reproduces and diagnoses bugs without landing a fix.",
+  "acceptedInput": "Bug report, Jira issue, or diagnostic prompt",
+  "inputArtifacts": [],
+  "outputArtifact": "DiagnosisHandoff",
+  "authority": {
+    "defaultPolicy": "diagnostic",
+    "allowedPolicies": ["diagnostic"]
+  },
+  "modelRoute": [
+    {
+      "driver": "codex",
+      "model": "gpt-5.6-sol",
+      "reasoningEffort": "high"
+    },
+    {
+      "driver": "claudeAgent",
+      "model": "claude-fable-5-1",
+      "reasoningEffort": "high"
+    }
+  ],
+  "instructions": "# Investigator\n\nReproduces and diagnoses bugs without landing a fix.\n\nAccept: Bug report, Jira issue, or diagnostic prompt.\nReturn a DiagnosisHandoff with evidence, limitations, and validation results.\nFollow the selected authority policy's behavioral instructions."
+}

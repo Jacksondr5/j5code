@@ -45,6 +45,12 @@ export const isHumanParticipantId = (id: ParticipantId): boolean =>
 export const isDurableHumanParticipantId = (id: ParticipantId): boolean =>
   isHumanParticipantId(id) && id !== "human:global";
 
+export const MACHINE_PARTICIPANT_ID_PREFIX = "machine:";
+export const isMachineParticipantId = (id: ParticipantId): boolean =>
+  id.startsWith(MACHINE_PARTICIPANT_ID_PREFIX) && id.length > MACHINE_PARTICIPANT_ID_PREFIX.length;
+export const machineParticipantIdForName = (name: string) =>
+  ParticipantId.make(`${MACHINE_PARTICIPANT_ID_PREFIX}${name}`);
+
 export const AgentParticipant = Schema.Struct({
   kind: Schema.Literal("agent"),
   id: ParticipantId,
@@ -64,7 +70,24 @@ export const HumanParticipant = Schema.Struct({
 });
 export type HumanParticipant = typeof HumanParticipant.Type;
 
-export const Participant = Schema.Union([AgentParticipant, HumanParticipant]);
+/**
+ * A registered non-agent sender (cron job, watchdog, script). It has no thread,
+ * sends plain messages only, and can never receive.
+ */
+export const MachineParticipant = Schema.Struct({
+  kind: Schema.Literal("machine"),
+  id: ParticipantId.pipe(
+    Schema.check(
+      Schema.makeFilter(isMachineParticipantId, {
+        message: "A machine participant id must use the machine:<name> namespace.",
+      }),
+    ),
+  ),
+  name: Schema.String.check(Schema.isNonEmpty()),
+});
+export type MachineParticipant = typeof MachineParticipant.Type;
+
+export const Participant = Schema.Union([AgentParticipant, HumanParticipant, MachineParticipant]);
 export type Participant = typeof Participant.Type;
 
 export const participantId = (participant: Participant): ParticipantId => participant.id;
@@ -283,6 +306,16 @@ export const SendMessageInput = Schema.Struct({
   acceptedAt: Schema.String,
 });
 export type SendMessageInput = typeof SendMessageInput.Type;
+
+/** A machine sender commits a plain message only: no ask, no reply, no urgency. */
+export const SendAsMachineInput = Schema.Struct({
+  commandId: CommCommandId,
+  senderParticipantId: ParticipantId,
+  to: ParticipantId,
+  message: Schema.String.check(Schema.isNonEmpty()),
+  acceptedAt: Schema.String,
+});
+export type SendAsMachineInput = typeof SendAsMachineInput.Type;
 
 export const SendMessageResult = Schema.Struct({
   messageId: LedgerMessageId,

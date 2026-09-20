@@ -16,6 +16,12 @@ import {
 } from "./orchestrationV2.ts";
 import { ProviderInteractionMode, RuntimeMode } from "./providerPolicy.ts";
 
+/**
+ * Message id prefix for the prompt a scheduled task fires into its thread.
+ * Clients use it to tell automation fires apart from human-typed messages.
+ */
+export const SCHEDULED_TASK_MESSAGE_ID_PREFIX = "scheduled-task-message:";
+
 /** 24-hour "HH:MM" wall-clock time. Mirrors `parseTimeOfDay` on the server. */
 const TimeOfDay = TrimmedNonEmptyString.check(
   Schema.isPattern(/^([01]?\d|2[0-3]):([0-5]\d)$/),

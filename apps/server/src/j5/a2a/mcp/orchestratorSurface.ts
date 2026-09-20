@@ -1,3 +1,4 @@
+import { J5DelegateTaskTool } from "../../agents/agentDelegation.ts";
 import {
   OrchestratorMcpFailure,
   OrchestratorMcpThreadReadInput,
@@ -20,6 +21,8 @@ import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorToolkit, ScheduleTaskTool } from "../../../mcp/toolkits/orchestrator/tools.ts";
 
 const {
+  task_status: TaskStatusTool,
+  task_cancel: TaskCancelTool,
   list_scheduled_tasks: ListScheduledTasksTool,
   update_scheduled_task: UpdateScheduledTaskTool,
   delete_scheduled_task: DeleteScheduledTaskTool,
@@ -124,6 +127,9 @@ export const J5ThreadWaitTool = Tool.make("t3_thread_wait", {
   .annotate(Tool.Idempotent, true);
 
 export const J5OrchestratorSurface = Toolkit.make(
+  J5DelegateTaskTool,
+  TaskStatusTool,
+  TaskCancelTool,
   J5OrchestratorCapabilitiesTool,
   ScheduleTaskTool,
   ListScheduledTasksTool,

@@ -17,6 +17,7 @@ import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import {
   formatClosedHumanEnvelope,
   formatClosedPeerEnvelope,
+  formatMachineEnvelope,
   formatPeerEnvelope,
 } from "./EnvelopeFormatter.ts";
 import {
@@ -24,6 +25,7 @@ import {
   SquadronId,
   ExchangeId,
   isHumanParticipantId,
+  isMachineParticipantId,
   Participant,
   ParticipantId,
   type LedgerMessageId,
@@ -165,12 +167,18 @@ export const formatAgentDeliveryEnvelope = (input: AgentDeliveryInput): string =
             })
         : isHumanParticipantId(input.senderId)
           ? assertPersonReply(input)
-          : formatPeerEnvelope({
-              senderId: input.senderId,
-              originSquadronId: input.originSquadronId,
-              exchangeId: input.exchangeId,
-              message: input.message,
-            });
+          : isMachineParticipantId(input.senderId)
+            ? formatMachineEnvelope({
+                senderId: input.senderId,
+                originSquadronId: input.originSquadronId,
+                message: input.message,
+              })
+            : formatPeerEnvelope({
+                senderId: input.senderId,
+                originSquadronId: input.originSquadronId,
+                exchangeId: input.exchangeId,
+                message: input.message,
+              });
     case "silence_notice":
     case "lifecycle_notice":
       return input.message;

@@ -160,6 +160,7 @@ import {
   toAcpRegistryOperationError,
 } from "./provider/acp/AcpRegistrySupport.ts";
 import { AcpRegistryRuntimeCoordinator } from "./provider/acp/AcpRegistryRuntimeCoordinator.ts";
+import { makeAgentPersonaRpcHandlers } from "./j5/agents/agentPersonaRpc.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
@@ -200,6 +201,7 @@ import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as ArtifactWorkspace from "./j5/artifacts/ArtifactWorkspace.ts";
+import { AgentHandoffRefreshes } from "./j5/agents/agentHandoffRefreshes.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
@@ -1683,6 +1685,11 @@ const makeWsRpcLayer = (
         return yield* projectMutationOperation(projectService, mutation);
       });
 
+      const agentPersonaRpcHandlers = yield* makeAgentPersonaRpcHandlers({
+        providers: providerRegistry.getProviders,
+        observe: observeRpcEffect,
+        observeStream: observeRpcStream,
+      });
       const handlers = ServerWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
@@ -1729,6 +1736,7 @@ const makeWsRpcLayer = (
                 : {}),
             },
           ),
+        ...agentPersonaRpcHandlers,
         [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.getWorkflowScript,
@@ -1821,6 +1829,7 @@ const makeWsRpcLayer = (
                   modelSelection: input.modelSelection,
                   runtimeMode: input.runtimeMode,
                   interactionMode: input.interactionMode,
+                  ...(input.agentPersona === undefined ? {} : { agentPersona: input.agentPersona }),
                   workspaceStrategy: input.workspaceStrategy,
                   ...(input.initialMessage === undefined
                     ? {}
@@ -3375,6 +3384,8 @@ export const websocketRpcRouteLayer = Layer.unwrap(
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const sql = yield* SqlClient.SqlClient;
+    // J5: the revision counter the saved-agent handoff observer bumps; one instance per server.
+    const agentHandoffRefreshes = yield* AgentHandoffRefreshes;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -3428,6 +3439,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               // One server-lifetime service means clients share the same PR caches, and a WS
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
+              Layer.provide(Layer.succeed(AgentHandoffRefreshes, agentHandoffRefreshes)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

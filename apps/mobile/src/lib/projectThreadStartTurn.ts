@@ -23,6 +23,8 @@ export interface ProjectThreadStartTurnSpec {
   /** Wire attachments from `prepareTurnAttachments`, in composer order. */
   readonly uploadedAttachments: ReadonlyArray<UploadedMobileAttachment>;
   readonly modelSelection: ModelSelection;
+  /** Launch as a saved agent; the server resolves and pins its route. */
+  readonly agentPersonaId?: string;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly workspaceMode: "local" | "worktree";
@@ -59,6 +61,9 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
       createThread: {
         projectId: spec.projectId,
         title,
+        ...(spec.agentPersonaId === undefined
+          ? {}
+          : { agentPersona: { personaId: spec.agentPersonaId } }),
         modelSelection: spec.modelSelection,
         runtimeMode: spec.runtimeMode,
         interactionMode: spec.interactionMode,

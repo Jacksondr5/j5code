@@ -345,6 +345,7 @@ import {
   useSquadronDraftScope,
 } from "../j5/squadron/SquadronDraftState";
 import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
+import { clearDraftAgent, draftAgentPersonaLaunch } from "../j5/agents/agentDraftState";
 import {
   buildSquadronPickerEntries,
   resolveCurrentThreadNewThreadDestination,
@@ -8025,6 +8026,7 @@ export default function ChatView(props: ChatViewProps) {
                     createThread: {
                       projectId: activeProject.id,
                       title,
+                      ...draftAgentPersonaLaunch(routeThreadKey),
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,
                       interactionMode: sendInteractionMode,
@@ -8075,6 +8077,7 @@ export default function ChatView(props: ChatViewProps) {
         // snapshot is stale. Uploads may have outlasted a navigation, so only
         // the sending thread's panel clears.
         clearUsageLimitsFor(routeThreadKey);
+        clearDraftAgent(routeThreadKey);
         if (turnUsesAttachmentUploads) {
           releaseDraftAttachments(composerAttachmentsSnapshot);
         }
@@ -9534,6 +9537,12 @@ export default function ChatView(props: ChatViewProps) {
                             threadSyncPhase={activeEnvironmentUnavailable ? null : threadSyncPhase}
                             runtimeMode={runtimeMode}
                             interactionMode={interactionMode}
+                            {...(serverProjection?.thread.agentPersonaAssignment === undefined
+                              ? {}
+                              : {
+                                  agentPersonaAssignment:
+                                    serverProjection.thread.agentPersonaAssignment,
+                                })}
                             lockedProvider={modelPickerLockedProvider}
                             providerStatuses={providerStatuses as ServerProvider[]}
                             providerCatalogKnown={serverConfig !== null}

@@ -1,4 +1,5 @@
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
+import { AgentPersonaAssignmentControls } from "../../j5/agents/AgentPersonaAssignmentControls";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { useAtomValue } from "@effect/atom-react";
 import type {
@@ -507,6 +508,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         option.selection.instanceId === currentModelSelection.instanceId &&
         option.selection.model === currentModelSelection.model,
     ) ?? null;
+  const agentPersonaAssignment = props.selectedThread.agentPersonaAssignment;
   const providerOptionDescriptors = useMemo(
     () =>
       resolveProviderOptionDescriptors({
@@ -819,20 +821,28 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                       onPickFiles={props.onPickDraftFiles}
                     />
                     <View className="min-w-0 shrink">
-                      <ComposerInlineControl
-                        accessibilityLabel="Model and reasoning settings"
-                        emphasized
-                        iconNode={
-                          <ProviderIcon
-                            iconUrl={currentModelOption?.providerIconUrl}
-                            provider={currentModelOption?.providerDriver}
-                            size={16}
-                          />
-                        }
-                        label={currentModelOption?.label ?? currentModelSelection.model}
-                        maxWidth="100%"
-                        onPress={openSettings}
-                      />
+                      {agentPersonaAssignment ? (
+                        <AgentPersonaAssignmentControls
+                          assignment={agentPersonaAssignment}
+                          environmentId={props.environmentId}
+                          threadId={props.selectedThread.id}
+                        />
+                      ) : (
+                        <ComposerInlineControl
+                          accessibilityLabel="Model and reasoning settings"
+                          emphasized
+                          iconNode={
+                            <ProviderIcon
+                              iconUrl={currentModelOption?.providerIconUrl}
+                              provider={currentModelOption?.providerDriver}
+                              size={16}
+                            />
+                          }
+                          label={currentModelOption?.label ?? currentModelSelection.model}
+                          maxWidth="100%"
+                          onPress={openSettings}
+                        />
+                      )}
                     </View>
                   </View>
                 )}

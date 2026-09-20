@@ -1,6 +1,7 @@
 ---
 title: "Research synthesis: what we build, what we steal, what we design fresh"
-kind: spec
+kind: research
+as_of: 2026-08-23
 ---
 
 # Research synthesis (v2 — verified against current code)
@@ -57,8 +58,8 @@ kind: spec
 ## Our headline design work (neither app has it)
 
 1. **Cross-machine fleets**: T3 proved the remote transport + auth layer; Traycer proved single-host orchestration; nobody routes A2A across hosts or syncs fleet state across environments. This is the flagship differentiator — design it into the event/message layer from day one.
-2. **PR dashboard** (`../backlog.md`) — fleet-level PR state fed by sitter agents; study Jackson's personal site when available.
-3. **Agent types/roles** (`../backlog.md`) — definition half (SOUL.md-style) + Traycer's role-claims runtime half.
+2. **PR dashboard** (`../worklog/2026-08-14-backlog.md`) — fleet-level PR state fed by sitter agents; study Jackson's personal site when available.
+3. **Agent types/roles** (`../worklog/2026-08-14-backlog.md`) — definition half (SOUL.md-style) + Traycer's role-claims runtime half.
 
 ## Open questions for the design phase
 

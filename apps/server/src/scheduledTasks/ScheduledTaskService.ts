@@ -1,6 +1,7 @@
 import {
   CommandId,
   MessageId,
+  SCHEDULED_TASK_MESSAGE_ID_PREFIX,
   ScheduledTask,
   ScheduledTaskError,
   ScheduledTaskId,
@@ -470,7 +471,7 @@ export const layer = Layer.effect(
 
         const fireKey = `${active.id}:${DateTime.toEpochMillis(startedAt)}:${trigger}`;
         const commandId = CommandId.make(`scheduled-task:${fireKey}`);
-        const messageId = MessageId.make(`scheduled-task-message:${fireKey}`);
+        const messageId = MessageId.make(`${SCHEDULED_TASK_MESSAGE_ID_PREFIX}${fireKey}`);
         // Dispatch from the fresh row so prompt/model/binding edits made
         // after the poll read are honoured.
         const prompt = active.prompt;

@@ -1,6 +1,7 @@
 ---
 title: "T3 Code — performance, quality & fork viability"
-kind: spec
+kind: research
+as_of: 2026-08-23
 ---
 
 # Performance, quality & fork viability

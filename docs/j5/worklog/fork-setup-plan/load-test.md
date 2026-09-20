@@ -1,6 +1,6 @@
 ---
 title: "J5 Code fleet load test and provider smoke"
-kind: spec
+kind: record
 ---
 
 # J5 Code fleet load test and provider smoke

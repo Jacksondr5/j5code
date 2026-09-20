@@ -30,6 +30,7 @@ import {
 } from "./acknowledged-thread-messages";
 import { appAtomRegistry } from "./atom-registry";
 import { restoredNewTaskDraftKey } from "./new-task-draft-key";
+import { selectDraftAgent } from "../j5/agents/agentDraftState";
 import { useProjects, useServerConfigs, useThreadShells } from "./entities";
 import {
   clearPendingThreadCreationOutcome,
@@ -499,6 +500,9 @@ function stampRecoveryDraftProject(queuedMessage: QueuedThreadMessage, draftKey:
       createdAt: queuedMessage.createdAt,
     },
   });
+  // The chosen agent is session state, not draft content, so the restored
+  // draft reselects it explicitly; the editor shows it and can clear it.
+  selectDraftAgent(draftKey, queuedMessage.creation.agentPersonaId ?? null);
 }
 
 async function preserveUploadedAttachmentsForEditor(
@@ -939,6 +943,9 @@ export function useThreadOutboxDrain(): void {
           branch: creation.branch,
           worktreePath: creation.worktreePath,
           startFromOrigin: creation.startFromOrigin ?? false,
+          ...(creation.agentPersonaId === undefined
+            ? {}
+            : { agentPersonaId: creation.agentPersonaId }),
           worktreeBranchName: buildTemporaryWorktreeBranchName(randomHex),
         }),
       });

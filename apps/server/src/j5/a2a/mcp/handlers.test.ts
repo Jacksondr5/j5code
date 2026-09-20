@@ -156,6 +156,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
                   durableAtSeq: 1,
                 }),
               ),
+        sendAsMachine: () => Effect.die("unused"),
         clearOwnAsk: (input) =>
           Ref.update(clears, (items) => [...items, input]).pipe(
             Effect.as({
@@ -325,6 +326,7 @@ it.effect("keeps participant listing placement-read-only", () =>
       A2ASendService.of({
         send: () => Effect.die("send_message is outside this placement-handler test"),
         clearOwnAsk: () => Effect.die("clear_own_ask is outside this placement-handler test"),
+        sendAsMachine: () => Effect.die("unused"),
         listParticipants: () => Effect.succeed([callerRow, forkedRow, humanRow]),
       }),
     );
@@ -501,6 +503,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
       A2ASendService.of({
         send: () => Effect.die("unused"),
         clearOwnAsk: () => Effect.die("unused"),
+        sendAsMachine: () => Effect.die("unused"),
         listParticipants: () => Effect.succeed(rows),
       }),
     );
@@ -645,6 +648,7 @@ it.effect("returns null display names when the ambient shell snapshot fails", ()
       A2ASendService.of({
         send: () => Effect.die("unused"),
         clearOwnAsk: () => Effect.die("unused"),
+        sendAsMachine: () => Effect.die("unused"),
         listParticipants: () => Effect.succeed(rows),
       }),
     );
@@ -729,6 +733,7 @@ it.effect("preflights home before creation and records facts before the one stab
       A2ASendService.of({
         send: () => Effect.die("send_message is outside this spawn test"),
         clearOwnAsk: () => Effect.die("clear_own_ask is outside this spawn test"),
+        sendAsMachine: () => Effect.die("unused"),
         listParticipants: () => Effect.succeed([callerRow]),
       }),
     );
@@ -1090,6 +1095,7 @@ it.effect("stops exactly one placed agent without consulting or touching descend
         A2ASendService.of({
           send: () => Effect.die("send_message is outside this stop test"),
           clearOwnAsk: () => Effect.die("clear_own_ask is outside this stop test"),
+          sendAsMachine: () => Effect.die("unused"),
           listParticipants: () => Effect.succeed([callerRow]),
         }),
       ),

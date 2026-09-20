@@ -586,6 +586,8 @@ describe("CodexAdapterV2 process spawning", () => {
                 http_headers: {
                   Authorization: "Bearer secret-codex-token",
                 },
+                // Full access defaults to approval policy never, so the J5 handoff write is pre-approved.
+                tools: { write_artifact: { approval_mode: "approve" } },
               },
             },
           },

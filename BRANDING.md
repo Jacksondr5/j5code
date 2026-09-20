@@ -28,8 +28,8 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   `cloud/bootService.ts`, `serviceLauncher.ts`, `packages/shared/src/devHome.ts`, and
   `scripts/dev-runner.ts`. Explicit CLI home outranks worktree isolation; worktree dev
   state outranks an ambient home. Pairing must target the same resolved state.
-- SSH runner homes: `packages/ssh/src/tunnel.ts` keeps upstream npm runners on `~/.t3`
-  and J5 node-script runners on `~/.j5code`.
+- SSH runner homes: `packages/ssh/src/tunnel.ts` uses `~/.j5code` for both published J5 and node-script runners; `~/.t3/ssh-launch`
+  remains transport bookkeeping.
 - Desktop runtime identity and state: `DesktopEnvironment.ts`, `DesktopStatePaths.ts`,
   `DesktopEarlyElectronStartup.ts`, and `DesktopAppIdentity.ts`.
 - Desktop OS integration: `electron-launcher.mjs`, `ElectronProtocol.ts`,
@@ -39,8 +39,9 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   background SVGs.
 - Mobile OS identity and links: `apps/mobile/app.config.ts`, mobile package scripts, `App.tsx`,
   pairing QR handling, and the Agent Activity widget.
-- Web fallback identity: `apps/web/src/branding.ts` and the pre-React boot shell in
-  `apps/web/index.html`.
+- Web fallback identity: `apps/web/src/branding.ts`, the pre-React boot shell in
+  `apps/web/index.html`, and the fork-owned `apps/web/src/j5/branding/J5Wordmark.tsx` connected at
+  the sidebar's small `SidebarChrome.tsx` seam.
 
 ## Deliberately unchanged upstream internals
 

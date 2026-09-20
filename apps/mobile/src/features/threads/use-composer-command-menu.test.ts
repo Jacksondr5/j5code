@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { ProviderDriverKind } from "@t3tools/contracts";
 
+vi.mock("../../j5/agents/useAgentMentionPicker", () => ({
+  useAgentMentionPicker: () => ({ items: [], isPending: false, error: null }),
+}));
+
 vi.mock("../../state/queries", () => ({
   useComposerPathSearch: () => ({ entries: [], isPending: false }),
 }));
