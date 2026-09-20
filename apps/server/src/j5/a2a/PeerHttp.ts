@@ -21,6 +21,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import {
   HttpRouter,
   HttpServerRequest,
@@ -119,6 +120,11 @@ export const peerHttpRouteLayer = Layer.unwrap(
     const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
 
+    // Rotation is list-revoke-issue; two concurrent issues could both revoke and
+    // both issue, leaving two live credentials. One permit keeps rotation and
+    // removal serial so exactly one session per peer subject survives.
+    const rotationPermit = yield* Semaphore.make(1);
+
     /** One live session per peer subject: issuing again rotates the old one out. */
     const revokeSessionsForSubject = (subject: string) =>
       Effect.gen(function* () {
@@ -173,13 +179,15 @@ export const peerHttpRouteLayer = Layer.unwrap(
         const subject = peerSubjectForEnvironment(decoded.success.environmentId);
         const label = decoded.success.label?.trim() || decoded.success.environmentId;
         const issued = yield* Effect.result(
-          revokeSessionsForSubject(subject).pipe(
-            Effect.andThen(
-              serverAuth.issueSession({
-                scopes: [AuthA2APeerScope],
-                subject,
-                label: `Peer: ${label}`,
-              }),
+          rotationPermit.withPermit(
+            revokeSessionsForSubject(subject).pipe(
+              Effect.andThen(
+                serverAuth.issueSession({
+                  scopes: [AuthA2APeerScope],
+                  subject,
+                  label: `Peer: ${label}`,
+                }),
+              ),
             ),
           ),
         );
@@ -263,12 +271,14 @@ export const peerHttpRouteLayer = Layer.unwrap(
         if (Result.isFailure(decoded)) return requestFailure("environmentId is required.");
         // Both directions end here: our record of the peer, and the session it held for us.
         const outcome = yield* Effect.result(
-          Effect.all({
-            removed: peers.remove(decoded.success.environmentId),
-            revokedSessions: revokeSessionsForSubject(
-              peerSubjectForEnvironment(decoded.success.environmentId),
-            ),
-          }),
+          rotationPermit.withPermit(
+            Effect.all({
+              removed: peers.remove(decoded.success.environmentId),
+              revokedSessions: revokeSessionsForSubject(
+                peerSubjectForEnvironment(decoded.success.environmentId),
+              ),
+            }),
+          ),
         );
         if (Result.isFailure(outcome)) {
           yield* Effect.logError("J5 A2A peer remove failed", { cause: outcome.failure });
