@@ -38,6 +38,7 @@ import {
 } from "./DeliveryTransport.ts";
 import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
@@ -81,7 +82,11 @@ const makeTestLayer = (
 ) => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
-  const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+  const send = sendLayer.pipe(
+    Layer.provide(peerDirectoryNoneLayer),
+    Layer.provide(ledger),
+    Layer.provide(database),
+  );
   const transportLayer = Layer.succeed(A2ADeliveryTransport, A2ADeliveryTransport.of(transport));
   const worker = deliveryWorkerLayerWithHooks(false).pipe(
     Layer.provide(ledger),
@@ -402,7 +407,11 @@ it.effect("startup reconciliation drains a persisted cross-squadron half-write a
       const filename = path.join(directory, "state.sqlite");
       const firstDatabase = NodeSqliteClient.layer({ filename });
       const firstLedger = ledgerLayer.pipe(Layer.provide(firstDatabase));
-      const firstSend = sendLayer.pipe(Layer.provide(firstLedger), Layer.provide(firstDatabase));
+      const firstSend = sendLayer.pipe(
+        Layer.provide(peerDirectoryNoneLayer),
+        Layer.provide(firstLedger),
+        Layer.provide(firstDatabase),
+      );
       const firstLayer = Layer.mergeAll(firstDatabase, firstLedger, firstSend);
       const persisted = yield* Effect.scoped(
         Effect.gen(function* () {
@@ -632,7 +641,11 @@ it.effect("delivers to the human through the idempotent inbox-data transport", (
   Effect.gen(function* () {
     const database = NodeSqliteClient.layer({ filename: ":memory:" });
     const ledger = ledgerLayer.pipe(Layer.provide(database));
-    const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+    const send = sendLayer.pipe(
+      Layer.provide(peerDirectoryNoneLayer),
+      Layer.provide(ledger),
+      Layer.provide(database),
+    );
     const threadManagement = Layer.mock(ThreadManagementService)({});
     const transport = deliveryTransportLive.pipe(
       Layer.provide(FetchHttpClient.layer),
@@ -725,7 +738,11 @@ it.effect(
     Effect.gen(function* () {
       const database = NodeSqliteClient.layer({ filename: ":memory:" });
       const ledger = ledgerLayer.pipe(Layer.provide(database));
-      const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+      const send = sendLayer.pipe(
+        Layer.provide(peerDirectoryNoneLayer),
+        Layer.provide(ledger),
+        Layer.provide(database),
+      );
       const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));
       const transport = deliveryTransportLive.pipe(
         Layer.provide(FetchHttpClient.layer),
@@ -834,7 +851,11 @@ for (const deliveredBeforeClosure of [true, false]) {
       Effect.gen(function* () {
         const database = NodeSqliteClient.layer({ filename: ":memory:" });
         const ledger = ledgerLayer.pipe(Layer.provide(database));
-        const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+        const send = sendLayer.pipe(
+          Layer.provide(peerDirectoryNoneLayer),
+          Layer.provide(ledger),
+          Layer.provide(database),
+        );
         const transport = deliveryTransportLive.pipe(
           Layer.provide(FetchHttpClient.layer),
           Layer.provide(Layer.mock(PeerRegistryService)({})),

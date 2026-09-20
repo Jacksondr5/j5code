@@ -38,6 +38,7 @@ import {
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { A2ADeliveryTransport, type A2ADeliveryTransportShape } from "./DeliveryTransport.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
@@ -97,7 +98,11 @@ const decodeSilenceNotice = Schema.decodeUnknownEffect(SilenceNoticePayload);
 const makeTestLayer = () => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
-  const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+  const send = sendLayer.pipe(
+    Layer.provide(peerDirectoryNoneLayer),
+    Layer.provide(ledger),
+    Layer.provide(database),
+  );
   const threads = Layer.mock(ThreadManagementService)({
     getThreadProjection: () =>
       Effect.succeed({
@@ -146,7 +151,11 @@ const makeDaemonTestLayer = (
 ) => {
   const database = SqlitePersistenceMemory;
   const ledger = ledgerLayer.pipe(Layer.provide(database));
-  const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+  const send = sendLayer.pipe(
+    Layer.provide(peerDirectoryNoneLayer),
+    Layer.provide(ledger),
+    Layer.provide(database),
+  );
   const threads = Layer.mock(ThreadManagementService)({
     getThreadProjection: () =>
       Effect.succeed({ runs, turnItems: [] } as unknown as OrchestrationV2ThreadProjection),

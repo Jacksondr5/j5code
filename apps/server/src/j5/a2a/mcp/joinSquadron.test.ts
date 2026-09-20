@@ -94,7 +94,11 @@ const homeTransactions = homeRegistrationTransactionLayer.pipe(
 );
 const placements = placementLayer.pipe(Layer.provide(ledger), Layer.provide(database));
 const references = squadronProjectReferencesLayer.pipe(Layer.provide(database));
-const sendService = sendServiceLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+const sendService = sendServiceLayer.pipe(
+  Layer.provide(peerDirectoryNoneLayer),
+  Layer.provide(ledger),
+  Layer.provide(database),
+);
 const join = squadronJoinLayer.pipe(
   Layer.provide(homeTransactions),
   Layer.provide(ledger),
