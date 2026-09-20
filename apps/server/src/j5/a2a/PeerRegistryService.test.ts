@@ -98,6 +98,23 @@ const makeTestLayer = (input: {
         })),
       ),
   });
+  const auth = Layer.mock(EnvironmentAuth)({
+    listSessions: () =>
+      Effect.succeed(
+        liveSubjects.map((subject, index) => ({
+          sessionId: AuthSessionId.make(`auth-session:${String(index)}`),
+          subject,
+          scopes: [AuthA2APeerScope],
+          method: "bearer-access-token" as const,
+          client: { deviceType: "bot" as const },
+          issuedAt: DateTime.makeUnsafe("2026-09-01T00:00:00.000Z"),
+          expiresAt: DateTime.makeUnsafe("2027-01-01T00:00:00.000Z"),
+          lastConnectedAt: null,
+          connected: false,
+          current: false,
+        })),
+      ),
+  });
   const registry = peerRegistryLayer.pipe(
     Layer.provide(database),
     Layer.provide(http),
@@ -297,4 +314,25 @@ it.effect(
         }),
       ),
     ),
+);
+
+it.effect("hands a peer to the transport only while the session it holds here is still live", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const registry = yield* PeerRegistryService;
+    yield* registry.add({
+      origin: homeOrigin,
+      credential: "home-issued-token",
+      label: "Home",
+      acceptedAt: timestamp,
+    });
+    liveSubjects.length = 0;
+    assert.deepStrictEqual(yield* registry.connections(), [], "revoked in Settings: no delivery");
+    assert.equal((yield* registry.list()).length, 1, "the record itself stays visible");
+    liveSubjects.push(`peer:${home}`);
+    const live = yield* registry.connections();
+    assert.equal(live.length, 1);
+    assert.equal(live[0]!.credential, "home-issued-token");
+    liveSubjects.length = 0;
+  }).pipe(Effect.provide(makeTestLayer({ [homeOrigin]: homeHello(`peer:${work}`) }))),
 );

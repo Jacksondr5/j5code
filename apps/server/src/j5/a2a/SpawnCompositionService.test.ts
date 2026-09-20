@@ -24,6 +24,7 @@ import {
   ParticipantPlacementTransactionWriter,
   layer as placementLayer,
 } from "./PlacementService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { A2ASendService, layer as sendServiceLayer } from "./SendService.ts";
 import {
   SpawnCompositionService,
@@ -272,7 +273,10 @@ it.effect("waits for a DeliveryWorker ledger permit before entering the spawn tr
       );
       const homeTransaction = Context.get(homeTransactionContext, A2AHomeRegistrationTransaction);
       const sendContext = yield* Layer.build(
-        sendServiceLayer.pipe(Layer.provide(Layer.mergeAll(ledgerServices, databaseLayer))),
+        sendServiceLayer.pipe(
+          Layer.provide(peerDirectoryNoneLayer),
+          Layer.provide(Layer.mergeAll(ledgerServices, databaseLayer)),
+        ),
       );
       const sendService = Context.get(sendContext, A2ASendService);
 

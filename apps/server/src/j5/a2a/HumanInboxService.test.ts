@@ -19,6 +19,7 @@ import {
 } from "./DeliveryTransport.ts";
 import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
@@ -43,7 +44,11 @@ const secondPerson: HumanParticipant = {
 const makeTestLayer = (deliveries: Ref.Ref<ReadonlyArray<AgentDeliveryInput>>) => {
   const database = NodeSqliteClient.layerMemory();
   const ledger = ledgerLayer.pipe(Layer.provide(database));
-  const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+  const send = sendLayer.pipe(
+    Layer.provide(peerDirectoryNoneLayer),
+    Layer.provide(ledger),
+    Layer.provide(database),
+  );
   const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   const liveTransport = deliveryTransportLive.pipe(
     Layer.provide(FetchHttpClient.layer),

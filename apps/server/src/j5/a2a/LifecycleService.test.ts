@@ -18,6 +18,7 @@ import {
 } from "./DeliveryTransport.ts";
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { A2ALifecycleService, manualLayer as lifecycleLayer } from "./LifecycleService.ts";
 import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { ParticipantPlacementService, layer as placementLayer } from "./PlacementService.ts";
@@ -67,7 +68,11 @@ const makeTestLayer = (
   const database = NodeSqliteClient.layerMemory();
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const placements = placementLayer.pipe(Layer.provide(database));
-  const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+  const send = sendLayer.pipe(
+    Layer.provide(peerDirectoryNoneLayer),
+    Layer.provide(ledger),
+    Layer.provide(database),
+  );
   const transport = Layer.succeed(
     A2ADeliveryTransport,
     A2ADeliveryTransport.of({

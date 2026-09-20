@@ -23,6 +23,8 @@ import {
   ParticipantId,
   SquadronId,
   type AgentParticipant,
+  CorrelationId,
+  LedgerMessageId,
 } from "./contracts.ts";
 
 const timestamp = "2026-09-16T12:00:00.000Z";
@@ -218,7 +220,8 @@ it.effect(
           .pipe(Effect.flip);
       }).pipe(Effect.provide(makeSendLayer([], ["Home"])));
       assert.equal(unread._tag, "A2APeersUnreadError");
-      assert.include(unread.message, "Home: ECONNREFUSED");
+      assert.include(unread.message, "1 peer server(s) could not be read");
+      assert.notInclude(unread.message, "Home", "no server is named to the agent");
     }),
 );
 
@@ -345,4 +348,86 @@ it.effect("turns a peer's refusal into a delivery failure the worker retries and
     assert.equal(failure._tag, "A2ADeliveryTransportError");
     assert.include(String(failure.cause), "refused the delivery (HTTP 404)");
   }),
+);
+
+it.effect(
+  "records a send to a known remote agent while its peer is asleep, from the route the ledger already holds",
+  () =>
+    Effect.gen(function* () {
+      yield* seedLocal();
+      const ledger = yield* A2ALedger;
+      const send = yield* A2ASendService;
+      const sql = yield* SqlClient.SqlClient;
+      // An earlier ask reached this agent on Home; that delivery row is the recorded route.
+      yield* ledger.append({
+        commandId: CommCommandId.make("command:peer-outbound:earlier"),
+        squadronId: localSquadron,
+        acceptedAt: timestamp,
+        event: {
+          kind: "message.sent",
+          sender: billing.id,
+          receiver: remoteSupport,
+          exchangeId: null,
+          correlationId: CorrelationId.make("correlation:peer-outbound:earlier"),
+          payload: {
+            messageId: LedgerMessageId.make("message:peer-outbound:earlier"),
+            text: "earlier",
+            originSquadronId: localSquadron,
+            receiverSquadronId: supportOnHome.squadronId,
+            receiverEnvironmentId: "environment-Home",
+            exchangeRole: "none",
+            envelopeChannel: "peer",
+          },
+          createdAt: timestamp,
+        },
+      });
+      const sent = yield* send.send({
+        commandId: CommCommandId.make("command:peer-outbound:asleep"),
+        senderThreadId: billing.threadId,
+        to: remoteSupport,
+        message: "Still there?",
+        acceptedAt: timestamp,
+      });
+      const rows = yield* sql<{
+        readonly receiver_environment_id: string | null;
+        readonly status: string;
+      }>`
+      SELECT receiver_environment_id, status FROM j5_a2a_delivery WHERE message_id = ${sent.messageId}
+    `;
+      assert.deepStrictEqual(rows, [
+        { receiver_environment_id: "environment-Home", status: "pending" },
+      ]);
+    }).pipe(Effect.provide(makeSendLayer([], ["Home"]))),
+);
+
+it.effect("never resolves a machine sender's receiver through peers", () =>
+  Effect.gen(function* () {
+    yield* seedLocal();
+    const ledger = yield* A2ALedger;
+    const watchdog = ParticipantId.make("machine:watchdog");
+    yield* ledger.append({
+      commandId: CommCommandId.make("command:peer-outbound:machine-join"),
+      squadronId: localSquadron,
+      acceptedAt: timestamp,
+      event: {
+        kind: "participant.joined",
+        sender: null,
+        receiver: watchdog,
+        exchangeId: null,
+        correlationId: null,
+        payload: { participant: { kind: "machine", id: watchdog, name: "watchdog" } },
+        createdAt: timestamp,
+      },
+    });
+    const refused = yield* (yield* A2ASendService)
+      .sendAsMachine({
+        commandId: CommCommandId.make("command:peer-outbound:machine-remote"),
+        senderParticipantId: watchdog,
+        to: remoteSupport,
+        message: "canary 42",
+        acceptedAt: timestamp,
+      })
+      .pipe(Effect.flip);
+    assert.equal(refused._tag, "A2AParticipantNotFoundError");
+  }).pipe(Effect.provide(makeSendLayer([supportOnHome]))),
 );

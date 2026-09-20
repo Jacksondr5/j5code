@@ -2061,7 +2061,13 @@ it.effect(
         Layer.mock(SpawnCompositionService)({}),
         Layer.mock(ThreadManagementService)({}),
         Layer.mock(OrchestratorMcpService)({}),
-        Layer.mock(ArchiveAgentService)({}),
+        Layer.mock(AgentCrewInstanceService)({
+          findMembership: () => Effect.succeed(null),
+          listForCaptain: () => Effect.succeed([]),
+        }),
+        Layer.mock(ArchiveCrewService)({}),
+        Layer.mock(CrewStopService)({}),
+        Layer.mock(CrewProposalService)({}),
         Layer.mock(SquadronJoinService)({}),
         Layer.mock(SquadronProjectReferences)({}),
         NodeServices.layer,
@@ -2095,7 +2101,8 @@ it.effect(
         assert.equal(remoteRow.thread_id, "thread:support");
         assert.deepStrictEqual(remoteRow.provenance, { kind: "unrecorded" });
         assert.isFalse(hasKey(remoteRow, "environment_id"), "no verb reveals a server");
-        assert.deepStrictEqual(listed.unread_peers, [{ label: "Mac", reason: "ECONNREFUSED" }]);
+        assert.equal(listed.unread_peer_count, 1, "an unread peer is counted, never named");
+        assert.isFalse(hasKey(listed, "unread_peers"));
 
         const withArchived = yield* callList(true);
         assert.deepStrictEqual(

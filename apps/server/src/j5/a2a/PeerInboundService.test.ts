@@ -17,6 +17,7 @@ import {
   type AgentDeliveryInput,
 } from "./DeliveryTransport.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import {
   PeerInboundService,
@@ -47,7 +48,11 @@ const remoteAsker = ParticipantId.make("agent:j5:a2a:thread:remote-asker");
 const makeTestLayer = (delivered: Ref.Ref<Array<AgentDeliveryInput>>) => {
   const database = NodeSqliteClient.layerMemory();
   const ledger = ledgerLayer.pipe(Layer.provide(database));
-  const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+  const send = sendLayer.pipe(
+    Layer.provide(peerDirectoryNoneLayer),
+    Layer.provide(ledger),
+    Layer.provide(database),
+  );
   const inbound = peerInboundLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   const transport: A2ADeliveryTransportShape = {
     cancelAgent: () => Effect.succeed("cancelled" as const),

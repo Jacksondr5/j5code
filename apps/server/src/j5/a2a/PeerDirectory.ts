@@ -8,7 +8,11 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
-import { PeerRegistryService, type PeerConnection } from "./PeerRegistryService.ts";
+import {
+  PeerRegistryService,
+  type PeerConnection,
+  type PeerSessionReadError,
+} from "./PeerRegistryService.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
 
 /**
@@ -43,12 +47,14 @@ export interface PeerDirectoryReading {
   readonly unreadPeers: ReadonlyArray<UnreadPeer>;
 }
 
+export type PeerDirectoryError = SqlError | PeerSessionReadError;
+
 export interface PeerDirectoryShape {
-  readonly listAgents: () => Effect.Effect<PeerDirectoryReading, SqlError>;
+  readonly listAgents: () => Effect.Effect<PeerDirectoryReading, PeerDirectoryError>;
   /** The agents with this id across every readable peer; more than one is the caller's ambiguity to refuse. */
   readonly resolveAgent: (
     participantId: ParticipantId,
-  ) => Effect.Effect<PeerDirectoryReading, SqlError>;
+  ) => Effect.Effect<PeerDirectoryReading, PeerDirectoryError>;
 }
 
 export class PeerDirectory extends Context.Service<PeerDirectory, PeerDirectoryShape>()(
@@ -83,7 +89,7 @@ const readPeerRoster = Effect.fn("j5.a2a.peer.directory.roster")(function* (peer
     HttpClientRequest.bearerToken(peer.credential),
     HttpClientRequest.acceptJson,
   );
-  const response = yield* client.execute(request).pipe(Effect.timeout(PEER_ROSTER_TIMEOUT));
+  const response = yield* client.execute(request);
   if (response.status !== 200) {
     return yield* new PeerRosterStatusError({ status: response.status });
   }
@@ -124,6 +130,8 @@ export const layer: Layer.Layer<PeerDirectory, never, PeerRegistryService | Http
             connections,
             (peer) =>
               readPeerRoster(peer).pipe(
+                // One bound for the whole read: connect, body, and decode.
+                Effect.timeout(PEER_ROSTER_TIMEOUT),
                 Effect.provideService(HttpClient.HttpClient, httpClient),
                 Effect.map((agents) => ({ agents, unread: null })),
                 Effect.catch((cause) =>

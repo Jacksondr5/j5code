@@ -33,6 +33,7 @@ import { FetchHttpClient } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as NodeOS from "node:os";
 
+import { EnvironmentAuth } from "../../../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import * as CheckpointStore from "../../../checkpointing/CheckpointStore.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
@@ -70,6 +71,7 @@ import { A2AHumanInbox, layer as humanInboxLayer } from "../HumanInboxService.ts
 import { layer as peerRegistryLayer } from "../PeerRegistryService.ts";
 import { ensureLocalOperatorHumanPerson } from "../HumanPersonRegistry.ts";
 import { A2ALedger, layer as ledgerLayer } from "../LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "../PeerDirectory.ts";
 import { A2ASendService, layer as sendServiceLayer } from "../SendService.ts";
 import { layer as agentCrewInstanceLayer } from "../AgentCrewInstanceService.ts";
 import { A2ASilenceDetector, manualLayer as silenceDetectorLayer } from "../SilenceDetector.ts";
@@ -283,6 +285,7 @@ const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
   // The seed never crosses servers: the peer registry is real but empty.
   const peerRegistry = peerRegistryLayer.pipe(
     Layer.provide(FetchHttpClient.layer),
+    Layer.provide(Layer.mock(EnvironmentAuth)({ listSessions: () => Effect.succeed([]) })),
     Layer.provide(
       ServerEnvironment.identityLayer.pipe(
         Layer.provide(ServerSecretStore.layer),
@@ -348,7 +351,7 @@ const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
     Layer.provideMerge(agentCrewInstanceLayer),
   );
   const a2a = Layer.mergeAll(
-    sendServiceLayer,
+    sendServiceLayer.pipe(Layer.provide(peerDirectoryNoneLayer)),
     deliveryWorker,
     silenceDetector,
     humanInboxLayer,
