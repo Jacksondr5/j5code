@@ -502,6 +502,7 @@ it.effect(
         const body = posted.at(-1)!.body as PeerDeliveryRequest;
         assert.equal(body.exchangeRole, "terminal_notice");
         assert.deepStrictEqual(body.terminal, {
+          kind: "dropped",
           disposition: "sender-retired",
           cause: {
             kind: "participant-archived",
@@ -519,4 +520,57 @@ it.effect(
         ),
       );
     }),
+);
+
+it.effect("carries a withdrawn ask to the peer as a sender-cleared terminal notice", () =>
+  Effect.gen(function* () {
+    const posted: Array<{ url: string; authorization: string | undefined; body: unknown }> = [];
+    yield* Effect.gen(function* () {
+      const { sent } = yield* crossingAsk();
+      const send = yield* A2ASendService;
+      const sql = yield* SqlClient.SqlClient;
+      const cleared = yield* send.clearOwnAsk({
+        commandId: CommCommandId.make("command:peer-outbound:clear"),
+        senderThreadId: billing.threadId,
+        exchangeId: ExchangeId.make(sent.exchangeId!),
+        acceptedAt: timestamp,
+      });
+      assert.equal(cleared.closureKind, "sender-cleared");
+      const notice = yield* sql<{
+        readonly message_id: string;
+        readonly receiver_id: string;
+        readonly receiver_environment_id: string | null;
+      }>`
+        SELECT message_id, receiver_id, receiver_environment_id
+        FROM j5_a2a_delivery WHERE exchange_role = 'terminal_notice'
+      `;
+      assert.equal(notice.length, 1);
+      assert.equal(notice[0]!.receiver_id, remoteSupport);
+      assert.equal(notice[0]!.receiver_environment_id, homePeer.environmentId);
+
+      const transport = yield* A2ADeliveryTransport;
+      yield* transport.deliverPeer({
+        originSquadronId: localSquadron,
+        receiverSquadronId: supportOnHome.squadronId,
+        receiverEnvironmentId: homePeer.environmentId,
+        messageId: LedgerMessageId.make(notice[0]!.message_id),
+        senderId: LIFECYCLE_PARTICIPANT_ID,
+        receiverId: remoteSupport,
+        exchangeId: ExchangeId.make(sent.exchangeId!),
+        exchangeRole: "terminal_notice",
+        message: "withdrawn",
+        envelopeChannel: "lifecycle_notice",
+        createdAt: timestamp,
+      });
+      const body = posted.at(-1)!.body as PeerDeliveryRequest;
+      assert.deepStrictEqual(body.terminal, { kind: "sender-cleared" });
+    }).pipe(
+      Effect.provide(
+        makeTransportLayer(
+          { status: 201, body: { accepted: true, receivedSeq: 11, replay: false } },
+          posted,
+        ),
+      ),
+    );
+  }),
 );

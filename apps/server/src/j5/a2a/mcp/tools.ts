@@ -624,7 +624,7 @@ export const J5ClearOwnAskTool = Tool.make("clear_own_ask", {
   success: ClearOwnAskResult,
   failure: J5McpFailure,
   failureMode: "return",
-  dependencies: [McpInvocationContext.McpInvocationContext, A2ASendService],
+  dependencies: [McpInvocationContext.McpInvocationContext, A2ASendService, A2ADeliveryWorker],
 })
   .annotate(Tool.Title, "Withdraw your open ask")
   .annotate(Tool.Readonly, false)

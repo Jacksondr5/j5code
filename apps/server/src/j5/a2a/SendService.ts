@@ -19,6 +19,7 @@ import {
   isMachineParticipantId,
   LedgerMessageId,
   MessageSentPayload,
+  LIFECYCLE_PARTICIPANT_ID,
   Participant,
   type ParticipantDirectoryRow,
   ParticipantId,
@@ -31,6 +32,7 @@ import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { isRegisteredHumanPerson, listRegisteredHumanPersonIds } from "./HumanPersonRegistry.ts";
 import { A2ALedgerTransactionWriter, A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 import { PeerDirectory, type PeerDirectoryError } from "./PeerDirectory.ts";
+import { findPeerCounterparty } from "./peerCounterparty.ts";
 
 const encodeSentPayload = Schema.encodeEffect(Schema.toCodecJson(MessageSentPayload));
 
@@ -349,6 +351,21 @@ const exchangeIdFor = (commandId: CommCommandId) =>
 
 const correlationIdFor = (commandId: CommCommandId) =>
   CorrelationId.make(`correlation:j5:a2a:${encodeURIComponent(commandId)}`);
+
+const withdrawalMessageIdFor = (commandId: CommCommandId) =>
+  LedgerMessageId.make(`message:j5:a2a:withdraw:${encodeURIComponent(commandId)}`);
+
+/** Platform-authored, like the retirement notice: the asker cleared its own ask, nothing is owed. */
+export const formatWithdrawalNotice = (input: {
+  readonly exchangeId: ExchangeId;
+  readonly askerId: ParticipantId;
+}): string =>
+  [
+    "[Cross-agent messaging system notice: exchange withdrawn]",
+    `Exchange ${input.exchangeId} was withdrawn by ${input.askerId}, who no longer needs an answer.`,
+    "Your reply obligation has ended; do not reply to this Exchange.",
+    "This is a platform-authored terminal notice, not a peer reply.",
+  ].join("\n\n");
 
 interface ResolvedSender {
   readonly squadronId: SquadronId;
@@ -1077,32 +1094,72 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
             });
           }
 
-          const result = yield* ledger.append({
-            commandId: input.commandId,
-            squadronId: SquadronId.make(exchange.squadron_id),
-            acceptedAt: input.acceptedAt,
-            event: {
-              kind: "exchange.closed",
-              sender: sender.participantId,
-              receiver: ParticipantId.make(exchange.receiver_id),
-              exchangeId: input.exchangeId,
-              correlationId: correlationIdFor(input.commandId),
-              payload: { closureKind: "sender-cleared" },
-              createdAt: input.acceptedAt,
-            },
+          const receiverId = ParticipantId.make(exchange.receiver_id);
+          const squadronId = SquadronId.make(exchange.squadron_id);
+          const correlationId = correlationIdFor(input.commandId);
+          // A receiver on a peer server holds its own copy of this Exchange and
+          // would keep owing a reply; a terminal notice travels the peer path to
+          // close it there too.
+          const remote = yield* findPeerCounterparty(sql, {
+            squadronId,
+            exchangeId: input.exchangeId,
+            participantId: receiverId,
           });
+          const withdrawal: ReadonlyArray<CommEvent> =
+            remote === null
+              ? []
+              : [
+                  {
+                    kind: "message.sent",
+                    sender: LIFECYCLE_PARTICIPANT_ID,
+                    receiver: receiverId,
+                    exchangeId: input.exchangeId,
+                    correlationId,
+                    payload: {
+                      messageId: withdrawalMessageIdFor(input.commandId),
+                      text: formatWithdrawalNotice({
+                        exchangeId: input.exchangeId,
+                        askerId: sender.participantId,
+                      }),
+                      originSquadronId: squadronId,
+                      receiverSquadronId: remote.squadronId,
+                      receiverEnvironmentId: remote.environmentId,
+                      exchangeRole: "terminal_notice",
+                      envelopeChannel: "lifecycle_notice",
+                    },
+                    createdAt: input.acceptedAt,
+                  },
+                ];
+          const result = yield* ledger.appendEvents({
+            commandId: input.commandId,
+            squadronId,
+            acceptedAt: input.acceptedAt,
+            events: [
+              {
+                kind: "exchange.closed",
+                sender: sender.participantId,
+                receiver: receiverId,
+                exchangeId: input.exchangeId,
+                correlationId,
+                payload: { closureKind: "sender-cleared" },
+                createdAt: input.acceptedAt,
+              },
+              ...withdrawal,
+            ],
+          });
+          const closedEvent = result.events[0]!;
           const eventMatchesClear =
-            result.event.kind === "exchange.closed" &&
-            result.event.exchangeId === input.exchangeId &&
-            result.event.sender === sender.participantId &&
-            typeof result.event.payload === "object" &&
-            result.event.payload !== null &&
-            "closureKind" in result.event.payload &&
-            result.event.payload.closureKind === "sender-cleared";
+            closedEvent.kind === "exchange.closed" &&
+            closedEvent.exchangeId === input.exchangeId &&
+            closedEvent.sender === sender.participantId &&
+            typeof closedEvent.payload === "object" &&
+            closedEvent.payload !== null &&
+            "closureKind" in closedEvent.payload &&
+            closedEvent.payload.closureKind === "sender-cleared";
           const clearResult = {
             exchangeId: input.exchangeId,
             closureKind: "sender-cleared" as const,
-            closedAt: result.event.createdAt,
+            closedAt: closedEvent.createdAt,
           } satisfies ClearOwnAskResult;
           if (!result.committed && eventMatchesClear) return clearResult;
           if (!result.committed || !eventMatchesClear) {
