@@ -422,6 +422,7 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/desktop/src/app/DesktopClerk.test.ts`                                                                | R       | B                                     |
 | `apps/desktop/src/app/DesktopConfig.ts`                                                                    | R       | B, H                                  |
 | `apps/desktop/src/app/DesktopConnectionCatalogStore.test.ts`                                               | R       | B                                     |
+| `apps/desktop/src/app/DesktopPreReadyPlatform.test.ts`                                                     | N       | B                                     |
 | `apps/desktop/src/app/DesktopEarlyElectronStartup.test.ts`                                                 | R       | B, H                                  |
 | `apps/desktop/src/app/DesktopEarlyElectronStartup.ts`                                                      | R       | B, H                                  |
 | `apps/desktop/src/app/DesktopEnvironment.test.ts`                                                          | R       | B, H                                  |

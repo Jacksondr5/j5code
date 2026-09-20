@@ -56,11 +56,15 @@ jobs:
       - name: Unit tests
         run: pnpm exec vp run -r --log grouped test
 
-      # actions/checkout runs its credential cleanup after all workflow steps.
-      # That cleanup recursively visits this vendored gitlink, but its manifest
-      # belongs to the vendored tree rather than this repository. Remove the
-      # link from the disposable CI index once all work is complete so the
-      # post-job cleanup cannot misclassify it as a root submodule.
-      - name: Exclude vendored gitlink from checkout cleanup
+      # These gitlinks belong to vendored manifests, not this repository.
+      # Remove them only from the disposable index before checkout's cleanup.
+      - name: Exclude vendored gitlinks from checkout cleanup
         if: always()
-        run: git update-index --force-remove -- .repos/alchemy-effect/.vendor/alchemy
+        run: |
+          python3 - <<'PYTHON'
+          import subprocess
+          entries = subprocess.check_output(["git", "ls-files", "--stage", "-z", ".repos"])
+          paths = [entry.split(b"\t", 1)[1] for entry in entries.split(b"\0") if entry.startswith(b"160000 ")]
+          if paths:
+              subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
+          PYTHON
