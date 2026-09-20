@@ -829,6 +829,9 @@ export const BackgroundActivityProfile = Schema.Literals([
 export type BackgroundActivityProfile = typeof BackgroundActivityProfile.Type;
 export const DEFAULT_BACKGROUND_ACTIVITY_PROFILE: BackgroundActivityProfile = "balanced";
 
+/** Default skill catalog source: Git URL cloned into managed state on first use. */
+export const DEFAULT_SKILL_CATALOG_SOURCE = "https://github.com/First-horizon/agent-skills.git";
+
 export const BackgroundActivityProfileSelection = Schema.Literals([
   "balanced",
   "performance",
@@ -932,6 +935,15 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  /**
+   * Skill catalog source for Settings → Skills on this environment: a Git URL
+   * (cloned into managed state on first use) or an absolute path on that
+   * environment's machine. Environment-local like `addProjectBaseDirectory`;
+   * never synced across environments.
+   */
+  skillCatalogSource: TrimmedNonEmptyString.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SKILL_CATALOG_SOURCE)),
+  ),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
       Effect.succeed({
@@ -1159,6 +1171,7 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
+  skillCatalogSource: Schema.optionalKey(TrimmedNonEmptyString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   sourceControlWritingStyle: Schema.optionalKey(
     Schema.Struct({

@@ -669,3 +669,25 @@ describe("ServerSettings environment icon", () => {
     expect(encodeServerSettings(settings).environmentIcon).toBe("laptop");
   });
 });
+
+describe("ServerSettings skill catalog source", () => {
+  it("defaults to the shared agent-skills repository", () => {
+    expect(decodeServerSettings({}).skillCatalogSource).toBe(
+      "https://github.com/First-horizon/agent-skills.git",
+    );
+  });
+
+  it("round-trips a custom source and trims patches", () => {
+    const settings = decodeServerSettings({ skillCatalogSource: "  /opt/skills  " });
+    expect(settings.skillCatalogSource).toBe("/opt/skills");
+    const patch = decodeServerSettingsPatch({ skillCatalogSource: "  /opt/skills  " });
+    expect(patch.skillCatalogSource).toBe("/opt/skills");
+  });
+
+  it("rejects blank sources at the settings and patch boundaries", () => {
+    for (const skillCatalogSource of ["", "   "]) {
+      expect(() => decodeServerSettings({ skillCatalogSource })).toThrow();
+      expect(() => decodeServerSettingsPatch({ skillCatalogSource })).toThrow();
+    }
+  });
+});
