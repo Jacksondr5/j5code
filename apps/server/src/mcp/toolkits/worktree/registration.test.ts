@@ -382,7 +382,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(allowedDirectory.result.isError).not.toBe(true);
       expect(decodeJson(allowedDirectory.result.content[0]!.text)).toEqual({
         participants: [],
-        unread_peers: [],
+        unread_peer_count: 0,
       });
 
       // The handoff tool mutates thread state, reaches the network (origin

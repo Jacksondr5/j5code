@@ -90,6 +90,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
           Layer.provide(Layer.mock(OrchestratorV2)({})),
           Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
           Layer.provide(archiveDependencies),
+          Layer.provide(Layer.mock(EnvironmentAuth)({})),
           Layer.provide(
             ServerConfig.layerTest(process.cwd(), { prefix: "j5-a2a-runtime-layer-" }).pipe(
               Layer.provide(NodeServices.layer),

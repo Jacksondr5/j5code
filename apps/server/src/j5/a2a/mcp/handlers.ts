@@ -530,10 +530,7 @@ const handlers = {
           display_name: agent.displayName,
         }));
       return {
-        unread_peers: remote.unreadPeers.map((peer) => ({
-          label: peer.label,
-          reason: peer.reason,
-        })),
+        unread_peer_count: remote.unreadPeers.length,
         participants: directory
           .map((row) => {
             const placement = placementByParticipant.get(

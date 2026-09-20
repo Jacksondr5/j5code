@@ -124,15 +124,10 @@ export const J5ParticipantDirectoryRow = Schema.Struct({
 });
 export type J5ParticipantDirectoryRow = typeof J5ParticipantDirectoryRow.Type;
 
-/** A peer server whose address book could not be read; its agents are absent, not gone. */
-export const J5UnreadPeer = Schema.Struct({
-  label: Schema.String,
-  reason: Schema.String,
-});
-
 export const J5ListParticipantsResult = Schema.Struct({
   participants: Schema.Array(J5ParticipantDirectoryRow),
-  unread_peers: Schema.Array(J5UnreadPeer),
+  /** Peer servers whose address books could not be read: their agents are absent, not gone. No server is named. */
+  unread_peer_count: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
 const NonEmptyString = Schema.String.check(Schema.isNonEmpty());
