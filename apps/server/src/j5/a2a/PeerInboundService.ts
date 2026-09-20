@@ -157,8 +157,31 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
         return { squadronId: SquadronId.make(row.squadron_id), participant };
       });
 
+      /**
+       * A retry replays the first receipt whatever has happened to the receiver
+       * since: the peer's acknowledgement was lost, not the fact it recorded.
+       */
+      const priorReceipt = Effect.fn("j5.a2a.peer.inbound.priorReceipt")(function* (
+        input: PeerInboundInput,
+      ) {
+        const commandId = peerReceiveCommandId({
+          originEnvironmentId: input.originEnvironmentId,
+          messageId: input.messageId,
+        });
+        const rows = yield* sql<{ readonly seq: number }>`
+          SELECT seq FROM j5_a2a_comm_event
+          WHERE command_id = ${commandId} AND kind = 'message.received'
+          LIMIT 1
+        `;
+        return rows[0] === undefined
+          ? null
+          : ({ receivedSeq: rows[0].seq, replay: true } satisfies PeerInboundResult);
+      });
+
       const receive: PeerInboundServiceShape["receive"] = (input) =>
         Effect.gen(function* () {
+          const replayed = yield* priorReceipt(input);
+          if (replayed !== null) return replayed;
           const receiverId = ParticipantId.make(input.receiverId);
           const senderId = ParticipantId.make(input.senderId);
           const receiver = yield* localReceiver(receiverId);

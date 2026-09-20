@@ -265,8 +265,18 @@ it.effect(
         yield* setup();
         const inbound = yield* PeerInboundService;
         const ledger = yield* A2ALedger;
+        // Each refusal is its own message: a repeated message id would replay, not refuse.
+        let refused = 0;
         const fail = (input: Partial<PeerInboundInput>) =>
-          Effect.flip(inbound.receive({ ...ask, ...input }));
+          Effect.flip(
+            inbound.receive({
+              ...ask,
+              messageId: `message:j5:a2a:refused-${String((refused += 1))}`,
+              correlationId: `correlation:j5:a2a:refused-${String(refused)}`,
+              ...input,
+            }),
+          );
+        yield* inbound.receive(ask);
 
         assert.equal(
           (yield* fail({ receiverId: "agent:j5:a2a:thread:ghost" }))._tag,
@@ -281,7 +291,13 @@ it.effect(
           "A2APeerReceiverNotDeliverableError",
         );
         assert.equal(
-          (yield* Effect.flip(inbound.receive(askWithoutIntent)))._tag,
+          (yield* Effect.flip(
+            inbound.receive({
+              ...askWithoutIntent,
+              messageId: "message:j5:a2a:refused-no-intent",
+              correlationId: "correlation:j5:a2a:refused-no-intent",
+            }),
+          ))._tag,
           "A2APeerAskIntentRequiredError",
         );
 
@@ -302,6 +318,9 @@ it.effect(
         const archived = yield* fail({});
         assert.equal(archived._tag, "A2APeerReceiverNotDeliverableError");
         assert.include(archived.message, "archived");
+        // The ask recorded above still replays: the receipt outlives the receiver's membership.
+        const replayed = yield* inbound.receive(ask);
+        assert.isTrue(replayed.replay);
       }).pipe(Effect.provide(makeTestLayer(delivered)));
     }),
 );
