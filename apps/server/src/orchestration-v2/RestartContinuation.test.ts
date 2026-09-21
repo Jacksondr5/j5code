@@ -114,6 +114,28 @@ it("requires matching saved native state for an unfinished root run", () => {
     assert.isUndefined(restartContinuationRun(invalid as OrchestrationV2ThreadProjection));
 });
 
+it.effect("leaves playbook-owned threads to explicit playbook Resume", () => {
+  const ownedThreadId = ThreadId.make(`thread:pb:${"c".repeat(64)}`);
+  const projection = makeProjection();
+  assert.isUndefined(
+    restartContinuationRun({
+      ...projection,
+      thread: { ...projection.thread, id: ownedThreadId },
+    }),
+  );
+  return continueRestartedRun({ threadId: ownedThreadId, sourceRunId: runId }).pipe(
+    Effect.provide(
+      Layer.merge(
+        ServerSettings.layerTest({ continueThreadsAfterServerUpdate: true }),
+        Layer.mock(ThreadManagementService)({
+          getThreadProjection: () => Effect.die("Playbook continuation must not read the thread"),
+          dispatch: () => Effect.die("Playbook continuation must not dispatch"),
+        }),
+      ),
+    ),
+  );
+});
+
 it("recovers an admitted continuation after another crash before provider start", () => {
   const projection = makeProjection();
   const starting = {
