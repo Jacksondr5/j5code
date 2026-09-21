@@ -42,6 +42,7 @@ import {
   crewSeatRequestKey,
   lifecycleCommandId,
   spawnCrewInstanceId,
+  spawnBriefWithoutCrewContext,
   spawnFirstTurnText,
   spawnHomeCommandId,
   spawnMessageId,
@@ -545,7 +546,10 @@ export const layer = Layer.effect(
         const previous = projection.messages.find(
           (message) => message.id === spawnMessageId(member.stableInput),
         );
-        if (previous !== undefined && previous.text !== text)
+        if (
+          previous !== undefined &&
+          spawnBriefWithoutCrewContext(previous.text) !== spawnBriefWithoutCrewContext(text)
+        )
           return yield* new CrewLaunchOperationError({
             phase: "checking the previously dispatched brief for",
             seatName: member.seat.name,

@@ -1022,6 +1022,47 @@ it.effect("rejects inherited ACP access that the harness cannot enforce", () =>
   }).pipe(Effect.scoped),
 );
 
+it.effect("refuses persona seats whose effective ACP access the harness cannot enforce", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(
+        dependencies(commands, [provider("acp", "acpRegistry", [{ slug: "model", options: [] }])]),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-persona-acp-" })),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const seat = {
+        name: "builder",
+        agentId: "builder",
+        reason: "Build",
+        modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
+      };
+      // A workspace-write persona with no override: the harness cannot enforce its default.
+      const inherited = yield* launcher.resolveSeats(captain, [seat]).pipe(Effect.flip);
+      assert.equal(inherited._tag, "CrewLaunchSeatUnavailableError");
+      assert.include(inherited.message, "cannot enforce the persona's default access");
+      // An explicit auto mode is refused on the persona branch as it is for custom seats.
+      for (const runtimeMode of ["auto", "auto-accept-edits"] as const) {
+        const overridden = yield* launcher
+          .resolveSeats(captain, [{ ...seat, runtimeMode }])
+          .pipe(Effect.flip);
+        assert.equal(overridden._tag, "CrewLaunchSeatUnavailableError");
+        assert.include(overridden.message, "cannot enforce the selected access mode");
+      }
+      // Modes the harness enforces itself pass, and the approval-bound preview records them.
+      const allowed = yield* launcher.resolveSeats(captain, [
+        { ...seat, runtimeMode: "approval-required" },
+      ]);
+      assert.equal(allowed[0]?.runtimeMode, "approval-required");
+      assert.lengthOf(yield* Ref.get(commands), 0);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
 it.effect("pins non-reasoning provider defaults for persona seats without overrides", () =>
   Effect.gen(function* () {
     const { context, commands, captain } = yield* fixture;
@@ -1144,4 +1185,79 @@ it.effect(
         );
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
+);
+
+it.effect("a retry that drops the failed seat keeps the briefs the other seats already have", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const stable = { providerSessionId: "session", requestKey: "partial-drop" };
+    const failedThread = spawnThreadId({
+      ...stable,
+      requestKey: crewSeatRequestKey(stable.requestKey, "second"),
+    });
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(
+        dependencies(
+          commands,
+          [provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }])],
+          new Set(),
+          new Set(),
+          new Set(),
+          true,
+          new Set([failedThread]),
+        ),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-retry-drop-" })),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const crews = yield* AgentCrewInstanceService;
+      const seats = ["first", "second"].map((name) => ({
+        name,
+        agentId: null,
+        reason: "Review",
+        instructions: "Original instructions",
+      }));
+      const input = {
+        ...stable,
+        captain,
+        seats,
+        displayName: "Review",
+        brief: "Review the change",
+        resolvedSeats: yield* launcher.resolveSeats(captain, seats),
+      };
+      yield* launcher.launch(input).pipe(Effect.flip);
+      const dispatched = (yield* Ref.get(commands)).filter(
+        (command) => command.type === "message.dispatch",
+      );
+      assert.lengthOf(dispatched, 1);
+      // The person drops the failed seat and approves: first's roster block changes, its brief
+      // and instructions do not, so the retry converges instead of refusing.
+      const kept = seats.filter((seat) => seat.name === "first");
+      const instance = yield* launcher.launch({
+        ...input,
+        seats: kept,
+        resolvedSeats: yield* launcher.resolveSeats(captain, kept),
+      });
+      assert.deepStrictEqual(
+        (yield* crews.read(instance.id))!.members.map(({ seatName }) => seatName),
+        ["first"],
+      );
+      // The replayed brief carries first's stable message id, so the orchestrator drops it as a
+      // duplicate; nothing was started for the dropped seat.
+      const briefs = (yield* Ref.get(commands)).filter(
+        (command) => command.type === "message.dispatch",
+      );
+      assert.isTrue(briefs.every((brief) => brief.threadId === dispatched[0]!.threadId));
+      assert.isTrue(
+        briefs.every(
+          (brief) =>
+            brief.type === "message.dispatch" && brief.messageId === dispatched[0]!.messageId,
+        ),
+      );
+      assert.isFalse(briefs.some((brief) => brief.threadId === failedThread));
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
 );
