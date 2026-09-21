@@ -1,5 +1,7 @@
 import { assert, it } from "@effect/vitest";
+import { ProviderInstanceId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Schema from "effect/Schema";
 import { Tool } from "effect/unstable/ai";
 
 import { A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
@@ -9,7 +11,9 @@ import {
   J5ArchiveAgentTool,
   J5ArchiveCrewTool,
   J5ProposeCrewTool,
+  J5ProposeCrewInput,
   J5RequestCrewMemberTool,
+  J5RequestCrewMemberInput,
   J5SendMessageTool,
   J5SpawnAgentTool,
   J5StopAgentTool,
@@ -18,6 +22,9 @@ import {
   J5_SPAWN_AGENT_DESCRIPTION,
   J5_STOP_AGENT_DESCRIPTION,
 } from "./tools.ts";
+
+const decodeProposeCrew = Schema.decodeUnknownSync(J5ProposeCrewInput);
+const decodeRequestCrewMember = Schema.decodeUnknownSync(J5RequestCrewMemberInput);
 
 it("publishes the ratified single-target lifecycle contracts fail-closed", () => {
   assert.equal(J5SendMessageTool.description, A2A_SEND_TOOL_DESCRIPTION);
@@ -125,4 +132,44 @@ it("publishes every tool with a top-level object input schema", () => {
     assert.equal(schema.type, "object", `${tool.name} must publish type: "object"`);
     assert.isUndefined(schema.anyOf, `${tool.name} must not publish a top-level anyOf`);
   }
+});
+
+it("accepts explicit custom seat settings through both crew tools without requiring a persona", () => {
+  const custom = {
+    seat: "reviewer",
+    reason: "Review correctness",
+    instructions: "Report findings and evidence.",
+    model_selection: {
+      instanceId: ProviderInstanceId.make("codex-custom"),
+      model: "gpt-6-astra",
+      options: [{ id: "reasoningEffort", value: "high" }],
+    },
+    runtime_mode: "approval-required",
+  } satisfies J5RequestCrewMemberInput;
+  const roster = { name: "Review", brief: "Review the change.", seats: [custom] };
+  assert.deepStrictEqual(decodeProposeCrew(roster), roster);
+  assert.deepStrictEqual(decodeRequestCrewMember(custom), custom);
+  assert.throws(() =>
+    decodeRequestCrewMember({
+      ...custom,
+      runtime_mode: "invented-access-mode",
+    }),
+  );
+  assert.throws(() =>
+    decodeRequestCrewMember({
+      ...custom,
+      model_selection: { model: "gpt-6-astra" },
+    }),
+  );
+  // The published tool must expose canonical, typed fields rather than the legacy decoder's
+  // unknown-valued source fields, so providers can actually choose a valid configuration.
+  const schema = Tool.getJsonSchema(J5RequestCrewMemberTool) as {
+    properties: Record<string, { anyOf?: ReadonlyArray<{ type?: string; required?: string[] }> }>;
+  };
+  const selection = schema.properties.model_selection?.anyOf?.find(
+    (entry) => entry.type === "object",
+  );
+  assert.isDefined(selection);
+  assert.sameMembers(selection?.required ?? [], ["instanceId", "model"]);
+  assert.property(schema.properties, "runtime_mode");
 });

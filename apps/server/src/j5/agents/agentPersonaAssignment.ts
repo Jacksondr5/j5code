@@ -70,12 +70,6 @@ export function validateAgentPersonaAssignment(
   assignment: OrchestrationV2AgentPersonaAssignment,
   definition: AgentPersonaDefinition = getBuiltInAgentPersona(assignment.personaId),
 ): string | undefined {
-  const target = definition.modelRoute[assignment.resolvedRoute === "primary" ? 0 : 1];
-  const optionId = target.driver === "codex" ? "reasoningEffort" : "effort";
-  const selectedEffort = assignment.resolvedModelSelection.options?.find(
-    (option) => option.id === optionId,
-  )?.value;
-
   if (assignment.definitionVersion !== definition.version) {
     return "Persona assignment uses an unknown definition version.";
   }
@@ -84,9 +78,22 @@ export function validateAgentPersonaAssignment(
   ) {
     return "Persona assignment uses an authority policy outside its definition.";
   }
-  if (!providerCanEnforceAgentPersonaAuthority(target.driver, assignment.authorityPolicy)) {
+  if (
+    assignment.runtimeModeOverride === undefined &&
+    !providerCanEnforceAgentPersonaAuthority(assignment.resolvedDriver, assignment.authorityPolicy)
+  ) {
     return "Persona assignment targets a provider that cannot enforce its authority policy.";
   }
+  if (assignment.resolvedRoute === "override") {
+    return assignment.definitionDigest === undefined
+      ? "Human runtime overrides require a saved persona snapshot."
+      : undefined;
+  }
+  const target = definition.modelRoute[assignment.resolvedRoute === "primary" ? 0 : 1];
+  const optionId = target.driver === "codex" ? "reasoningEffort" : "effort";
+  const selectedEffort = assignment.resolvedModelSelection.options?.find(
+    (option) => option.id === optionId,
+  )?.value;
   if (
     assignment.resolvedDriver !== target.driver ||
     assignment.resolvedModelSelection.model !== target.model ||

@@ -15,9 +15,18 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 
+import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
+import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
+import { guardAgentPersonaThreadCreate } from "../agents/agentPersonaOrchestration.ts";
 import { ServerConfig } from "../../config.ts";
-import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
-import { ProjectionStoreReadError } from "../../orchestration-v2/ProjectionStore.ts";
+import {
+  OrchestratorDispatchError,
+  OrchestratorProjectionError,
+} from "../../orchestration-v2/Orchestrator.ts";
+import {
+  ProjectionStoreReadError,
+  ProjectionStoreThreadNotFoundError,
+} from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -25,6 +34,7 @@ import {
   AgentCrewInstanceService,
   layer as crewInstanceLayer,
 } from "./AgentCrewInstanceService.ts";
+import { describeCrewSeatRuntime } from "./crewRuntimePreview.ts";
 import { CrewLaunchService, layer as crewLaunchLayer } from "./CrewLaunchService.ts";
 import { A2AHomeConflictError, participantIdForThread } from "./HomeRegistrar.ts";
 import { crewSeatRequestKey, spawnCrewInstanceId, spawnThreadId } from "./spawnIds.ts";
@@ -120,28 +130,62 @@ const dependencies = (
   /** Seat threads whose projection the store cannot read, once; a not-found is not among them. */
   unreadableOnce: Set<string> = new Set(),
   archived: Set<string> = new Set(),
+  realThreads = false,
+  failBriefOnce: Set<string> = new Set(),
 ) =>
   Layer.mergeAll(
     Layer.mock(ThreadManagementService)({
       getThreadProjection: (threadId) =>
-        unreadableOnce.delete(threadId)
-          ? Effect.fail(
-              new OrchestratorProjectionError({
-                threadId,
-                cause: new ProjectionStoreReadError({ threadId }),
+        realThreads
+          ? Ref.get(commands).pipe(
+              Effect.flatMap((commands) => {
+                const created = commands.find(
+                  (command) => command.type === "thread.create" && command.threadId === threadId,
+                );
+                return created?.type === "thread.create"
+                  ? Effect.succeed({
+                      thread: { ...thread(threadId), ...created },
+                      messages: commands.flatMap((command) =>
+                        command.type === "message.dispatch" && command.threadId === threadId
+                          ? [{ id: command.messageId, text: command.text }]
+                          : [],
+                      ),
+                    } as unknown as OrchestrationV2ThreadProjection)
+                  : Effect.fail(
+                      new OrchestratorProjectionError({
+                        threadId,
+                        cause: new ProjectionStoreThreadNotFoundError({ threadId }),
+                      }),
+                    );
               }),
             )
-          : Effect.succeed({
-              thread: {
-                ...thread(threadId),
-                archivedAt: archived.has(threadId) ? createdAt : null,
-              },
-            } as unknown as OrchestrationV2ThreadProjection),
+          : unreadableOnce.delete(threadId)
+            ? Effect.fail(
+                new OrchestratorProjectionError({
+                  threadId,
+                  cause: new ProjectionStoreReadError({ threadId }),
+                }),
+              )
+            : Effect.succeed({
+                messages: [],
+                thread: {
+                  ...thread(threadId),
+                  archivedAt: archived.has(threadId) ? createdAt : null,
+                },
+              } as unknown as OrchestrationV2ThreadProjection),
       dispatch: (command) =>
-        Ref.update(commands, (items) => {
-          if (command.type === "thread.archive") archived.add(command.threadId);
-          return [...items, command];
-        }).pipe(Effect.as({ events: [], effects: [] } as never)),
+        Effect.gen(function* () {
+          if (command.type === "message.dispatch" && failBriefOnce.delete(command.threadId))
+            return yield* new OrchestratorDispatchError({
+              commandId: command.commandId,
+              commandType: command.type,
+            });
+          yield* Ref.update(commands, (items) => {
+            if (command.type === "thread.archive") archived.add(command.threadId);
+            return [...items, command];
+          });
+          return { events: [], effects: [] } as never;
+        }),
     }),
     Layer.mock(SpawnCompositionService)({
       recordFacts: (input) =>
@@ -542,5 +586,678 @@ it.effect("custom seats refuse unavailable providers before recording or spawnin
         assert.lengthOf(yield* (yield* AgentCrewInstanceService).listLive(), 0);
       }).pipe(Effect.provide(testLayer));
     }
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "previews actual routes and pins custom defaults; approved launches and retries keep that exact runtime",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high", "low"] }]);
+      const withDefaults: ServerProvider = {
+        ...codex,
+        displayName: "Codex",
+        models: codex.models.map((model) => ({
+          ...model,
+          capabilities: {
+            optionDescriptors: [
+              {
+                id: "reasoningEffort",
+                label: "Reasoning",
+                type: "select",
+                currentValue: "high",
+                options: [
+                  { id: "high", label: "High" },
+                  { id: "low", label: "Low" },
+                ],
+              },
+            ],
+          },
+        })),
+      };
+      const providers = [withDefaults];
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(commands, providers, new Set(), new Set(), new Set(), true),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(
+          ServerConfig.layerTest(process.cwd(), { prefix: "j5-preview-runtime-" }),
+        ),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const seats = [
+          { name: "scribe", agentId: null, reason: "Notes", instructions: "Take notes" },
+        ];
+        const resolvedSeats = yield* launcher.resolveSeats(captain, seats);
+        assert.deepStrictEqual(resolvedSeats[0]?.runtime, {
+          seat: "scribe",
+          provider: "OpenAI",
+          harness: "Codex",
+          model: "gpt-5.6-sol",
+          reasoning: "High",
+          access: "Full access",
+          modelSelection: {
+            ...captain.thread.modelSelection,
+            options: [{ id: "reasoningEffort", value: "high" }],
+          },
+          runtimeMode: "full-access",
+        });
+        assert.deepStrictEqual(resolvedSeats[0]?.modelSelection.options, [
+          { id: "reasoningEffort", value: "high" },
+        ]);
+        const input = {
+          providerSessionId: "session",
+          requestKey: "runtime-pinned",
+          captain,
+          displayName: "Notes",
+          seats,
+          resolvedSeats,
+          brief: "Review",
+        };
+        // A changed provider default after validation cannot alter the approved launch.
+        providers[0] = {
+          ...withDefaults,
+          models: withDefaults.models.map((model) => ({
+            ...model,
+            capabilities: {
+              optionDescriptors: [
+                {
+                  id: "reasoningEffort",
+                  label: "Reasoning",
+                  type: "select",
+                  currentValue: "low",
+                  options: [
+                    { id: "high", label: "High" },
+                    { id: "low", label: "Low" },
+                  ],
+                },
+              ],
+            },
+          })),
+        };
+        const launched = yield* launcher.launch(input);
+        const create = (yield* Ref.get(commands)).find(
+          (command) => command.type === "thread.create",
+        );
+        assert.equal(create?.type, "thread.create");
+        if (create?.type === "thread.create")
+          assert.deepStrictEqual(create.modelSelection, resolvedSeats[0]?.modelSelection);
+        const retried = yield* launcher.launch(input);
+        assert.equal(retried.id, launched.id);
+        const changedSeats = yield* launcher.resolveSeats(captain, seats);
+        assert.equal(changedSeats[0]?.runtime.reasoning, "Low");
+        const before = (yield* Ref.get(commands)).length;
+        const changed = yield* launcher
+          .launch({ ...input, resolvedSeats: changedSeats })
+          .pipe(Effect.flip);
+        assert.equal(changed._tag, "CrewLaunchSeatUnavailableError");
+        assert.lengthOf(yield* Ref.get(commands), before);
+        const saved = yield* launcher.resolveSeats(captain, [
+          { name: "builder", agentId: "builder", reason: "Build" },
+        ]);
+        assert.equal(saved[0]?.assignment?.resolvedDriver, "codex");
+        assert.equal(saved[0]?.runtime.harness, "Codex");
+        assert.equal(saved[0]?.runtime.access, "Repository write");
+        const accessOnly = (yield* launcher.resolveSeats(captain, [
+          { name: "builder", agentId: "builder", reason: "Build", runtimeMode: "full-access" },
+        ]))[0]!;
+        assert.deepStrictEqual(accessOnly.modelSelection, saved[0]?.modelSelection);
+        assert.equal(accessOnly.assignment?.resolvedRoute, saved[0]?.assignment?.resolvedRoute);
+        assert.equal(accessOnly.runtime.access, "Full access");
+        const accessPolicy = yield* resolveAgentPersonaRuntime(
+          {
+            agentPersonaAssignment: accessOnly.assignment!,
+            runtimeMode: accessOnly.runtimeMode,
+          },
+          yield* makeAgentPersonaLibrary,
+        );
+        assert.equal(accessPolicy.runtimeMode, "full-access");
+        assert.notProperty(accessPolicy, "sandboxPolicy");
+
+        assert.equal(
+          saved[0]?.modelSelection.model,
+          saved[0]?.assignment?.resolvedModelSelection.model,
+        );
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.each([
+  ["codex", "Codex", undefined, "OpenAI", "Codex"],
+  ["claudeAgent", "Claude", undefined, "Anthropic", "Claude Code"],
+  ["claudeAgent", "Claude Code", undefined, "Anthropic", "Claude Code"],
+  ["codex", "Work account", undefined, "OpenAI (Work account)", "Codex"],
+  ["codex", "Codex", "Other vendor", "Other vendor", "Codex"],
+  ["opencode", "Team account", "OpenAI", "OpenAI (Team account)", "OpenCode"],
+])(
+  "runtime provider label for %s / %s respects the model vendor and configured instance",
+  (driver, displayName, subProvider, expectedProvider, expectedHarness) => {
+    const configured = provider("instance", driver!, [{ slug: "model", options: ["high"] }]);
+    const runtime = describeCrewSeatRuntime(
+      "seat",
+      { instanceId: configured.instanceId, model: "model" },
+      {
+        ...configured,
+        displayName: displayName!,
+        models: configured.models.map((model) => ({
+          ...model,
+          ...(subProvider === undefined ? {} : { subProvider }),
+        })),
+      },
+      "full-access",
+      null,
+    );
+    assert.equal(runtime.provider, expectedProvider);
+    assert.equal(runtime.harness, expectedHarness);
+  },
+);
+
+it.effect(
+  "custom runtime overrides select the advertised harness, model, reasoning, and access without fallback",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const providers = [
+        provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]),
+        provider("claude-work", "claudeAgent", [
+          { slug: "claude-sonnet", options: ["high", "low"] },
+        ]),
+        provider("acp", "acpRegistry", [{ slug: "model", options: [] }]),
+      ];
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(commands, providers, new Set(), new Set(), new Set(), true),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-custom-runtime-" })),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const custom = {
+          name: "reviewer",
+          agentId: null,
+          reason: "Review",
+          instructions: "Read changes",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("claude-work"),
+            model: "claude-sonnet",
+            options: [{ id: "effort", value: "low" }],
+          },
+          runtimeMode: "approval-required" as const,
+        };
+        const resolvedSeats = yield* launcher.resolveSeats(captain, [custom]);
+        const resolved = resolvedSeats[0]!;
+        assert.deepStrictEqual(resolved.modelSelection, custom.modelSelection);
+        assert.equal(resolved.runtimeMode, "approval-required");
+        assert.equal(resolved.runtime.harness, "Claude Code");
+        assert.equal(resolved.runtime.reasoning, "low");
+        assert.equal(resolved.runtime.access, "Approval required");
+        assert.deepStrictEqual(resolved.runtime.modelSelection, custom.modelSelection);
+        assert.equal(resolved.runtime.runtimeMode, custom.runtimeMode);
+        const instance = yield* launcher.launch({
+          providerSessionId: "session",
+          requestKey: "custom-override",
+          captain,
+          displayName: "Review",
+          seats: [custom],
+          resolvedSeats,
+          brief: "Review",
+        });
+        const created = (yield* Ref.get(commands)).find(
+          (command) => command.type === "thread.create",
+        );
+        assert.equal(created?.type, "thread.create");
+        if (created?.type === "thread.create") {
+          assert.deepStrictEqual(created.modelSelection, custom.modelSelection);
+          assert.equal(created.runtimeMode, custom.runtimeMode);
+          assert.isUndefined(created.agentPersonaAssignment);
+        }
+        const additional = { ...custom, name: "scribe", runtimeMode: "full-access" as const };
+        const addedResolved = yield* launcher.resolveSeats(captain, [additional]);
+        yield* launcher.addSeats({
+          providerSessionId: "session",
+          requestKey: "custom-override-add",
+          captain,
+          instance,
+          seats: [additional],
+          resolvedSeats: addedResolved,
+        });
+        const added = (yield* Ref.get(commands)).findLast(
+          (command) => command.type === "thread.create",
+        );
+        if (added?.type === "thread.create") {
+          assert.deepStrictEqual(added.modelSelection, additional.modelSelection);
+          assert.equal(added.runtimeMode, "full-access");
+        }
+        for (const modelSelection of [
+          { ...custom.modelSelection, instanceId: ProviderInstanceId.make("missing") },
+          { ...custom.modelSelection, model: "missing" },
+          { ...custom.modelSelection, options: [{ id: "effort", value: "unsupported" }] },
+          { ...custom.modelSelection, options: [{ id: "effort", value: true }] },
+          { ...custom.modelSelection, options: [{ id: "unknown", value: "high" }] },
+          {
+            ...custom.modelSelection,
+            options: [
+              { id: "effort", value: "low" },
+              { id: "effort", value: "high" },
+            ],
+          },
+        ]) {
+          const invalid = yield* launcher
+            .resolveSeats(captain, [{ ...custom, modelSelection }])
+            .pipe(Effect.flip);
+          assert.equal(invalid._tag, "CrewLaunchSeatUnavailableError");
+        }
+        const invalidAccess = yield* launcher
+          .resolveSeats(captain, [
+            {
+              ...custom,
+              modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
+              runtimeMode: "auto-accept-edits",
+            },
+          ])
+          .pipe(Effect.flip);
+        assert.equal(invalidAccess._tag, "CrewLaunchSeatUnavailableError");
+        assert.include(invalidAccess.message, "Choose Approval required or Full access");
+        // Neither configured provider advertises Critic's saved model: the human override
+        // still launches, preserving its snapshot and behavior on the selected harness.
+        const personaSeat = {
+          ...custom,
+          name: "saved-reviewer",
+          agentId: "critic",
+          runtimeMode: "full-access" as const,
+        };
+        const personaOverride = yield* launcher.resolveSeats(captain, [personaSeat]);
+        const saved = personaOverride[0]!;
+        assert.equal(saved.assignment?.resolvedRoute, "override");
+        assert.deepStrictEqual(saved.modelSelection, custom.modelSelection);
+        assert.equal(saved.runtime.access, "Full access");
+        const library = yield* makeAgentPersonaLibrary;
+        const policy = yield* resolveAgentPersonaRuntime(
+          { agentPersonaAssignment: saved.assignment!, runtimeMode: saved.runtimeMode },
+          library,
+        );
+        assert.equal(policy.runtimeMode, "full-access");
+        assert.notProperty(policy, "sandboxPolicy");
+        assert.notProperty(policy, "approvalPolicy");
+        assert.include(policy.agentPersonaInstructions!, "Selected behavior: critic-review");
+        assert.include(policy.agentPersonaInstructions!, "Never commit or push.");
+        const original = yield* library.readSnapshot(saved.assignment!);
+        assert.include(policy.agentPersonaInstructions!, original.instructions);
+        yield* launcher.addSeats({
+          providerSessionId: "session",
+          requestKey: "saved-override-add",
+          captain,
+          instance,
+          seats: [personaSeat],
+          resolvedSeats: personaOverride,
+        });
+        const savedCommand = (yield* Ref.get(commands)).findLast(
+          (command) => command.type === "thread.create",
+        );
+        assert.equal(savedCommand?.type, "thread.create");
+        if (savedCommand?.type === "thread.create") {
+          assert.deepStrictEqual(savedCommand.modelSelection, personaSeat.modelSelection);
+          assert.equal(savedCommand.runtimeMode, "full-access");
+          assert.deepStrictEqual(savedCommand.agentPersonaAssignment, saved.assignment);
+          yield* guardAgentPersonaThreadCreate(savedCommand, library, () =>
+            Effect.succeed("claudeAgent"),
+          );
+        }
+        for (const selection of [
+          { ...custom.modelSelection, model: "missing" },
+          { ...custom.modelSelection, options: [{ id: "effort", value: "unsupported" }] },
+        ]) {
+          const invalid = yield* launcher
+            .resolveSeats(captain, [{ ...personaSeat, modelSelection: selection }])
+            .pipe(Effect.flip);
+          assert.equal(invalid._tag, "CrewLaunchSeatUnavailableError");
+        }
+        const modelOnly = (yield* launcher.resolveSeats(captain, [
+          { ...personaSeat, runtimeMode: undefined },
+        ]))[0]!;
+        const defaultPolicy = yield* resolveAgentPersonaRuntime(
+          { agentPersonaAssignment: modelOnly.assignment!, runtimeMode: modelOnly.runtimeMode },
+          library,
+        );
+        assert.equal(modelOnly.runtime.access, "Read only");
+        assert.equal(
+          "sandboxPolicy" in defaultPolicy ? defaultPolicy.sandboxPolicy?.type : undefined,
+          "readOnly",
+        );
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it("runtime previews show advertised variant and boolean thinking choices", () => {
+  const configured = provider("instance", "opencode", [{ slug: "model", options: [] }]);
+  const selected = { instanceId: configured.instanceId, model: "model" };
+  const variantProvider: ServerProvider = {
+    ...configured,
+    models: configured.models.map((model) => ({
+      ...model,
+      capabilities: {
+        optionDescriptors: [
+          {
+            id: "variant",
+            label: "Reasoning",
+            type: "select",
+            options: [{ id: "deep", label: "Deep reasoning" }],
+          },
+        ],
+      },
+    })),
+  };
+  assert.equal(
+    describeCrewSeatRuntime(
+      "seat",
+      { ...selected, options: [{ id: "variant", value: "deep" }] },
+      variantProvider,
+      "auto",
+      null,
+    ).reasoning,
+    "Deep reasoning",
+  );
+  const thinkingProvider: ServerProvider = {
+    ...configured,
+    models: configured.models.map((model) => ({
+      ...model,
+      capabilities: {
+        optionDescriptors: [
+          { id: "thinking", label: "Thinking", type: "boolean", currentValue: false },
+        ],
+      },
+    })),
+  };
+  assert.equal(
+    describeCrewSeatRuntime(
+      "seat",
+      { ...selected, options: [{ id: "thinking", value: true }] },
+      thinkingProvider,
+      "auto",
+      null,
+    ).reasoning,
+    "On",
+  );
+  assert.equal(
+    describeCrewSeatRuntime("seat", selected, thinkingProvider, "auto", null).reasoning,
+    "Off",
+  );
+});
+
+it.effect("rejects inherited ACP access that the harness cannot enforce", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(
+        dependencies(commands, [provider("acp", "acpRegistry", [{ slug: "model", options: [] }])]),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-inherited-acp-" })),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      for (const runtimeMode of ["auto", "auto-accept-edits"] as const) {
+        const failure = yield* launcher
+          .resolveSeats({ ...captain, thread: { ...captain.thread, runtimeMode } }, [
+            {
+              name: "reviewer",
+              agentId: null,
+              reason: "Review",
+              instructions: "Review",
+              modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
+            },
+          ])
+          .pipe(Effect.flip);
+        assert.equal(failure._tag, "CrewLaunchSeatUnavailableError");
+      }
+      assert.lengthOf(yield* Ref.get(commands), 0);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("refuses persona seats whose effective ACP access the harness cannot enforce", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(
+        dependencies(commands, [provider("acp", "acpRegistry", [{ slug: "model", options: [] }])]),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-persona-acp-" })),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const seat = {
+        name: "builder",
+        agentId: "builder",
+        reason: "Build",
+        modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
+      };
+      // A workspace-write persona with no override: the harness cannot enforce its default.
+      const inherited = yield* launcher.resolveSeats(captain, [seat]).pipe(Effect.flip);
+      assert.equal(inherited._tag, "CrewLaunchSeatUnavailableError");
+      assert.include(inherited.message, "cannot enforce the persona's default access");
+      // An explicit auto mode is refused on the persona branch as it is for custom seats.
+      for (const runtimeMode of ["auto", "auto-accept-edits"] as const) {
+        const overridden = yield* launcher
+          .resolveSeats(captain, [{ ...seat, runtimeMode }])
+          .pipe(Effect.flip);
+        assert.equal(overridden._tag, "CrewLaunchSeatUnavailableError");
+        assert.include(overridden.message, "cannot enforce the selected access mode");
+      }
+      // Modes the harness enforces itself pass, and the approval-bound preview records them.
+      const allowed = yield* launcher.resolveSeats(captain, [
+        { ...seat, runtimeMode: "approval-required" },
+      ]);
+      assert.equal(allowed[0]?.runtimeMode, "approval-required");
+      assert.lengthOf(yield* Ref.get(commands), 0);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("pins non-reasoning provider defaults for persona seats without overrides", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
+    const configured = (fastMode: boolean): ServerProvider => ({
+      ...codex,
+      models: codex.models.map((model) => ({
+        ...model,
+        capabilities: {
+          optionDescriptors: [
+            ...model.capabilities!.optionDescriptors!,
+            {
+              id: "fastMode",
+              label: "Fast",
+              type: "boolean",
+              currentValue: fastMode,
+            },
+          ],
+        },
+      })),
+    });
+    const providers = [configured(true)];
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(dependencies(commands, providers)),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-persona-defaults-" })),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const seats = [{ name: "builder", agentId: "builder", reason: "Build" }];
+      const before = (yield* launcher.resolveSeats(captain, seats))[0]!;
+      assert.deepStrictEqual(
+        before.modelSelection.options?.find((option) => option.id === "fastMode"),
+        { id: "fastMode", value: true },
+      );
+      assert.deepStrictEqual(before.assignment?.resolvedModelSelection, before.modelSelection);
+      providers[0] = configured(false);
+      const after = (yield* launcher.resolveSeats(captain, seats))[0]!;
+      assert.equal(before.runtime.reasoning, after.runtime.reasoning);
+      assert.deepStrictEqual(
+        after.modelSelection.options?.find((option) => option.id === "fastMode"),
+        { id: "fastMode", value: false },
+      );
+      assert.notDeepEqual(before, after);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "refuses edited instructions after a partial launch already dispatched that seat's brief",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const stable = { providerSessionId: "session", requestKey: "partial-brief" };
+      const failedThread = spawnThreadId({
+        ...stable,
+        requestKey: crewSeatRequestKey(stable.requestKey, "second"),
+      });
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(
+            commands,
+            [provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }])],
+            new Set(),
+            new Set(),
+            new Set(),
+            true,
+            new Set([failedThread]),
+          ),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(
+          ServerConfig.layerTest(process.cwd(), { prefix: "j5-retry-instructions-" }),
+        ),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const seats = ["first", "second"].map((name) => ({
+          name,
+          agentId: null,
+          reason: "Review",
+          instructions: "Original instructions",
+        }));
+        const input = {
+          ...stable,
+          captain,
+          seats,
+          displayName: "Review",
+          brief: "Review the change",
+          resolvedSeats: yield* launcher.resolveSeats(captain, seats),
+        };
+        yield* launcher.launch(input).pipe(Effect.flip);
+        const dispatched = (yield* Ref.get(commands)).filter(
+          (command) => command.type === "message.dispatch",
+        );
+        assert.lengthOf(dispatched, 1);
+        const edited = seats.map((seat) =>
+          seat.name === "first" ? { ...seat, instructions: "New instructions" } : seat,
+        );
+        const rejected = yield* launcher
+          .launch({
+            ...input,
+            seats: edited,
+            resolvedSeats: yield* launcher.resolveSeats(captain, edited),
+          })
+          .pipe(Effect.flip);
+        assert.equal(rejected._tag, "CrewLaunchOperationError");
+        assert.include(rejected.message, "already dispatched a different brief");
+        assert.deepStrictEqual(
+          (yield* Ref.get(commands)).filter((command) => command.type === "message.dispatch"),
+          dispatched,
+        );
+        yield* launcher.launch(input);
+        assert.isTrue(
+          (yield* Ref.get(commands)).some(
+            (command) => command.type === "message.dispatch" && command.threadId === failedThread,
+          ),
+        );
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect("a retry that drops the failed seat keeps the briefs the other seats already have", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const stable = { providerSessionId: "session", requestKey: "partial-drop" };
+    const failedThread = spawnThreadId({
+      ...stable,
+      requestKey: crewSeatRequestKey(stable.requestKey, "second"),
+    });
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(
+        dependencies(
+          commands,
+          [provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }])],
+          new Set(),
+          new Set(),
+          new Set(),
+          true,
+          new Set([failedThread]),
+        ),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-retry-drop-" })),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const crews = yield* AgentCrewInstanceService;
+      const seats = ["first", "second"].map((name) => ({
+        name,
+        agentId: null,
+        reason: "Review",
+        instructions: "Original instructions",
+      }));
+      const input = {
+        ...stable,
+        captain,
+        seats,
+        displayName: "Review",
+        brief: "Review the change",
+        resolvedSeats: yield* launcher.resolveSeats(captain, seats),
+      };
+      yield* launcher.launch(input).pipe(Effect.flip);
+      const dispatched = (yield* Ref.get(commands)).filter(
+        (command) => command.type === "message.dispatch",
+      );
+      assert.lengthOf(dispatched, 1);
+      // The person drops the failed seat and approves: first's roster block changes, its brief
+      // and instructions do not, so the retry converges instead of refusing.
+      const kept = seats.filter((seat) => seat.name === "first");
+      const instance = yield* launcher.launch({
+        ...input,
+        seats: kept,
+        resolvedSeats: yield* launcher.resolveSeats(captain, kept),
+      });
+      assert.deepStrictEqual(
+        (yield* crews.read(instance.id))!.members.map(({ seatName }) => seatName),
+        ["first"],
+      );
+      // The replayed brief carries first's stable message id, so the orchestrator drops it as a
+      // duplicate; nothing was started for the dropped seat.
+      const briefs = (yield* Ref.get(commands)).filter(
+        (command) => command.type === "message.dispatch",
+      );
+      assert.isTrue(briefs.every((brief) => brief.threadId === dispatched[0]!.threadId));
+      assert.isTrue(
+        briefs.every(
+          (brief) =>
+            brief.type === "message.dispatch" && brief.messageId === dispatched[0]!.messageId,
+        ),
+      );
+      assert.isFalse(briefs.some((brief) => brief.threadId === failedThread));
+    }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );

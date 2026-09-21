@@ -44,7 +44,7 @@ import {
 } from "../ArchiveCrewService.ts";
 import { CrewStopService } from "../CrewStopService.ts";
 import { CrewProposalService, type CrewProposalOutcome } from "../CrewProposalService.ts";
-import type { CrewProposal } from "../AgentCrewProposalService.ts";
+import type { CrewProposal, CrewProposalSeat } from "../AgentCrewProposalService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import {
   A2AHomeNotFoundError,
@@ -2115,6 +2115,8 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
     const squadronId = SquadronId.make("squadron:j5:mcp-propose");
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-propose-captain");
     const proposals = yield* Ref.make<ReadonlyArray<string>>([]);
+    const proposedSeats = yield* Ref.make<ReadonlyArray<CrewProposalSeat>>([]);
+    const addedSeats = yield* Ref.make<ReadonlyArray<CrewProposalSeat>>([]);
     const membership = yield* Ref.make<{ crewInstanceId: string; seatName: string } | null>(null);
     const callerRow = {
       squadronId,
@@ -2175,9 +2177,11 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
               proposal: proposal(input.requestKey, "roster"),
               instance: null,
             } satisfies CrewProposalOutcome),
+            Effect.tap(() => Ref.set(proposedSeats, input.seats)),
           ),
         requestMember: (input) =>
           Ref.update(proposals, (items) => [...items, input.requestKey]).pipe(
+            Effect.tap(() => Ref.update(addedSeats, (seats) => [...seats, input.seat])),
             Effect.as({
               proposal: {
                 ...proposal(input.requestKey, "addition"),
@@ -2236,10 +2240,25 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       const message = (response: { readonly result: unknown }) =>
         (response.result as { readonly message: string }).message;
 
+      const customSelection: ModelSelection = {
+        instanceId: ProviderInstanceId.make("codex-custom"),
+        model: "gpt-6-astra",
+        options: [{ id: "reasoningEffort", value: "high" }],
+      };
       const proposed = yield* run("propose_crew", {
         name: "Login Fix Crew",
         brief: "Fix the flaky login test.",
-        seats: [{ seat: "builder", persona: "builder", reason: "Implements" }],
+        seats: [
+          { seat: "builder", persona: "builder", reason: "Implements" },
+          {
+            seat: "reviewer",
+            reason: "Reviews correctness",
+            instructions: "Review and report concrete risks.",
+            model_selection: customSelection,
+            runtime_mode: "approval-required",
+          },
+          { seat: "researcher", reason: "Researches", instructions: "Inspect related behavior." },
+        ],
         client_request_id: "propose-1",
       });
       assert.isFalse(proposed.isFailure, message(proposed));
@@ -2250,10 +2269,30 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
         members: [],
       });
 
+      assert.deepStrictEqual(yield* Ref.get(proposedSeats), [
+        { seat: "builder", agentId: "builder", reason: "Implements" },
+        {
+          seat: "reviewer",
+          agentId: null,
+          reason: "Reviews correctness",
+          instructions: "Review and report concrete risks.",
+          modelSelection: customSelection,
+          runtimeMode: "approval-required",
+        },
+        {
+          seat: "researcher",
+          agentId: null,
+          reason: "Researches",
+          instructions: "Inspect related behavior.",
+        },
+      ]);
+
       const added = yield* run("request_crew_member", {
-        seat: "sentry",
-        persona: "sentry",
+        seat: "security",
         reason: "Security pass",
+        instructions: "Review authorization boundaries.",
+        model_selection: customSelection,
+        runtime_mode: "auto-accept-edits",
         client_request_id: "add-1",
       });
       assert.isFalse(added.isFailure, message(added));
@@ -2265,6 +2304,16 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       assert.equal(addedResult.status, "approved");
       assert.equal(addedResult.crew_instance_id, "crew:1");
       assert.lengthOf(addedResult.members, 1);
+      assert.deepStrictEqual(yield* Ref.get(addedSeats), [
+        {
+          seat: "security",
+          agentId: null,
+          reason: "Security pass",
+          instructions: "Review authorization boundaries.",
+          modelSelection: customSelection,
+          runtimeMode: "auto-accept-edits",
+        },
+      ]);
 
       yield* Ref.set(membership, { crewInstanceId: "crew:1", seatName: "builder" });
       const refused = yield* run("propose_crew", {

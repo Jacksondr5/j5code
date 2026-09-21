@@ -17,6 +17,7 @@ import {
 import { CrewProposalService } from "./CrewProposalService.ts";
 
 export const CREW_PROPOSALS_PATH = "/api/j5/a2a/crews/proposals";
+export const CREW_PROPOSAL_PREVIEW_PATH = "/api/j5/a2a/crews/proposals/preview";
 export const CREW_PROPOSAL_RESOLVE_PATH = "/api/j5/a2a/crews/proposals/resolve";
 
 // The response and request shapes are the J5 contract the clients decode; aliased so the route's
@@ -27,6 +28,8 @@ const CrewProposalResolveResponse = J5Contracts.CrewProposalResolveResponse;
 
 const encodeList = Schema.encodeEffect(CrewProposalsResponse);
 const encodeResolve = Schema.encodeEffect(CrewProposalResolveResponse);
+const decodePreview = Schema.decodeUnknownEffect(J5Contracts.CrewProposalPreviewRequest);
+const encodePreview = Schema.encodeEffect(J5Contracts.CrewProposalPreviewResponse);
 const decodeResolve = Schema.decodeUnknownEffect(CrewProposalResolveRequest);
 
 const failureResponse = (cause: unknown) => {
@@ -62,6 +65,7 @@ const failureResponse = (cause: unknown) => {
 export const makeCrewProposalsHttpRouteLayer = (paths: {
   readonly list: HttpRouter.PathInput;
   readonly resolve: HttpRouter.PathInput;
+  readonly preview?: HttpRouter.PathInput;
 }) =>
   Layer.unwrap(
     Effect.gen(function* () {
@@ -87,6 +91,31 @@ export const makeCrewProposalsHttpRouteLayer = (paths: {
           }),
         ),
       );
+      const previewRoute = HttpRouter.add(
+        "POST",
+        paths.preview ?? CREW_PROPOSAL_PREVIEW_PATH,
+        Effect.gen(function* () {
+          yield* annotateEnvironmentRequest("j5.a2a.crews.proposals.preview");
+          yield* authenticateClientRead;
+          const body = yield* jsonBody;
+          if (Result.isFailure(body)) return invalidRequest("The request body must be JSON.");
+          const decoded = yield* Effect.result(decodePreview(body.success));
+          if (Result.isFailure(decoded))
+            return invalidRequest("proposalId and optional seats are required.");
+          const preview = yield* Effect.result(
+            gate.preview(decoded.success).pipe(Effect.flatMap(encodePreview)),
+          );
+          return Result.isSuccess(preview)
+            ? HttpServerResponse.jsonUnsafe(preview.success)
+            : yield* failureResponse(preview.failure);
+        }).pipe(
+          Effect.catchTags({
+            EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+            EnvironmentInternalError: HttpServerRespondable.toResponse,
+            EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+          }),
+        ),
+      );
       const resolveRoute = HttpRouter.add(
         "POST",
         paths.resolve,
@@ -98,23 +127,17 @@ export const makeCrewProposalsHttpRouteLayer = (paths: {
           const decoded = yield* Effect.result(decodeResolve(body.success));
           if (Result.isFailure(decoded))
             return invalidRequest(
-              "proposalId, decision (approve or decline), and optional seats are required.",
+              "A valid proposalId and decision are required; approval also requires a runtime preview token.",
             );
           const outcome = yield* Effect.result(
-            gate
-              .resolve({
-                proposalId: decoded.success.proposalId,
-                decision: decoded.success.decision,
-                seats: decoded.success.seats,
-              })
-              .pipe(
-                Effect.flatMap((result) =>
-                  encodeResolve({
-                    proposal: result.proposal,
-                    crewInstanceId: result.instance?.id ?? null,
-                  }),
-                ),
+            gate.resolve(decoded.success).pipe(
+              Effect.flatMap((result) =>
+                encodeResolve({
+                  proposal: result.proposal,
+                  crewInstanceId: result.instance?.id ?? null,
+                }),
               ),
+            ),
           );
           return Result.isSuccess(outcome)
             ? HttpServerResponse.jsonUnsafe(outcome.success)
@@ -127,11 +150,12 @@ export const makeCrewProposalsHttpRouteLayer = (paths: {
           }),
         ),
       );
-      return Layer.mergeAll(listRoute, resolveRoute);
+      return Layer.mergeAll(listRoute, previewRoute, resolveRoute);
     }),
   );
 
 export const crewProposalsHttpRouteLayer = makeCrewProposalsHttpRouteLayer({
   list: CREW_PROPOSALS_PATH,
   resolve: CREW_PROPOSAL_RESOLVE_PATH,
+  preview: CREW_PROPOSAL_PREVIEW_PATH,
 });

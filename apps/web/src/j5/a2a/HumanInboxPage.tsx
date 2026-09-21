@@ -445,15 +445,19 @@ export function HumanInboxPage() {
     proposal: ScopedCrewProposal,
     decision: "approve" | "decline",
     seats: ReadonlyArray<CrewProposalSeat>,
+    approvalToken?: string,
   ) => {
     setResolvingProposalId(proposal.id);
     setError(null);
     try {
-      await resolveCrewProposal(proposal.environmentId, {
-        proposalId: proposal.id,
-        decision,
-        ...(decision === "approve" ? { seats } : {}),
-      });
+      if (decision === "approve" && approvalToken === undefined)
+        throw new Error("Refresh the runtime preview before approving.");
+      await resolveCrewProposal(
+        proposal.environmentId,
+        decision === "approve"
+          ? { proposalId: proposal.id, decision, seats, approvalToken: approvalToken! }
+          : { proposalId: proposal.id, decision },
+      );
       notifyHumanInboxChanged(proposal.environmentId);
       await refreshCrewProposals(proposal.environmentId).catch(() => undefined);
     } catch (cause) {
@@ -566,8 +570,8 @@ export function HumanInboxPage() {
                       proposal={proposal}
                       environmentId={proposal.environmentId}
                       busy={resolvingProposalId === proposal.id}
-                      onResolve={(decision, seats) =>
-                        void resolveProposal(proposal, decision, seats)
+                      onResolve={(decision, seats, approvalToken) =>
+                        void resolveProposal(proposal, decision, seats, approvalToken)
                       }
                       onOpenCaptain={() => openCaptain(proposal)}
                     />

@@ -80,6 +80,15 @@ export interface CrewBriefContext {
   }>;
 }
 
+/**
+ * A dispatched brief minus its `<j5_crew_context>` block. The roster inside that block names
+ * every seat's participant, so dropping or renaming one seat on a retry rewrites the briefs of
+ * seats that already started; those are platform facts, and only the human-authored parts (the
+ * Captain's brief, the seat's instructions) must match what a seat was already told.
+ */
+export const spawnBriefWithoutCrewContext = (text: string) =>
+  text.replace(/<j5_crew_context>\n[\s\S]*?\n<\/j5_crew_context>\n\n/, "");
+
 export const spawnFirstTurnText = (input: {
   readonly brief: string;
   readonly participantId: string;

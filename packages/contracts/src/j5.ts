@@ -1,5 +1,7 @@
 import * as Schema from "effect/Schema";
 
+import { ModelSelection } from "./modelSelection.ts";
+import { RuntimeMode } from "./providerPolicy.ts";
 import { EnvironmentId, ProjectId, ThreadId } from "./baseSchemas.ts";
 
 export const ScopedSquadronRef = Schema.Struct({
@@ -89,13 +91,16 @@ export const CREW_SEAT_CAP = 12;
 
 /**
  * One requested or approved Crew seat, as the Captain proposed it or the human edited it. A null
- * agent is a custom seat: no saved agent, it runs on the Captain's provider, model, and mode.
+ * agent is a custom seat. Human runtime edits apply to every seat; omitted fields use the persona
+ * defaults or, for a custom seat, inherit the Captain.
  */
 export const CrewProposalSeat = Schema.Struct({
   seat: Schema.String,
   agentId: Schema.NullOr(Schema.String),
   reason: Schema.String,
   instructions: Schema.optional(Schema.String),
+  modelSelection: Schema.optional(ModelSelection),
+  runtimeMode: Schema.optional(RuntimeMode),
 });
 export type CrewProposalSeat = typeof CrewProposalSeat.Type;
 
@@ -119,11 +124,42 @@ export type CrewProposal = typeof CrewProposal.Type;
 export type ScopedCrewProposal = CrewProposal & { readonly environmentId: EnvironmentId };
 
 export const CrewProposalsResponse = Schema.Struct({ proposals: Schema.Array(CrewProposal) });
-export const CrewProposalResolveRequest = Schema.Struct({
+/** Server-resolved runtime, displayed verbatim before a human approves this exact roster. */
+export const CrewProposalSeatRuntime = Schema.Struct({
+  seat: Schema.String,
+  provider: Schema.String,
+  harness: Schema.String,
+  model: Schema.String,
+  reasoning: Schema.String,
+  access: Schema.String,
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+});
+export type CrewProposalSeatRuntime = typeof CrewProposalSeatRuntime.Type;
+export const CrewProposalPreviewRequest = Schema.Struct({
   proposalId: Schema.String,
-  decision: Schema.Literals(["approve", "decline"]),
   seats: Schema.optional(Schema.Array(CrewProposalSeat).check(Schema.isMaxLength(CREW_SEAT_CAP))),
 });
+export type CrewProposalPreviewRequest = typeof CrewProposalPreviewRequest.Type;
+export const CrewProposalPreviewResponse = Schema.Struct({
+  proposalId: Schema.String,
+  approvalToken: Schema.String,
+  seats: Schema.Array(CrewProposalSeatRuntime),
+});
+export type CrewProposalPreviewResponse = typeof CrewProposalPreviewResponse.Type;
+
+export const CrewProposalResolveRequest = Schema.Union([
+  Schema.Struct({
+    proposalId: Schema.String,
+    decision: Schema.Literal("approve"),
+    approvalToken: Schema.String,
+    seats: Schema.optional(Schema.Array(CrewProposalSeat).check(Schema.isMaxLength(CREW_SEAT_CAP))),
+  }),
+  Schema.Struct({
+    proposalId: Schema.String,
+    decision: Schema.Literal("decline"),
+  }),
+]);
 export type CrewProposalResolveRequest = typeof CrewProposalResolveRequest.Type;
 export const CrewProposalResolveResponse = Schema.Struct({
   proposal: CrewProposal,
@@ -294,6 +330,7 @@ export const J5_API_PATHS = {
   answer: "/api/j5/a2a/inbox/answer",
   openCount: "/api/j5/a2a/client-reads/open-count",
   crewProposals: "/api/j5/a2a/crews/proposals",
+  crewProposalPreview: "/api/j5/a2a/crews/proposals/preview",
   crewProposalResolve: "/api/j5/a2a/crews/proposals/resolve",
   crewStop: "/api/j5/a2a/crews/stop",
   crewArchive: "/api/j5/a2a/crews/archive",

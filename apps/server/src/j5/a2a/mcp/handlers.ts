@@ -899,6 +899,8 @@ const handlers = {
             agentId: seat.persona ?? null,
             reason: seat.reason,
             ...(seat.instructions === undefined ? {} : { instructions: seat.instructions }),
+            ...(seat.model_selection === undefined ? {} : { modelSelection: seat.model_selection }),
+            ...(seat.runtime_mode === undefined ? {} : { runtimeMode: seat.runtime_mode }),
           })),
         })
         .pipe(Effect.mapError((error) => stateError(error.message, crewProposalNextStep(error))));
@@ -920,6 +922,10 @@ const handlers = {
             agentId: input.persona ?? null,
             reason: input.reason,
             ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
+            ...(input.model_selection === undefined
+              ? {}
+              : { modelSelection: input.model_selection }),
+            ...(input.runtime_mode === undefined ? {} : { runtimeMode: input.runtime_mode }),
           },
           brief: input.brief ?? null,
         })

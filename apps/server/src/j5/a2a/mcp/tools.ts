@@ -3,10 +3,12 @@ import * as Schema from "effect/Schema";
 
 import {
   AgentPersonaId,
+  ModelSelection,
   OrchestrationV2RunStatus,
   ProjectId,
   ProviderInstanceId,
   RunId,
+  RuntimeMode,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
@@ -190,12 +192,22 @@ const CrewReason = NonEmptyString.check(Schema.isMaxLength(CREW_REASON_MAX_CHARS
 const CrewText = NonEmptyString.check(Schema.isMaxLength(CREW_TEXT_MAX_CHARS));
 const CrewSeatPersona = AgentPersonaId.annotate({
   description:
-    "Persona id from list_personas. Omit for a custom seat, which runs on the Captain's provider, model, and access and needs instructions.",
+    "Persona id from list_personas. Omit for a custom seat with required instructions and optional model_selection/runtime_mode overrides; omitted settings inherit the Captain. Saved personas are proposed with their own configuration; the human may edit their runtime before approval.",
+});
+
+const CrewSeatModelSelection = Schema.toType(ModelSelection).annotate({
+  description:
+    "Custom seats only: provider instance and model from orchestrator_capabilities. Set options to an array of {id, value} using that model's advertised reasoning option. Omit to inherit the Captain's model selection.",
+});
+const CrewSeatRuntimeMode = RuntimeMode.annotate({
+  description: "Custom seats only: access mode. Omit to inherit the Captain's access mode.",
 });
 
 export const J5CrewSeatInput = Schema.Struct({
   seat: CrewSeatName,
   persona: Schema.optional(CrewSeatPersona),
+  model_selection: Schema.optional(CrewSeatModelSelection),
+  runtime_mode: Schema.optional(CrewSeatRuntimeMode),
   reason: CrewReason,
   instructions: Schema.optional(CrewText),
 });
@@ -215,6 +227,8 @@ export const J5RequestCrewMemberInput = Schema.Struct({
   crew_instance_id: Schema.optional(NonEmptyString),
   seat: CrewSeatName,
   persona: Schema.optional(CrewSeatPersona),
+  model_selection: Schema.optional(CrewSeatModelSelection),
+  runtime_mode: Schema.optional(CrewSeatRuntimeMode),
   reason: CrewReason,
   brief: Schema.optional(CrewText),
   instructions: Schema.optional(CrewText),
@@ -384,10 +398,10 @@ export const J5_LIST_AGENTS_DESCRIPTION =
   "List the personas in this environment: id, purpose, runtime policy, whether each can start now, and the provider, model, and reasoning it would run on. Read this before choosing a persona for spawn_agent or a crew roster so the choice fits the task and the user's budget. Read-only.";
 
 export const J5_PROPOSE_CREW_DESCRIPTION =
-  "Propose the crew you need for the brief you were given. Use it when the user asks for a crew or the work splits into distinct responsibilities that should run at once. Mix saved personas and custom seats in the same roster: call list_personas when choosing a saved persona, or leave persona unset for a custom seat that runs on your own provider, model, and access mode with only its instructions (required) and the brief; name the crew for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the roster and each seat's resolved provider, model, reasoning, and access in this thread, may remove or add seats, and approves or declines; you receive the decision and the roster as a message here. Approved seats run with their own persona's permissions, which may exceed yours. You become the crew's Captain and may command several crews at once; later requests, stops, and archives name the crew they mean. Use send_message for member-to-member, member-to-Captain, and Captain-to-Captain coordination, including intermediate findings and direct results; artifacts do not gate these conversations. Reuse client_request_id to retry safely. This call is itself the human gate, so it works under every sandbox and approval policy, including approval policy never; never refuse the brief because approvals are disabled.";
+  "Propose the crew you need for the brief you were given. Use it when the user asks for a crew or the work splits into distinct responsibilities that should run at once. Mix saved personas and custom seats in the same roster: call list_personas when choosing a saved persona, or leave persona unset for a custom seat with its own instructions (required) and the brief. Custom seats inherit your settings by default; to choose a different harness, model, reasoning, or access, set model_selection (instanceId, model, options) and/or runtime_mode using orchestrator_capabilities. Saved personas are proposed with their own configuration; only the human may override their runtime before approval; name the crew for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the roster and each seat's resolved provider, model, reasoning, and access in this thread, may remove or add seats, and approves or declines; you receive the decision and the roster as a message here. Approved seats run with the runtime the human approves, which may exceed yours. You become the crew's Captain and may command several crews at once; later requests, stops, and archives name the crew they mean. Use send_message for member-to-member, member-to-Captain, and Captain-to-Captain coordination, including intermediate findings and direct results; artifacts do not gate these conversations. Reuse client_request_id to retry safely. This call is itself the human gate, so it works under every sandbox and approval policy, including approval policy never; never refuse the brief because approvals are disabled.";
 
 export const J5_REQUEST_CREW_MEMBER_DESCRIPTION =
-  "Ask the user to add one seat to a crew you command when the work needs one the roster lacks: seat name, persona id from list_personas (or none for a custom seat that runs on your provider, model, and access and needs instructions), a clear reason identifying the concern and missing expertise or responsibility, and optionally instructions and a brief for the new seat. The user decides from their inbox; you receive the decision and the updated roster as a message here. Continue the already-approved work and direct coordination while the addition is pending. Captain-only; a member sends the concern and needed expertise to its Captain with send_message. Reuse client_request_id to retry safely. Filing the request is the human gate itself and works under every approval policy, including approval policy never.";
+  "Ask the user to add one seat to a crew you command when the work needs one the roster lacks: seat name, persona id from list_personas (or none for a custom seat with required instructions and optional model_selection/runtime_mode overrides; omitted settings inherit yours; saved-persona runtime changes are made only by the human before approval), a clear reason identifying the concern and missing expertise or responsibility, and optionally instructions and a brief for the new seat. The user decides from their inbox; you receive the decision and the updated roster as a message here. Continue the already-approved work and direct coordination while the addition is pending. Captain-only; a member sends the concern and needed expertise to its Captain with send_message. Reuse client_request_id to retry safely. Filing the request is the human gate itself and works under every approval policy, including approval policy never.";
 
 export const J5_STOP_AGENT_DESCRIPTION =
   "Stop one Peer Agent: interrupts its running turn now. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. Requires your current squadron_id. Reuse client_request_id to retry safely.";

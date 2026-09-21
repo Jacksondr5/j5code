@@ -23,7 +23,11 @@ describe("spawn thread ids", () => {
 
 import { assert } from "@effect/vitest";
 
-import { spawnFirstTurnText, type CrewBriefContext } from "./spawnIds.ts";
+import {
+  spawnBriefWithoutCrewContext,
+  spawnFirstTurnText,
+  type CrewBriefContext,
+} from "./spawnIds.ts";
 
 const identity = {
   brief: "Review the proposed change.",
@@ -76,4 +80,26 @@ it("keeps an ordinary Peer Agent brief free of crew instructions", () => {
   assert.include(text, `<spawner_brief>\n${identity.brief}\n</spawner_brief>`);
   assert.notInclude(text, "crew_collaboration");
   assert.notInclude(text, "Captain");
+});
+
+it("compares dispatched briefs by their human-authored parts, not the roster", () => {
+  const first = spawnFirstTurnText({ ...identity, crew });
+  const smallerRoster = spawnFirstTurnText({
+    ...identity,
+    crew: { ...crew, roster: crew.roster.slice(0, 1) },
+  });
+  assert.notEqual(first, smallerRoster);
+  assert.equal(spawnBriefWithoutCrewContext(first), spawnBriefWithoutCrewContext(smallerRoster));
+  assert.notEqual(
+    spawnBriefWithoutCrewContext(first),
+    spawnBriefWithoutCrewContext(
+      spawnFirstTurnText({ ...identity, crew: { ...crew, seatInstructions: "Edited" } }),
+    ),
+  );
+  assert.notEqual(
+    spawnBriefWithoutCrewContext(first),
+    spawnBriefWithoutCrewContext(spawnFirstTurnText({ ...identity, brief: "Edited", crew })),
+  );
+  assert.notInclude(spawnBriefWithoutCrewContext(first), "j5_crew_context");
+  assert.include(spawnBriefWithoutCrewContext(first), "<seat_instructions>");
 });

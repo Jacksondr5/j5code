@@ -12,9 +12,11 @@ import type { ProviderAdapterV2RuntimePolicy } from "../../../orchestration-v2/P
  * refused `spawn_agent` and told to run its own helpers as Subagents, so those must work under
  * the same policy, and a child inherits its parent's sandbox through the escalation check. The
  * rest of the t3-code server (worktree handoff, browser preview, scheduling) keeps Codex's own
- * verdict, so a read-only persona under `never` still cannot reach those. Interactive modes keep Codex's
- * prompting, which is what their users chose. Kept as a leaf module (no toolkit import) so the
- * adapter avoids a cycle; the test checks the list against J5Toolkit.
+ * verdict, so a read-only persona under `never` still cannot reach those. Interactive modes
+ * pre-approve only routine communication and filing roster requests; the latter still require
+ * human approval in the app before any member launches. Lifecycle and spawning tools keep
+ * Codex's prompting in those modes. Kept as a leaf module (no toolkit import) so the adapter
+ * avoids a cycle; the test checks the full list against J5Toolkit.
  */
 export const J5_CODEX_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
   "send_message",
@@ -38,12 +40,23 @@ export const J5_CODEX_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
   "clear_own_ask",
 ];
 
-/** Codex `mcp_servers.<id>.tools.<tool>.approval_mode`, one entry per J5 verb. */
-export const J5_CODEX_T3_MCP_SERVER_CONFIG = {
-  tools: Object.fromEntries(
-    J5_CODEX_PREAPPROVED_TOOLS.map((name) => [name, { approval_mode: "approve" as const }]),
-  ),
-} as const;
+/** These calls coordinate approved work or file a request in the app's human approval inbox. */
+export const J5_CODEX_COORDINATION_TOOLS: ReadonlyArray<string> = [
+  "send_message",
+  "clear_own_ask",
+  "propose_crew",
+  "request_crew_member",
+];
+
+/** Codex `mcp_servers.<id>.tools.<tool>.approval_mode`, never a server-wide default. */
+const preapprovedToolConfig = (names: ReadonlyArray<string>) => ({
+  tools: Object.fromEntries(names.map((name) => [name, { approval_mode: "approve" as const }])),
+});
+
+export const J5_CODEX_T3_MCP_SERVER_CONFIG = preapprovedToolConfig(J5_CODEX_PREAPPROVED_TOOLS);
+export const J5_CODEX_COORDINATION_MCP_SERVER_CONFIG = preapprovedToolConfig(
+  J5_CODEX_COORDINATION_TOOLS,
+);
 
 /** Mirrors the adapter's runtime-mode default: only full-access resolves to `never` on its own. */
 export const codexApprovalPolicyIsNever = (
@@ -56,5 +69,7 @@ export const codexApprovalPolicyIsNever = (
 
 export const j5CodexT3McpServerConfig = (
   runtimePolicy: Pick<ProviderAdapterV2RuntimePolicy, "runtimeMode" | "approvalPolicy"> | undefined,
-): typeof J5_CODEX_T3_MCP_SERVER_CONFIG | Record<never, never> =>
-  codexApprovalPolicyIsNever(runtimePolicy) ? J5_CODEX_T3_MCP_SERVER_CONFIG : {};
+): typeof J5_CODEX_T3_MCP_SERVER_CONFIG =>
+  codexApprovalPolicyIsNever(runtimePolicy)
+    ? J5_CODEX_T3_MCP_SERVER_CONFIG
+    : J5_CODEX_COORDINATION_MCP_SERVER_CONFIG;
