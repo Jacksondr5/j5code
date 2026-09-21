@@ -127,24 +127,17 @@ export const makeCrewProposalsHttpRouteLayer = (paths: {
           const decoded = yield* Effect.result(decodeResolve(body.success));
           if (Result.isFailure(decoded))
             return invalidRequest(
-              "proposalId, decision (approve or decline), and optional seats are required.",
+              "A valid proposalId and decision are required; approval also requires a runtime preview token.",
             );
           const outcome = yield* Effect.result(
-            gate
-              .resolve({
-                proposalId: decoded.success.proposalId,
-                decision: decoded.success.decision,
-                approvalToken: decoded.success.approvalToken,
-                seats: decoded.success.seats,
-              })
-              .pipe(
-                Effect.flatMap((result) =>
-                  encodeResolve({
-                    proposal: result.proposal,
-                    crewInstanceId: result.instance?.id ?? null,
-                  }),
-                ),
+            gate.resolve(decoded.success).pipe(
+              Effect.flatMap((result) =>
+                encodeResolve({
+                  proposal: result.proposal,
+                  crewInstanceId: result.instance?.id ?? null,
+                }),
               ),
+            ),
           );
           return Result.isSuccess(outcome)
             ? HttpServerResponse.jsonUnsafe(outcome.success)

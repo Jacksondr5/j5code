@@ -148,12 +148,18 @@ export const CrewProposalPreviewResponse = Schema.Struct({
 });
 export type CrewProposalPreviewResponse = typeof CrewProposalPreviewResponse.Type;
 
-export const CrewProposalResolveRequest = Schema.Struct({
-  proposalId: Schema.String,
-  decision: Schema.Literals(["approve", "decline"]),
-  approvalToken: Schema.optional(Schema.String),
-  seats: Schema.optional(Schema.Array(CrewProposalSeat).check(Schema.isMaxLength(CREW_SEAT_CAP))),
-});
+export const CrewProposalResolveRequest = Schema.Union([
+  Schema.Struct({
+    proposalId: Schema.String,
+    decision: Schema.Literal("approve"),
+    approvalToken: Schema.String,
+    seats: Schema.optional(Schema.Array(CrewProposalSeat).check(Schema.isMaxLength(CREW_SEAT_CAP))),
+  }),
+  Schema.Struct({
+    proposalId: Schema.String,
+    decision: Schema.Literal("decline"),
+  }),
+]);
 export type CrewProposalResolveRequest = typeof CrewProposalResolveRequest.Type;
 export const CrewProposalResolveResponse = Schema.Struct({
   proposal: CrewProposal,

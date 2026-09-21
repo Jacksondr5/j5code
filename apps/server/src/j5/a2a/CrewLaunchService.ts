@@ -271,7 +271,7 @@ export const layer = Layer.effect(
             seat.runtimeMode ?? captainAccess?.runtimeMode ?? captain.thread.runtimeMode;
           if (
             provider!.driver === "acpRegistry" &&
-            (seat.runtimeMode === "auto" || seat.runtimeMode === "auto-accept-edits")
+            (runtimeMode === "auto" || runtimeMode === "auto-accept-edits")
           )
             return yield* new CrewLaunchSeatUnavailableError({
               seatName: seat.name,
@@ -306,6 +306,10 @@ export const layer = Layer.effect(
             );
             return {
               ...prepared,
+              resolvedModelSelection: (yield* resolveSelection(
+                seat,
+                prepared.resolvedModelSelection,
+              )).modelSelection,
               ...(seat.runtimeMode === undefined ? {} : { runtimeModeOverride: seat.runtimeMode }),
             };
           }
@@ -330,16 +334,6 @@ export const layer = Layer.effect(
               agentId,
               detail:
                 "This harness cannot enforce the persona's default access. Select an explicit access mode.",
-            });
-          if (
-            provider.driver === "acpRegistry" &&
-            (seat.runtimeMode === "auto" || seat.runtimeMode === "auto-accept-edits")
-          )
-            return yield* new CrewLaunchSeatUnavailableError({
-              seatName: seat.name,
-              agentId,
-              detail:
-                "This ACP harness cannot enforce the selected access mode. Choose Approval required or Full access.",
             });
           const definitionDigest = yield* agents.snapshot(definition);
           return {
@@ -371,6 +365,16 @@ export const layer = Layer.effect(
           assignment.resolvedDriver,
         );
         const runtimeMode = seat.runtimeMode ?? policy.runtimeMode;
+        if (
+          assignment.resolvedDriver === "acpRegistry" &&
+          (runtimeMode === "auto" || runtimeMode === "auto-accept-edits")
+        )
+          return yield* new CrewLaunchSeatUnavailableError({
+            seatName: seat.name,
+            agentId,
+            detail:
+              "This ACP harness cannot enforce the selected access mode. Choose Approval required or Full access.",
+          });
         // The obligation is read from the same immutable snapshot the seat will run on, so a
         // later library edit cannot change what a running seat owes.
         const definition = yield* agents.readSnapshot(assignment).pipe(
@@ -498,7 +502,59 @@ export const layer = Layer.effect(
           member.agentId ??
           "custom",
       }));
-      for (const member of planned) {
+      const briefs = planned.map((member) => ({
+        member,
+        text: spawnFirstTurnText({
+          brief,
+          participantId: member.participantId,
+          squadronId: captain.squadronId,
+          squadronName: captain.squadronName,
+          crew: {
+            displayName: instance.displayName,
+            instanceId: instance.id,
+            seatName: member.seat.name,
+            seatInstructions: member.seat.instructions,
+            captainParticipantId: captain.participantId,
+            obligation:
+              member.outputArtifact === null || member.assignment === null
+                ? undefined
+                : {
+                    kind: member.outputArtifact,
+                    path: agentHandoffArtifactPath({
+                      personaId: member.assignment.personaId,
+                      artifact: member.outputArtifact,
+                      threadId: member.threadId,
+                    }),
+                  },
+            roster,
+          },
+        }),
+      }));
+      for (const { member, text } of briefs) {
+        const projection = yield* threadManagement.getThreadProjection(member.threadId).pipe(
+          Effect.mapError(
+            (cause) =>
+              new CrewLaunchOperationError({
+                phase: "checking the previously dispatched brief for",
+                seatName: member.seat.name,
+                createdSeats: planned.map((entry) => entry.seat.name),
+                cause,
+              }),
+          ),
+        );
+        const previous = projection.messages.find(
+          (message) => message.id === spawnMessageId(member.stableInput),
+        );
+        if (previous !== undefined && previous.text !== text)
+          return yield* new CrewLaunchOperationError({
+            phase: "checking the previously dispatched brief for",
+            seatName: member.seat.name,
+            createdSeats: planned.map((entry) => entry.seat.name),
+            cause:
+              "An earlier attempt already dispatched a different brief for this seat. Restore the approved instructions and roster, rename the seat, or decline and create a fresh proposal.",
+          });
+      }
+      for (const { member, text } of briefs) {
         yield* threadManagement
           .dispatch({
             type: "message.dispatch",
@@ -507,31 +563,7 @@ export const layer = Layer.effect(
             commandId: lifecycleCommandId({ ...member.stableInput, operation: "spawn-brief" }),
             threadId: member.threadId,
             messageId: spawnMessageId(member.stableInput),
-            text: spawnFirstTurnText({
-              brief,
-              participantId: member.participantId,
-              squadronId: captain.squadronId,
-              squadronName: captain.squadronName,
-              crew: {
-                displayName: instance.displayName,
-                instanceId: instance.id,
-                seatName: member.seat.name,
-                seatInstructions: member.seat.instructions,
-                captainParticipantId: captain.participantId,
-                obligation:
-                  member.outputArtifact === null || member.assignment === null
-                    ? undefined
-                    : {
-                        kind: member.outputArtifact,
-                        path: agentHandoffArtifactPath({
-                          personaId: member.assignment.personaId,
-                          artifact: member.outputArtifact,
-                          threadId: member.threadId,
-                        }),
-                      },
-                roster,
-              },
-            }),
+            text,
             attachments: [],
             modelSelection: member.modelSelection,
             dispatchMode: { type: "start_immediately" },

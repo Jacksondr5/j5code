@@ -19,7 +19,10 @@ import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
 import { guardAgentPersonaThreadCreate } from "../agents/agentPersonaOrchestration.ts";
 import { ServerConfig } from "../../config.ts";
-import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
+import {
+  OrchestratorDispatchError,
+  OrchestratorProjectionError,
+} from "../../orchestration-v2/Orchestrator.ts";
 import {
   ProjectionStoreReadError,
   ProjectionStoreThreadNotFoundError,
@@ -128,6 +131,7 @@ const dependencies = (
   unreadableOnce: Set<string> = new Set(),
   archived: Set<string> = new Set(),
   realThreads = false,
+  failBriefOnce: Set<string> = new Set(),
 ) =>
   Layer.mergeAll(
     Layer.mock(ThreadManagementService)({
@@ -141,6 +145,11 @@ const dependencies = (
                 return created?.type === "thread.create"
                   ? Effect.succeed({
                       thread: { ...thread(threadId), ...created },
+                      messages: commands.flatMap((command) =>
+                        command.type === "message.dispatch" && command.threadId === threadId
+                          ? [{ id: command.messageId, text: command.text }]
+                          : [],
+                      ),
                     } as unknown as OrchestrationV2ThreadProjection)
                   : Effect.fail(
                       new OrchestratorProjectionError({
@@ -158,16 +167,25 @@ const dependencies = (
                 }),
               )
             : Effect.succeed({
+                messages: [],
                 thread: {
                   ...thread(threadId),
                   archivedAt: archived.has(threadId) ? createdAt : null,
                 },
               } as unknown as OrchestrationV2ThreadProjection),
       dispatch: (command) =>
-        Ref.update(commands, (items) => {
-          if (command.type === "thread.archive") archived.add(command.threadId);
-          return [...items, command];
-        }).pipe(Effect.as({ events: [], effects: [] } as never)),
+        Effect.gen(function* () {
+          if (command.type === "message.dispatch" && failBriefOnce.delete(command.threadId))
+            return yield* new OrchestratorDispatchError({
+              commandId: command.commandId,
+              commandType: command.type,
+            });
+          yield* Ref.update(commands, (items) => {
+            if (command.type === "thread.archive") archived.add(command.threadId);
+            return [...items, command];
+          });
+          return { events: [], effects: [] } as never;
+        }),
     }),
     Layer.mock(SpawnCompositionService)({
       recordFacts: (input) =>
@@ -971,3 +989,159 @@ it("runtime previews show advertised variant and boolean thinking choices", () =
     "Off",
   );
 });
+
+it.effect("rejects inherited ACP access that the harness cannot enforce", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(
+        dependencies(commands, [provider("acp", "acpRegistry", [{ slug: "model", options: [] }])]),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-inherited-acp-" })),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      for (const runtimeMode of ["auto", "auto-accept-edits"] as const) {
+        const failure = yield* launcher
+          .resolveSeats({ ...captain, thread: { ...captain.thread, runtimeMode } }, [
+            {
+              name: "reviewer",
+              agentId: null,
+              reason: "Review",
+              instructions: "Review",
+              modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
+            },
+          ])
+          .pipe(Effect.flip);
+        assert.equal(failure._tag, "CrewLaunchSeatUnavailableError");
+      }
+      assert.lengthOf(yield* Ref.get(commands), 0);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("pins non-reasoning provider defaults for persona seats without overrides", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
+    const configured = (fastMode: boolean): ServerProvider => ({
+      ...codex,
+      models: codex.models.map((model) => ({
+        ...model,
+        capabilities: {
+          optionDescriptors: [
+            ...model.capabilities!.optionDescriptors!,
+            {
+              id: "fastMode",
+              label: "Fast",
+              type: "boolean",
+              currentValue: fastMode,
+            },
+          ],
+        },
+      })),
+    });
+    const providers = [configured(true)];
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(dependencies(commands, providers)),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-persona-defaults-" })),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const seats = [{ name: "builder", agentId: "builder", reason: "Build" }];
+      const before = (yield* launcher.resolveSeats(captain, seats))[0]!;
+      assert.deepStrictEqual(
+        before.modelSelection.options?.find((option) => option.id === "fastMode"),
+        { id: "fastMode", value: true },
+      );
+      assert.deepStrictEqual(before.assignment?.resolvedModelSelection, before.modelSelection);
+      providers[0] = configured(false);
+      const after = (yield* launcher.resolveSeats(captain, seats))[0]!;
+      assert.equal(before.runtime.reasoning, after.runtime.reasoning);
+      assert.deepStrictEqual(
+        after.modelSelection.options?.find((option) => option.id === "fastMode"),
+        { id: "fastMode", value: false },
+      );
+      assert.notDeepEqual(before, after);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "refuses edited instructions after a partial launch already dispatched that seat's brief",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const stable = { providerSessionId: "session", requestKey: "partial-brief" };
+      const failedThread = spawnThreadId({
+        ...stable,
+        requestKey: crewSeatRequestKey(stable.requestKey, "second"),
+      });
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(
+            commands,
+            [provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }])],
+            new Set(),
+            new Set(),
+            new Set(),
+            true,
+            new Set([failedThread]),
+          ),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(
+          ServerConfig.layerTest(process.cwd(), { prefix: "j5-retry-instructions-" }),
+        ),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const seats = ["first", "second"].map((name) => ({
+          name,
+          agentId: null,
+          reason: "Review",
+          instructions: "Original instructions",
+        }));
+        const input = {
+          ...stable,
+          captain,
+          seats,
+          displayName: "Review",
+          brief: "Review the change",
+          resolvedSeats: yield* launcher.resolveSeats(captain, seats),
+        };
+        yield* launcher.launch(input).pipe(Effect.flip);
+        const dispatched = (yield* Ref.get(commands)).filter(
+          (command) => command.type === "message.dispatch",
+        );
+        assert.lengthOf(dispatched, 1);
+        const edited = seats.map((seat) =>
+          seat.name === "first" ? { ...seat, instructions: "New instructions" } : seat,
+        );
+        const rejected = yield* launcher
+          .launch({
+            ...input,
+            seats: edited,
+            resolvedSeats: yield* launcher.resolveSeats(captain, edited),
+          })
+          .pipe(Effect.flip);
+        assert.equal(rejected._tag, "CrewLaunchOperationError");
+        assert.include(rejected.message, "already dispatched a different brief");
+        assert.deepStrictEqual(
+          (yield* Ref.get(commands)).filter((command) => command.type === "message.dispatch"),
+          dispatched,
+        );
+        yield* launcher.launch(input);
+        assert.isTrue(
+          (yield* Ref.get(commands)).some(
+            (command) => command.type === "message.dispatch" && command.threadId === failedThread,
+          ),
+        );
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);

@@ -4,6 +4,7 @@ import { PencilIcon, PlusIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Badge } from "../../components/ui/badge";
+import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import { Button } from "../../components/ui/button";
 import { useEnvironmentQuery } from "../../state/query";
 import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
@@ -11,7 +12,23 @@ import type { CrewProposal, CrewProposalSeat } from "./crewProposalsClient";
 import { addSeat, describeSeatAgent, removeSeat, saveSeat } from "./crewProposalDraft";
 import { CrewSeatDialog } from "./CrewSeatDialog";
 import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
+import { useParticipantLabels } from "../a2a/ParticipantIdentitiesClient";
 import { useCrewProposalPreview } from "./useCrewProposalPreview";
+
+function CaptainLabel(props: {
+  readonly environmentId: EnvironmentId;
+  readonly participantId: string;
+}) {
+  const labels = useParticipantLabels(props.environmentId, [props.participantId]);
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="truncate" />}>
+        {labels.get(props.participantId) ?? "Captain"}
+      </TooltipTrigger>
+      <TooltipPopup>{props.participantId}</TooltipPopup>
+    </Tooltip>
+  );
+}
 
 /**
  * The human gate for one Crew request. The Captain's seats arrive with reasons; the user may drop
@@ -66,7 +83,15 @@ export function CrewProposalCard(props: {
             <Badge variant="warning" className="uppercase tracking-wide">
               {proposal.kind === "roster" ? "New crew" : "Add a seat"}
             </Badge>
-            <span className="truncate">{proposal.captainParticipantId}</span>
+            {props.environmentId === null ? (
+              <span>Captain</span>
+            ) : (
+              <CaptainLabel
+                key={`${props.environmentId}:${proposal.captainParticipantId}`}
+                environmentId={props.environmentId}
+                participantId={proposal.captainParticipantId}
+              />
+            )}
           </div>
           <h2 className="mt-1 text-base font-semibold leading-snug">{proposal.displayName}</h2>
         </div>

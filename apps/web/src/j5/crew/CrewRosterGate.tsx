@@ -42,11 +42,14 @@ export function CrewRosterGate(props: {
       setBusyId(proposal.id);
       setError(null);
       try {
-        await resolveCrewProposal(environmentId, {
-          proposalId: proposal.id,
-          decision,
-          ...(decision === "approve" ? { seats, approvalToken } : {}),
-        });
+        if (decision === "approve" && approvalToken === undefined)
+          throw new Error("Refresh the runtime preview before approving.");
+        await resolveCrewProposal(
+          environmentId,
+          decision === "approve"
+            ? { proposalId: proposal.id, decision, seats, approvalToken: approvalToken! }
+            : { proposalId: proposal.id, decision },
+        );
         notifyHumanInboxChanged(environmentId);
         await refreshCrewProposals(environmentId).catch(() => undefined);
       } catch (cause) {
@@ -61,7 +64,10 @@ export function CrewRosterGate(props: {
   const gates = rosterGatesForThread(query.data ?? [], threadId);
   if (gates.length === 0 || environmentId === undefined) return null;
   return (
-    <div className="mb-3" data-testid="crew-roster-gate">
+    <div
+      className="mb-3 max-h-[60dvh] min-h-0 shrink overflow-y-auto overscroll-contain"
+      data-testid="crew-roster-gate"
+    >
       {error ? (
         <p className="mb-2 text-sm text-destructive" role="alert">
           {error}
