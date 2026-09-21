@@ -2,14 +2,39 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
 import { OrchestrationV2Command, OrchestrationV2PublicCommand } from "../orchestrationV2.ts";
-import { AgentPersonaId, OrchestrationV2AgentPersonaAssignment } from "./agentPersona.ts";
+import {
+  AgentPersonaId,
+  AgentPersonaAuthorityPolicy,
+  OrchestrationV2AgentPersonaRequest,
+  OrchestrationV2AgentPersonaAssignment,
+} from "./agentPersona.ts";
 
 const decodeOrchestrationV2Command = Schema.decodeUnknownSync(OrchestrationV2Command);
 const decodeOrchestrationV2PublicCommand = Schema.decodeUnknownSync(OrchestrationV2PublicCommand);
 const decodePersonaId = Schema.decodeUnknownSync(AgentPersonaId);
 const decodePersonaAssignment = Schema.decodeUnknownSync(OrchestrationV2AgentPersonaAssignment);
+const decodePersonaRequest = Schema.decodeUnknownSync(OrchestrationV2AgentPersonaRequest);
+const isActivePolicy = Schema.is(AgentPersonaAuthorityPolicy);
 
 describe("agent persona contracts", () => {
+  it("preserves retired authority in stored assignments without accepting it for new requests", () => {
+    const assignment = {
+      personaId: "skill-manager",
+      definitionVersion: 1,
+      authorityPolicy: "user-approved",
+      resolvedRoute: "primary",
+      resolvedDriver: "codex",
+      resolvedModelSelection: { instanceId: "codex", model: "gpt-5.6-terra" },
+    };
+    expect(decodePersonaAssignment(assignment)).toEqual(assignment);
+    expect(isActivePolicy("user-approved")).toBe(false);
+    expect(() =>
+      decodePersonaRequest({ personaId: "skill-manager", authorityPolicy: "user-approved" }),
+    ).toThrow();
+    expect(() =>
+      decodePersonaAssignment({ ...assignment, authorityPolicy: "unknown-policy" }),
+    ).toThrow();
+  });
   it("rejects server-owned persona assignments on the public command boundary", () => {
     const command = {
       type: "thread.create",

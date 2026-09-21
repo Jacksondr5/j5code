@@ -5,6 +5,8 @@ import {
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
+import { createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 
 import { buildCodexTurnStartParams } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import {
@@ -26,6 +28,26 @@ const runtimePolicy = (
 });
 
 describe("agent persona provider policy", () => {
+  it.effect("reports retired persona authority before loading its removed definition", () =>
+    Effect.gen(function* () {
+      const error = yield* resolveAgentPersonaRuntime(
+        {
+          runtimeMode: "approval-required",
+          agentPersonaAssignment: {
+            personaId: "skill-manager",
+            definitionVersion: 1,
+            definitionDigest: "a".repeat(64),
+            authorityPolicy: "user-approved",
+            resolvedRoute: "primary",
+            resolvedDriver: ProviderDriverKind.make("codex"),
+            resolvedModelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
+          },
+        },
+        createAgentPersonaLibrary(),
+      ).pipe(Effect.flip);
+      assert.include(error.message, "retired user-approved persona policy");
+    }),
+  );
   it("translates inspection policies to non-interactive read-only access", () => {
     for (const authorityPolicy of ["read-only", "critic-review"] as const) {
       assert.deepEqual(
@@ -62,6 +84,8 @@ describe("agent persona provider policy", () => {
       ["critic-fix", "claudeAgent"],
       ["diagnostic", "codex"],
       ["publish-only", "codex"],
+      ["user-approved", "codex"],
+      ["user-approved", "claudeAgent"],
     ] as const) {
       assert.isFalse(
         providerCanEnforceAgentPersonaAuthority(ProviderDriverKind.make(driver), authorityPolicy),

@@ -30,6 +30,12 @@ export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime"
 ) {
   const assignment = thread.agentPersonaAssignment;
   if (assignment === undefined) return { runtimeMode: thread.runtimeMode };
+  if (assignment.authorityPolicy === "user-approved") {
+    return yield* new AgentPersonaLibraryError({
+      message:
+        "This thread uses the retired user-approved persona policy. Start a new thread with a supported agent.",
+    });
+  }
   let instructions: string | undefined;
   if (assignment.definitionDigest === undefined) {
     instructions = getBuiltInAgentPersonaInstructions(assignment);

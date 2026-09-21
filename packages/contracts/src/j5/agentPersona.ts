@@ -79,7 +79,9 @@ export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
   definitionVersion: PositiveInt,
   definitionDigest: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
   displayName: Schema.optional(TrimmedNonEmptyString),
-  authorityPolicy: AgentPersonaAuthorityPolicy,
+  // Retired policies remain readable in immutable thread history. New persona
+  // requests and definitions continue to accept only active policies above.
+  authorityPolicy: Schema.Union([AgentPersonaAuthorityPolicy, Schema.Literal("user-approved")]),
   resolvedRoute: Schema.Literals(["primary", "fallback", "override"]),
   resolvedDriver: ProviderDriverKind,
   resolvedModelSelection: ModelSelection,

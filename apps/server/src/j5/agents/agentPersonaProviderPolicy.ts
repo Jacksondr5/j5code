@@ -1,4 +1,4 @@
-import type { AgentPersonaAuthorityPolicy, RuntimeMode } from "@t3tools/contracts";
+import type { OrchestrationV2AgentPersonaAssignment, RuntimeMode } from "@t3tools/contracts";
 
 import { getAgentAuthorityRules } from "./agentPersonas.ts";
 
@@ -33,7 +33,7 @@ const WORKSPACE_WRITE_POLICY = {
 /** Tests the supported sandbox/tool policy, not prose promises such as no-commit or targeted edits. */
 export function providerCanEnforceAgentPersonaAuthority(
   driver: string,
-  authorityPolicy: AgentPersonaAuthorityPolicy,
+  authorityPolicy: OrchestrationV2AgentPersonaAssignment["authorityPolicy"],
 ): boolean {
   switch (authorityPolicy) {
     case "read-only":
@@ -44,15 +44,19 @@ export function providerCanEnforceAgentPersonaAuthority(
       return driver === "codex";
     case "diagnostic":
     case "publish-only":
+    case "user-approved":
       return false;
   }
 }
 
 export function translateAgentPersonaProviderPolicy(
-  authorityPolicy: AgentPersonaAuthorityPolicy,
+  authorityPolicy: OrchestrationV2AgentPersonaAssignment["authorityPolicy"],
   driver: string,
 ): AgentPersonaProviderPolicy {
-  if (!providerCanEnforceAgentPersonaAuthority(driver, authorityPolicy)) {
+  if (
+    authorityPolicy === "user-approved" ||
+    !providerCanEnforceAgentPersonaAuthority(driver, authorityPolicy)
+  ) {
     return READ_ONLY_POLICY;
   }
 

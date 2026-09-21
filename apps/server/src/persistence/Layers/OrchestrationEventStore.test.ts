@@ -3,6 +3,7 @@ import {
   EventId,
   ProjectId,
   ProviderInstanceId,
+  ProviderDriverKind,
   ThreadId,
   TurnItemId,
   type OrchestrationV2DomainEvent,
@@ -34,6 +35,62 @@ const TestLayer = OrchestrationEventStoreLive.pipe(Layer.provideMerge(SqlitePers
 const layer = it.layer(TestLayer);
 
 layer("OrchestrationEventStore", (it) => {
+  it.effect("replays thread history with the retired user-approved persona authority", () =>
+    Effect.gen(function* () {
+      const store = yield* OrchestrationEventStore;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread:retired-persona");
+      const instanceId = ProviderInstanceId.make("codex");
+      const assignment = {
+        personaId: "skill-manager",
+        definitionVersion: 1,
+        authorityPolicy: "user-approved",
+        resolvedRoute: "primary",
+        resolvedDriver: ProviderDriverKind.make("codex"),
+        resolvedModelSelection: { instanceId, model: "test" },
+      } as const;
+      yield* store.appendAgentEvents({
+        events: [
+          {
+            id: EventId.make("event:retired-persona"),
+            type: "thread.created",
+            threadId,
+            occurredAt: now,
+            payload: {
+              id: threadId,
+              projectId: ProjectId.make("project:retired-persona"),
+              title: "Retired persona history",
+              providerInstanceId: instanceId,
+              modelSelection: assignment.resolvedModelSelection,
+              runtimeMode: "approval-required",
+              interactionMode: "default",
+              agentPersonaAssignment: assignment,
+              branch: null,
+              worktreePath: null,
+              activeProviderThreadId: null,
+              lineage: { rootThreadId: threadId, parentThreadId: null, relationshipToParent: null },
+              forkedFrom: null,
+              createdBy: "user",
+              creationSource: "web",
+              createdAt: now,
+              updatedAt: now,
+              archivedAt: null,
+              settledOverride: null,
+              settledAt: null,
+              lastVisitedAt: null,
+              deletedAt: null,
+            },
+          },
+        ],
+      });
+      const history = yield* store.readAgentEvents({ threadId }).pipe(Stream.runCollect);
+      assert.lengthOf(history, 1);
+      const event = history[0]!.event;
+      assert.equal(event.type, "thread.created");
+      if (event.type === "thread.created")
+        assert.deepEqual(event.payload.agentPersonaAssignment, assignment);
+    }),
+  );
   it.effect("retains only shell metadata from oversized replay and live application events", () =>
     Effect.scoped(
       Effect.gen(function* () {
