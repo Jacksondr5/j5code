@@ -145,8 +145,8 @@ export const layer = Layer.effect(
       new CrewProposalOperationError({ phase, cause });
 
     /**
-     * Saved-agent seats must name known, enabled agents; the library is the source of truth, not
-     * the Captain. A custom seat names none and is checked for shape only.
+     * Persona seats must name known, enabled personas; the library is the source of truth, not the
+     * Captain. A custom seat names none and is checked for shape only.
      */
     const validateSeats = Effect.fn("j5.a2a.crewProposal.validateSeats")(function* (
       seats: ReadonlyArray<CrewProposalSeat>,
@@ -156,7 +156,7 @@ export const layer = Layer.effect(
       if (seats.length === 0)
         return yield* new CrewProposalRequestError({
           detail: "A crew request needs at least one seat.",
-          nextStep: "Call list_agents, then propose seats with a reason each.",
+          nextStep: "Call list_personas, then propose seats with a reason each.",
         });
       // The MCP schema already bounds a Captain's seats; the human's card submits the same shape
       // through HTTP, so every door meets the rule here rather than surfacing a storage error.
@@ -193,13 +193,13 @@ export const layer = Layer.effect(
         const definition = catalog.definitions.find(({ id }) => id === seat.agentId);
         if (definition === undefined)
           return yield* new CrewProposalRequestError({
-            detail: `Seat ${seat.seat} names agent "${seat.agentId}", which is not in this environment's library.`,
-            nextStep: "Call list_agents and pick an agent id it returns.",
+            detail: `Seat ${seat.seat} names persona "${seat.agentId}", which is not in this environment's library.`,
+            nextStep: "Call list_personas and pick a persona id it returns.",
           });
         if (disabled.has(seat.agentId))
           return yield* new CrewProposalRequestError({
-            detail: `Seat ${seat.seat} names agent "${seat.agentId}", which is turned off.`,
-            nextStep: "Pick an enabled agent from list_agents, or ask the human to turn it on.",
+            detail: `Seat ${seat.seat} names persona "${seat.agentId}", which is turned off.`,
+            nextStep: "Pick an enabled persona from list_personas, or ask the user to turn it on.",
           });
       }
     });

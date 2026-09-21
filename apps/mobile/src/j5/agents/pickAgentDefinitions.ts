@@ -21,7 +21,7 @@ export async function pickAgentDefinitions(kind: "folder" | "agent") {
       const entry = pending.pop()!;
       if (visited.has(entry.directory.uri)) continue;
       visited.add(entry.directory.uri);
-      if (visited.size > 1000) throw new Error("Select a smaller folder of agent definitions.");
+      if (visited.size > 1000) throw new Error("Select a smaller folder of persona definitions.");
       for (const child of entry.directory.list()) {
         const name = `${entry.prefix}/${child.name}`;
         if (child instanceof Directory) {
@@ -30,7 +30,7 @@ export async function pickAgentDefinitions(kind: "folder" | "agent") {
           files.push({ name, size: child.size, text: () => child.text() });
           if (files.length > AGENT_PERSONA_IMPORT_MAX_FILES)
             throw new Error(
-              `Select at most ${AGENT_PERSONA_IMPORT_MAX_FILES} agent definitions at a time.`,
+              `Select at most ${AGENT_PERSONA_IMPORT_MAX_FILES} persona definitions at a time.`,
             );
         }
       }

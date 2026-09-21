@@ -18,7 +18,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import type { CrewProposal, CrewProposalSeat } from "./crewProposalsClient";
 
-/** The agent choice for a seat that runs without a saved agent: named and briefed on the card. */
+/** The persona choice for a seat that runs without a persona: named and briefed on the card. */
 export const CUSTOM_AGENT = "__custom__";
 
 /** Pure roster edits so the card's behavior is testable without rendering. */
@@ -35,12 +35,12 @@ export const addSeat = (
   if (seats.some((seat) => seat.seat === seatName))
     return { seats, error: `Seat ${seatName} already exists.` };
   if (draft.agentId.length === 0)
-    return { seats, error: "Pick an agent for the seat, or Custom agent." };
+    return { seats, error: "Pick a persona for the seat, or Custom seat." };
   const custom = draft.agentId === CUSTOM_AGENT;
   const instructions = draft.instructions.trim();
-  // A custom seat has no definition; its instructions are all it will know beyond the brief.
+  // A custom seat has no persona; its instructions are all it will know beyond the brief.
   if (custom && instructions.length === 0)
-    return { seats, error: "Give the custom agent its instructions." };
+    return { seats, error: "Give the custom seat its instructions." };
   return {
     seats: [
       ...seats,
@@ -56,8 +56,8 @@ export const addSeat = (
 };
 
 /**
- * What the human is approving for a seat beyond its name: the agent and the access it runs with.
- * A custom seat has no agent and runs with the Captain's own access.
+ * What the human is approving for a seat beyond its name: the persona and the access it runs
+ * with. A custom seat has no persona and runs with the Captain's own access.
  */
 export const describeSeatAgent = (
   rows: ReadonlyArray<{
@@ -68,7 +68,7 @@ export const describeSeatAgent = (
   agentId: string | null,
 ): { readonly name: string; readonly authority: string | null } => {
   if (agentId === null)
-    return { name: "Custom agent", authority: "Runs with the Captain's model and access mode" };
+    return { name: "Custom seat", authority: "Runs with the Captain's model and access mode" };
   const row = rows.find((candidate) => candidate.personaId === agentId);
   return row === undefined
     ? { name: agentId, authority: null }
@@ -77,7 +77,7 @@ export const describeSeatAgent = (
 
 /**
  * The human gate for one Crew request. The Captain's seats arrive with reasons; the user may drop
- * seats, add agents from the library or a custom seat with its own instructions, then approve the
+ * seats, add personas from the library or a custom seat with its own instructions, then approve the
  * final roster or decline the whole request.
  */
 export function CrewProposalCard(props: {
@@ -192,18 +192,18 @@ export function CrewProposalCard(props: {
           value={draft.agentId || undefined}
           onValueChange={(value) => setDraft({ ...draft, agentId: value ?? "" })}
         >
-          <SelectTrigger aria-label="Agent for the new seat">
+          <SelectTrigger aria-label="Persona for the new seat">
             <SelectValue>
               {customDraft
-                ? "Custom agent"
+                ? "Custom seat"
                 : draft.agentId
                   ? agentName(draft.agentId)
-                  : "Choose an agent"}
+                  : "Choose a persona"}
             </SelectValue>
           </SelectTrigger>
           <SelectPopup align="start" alignItemWithTrigger={false}>
-            {/* First, so a Crew need not fit a saved mold (Jackson, 2026-09-17). */}
-            <SelectItem value={CUSTOM_AGENT}>Custom agent</SelectItem>
+            {/* First, so a Crew need not fit a saved persona (Jackson, 2026-09-17). */}
+            <SelectItem value={CUSTOM_AGENT}>Custom seat</SelectItem>
             {agents.map((agent) => (
               <SelectItem key={agent.personaId} value={agent.personaId}>
                 {agent.displayName}
@@ -236,7 +236,7 @@ export function CrewProposalCard(props: {
           disabled={props.busy}
           placeholder={
             customDraft
-              ? "What this custom agent should do"
+              ? "What this custom seat should do"
               : "Instructions for this seat (optional)"
           }
           value={draft.instructions}

@@ -433,7 +433,7 @@ const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
  */
 const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function* (
   input: {
-    readonly agent: string;
+    readonly persona: string;
     readonly provider: string;
     readonly model: string;
     readonly reasoning: string;
@@ -444,7 +444,7 @@ const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function
   const providers = yield* (yield* ProviderRegistry).getProviders;
   const assignment = yield* prepareAgentPersonaPeerSpawn(
     {
-      personaId: input.agent,
+      personaId: input.persona,
       provider: providers.find((candidate) => candidate.instanceId === modelSelection.instanceId),
       instanceId: modelSelection.instanceId,
       model: input.model,
@@ -454,8 +454,8 @@ const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function
   ).pipe(
     Effect.mapError((error) =>
       stateError(
-        `Saved agent ${input.agent} cannot be spawned as requested: ${error.message}`,
-        "Call orchestrator_capabilities, then retry spawn_agent with a provider, model, and reasoning from that agent's declared routes, or omit agent for a plain Peer Agent.",
+        `Persona ${input.persona} cannot be spawned as requested: ${error.message}`,
+        "Call orchestrator_capabilities, then retry spawn_agent with a provider, model, and reasoning from that persona's declared routes, or omit persona for a plain Peer Agent.",
       ),
     ),
   );
@@ -514,7 +514,7 @@ const crewProposalNextStep = (error: { readonly _tag: string }) =>
   error._tag === "CrewProposalRequestError"
     ? "Correct the request and retry."
     : error._tag === "CrewLaunchSeatUnavailableError"
-      ? "Choose a different agent from list_agents or ask the human to fix that agent, then retry."
+      ? "Choose a different persona from list_personas or ask the user to fix that persona, then retry."
       : error._tag === "CrewLaunchCapError"
         ? "The crew is full. Work with the seats it has, or propose a new crew for the extra work."
         : error._tag === "CrewLaunchSeatConflictError"
@@ -527,7 +527,7 @@ const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
   crew_instance_id: outcome.instance?.id ?? null,
   members: (outcome.instance?.members ?? []).map((member) => ({
     seat: member.seatName,
-    agent_id: member.agentId,
+    persona_id: member.agentId,
     participant_id: member.participantId,
     thread_id: member.threadId,
   })),
@@ -767,10 +767,11 @@ const handlers = {
             ),
           ),
         );
+      const personaId = input.persona;
       const persona =
-        input.agent === undefined
+        personaId === undefined
           ? undefined
-          : yield* prepareSpawnPersona({ ...input, agent: input.agent }, selected);
+          : yield* prepareSpawnPersona({ ...input, persona: personaId }, selected);
       const modelSelection = persona?.modelSelection ?? selected;
       const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
       const stableInput = {
@@ -895,7 +896,7 @@ const handlers = {
           brief: input.brief,
           seats: input.seats.map((seat) => ({
             seat: seat.seat,
-            agentId: seat.agent ?? null,
+            agentId: seat.persona ?? null,
             reason: seat.reason,
             ...(seat.instructions === undefined ? {} : { instructions: seat.instructions }),
           })),
@@ -916,7 +917,7 @@ const handlers = {
           crewInstanceId: input.crew_instance_id ?? null,
           seat: {
             seat: input.seat,
-            agentId: input.agent ?? null,
+            agentId: input.persona ?? null,
             reason: input.reason,
             ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
           },
@@ -925,7 +926,7 @@ const handlers = {
         .pipe(Effect.mapError((error) => stateError(error.message, crewProposalNextStep(error))));
       return projectCrewProposal(outcome);
     }).pipe(Effect.mapError(failure)),
-  list_agents: () =>
+  list_personas: () =>
     Effect.gen(function* () {
       const library = yield* makeAgentPersonaLibrary;
       const current = yield* library
@@ -933,8 +934,8 @@ const handlers = {
         .pipe(
           Effect.mapError((error) =>
             stateError(
-              `The agent library cannot be read: ${error.message}`,
-              "Ask the human to fix the agent library in Settings → Agents, then retry list_agents.",
+              `The persona library cannot be read: ${error.message}`,
+              "Ask the user to fix the persona library in Settings → Personas, then retry list_personas.",
             ),
           ),
         );
@@ -942,7 +943,7 @@ const handlers = {
       const disabled = new Set(current.disabledIds);
       const catalog = buildAgentPersonaCatalog(providers, current.definitions);
       return {
-        agents: catalog.personas.map((persona) => {
+        personas: catalog.personas.map((persona) => {
           const isDisabled = disabled.has(persona.personaId);
           const available = !isDisabled && persona.availability.status === "available";
           return {

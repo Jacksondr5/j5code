@@ -72,7 +72,7 @@ export function AgentPersonaAssignmentControl(props: {
         <Tooltip>
           <TooltipTrigger
             render={
-              <ComposerControl type="button" aria-label="Remove agent" onClick={props.onClear} />
+              <ComposerControl type="button" aria-label="Remove persona" onClick={props.onClear} />
             }
           >
             <ComposerControlIcon icon={XIcon} />
@@ -94,7 +94,7 @@ export function AgentPersonaAssignmentControl(props: {
               <ComposerControl
                 type="button"
                 disabled
-                aria-label="Agent definition changed since launch"
+                aria-label="Persona definition changed since launch"
                 className="text-warning-foreground"
               />
             }

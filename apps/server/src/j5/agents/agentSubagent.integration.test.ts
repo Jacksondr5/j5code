@@ -195,7 +195,7 @@ it.effect("persists the saved persona on a nested child and reuses that child on
     // delegate_task with agent takes the same path; target or runtimeMode alongside it is refused.
     const viaDelegate = yield* delegateTask({
       task: "Return a short evidence brief.",
-      agent: "scout",
+      persona: "scout",
       clientRequestId: "delegate-request",
     }).pipe(Effect.provideService(McpInvocationContext, scope));
     assert.equal(
@@ -205,11 +205,11 @@ it.effect("persists the saved persona on a nested child and reuses that child on
     );
     const rejected = yield* delegateTask({
       task: "Return a short evidence brief.",
-      agent: "scout",
+      persona: "scout",
       runtimeMode: "full-access",
     }).pipe(Effect.provideService(McpInvocationContext, scope), Effect.flip);
     assert.equal(rejected.code, "invalid_request");
-    // Without agent it is upstream's plain child: no pinned assignment.
+    // Without persona it is upstream's plain child: no pinned assignment.
     const plain = yield* delegateTask({ task: "Plain child work.", clientRequestId: "plain" }).pipe(
       Effect.provideService(McpInvocationContext, scope),
     );

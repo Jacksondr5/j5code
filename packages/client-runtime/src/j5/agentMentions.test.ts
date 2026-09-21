@@ -76,14 +76,14 @@ describe("agent picker", () => {
 describe("agent mention selection", () => {
   it("replaces exactly the typed trigger with the stable mention and reports the outcome", () => {
     const calls: Array<unknown[]> = [];
-    const text = "fix @agent:sc please";
-    const trigger = { rangeStart: 4, rangeEnd: 13 };
+    const text = "fix @persona:sc please";
+    const trigger = { rangeStart: 4, rangeEnd: 15 };
     const applied = applyAgentMentionSelection({ personaId: "scout" }, trigger, text, (...args) => {
       calls.push(args);
       return true;
     });
     expect(applied).toBe(true);
-    expect(calls).toEqual([[4, 13, "@agent:scout ", { expectedText: "@agent:sc" }]]);
+    expect(calls).toEqual([[4, 15, "@persona:scout ", { expectedText: "@persona:sc" }]]);
     expect(applyAgentMentionSelection({ personaId: "scout" }, trigger, text, () => false)).toBe(
       false,
     );

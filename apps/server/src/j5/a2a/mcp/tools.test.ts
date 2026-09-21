@@ -57,14 +57,16 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
   assert.sameMembers([...(stopSchema.required ?? [])], ["squadron_id", "participant_id"]);
   assert.sameMembers([...(archiveSchema.required ?? [])], ["squadron_id", "participant_id"]);
   assert.property(spawnSchema.properties ?? {}, "client_request_id");
-  assert.property(spawnSchema.properties ?? {}, "agent");
-  assert.include(J5SpawnAgentTool.description ?? "", "one of that agent's declared routes");
+  assert.property(spawnSchema.properties ?? {}, "persona");
+  // No pre-dogfood compatibility spelling: `persona` is the only name the model sees.
+  assert.notProperty(spawnSchema.properties ?? {}, "agent");
+  assert.include(J5SpawnAgentTool.description ?? "", "one of that persona's declared routes");
   assert.property(stopSchema.properties ?? {}, "client_request_id");
   assert.property(archiveSchema.properties ?? {}, "client_request_id");
   assert.property(archiveSchema.properties ?? {}, "confirmation_token");
   assert.sameMembers(Object.keys(J5Toolkit.tools), [
     "send_message",
-    "list_agents",
+    "list_personas",
     "list_participants",
     "propose_crew",
     "request_crew_member",
@@ -109,7 +111,7 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
 // Claude Code drops EVERY tool of an MCP server when one tool's input schema has no top-level
 // `type: "object"` (verified 2026-09-10 with a probe server: a single top-level `anyOf` tool made
 // the whole server's inventory vanish while it still reported "connected"). `Schema.Struct({})`
-// encodes as exactly that anyOf, which is how `list_agents` silently took the whole t3-code
+// encodes as exactly that anyOf, which is how `list_personas` silently took the whole t3-code
 // toolkit away from every Claude thread. No-input tools must omit `parameters` instead.
 it("publishes every tool with a top-level object input schema", () => {
   for (const tool of [

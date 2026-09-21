@@ -35,7 +35,7 @@ export function useCreateProjectThread() {
     async (input: {
       readonly project: EnvironmentProject;
       readonly modelSelection: ModelSelection;
-      /** Launch as a saved agent; the server resolves and pins its route. */
+      /** Launch as a persona; the server resolves and pins its route. */
       readonly agentPersonaId?: string;
       readonly envMode: "local" | "worktree";
       readonly branch: string | null;

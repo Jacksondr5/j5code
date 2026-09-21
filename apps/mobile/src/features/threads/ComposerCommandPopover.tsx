@@ -96,7 +96,7 @@ function itemIcon(item: ComposerCommandItem): AppSymbolName | null {
 function groupLabel(triggerKind: ComposerTriggerKind | null): string | null {
   switch (triggerKind) {
     case "agent":
-      return "Agents";
+      return "Personas";
     case "slash-command":
       return "Commands";
     case "skill":
@@ -114,7 +114,7 @@ function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean):
   }
   switch (triggerKind) {
     case "agent":
-      return "No available agents found.";
+      return "No available personas found.";
     case "path":
       return "No matching files or folders.";
     case "skill":
