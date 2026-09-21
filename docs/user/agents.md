@@ -47,6 +47,24 @@ The selected agent runs as a subagent under the current conversation and returns
 
 An agent can also start a saved agent as a peer with its own top-level task by naming it in a spawn. The peer keeps the saved instructions and runtime policy, and the spawning agent must choose one of the saved agent's declared provider, model, and reasoning combinations. The peer runs with its own saved agent's permissions, not the spawning agent's.
 
+## Crews
+
+A crew is a group of agents that one agent, the Captain, runs as a unit for one piece of work. You do not define crews in advance, and there is no special Captain agent: any thread can compose a crew. On web or desktop, in a new or existing thread, type `/` and pick **/crew** from the menu (or type it), then add what the crew should accomplish, for example:
+
+```text
+/crew Follow @docs/runbooks/release.md for the 2.4 release and report back when the PR is green.
+```
+
+The thread's agent, whichever saved agent or model it is running as, receives your brief together with instructions to compose a crew rather than do the work itself. It reads the saved-agent library and proposes a roster: one seat per agent with a reason. The proposal appears above the composer in that thread, like a planning question. Remove seats you do not want, add agents from the library with a seat name and reason, then **Approve** or **Decline**. Approval starts every seat as a peer under the Captain with your brief and the roster, and the Captain is told the decision in its thread, where it shows as a card listing the crew and its seats; click a seat to open its thread. Your `/crew` message shows as the brief you wrote, with the instructions the command sent alongside it one click away. Seats run with their own agent's permissions once you approve them, so a read-only Captain can command agents that write.
+
+One Captain can run several crews. Send `/crew` again in the same thread when there is separate work to hand off, and each proposal gets its own named crew; the Captain can also propose another crew on its own when the work splits.
+
+While the crew works, the Captain may ask for one more agent. That request lands under **Crew requests** in the Inbox and counts on the inbox bell; approve or decline it there. A crew holds at most twelve seats. Crew members cannot request seats themselves.
+
+When a seat's agent is defined to return a report, such as a review handoff, it writes that report as a handoff artifact under `handoffs/` in the project's Artifacts page, exactly as the agent would when running on its own (see **Handoff artifacts** above). A seat that finishes without writing its report is reminded once. Reports are never left in chat.
+
+Crews are a web and desktop feature. Crew members show a seat chip in the thread list and the Captain a Captain chip.
+
 Persona instructions describe intended behavior. They do not grant permissions or guarantee that an agent obeys them. The displayed runtime policy reflects supported provider controls; unsupported modes appear as **Blocked**.
 
 The trash action also works for folder-loaded agents and bundled examples. Source files remain unchanged, and removal survives restarts. A removed example or folder agent stays in the list marked **Removed** with a **Restore** action that brings it back; a removed imported copy is gone and must be imported again.

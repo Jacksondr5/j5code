@@ -1238,6 +1238,8 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
           message: row.message,
           timestampLabel: formatDayAwareTimestamp(row.message.createdAt, ctx.timestampFormat),
           participantLabels: ctx.participantLabels,
+          threadRef: ctx.threadRef,
+          markdownCwd: ctx.markdownCwd,
         })
       : null;
 

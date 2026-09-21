@@ -12,6 +12,9 @@ describe("T3 orchestration provider instructions", () => {
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "your provider's native Subagent mechanism");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Use platform `spawn_agent`");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "what should come back in that brief");
+    // Crews are the third shape of help; without this bullet an agent asked for a crew makes subagents.
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "A Crew is a group of Peer Agents");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Use `propose_crew`");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Use `list_participants`");
     assert.include(
       T3_CODE_ORCHESTRATION_INSTRUCTIONS,

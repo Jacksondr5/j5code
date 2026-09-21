@@ -821,6 +821,7 @@ import { resolveComposerDispatchMode, type ComposerDispatchMode } from "./compos
 import { SteerUnavailableNotice } from "../../j5/composer/SteerUnavailableNotice";
 import { useJ5SteerState } from "../../j5/composer/useJ5SteerState";
 import { shouldRefuseComposerSteer } from "../../j5/composer/submitGuard";
+import { j5CrewSlashCommandItems } from "../../j5/crew/crewSlashCommand";
 import type { ContextWindowSnapshot } from "../../lib/contextWindow";
 import {
   formatProviderSkillDisplayName,
@@ -2025,7 +2026,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         (item) => item.command.name !== "compact" || compactSlashCommandAvailable,
       );
       const slashCommandItems = slashCommandItemsForPromptPosition(
-        [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],
+        [
+          ...builtInSlashCommandItems,
+          ...j5CrewSlashCommandItems(selectedProvider),
+          ...visibleProviderSlashCommandItems,
+          ...skillItems,
+        ],
         composerTrigger.rangeStart === 0,
       );
       return searchSlashCommandItems(slashCommandItems, query);
