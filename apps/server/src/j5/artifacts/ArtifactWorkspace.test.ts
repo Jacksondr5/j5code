@@ -95,6 +95,33 @@ describe("ArtifactWorkspace", () => {
     ),
   );
 
+  it.effect("deletes an artifact without affecting other project artifacts", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const serverConfig = yield* ServerConfig.ServerConfig;
+        const artifacts = yield* ArtifactWorkspace.ArtifactWorkspace;
+        yield* artifacts.write({ projectId, relativePath: "notes/old.md", content: "old" });
+        yield* artifacts.write({ projectId, relativePath: "notes/keep.md", content: "keep" });
+
+        const deletedPath = yield* artifacts.delete({ projectId, relativePath: "./notes\\old.md" });
+        assert.equal(deletedPath, "notes/old.md");
+
+        const artifactRoot = path.join(
+          serverConfig.stateDir,
+          ArtifactWorkspace.ARTIFACT_DIRECTORY_NAME,
+          ArtifactWorkspace.artifactProjectDirectoryName(projectId),
+        );
+        assert.equal(
+          (yield* artifacts.read({ projectId, relativePath: "notes/keep.md" })).content,
+          "keep",
+        );
+        assert.isFalse(yield* fileSystem.exists(path.join(artifactRoot, "notes/old.md")));
+      }).pipe(Effect.provide(TestLayer)),
+    ),
+  );
+
   it.effect("stacks handoff versions inside one file, newest first, and converges on retry", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -293,6 +320,14 @@ describe("ArtifactWorkspace", () => {
           artifacts.write({ projectId, relativePath: "..\\outside.txt", content: "nope" }),
         );
         assert.isTrue(windowsWriteResult._tag === "Failure");
+        const deleteResult = yield* Effect.exit(
+          artifacts.delete({ projectId, relativePath: "../outside.txt" }),
+        );
+        assert.isTrue(deleteResult._tag === "Failure");
+        const windowsDeleteResult = yield* Effect.exit(
+          artifacts.delete({ projectId, relativePath: "..\\outside.txt" }),
+        );
+        assert.isTrue(windowsDeleteResult._tag === "Failure");
       }).pipe(Effect.provide(TestLayer)),
     ),
   );
@@ -330,6 +365,35 @@ describe("ArtifactWorkspace", () => {
           assert.isFalse(yield* fileSystem.exists(path.join(outside, "new-directory")));
         }).pipe(Effect.provide(TestLayer)),
       ),
+  );
+
+  it.effect.skipIf(!symlinksSupported)("does not delete through an artifact symlink", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const serverConfig = yield* ServerConfig.ServerConfig;
+        const artifacts = yield* ArtifactWorkspace.ArtifactWorkspace;
+        yield* artifacts.write({ projectId, relativePath: "target.md", content: "keep" });
+        const artifactRoot = path.join(
+          serverConfig.stateDir,
+          ArtifactWorkspace.ARTIFACT_DIRECTORY_NAME,
+          ArtifactWorkspace.artifactProjectDirectoryName(projectId),
+        );
+        yield* fileSystem.symlink(
+          path.join(artifactRoot, "target.md"),
+          path.join(artifactRoot, "link.md"),
+        );
+
+        const result = yield* Effect.exit(artifacts.delete({ projectId, relativePath: "link.md" }));
+
+        assert.isTrue(result._tag === "Failure");
+        assert.equal(
+          (yield* artifacts.read({ projectId, relativePath: "target.md" })).content,
+          "keep",
+        );
+      }).pipe(Effect.provide(TestLayer)),
+    ),
   );
 
   it.effect("watches for files created in the artifacts directory", () =>
