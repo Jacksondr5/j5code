@@ -26,39 +26,7 @@ const approvedGate = [
   "Your crew is running. Each seat has your brief and this roster.",
 ].join("\n");
 
-const crewLaunchPrompt = (brief: string) =>
-  `<j5_crew_launch>\nCompose a Crew with propose_crew, then end your turn.\n</j5_crew_launch>\n\n${brief}`;
-
 describe("crew notices in the Captain's thread", () => {
-  it("presents the person's /crew turn as its brief with the guidance set aside", () => {
-    const notice = presentCrewNotice({
-      role: "user",
-      createdBy: "user",
-      text: crewLaunchPrompt("Land the invoice-export PR: build, review, sit on CI."),
-    });
-    expect(notice).toMatchObject({
-      kind: "launch",
-      brief: "Land the invoice-export PR: build, review, sit on CI.",
-    });
-    expect(notice?.kind === "launch" && notice.guidance).toContain("propose_crew");
-    // A message that merely mentions the tag, or an empty brief, stays an ordinary message.
-    expect(presentCrewNotice({ role: "user", text: "about <j5_crew_launch> tags" })).toBeNull();
-    expect(
-      presentCrewNotice({ role: "user", text: "<j5_crew_launch>\nx\n</j5_crew_launch>\n\n" }),
-    ).toBeNull();
-    expect(presentCrewNotice({ role: "assistant", text: crewLaunchPrompt("x") })).toBeNull();
-    // Claude's effort prefix lands ahead of the wrapper; the card still recognizes the turn, and
-    // contexts appended after the brief stay part of what the Captain received.
-    const prefixed = presentCrewNotice({
-      role: "user",
-      createdBy: "user",
-      text: `Ultrathink:\n${crewLaunchPrompt("Fix it.")}\n\n<terminal_context>\n$ ls\n</terminal_context>`,
-    });
-    expect(prefixed).toMatchObject({ kind: "launch" });
-    expect(prefixed?.kind === "launch" && prefixed.brief).toContain("Fix it.");
-    expect(prefixed?.kind === "launch" && prefixed.brief).toContain("terminal_context");
-  });
-
   it("presents an approved roster with its seats and names the seats for the identity read", () => {
     const message = { role: "user", createdBy: "system", text: approvedGate };
     const notice = presentCrewNotice(message);

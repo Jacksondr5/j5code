@@ -7,7 +7,6 @@ import type { ReactNode } from "react";
 import ChatMarkdown from "../../components/ChatMarkdown";
 import { Badge } from "../../components/ui/badge";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
-import { deriveDisplayedUserMessageState } from "../../lib/terminalContext";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { useRightPanelStore } from "../../rightPanelStore";
 import {
@@ -31,79 +30,12 @@ const TONE_CLASS = {
 export interface CrewNoticeRenderInput {
   readonly message: CrewNoticeMessage & {
     readonly createdAt: string;
-    /** What the person attached to the turn; the launch card lists them by name. */
-    readonly attachments?:
-      | ReadonlyArray<{ readonly type: string; readonly name?: string }>
-      | undefined;
   };
   readonly timestampLabel?: string | undefined;
   readonly participantLabels?: ReadonlyMap<string, string> | undefined;
   /** The thread the timeline shows; seats open on its environment and markdown resolves against it. */
   readonly threadRef?: ScopedThreadRef | null | undefined;
   readonly markdownCwd?: string | undefined;
-}
-
-/**
- * The person's `/crew` turn, shown as the brief it is. The guidance block the command sent with
- * it stays one click away rather than filling the bubble, since the agent read it and the person
- * wrote none of it.
- */
-function CrewLaunchCard(props: {
-  readonly notice: Extract<CrewNoticePresentation, { kind: "launch" }>;
-  readonly input: CrewNoticeRenderInput;
-}) {
-  const { notice, input } = props;
-  // Attached terminal and element contexts ride with the brief for the Captain; the card shows
-  // the brief the person typed, the way the ordinary user row hides its appended contexts.
-  const visibleBrief = deriveDisplayedUserMessageState(notice.brief).visibleText.trim();
-  const attachmentNames = (input.message.attachments ?? []).map(
-    (attachment) => attachment.name ?? attachment.type,
-  );
-  return (
-    <div className="flex justify-end">
-      <section
-        className="max-w-[88%] min-w-0 rounded-[10px] border border-border/70 bg-accent px-3.5 py-2.5"
-        data-j5-crew-renderer="launch"
-      >
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <UsersIcon className="size-3.5 shrink-0" aria-hidden />
-          <span className="font-medium">Crew brief</span>
-          {input.timestampLabel ? (
-            <time className="ms-auto tabular-nums" dateTime={input.message.createdAt}>
-              {input.timestampLabel}
-            </time>
-          ) : null}
-        </div>
-        <ChatMarkdown
-          text={visibleBrief.length > 0 ? visibleBrief : notice.brief}
-          cwd={input.markdownCwd}
-          threadRef={input.threadRef ?? undefined}
-          className="mt-1.5 text-sm text-foreground"
-          lineBreaks
-          parseRawHtml={false}
-        />
-        {attachmentNames.length > 0 ? (
-          <ul className="mt-2 flex flex-wrap gap-1" aria-label="Attachments">
-            {attachmentNames.map((name, index) => (
-              <li key={`${name}-${index}`}>
-                <Badge variant="outline" className="max-w-56 truncate px-1.5 py-0 text-[11px]">
-                  {name}
-                </Badge>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        <details className="mt-2">
-          <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-            Guidance sent with the brief
-          </summary>
-          <p className="mt-1 text-xs leading-relaxed whitespace-pre-wrap break-words text-muted-foreground">
-            {notice.guidance}
-          </p>
-        </details>
-      </section>
-    </div>
-  );
 }
 
 /**
@@ -349,7 +281,6 @@ function CrewSeatsCard(props: {
 export function renderCrewNotice(input: CrewNoticeRenderInput): ReactNode {
   const notice = presentCrewNotice(input.message);
   if (notice === null) return null;
-  if (notice.kind === "launch") return <CrewLaunchCard notice={notice} input={input} />;
   if (notice.kind === "seats") return <CrewSeatsCard notice={notice} input={input} />;
   return <CrewGateCard notice={notice} input={input} />;
 }
