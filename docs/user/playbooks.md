@@ -14,7 +14,7 @@ and model in **Settings → Agents**. It currently requires an authenticated Cod
 provider because authoring needs Workspace write authority. Mobile prepares an
 authoring prompt for you to send instead. Return to the library and refresh after
 creation or edits. Invalid definitions remain visible with their errors.
-**Use playbook** prepares a start request in that workspace for you to send.
+**Prepare playbook chat** opens a draft with a start request in that workspace for you to send.
 The command palette also finds the Playbooks settings page.
 
 Use **Import YAML** to add `.yaml` or `.yml` definitions to the selected workspace.

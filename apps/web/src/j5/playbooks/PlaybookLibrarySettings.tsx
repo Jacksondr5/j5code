@@ -7,6 +7,7 @@ import {
 } from "@t3tools/client-runtime/j5/playbooks";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { CommandId } from "@t3tools/contracts";
+import { RefreshCwIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   SettingsPageContainer,
@@ -15,6 +16,7 @@ import {
 } from "../../components/settings/settingsLayout";
 import { Button } from "../../components/ui/button";
 import { toastManager } from "../../components/ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { newMessageId, newThreadId, randomUUID } from "../../lib/utils";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
@@ -49,6 +51,9 @@ export function PlaybookLibrarySettings() {
       : null,
   );
   const { refresh } = query;
+  const libraryPath = workspace
+    ? `${query.data?.workspaceRoot ?? workspace.workspaceRoot}/.j5/playbooks`
+    : null;
   useEffect(() => {
     window.addEventListener("focus", refresh);
     return () => window.removeEventListener("focus", refresh);
@@ -216,12 +221,13 @@ export function PlaybookLibrarySettings() {
           void importFiles(files);
         }}
       />
-      <SettingsSection
-        title="Playbooks"
-        id="playbooks"
-        description="Reusable prompts that guide an agent through ordered phases. Create and refine them in a conversation."
-        headerAction={
-          <div className="flex flex-wrap items-center gap-2">
+      <SettingsSection title="Playbooks" id="playbooks" hideTitle variant="plain">
+        <div className="flex flex-col gap-3 px-3 pb-3 sm:flex-row sm:items-start sm:justify-between sm:px-4">
+          <p className="min-w-0 text-sm text-muted-foreground">
+            Reusable prompts that guide an agent through ordered phases. Create and refine them in a
+            conversation.
+          </p>
+          <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
             <Button
               size="xs"
               disabled={!workspace || busy || !query.data || !!query.error}
@@ -237,24 +243,41 @@ export function PlaybookLibrarySettings() {
             >
               Import YAML
             </Button>
-            <Button
-              size="xs"
-              variant="outline"
-              disabled={!workspace || busy || query.isPending}
-              onClick={refresh}
-            >
-              Refresh
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label="Refresh playbooks"
+                    disabled={!workspace || busy || query.isPending}
+                    onClick={refresh}
+                  >
+                    <RefreshCwIcon aria-hidden="true" />
+                  </Button>
+                }
+              />
+              <TooltipPopup>Refresh playbooks</TooltipPopup>
+            </Tooltip>
           </div>
-        }
-      >
+        </div>
         <SettingsRow
           title="Workspace"
           description={
-            workspace && (
-              <span className="break-all">
-                {query.data?.workspaceRoot ?? workspace.workspaceRoot}/.j5/playbooks
-              </span>
+            libraryPath && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span
+                      tabIndex={0}
+                      className="block truncate rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                  }
+                >
+                  {libraryPath}
+                </TooltipTrigger>
+                <TooltipPopup className="max-w-sm break-all">{libraryPath}</TooltipPopup>
+              </Tooltip>
             )
           }
           control={
@@ -280,7 +303,7 @@ export function PlaybookLibrarySettings() {
             </select>
           }
         />
-        <div className="space-y-3 px-3 py-3 sm:px-4">
+        <div className="space-y-4 px-3 py-3 sm:px-4">
           {(error || query.error) && (
             <p role="alert" className="text-sm text-destructive">
               {error ?? query.error}
@@ -302,7 +325,7 @@ export function PlaybookLibrarySettings() {
             </p>
           )}
           {query.data?.playbooks.map((playbook) => (
-            <article key={playbook.name} className="rounded-lg border border-border p-4">
+            <article key={playbook.name} className="border-t border-border/60 pt-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h3 className="font-medium">{playbook.title}</h3>
@@ -311,12 +334,12 @@ export function PlaybookLibrarySettings() {
                   </p>
                 </div>
                 <Button
-                  size="sm"
+                  size="xs"
                   variant="outline"
                   disabled={busy || !!query.error || !!playbook.issue}
                   onClick={() => void openDraft(`Start playbook ${playbook.name}`)}
                 >
-                  Use playbook
+                  Prepare playbook chat
                 </Button>
               </div>
               <p className="mt-2 text-sm text-muted-foreground">{playbook.description}</p>
@@ -325,9 +348,12 @@ export function PlaybookLibrarySettings() {
                   {playbook.issue.message}
                 </p>
               ) : (
-                <ol className="mt-3 flex flex-wrap gap-2" aria-label={`${playbook.title} phases`}>
+                <ol
+                  className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
+                  aria-label={`${playbook.title} phases`}
+                >
                   {playbook.steps.map((step, index) => (
-                    <li key={step.id} className="rounded border border-border px-3 py-2 text-sm">
+                    <li key={step.id} className="min-w-0 break-words">
                       {index + 1}. {step.title}
                     </li>
                   ))}
