@@ -150,6 +150,9 @@ const NonMembershipCommEvent = Schema.Struct({
 export const MessageReceivedPayload = Schema.Struct({
   originSquadronId: SquadronId,
   originEnvironmentId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  /** From a peer delivery: the names its server sent, read by the client identity lookup. */
+  originSquadronName: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  senderLabel: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   message: Schema.Json,
 });
 export type MessageReceivedPayload = typeof MessageReceivedPayload.Type;

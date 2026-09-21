@@ -264,6 +264,10 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
             payload: {
               originSquadronId,
               originEnvironmentId: input.originEnvironmentId,
+              ...(input.originSquadronName === undefined
+                ? {}
+                : { originSquadronName: input.originSquadronName }),
+              ...(input.senderLabel === undefined ? {} : { senderLabel: input.senderLabel }),
               message: {
                 messageId,
                 text: input.text,

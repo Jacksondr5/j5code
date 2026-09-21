@@ -457,6 +457,25 @@ export const live: Layer.Layer<
                 `
               : [];
           const terminal = yield* terminalFactFor(terminalRows[0]);
+          // Names travel with the message for the peer's people, so its timeline
+          // can name the sender as it names a local one. Best-effort: a name the
+          // origin cannot read never holds a delivery.
+          const squadronRows = yield* sql<{ readonly name: string }>`
+            SELECT name FROM j5_a2a_squadron WHERE id = ${input.originSquadronId} LIMIT 1
+          `;
+          const labelRows = yield* Effect.orElseSucceed(
+            sql<{ readonly title: string | null }>`
+              SELECT thread.title AS title
+              FROM j5_a2a_squadron_membership AS membership
+              JOIN orchestration_v2_projection_threads AS thread
+                ON thread.thread_id = json_extract(membership.payload, '$.threadId')
+              WHERE membership.squadron_id = ${input.originSquadronId}
+                AND membership.participant_id = ${input.senderId}
+              LIMIT 1
+            `,
+            (): ReadonlyArray<{ readonly title: string | null }> => [],
+          );
+          const senderLabel = labelRows[0]?.title?.trim() ?? "";
           const body = {
             messageId: input.messageId,
             senderId: input.senderId,
@@ -467,6 +486,8 @@ export const live: Layer.Layer<
             envelopeChannel: input.envelopeChannel,
             text: input.message,
             originSquadronId: input.originSquadronId,
+            ...(squadronRows[0] === undefined ? {} : { originSquadronName: squadronRows[0].name }),
+            ...(senderLabel.length === 0 ? {} : { senderLabel }),
             ...(intentRows[0] === undefined ? {} : { intent: intentRows[0].intent }),
             ...(terminal === undefined ? {} : { terminal }),
             createdAt: input.createdAt,

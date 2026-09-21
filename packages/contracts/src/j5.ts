@@ -559,6 +559,13 @@ export const PeerDeliveryRequest = Schema.Struct({
   envelopeChannel: Schema.Literals(["peer", "silence_notice", "lifecycle_notice"]),
   text: Schema.String.check(Schema.isNonEmpty()),
   originSquadronId: Schema.String.check(Schema.isNonEmpty()),
+  /**
+   * Names for the receiving side's people: the origin Squadron's name and the
+   * sender's display name (its thread title), so a timeline can name a remote
+   * sender as it names a local one. Agents keep addressing by id.
+   */
+  originSquadronName: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  senderLabel: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   /** Required when `exchangeRole` is `ask`: the Exchange the receiver now owes a reply to. */
   intent: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   /**
