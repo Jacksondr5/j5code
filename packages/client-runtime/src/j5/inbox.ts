@@ -30,9 +30,7 @@ export function mergeHumanInboxSources(input: J5ReadSources<HumanInboxResponse>)
   return items;
 }
 
-export function mergeOpenInboxCounts(
-  input: J5ReadSources<{ readonly personId: string; readonly count: number }>,
-) {
+export function mergeOpenInboxCounts(input: J5ReadSources<{ readonly count: number }>) {
   const known = input.sources.filter((source) => source.data !== null);
   return {
     count: known.length === 0 ? null : known.reduce((sum, source) => sum + source.data!.count, 0),

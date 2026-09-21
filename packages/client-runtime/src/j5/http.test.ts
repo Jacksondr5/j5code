@@ -1,6 +1,7 @@
 import { expect, it } from "@effect/vitest";
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import { HttpClientRequest } from "effect/unstable/http";
 
 import {
   BearerConnectionTarget,
@@ -15,6 +16,7 @@ import { ManagedRelayDpopSigner } from "../relay/managedRelay.ts";
 import {
   answerHumanExchange,
   createSquadron,
+  executeJ5Request,
   isJ5UnsupportedError,
   J5HttpError,
   listHumanInbox,
@@ -24,6 +26,41 @@ import {
 
 const relayToken = (accessToken: string) =>
   ({ _tag: "Dpop", accessToken, expiresAtEpochMs: 4_102_444_800_000 }) as const;
+
+it.effect("preserves conditional Playbook reads and structured conflict details", () =>
+  Effect.gen(function* () {
+    const environment = prepared("alpha", { _tag: "Bearer", token: "alpha-token" });
+    const response = yield* executeJ5Request(
+      environment,
+      HttpClientRequest.get("/api/j5/playbooks/run?ifReadVersion=2"),
+      10_000,
+    ).pipe(Effect.provide(remoteHttpClientLayer(async () => new Response(null, { status: 304 }))));
+    expect(response.status).toBe(304);
+    const conflict = yield* executeJ5Request(
+      environment,
+      HttpClientRequest.post("/api/j5/playbooks/run/resume"),
+      10_000,
+    ).pipe(
+      Effect.provide(
+        remoteHttpClientLayer(async () =>
+          Response.json(
+            {
+              message: "Playbook command failed",
+              error: { code: "conflict", detail: "Run revision changed" },
+            },
+            { status: 409 },
+          ),
+        ),
+      ),
+      Effect.flip,
+    );
+    expect(conflict).toMatchObject({
+      status: 409,
+      code: "conflict",
+      detail: "Run revision changed",
+    });
+  }),
+);
 
 /** Hands out relay credentials the way the live authorization service does, one per request. */
 function relayAuthorization(tokens: ReadonlyArray<string>, httpBaseUrl = "https://relay.test") {
