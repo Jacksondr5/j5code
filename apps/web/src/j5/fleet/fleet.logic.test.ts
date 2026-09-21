@@ -7,8 +7,9 @@ import {
   countFleetAlerts,
   fleetInvolvedThreadRefs,
   originLabel,
+  retiredCrews,
 } from "./fleet.logic";
-import type { FleetAgent, FleetSquadron } from "./fleetClient";
+import type { FleetAgent, FleetCrew, FleetSquadron } from "./fleetClient";
 
 const agent = (participantId: string, overrides: Partial<FleetAgent> = {}): FleetAgent => ({
   participantId,
@@ -117,5 +118,33 @@ describe("fleet involvement", () => {
       ["env:a", "thread:critic"],
       ["env:a", "thread:spawner"],
     ]);
+  });
+});
+
+describe("retired crews", () => {
+  const crew = (id: string, archivedAt: string | null): FleetCrew => ({
+    crewInstanceId: id,
+    crewName: id,
+    captainParticipantId: "captain",
+    captainThreadId: "thread:captain",
+    brief: "Land the PR.",
+    version: 1,
+    createdAt: "2026-09-14T09:00:00.000Z",
+    archivedAt,
+    roster: [],
+  });
+
+  it("keeps only archived Crews, newest retirement first, so the snapshot stays readable", () => {
+    const squadron: FleetSquadron = {
+      id: "squadron:alpha",
+      name: "Alpha",
+      agents: [],
+      crews: [
+        crew("live", null),
+        crew("older", "2026-09-14T10:00:00.000Z"),
+        crew("newer", "2026-09-14T12:00:00.000Z"),
+      ],
+    };
+    expect(retiredCrews(squadron).map((entry) => entry.crewInstanceId)).toEqual(["newer", "older"]);
   });
 });

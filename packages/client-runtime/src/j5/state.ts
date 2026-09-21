@@ -1,5 +1,11 @@
 import type { ProjectId } from "@t3tools/contracts";
-import type { AnswerHumanExchangeRequest, CrewProposalResolveRequest } from "@t3tools/contracts/j5";
+import type {
+  AnswerHumanExchangeRequest,
+  CrewProposalResolveRequest,
+  CrewArchiveRequest,
+  CrewStopRequest,
+  FleetReadRequest,
+} from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -54,8 +60,8 @@ export function createJ5EnvironmentAtoms<R, E>(
     fleet: createEnvironmentQueryAtomFamily(runtime, {
       label: "j5:fleet",
       staleTimeMs: 30_000,
-      execute: (_input: Record<string, never>) =>
-        preparedConnection.pipe(Effect.flatMap(J5Http.readFleet)),
+      execute: (input: FleetReadRequest) =>
+        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.readFleet(prepared, input))),
     }),
     // Crew gates are read per environment like the inbox; a Captain on any connected server
     // reaches the human's bell and thread.
@@ -71,6 +77,16 @@ export function createJ5EnvironmentAtoms<R, E>(
         preparedConnection.pipe(
           Effect.flatMap((prepared) => J5Http.resolveCrewProposal(prepared, input)),
         ),
+    }),
+    archiveCrew: createEnvironmentCommand(runtime, {
+      label: "j5:archive-crew",
+      execute: (input: CrewArchiveRequest) =>
+        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.archiveCrew(prepared, input))),
+    }),
+    stopCrew: createEnvironmentCommand(runtime, {
+      label: "j5:stop-crew",
+      execute: (input: CrewStopRequest) =>
+        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.stopCrew(prepared, input))),
     }),
     createSquadron: createEnvironmentCommand(runtime, {
       label: "j5:create-squadron",

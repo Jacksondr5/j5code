@@ -26,6 +26,7 @@ import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { ArtifactWorkspace } from "../artifacts/ArtifactWorkspace.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
+import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { formatRunFailureField, runFailureDetail } from "./runFailures.ts";
 import { lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
@@ -55,6 +56,12 @@ export interface CrewSeatFinishNotifierShape {
   readonly handleStoredEvent: (
     event: OrchestrationV2StoredEvent,
   ) => Effect.Effect<ThreadId | null, never>;
+  /**
+   * The boot sweep: tell every Captain about a live seat whose last run finished while nothing
+   * reported it. Covers a notice that failed (the seat was left unreported on purpose) and a
+   * finish that landed while the server was down. Returns the seat threads reported.
+   */
+  readonly reconcile: Effect.Effect<ReadonlyArray<ThreadId>>;
 }
 
 export class CrewSeatFinishNotifier extends Context.Service<
@@ -196,6 +203,7 @@ const makeLayer = (daemon: boolean) =>
       const alertHumanOfCrewFailure = yield* makeCrewFailureAlert;
       const crews = yield* AgentCrewInstanceService;
       const reporter = yield* CrewLaunchReporter;
+      const cascade = yield* CrewCaptainArchiveCascade;
       const workspace = yield* ArtifactWorkspace;
       const agents = yield* makeAgentPersonaLibrary;
       const sql = yield* SqlClient.SqlClient;
@@ -338,6 +346,47 @@ const makeLayer = (daemon: boolean) =>
         return threadId;
       });
 
+      /** Only report the latest run, never an older finish hidden behind a later interruption. */
+      const outstandingFinish = (projection: OrchestrationV2ThreadProjection) => {
+        if (ThreadManagement.latestActiveRun(projection) !== undefined) return undefined;
+        const newest = projection.runs.toSorted((a, b) => b.ordinal - a.ordinal)[0];
+        return newest?.status === "completed" || newest?.status === "failed" ? newest : undefined;
+      };
+
+      const reconcile: CrewSeatFinishNotifierShape["reconcile"] = Effect.gen(function* () {
+        const reportedNow: Array<ThreadId> = [];
+        for (const instance of yield* crews.listLive()) {
+          for (const member of instance.members) {
+            // A seat whose thread cannot be read (gone, or the store hiccuped) is skipped this pass.
+            const projection = yield* threads
+              .getThreadProjection(member.threadId)
+              .pipe(Effect.catchCause(() => Effect.succeed(null)));
+            if (projection === null) continue;
+            if (projection.thread.archivedAt !== null) continue;
+            const run = outstandingFinish(projection);
+            if (run === undefined) continue;
+            const outcome = yield* notifyIfFinished(member.threadId, run).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("J5 crew seat finish sweep skipped a seat", {
+                  threadId: member.threadId,
+                  cause,
+                }).pipe(Effect.as(null)),
+              ),
+            );
+            if (outcome !== null) reportedNow.push(outcome);
+          }
+        }
+        if (reportedNow.length > 0)
+          yield* Effect.logInfo("J5 crew seat finish sweep reported finished seats", {
+            reportedNow,
+          });
+        return reportedNow;
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logError("J5 crew seat finish sweep failed", { cause }).pipe(Effect.as([])),
+        ),
+      );
+
       const handleStoredEvent: CrewSeatFinishNotifierShape["handleStoredEvent"] = (stored) =>
         Effect.gen(function* () {
           const run = finishedRun(stored);
@@ -352,8 +401,9 @@ const makeLayer = (daemon: boolean) =>
         );
 
       if (daemon) {
-        // Start from the current high-water mark: a missed finish is harmless and the next
-        // terminal run for that member catches up.
+        // The stream starts from the current high-water mark, so everything that landed while
+        // the server was down, and every reaction that failed before it, is caught up by one
+        // sweep first: orphaned Crews retire, finished seats tell their Captains.
         const runDaemon = Effect.gen(function* () {
           const rows = yield* sql<{ readonly sequence: number }>`
             SELECT COALESCE(MAX(sequence), 0) AS sequence FROM orchestration_v2_events
@@ -362,13 +412,18 @@ const makeLayer = (daemon: boolean) =>
           // Launches the server lost mid-report are reported first, so a first turn that failed
           // while it was down is a launch outcome rather than a finish.
           yield* reporter.reconcile;
+          yield* cascade.reconcile;
+          yield* reconcile;
           // Suspended so each resume after a stream failure starts from the last handled
           // sequence rather than from the daemon's start.
           return yield* Effect.forever(
             Stream.suspend(() => threads.streamStoredEventsFrom({ afterSequence })).pipe(
+              // One stream serves both Crew reactions: seats settling, and a Captain's archive
+              // retiring its Crews (CrewCaptainArchiveCascade).
               Stream.runForEach((event) =>
                 reporter.handleStoredEvent(event).pipe(
                   Effect.andThen(handleStoredEvent(event)),
+                  Effect.andThen(cascade.handleStoredEvent(event)),
                   Effect.tap(() => Effect.sync(() => (afterSequence = event.sequence))),
                 ),
               ),
@@ -383,7 +438,7 @@ const makeLayer = (daemon: boolean) =>
         yield* Effect.forkScoped(runDaemon);
       }
 
-      return CrewSeatFinishNotifier.of({ handleStoredEvent });
+      return CrewSeatFinishNotifier.of({ handleStoredEvent, reconcile });
     }),
   );
 

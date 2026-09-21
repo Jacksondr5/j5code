@@ -7,6 +7,7 @@ import { J5OrchestratorSurface } from "./orchestratorSurface.ts";
 import { J5_CLAUDE_MCP_ALLOWED_TOOLS } from "./claudeAllowedTools.ts";
 import {
   J5ArchiveAgentTool,
+  J5ArchiveCrewTool,
   J5ProposeCrewTool,
   J5RequestCrewMemberTool,
   J5SendMessageTool,
@@ -69,11 +70,17 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
     "request_crew_member",
     "spawn_agent",
     "stop_agent",
+    "stop_crew",
     "archive_agent",
+    "archive_crew",
     "clear_own_ask",
     "list_squadrons",
     "join_squadron",
   ]);
+  assert.include(J5ArchiveCrewTool.description ?? "", "only as a unit");
+  assert.include(J5ArchiveCrewTool.description ?? "", "confirmation_token");
+  assert.include(J5ArchiveCrewTool.description ?? "", "check with the user");
+  assert.isTrue(Context.get(J5ArchiveCrewTool.annotations, Tool.Destructive));
   // Proposals only file a human-gated request, and must say so: read-only Captains run with
   // approval policy never and have refused the brief when the gate looked like a shell approval.
   assert.isFalse(Context.get(J5ProposeCrewTool.annotations, Tool.Destructive));

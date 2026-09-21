@@ -10,6 +10,7 @@ import {
   selectSpawnedChildRows,
   spawnedChildrenNeedAttention,
   spawnedGroupExpansionKey,
+  stoppableCrew,
   writeExpandedSpawnParents,
 } from "./spawnedChildren.logic";
 
@@ -99,6 +100,33 @@ describe("spawned children under a sidebar row", () => {
     expect(spawnedGroupExpansionKey("env:b", "captain", "crew:crew:1")).not.toBe(
       spawnedGroupExpansionKey("env:a", "captain", "crew:crew:1"),
     );
+  });
+
+  it("offers Stop on a Crew's own group only while one of its seats is running", () => {
+    const blog = { crewInstanceId: "crew:2", crewName: "Blog Migration" };
+    const running = new Map([
+      ["builder", thread("builder", "2026-09-09T10:00:00Z", { runtime: { status: "running" } })],
+      ["critic", thread("critic", "2026-09-09T11:00:00Z")],
+      ["writer", thread("writer", "2026-09-09T12:00:00Z")],
+      ["solo", thread("solo", "2026-09-09T13:00:00Z", { runtime: { status: "running" } })],
+    ]);
+    const groups = groupSpawnedChildren(
+      selectSpawnedChildRows(
+        [
+          child("builder", "builder"),
+          child("critic", "critic"),
+          child("writer", "writer", blog),
+          child("solo", null),
+        ],
+        running,
+      ),
+    );
+    // Blog Migration is idle, Review Pair has a running seat, and the solo group never stops.
+    expect(groups.map((group) => stoppableCrew(group))).toEqual([
+      null,
+      { crewInstanceId: "crew:1", crewName: "Review Pair" },
+      null,
+    ]);
   });
 
   it("remembers expansion per parent and tolerates broken or missing storage", () => {

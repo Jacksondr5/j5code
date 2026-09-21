@@ -108,7 +108,7 @@ A plain spawn without `agent` is unchanged and inherits the parent's runtime mod
 
 **Result:** exactly one of `interrupt_requested` (a running turn is being interrupted) or `already_idle` (no running turn; no side effect). An interrupt acknowledgement and an observed terminal run state are separate facts; the tool never claims a turn stopped merely because interruption was requested. Anything else is an error naming the caller's actual Squadron and the corrected retry.
 
-**Rules.** A caller's runtime policy never gates `stop_agent` or `archive_agent`: a read-only persona may run them, because identity and the human's confirmation token are the gates, and the sandbox guards the workspace rather than the platform's verbs (Bryant, 2026-09-14). Stop and archive are single-target; the unit cascade belongs to Crews, which stop and archive as units through their own verbs when they exist. A stop is final across restarts: a committed stop wins even if the provider has not yet acknowledged it, so a stopped run is never resumed by upstream's restart continuation.
+**Rules.** A caller's runtime policy never gates `stop_agent`, `archive_agent`, or `archive_crew`: a read-only persona may run them, because identity (the Captain, its own Crew) and the human's confirmation token are the gates, and the sandbox guards the workspace rather than the platform's verbs (Bryant, 2026-09-14). Stop and archive are single-target; the unit cascade belongs to Crews, which stop and archive as units through their own verbs when they exist. A stop is final across restarts: a committed stop wins even if the provider has not yet acknowledged it, so a stopped run is never resumed by upstream's restart continuation.
 
 ### `archive_agent`
 
@@ -265,6 +265,61 @@ handoffs live in application storage, never in the sandboxed workspace. (Withdra
 the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `read_artifact` and
 `list_artifacts`, which collided with the project artifact toolkit's names.)
 
+### `stop_crew`
+
+**Description (contract):** "Stop a Crew you command: interrupts the running turn of every seat
+now. Nothing settles or is retired, and every seat can be messaged again afterwards. Captain-only.
+Reuse client_request_id to retry safely."
+
+| Input               | Type              | Required | Meaning                                        |
+| ------------------- | ----------------- | -------- | ---------------------------------------------- |
+| `squadron_id`       | SquadronId        | yes      | The caller's current Squadron                  |
+| `crew_instance_id`  | string            | yes      | The id from the `<j5_crew_gate>` roster notice |
+| `client_request_id` | string, non-empty | no       | Supply and reuse to make retries safe          |
+
+Result: `crew_instance_id` and `members` (seat, participant_id, result: `interrupt_requested`,
+`already_idle`, or `archived`). Semantics: the unit form of `stop_agent`. Only the Captain may call
+it; anyone else is refused and pointed at asking the Captain; an archived Crew is refused naming
+its state. Every seat with a run in flight is interrupted through the ordinary single-agent stop
+(so a committed stop wins over restart continuation here too); idle seats are reported as such and
+left alone; nothing settles, nothing is retired, no Exchange closes, and the seats stay addressable.
+The person has the same act as a **Stop crew** control on the Crew's header on the Fleet page and on
+the Captain's expander in the sidebar, shown only while a seat is running; it is not a Crew
+participant, so no Captain check applies to it (Bryant, 2026-09-14).
+
+### `archive_crew`
+
+**Description (contract):** "Retire a whole Crew you command. Crews archive only as a unit —
+members are never retired one by one. A clean archive completes immediately; otherwise the call
+refuses with the facts and a confirmation_token. Before retrying with that token, check with the
+user. Nothing is destroyed: worktrees, branches, and ledgers stay readable. Reuse
+client_request_id to retry safely."
+
+| Input                | Type              | Required | Meaning                                              |
+| -------------------- | ----------------- | -------- | ---------------------------------------------------- |
+| `squadron_id`        | SquadronId        | yes      | The caller's current Squadron                        |
+| `crew_instance_id`   | string            | yes      | The id from the `<j5_crew_gate>` roster notice       |
+| `confirmation_token` | string            | no       | Token from the refusal; confirms exactly those facts |
+| `client_request_id`  | string, non-empty | no       | Supply and reuse to make retries safe                |
+
+Result: `status` (`archived` or `already_archived`), `crew_instance_id`, and `members` (seat,
+participant_id, per-member result). Semantics: only the Captain — the participant that launched the
+Crew — may archive it (R19); anyone else is refused and pointed at asking the Captain. Facts are
+read for every member before anything happens. If any member has an open Exchange or a running
+turn, the call refuses with a per-seat list (`members[].open_exchanges`, `members[].running_turn`,
+`already_archived`) and a signed `confirmation_token` over exactly those facts. With a matching
+token, members retire in seat order through the ordinary single-agent archive with their own
+confirmation already satisfied (interrupt, thread archive, participant retirement, loud Exchange
+terminations to every waiter), then the Crew record is marked archived. A token stays valid when
+the current facts are a subset of the confirmed ones, so a retry after a partial failure finishes
+the job; new work on any seat makes it stale and yields a fresh token. Partial failures name the
+seats retired so far and the seat that failed; retry with the same `client_request_id` and token.
+
+**Members are never archived one by one (R14):** `archive_agent` refuses a target that sits in a
+Crew and names the `archive_crew` call to make instead. A member that finishes with nothing owed is
+reported to its Captain; the platform settles no seat, and settlement is not archive. `stop_agent` on a member is still allowed;
+stopping retires nothing.
+
 ### Kept upstream tools
 
 - `orchestrator_capabilities` — providers and models (ids, labels, option descriptors) for spawn targeting, plus runtime and interaction-mode facts. It deliberately stays silent about delegation even though `delegate_task` is back on the surface: that tool's own description carries its saved-agent use, and J5 verbs are advertised by their own descriptions.
@@ -293,6 +348,8 @@ the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `rea
 16. `join_squadron` establishes a home only for a thread that has none, only in a Squadron that references the thread's project, leaves the thread and its running work untouched, returns the existing registration when the thread is already homed there, and refuses a thread homed elsewhere, an archived or deleted thread, and a retired identity.
 17. `list_agents` returns every saved agent with its availability and route; `propose_crew` and `request_crew_member` file a human gate and refuse unknown, disabled, duplicate, or over-cap seats before anything is recorded; both succeed under every sandbox and approval policy, including Codex approval policy `never`.
 18. Approving a proposal spawns exactly once; a second approval finds it claimed; a spawn that fails after reserving its seats reopens the gate, and the retry converges on those seats.
+19. `archive_crew` is Captain-only, refuses with per-seat facts and a token when any seat has an open Exchange or a running turn, and finishes a partial archive on retry; `archive_agent` refuses a Crew member and a Captain of a live Crew, naming the `archive_crew` call.
+20. `stop_crew` is Captain-only, interrupts every seat with a running turn and reports each seat as interrupted, already idle, or archived; it settles, retires, and closes nothing, and a non-Captain or an archived Crew is refused naming the next step. The person's Stop crew control does the same through the operate scope.
 
 ## History
 
@@ -307,9 +364,11 @@ the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `rea
 - 2026-09-12 — archiving is reversible: unarchive restores the same identity without reopening Exchanges; deletion is a separate permanent act for people only; the address book hides archived agents unless asked (PR #132).
 - 2026-09-12 — `list_squadrons` and `join_squadron` added for the one case of a native thread with no home (issue #129, PR #131).
 - 2026-09-07 — rewritten from a stack of dated contract revisions into current-state contracts; every verb's build state true as of this date (all six verbs shipped; `regarding` and the person follow-up rule are issue #111).
-- 2026-09-09 — `list_agents`, `propose_crew`, and `request_crew_member`: Crews composed at launch through a human gate ([record](../../worklog/2026-09-14-crews-consolidation.md)).
+- 2026-09-09 — `list_agents`, `propose_crew`, `request_crew_member`, and `archive_crew`: Crews composed at launch through a human gate ([record](../../worklog/2026-09-14-crews-consolidation.md)).
 - 2026-09-10 — human approval is the authority for seat access; proposals and requests pre-approved for Codex under approval policy `never`; `deliver_artifact` added.
-- 2026-09-14 — `deliver_artifact` and the crew-only artifact reads withdrawn in favor of the shared handoff files; Codex pre-approval narrowed to a per-tool list ([record](../../worklog/2026-09-14-crews-consolidation.md)).
+- 2026-09-14 — lifecycle verbs stay available to read-only personas by decision (Sentry S-4 closed).
+- 2026-09-14 — `deliver_artifact` and the crew-only artifact reads withdrawn in favor of the shared handoff files; Codex pre-approval narrowed to a per-tool list; `archive_agent` refuses Captains of live Crews ([record](../../worklog/2026-09-14-crews-consolidation.md)).
 - 2026-09-14 — `t3_thread_wait` withdrawn: blocking inside a turn starves a participant of the queued notices it is waiting for ([record](../../worklog/2026-09-14-crews-consolidation.md)).
+- 2026-09-14 — `stop_crew`: the unit form of stop for the Captain over MCP and for the person as a Stop crew control; interrupts running seats only ([record](../../worklog/2026-09-14-crews-consolidation.md)).
 - 2026-09-14 — `delegate_task`, `task_status`, and `task_cancel` return to the J5 surface, with a saved-agent `agent` parameter on `delegate_task` replacing the J5-only `invoke_agent` ([review](https://github.com/Jacksondr5/j5code/pull/124#issuecomment-5663559782)).
 - 2026-09-15 — machine participants appear in `list_participants` as named senders that receive nothing (issue #74).
