@@ -203,3 +203,84 @@ it.effect("refuses a same-name seat under a different identity, and any seat onc
     assert.lengthOf((yield* service.read("crew:conflict"))!.members, 1);
   }).pipe(Effect.provide(testLayer)),
 );
+
+it.effect(
+  "updates reserved metadata only under its own identity and keeps replay ordinals distinct",
+  () =>
+    Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      const squadronId = SquadronId.make("squadron:reservation-update");
+      yield* (yield* A2ALedger).createSquadron({
+        squadron: { id: squadronId, name: "Reservations", createdAt },
+      });
+      const service = yield* AgentCrewInstanceService;
+      const member = (name: string) => ({
+        seatName: name,
+        agentId: "critic",
+        reason: null,
+        participantId: ParticipantId.make(`agent:${name}`),
+        threadId: ThreadId.make(`thread:${name}`),
+      });
+      const input = {
+        id: "crew:reservation-update",
+        squadronId,
+        captainParticipantId: ParticipantId.make("agent:captain"),
+        captainThreadId: ThreadId.make("thread:captain"),
+        displayName: "Reservations",
+        brief: "Work",
+        createdAt,
+        members: [member("first"), member("reviewer"), member("last")],
+      };
+      const first = yield* service.record(input);
+      const updated = { ...member("reviewer"), agentId: "builder", reason: "New reason" };
+      assert.deepStrictEqual(
+        yield* service.updateMembers(input.id, [
+          { ...updated, participantId: ParticipantId.make("agent:other") },
+        ]),
+        [],
+      );
+      assert.deepStrictEqual(yield* service.read(input.id), first);
+      const sql = yield* SqlClient.SqlClient;
+      const before =
+        yield* sql`SELECT * FROM j5_agent_crew_member WHERE crew_instance_id = ${input.id} ORDER BY ordinal`;
+      assert.deepStrictEqual(yield* service.updateMembers(input.id, [updated]), ["reviewer"]);
+      assert.deepStrictEqual(yield* service.updateMembers(input.id, [updated]), []);
+      const after =
+        yield* sql`SELECT * FROM j5_agent_crew_member WHERE crew_instance_id = ${input.id} ORDER BY ordinal`;
+      assert.deepStrictEqual(
+        after,
+        before.map((row) =>
+          row.seat_name === "reviewer"
+            ? { ...row, agent_id: "builder", reason: "New reason" }
+            : row,
+        ),
+      );
+      assert.deepStrictEqual(yield* service.read(input.id), {
+        ...first,
+        members: first.members.map((entry) =>
+          entry.seatName === "reviewer"
+            ? { ...entry, agentId: "builder", reason: "New reason" }
+            : entry,
+        ),
+      });
+      // Null values are changes too; replay does not change the version or reserved position.
+      assert.deepStrictEqual(
+        yield* service.updateMembers(input.id, [{ ...updated, agentId: null, reason: null }]),
+        ["reviewer"],
+      );
+      assert.equal((yield* service.read(input.id))!.version, first.version);
+      yield* service.removeMembers(input.id, ["reviewer"]);
+      const replay = yield* service.record({
+        ...input,
+        members: [member("first"), member("last"), member("reviewer")],
+      });
+      assert.deepStrictEqual(
+        replay.members.map((entry) => entry.seatName),
+        ["first", "last", "reviewer"],
+      );
+      const ordinals = yield* sql<{
+        ordinal: number;
+      }>`SELECT ordinal FROM j5_agent_crew_member WHERE crew_instance_id = ${input.id}`;
+      assert.equal(new Set(ordinals.map((row) => row.ordinal)).size, 3);
+    }).pipe(Effect.provide(testLayer)),
+);

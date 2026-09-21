@@ -79,6 +79,13 @@ export interface AgentCrewInstanceServiceShape {
     options?: { readonly maxSeats?: number | undefined },
   ) => Effect.Effect<AddMembersOutcome, SqlError>;
   readonly read: (id: string) => Effect.Effect<AgentCrewInstance | null, SqlError>;
+  /** Rewrite persona and reason under the reserved identity. The caller verifies no thread exists. */
+  readonly updateMembers: (
+    id: string,
+    members: ReadonlyArray<
+      Pick<NewAgentCrewMember, "seatName" | "participantId" | "agentId" | "reason">
+    >,
+  ) => Effect.Effect<ReadonlyArray<string>, SqlError>;
   /**
    * Drop seats from the roster by name, whether or not a thread was ever created for them. The
    * caller has already archived any thread behind them: a failed launch or addition that the
@@ -225,7 +232,11 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
                 ${input.createdAt}, NULL
               )
             `;
-            yield* insertMembers(input.id, input.members, 1, 0);
+            const ordinals = yield* sql<{ readonly next: number }>`
+              SELECT COALESCE(MAX(ordinal), -1) + 1 AS next FROM j5_agent_crew_member
+              WHERE crew_instance_id = ${input.id}
+            `;
+            yield* insertMembers(input.id, input.members, 1, Number(ordinals[0]?.next ?? 0));
           }),
         );
         return (yield* read(input.id))!;
@@ -387,12 +398,30 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
         return rows.map((row) => row.seat_name);
       });
 
+      const updateMembers: AgentCrewInstanceServiceShape["updateMembers"] = Effect.fn(
+        "j5.a2a.agentCrewInstances.updateMembers",
+      )(function* (id, members) {
+        const changed: Array<string> = [];
+        for (const member of members) {
+          const rows = yield* sql<{ readonly seat_name: string }>`
+            UPDATE j5_agent_crew_member SET agent_id = ${member.agentId}, reason = ${member.reason}
+            WHERE crew_instance_id = ${id} AND seat_name = ${member.seatName}
+              AND participant_id = ${member.participantId}
+              AND (agent_id IS NOT ${member.agentId} OR reason IS NOT ${member.reason})
+            RETURNING seat_name
+          `;
+          changed.push(...rows.map((row) => row.seat_name));
+        }
+        return changed;
+      });
+
       return AgentCrewInstanceService.of({
         record,
         addMembers,
         read,
         findMembership,
         removeMembers,
+        updateMembers,
         listForCaptain,
         listForSquadron,
         listLive,

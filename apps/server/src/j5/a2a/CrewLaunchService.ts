@@ -466,6 +466,19 @@ export const layer = Layer.effect(
           .pipe(
             Effect.mapError(operationError("reading the created seat thread", member.seat.name)),
           );
+        if (child.thread.archivedAt !== null)
+          yield* threadManagement
+            .dispatch({
+              type: "thread.unarchive",
+              commandId: lifecycleCommandId({
+                ...member.stableInput,
+                operation: `retry-unarchive@${DateTime.formatIso(child.thread.archivedAt)}`,
+              }),
+              threadId: member.threadId,
+            })
+            .pipe(
+              Effect.mapError(operationError("reviving the seat thread for", member.seat.name)),
+            );
         const facts = yield* composition
           .recordFacts({
             homeCommandId: spawnHomeCommandId(member.stableInput),
@@ -586,10 +599,29 @@ export const layer = Layer.effect(
       }
     });
 
-    const assertReusableSeats = Effect.fn("j5.a2a.crewLaunch.assertReusableSeats")(function* (
+    const reconcileReservations = Effect.fn("j5.a2a.crewLaunch.reconcileReservations")(function* (
+      stable: { readonly providerSessionId: string; readonly requestKey: string },
+      crewInstanceId: string,
       planned: ReadonlyArray<Planned>,
       approved: boolean,
     ) {
+      const recordError = (phase: string) => (cause: unknown) =>
+        new CrewLaunchOperationError({ phase, seatName: null, createdSeats: [], cause });
+      const earlier = yield* crews
+        .read(crewInstanceId)
+        .pipe(Effect.mapError(recordError("reading the earlier attempt")));
+      // Additions share the Crew with other proposals: only reconcile identities this request owns.
+      const reservations = (earlier?.members ?? []).filter(
+        (member) =>
+          member.participantId ===
+          participantIdForThread(
+            spawnThreadId({
+              providerSessionId: stable.providerSessionId,
+              requestKey: crewSeatRequestKey(stable.requestKey, member.seatName),
+            }),
+          ),
+      );
+      const changed: Array<NewAgentCrewMember> = [];
       for (const member of planned) {
         const existing = yield* getThreadProjectionIfPresent(
           threadManagement,
@@ -612,69 +644,79 @@ export const layer = Layer.effect(
             detail:
               "An earlier attempt created this seat with different runtime settings. Restore those settings, rename the seat, or decline and create a fresh proposal.",
           });
-        if (
-          existing !== null &&
-          (existing.thread.archivedAt !== null || existing.thread.deletedAt != null)
-        )
+        if (existing !== null && existing.thread.deletedAt != null)
           return yield* new CrewLaunchOperationError({
-            phase: "reusing a retired seat",
+            phase: "reusing a deleted seat",
             seatName: member.seat.name,
             createdSeats: [],
-            cause: `Seat ${member.seat.name} was retired by an earlier attempt. Use a new seat name or decline and create a fresh proposal.`,
+            cause: `Seat ${member.seat.name} was deleted. Use a new seat name or decline and create a fresh proposal.`,
+          });
+        const reservation = reservations.find((entry) => entry.seatName === member.seat.name);
+        if (
+          existing === null &&
+          reservation !== undefined &&
+          (reservation.agentId !== member.seat.agentId || reservation.reason !== member.seat.reason)
+        )
+          changed.push({
+            ...reservation,
+            agentId: member.seat.agentId,
+            reason: member.seat.reason,
           });
       }
+
+      const stale = reservations.filter(
+        (member) => !planned.some((entry) => entry.seat.name === member.seatName),
+      );
+      for (const member of stale) {
+        // Only a thread that never came to exist is skipped; a store that cannot answer fails
+        // the retry, or the row below would be dropped from under a live seat thread.
+        const seat = yield* getThreadProjectionIfPresent(threadManagement, member.threadId).pipe(
+          Effect.mapError(recordError(`reading the earlier seat ${member.seatName}`)),
+        );
+        if (seat !== null && seat.thread.archivedAt === null && seat.thread.deletedAt == null)
+          yield* threadManagement
+            .dispatch({
+              type: "thread.archive",
+              commandId: lifecycleCommandId({
+                providerSessionId: stable.providerSessionId,
+                requestKey: crewSeatRequestKey(stable.requestKey, member.seatName),
+                operation: `retry-archive@${DateTime.formatIso(seat.thread.updatedAt)}`,
+              }),
+              threadId: member.threadId,
+            })
+            .pipe(Effect.mapError(recordError(`retiring renamed seat ${member.seatName}`)));
+      }
+      if (stale.length > 0)
+        yield* crews
+          .removeMembers(
+            crewInstanceId,
+            stale.map((member) => member.seatName),
+          )
+          .pipe(Effect.mapError(recordError("releasing renamed seats")));
+      yield* crews
+        .updateMembers(crewInstanceId, changed)
+        .pipe(Effect.mapError(recordError("updating reserved seats")));
     });
 
     const launch: CrewLaunchServiceShape["launch"] = (input) =>
       Effect.gen(function* () {
         const resolved = input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats));
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
-        yield* assertReusableSeats(planned, input.resolvedSeats !== undefined);
         const recordError = (phase: string) => (cause: unknown) =>
           new CrewLaunchOperationError({ phase, seatName: null, createdSeats: [], cause });
         const crewInstanceId = spawnCrewInstanceId({
           providerSessionId: input.providerSessionId,
           requestKey: input.requestKey,
         });
-        // A retry after the person renamed a seat on the card finds the earlier name still on the
-        // record, possibly with a thread the failed launch created. Retire it before recording the
-        // roster that launches: archive the thread if one exists and drop the row, so no member
-        // lingers with a thread and no brief, and the record never holds more seats than the cap.
-        const earlier = yield* crews
-          .read(crewInstanceId)
-          .pipe(Effect.mapError(recordError("reading the earlier attempt")));
-        const stale = (earlier?.members ?? []).filter(
-          (member) => !planned.some((entry) => entry.seat.name === member.seatName),
+        yield* reconcileReservations(
+          input,
+          crewInstanceId,
+          planned,
+          input.resolvedSeats !== undefined,
         );
-        for (const member of stale) {
-          // Only a thread that never came to exist is skipped; a store that cannot answer fails
-          // the retry, or the row below would be dropped from under a live seat thread.
-          const seat = yield* getThreadProjectionIfPresent(threadManagement, member.threadId).pipe(
-            Effect.mapError(recordError(`reading the earlier seat ${member.seatName}`)),
-          );
-          if (seat !== null && seat.thread.archivedAt === null)
-            yield* threadManagement
-              .dispatch({
-                type: "thread.archive",
-                commandId: lifecycleCommandId({
-                  providerSessionId: input.providerSessionId,
-                  requestKey: crewSeatRequestKey(input.requestKey, member.seatName),
-                  operation: "retry-archive",
-                }),
-                threadId: member.threadId,
-              })
-              .pipe(Effect.mapError(recordError(`retiring renamed seat ${member.seatName}`)));
-        }
-        if (stale.length > 0)
-          yield* crews
-            .removeMembers(
-              crewInstanceId,
-              stale.map((member) => member.seatName),
-            )
-            .pipe(Effect.mapError(recordError("releasing renamed seats")));
-        // Record the unit before any seat exists: every planned seat is named under its
-        // deterministic ids, so a spawn that fails partway leaves nothing a Crew record does not
-        // know, and a member's own crew request is refused from its first turn.
+        // Record the reconciled unit before any seat exists, under deterministic ids, so a spawn
+        // that fails partway leaves nothing a Crew record does not know, and a member's own crew
+        // request is refused from its first turn.
         const instance = yield* crews
           .record({
             id: crewInstanceId,
@@ -703,9 +745,14 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const resolved = input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats));
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
-        yield* assertReusableSeats(planned, input.resolvedSeats !== undefined);
-        // Reserve the seats before anything spawns: the store decides the cap and the version in
-        // one transaction, so two approvals landing together cannot both pass. Seat ids are
+        yield* reconcileReservations(
+          input,
+          input.instance.id,
+          planned,
+          input.resolvedSeats !== undefined,
+        );
+        // Reserve the reconciled seats before anything spawns: the store decides the cap and version
+        // in one transaction, so two approvals landing together cannot both pass. Seat ids are
         // deterministic, so a retry after a failed spawn finds its reservation and converges.
         const reservation = yield* crews
           .addMembers(

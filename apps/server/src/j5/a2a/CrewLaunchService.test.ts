@@ -14,6 +14,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
@@ -92,6 +93,7 @@ const thread = (id: ThreadId): OrchestrationV2AppThread =>
     branch: "main",
     worktreePath: "/repo",
     createdAt,
+    updatedAt: createdAt,
     archivedAt: null,
   }) as unknown as OrchestrationV2AppThread;
 
@@ -144,7 +146,26 @@ const dependencies = (
                 );
                 return created?.type === "thread.create"
                   ? Effect.succeed({
-                      thread: { ...thread(threadId), ...created },
+                      thread: {
+                        ...thread(threadId),
+                        ...created,
+                        updatedAt: DateTime.add(createdAt, {
+                          milliseconds:
+                            commands.findLastIndex(
+                              (command) => "threadId" in command && command.threadId === threadId,
+                            ) + 1,
+                        }),
+                        archivedAt: archived.has(threadId)
+                          ? DateTime.add(createdAt, {
+                              milliseconds:
+                                commands.findLastIndex(
+                                  (command) =>
+                                    command.type === "thread.archive" &&
+                                    command.threadId === threadId,
+                                ) + 1,
+                            })
+                          : null,
+                      },
                       messages: commands.flatMap((command) =>
                         command.type === "message.dispatch" && command.threadId === threadId
                           ? [{ id: command.messageId, text: command.text }]
@@ -175,13 +196,27 @@ const dependencies = (
               } as unknown as OrchestrationV2ThreadProjection),
       dispatch: (command) =>
         Effect.gen(function* () {
+          if (
+            realThreads &&
+            (yield* Ref.get(commands)).some((item) => item.commandId === command.commandId)
+          )
+            return { events: [], effects: [] } as never;
           if (command.type === "message.dispatch" && failBriefOnce.delete(command.threadId))
+            return yield* new OrchestratorDispatchError({
+              commandId: command.commandId,
+              commandType: command.type,
+            });
+          if (
+            (command.type === "thread.archive" && archived.has(command.threadId)) ||
+            (command.type === "thread.unarchive" && !archived.has(command.threadId))
+          )
             return yield* new OrchestratorDispatchError({
               commandId: command.commandId,
               commandType: command.type,
             });
           yield* Ref.update(commands, (items) => {
             if (command.type === "thread.archive") archived.add(command.threadId);
+            if (command.type === "thread.unarchive") archived.delete(command.threadId);
             return [...items, command];
           });
           return { events: [], effects: [] } as never;
@@ -393,22 +428,28 @@ it.effect(
           .filter((command) => command.type === "thread.archive")
           .map((command) => command.threadId);
         assert.deepStrictEqual(archived, [seatThread("critic")]);
-        const beforeRetry = (yield* Ref.get(commands)).length;
-        const retiredSeat = yield* launch("critic").pipe(Effect.flip);
-        assert.equal(retiredSeat._tag, "CrewLaunchOperationError");
-        assert.include(retiredSeat.message, "reusing a retired seat");
-        assert.equal((yield* Ref.get(commands)).length, beforeRetry);
-        assert.sameMembers(
-          (yield* crews.read(crewId))!.members.map((member) => member.seatName),
-          ["builder", "reviewer"],
+        const revived = yield* launch("critic");
+        const ordinals = yield* (yield* SqlClient.SqlClient)<{ readonly ordinal: number }>`
+          SELECT ordinal FROM j5_agent_crew_member WHERE crew_instance_id = ${crewId}
+        `;
+        assert.equal(new Set(ordinals.map((row) => row.ordinal)).size, revived.members.length);
+        assert.deepStrictEqual(
+          revived.members.map((member) => member.seatName),
+          ["builder", "critic"],
         );
-        assert.isNull(yield* crews.findMembership(participantIdForThread(seatThread("critic"))));
+        assert.deepStrictEqual(
+          (yield* Ref.get(commands))
+            .filter((command) => command.type === "thread.unarchive")
+            .map((command) => command.threadId),
+          [seatThread("critic")],
+        );
+        assert.isNull(yield* crews.findMembership(participantIdForThread(seatThread("reviewer"))));
         // Every seat that launches was briefed, and the roster in the brief is the one that launched.
         const briefs = (yield* Ref.get(commands)).filter(
           (command) => command.type === "message.dispatch",
         );
-        assert.lengthOf(briefs, 2);
-        const reviewerBrief = briefs.at(-1);
+        assert.lengthOf(briefs, 4);
+        const reviewerBrief = briefs.find((command) => command.threadId === seatThread("reviewer"));
         if (reviewerBrief?.type === "message.dispatch") {
           assert.include(reviewerBrief.text, "your_seat: reviewer");
           assert.notInclude(reviewerBrief.text, "- critic:");
@@ -1261,3 +1302,213 @@ it.effect("a retry that drops the failed seat keeps the briefs the other seats a
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );
+
+for (const scenario of [
+  "addition rename",
+  "drop and re-add",
+  "persona correction",
+  "established seats",
+] as const) {
+  it.effect(`retry convergence: ${scenario}`, () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const stable = { providerSessionId: "session", requestKey: "converge" };
+      const seatThread = (name: string) =>
+        spawnThreadId({
+          ...stable,
+          requestKey: crewSeatRequestKey(stable.requestKey, name),
+        });
+      const failHome = new Set<string>(
+        scenario === "addition rename"
+          ? [seatThread("old-name")]
+          : scenario === "persona correction"
+            ? [seatThread("first")]
+            : [],
+      );
+      const failBrief = new Set<string>(
+        scenario === "drop and re-add" || scenario === "established seats"
+          ? [seatThread("second")]
+          : [],
+      );
+      const archived = new Set<string>();
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(
+            commands,
+            [
+              provider("codex", "codex", [
+                { slug: "gpt-5.6-sol", options: ["high"] },
+                { slug: "gpt-5.6-terra", options: ["high"] },
+              ]),
+            ],
+            failHome,
+            new Set(),
+            archived,
+            true,
+            failBrief,
+          ),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-converge-" })),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const crews = yield* AgentCrewInstanceService;
+        const seat = (name: string, agentId: string | null = null, reason = "Original reason") => ({
+          name,
+          agentId,
+          reason,
+        });
+        const launch = (seats: ReturnType<typeof seat>[]) =>
+          Effect.gen(function* () {
+            const resolvedSeats = yield* launcher.resolveSeats(captain, seats);
+            return yield* launcher.launch({
+              ...stable,
+              captain,
+              seats,
+              resolvedSeats,
+              displayName: "Convergence",
+              brief: "Finish the approved work.",
+            });
+          });
+        if (scenario === "addition rename") {
+          const instance = yield* crews.record({
+            id: "crew:eleven",
+            squadronId,
+            captainParticipantId: captainId,
+            captainThreadId: captainThread,
+            displayName: "Eleven",
+            brief: "Existing work",
+            createdAt: DateTime.formatIso(createdAt),
+            members: Array.from({ length: 11 }, (_, i) => ({
+              seatName: `existing-${i}`,
+              agentId: null,
+              reason: "Established",
+              participantId: participantIdForThread(ThreadId.make(`existing-${i}`)),
+              threadId: ThreadId.make(`existing-${i}`),
+            })),
+          });
+          const add = (name: string) =>
+            launcher.addSeats({ ...stable, captain, instance, seats: [seat(name)] });
+          assert.equal((yield* add("old-name").pipe(Effect.flip))._tag, "CrewLaunchOperationError");
+          assert.lengthOf((yield* crews.read(instance.id))!.members, 12);
+          const result = yield* add("new-name");
+          assert.deepStrictEqual(result.members.slice(0, 11), instance.members);
+          assert.deepStrictEqual(
+            result.members.map((member) => member.seatName),
+            [...instance.members.map((member) => member.seatName), "new-name"],
+          );
+          const captured = yield* Ref.get(commands);
+          assert.deepStrictEqual(
+            captured
+              .filter((command) => command.type === "thread.archive")
+              .map((command) => command.threadId),
+            [seatThread("old-name")],
+          );
+          assert.deepStrictEqual(
+            captured
+              .filter((command) => command.type === "message.dispatch")
+              .map((command) => command.threadId),
+            [seatThread("new-name")],
+          );
+          assert.isTrue(archived.has(seatThread("old-name")));
+          return;
+        }
+        const seats =
+          scenario === "persona correction"
+            ? [seat("first", "builder"), seat("second", "critic")]
+            : [seat("first"), seat("second")];
+        assert.equal((yield* launch(seats).pipe(Effect.flip))._tag, "CrewLaunchOperationError");
+        const id = spawnCrewInstanceId(stable);
+        const before = (yield* crews.read(id))!;
+        if (scenario === "drop and re-add") {
+          yield* launch([seats[0]!]);
+          assert.isTrue(archived.has(seatThread("second")));
+          const result = yield* launch(seats);
+          assert.isFalse(archived.has(seatThread("second")));
+          assert.deepStrictEqual(
+            result.members.map((member) => member.seatName),
+            ["first", "second"],
+          );
+          assert.deepStrictEqual(result.members[0], before.members[0]);
+          let captured = yield* Ref.get(commands);
+          assert.lengthOf(
+            captured.filter((command) => command.type === "thread.unarchive"),
+            1,
+          );
+          assert.lengthOf(
+            captured.filter(
+              (command) =>
+                command.type === "message.dispatch" && command.threadId === seatThread("second"),
+            ),
+            1,
+          );
+          // A second drop/re-add must not replay the first flip's accepted receipt.
+          yield* launch([seats[0]!]);
+          assert.isTrue(archived.has(seatThread("second")));
+          yield* launch(seats);
+          assert.isFalse(archived.has(seatThread("second")));
+          captured = yield* Ref.get(commands);
+          const flips = captured.filter(
+            (command) => command.type === "thread.archive" || command.type === "thread.unarchive",
+          );
+          assert.lengthOf(flips, 4);
+          assert.equal(new Set(flips.map((command) => command.commandId)).size, 4);
+          assert.lengthOf(
+            captured.filter(
+              (command) =>
+                command.type === "message.dispatch" && command.threadId === seatThread("second"),
+            ),
+            1,
+          );
+        } else {
+          if (scenario === "persona correction") {
+            assert.isFalse(
+              (yield* Ref.get(commands)).some(
+                (command) =>
+                  command.type === "thread.create" && command.threadId === seatThread("second"),
+              ),
+            );
+            seats[1] = seat("second", "scout", "Updated reason");
+          } else seats[0] = seat("first", null, "Must not overwrite established metadata");
+          const result = yield* launch(seats);
+          assert.deepStrictEqual(result.members[0], before.members[0]);
+          const captured = yield* Ref.get(commands);
+          assert.lengthOf(
+            captured.filter(
+              (command) => command.type === "thread.archive" || command.type === "thread.unarchive",
+            ),
+            0,
+          );
+          if (scenario === "persona correction") {
+            assert.equal(result.members[1]!.agentId, "scout");
+            assert.equal(result.members[1]!.reason, "Updated reason");
+            const created = captured.find(
+              (command) =>
+                command.type === "thread.create" && command.threadId === seatThread("second"),
+            );
+            assert.equal(
+              created?.type === "thread.create" && created.agentPersonaAssignment?.personaId,
+              "scout",
+            );
+          } else {
+            assert.deepStrictEqual(result.members, before.members);
+            assert.lengthOf(
+              captured.filter(
+                (command) =>
+                  command.type === "thread.create" && command.threadId === seatThread("first"),
+              ),
+              1,
+            );
+          }
+        }
+        const briefs = (yield* Ref.get(commands)).filter(
+          (command) => command.type === "message.dispatch",
+        );
+        assert.lengthOf(briefs, 2);
+        assert.equal(new Set(briefs.map((command) => command.messageId)).size, 2);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+  );
+}
