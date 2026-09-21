@@ -200,6 +200,43 @@ export const openInboxCountStatement = (sql: SqlClient.SqlClient, personId: Part
       AND inbox.person_id = ${personId}
   `;
 
+/**
+ * The newest label a peer sent for each sender: each probe and the "nothing
+ * newer" check use the partial index from migration 21, so the cost follows the
+ * senders asked about, not the received history.
+ */
+export const peerSenderLabelStatement = (
+  sql: SqlClient.SqlClient,
+  participantIds: ReadonlyArray<string>,
+) =>
+  sql<IdentityRow>`
+    SELECT event.sender AS participant_id,
+           json_extract(event.payload, '$.senderLabel') AS display_name
+    FROM j5_a2a_comm_event AS event
+    WHERE event.kind = 'message.received'
+      AND json_extract(event.payload, '$.senderLabel') IS NOT NULL
+      AND event.sender IN ${sql.in(participantIds)}
+      AND NOT EXISTS (
+        SELECT 1 FROM j5_a2a_comm_event AS newer
+        WHERE newer.kind = 'message.received'
+          AND json_extract(newer.payload, '$.senderLabel') IS NOT NULL
+          AND newer.sender = event.sender
+          AND (
+            newer.created_at > event.created_at
+            OR (newer.created_at = event.created_at AND newer.seq > event.seq)
+          )
+      )
+  `;
+
+/** Test-facing plan hook for the peer label statement. */
+export const explainPeerSenderLabelStatement = (
+  sql: SqlClient.SqlClient,
+  participantIds: ReadonlyArray<string>,
+) => {
+  const [statement, parameters] = peerSenderLabelStatement(sql, participantIds).compile();
+  return sql.unsafe<QueryPlanRow>(`EXPLAIN QUERY PLAN ${statement}`, parameters);
+};
+
 /** Test-facing plan hook that compiles the production count statement rather than a copy. */
 export const explainOpenInboxCountStatement = (
   sql: SqlClient.SqlClient,
@@ -285,6 +322,15 @@ export const layer: Layer.Layer<ClientReadsService, never, A2AHumanInbox | SqlCl
                 WHERE participant_id IN ${sql.in(participantIdBatch)}
               `),
             );
+            // A sender homed on a peer has no thread here; the label its server
+            // sent with its latest delivery stands in, and only for ids nothing
+            // local named, so local-only reads never touch received history.
+            const unresolved = participantIdBatch.filter(
+              (participantId) => !rows.some((row) => row.participant_id === participantId),
+            );
+            if (unresolved.length > 0) {
+              rows.push(...(yield* peerSenderLabelStatement(sql, unresolved)));
+            }
           }
           const rowsByParticipant = Map.groupBy(rows, (row) => row.participant_id);
           return {
