@@ -460,7 +460,7 @@ function RetiredCrewItem(props: {
         {crew.roster.map((member) => (
           <li key={member.seat} className="flex flex-wrap items-baseline gap-x-2">
             <span className="uppercase tracking-wide text-muted-foreground">{member.seat}</span>
-            <span>{member.agentId}</span>
+            <span>{member.agentId ?? "Custom agent"}</span>
             <span className="text-muted-foreground">
               {member.addedVersion > 1 ? `joined at v${member.addedVersion}` : "approved roster"}
               {member.reason === null ? "" : ` · ${member.reason}`}

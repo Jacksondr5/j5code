@@ -17,7 +17,7 @@ const bounded = (max: number) =>
 /** One requested or approved seat. Reasons and instructions are the Captain's content, verbatim. */
 export const CrewProposalSeat = Schema.Struct({
   seat: bounded(CREW_NAME_MAX_CHARS),
-  agentId: bounded(CREW_NAME_MAX_CHARS),
+  agentId: Schema.NullOr(bounded(CREW_NAME_MAX_CHARS)),
   reason: bounded(CREW_REASON_MAX_CHARS),
   instructions: Schema.optional(bounded(CREW_TEXT_MAX_CHARS)),
 });

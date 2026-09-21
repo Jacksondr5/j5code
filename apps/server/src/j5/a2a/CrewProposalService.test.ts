@@ -366,6 +366,46 @@ it.effect("gates every roster on the human and gates additions with the seat cap
         .pipe(Effect.flip);
       assert.include(unknown.message, 'names agent "nobody"');
 
+      // A custom seat has nothing but its instructions to run on, so it cannot be filed without them.
+      const bare = yield* gate
+        .requestMember({
+          requestKey: "add-custom-bare",
+          captain,
+          crewInstanceId: instance.id,
+          seat: { seat: "scribe", agentId: null, reason: "Keeps notes" },
+          brief: null,
+        })
+        .pipe(Effect.flip);
+      assert.include(bare.message, "A custom seat needs instructions");
+
+      const blank = yield* gate
+        .requestMember({
+          requestKey: "add-custom-blank",
+          captain,
+          crewInstanceId: instance.id,
+          seat: { seat: "scribe", agentId: null, reason: "Keeps notes", instructions: " \n\t " },
+          brief: null,
+        })
+        .pipe(Effect.flip);
+      assert.include(blank.message, "Seat instructions");
+
+      // A custom seat names no agent, so the library is not consulted; it is filed like any other.
+      const custom = yield* gate.requestMember({
+        requestKey: "add-custom",
+        captain,
+        crewInstanceId: instance.id,
+        seat: {
+          seat: "scribe",
+          agentId: null,
+          reason: "Keeps notes",
+          instructions: "Write the running notes.",
+        },
+        brief: null,
+      });
+      assert.equal(custom.proposal.status, "open");
+      assert.isNull(custom.proposal.requestedSeats[0]?.agentId);
+      yield* gate.resolve({ proposalId: custom.proposal.id, decision: "decline" });
+
       const declined = yield* gate.resolve({
         proposalId: request.proposal.id,
         decision: "decline",
