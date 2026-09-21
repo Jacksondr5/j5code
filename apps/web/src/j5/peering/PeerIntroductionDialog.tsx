@@ -153,71 +153,72 @@ export function PeerIntroductionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Peer with another environment</DialogTitle>
+          <DialogTitle>Peer with another server</DialogTitle>
           <DialogDescription>
-            Both servers will hold a credential the other issued and the address they reach each
-            other at. Use the address each server can reach; the one this client uses is only a
-            starting point.
+            Each server ends up holding a credential the other issued and the address it reaches the
+            other at. The addresses below start from what this browser uses; confirm the address
+            each server can actually reach.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
-          <div className="space-y-4">
-            <label className="flex flex-col gap-1.5 text-sm font-medium text-foreground">
-              Environment to peer with
-              <Select
-                disabled={busy}
-                value={otherId ?? undefined}
-                onValueChange={(value) => chooseOther((value as EnvironmentId | null) ?? null)}
-              >
-                <SelectTrigger className="w-full" aria-label="Environment to peer with">
-                  <SelectValue>{other?.label ?? "Choose an environment"}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="start" alignItemWithTrigger={false}>
-                  {candidates.map((environment) => (
-                    <SelectItem key={environment.environmentId} value={environment.environmentId}>
-                      {environment.label}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-              {candidates.length === 0 ? (
-                <span className="text-xs font-normal text-muted-foreground">
-                  Add another environment under Remote environments first.
-                </span>
-              ) : null}
-            </label>
-
-            <OriginField
-              title={`Where ${remote.label} reaches ${local.label}`}
-              value={primaryOrigin}
-              onChange={setPrimaryOrigin}
-              disabled={busy}
-            />
-            <OriginField
-              title={`Where ${local.label} reaches ${remote.label}`}
-              value={otherOrigin}
-              onChange={setOtherOrigin}
-              disabled={busy || otherId === null}
-            />
+          <div className="space-y-5">
             <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-1.5 text-sm">
+                <span className="font-medium text-foreground">This server</span>
+                <span className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-foreground">
+                  {primary?.label ?? primaryEnvironmentId}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  The server this page is served from.
+                </span>
+              </div>
               <label className="flex flex-col gap-1.5 text-sm font-medium text-foreground">
-                {`Label for ${local.label} on ${remote.label}`}
-                <Input
-                  nativeInput
-                  value={primaryLabel}
+                Remote server
+                <Select
                   disabled={busy}
-                  onChange={(event) => setPrimaryLabel(event.currentTarget.value)}
-                />
+                  value={otherId ?? undefined}
+                  onValueChange={(value) => chooseOther((value as EnvironmentId | null) ?? null)}
+                >
+                  <SelectTrigger className="w-full" aria-label="Remote server to peer with">
+                    <SelectValue>{other?.label ?? "Choose a remote server"}</SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="start" alignItemWithTrigger={false}>
+                    {candidates.map((environment) => (
+                      <SelectItem key={environment.environmentId} value={environment.environmentId}>
+                        {environment.label}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+                <span className="text-xs font-normal text-muted-foreground">
+                  {candidates.length === 0
+                    ? "Add another environment under Remote environments first."
+                    : "One of the environments this browser is connected to."}
+                </span>
               </label>
-              <label className="flex flex-col gap-1.5 text-sm font-medium text-foreground">
-                {`Label for ${remote.label} on ${local.label}`}
-                <Input
-                  nativeInput
-                  value={otherLabel}
-                  disabled={busy || otherId === null}
-                  onChange={(event) => setOtherLabel(event.currentTarget.value)}
-                />
-              </label>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <PeerSideFields
+                heading={`This server · ${primary?.label ?? primaryEnvironmentId}`}
+                originTitle={`Reaches ${remote.label} at`}
+                originValue={otherOrigin}
+                onOriginChange={setOtherOrigin}
+                labelTitle={`Known on ${remote.label} as`}
+                labelValue={primaryLabel}
+                onLabelChange={setPrimaryLabel}
+                disabled={busy || otherId === null}
+              />
+              <PeerSideFields
+                heading={`Remote server · ${other?.label ?? "not chosen"}`}
+                originTitle="Reaches this server at"
+                originValue={primaryOrigin}
+                onOriginChange={setPrimaryOrigin}
+                labelTitle="Known on this server as"
+                labelValue={otherLabel}
+                onLabelChange={setOtherLabel}
+                disabled={busy || otherId === null}
+              />
             </div>
 
             {readiness.kind !== "ready" && otherId !== null ? (
@@ -267,31 +268,56 @@ export function PeerIntroductionDialog({
   );
 }
 
-function OriginField({
-  title,
-  value,
-  onChange,
+/**
+ * One side of the pairing, from that server's point of view: where it reaches
+ * the other server, and what the other server will call it. The two columns
+ * mirror each other and stack when the dialog is narrow.
+ */
+function PeerSideFields({
+  heading,
+  originTitle,
+  originValue,
+  onOriginChange,
+  labelTitle,
+  labelValue,
+  onLabelChange,
   disabled,
 }: {
-  readonly title: string;
-  readonly value: string;
-  readonly onChange: (value: string) => void;
+  readonly heading: string;
+  readonly originTitle: string;
+  readonly originValue: string;
+  readonly onOriginChange: (value: string) => void;
+  readonly labelTitle: string;
+  readonly labelValue: string;
+  readonly onLabelChange: (value: string) => void;
   readonly disabled: boolean;
 }) {
-  const warning = peerOriginWarning(value);
+  const warning = peerOriginWarning(originValue);
   return (
-    <label className="flex flex-col gap-1.5 text-sm font-medium text-foreground">
-      {title}
-      <Input
-        nativeInput
-        value={value}
-        disabled={disabled}
-        placeholder="https://host:3773"
-        onChange={(event) => onChange(event.currentTarget.value)}
-      />
-      {warning !== null ? (
-        <span className="text-xs font-normal text-warning-foreground">{warning}</span>
-      ) : null}
-    </label>
+    <fieldset className="flex flex-col gap-3 rounded-lg border border-border/60 p-3">
+      <legend className="px-1 text-xs font-medium text-muted-foreground">{heading}</legend>
+      <label className="flex flex-col gap-1.5 text-sm font-medium text-foreground">
+        {originTitle}
+        <Input
+          nativeInput
+          value={originValue}
+          disabled={disabled}
+          placeholder="https://host:3773"
+          onChange={(event) => onOriginChange(event.currentTarget.value)}
+        />
+        {warning !== null ? (
+          <span className="text-xs font-normal text-warning-foreground">{warning}</span>
+        ) : null}
+      </label>
+      <label className="flex flex-col gap-1.5 text-sm font-medium text-foreground">
+        {labelTitle}
+        <Input
+          nativeInput
+          value={labelValue}
+          disabled={disabled}
+          onChange={(event) => onLabelChange(event.currentTarget.value)}
+        />
+      </label>
+    </fieldset>
   );
 }
