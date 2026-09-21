@@ -66,11 +66,11 @@ export function PeerServersSettings({
           size="xs"
           variant="ghost"
           className="font-normal text-muted-foreground/60 hover:text-muted-foreground"
-          aria-label="Peer with another environment"
+          aria-label="Add peer"
           onClick={() => setDialogOpen(true)}
         >
           <PlusIcon className="size-3" />
-          <span>Peer with…</span>
+          <span>Add peer</span>
         </Button>
       }
     >
