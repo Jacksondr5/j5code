@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { Link } from "@tanstack/react-router";
-import { UsersRoundIcon } from "lucide-react";
+import { RadarIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 
 import { useSidebar } from "../../components/ui/sidebar";
@@ -33,7 +33,7 @@ export function FleetRailEntry({ onBackdrop }: { readonly onBackdrop: boolean })
     <Link
       aria-label={label}
       className={cn(
-        // The gap to the inbox bell beside it is this element's own margin, so the upstream
+        // The gap to the inbox entry beside it is this element's own margin, so the upstream
         // wrapper keeps its spacing classes.
         "relative z-10 me-0.5 flex size-7 shrink-0 items-center justify-center rounded-md outline-hidden transition-colors [-webkit-app-region:no-drag] focus-visible:ring-2 focus-visible:ring-ring",
         onBackdrop
@@ -44,7 +44,7 @@ export function FleetRailEntry({ onBackdrop }: { readonly onBackdrop: boolean })
       title={label}
       to="/fleet"
     >
-      <UsersRoundIcon aria-hidden className="size-4" />
+      <RadarIcon aria-hidden className="size-4" />
       {alerts !== null && alerts > 0 ? (
         <span className="absolute -end-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] font-semibold leading-none text-primary-foreground tabular-nums ring-2 ring-sidebar">
           {alerts}
