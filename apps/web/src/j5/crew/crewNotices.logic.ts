@@ -22,7 +22,7 @@ export interface CrewRosterSeat {
   readonly start: SeatStart | null;
 }
 
-/** A seat that failed to start, with the run's recorded error as the report carried it. */
+/** A seat that failed, with the run's recorded error as the report carried it. */
 export interface SeatStartFailure {
   readonly seat: string;
   readonly runStatus: string;
@@ -62,6 +62,12 @@ const LAUNCH_BLOCK =
 const GATE_BLOCK = /^<j5_crew_gate>\n([\s\S]*?)\n<\/j5_crew_gate>/;
 const ROSTER_LINE =
   /^- ([^:]+): participant_id=(\S+) agent=(\S+) thread_id=(\S+)(?: start=(started|failed|pending))?( \(new\))?$/;
+
+// Decode after parsing: provider diagnostics cannot create fields or terminate tagged blocks.
+const decodeFailureField = (value: string) =>
+  value.replace(/&#(10|13|38|60|62|8232|8233);/g, (_, code: string) =>
+    String.fromCharCode(Number(code)),
+  );
 
 const field = (block: string, name: string) =>
   new RegExp(`^${name}: (.*)$`, "m").exec(block)?.[1]?.trim() ?? null;
@@ -118,7 +124,7 @@ const parseGate = (text: string): CrewNoticePresentation | null => {
     const [seat, runStatus, ...rest] = entry.split(" | ");
     return seat === undefined || runStatus === undefined || rest.length === 0
       ? []
-      : [{ seat, runStatus, detail: rest.join(" | ") }];
+      : [{ seat, runStatus, detail: decodeFailureField(rest.join(" | ")) }];
   });
   const changes = field(block, "changes");
   const requestedSeats = (field(block, "requested_seats") ?? "")
@@ -168,8 +174,8 @@ export const crewGateTitle = (notice: Extract<CrewNoticePresentation, { kind: "g
     return notice.requestKind === "roster" ? "Crew declined" : "Seat declined";
   if (notice.failures.length > 0)
     return notice.requestKind === "roster"
-      ? `Crew launched, ${notice.failures.length} ${notice.failures.length === 1 ? "seat" : "seats"} failed to start`
-      : "Seat failed to start";
+      ? `Crew launched, ${notice.failures.length} ${notice.failures.length === 1 ? "seat" : "seats"} failed`
+      : "Seat failed";
   return notice.requestKind === "roster" ? "Crew launched" : "Seat added";
 };
 
@@ -180,7 +186,7 @@ export const crewGateFooter = (notice: Extract<CrewNoticePresentation, { kind: "
   const parts: Array<string> = [];
   if (notice.failures.length > 0)
     parts.push(
-      `${notice.failures.length} ${notice.failures.length === 1 ? "seat" : "seats"} failed to start; the Captain has each reason.`,
+      `${notice.failures.length} ${notice.failures.length === 1 ? "seat" : "seats"} failed; the Captain has each reason.`,
     );
   if (notice.pendingSeats.length > 0)
     parts.push(

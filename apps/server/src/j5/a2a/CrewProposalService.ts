@@ -522,21 +522,28 @@ export const layer = Layer.effect(
     });
 
     /**
-     * A claimed decline: an earlier approval may have failed partway and handed the gate back, so
-     * the cleanup runs first and the decline is recorded last. For an addition, every row this
-     * proposal reserved is released; for a roster, the Crew record and any seat threads the
-     * failed launch created are retired. Run from the gate and from the boot sweep alike.
+     * A claimed decline's work before it is recorded: an earlier approval may have failed partway
+     * and handed the gate back, so the cleanup runs first and the Captain is told last. For an
+     * addition, every row this proposal reserved is released; for a roster, the Crew record and
+     * any seat threads the failed launch created are retired.
      */
+    const retireAndNotifyDeclined = Effect.fn("j5.a2a.crewProposal.retireAndNotifyDeclined")(
+      function* (claimed: CrewProposal) {
+        if (claimed.crewInstanceId !== null) {
+          if (claimed.kind === "addition")
+            yield* retireFailedAddition(claimed, claimed.crewInstanceId);
+          else yield* retireFailedLaunch(claimed, claimed.crewInstanceId);
+        }
+        yield* notifyDeclined(claimed);
+      },
+    );
+
+    /** A claimed decline, cleaned up, told, and recorded; run from the gate and the boot sweep alike. */
     const finishDecline = Effect.fn("j5.a2a.crewProposal.finishDecline")(function* (
       claimed: CrewProposal,
     ) {
-      if (claimed.crewInstanceId !== null) {
-        if (claimed.kind === "addition")
-          yield* retireFailedAddition(claimed, claimed.crewInstanceId);
-        else yield* retireFailedLaunch(claimed, claimed.crewInstanceId);
-      }
+      yield* retireAndNotifyDeclined(claimed);
       const declined = yield* complete(claimed, "decline", null);
-      yield* notifyDeclined(declined);
       return { proposal: declined, instance: null } satisfies CrewProposalOutcome;
     });
 
@@ -554,11 +561,15 @@ export const layer = Layer.effect(
           });
         if (input.decision === "decline") {
           const claimed = yield* claim(proposal, "decline", null);
-          return yield* finishDecline(claimed).pipe(
-            // A cleanup the store refused hands the gate back so the person can decline again,
-            // rather than leaving a claimed row only the next boot would finish.
+          // A cleanup or notice the store refused hands the gate back so the person can decline
+          // again, rather than leaving a claimed row only the next boot would finish.
+          yield* retireAndNotifyDeclined(claimed).pipe(
             Effect.onError(() => proposals.reopen(claimed.id).pipe(Effect.ignore)),
           );
+          // Once the decline notice is durable the row stays `declining` for the boot sweep to
+          // record: reopening here would let a fresh approval launch beneath a declined card.
+          const declined = yield* complete(claimed, "decline", null);
+          return { proposal: declined, instance: null } satisfies CrewProposalOutcome;
         }
         const seats = input.seats ?? proposal.requestedSeats;
         // The human may have renamed or added seats on the card; check them against the live

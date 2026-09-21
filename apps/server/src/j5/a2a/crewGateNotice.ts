@@ -2,7 +2,7 @@ import type { OrchestrationV2ProviderFailure } from "@t3tools/contracts";
 
 import type { AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import type { CrewProposal, CrewProposalSeat } from "./AgentCrewProposalService.ts";
-import { formatRunFailure } from "./runFailures.ts";
+import { formatRunFailureField } from "./runFailures.ts";
 
 /**
  * How a seat's first turn went, measured from its run: `started` once provider activity is recorded
@@ -93,10 +93,10 @@ export const crewLaunchReportText = (input: {
   const failed = [...verdicts].filter(([, verdict]) => verdict.kind === "failed");
   const pending = [...verdicts].filter(([, verdict]) => verdict.kind === "pending");
   const windowSeconds = Math.round(input.windowMs / 1000);
-  const launch = `launch: ${started} started, ${failed.length} failed to start, ${pending.length} start unconfirmed after ${windowSeconds}s`;
+  const launch = `launch: ${started} started, ${failed.length} failed, ${pending.length} start unconfirmed after ${windowSeconds}s`;
   const failedLines = failed.map(
     ([seat, verdict]) =>
-      `seat_failed: ${seat} | ${verdict.kind === "failed" ? verdict.runStatus : ""} | ${formatRunFailure(verdict.kind === "failed" ? verdict.failure : null)}`,
+      `seat_failed: ${seat} | ${verdict.kind === "failed" ? verdict.runStatus : ""} | ${formatRunFailureField(verdict.kind === "failed" ? verdict.failure : null)}`,
   );
   const pendingLines = pending.map(([seat]) => `seat_pending: ${seat}`);
   const roster = instance.members
@@ -125,7 +125,7 @@ export const crewLaunchReportText = (input: {
   const prose: Array<string> = [];
   if (failed.length > 0)
     prose.push(
-      `${failed.length} of ${verdicts.size} seats failed to start; each seat_failed line carries the run's error. The platform raises provider sign-in and permission failures in the human inbox. Re-brief the seat with send_message once the provider works; ask the user about other failures when their help is needed. Seats that started have your brief and this roster.`,
+      `${failed.length} of ${verdicts.size} seats failed; each seat_failed line carries the run's error. The platform raises provider sign-in and permission failures in the human inbox. Re-brief the seat with send_message once the provider works; ask the user about other failures when their help is needed. Seats that started have your brief and this roster.`,
     );
   if (pending.length > 0)
     prose.push(

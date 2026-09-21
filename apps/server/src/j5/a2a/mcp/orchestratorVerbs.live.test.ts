@@ -55,6 +55,7 @@ import { ParticipantPlacementService } from "../PlacementService.ts";
 import { CommCommandId, ParticipantId, SquadronId } from "../contracts.ts";
 import { PlacementCommandId } from "../placementContracts.ts";
 import { J5A2ARuntimeLayer } from "../runtimeLayer.ts";
+import { spawnThreadId } from "../spawnIds.ts";
 import { J5ToolkitHandlersLive } from "./handlers.ts";
 import {
   type J5SpawnAgentInput,
@@ -287,9 +288,10 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
             createdAt: "2026-08-30T17:00:00.000Z",
           });
 
-          const expectedThreadId = ThreadId.make(
-            `thread:j5:a2a:mcp:${encodeURIComponent(scope.providerSessionId)}:spawn:${requestKey}`,
-          );
+          const expectedThreadId = spawnThreadId({
+            providerSessionId: scope.providerSessionId,
+            requestKey,
+          });
           const runningFiber = yield* runStatus(expectedThreadId, new Set(["running"])).pipe(
             Effect.forkScoped,
           );

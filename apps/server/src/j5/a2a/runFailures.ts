@@ -23,3 +23,13 @@ export const runFailureDetail = (
 /** One line for a notice: `provider_error — API Error: Can't reach the API server`. */
 export const formatRunFailure = (failure: OrchestrationV2ProviderFailure | null) =>
   failure === null ? "no error detail was recorded" : `${failure.class} — ${failure.message}`;
+
+/**
+ * Escape field and tag delimiters before provider text enters a line-oriented Crew notice. The
+ * parsers extract fields with multiline `^`/`$`, which treat U+2028 and U+2029 as line breaks too.
+ */
+export const formatRunFailureField = (failure: OrchestrationV2ProviderFailure | null) =>
+  formatRunFailure(failure).replace(
+    /[&<>\r\n\u2028\u2029]/g,
+    (character) => `&#${character.charCodeAt(0)};`,
+  );

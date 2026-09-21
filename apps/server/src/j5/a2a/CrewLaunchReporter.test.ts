@@ -318,10 +318,7 @@ it.effect("posts one report once every seat has started or failed, with the run'
       assert.equal(yield* reporter.handleStoredEvent(running), id);
       const [report] = yield* reports();
       assert.isDefined(report);
-      assert.include(
-        report!,
-        "launch: 2 started, 1 failed to start, 0 start unconfirmed after 60s",
-      );
+      assert.include(report!, "launch: 2 started, 1 failed, 0 start unconfirmed after 60s");
       assert.include(report!, "changes: added prosecutor");
       assert.include(
         report!,
@@ -369,10 +366,7 @@ it.effect(
         let texts = yield* reports();
         assert.lengthOf(texts, 1);
         assert.include(texts[0]!, `proposal_id: ${lost}`);
-        assert.include(
-          texts[0]!,
-          "launch: 1 started, 0 failed to start, 0 start unconfirmed after 60s",
-        );
+        assert.include(texts[0]!, "launch: 1 started, 0 failed, 0 start unconfirmed after 60s");
         assert.isNotNull((yield* proposals.read(lost))!.reportedAt);
         assert.isNull((yield* proposals.read(slow))!.reportedAt);
         // The slow seat's thread never even exists; when the window closes the Captain is told so.
@@ -381,10 +375,7 @@ it.effect(
         texts = yield* reports();
         assert.lengthOf(texts, 2);
         assert.include(texts[1]!, `proposal_id: ${slow}`);
-        assert.include(
-          texts[1]!,
-          "launch: 0 started, 0 failed to start, 1 start unconfirmed after 60s",
-        );
+        assert.include(texts[1]!, "launch: 0 started, 0 failed, 1 start unconfirmed after 60s");
         assert.include(texts[1]!, "seat_pending: setup");
         assert.include(texts[1]!, "1 seat has no confirmed provider activity after 60s");
         assert.isNotNull((yield* proposals.read(slow))!.reportedAt);
@@ -478,10 +469,7 @@ it.effect("a provider activity update during initial reads is handled after the 
       yield* Fiber.join(watching);
       yield* Fiber.join(update);
       assert.lengthOf(yield* reports(), 1);
-      assert.include(
-        (yield* reports())[0]!,
-        "launch: 2 started, 0 failed to start, 0 start unconfirmed",
-      );
+      assert.include((yield* reports())[0]!, "launch: 2 started, 0 failed, 0 start unconfirmed");
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );
@@ -506,10 +494,7 @@ it.effect(
         // No stream event was delivered; the timeout must use current facts.
         yield* TestClock.adjust(CREW_LAUNCH_REPORT_WINDOW_MS);
         yield* Queue.take(receipts);
-        assert.include(
-          (yield* reports())[0]!,
-          "launch: 1 started, 0 failed to start, 0 start unconfirmed",
-        );
+        assert.include((yield* reports())[0]!, "launch: 1 started, 0 failed, 0 start unconfirmed");
         const run = runEvent(threadId, { status: "failed", userMessageId }).event
           .payload as OrchestrationV2Run;
         assert.isFalse(yield* reporter.coversFailure(threadId, run));

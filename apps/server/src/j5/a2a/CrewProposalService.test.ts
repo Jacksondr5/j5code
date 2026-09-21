@@ -169,6 +169,7 @@ const fixture = Effect.gen(function* () {
   );
   const notices = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
   // Seat threads whose archive the store refuses, to prove a decline whose cleanup fails stays open.
+  const noticeFailure = yield* Ref.make(false);
   const archiveFailures = yield* Ref.make<ReadonlySet<string>>(new Set());
   // Seat threads that never came to exist (a not-found), and ones whose read the store cannot answer.
   const missingThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
@@ -176,7 +177,19 @@ const fixture = Effect.gen(function* () {
   // An approval is told to the Captain by the launch report, once its seats have started; here the
   // reporter records which proposals it was handed.
   const watched = yield* Ref.make<ReadonlyArray<string>>([]);
+  // While set, recording a resolution lands nothing: the store answers as if the row were no
+  // longer claimed, which is what a decline sees when its final write fails after the notice.
+  const completeFailure = yield* Ref.make(false);
+  const store = Context.get(context, AgentCrewProposalService);
+  const flakyStore = Layer.succeed(AgentCrewProposalService, {
+    ...store,
+    complete: (input) =>
+      Ref.get(completeFailure).pipe(
+        Effect.flatMap((failing) => (failing ? Effect.succeed(null) : store.complete(input))),
+      ),
+  });
   const layer = crewProposalLayer.pipe(
+    Layer.provideMerge(flakyStore),
     Layer.provideMerge(fakeLauncher(crews)),
     Layer.provideMerge(
       Layer.mock(CrewLaunchReporter)({
@@ -203,8 +216,9 @@ const fixture = Effect.gen(function* () {
         dispatch: (command) =>
           Effect.gen(function* () {
             if (
-              command.type === "thread.archive" &&
-              (yield* Ref.get(archiveFailures)).has(command.threadId)
+              (command.type === "thread.archive" &&
+                (yield* Ref.get(archiveFailures)).has(command.threadId)) ||
+              (command.type === "message.dispatch" && (yield* Ref.get(noticeFailure)))
             )
               return yield* Effect.fail(
                 new OrchestratorDispatchError({
@@ -221,7 +235,16 @@ const fixture = Effect.gen(function* () {
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-proposal-" })),
     Layer.provideMerge(NodeServices.layer),
   );
-  return { layer, notices, watched, archiveFailures, missingThreads, unreadableThreads };
+  return {
+    layer,
+    notices,
+    watched,
+    archiveFailures,
+    missingThreads,
+    unreadableThreads,
+    noticeFailure,
+    completeFailure,
+  };
 });
 
 it.effect(
@@ -783,6 +806,41 @@ it.effect("a decision that races another device's on the same gate is refused, n
   }).pipe(Effect.scoped),
 );
 
+it.effect("a decline whose notice committed is never handed back to the opposite choice", () =>
+  Effect.gen(function* () {
+    const { layer, notices, completeFailure } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const gate = yield* CrewProposalService;
+      const proposals = yield* AgentCrewProposalService;
+      const roster = yield* gate.propose({
+        requestKey: "declined-stays-1",
+        captain,
+        displayName: "Declined stays declined",
+        brief: "Build it.",
+        seats: [{ seat: "maker", agentId: "builder", reason: "Builds" }],
+      });
+      // The Captain's decline card is durable, then the final status write fails.
+      yield* Ref.set(completeFailure, true);
+      const failed = yield* gate
+        .resolve({ proposalId: roster.proposal.id, decision: "decline" })
+        .pipe(Effect.flip);
+      assert.equal(failed._tag, "CrewProposalOperationError");
+      const told = (yield* Ref.get(notices)).findLast(
+        (command) => command.type === "message.dispatch",
+      );
+      if (told?.type === "message.dispatch") assert.include(told.text, "decision: declined");
+      else assert.fail("the decline notice was not dispatched");
+      // Reopening now would let an approval launch a Crew beneath a card that says declined;
+      // a claimed row refuses every resolution until the boot sweep records the decline.
+      assert.equal((yield* proposals.read(roster.proposal.id))!.status, "declining");
+      // The boot sweep finishes the lost decline once the store recovers.
+      yield* Ref.set(completeFailure, false);
+      assert.deepStrictEqual(yield* gate.reconcile, [roster.proposal.id]);
+      assert.equal((yield* proposals.read(roster.proposal.id))!.status, "declined");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
 it.effect("the boot sweep finishes a decline the server lost and hands a lost approval back", () =>
   Effect.gen(function* () {
     const { layer, notices } = yield* fixture;
@@ -883,6 +941,30 @@ it.effect("a seat thread that never existed is skipped; a store that cannot answ
           .map((command) => command.threadId),
         [ThreadId.make("thread:builder")],
       );
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a failed decline notice leaves the decision retryable", () =>
+  Effect.gen(function* () {
+    const { layer, noticeFailure, notices } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const gate = yield* CrewProposalService;
+      const store = yield* AgentCrewProposalService;
+      const open = yield* gate.propose({
+        requestKey: "decline-notice-failure",
+        captain,
+        displayName: "Review",
+        brief: "Review the change",
+        seats: [{ seat: "critic", agentId: "critic", reason: "Review" }],
+      });
+      yield* Ref.set(noticeFailure, true);
+      yield* gate.resolve({ proposalId: open.proposal.id, decision: "decline" }).pipe(Effect.flip);
+      assert.equal((yield* store.read(open.proposal.id))?.status, "open");
+      yield* Ref.set(noticeFailure, false);
+      const result = yield* gate.resolve({ proposalId: open.proposal.id, decision: "decline" });
+      assert.equal(result.proposal.status, "declined");
+      assert.lengthOf(yield* Ref.get(notices), 1);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );

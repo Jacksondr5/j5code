@@ -187,7 +187,7 @@ function CrewGateCard(props: {
                   ) : null}
                   {seat.start === "failed" ? (
                     <span className="ms-auto shrink-0 rounded-md bg-red-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-red-700 dark:text-red-300">
-                      Failed to start
+                      Failed
                     </span>
                   ) : seat.start === "pending" ? (
                     <span className="ms-auto shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">

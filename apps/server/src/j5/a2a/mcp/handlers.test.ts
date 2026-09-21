@@ -1147,6 +1147,7 @@ it.effect("preflights home before creation and records facts before the one stab
     const squadronName = "Release proof Squadron";
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-spawn-caller");
     const childParticipantId = ParticipantId.make("agent:j5:mcp-spawn-child");
+    const failFacts = yield* Ref.make(false);
     const order = yield* Ref.make<ReadonlyArray<string>>([]);
     const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
     const facts = yield* Ref.make<
@@ -1192,44 +1193,48 @@ it.effect("preflights home before creation and records facts before the one stab
     });
     const composition = Layer.mock(SpawnCompositionService)({
       recordFacts: (input) =>
-        String(input.threadId).includes("spawn-facts-fail")
-          ? Effect.fail(
-              new PlacementStorageError({
-                operation: "record spawn facts",
-                cause: new Error("injected placement failure"),
-              }),
-            )
-          : Effect.all(
-              [
-                Ref.update(order, (items) => [...items, "facts"]),
-                Ref.update(facts, (items) => [
-                  ...items,
-                  {
-                    homeCommandId: input.homeCommandId,
-                    placementCommandId: input.placementCommandId,
-                    spawnedByParticipantId: input.spawnedByParticipantId,
-                    threadId: input.threadId,
-                  },
-                ]),
-              ],
-              { discard: true },
-            ).pipe(
-              Effect.as({
-                home: { squadronId, participantId: childParticipantId },
-                placement: {
-                  squadronId,
-                  participantId: childParticipantId,
-                  provenance: {
-                    kind: "spawned-by" as const,
-                    spawnedByParticipantId: callerParticipantId,
-                    source: "j5_spawn" as const,
-                  },
-                  placementParentId: callerParticipantId,
-                  createdEventSeq: 1,
-                  updatedEventSeq: 1,
-                },
-              }),
-            ),
+        Ref.get(failFacts).pipe(
+          Effect.flatMap((fail) =>
+            fail
+              ? Effect.fail(
+                  new PlacementStorageError({
+                    operation: "record spawn facts",
+                    cause: new Error("injected placement failure"),
+                  }),
+                )
+              : Effect.all(
+                  [
+                    Ref.update(order, (items) => [...items, "facts"]),
+                    Ref.update(facts, (items) => [
+                      ...items,
+                      {
+                        homeCommandId: input.homeCommandId,
+                        placementCommandId: input.placementCommandId,
+                        spawnedByParticipantId: input.spawnedByParticipantId,
+                        threadId: input.threadId,
+                      },
+                    ]),
+                  ],
+                  { discard: true },
+                ).pipe(
+                  Effect.as({
+                    home: { squadronId, participantId: childParticipantId },
+                    placement: {
+                      squadronId,
+                      participantId: childParticipantId,
+                      provenance: {
+                        kind: "spawned-by" as const,
+                        spawnedByParticipantId: callerParticipantId,
+                        source: "j5_spawn" as const,
+                      },
+                      placementParentId: callerParticipantId,
+                      createdEventSeq: 1,
+                      updatedEventSeq: 1,
+                    },
+                  }),
+                ),
+          ),
+        ),
     });
     const threadManagement = Layer.mock(ThreadManagementService)({
       getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
@@ -1429,6 +1434,7 @@ it.effect("preflights home before creation and records facts before the one stab
       );
       assert.lengthOf(yield* Ref.get(commands), 4);
 
+      yield* Ref.set(failFacts, true);
       const orphaned = yield* call({
         ...args,
         client_request_id: "spawn-facts-fail",

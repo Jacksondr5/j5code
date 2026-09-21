@@ -1,3 +1,4 @@
+import * as NodeCrypto from "node:crypto";
 import { CommandId, MessageId, ThreadId } from "@t3tools/contracts";
 
 import { CommCommandId } from "./contracts.ts";
@@ -34,8 +35,13 @@ export const lifecycleId = (
 export const lifecycleCommandId = (input: SpawnStableInput & { readonly operation: string }) =>
   CommandId.make(lifecycleId({ kind: "command", ...input }));
 
+// Thread ids become filenames (including base64 terminal history names); bound their length.
 export const spawnThreadId = (input: SpawnStableInput) =>
-  ThreadId.make(lifecycleId({ kind: "thread", operation: "spawn", ...input }));
+  ThreadId.make(
+    `thread:j5:a2a:${NodeCrypto.createHash("sha256")
+      .update(JSON.stringify([input.providerSessionId, input.requestKey]))
+      .digest("hex")}`,
+  );
 
 export const spawnCrewInstanceId = (input: SpawnStableInput) =>
   lifecycleId({ kind: "crew", operation: "spawn-crew", ...input });
