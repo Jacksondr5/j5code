@@ -126,7 +126,16 @@ const unusedLifecycleDependencies = Layer.mergeAll(
   Layer.mock(A2AHomeRegistrar)({
     getHomeForThread: (threadId) => Effect.fail(new A2AHomeNotFoundError({ threadId })),
   }),
-  Layer.mock(A2ALedger)({}),
+  Layer.mock(A2ALedger)({
+    listSquadrons: () =>
+      Effect.succeed([
+        {
+          id: SquadronId.make("squadron:j5:mcp-directory"),
+          name: "Directory Squadron",
+          createdAt: DateTime.formatIso(createdAt),
+        },
+      ]),
+  }),
   Layer.mock(SpawnCompositionService)({}),
   Layer.mock(ThreadManagementService)({}),
   Layer.mock(OrchestratorMcpService)({}),
@@ -583,6 +592,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
     assert.deepStrictEqual(directory.participants, [
       {
         squadron_id: squadronId,
+        squadron_name: "Directory Squadron",
         participant_id: activeParticipantId,
         participant: { kind: "agent", id: activeParticipantId, thread_id: activeThreadId },
         self: false,
@@ -597,6 +607,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
       },
       {
         squadron_id: squadronId,
+        squadron_name: "Directory Squadron",
         participant_id: archivedParticipantId,
         participant: { kind: "agent", id: archivedParticipantId, thread_id: archivedThreadId },
         self: false,
@@ -611,6 +622,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
       },
       {
         squadron_id: squadronId,
+        squadron_name: "Directory Squadron",
         participant_id: missingParticipantId,
         participant: { kind: "agent", id: missingParticipantId, thread_id: missingThreadId },
         self: false,
@@ -625,6 +637,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
       },
       {
         squadron_id: squadronId,
+        squadron_name: "Directory Squadron",
         participant_id: humanParticipantId,
         participant: { kind: "human", id: humanParticipantId },
         self: false,
@@ -2058,7 +2071,7 @@ it.effect(
             Effect.fail(new OrchestratorProjectionError({ threadId: invocation.threadId })),
         }),
         Layer.mock(A2AHomeRegistrar)({}),
-        Layer.mock(A2ALedger)({}),
+        Layer.mock(A2ALedger)({ listSquadrons: () => Effect.succeed([]) }),
         Layer.mock(SpawnCompositionService)({}),
         Layer.mock(ThreadManagementService)({}),
         Layer.mock(OrchestratorMcpService)({}),
@@ -2096,6 +2109,8 @@ it.effect(
         );
         const remoteRow = listed.participants[1]!;
         assert.equal(remoteRow.display_name, "Support triage");
+        assert.equal(remoteRow.squadron_name, "L2 Support Rotation");
+        assert.equal(listed.participants[0]!.squadron_name, null);
         assert.equal(remoteRow.can_receive_message, true);
         assert.equal(remoteRow.can_open_exchange, true);
         assert.equal(remoteRow.self, false);

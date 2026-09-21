@@ -108,6 +108,8 @@ const ask: PeerInboundInput = {
   envelopeChannel: "peer",
   text: "What is the incident status?",
   originSquadronId: homeSquadron,
+  originSquadronName: "Home Support",
+  senderLabel: "Incident asker",
   intent: "incident status",
   createdAt: timestamp,
   originEnvironmentId: homeEnvironment,
@@ -147,6 +149,20 @@ it.effect(
           { kind: "exchange.opened", origin_environment: null },
           { kind: "message.received", origin_environment: homeEnvironment },
         ]);
+        const names = yield* sql<{
+          readonly squadron_name: string | null;
+          readonly sender_label: string | null;
+        }>`
+          SELECT json_extract(payload, '$.originSquadronName') AS squadron_name,
+                 json_extract(payload, '$.senderLabel') AS sender_label
+          FROM j5_a2a_comm_event
+          WHERE squadron_id = ${localSquadron} AND kind = 'message.received'
+        `;
+        assert.deepStrictEqual(
+          names,
+          [{ squadron_name: "Home Support", sender_label: "Incident asker" }],
+          "the names the origin sent stay with the received row for the client",
+        );
         const exchanges = yield* sql<{
           readonly sender_id: string;
           readonly receiver_id: string;

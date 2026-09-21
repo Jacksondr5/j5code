@@ -18,6 +18,7 @@ import {
   layerWithHooks as deliveryWorkerLayerWithHooks,
 } from "./DeliveryWorker.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { runMigrations } from "../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { PeerDirectory, type RemoteAgent } from "./PeerDirectory.ts";
 import { PeerRegistryService, type PeerConnection } from "./PeerRegistryService.ts";
@@ -105,11 +106,24 @@ const makeSendLayer = (
 };
 
 const seedLocal = Effect.fn("test.j5.a2a.peer.outbound.seed")(function* () {
+  yield* runMigrations();
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
   yield* ledger.createSquadron({
     squadron: { id: localSquadron, name: "Billing Migration", createdAt: timestamp },
   });
+  // The sender's thread title is the label the peer's people will see.
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`
+    INSERT INTO orchestration_v2_projection_threads (
+      thread_id, project_id, title, default_provider, runtime_mode,
+      interaction_mode, active_provider_thread_id, created_at, updated_at,
+      archived_at, deleted_at, payload_json
+    ) VALUES (
+      ${billing.threadId}, 'project:billing', 'Billing agent', 'codex', 'full-access',
+      'default', NULL, ${timestamp}, ${timestamp}, NULL, NULL, '{}'
+    )
+  `;
   yield* ledger.append({
     commandId: CommCommandId.make("command:peer-outbound:join"),
     squadronId: localSquadron,
@@ -326,6 +340,8 @@ it.effect(
         assert.equal(body.exchangeRole, "ask");
         assert.equal(body.intent, "incident status");
         assert.equal(body.originSquadronId, localSquadron);
+        assert.equal(body.originSquadronName, "Billing Migration");
+        assert.equal(body.senderLabel, "Billing agent");
         assert.match(body.correlationId, /^correlation:j5:a2a:/);
       }).pipe(
         Effect.provide(

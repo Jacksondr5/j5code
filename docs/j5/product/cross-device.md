@@ -64,12 +64,13 @@ What this never does: no replicated state, no multi-master, no Squadron migratio
 14. Peering is done from a client connected to both environments with administrative scope; the person confirms the origin each server will use, which may differ from the one the client uses.
 15. A peer server is recorded only after the recording server has reached it at the stated origin with the credential it issued; an unreachable origin is refused with the reason, never recorded, and a known peer server is not moved to a new origin unless the person says so.
 16. An agent addresses a participant homed on a peer server by the same participant id it would use locally; no agent verb takes, returns or reveals a server, and the envelope names the sender and its Squadron exactly as for a local send.
-17. The address book lists participants homed on peer servers beside local ones with their Squadron; it reads every peer server's roster live on each call, so an unreachable one costs the call its timeout and is reported as unread in the listing, never omitted silently.
+17. The address book lists participants homed on peer servers beside local ones with their Squadron's id and name; it reads every peer server's roster live on each call, so an unreachable one costs the call its timeout and is reported as unread in the listing, never omitted silently.
 18. A message to a participant on a peer server is recorded in the sender's Squadron ledger before the call returns, for a participant the address book resolves or one this server has already exchanged messages with; a first message to a participant on a peer server that cannot be read is refused with the reason. The peer server records its own received row before delivering to the agent's thread, and that acknowledgement is the sender's delivery receipt: it means the peer server accepted the message, and delivery into the thread is the peer server's to retry and alarm on. Failure to reach the peer server retries and alarms on the sender's server as any delivery does.
 19. Retrying one message to a peer server never yields a second received row or a second delivery.
 20. A reply, silence notice, withdrawal or lifecycle closure for an Exchange across peer servers travels the peer path back to the origin server and closes or notifies the origin Exchange exactly as a local one would; a withdrawal closes the Exchange without waking the answerer, locally or across servers.
 21. A person is never addressed across peer servers: an ask to a person is delivered on the sender's own server.
 22. Peer servers reach each other directly at the recorded origin; no relay or tunnel is required for peering.
+23. A delivery to a peer server carries the sender's display name; the receiving server keeps it with its received row so the client names a remote sender in the timeline as it names a local one, and no agent verb needs it.
 
 ## Scenarios
 

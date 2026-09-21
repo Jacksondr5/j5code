@@ -492,6 +492,13 @@ const handlers = {
       const orchestrator = yield* OrchestratorV2;
       const includeArchived = input.include_archived ?? false;
       const directory = yield* service.listParticipants(scope.threadId, includeArchived);
+      // A Squadron's name beside its id is how an agent tells its own home from
+      // a peer's without any server being named.
+      const squadronNames = new Map(
+        (yield* (yield* A2ALedger).listSquadrons()).map(
+          (squadron) => [squadron.id, squadron.name] as const,
+        ),
+      );
       // Agents homed on peer servers sit beside local ones, told apart only by
       // their Squadron. A peer that did not answer is reported, never omitted.
       const remote = yield* (yield* PeerDirectory).listAgents();
@@ -517,6 +524,7 @@ const handlers = {
         .filter((agent) => includeArchived || !agent.archived)
         .map((agent) => ({
           squadron_id: agent.squadronId,
+          squadron_name: agent.squadronName,
           participant_id: agent.participantId,
           participant: {
             kind: "agent" as const,
@@ -544,6 +552,7 @@ const handlers = {
               row.participant.kind === "agent" && row.participant.threadId === scope.threadId;
             return {
               squadron_id: row.squadronId,
+              squadron_name: squadronNames.get(row.squadronId) ?? null,
               participant_id: row.participantId,
               participant:
                 row.participant.kind === "agent"

@@ -12,6 +12,7 @@ import { runJ5A2AMigrations } from "./Migrations.ts";
 import {
   ClientReadsService,
   explainOpenInboxCountStatement,
+  explainPeerSenderLabelStatement,
   layer as clientReadsLayer,
 } from "./ClientReadsService.ts";
 import { CommCommandId, ParticipantId, SquadronId, type AgentParticipant } from "./contracts.ts";
@@ -318,4 +319,77 @@ it.effect(
         "the literal open-count predicate should use the partial person index",
       );
     }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("names a sender homed on a peer by the label its server sent, after any local name", () =>
+  Effect.gen(function* () {
+    yield* runMigrations();
+    yield* runJ5A2AMigrations();
+    const ledger = yield* A2ALedger;
+    const reads = yield* ClientReadsService;
+    const sql = yield* SqlClient.SqlClient;
+    const squadron = SquadronId.make("squadron:client-reads:peer");
+    const remoteSender = ParticipantId.make("agent:j5:a2a:thread:remote-asker");
+    const local: AgentParticipant = {
+      kind: "agent",
+      id: ParticipantId.make("agent:j5:a2a:thread:client-reads:local"),
+      threadId: ThreadId.make("thread:client-reads:local"),
+    };
+    const createdAt = "2026-09-21T00:00:00.000Z";
+    yield* ledger.createSquadron({ squadron: { id: squadron, name: "Peer Reads", createdAt } });
+    yield* ledger.appendEvents({
+      commandId: CommCommandId.make("command:client-reads:peer:join"),
+      squadronId: squadron,
+      acceptedAt: createdAt,
+      events: [
+        {
+          kind: "participant.joined",
+          sender: null,
+          receiver: local.id,
+          exchangeId: null,
+          correlationId: null,
+          payload: { participant: local },
+          createdAt,
+        },
+      ],
+    });
+    // Two deliveries from the same remote sender; the latest label wins.
+    const received = (seq: number, label: string, at: string) => sql`
+      INSERT INTO j5_a2a_comm_event (
+        seq, squadron_id, kind, sender, receiver, exchange_id, correlation_id,
+        payload, created_at, command_id
+      ) VALUES (
+        ${seq}, ${squadron}, 'message.received', ${remoteSender}, ${local.id}, NULL,
+        ${"correlation:client-reads:peer:" + String(seq)},
+        ${JSON.stringify({
+          originSquadronId: "squadron:home",
+          originEnvironmentId: "environment-home",
+          senderLabel: label,
+          message: {},
+        })},
+        ${at}, ${"command:client-reads:peer:" + String(seq)}
+      )
+    `;
+    yield* received(2, "Old title", "2026-09-21T00:01:00.000Z");
+    yield* received(3, "Incident asker", "2026-09-21T00:02:00.000Z");
+
+    const identities = yield* reads.participantIdentities({
+      participantIds: [remoteSender, local.id],
+    });
+    assert.deepStrictEqual(identities, {
+      entries: [
+        { participantId: remoteSender, identity: { kind: "known", displayName: "Incident asker" } },
+        { participantId: local.id, identity: { kind: "unknown" } },
+      ],
+    });
+    const plan = yield* explainPeerSenderLabelStatement(sql, [remoteSender]);
+    assert.isTrue(
+      plan.every(
+        (row) =>
+          !row.detail.includes("j5_a2a_comm_event") ||
+          row.detail.includes("j5_a2a_comm_event_received_sender_label_idx"),
+      ),
+      `every touch of the ledger should go through the sender-label index: ${plan.map((row) => row.detail).join(" | ")}`,
+    );
+  }).pipe(Effect.provide(makeTestLayer())),
 );
