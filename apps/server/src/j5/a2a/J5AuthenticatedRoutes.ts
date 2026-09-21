@@ -1,4 +1,6 @@
 import * as Layer from "effect/Layer";
+import { playbookLayer } from "../playbook-definitions/Service.ts";
+import { playbookHttpLayer } from "../playbook/Http.ts";
 
 import {
   CLIENT_READS_OPEN_COUNT_PATH,
@@ -19,8 +21,9 @@ import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.
  * One authenticated J5 route aggregate. New J5 HTTP route layers enter here
  * rather than adding another upstream server composition seam.
  */
-export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
+export const j5AuthenticatedRouteRegistration = Layer.mergeAll(
   artifactHttpRouteLayer,
+  playbookHttpLayer,
   humanInboxHttpRouteLayer,
   machineSenderHttpRouteLayer,
   preArchiveFactsHttpRouteLayer,
@@ -32,3 +35,7 @@ export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
     openInboxCount: CLIENT_READS_OPEN_COUNT_PATH,
   }),
 ).pipe(Layer.provide(artifactWorkspaceLayer), Layer.provide(squadronManagementServiceLayer));
+
+export const j5AuthenticatedRoutesLayer = j5AuthenticatedRouteRegistration.pipe(
+  Layer.provide(playbookLayer),
+);
