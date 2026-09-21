@@ -255,7 +255,12 @@ There is no Crew-specific artifact verb. A seat whose definition declares an out
 it with the project `write_artifact` tool to the same handoff file every saved agent writes
 (`handoffs/<agent>/<Artifact>-<task>.md`, see the [persona contract](../agent-personas/index.md));
 its first turn carries `<seat_obligation>` naming that exact path. The handoff gate checks for the
-file when a run ends and reminds the seat once. Read-only Codex and Claude personas have `write_artifact` pre-approved for this reason, and `delegate_task` with `task_status` and `task_cancel` beside it, because a Crew member refused `spawn_agent` is sent to provider-native Subagents and a verb the sandbox then rejects is no way out:
+file when a run ends and reminds the seat once. When a seat finishes, the seat finish notifier posts
+one platform-composed `<j5_seat_finished>` notice per finished run into the Captain's thread: the seat,
+its participant and thread ids, the run status (completed, failed, or cancelled), and the handoff
+as `written`, `missing`, or `none declared` with its path; a written handoff up to 4,000
+characters rides inline, longer ones name the path for the project `read_artifact` tool. Ids
+derive from the run, so a redelivered event cannot post twice. Read-only Codex and Claude personas have `write_artifact` pre-approved for this reason, and `delegate_task` with `task_status` and `task_cancel` beside it, because a Crew member refused `spawn_agent` is sent to provider-native Subagents and a verb the sandbox then rejects is no way out:
 handoffs live in application storage, never in the sandboxed workspace. (Withdrawn on 2026-09-14:
 the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `read_artifact` and
 `list_artifacts`, which collided with the project artifact toolkit's names.)
@@ -263,9 +268,10 @@ the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `rea
 ### Kept upstream tools
 
 - `orchestrator_capabilities` — providers and models (ids, labels, option descriptors) for spawn targeting, plus runtime and interaction-mode facts. It deliberately stays silent about delegation even though `delegate_task` is back on the surface: that tool's own description carries its saved-agent use, and J5 verbs are advertised by their own descriptions.
-- `delegate_task`, `task_status`, `task_cancel` — upstream's provider-owned child delegation. J5 re-declares `delegate_task` with its own description, which leads with the optional `agent` (a saved agent id from an `@agent:ID` mention or the Settings → Agents library) and presents the plain child as the fallback for cross-provider or T3-tracked work rather than the default for any subagent request. With `agent`, the server pins that agent's instructions, model route, reasoning, and runtime policy and refuses `target` and `runtimeMode`; without it, the child is upstream's plain subagent. The child is backing storage under the calling thread, not a Peer Agent; use `spawn_agent` for a participant.
+- `delegate_task`, `task_status`, `task_cancel` — upstream's provider-owned child delegation. J5 re-declares `delegate_task` with its own description, which leads with the optional `agent` (a saved agent id from an `@agent:ID` mention or the Settings → Agents library) and presents the plain child as the fallback for cross-provider or T3-tracked work rather than the default for any subagent request. With `agent`, the server pins that agent's instructions, model route, reasoning, and runtime policy and refuses `target` and `runtimeMode`; without it, the child is upstream's plain subagent. The child is backing storage under the calling thread, not a Peer Agent; use `spawn_agent` for a participant. Its wait mode is safe where `t3_thread_wait` was not: a child that messages its parent ends its own turn, so the wait returns and the parent reads the message on its next turn (latency, never starvation).
 - `schedule_task`, `list_scheduled_tasks`, `update_scheduled_task`, `delete_scheduled_task` — consumed as-is.
-- `t3_thread_list`, `t3_thread_read`, `t3_thread_wait` — consumed as-is; if an upstream description mentions delegation, J5 re-declares that tool with corrected prose.
+- `t3_thread_list`, `t3_thread_read` — consumed as-is; if an upstream description mentions delegation, J5 re-declares that tool with corrected prose.
+- `t3_thread_wait` is **withdrawn** from the J5 surface. Platform notices queue behind a running turn, so a participant that blocks inside its turn waiting on another thread can never receive the notice that thread's finish produces; a Captain that waited on a seat this way starved itself of its own Crew's news (Bryant, 2026-09-14). Whatever a participant is waiting for arrives as a message once it ends its turn.
 
 ## Acceptance criteria
 
@@ -304,5 +310,6 @@ the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `rea
 - 2026-09-09 — `list_agents`, `propose_crew`, and `request_crew_member`: Crews composed at launch through a human gate ([record](../../worklog/2026-09-14-crews-consolidation.md)).
 - 2026-09-10 — human approval is the authority for seat access; proposals and requests pre-approved for Codex under approval policy `never`; `deliver_artifact` added.
 - 2026-09-14 — `deliver_artifact` and the crew-only artifact reads withdrawn in favor of the shared handoff files; Codex pre-approval narrowed to a per-tool list ([record](../../worklog/2026-09-14-crews-consolidation.md)).
+- 2026-09-14 — `t3_thread_wait` withdrawn: blocking inside a turn starves a participant of the queued notices it is waiting for ([record](../../worklog/2026-09-14-crews-consolidation.md)).
 - 2026-09-14 — `delegate_task`, `task_status`, and `task_cancel` return to the J5 surface, with a saved-agent `agent` parameter on `delegate_task` replacing the J5-only `invoke_agent` ([review](https://github.com/Jacksondr5/j5code/pull/124#issuecomment-5663559782)).
 - 2026-09-15 — machine participants appear in `list_participants` as named senders that receive nothing (issue #74).
