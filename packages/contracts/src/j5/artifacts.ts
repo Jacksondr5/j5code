@@ -5,18 +5,18 @@ import { ArtifactChangeEvent, ArtifactWatchError, ArtifactWatchInput } from "../
 import { EnvironmentAuthorizationError } from "../auth.ts";
 import { ProjectId } from "../baseSchemas.ts";
 
-export const ARTIFACT_TRASH_PATH = "/api/j5/artifacts/trash";
+export const ARTIFACT_DELETE_PATH = "/api/j5/artifacts/delete";
 
-export const ArtifactTrashRequest = Schema.Struct({
+export const ArtifactDeleteRequest = Schema.Struct({
   projectId: ProjectId,
   path: Schema.String,
 });
-export type ArtifactTrashRequest = typeof ArtifactTrashRequest.Type;
+export type ArtifactDeleteRequest = typeof ArtifactDeleteRequest.Type;
 
-export const ArtifactTrashResponse = Schema.Struct({
-  trashed: Schema.Literal(true),
+export const ArtifactDeleteResponse = Schema.Struct({
+  deleted: Schema.Literal(true),
 });
-export type ArtifactTrashResponse = typeof ArtifactTrashResponse.Type;
+export type ArtifactDeleteResponse = typeof ArtifactDeleteResponse.Type;
 
 /**
  * The J5 artifact WebSocket surface: one stream that tells a client a project's artifacts

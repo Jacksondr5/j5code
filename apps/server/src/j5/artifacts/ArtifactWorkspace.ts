@@ -11,7 +11,6 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import trash from "trash";
 
 import { writeFileStringAtomically } from "../../atomicWrite.ts";
 import { ServerConfig } from "../../config.ts";
@@ -47,10 +46,10 @@ export interface ArtifactWorkspaceShape {
     readonly projectId: ProjectId;
     readonly relativePath: string;
   }) => Effect.Effect<ArtifactContent, ArtifactWorkspaceError>;
-  readonly trash: (input: {
+  readonly delete: (input: {
     readonly projectId: ProjectId;
     readonly relativePath: string;
-  }) => Effect.Effect<void, ArtifactWorkspaceError>;
+  }) => Effect.Effect<string, ArtifactWorkspaceError>;
   readonly write: (input: {
     readonly projectId: ProjectId;
     readonly relativePath: string;
@@ -495,12 +494,12 @@ export const layer = Layer.effect(
       },
     );
 
-    const trashArtifact: ArtifactWorkspaceShape["trash"] = Effect.fn("ArtifactWorkspace.trash")(
+    const deleteArtifact: ArtifactWorkspaceShape["delete"] = Effect.fn("ArtifactWorkspace.delete")(
       function* (input) {
         const workspace = yield* resolveExistingArtifactRoot(input.projectId);
         if (workspace.realArtifactRoot === null) {
           return yield* new ArtifactWorkspaceError({
-            operation: "trash-artifact",
+            operation: "delete-artifact",
             detail: "The artifact does not exist.",
             reason: "not_found",
           });
@@ -508,14 +507,14 @@ export const layer = Layer.effect(
         const relativePath = normalizeArtifactRelativePath(input.relativePath);
         if (relativePath.trim().length === 0 || path.isAbsolute(relativePath)) {
           return yield* new ArtifactWorkspaceError({
-            operation: "trash-artifact",
+            operation: "delete-artifact",
             detail: "Artifact paths must be relative to the artifacts directory.",
           });
         }
         const requestedPath = path.resolve(workspace.realArtifactRoot, relativePath);
         if (!isPathWithin(path, workspace.realArtifactRoot, requestedPath)) {
           return yield* new ArtifactWorkspaceError({
-            operation: "trash-artifact",
+            operation: "delete-artifact",
             detail: "Artifact paths cannot leave the artifacts directory.",
           });
         }
@@ -523,7 +522,7 @@ export const layer = Layer.effect(
           Effect.mapError(
             (cause) =>
               new ArtifactWorkspaceError({
-                operation: "trash-artifact",
+                operation: "delete-artifact",
                 detail: "The artifact does not exist.",
                 reason: "not_found",
                 cause,
@@ -532,36 +531,38 @@ export const layer = Layer.effect(
         );
         if (!isPathWithin(path, workspace.realArtifactRoot, realPath)) {
           return yield* new ArtifactWorkspaceError({
-            operation: "trash-artifact",
+            operation: "delete-artifact",
             detail: "Artifact links cannot leave the artifacts directory.",
           });
         }
         if (realPath !== requestedPath) {
           return yield* new ArtifactWorkspaceError({
-            operation: "trash-artifact",
-            detail: "Artifact links cannot be moved to the Trash.",
+            operation: "delete-artifact",
+            detail: "Artifact links cannot be deleted.",
           });
         }
         const info = yield* fileSystem
           .stat(realPath)
           .pipe(
             Effect.mapError(
-              workspaceError("trash-artifact", "The artifact could not be inspected."),
+              workspaceError("delete-artifact", "The artifact could not be inspected."),
             ),
           );
         if (info.type !== "File") {
           return yield* new ArtifactWorkspaceError({
-            operation: "trash-artifact",
-            detail: "Only artifact files can be moved to the Trash.",
+            operation: "delete-artifact",
+            detail: "Only artifact files can be deleted.",
           });
         }
-        // Use the already-validated canonical path. Symlink entries are rejected above, so a
-        // local writer cannot redirect this operation by swapping a requested ancestor.
-        yield* Effect.tryPromise(() => trash(realPath, { glob: false })).pipe(
-          Effect.mapError(
-            workspaceError("trash-artifact", "The artifact could not be moved to the Trash."),
-          ),
-        );
+        // Remove only the validated file; never recursively remove artifact directories.
+        yield* fileSystem
+          .remove(realPath)
+          .pipe(
+            Effect.mapError(
+              workspaceError("delete-artifact", "The artifact could not be deleted."),
+            ),
+          );
+        return path.relative(workspace.realArtifactRoot, realPath).replaceAll("\\", "/");
       },
     );
 
@@ -750,7 +751,7 @@ export const layer = Layer.effect(
       prepare,
       list,
       read,
-      trash: trashArtifact,
+      delete: deleteArtifact,
       write,
       writeVersioned,
       exportPlan,

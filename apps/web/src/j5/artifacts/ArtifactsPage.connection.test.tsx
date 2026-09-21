@@ -6,6 +6,7 @@ const testState = vi.hoisted(() => ({
   connected: false,
   listArtifacts: vi.fn(),
   readArtifact: vi.fn(),
+  deleteArtifact: vi.fn(),
 }));
 
 vi.mock("../../state/entities", () => ({
@@ -15,6 +16,12 @@ vi.mock("../../state/entities", () => ({
       environmentId: "environment:artifacts-connection",
       title: "Artifacts test",
       workspaceRoot: "/workspace",
+    },
+    {
+      id: "project:second",
+      environmentId: "environment:artifacts-connection",
+      title: "Second workspace",
+      workspaceRoot: "/second",
     },
   ],
 }));
@@ -39,9 +46,12 @@ vi.mock("./artifactChanges", () => ({
 vi.mock("./artifactClient", () => ({
   listArtifacts: testState.listArtifacts,
   readArtifact: testState.readArtifact,
-  trashArtifact: vi.fn(),
+  deleteArtifact: testState.deleteArtifact,
 }));
-vi.mock("../../components/ChatMarkdown", () => ({ default: () => null }));
+vi.mock("../../confirmDialog", () => ({ requestConfirmDialog: () => Promise.resolve(true) }));
+vi.mock("../../components/ChatMarkdown", () => ({
+  default: ({ content }: { content: string }) => <p>{content}</p>,
+}));
 vi.mock("../../components/DiffFilePathCopyButton", () => ({
   DiffFilePathCopyButton: () => null,
 }));
@@ -87,6 +97,7 @@ beforeEach(() => {
   testState.connected = false;
   testState.listArtifacts.mockReset().mockResolvedValue([]);
   testState.readArtifact.mockReset();
+  testState.deleteArtifact.mockReset();
 });
 
 afterEach(async () => {
@@ -112,4 +123,62 @@ describe("ArtifactsPage environment connection", () => {
       projectId: "project:artifacts-connection",
     });
   });
+});
+
+it("drops a failed deletion after switching projects and keeps the new preview", async () => {
+  testState.connected = true;
+  testState.listArtifacts.mockResolvedValue([
+    { path: "plan.md", byteLength: 10, modifiedAt: null },
+  ]);
+  testState.readArtifact.mockImplementation(({ projectId }) =>
+    Promise.resolve({
+      path: "plan.md",
+      byteLength: 10,
+      encoding: "utf8",
+      content: projectId,
+    }),
+  );
+  let rejectDeletion!: (error: Error) => void;
+  testState.deleteArtifact.mockImplementation(
+    () =>
+      new Promise((_, reject) => {
+        rejectDeletion = reject;
+      }),
+  );
+  await act(async () => {
+    renderer = create(
+      <ArtifactsPage
+        initialProjectId="project:artifacts-connection"
+        initialEnvironmentId="environment:artifacts-connection"
+        initialPath="plan.md"
+      />,
+    );
+  });
+  await act(async () => {
+    renderer!.root.findByProps({ "aria-label": "Delete artifact permanently" }).props.onClick();
+  });
+  expect(testState.deleteArtifact).toHaveBeenCalledOnce();
+  await act(async () => {
+    renderer!.root
+      .findAllByType("button")
+      .find((button) =>
+        button.findAllByType("span").some((span) => span.children.includes("Second workspace")),
+      )!
+      .props.onClick();
+  });
+  await act(async () => {
+    renderer!.root
+      .findAllByType("button")
+      .find((button) =>
+        button.findAllByType("span").some((span) => span.children.includes("plan.md")),
+      )!
+      .props.onClick();
+  });
+  await act(async () => {
+    rejectDeletion(new Error("Old project deletion failed"));
+  });
+  expect(JSON.stringify(renderer!.toJSON())).not.toContain("Old project deletion failed");
+  expect(testState.readArtifact).toHaveBeenLastCalledWith(
+    expect.objectContaining({ projectId: "project:second", path: "plan.md" }),
+  );
 });

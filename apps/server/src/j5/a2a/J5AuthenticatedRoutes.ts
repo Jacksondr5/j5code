@@ -12,7 +12,7 @@ import { preArchiveFactsHttpRouteLayer } from "./PreArchiveFactsHttp.ts";
 import { layer as squadronManagementServiceLayer } from "./SquadronManagementService.ts";
 import { squadronHttpRouteLayer } from "./SquadronHttp.ts";
 import { threadHomesHttpRouteLayer } from "./ThreadHomesHttp.ts";
-import { layer as agentHandoffArtifactTrashLayer } from "../agents/agentHandoffArtifactTrash.ts";
+import { layer as agentHandoffArtifactDeleteLayer } from "../agents/agentHandoffArtifactDelete.ts";
 import { artifactHttpRouteLayer } from "../artifacts/ArtifactHttp.ts";
 import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.ts";
 
@@ -34,6 +34,6 @@ export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
   }),
 ).pipe(
   Layer.provide(artifactWorkspaceLayer),
-  Layer.provide(agentHandoffArtifactTrashLayer),
+  Layer.provide(agentHandoffArtifactDeleteLayer),
   Layer.provide(squadronManagementServiceLayer),
 );

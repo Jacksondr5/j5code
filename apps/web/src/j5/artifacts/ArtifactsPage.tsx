@@ -9,7 +9,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import * as Option from "effect/Option";
-import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import ChatMarkdown from "../../components/ChatMarkdown";
 import { DiffFilePathCopyButton } from "../../components/DiffFilePathCopyButton";
@@ -28,7 +28,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { usePreparedConnection } from "../../state/session";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { artifactEnvironment } from "./artifactChanges";
-import { listArtifacts, readArtifact, trashArtifact } from "./artifactClient";
+import { listArtifacts, readArtifact, deleteArtifact } from "./artifactClient";
 import { artifactPreviewRevision } from "./artifactPreview.logic";
 import { nextArtifactRefreshGeneration } from "./artifactRefresh";
 
@@ -120,13 +120,13 @@ export function ArtifactsPage({
   const [listState, setListState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [contentState, setContentState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
-  const [trashError, setTrashError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   // Two counters on purpose: the change stream bumps the list only; the Refresh button bumps
   // both. Only the second reaches the body read, so another file changing never re-reads this one.
   const [listGeneration, setListGeneration] = useState(0);
   const [manualRefreshes, setManualRefreshes] = useState(0);
   const [listedProjectKey, setListedProjectKey] = useState<string | null>(null);
-  const [trashing, setTrashing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const filePane = useResizableWidth({
     storageKey: embedded ? "j5:artifacts:embedded-file-pane-width" : "j5:artifacts:file-pane-width",
     defaultWidth: embedded ? 176 : 288,
@@ -256,28 +256,34 @@ export function ArtifactsPage({
     };
   }, [connected, selectedEnvironmentId, selectedPath, selectedProjectId, selectedRevision]);
 
+  const selectionKey = JSON.stringify([selectedEnvironmentId, selectedProjectId, selectedPath]);
+  const currentSelection = useRef(selectionKey);
+  currentSelection.current = selectionKey;
+
   const refresh = useCallback(() => setManualRefreshes((count) => count + 1), []);
-  const trashSelectedArtifact = useCallback(async () => {
+  const deleteSelectedArtifact = useCallback(async () => {
     if (
       selectedEnvironmentId === null ||
       selectedProjectId === null ||
       selectedPath === null ||
-      trashing
+      deleting
     ) {
       return;
     }
+    const requestSelection = selectionKey;
     const path = selectedPath;
     const confirmation = requestConfirmDialog(
-      `Move “${path}” to the Trash on the environment host? You can recover it from that host account's Trash or Recycle Bin.`,
+      `Permanently delete “${path}” from the environment host? This cannot be undone.`,
       { variant: "destructive" },
-      { confirmLabel: "Move to Trash" },
+      { confirmLabel: "Delete permanently" },
     );
     if (confirmation === undefined || !(await confirmation)) return;
+    if (currentSelection.current !== requestSelection) return;
 
-    setTrashing(true);
-    setTrashError(null);
+    setDeleting(true);
+    setDeleteError(null);
     try {
-      await trashArtifact({
+      await deleteArtifact({
         environmentId: selectedEnvironmentId,
         projectId: selectedProjectId,
         path,
@@ -286,13 +292,12 @@ export function ArtifactsPage({
       // superseded reads, so an in-flight deletion from another project cannot write stale rows.
       setListGeneration((generation) => generation + 1);
     } catch (cause) {
-      setTrashError(
-        cause instanceof Error ? cause.message : "The artifact could not be moved to Trash.",
-      );
+      if (currentSelection.current !== requestSelection) return;
+      setDeleteError(cause instanceof Error ? cause.message : "The artifact could not be deleted.");
     } finally {
-      setTrashing(false);
+      setDeleting(false);
     }
-  }, [selectedEnvironmentId, selectedPath, selectedProjectId, trashing]);
+  }, [selectedEnvironmentId, selectedPath, selectedProjectId, deleting, selectionKey]);
   const selectedExtension = selectedPath === null ? "" : extensionOf(selectedPath);
   const selectedName = selectedPath?.split("/").at(-1) ?? null;
   const image = IMAGE_MEDIA_TYPES[selectedExtension] !== undefined;
@@ -362,7 +367,7 @@ export function ArtifactsPage({
                       onClick={() => {
                         setSelectedProjectKey(projectKey(project));
                         setSelectedPath(null);
-                        setTrashError(null);
+                        setDeleteError(null);
                       }}
                       type="button"
                     >
@@ -420,7 +425,7 @@ export function ArtifactsPage({
                       )}
                       onClick={() => {
                         setSelectedPath(entry.path);
-                        setTrashError(null);
+                        setDeleteError(null);
                       }}
                       type="button"
                     >
@@ -462,14 +467,16 @@ export function ArtifactsPage({
               <p className="min-w-0 flex-1 truncate text-xs font-medium">
                 {selectedName ?? "No artifact selected"}
               </p>
-              {selectedPath !== null ? <DiffFilePathCopyButton filePath={selectedPath} /> : null}
+              {selectedPath !== null ? (
+                <DiffFilePathCopyButton filePath={`artifacts/${selectedPath}`} />
+              ) : null}
               <Tooltip>
                 <TooltipTrigger
                   render={
                     <Button
-                      aria-label="Move artifact to Trash"
-                      disabled={selectedPath === null || trashing}
-                      onClick={() => void trashSelectedArtifact()}
+                      aria-label="Delete artifact permanently"
+                      disabled={selectedPath === null || deleting}
+                      onClick={() => void deleteSelectedArtifact()}
                       size="icon-micro"
                       variant="ghost"
                     />
@@ -477,12 +484,12 @@ export function ArtifactsPage({
                 >
                   <Trash2Icon className="size-3 text-muted-foreground" />
                 </TooltipTrigger>
-                <TooltipPopup>Move to Trash</TooltipPopup>
+                <TooltipPopup>Delete permanently</TooltipPopup>
               </Tooltip>
             </header>
-            {trashError !== null ? (
+            {deleteError !== null ? (
               <p className="shrink-0 border-b border-border px-3 py-2 text-xs text-destructive">
-                {trashError}
+                {deleteError}
               </p>
             ) : null}
             <ScrollArea className="min-h-0 flex-1">

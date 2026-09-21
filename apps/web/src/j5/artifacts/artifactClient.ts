@@ -3,10 +3,10 @@ import { executeJ5Request } from "@t3tools/client-runtime/j5/http";
 import {
   ARTIFACT_LIST_PATH,
   ARTIFACT_READ_PATH,
-  ARTIFACT_TRASH_PATH,
+  ARTIFACT_DELETE_PATH,
   ArtifactContent,
   ArtifactListResponse,
-  ArtifactTrashResponse,
+  ArtifactDeleteResponse,
   type ArtifactContent as ArtifactContentValue,
   type ArtifactEntry,
   type EnvironmentId,
@@ -87,17 +87,17 @@ export const readArtifactEffect = Effect.fn("j5.artifacts.client.read")(function
   return yield* HttpClientResponse.schemaBodyJson(ArtifactContent)(response);
 });
 
-export const trashArtifactEffect = Effect.fn("j5.artifacts.client.trash")(function* (input: {
+export const deleteArtifactEffect = Effect.fn("j5.artifacts.client.delete")(function* (input: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
   readonly path: string;
 }) {
   const response = yield* post({
     environmentId: input.environmentId,
-    pathname: ARTIFACT_TRASH_PATH,
+    pathname: ARTIFACT_DELETE_PATH,
     body: { projectId: input.projectId, path: input.path },
   });
-  yield* HttpClientResponse.schemaBodyJson(ArtifactTrashResponse)(response);
+  yield* HttpClientResponse.schemaBodyJson(ArtifactDeleteResponse)(response);
 });
 
 export const listArtifacts = (input: {
@@ -111,8 +111,8 @@ export const readArtifact = (input: {
   readonly path: string;
 }): Promise<ArtifactContentValue> => runtime.runPromise(readArtifactEffect(input));
 
-export const trashArtifact = (input: {
+export const deleteArtifact = (input: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
   readonly path: string;
-}): Promise<void> => runtime.runPromise(trashArtifactEffect(input));
+}): Promise<void> => runtime.runPromise(deleteArtifactEffect(input));

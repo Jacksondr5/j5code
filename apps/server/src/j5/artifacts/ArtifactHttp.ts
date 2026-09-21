@@ -1,10 +1,10 @@
 import {
   ARTIFACT_LIST_PATH,
   ARTIFACT_READ_PATH,
-  ARTIFACT_TRASH_PATH,
+  ARTIFACT_DELETE_PATH,
   ArtifactListRequest,
   ArtifactReadRequest,
-  ArtifactTrashRequest,
+  ArtifactDeleteRequest,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   type AuthEnvironmentScope,
@@ -30,12 +30,12 @@ import {
   failEnvironmentScopeRequired,
 } from "../../auth/http.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
-import { AgentHandoffArtifactTrash } from "../agents/agentHandoffArtifactTrash.ts";
+import { AgentHandoffArtifactDelete } from "../agents/agentHandoffArtifactDelete.ts";
 import { ArtifactWorkspace } from "./ArtifactWorkspace.ts";
 
 const decodeListRequest = Schema.decodeUnknownEffect(ArtifactListRequest);
 const decodeReadRequest = Schema.decodeUnknownEffect(ArtifactReadRequest);
-const decodeTrashRequest = Schema.decodeUnknownEffect(ArtifactTrashRequest);
+const decodeDeleteRequest = Schema.decodeUnknownEffect(ArtifactDeleteRequest);
 
 const authenticate = Effect.fn("j5.artifacts.authenticate")(function* (
   requiredScope: AuthEnvironmentScope,
@@ -111,7 +111,7 @@ class ArtifactProjectUnavailableError extends Schema.TaggedErrorClass<ArtifactPr
 export const artifactHttpRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const artifacts = yield* ArtifactWorkspace;
-    const handoffTrash = yield* AgentHandoffArtifactTrash;
+    const handoffDelete = yield* AgentHandoffArtifactDelete;
     const projects = yield* ProjectService.ProjectService;
 
     const listRoute = HttpRouter.add(
@@ -175,28 +175,28 @@ export const artifactHttpRouteLayer = Layer.unwrap(
       ),
     );
 
-    const trashRoute = HttpRouter.add(
+    const deleteRoute = HttpRouter.add(
       "POST",
-      ARTIFACT_TRASH_PATH,
+      ARTIFACT_DELETE_PATH,
       Effect.gen(function* () {
-        yield* annotateEnvironmentRequest("j5.artifacts.trash");
+        yield* annotateEnvironmentRequest("j5.artifacts.delete");
         yield* authenticateOperate;
         const request = yield* HttpServerRequest.HttpServerRequest;
         const body = yield* Effect.result(request.json);
         if (Result.isFailure(body)) return requestFailure("The request body must be JSON.");
-        const decoded = yield* Effect.result(decodeTrashRequest(body.success));
+        const decoded = yield* Effect.result(decodeDeleteRequest(body.success));
         if (Result.isFailure(decoded))
           return requestFailure("A valid projectId and artifact path are required.");
         const input = decoded.success;
         const result = yield* Effect.result(
           requireProject(projects, input.projectId).pipe(
             Effect.flatMap(() =>
-              artifacts.trash({ projectId: input.projectId, relativePath: input.path }),
+              artifacts.delete({ projectId: input.projectId, relativePath: input.path }),
             ),
-            Effect.tap(() =>
-              handoffTrash.reconcile({ projectId: input.projectId, path: input.path }).pipe(
+            Effect.tap((path) =>
+              handoffDelete.reconcile({ projectId: input.projectId, path }).pipe(
                 Effect.catchCause((cause) =>
-                  Effect.logWarning("Trashed artifact handoff state could not be reconciled", {
+                  Effect.logWarning("Deleted artifact handoff state could not be reconciled", {
                     cause,
                     projectId: input.projectId,
                     path: input.path,
@@ -207,7 +207,7 @@ export const artifactHttpRouteLayer = Layer.unwrap(
           ),
         );
         return Result.isSuccess(result)
-          ? HttpServerResponse.jsonUnsafe({ trashed: true })
+          ? HttpServerResponse.jsonUnsafe({ deleted: true })
           : yield* operationFailure(result.failure);
       }).pipe(
         Effect.catchTags({
@@ -218,6 +218,6 @@ export const artifactHttpRouteLayer = Layer.unwrap(
       ),
     );
 
-    return Layer.mergeAll(listRoute, readRoute, trashRoute);
+    return Layer.mergeAll(listRoute, readRoute, deleteRoute);
   }),
 );

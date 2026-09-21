@@ -13,9 +13,7 @@ choose a file to preview it. Markdown, text, source files, common image formats,
 documents can be previewed without opening an editor. HTML previews cannot run scripts or access
 J5 Code's page context.
 
-To remove the selected file, choose **Move to Trash**. J5 Code moves it to the environment host
-account's Trash or Recycle Bin—the machine and account where that project's J5 Code server is
-running—so it can be recovered there if needed. It is never permanently deleted by this action.
+The selected file is permanently deleted from the environment host after confirmation.
 
 From a project thread, you can also open the right panel and choose **Artifacts**. This view stays
 scoped to the current project workspace, so planning documents remain beside the conversation while

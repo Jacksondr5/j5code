@@ -1,7 +1,7 @@
 import {
   ARTIFACT_LIST_PATH,
   ARTIFACT_READ_PATH,
-  ARTIFACT_TRASH_PATH,
+  ARTIFACT_DELETE_PATH,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthSessionId,
@@ -15,16 +15,16 @@ import { HttpRouter, HttpServer } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
-import { AgentHandoffArtifactTrash } from "../agents/agentHandoffArtifactTrash.ts";
+import { AgentHandoffArtifactDelete } from "../agents/agentHandoffArtifactDelete.ts";
 import { artifactHttpRouteLayer } from "./ArtifactHttp.ts";
 import { ArtifactWorkspace } from "./ArtifactWorkspace.ts";
 
-it("reads and trashes artifacts through the authenticated project boundary", async () => {
+it("reads and deletees artifacts through the authenticated project boundary", async () => {
   const projectId = ProjectId.make("project:artifacts-http");
   let scopes: ReadonlyArray<
     typeof AuthOrchestrationReadScope | typeof AuthOrchestrationOperateScope
   > = [];
-  const trashed: Array<string> = [];
+  const deleted: Array<string> = [];
   const reconciled: Array<string> = [];
   const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
     authenticateHttpRequest: () =>
@@ -52,15 +52,19 @@ it("reads and trashes artifacts through the authenticated project boundary", asy
         encoding: "utf8" as const,
         content: "# Plan\n",
       }),
-    trash: ({ relativePath }) => Effect.sync(() => void trashed.push(relativePath)),
+    delete: ({ relativePath }) =>
+      Effect.sync(() => {
+        deleted.push(relativePath);
+        return "plan.md";
+      }),
   });
-  const handoffTrash = Layer.mock(AgentHandoffArtifactTrash)({
+  const handoffDelete = Layer.mock(AgentHandoffArtifactDelete)({
     reconcile: ({ path }) => Effect.sync(() => void reconciled.push(path)),
   });
   const routes = artifactHttpRouteLayer.pipe(
     Layer.provide(projects),
     Layer.provide(artifacts),
-    Layer.provide(handoffTrash),
+    Layer.provide(handoffDelete),
     Layer.provideMerge(auth),
     Layer.provide(HttpServer.layerServices),
   );
@@ -93,14 +97,14 @@ it("reads and trashes artifacts through the authenticated project boundary", asy
       content: "# Plan\n",
     });
 
-    assert.equal((await post(ARTIFACT_TRASH_PATH, { projectId, path: "plan.md" })).status, 403);
-    assert.deepStrictEqual(trashed, []);
+    assert.equal((await post(ARTIFACT_DELETE_PATH, { projectId, path: "plan.md" })).status, 403);
+    assert.deepStrictEqual(deleted, []);
 
     scopes = [AuthOrchestrationReadScope, AuthOrchestrationOperateScope];
-    const trash = await post(ARTIFACT_TRASH_PATH, { projectId, path: "plan.md" });
-    assert.equal(trash.status, 200);
-    assert.deepStrictEqual(await trash.json(), { trashed: true });
-    assert.deepStrictEqual(trashed, ["plan.md"]);
+    const deletion = await post(ARTIFACT_DELETE_PATH, { projectId, path: "./plan.md" });
+    assert.equal(deletion.status, 200);
+    assert.deepStrictEqual(await deletion.json(), { deleted: true });
+    assert.deepStrictEqual(deleted, ["./plan.md"]);
     assert.deepStrictEqual(reconciled, ["plan.md"]);
   } finally {
     await dispose();
