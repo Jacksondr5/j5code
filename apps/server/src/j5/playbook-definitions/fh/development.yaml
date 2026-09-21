@@ -1,0 +1,145 @@
+schema: t3-playbook/v1
+id: fh-development
+version: 3
+name: Development
+description: Plan, implement, verify, review, and publish a change with explicit approvals.
+implementation: fh-development-v3
+initial: workspace
+phases:
+  - id: workspace
+    kind: code
+    tasks: [{ id: workspace, operation: workspace }]
+    transitions: { pass: scout }
+  - id: scout
+    kind: agent
+    tasks:
+      - {
+          id: scout,
+          persona: scout,
+          instructions: Registered Development scout turn.,
+          output: report,
+        }
+    transitions: { pass: plan }
+  - id: plan
+    kind: agent
+    visitLimit: 3
+    tasks:
+      - {
+          id: navigator,
+          persona: navigator,
+          instructions: Registered Development planning turn.,
+          output: report,
+        }
+    transitions: { pass: plan_review }
+  - id: plan_review
+    kind: agent
+    visitLimit: 3
+    capabilities: [restart, plan-review]
+    tasks:
+      - {
+          id: advocate,
+          persona: advocate,
+          instructions: Registered Development plan review.,
+          output: review,
+        }
+      - {
+          id: skeptic,
+          persona: skeptic,
+          instructions: Registered Development plan review.,
+          output: review,
+        }
+    transitions: { pass: plan_approval, revise: plan, escalate: plan_approval }
+  - id: plan_approval
+    kind: gate
+    visitLimit: 3
+    capabilities: [approval, plan-approval]
+    transitions: { approve: build, request_changes: plan }
+  - id: build
+    kind: agent
+    visitLimit: 3
+    tasks:
+      - {
+          id: builder,
+          persona: builder,
+          authority: workspace-write,
+          instructions: Registered Development build turn.,
+          output: report,
+        }
+    transitions: { pass: validation }
+  - id: validation
+    kind: code
+    visitLimit: 4
+    tasks: [{ id: validation, operation: validation }]
+    transitions: { pass: code_review, revise: verification_diagnosis }
+  - id: verification_diagnosis
+    kind: agent
+    visitLimit: 5
+    tasks:
+      - {
+          id: verification_diagnosis,
+          persona: skeptic,
+          instructions: Registered Development verification diagnosis.,
+          output: report,
+        }
+    transitions:
+      implementation_repair: repair_capacity
+      environment_repair: repair_capacity
+      check_correction: checks_approval
+      unable_to_repair: verification_block
+  - id: repair_capacity
+    kind: code
+    visitLimit: 4
+    tasks: [{ id: repair_capacity, operation: repair_capacity }]
+    transitions: { pass: build }
+  - id: checks_approval
+    kind: gate
+    visitLimit: 2
+    capabilities: [approval, checks-approval]
+    transitions: { approve: validation, request_changes: verification_diagnosis }
+  - id: verification_block
+    kind: code
+    tasks: [{ id: verification_block, operation: repair_capacity }]
+    transitions: {}
+  - id: code_review
+    kind: agent
+    visitLimit: 3
+    capabilities: [restart, code-review, candidate-watch]
+    tasks:
+      - {
+          id: critic,
+          persona: critic,
+          authority: critic-review,
+          instructions: Registered Development code review.,
+          output: review,
+        }
+      - {
+          id: sentry,
+          persona: sentry,
+          instructions: Registered Development code review.,
+          output: review,
+        }
+    transitions: { pass: metadata, revise: build, changed: validation }
+  - id: metadata
+    kind: code
+    tasks: [{ id: metadata, operation: metadata }]
+    transitions: { pass: publication_approval }
+  - id: publication_approval
+    kind: gate
+    visitLimit: 3
+    capabilities: [approval, candidate-watch, publication]
+    transitions: { approve: commit, request_changes: build, changed: validation }
+  - id: commit
+    kind: code
+    capabilities: [publication]
+    tasks: [{ id: commit, operation: commit }]
+    transitions: { pass: push }
+  - id: push
+    kind: code
+    capabilities: [publication]
+    tasks: [{ id: push, operation: push }]
+    transitions: { pass: draft }
+  - id: draft
+    kind: code
+    capabilities: [publication]
+    tasks: [{ id: draft, operation: draft }]
+    transitions: { pass: $complete }
