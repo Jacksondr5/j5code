@@ -28,7 +28,6 @@ const encodeResponse = Schema.encodeEffect(CrewMembershipsResponse);
 const crewRef = (instance: AgentCrewInstance) => ({
   crewInstanceId: instance.id,
   crewName: instance.displayName,
-  archived: instance.archivedAt !== null,
 });
 
 /**
@@ -53,7 +52,8 @@ export const projectCrewMemberships = (
           : undefined;
       if (seat !== undefined)
         member = { kind: "member", seat: seat.seatName, crew: crewRef(instance) };
-      if (instance.captainParticipantId === participantId) commanded.push(crewRef(instance));
+      if (instance.archivedAt === null && instance.captainParticipantId === participantId)
+        commanded.push(crewRef(instance));
     }
     if (member !== undefined) entries.push({ threadId, membership: member });
     else if (commanded.length > 0)

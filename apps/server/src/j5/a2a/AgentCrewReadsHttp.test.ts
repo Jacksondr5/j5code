@@ -55,18 +55,7 @@ it("projects one membership per involved thread, live members before captains, n
       threadId: captainThread,
       membership: {
         kind: "captain",
-        crews: [
-          {
-            crewInstanceId: "crew:old",
-            crewName: "Review Pair",
-            archived: true,
-          },
-          {
-            crewInstanceId: "crew:live",
-            crewName: "Review Pair",
-            archived: false,
-          },
-        ],
+        crews: [{ crewInstanceId: "crew:live", crewName: "Review Pair" }],
       },
     },
     {
@@ -74,11 +63,7 @@ it("projects one membership per involved thread, live members before captains, n
       membership: {
         kind: "member",
         seat: "builder",
-        crew: {
-          crewInstanceId: "crew:live",
-          crewName: "Review Pair",
-          archived: false,
-        },
+        crew: { crewInstanceId: "crew:live", crewName: "Review Pair" },
       },
     },
   ]);
@@ -100,7 +85,7 @@ it("shows a former seat that now commands its own Crew as a captain", () => {
       threadId: builderThread,
       membership: {
         kind: "captain",
-        crews: [{ crewInstanceId: "crew:by-builder", crewName: "Review Pair", archived: false }],
+        crews: [{ crewInstanceId: "crew:by-builder", crewName: "Review Pair" }],
       },
     },
   ]);
@@ -168,4 +153,14 @@ it("serves the authenticated crew-membership read from the visible thread ids", 
   } finally {
     await dispose();
   }
+});
+
+it("drops a retired Captain and its seats from the membership response", () => {
+  assert.deepStrictEqual(
+    projectCrewMemberships(
+      [captainThread, builderThread, criticThread],
+      [instance("crew:retired", "2026-09-21T12:00:00.000Z")],
+    ),
+    { entries: [] },
+  );
 });

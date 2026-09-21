@@ -127,11 +127,10 @@ export const CrewProposalResolveResponse = Schema.Struct({
   crewInstanceId: Schema.NullOr(Schema.String),
 });
 
-/** A Crew as the sidebar and the Fleet page name it. */
+/** A live Crew as the sidebar names it; retired Crews are omitted from the read, not flagged. */
 export const CrewRef = Schema.Struct({
   crewInstanceId: Schema.String,
   crewName: Schema.String,
-  archived: Schema.Boolean,
 });
 export type CrewRef = typeof CrewRef.Type;
 

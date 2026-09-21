@@ -57,13 +57,9 @@ it("keeps two Squadrons over one folder distinguishable", () => {
   expect(bravo).not.toContain("Shared folder");
 });
 
-it("adds a seat chip for a crew member and the anchor mark for its Captain, skipping archived crews", () => {
+it("adds a seat chip for a crew member and the anchor mark for its Captain", () => {
   const home = { kind: "known" as const, squadron: { id: "squadron:alpha", name: "Alpha" } };
-  const live = {
-    crewInstanceId: "crew:1",
-    crewName: "Review Pair",
-    archived: false,
-  };
+  const live = { crewInstanceId: "crew:1", crewName: "Review Pair" };
   const member = renderToStaticMarkup(
     <ThreadCardIdentityView
       home={home}
@@ -85,15 +81,6 @@ it("adds a seat chip for a crew member and the anchor mark for its Captain, skip
   expect(captain).toContain('aria-label="Captain. Commands Review Pair"');
   expect(captain).not.toContain(">Captain<");
   expect(captain).toContain("Commands Review Pair");
-
-  const archived = renderToStaticMarkup(
-    <ThreadCardIdentityView
-      home={home}
-      fallbackFolder={null}
-      membership={{ kind: "member", seat: "builder", crew: { ...live, archived: true } }}
-    />,
-  );
-  expect(archived).not.toContain("thread-card-crew-chip");
 
   const plain = renderToStaticMarkup(
     <ThreadCardIdentity home={home} fallbackFolder="Shared folder" />,
