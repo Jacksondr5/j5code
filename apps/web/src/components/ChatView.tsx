@@ -558,6 +558,7 @@ const PreviewPanel = lazy(() =>
 );
 const DiffPanel = lazy(() => import("./DiffPanel"));
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
+const PlaybooksPanel = lazy(() => import("../j5/playbook/PlaybooksPanel"));
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
@@ -4164,6 +4165,10 @@ export default function ChatView(props: ChatViewProps) {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "agents");
   }, [activeThreadRef]);
+  const addPlaybooksSurface = useCallback(() => {
+    if (!activeThreadRef) return;
+    useRightPanelStore.getState().open(activeThreadRef, "playbooks");
+  }, [activeThreadRef]);
   const addDiffSurface = useCallback(() => {
     if (!activeThreadRef || !isServerThread || !isGitRepo) return;
     useRightPanelStore.getState().open(activeThreadRef, "diff");
@@ -5838,7 +5843,7 @@ export default function ChatView(props: ChatViewProps) {
   // The stack renders items[0] front-most and tucks the rest behind hover, so
   // ordering is priority: system banners, then the branch-mismatch notice,
   // and the informational parked-thread banner last — it must never cover another.
-  // Background work (subagent fleets, workflow runs, watch loops) can outlive
+  // Background work (subagent fleets, playbook runs, watch loops) can outlive
   // the turn; once it settles, the composer stop button is gone, so this
   // banner is the only visible stop affordance. Stop routes through the
   // turn interrupt, which stops the thread's background tasks too.
@@ -8139,6 +8144,10 @@ export default function ChatView(props: ChatViewProps) {
           ? {}
           : { initialPath: renderedRightPanelSurface.selectedPath })}
       />
+    ) : renderedRightPanelSurface?.kind === "playbooks" ? (
+      <Suspense fallback={null}>
+        <PlaybooksPanel />
+      </Suspense>
     ) : (renderedRightPanelSurface?.kind === "files" ||
         renderedRightPanelSurface?.kind === "file") &&
       ((activeProject && activeWorkspaceRoot) ||
@@ -8833,6 +8842,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddArtifacts={addArtifactsSurface}
           onAddPullRequest={addPullRequestSurface}
           onAddAgents={addAgentsSurface}
+          onAddPlaybooks={addPlaybooksSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           terminalAvailable={activeProject !== null}
           diffAvailable={isServerThread && isGitRepo}
@@ -8840,6 +8850,7 @@ export default function ChatView(props: ChatViewProps) {
           artifactsAvailable={activeProject !== null}
           pullRequestAvailable={pullRequestSurfaceAvailable}
           agentsAvailable
+          playbooksAvailable
           liveAgentCount={agentPanelModel.liveCount}
         >
           {rightPanelContent}
@@ -8885,6 +8896,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddArtifacts={addArtifactsSurface}
             onAddPullRequest={addPullRequestSurface}
             onAddAgents={addAgentsSurface}
+            onAddPlaybooks={addPlaybooksSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={activeProject !== null}
             diffAvailable={isServerThread && isGitRepo}
@@ -8892,6 +8904,7 @@ export default function ChatView(props: ChatViewProps) {
             artifactsAvailable={activeProject !== null}
             pullRequestAvailable={pullRequestSurfaceAvailable}
             agentsAvailable
+            playbooksAvailable
             liveAgentCount={agentPanelModel.liveCount}
           >
             {rightPanelContent}

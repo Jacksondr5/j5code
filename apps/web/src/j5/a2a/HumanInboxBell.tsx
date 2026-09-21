@@ -8,10 +8,13 @@ import { useSidebar } from "../../components/ui/sidebar";
 import { cn } from "../../lib/utils";
 import { inboxCountQueryAtom, inboxCountSourcesAtom, refreshJ5Sources } from "../state";
 import { createVisibleRefreshHook } from "../useVisibleRefresh";
+import { playbookInboxCountSourcesAtom } from "../playbook/inbox";
+import { playbookApprovalCountQuery } from "../playbook/queries";
 
 export const COUNT_POLL_INTERVAL_MS = 7_500;
 const useCountRefresh = createVisibleRefreshHook(() => {
   void refreshJ5Sources(inboxCountSourcesAtom, inboxCountQueryAtom);
+  void refreshJ5Sources(playbookInboxCountSourcesAtom, playbookApprovalCountQuery);
 }, COUNT_POLL_INTERVAL_MS);
 
 export const shouldShowOpenInboxCount = (count: number | null) => count !== null && count > 0;
@@ -19,7 +22,11 @@ export const shouldShowOpenInboxCount = (count: number | null) => count !== null
 export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean }) {
   const { isMobile, setOpenMobile } = useSidebar();
   const sources = useAtomValue(inboxCountSourcesAtom);
-  const { count, incomplete } = mergeOpenInboxCounts(sources);
+  const playbooks = useAtomValue(playbookInboxCountSourcesAtom);
+  const { count, incomplete } = mergeOpenInboxCounts({
+    isReady: sources.isReady && playbooks.isReady,
+    sources: [...sources.sources, ...playbooks.sources],
+  });
   useCountRefresh();
 
   const closeMobileSidebar = useCallback(() => {
