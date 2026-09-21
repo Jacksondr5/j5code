@@ -58,12 +58,6 @@ export type CrewNoticePresentation =
       readonly seats: ReadonlyArray<FinishedSeat>;
     }
   | {
-      /** The person's `/crew <brief>` turn: the brief, with the guidance block set aside. */
-      readonly kind: "launch";
-      readonly brief: string;
-      readonly guidance: string;
-    }
-  | {
       /** The gate's decision, posted to the Captain by the platform. */
       readonly kind: "gate";
       readonly proposalId: string;
@@ -81,11 +75,6 @@ export type CrewNoticePresentation =
       readonly pendingSeats: ReadonlyArray<string>;
     };
 
-// The Claude effort prefix (`applyClaudePromptEffortPrefix`) is applied after the wrapper, so a
-// launch sent with ultrathink starts with that line; the card skips it rather than showing the
-// raw block.
-const LAUNCH_BLOCK =
-  /^(?:Ultrathink:\n)?<j5_crew_launch>\n([\s\S]*?)\n<\/j5_crew_launch>\n\n([\s\S]*)$/;
 const GATE_BLOCK = /^<j5_crew_gate>\n([\s\S]*?)\n<\/j5_crew_gate>/;
 const ROSTER_LINE =
   /^- ([^:]+): participant_id=(\S+) persona=(\S*) thread_id=(\S+)(?: start=(started|failed|pending))?( \(new\))?$/;
@@ -103,13 +92,6 @@ const fields = (block: string, name: string) =>
   [...block.matchAll(new RegExp(`^${name}: (.*)$`, "gm"))].map((match) => match[1]!.trim());
 const seatStart = (value: string | undefined): SeatStart | null =>
   value === "started" || value === "failed" || value === "pending" ? value : null;
-
-const parseLaunch = (text: string): CrewNoticePresentation | null => {
-  const match = LAUNCH_BLOCK.exec(text);
-  if (match === null) return null;
-  const brief = match[2]!.trim();
-  return brief.length === 0 ? null : { kind: "launch", guidance: match[1]!.trim(), brief };
-};
 
 const parseGate = (text: string): CrewNoticePresentation | null => {
   const match = GATE_BLOCK.exec(text);
@@ -243,8 +225,6 @@ const parseSeats = (text: string): CrewNoticePresentation | null => {
 export const presentCrewNotice = (message: CrewNoticeMessage): CrewNoticePresentation | null => {
   if (message.role !== "user") return null;
   if (message.createdBy === "system") return parseGate(message.text) ?? parseSeats(message.text);
-  if (message.createdBy === undefined || message.createdBy === "user")
-    return parseLaunch(message.text);
   return null;
 };
 

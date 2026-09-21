@@ -135,5 +135,8 @@ export const crewLaunchReportText = (input: {
     prose.push(
       "Your crew is running. Each seat has your brief and this roster; coordinate with send_message, and ask the user through the inbox for decisions you cannot make from the brief.",
     );
+  prose.push(
+    "Seats are told to message you with their results; do not ask for the same results again. End your turn and read them as they arrive.",
+  );
   return `${block}\n\n${prose.join(" ")}`;
 };

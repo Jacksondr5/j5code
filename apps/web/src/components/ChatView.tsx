@@ -304,7 +304,6 @@ import {
   startSquadronDraft,
 } from "../j5/squadron/SquadronPicker.logic";
 import { refreshThreadHomes, useThreadHomes } from "../j5/squadron/ThreadHomesClient";
-import { crewCommandRefusal, crewLaunchPrompt, parseCrewCommand } from "../j5/crew/crewCommand";
 import {
   resolveEffectiveSquadronId,
   resolveSquadronDraftChipState,
@@ -7027,17 +7026,6 @@ export default function ChatView(props: ChatViewProps) {
       }
     }
 
-    // J5: `/crew <brief>` sends the brief wrapped in the crew-composition guidance as this
-    // thread's next turn, whatever agent the thread runs as. Parsed from the raw prompt (attached
-    // contexts are not a brief) and refused before any in-flight state is set, so a refusal leaves
-    // the composer exactly as it was.
-    const j5Crew = parseCrewCommand(promptForSend);
-    const j5CrewRefusal = j5Crew === null ? null : crewCommandRefusal(j5Crew);
-    if (j5CrewRefusal !== null) {
-      toastManager.add(stackedThreadToast({ type: "warning", ...j5CrewRefusal }));
-      return;
-    }
-
     sendInFlightRef.current = true;
     if (isDraftHeroState && activeThreadKey) {
       let resolveDockStarted: (() => void) | undefined;
@@ -7063,12 +7051,8 @@ export default function ChatView(props: ChatViewProps) {
     const composerElementContextsSnapshot = [...composerElementContexts];
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations];
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments];
-    // J5: a `/crew` turn sends the wrapped brief in place of the raw command; the attached
-    // contexts below still ride along, so the Captain reads them with the brief.
-    const promptBodyForSend =
-      j5Crew?.kind === "launch" ? crewLaunchPrompt(j5Crew.brief) : promptForSend;
     const messageTextWithContexts = appendElementContextsToPrompt(
-      appendTerminalContextsToPrompt(promptBodyForSend, composerTerminalContextsSnapshot),
+      appendTerminalContextsToPrompt(promptForSend, composerTerminalContextsSnapshot),
       composerElementContextsSnapshot,
     );
     const messageTextWithPreviewAnnotations = composerPreviewAnnotationsSnapshot.reduce(
