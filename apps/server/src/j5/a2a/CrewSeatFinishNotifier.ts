@@ -27,7 +27,7 @@ import { ArtifactWorkspace } from "../artifacts/ArtifactWorkspace.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
-import { formatRunFailure, runFailureDetail } from "./runFailures.ts";
+import { formatRunFailureField, runFailureDetail } from "./runFailures.ts";
 import { lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
 
 /**
@@ -180,7 +180,7 @@ export const seatFinishedNoticeText = (input: {
   // The outcome first: a seat that died read as "finished, forgot its handoff" when the failure
   // was one line among the handoff lines (Jackson's dogfood, 2026-09-17).
   const failureLine =
-    input.runStatus === "failed" ? `\nfailure: ${formatRunFailure(input.failure)}` : "";
+    input.runStatus === "failed" ? `\nfailure: ${formatRunFailureField(input.failure)}` : "";
   const head = `<j5_seat_finished>\nrun_status: ${input.runStatus}${failureLine}\nseat: ${input.seatName}\ncrew: ${input.crewName}\nparticipant_id: ${input.participantId}\nthread_id: ${input.threadId}\n${handoffLine}\n</j5_seat_finished>`;
   if (input.handoff.status !== "written") return head;
   return input.handoff.body !== null && input.handoff.body.length <= INLINE_HANDOFF_MAX_CHARS

@@ -221,7 +221,7 @@ const parseSeatSection = (section: string): FinishedSeat | null => {
     participantId,
     threadId,
     runStatus,
-    failure: field(block, "failure"),
+    failure: field(block, "failure") === null ? null : decodeFailureField(field(block, "failure")!),
     handoff,
   };
 };
