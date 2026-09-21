@@ -16,6 +16,7 @@ import { ClientReadsService } from "./ClientReadsService.ts";
 import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
 import { AgentCrewProposalService } from "./AgentCrewProposalService.ts";
 import { CrewProposalService } from "./CrewProposalService.ts";
+import { ParticipantPlacementService } from "./PlacementService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import {
   CLIENT_READS_OPEN_COUNT_PATH,
@@ -348,6 +349,7 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
         Layer.mock(AgentCrewInstanceService)({}),
         Layer.mock(AgentCrewProposalService)({}),
         Layer.mock(CrewProposalService)({}),
+        Layer.mock(ParticipantPlacementService)({}),
       ),
     ),
     Layer.provide(Layer.mock(ProjectService.ProjectService)({})),

@@ -13,6 +13,7 @@ import { Route as UsageRouteImport } from './routes/usage'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PairRouteImport } from './routes/pair'
 import { Route as InboxRouteImport } from './routes/inbox'
+import { Route as FleetRouteImport } from './routes/fleet'
 import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as ArtifactsRouteImport } from './routes/artifacts'
 import { Route as ChatRouteImport } from './routes/_chat'
@@ -52,6 +53,11 @@ const PairRoute = PairRouteImport.update({
 const InboxRoute = InboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FleetRoute = FleetRouteImport.update({
+  id: '/fleet',
+  path: '/fleet',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConnectRoute = ConnectRouteImport.update({
@@ -159,6 +165,7 @@ export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
   '/artifacts': typeof ArtifactsRoute
   '/connect': typeof ConnectRoute
+  '/fleet': typeof FleetRoute
   '/inbox': typeof InboxRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
@@ -183,6 +190,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/artifacts': typeof ArtifactsRoute
   '/connect': typeof ConnectRoute
+  '/fleet': typeof FleetRoute
   '/inbox': typeof InboxRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
@@ -210,6 +218,7 @@ export interface FileRoutesById {
   '/_chat': typeof ChatRouteWithChildren
   '/artifacts': typeof ArtifactsRoute
   '/connect': typeof ConnectRoute
+  '/fleet': typeof FleetRoute
   '/inbox': typeof InboxRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
@@ -238,6 +247,7 @@ export interface FileRouteTypes {
     | '/'
     | '/artifacts'
     | '/connect'
+    | '/fleet'
     | '/inbox'
     | '/pair'
     | '/settings'
@@ -262,6 +272,7 @@ export interface FileRouteTypes {
   to:
     | '/artifacts'
     | '/connect'
+    | '/fleet'
     | '/inbox'
     | '/pair'
     | '/settings'
@@ -288,6 +299,7 @@ export interface FileRouteTypes {
     | '/_chat'
     | '/artifacts'
     | '/connect'
+    | '/fleet'
     | '/inbox'
     | '/pair'
     | '/settings'
@@ -315,6 +327,7 @@ export interface RootRouteChildren {
   ChatRoute: typeof ChatRouteWithChildren
   ArtifactsRoute: typeof ArtifactsRoute
   ConnectRoute: typeof ConnectRoute
+  FleetRoute: typeof FleetRoute
   InboxRoute: typeof InboxRoute
   PairRoute: typeof PairRoute
   SettingsRoute: typeof SettingsRouteWithChildren
@@ -351,6 +364,13 @@ declare module '@tanstack/react-router' {
       path: '/inbox'
       fullPath: '/inbox'
       preLoaderRoute: typeof InboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/fleet': {
+      id: '/fleet'
+      path: '/fleet'
+      fullPath: '/fleet'
+      preLoaderRoute: typeof FleetRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/connect': {
@@ -548,6 +568,7 @@ const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRouteWithChildren,
   ArtifactsRoute: ArtifactsRoute,
   ConnectRoute: ConnectRoute,
+  FleetRoute: FleetRoute,
   InboxRoute: InboxRoute,
   PairRoute: PairRoute,
   SettingsRoute: SettingsRouteWithChildren,

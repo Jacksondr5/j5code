@@ -8,30 +8,22 @@ import {
   type ThreadCrewMembership,
 } from "./CrewMembershipsClient";
 
-const live = {
-  crewInstanceId: "crew:1",
-  crewName: "Review Pair",
-  archived: false,
-};
+const live = { crewInstanceId: "crew:1", crewName: "Review Pair" };
 
-it("labels members by seat and captains by their live crews", () => {
+it("labels members by seat and captains by the crews they command", () => {
   expect(presentCrewMembership(undefined)).toBeNull();
   expect(presentCrewMembership({ kind: "member", seat: "critic", crew: live })).toEqual({
+    kind: "seat",
     label: "Review Pair · critic",
     title: "Seat critic of crew Review Pair",
   });
   expect(
-    presentCrewMembership({ kind: "member", seat: "critic", crew: { ...live, archived: true } }),
-  ).toBeNull();
-  expect(
     presentCrewMembership({
       kind: "captain",
-      crews: [live, { ...live, crewInstanceId: "crew:2", crewName: "Old", archived: true }],
+      crews: [live, { crewInstanceId: "crew:2", crewName: "Second" }],
     }),
-  ).toEqual({ label: "Captain", title: "Commands Review Pair" });
-  expect(
-    presentCrewMembership({ kind: "captain", crews: [{ ...live, archived: true }] }),
-  ).toBeNull();
+  ).toEqual({ kind: "captain", title: "Commands Review Pair, Second" });
+  expect(presentCrewMembership({ kind: "captain", crews: [] })).toBeNull();
 });
 
 it("treats the visible rows as the whole truth when replacing memberships, per environment", () => {

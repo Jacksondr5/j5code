@@ -25,6 +25,8 @@ export const ThreadHome = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("known"),
     squadron: Schema.Struct({ id: Schema.String, name: Schema.String }),
+    /** SB5: `agent` means another agent spawned this thread, so it is roster-only unless pinned. */
+    origin: Schema.optional(Schema.Literals(["human", "agent"])),
   }),
   Schema.Struct({ kind: Schema.Literal("unknown") }),
 ]);
@@ -125,11 +127,10 @@ export const CrewProposalResolveResponse = Schema.Struct({
   crewInstanceId: Schema.NullOr(Schema.String),
 });
 
-/** A Crew as the sidebar and the Fleet page name it. */
+/** A live Crew as the sidebar names it; retired Crews are omitted from the read, not flagged. */
 export const CrewRef = Schema.Struct({
   crewInstanceId: Schema.String,
   crewName: Schema.String,
-  archived: Schema.Boolean,
 });
 export type CrewRef = typeof CrewRef.Type;
 
@@ -148,6 +149,82 @@ export const CrewMembershipsResponse = Schema.Struct({
   entries: Schema.Array(CrewMembershipEntry),
 });
 
+/** One agent placed directly under a visible thread, with its Crew seat when it has one. */
+export const SpawnedChild = Schema.Struct({
+  threadId: ThreadId,
+  participantId: Schema.String,
+  seat: Schema.NullOr(
+    Schema.Struct({ crewInstanceId: Schema.String, crewName: Schema.String, seat: Schema.String }),
+  ),
+});
+export type SpawnedChild = typeof SpawnedChild.Type;
+export const SpawnedChildrenEntry = Schema.Struct({
+  threadId: ThreadId,
+  children: Schema.Array(SpawnedChild),
+});
+export type SpawnedChildrenEntry = typeof SpawnedChildrenEntry.Type;
+export const SpawnedChildrenResponse = Schema.Struct({
+  entries: Schema.Array(SpawnedChildrenEntry),
+});
+
+/**
+ * A Crew as the Fleet page records it: the approved roster snapshot with who approved each seat
+ * and why. Archived Crews keep their snapshot so a successor can be briefed from it (Crews AC20).
+ */
+export const FleetCrew = Schema.Struct({
+  crewInstanceId: Schema.String,
+  crewName: Schema.String,
+  captainParticipantId: Schema.String,
+  captainThreadId: Schema.NullOr(Schema.String),
+  brief: Schema.String,
+  version: Schema.Number,
+  createdAt: Schema.String,
+  archivedAt: Schema.NullOr(Schema.String),
+  /** Every seat was approved by the person; the record keeps the version it joined at and why. */
+  roster: Schema.Array(
+    Schema.Struct({
+      seat: Schema.String,
+      agentId: Schema.String,
+      participantId: Schema.String,
+      addedVersion: Schema.Number,
+      reason: Schema.NullOr(Schema.String),
+    }),
+  ),
+});
+export type FleetCrew = typeof FleetCrew.Type;
+
+/** One agent row of the Fleet page: placement, provenance, Crew seat, and measured open asks. */
+export const FleetAgent = Schema.Struct({
+  participantId: Schema.String,
+  threadId: Schema.NullOr(Schema.String),
+  displayName: Schema.NullOr(Schema.String),
+  /** `agent` when another agent spawned it (roster-only in the sidebar); `unknown` when never recorded. */
+  origin: Schema.Literals(["human", "agent", "unknown"]),
+  placementParentId: Schema.NullOr(Schema.String),
+  crew: Schema.NullOr(
+    Schema.Struct({
+      crewInstanceId: Schema.String,
+      crewName: Schema.String,
+      seat: Schema.String,
+      captainParticipantId: Schema.String,
+    }),
+  ),
+  /** Open Exchanges this agent owes a reply on. */
+  openAsks: Schema.Number,
+  /** A retired agent kept only as a placeholder above an active descendant; never a live row. */
+  archived: Schema.Boolean,
+});
+export type FleetAgent = typeof FleetAgent.Type;
+export const FleetSquadron = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  agents: Schema.Array(FleetAgent),
+  crews: Schema.Array(FleetCrew),
+});
+export type FleetSquadron = typeof FleetSquadron.Type;
+export const FleetResponse = Schema.Struct({ squadrons: Schema.Array(FleetSquadron) });
+export type FleetResponse = typeof FleetResponse.Type;
+
 export const J5_API_PATHS = {
   squadrons: "/api/j5/squadrons",
   threadHomes: "/api/j5/a2a/client-reads/participant-homes",
@@ -156,7 +233,9 @@ export const J5_API_PATHS = {
   openCount: "/api/j5/a2a/client-reads/open-count",
   crewProposals: "/api/j5/a2a/crews/proposals",
   crewProposalResolve: "/api/j5/a2a/crews/proposals/resolve",
+  fleet: "/api/j5/a2a/client-reads/fleet",
   crewMemberships: "/api/j5/a2a/client-reads/crew-memberships",
+  spawnedChildren: "/api/j5/a2a/client-reads/spawned-children",
 } as const;
 
 /**

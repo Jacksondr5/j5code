@@ -10,23 +10,27 @@ import { runtime } from "../../lib/runtime";
 
 export type { CrewMembershipEntry, ThreadCrewMembership } from "@t3tools/contracts/j5";
 
-/** Sidebar chip copy: a member names its seat, a Captain names how many live Crews it runs. */
+/**
+ * Sidebar identity for a Crew relation: a member's chip names its Crew and seat; a Captain gets
+ * the anchor mark, with the live Crews it commands in the tooltip.
+ */
 export function presentCrewMembership(
   membership: ThreadCrewMembership | undefined,
-): { readonly label: string; readonly title: string } | null {
+):
+  | { readonly kind: "seat"; readonly label: string; readonly title: string }
+  | { readonly kind: "captain"; readonly title: string }
+  | null {
   if (membership === undefined) return null;
-  if (membership.kind === "member") {
-    if (membership.crew.archived) return null;
+  if (membership.kind === "member")
     return {
+      kind: "seat",
       label: `${membership.crew.crewName} · ${membership.seat}`,
       title: `Seat ${membership.seat} of crew ${membership.crew.crewName}`,
     };
-  }
-  const live = membership.crews.filter((crew) => !crew.archived);
-  if (live.length === 0) return null;
+  if (membership.crews.length === 0) return null;
   return {
-    label: "Captain",
-    title: `Commands ${live.map((crew) => crew.crewName).join(", ")}`,
+    kind: "captain",
+    title: `Commands ${membership.crews.map((crew) => crew.crewName).join(", ")}`,
   };
 }
 
@@ -52,9 +56,9 @@ const store = createScopedThreadReadStore<ThreadCrewMembership, CrewMembershipEn
 
 /**
  * Called beside the thread-home read whenever the row set changes; incremental, so a shells or
- * connection change reads only the rows not yet known. A thread can gain or lose a Crew at any
- * time, so `refreshCrewMemberships` re-reads every requested row on the Fleet poll and after a
- * launch, rather than on every shells change.
+ * connection change reads only the rows not yet answered for (an empty answer counts). A thread
+ * can gain or lose a Crew at any time: a launch or decision on this device re-reads every
+ * requested row, and the Fleet poll re-reads only the rows the roster names as involved.
  */
 export const requestCrewMemberships = (
   refs: ReadonlyArray<ScopedThreadRef>,
@@ -66,6 +70,13 @@ export const requestCrewMemberships = (
 };
 
 export const refreshCrewMemberships = () => store.refreshRequested();
+/**
+ * The Fleet poll's re-read: the rows the roster says sit in or command a Crew, plus every row
+ * still showing a chip, so a Captain whose last Crew retired (here or on another device) is
+ * re-read once more and its chip clears rather than staying until reload.
+ */
+export const refreshCrewMembershipRows = (refs: ReadonlyArray<ScopedThreadRef>) =>
+  store.refreshRows(refs, { held: true });
 
 export function useCrewMembership(
   ref: ScopedThreadRef | undefined,
