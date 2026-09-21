@@ -27,7 +27,7 @@ const runtimePolicy = (
 
 describe("agent persona provider policy", () => {
   it("translates inspection policies to non-interactive read-only access", () => {
-    for (const authorityPolicy of ["read-only", "critic-review"] as const) {
+    for (const authorityPolicy of ["read-only", "critic-review", "diagnostic"] as const) {
       assert.deepEqual(
         translateAgentPersonaProviderPolicy(authorityPolicy, ProviderDriverKind.make("codex")),
         {
@@ -60,7 +60,7 @@ describe("agent persona provider policy", () => {
     for (const [authorityPolicy, driver] of [
       ["workspace-write", "claudeAgent"],
       ["critic-fix", "claudeAgent"],
-      ["diagnostic", "codex"],
+      ["diagnostic", "cursor"],
       ["publish-only", "codex"],
     ] as const) {
       assert.isFalse(
@@ -97,6 +97,7 @@ describe("agent persona provider policy", () => {
       const readOnly = yield* build("critic-review");
       const workspaceWrite = yield* build("critic-fix");
       const publish = yield* build("publish-only");
+      const diagnostic = yield* build("diagnostic");
 
       assert.equal(readOnly.approvalPolicy, "never");
       assert.equal(readOnly.sandboxPolicy?.type, "readOnly");
@@ -104,10 +105,22 @@ describe("agent persona provider policy", () => {
       assert.equal(workspaceWrite.sandboxPolicy?.type, "workspaceWrite");
       assert.equal(publish.approvalPolicy, "never");
       assert.equal(publish.sandboxPolicy?.type, "readOnly");
+      assert.equal(diagnostic.approvalPolicy, "never");
+      assert.deepEqual(diagnostic.sandboxPolicy, readOnly.sandboxPolicy);
     }),
   );
 
   it("compiles the canonical policies into Claude permission modes", () => {
+    assert.isTrue(providerCanEnforceAgentPersonaAuthority("claudeAgent", "diagnostic"));
+    assert.deepEqual(
+      claudeRuntimeQueryPolicyForRuntimePolicy(runtimePolicy("diagnostic", "claudeAgent")),
+      {
+        permissionMode: "dontAsk",
+        tools: CLAUDE_READ_ONLY_ALLOWED_TOOLS,
+        allowedTools: CLAUDE_READ_ONLY_ALLOWED_TOOLS,
+        installPermissionCallback: false,
+      },
+    );
     assert.deepEqual(claudeRuntimeQueryPolicyForRuntimePolicy(runtimePolicy("critic-review")), {
       permissionMode: "dontAsk",
       tools: CLAUDE_READ_ONLY_ALLOWED_TOOLS,

@@ -8,8 +8,87 @@ import { compileYamlPlaybook } from "./Yaml.ts";
 import { development } from "./fh/development.ts";
 import { hash } from "../playbook/Definition.ts";
 import { testExecution } from "../playbook/testFixtures.ts";
+import { decide } from "../playbook/decider.ts";
 
 const source = NodeFS.readFileSync(new URL("./research-review.yaml", import.meta.url), "utf8");
+
+it("binds both reviewers, corrected attempts, and only the latest review round into feedback and gates", () => {
+  const definition = compileYamlPlaybook(
+    source
+      .replace("approvals: [approval]", "approvals: [approval]\n    evidence: [review]")
+      .replace(
+        "    outcome: review",
+        "      - id: second-review\n        persona: sentry\n        authority: critic-review\n        instructions: Review the research.\n        output: review\n    outcome: review",
+      ),
+  );
+  let run: Run = {
+    id: "paired-review",
+    definitionId: definition.id,
+    definitionVersion: definition.version,
+    definitionHash: definition.hash,
+    squadronId: "squadron",
+    projectId: "project",
+    repository: "/test",
+    baseCommit: "main",
+    inputs: { request: "research" },
+    execution: {
+      ...testExecution,
+      personas: {
+        researcher: testExecution.personas.scout,
+        "inline:review:review-report": testExecution.personas.critic,
+        "inline:review:second-review": {
+          ...testExecution.personas.sentry,
+          authorityPolicy: "critic-review",
+        },
+      },
+    },
+    phase: definition.initial,
+    revision: 0,
+    status: "running",
+    cause: null,
+    recovery: null,
+    gate: null,
+    actions: [],
+    artifacts: [],
+    approvals: [],
+    visits: {},
+  };
+  const complete = (output: unknown) => {
+    const action = run.actions.findLast((item) => item.status === "pending")!;
+    run = decide(run, { type: "result", actionId: action.id, output }, definition, 0);
+  };
+  const report = () =>
+    complete({
+      summary: `Round ${run.visits.research}`,
+      body: "evidence",
+      evidence: [],
+      unknowns: [],
+    });
+  const review = (verdict: "accept" | "revise") =>
+    complete({
+      verdict,
+      subjectHash: run.artifacts.findLast((item) => item.phase === "research")!.hash,
+      findings: verdict === "revise" ? [{ blocking: true, description: "Missing evidence" }] : [],
+    });
+  run = decide(run, { type: "enter" }, definition, 0);
+  complete({ worktree: "/test", branch: "branch" });
+  report();
+  review("revise");
+  complete("invalid output");
+  review("accept");
+  assert.equal(run.phase, "research");
+  const action = run.actions.findLast((item) => item.status === "pending")!;
+  const selected = (action.input as { selectedEvidenceIds: string[] }).selectedEvidenceIds;
+  assert.lengthOf(selected, 2);
+  assert.include((action.input as { prompt: string }).prompt, "Missing evidence");
+  assert.isTrue(run.artifacts.some((item) => selected.includes(item.id) && item.attempt === 2));
+  report();
+  review("accept");
+  review("accept");
+  assert.equal(run.phase, "approval");
+  assert.lengthOf(run.gate!.artifactIds, 3);
+  assert.isFalse(run.gate!.artifactIds.some((id) => selected.includes(id)));
+});
 
 it("compiles ordered phases and explicit shared agents", () => {
   const definition = compileYamlPlaybook(source, "research-review.yaml");
@@ -387,4 +466,27 @@ it("compiles custom publication phases and rejects incomplete or unsafe sequence
   check((source) => {
     source.initial = "prepare-publication";
   }, /developer report must run before preparation/);
+});
+
+it("requires publication before read-only feedback collection", () => {
+  const authored = parse(publicationSource) as import("./Yaml.ts").YamlPlaybook;
+  assert.throws(
+    () =>
+      compileYamlPlaybook(
+        stringify({
+          ...authored,
+          initial: "feedback",
+          phases: [
+            {
+              id: "feedback",
+              kind: "code",
+              tasks: [{ id: "collect", operation: "feedback" }],
+              transitions: { pass: authored.initial },
+            },
+            ...authored.phases,
+          ],
+        }),
+      ),
+    /draft publication must run before feedback on every path/,
+  );
 });

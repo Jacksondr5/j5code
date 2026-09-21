@@ -10,6 +10,7 @@ const decodePullRequests = Schema.decodeUnknownSync(
       isDraft: Schema.Boolean,
       mergedAt: Schema.NullOr(Schema.String),
       headRefOid: Schema.String,
+      state: Schema.String,
     }),
   ),
 );
@@ -22,8 +23,10 @@ export interface GitHub {
     draft: boolean;
     merged: boolean;
     commit: string;
+    closed: boolean;
   } | null>;
   readonly create: (metadata: Metadata) => Promise<void>;
+  readonly update: (metadata: Metadata, number: number) => Promise<void>;
 }
 export const github: GitHub = {
   async find(metadata) {
@@ -39,7 +42,7 @@ export const github: GitHub = {
       "--state",
       "all",
       "--json",
-      "url,number,isDraft,mergedAt,headRefOid",
+      "url,number,isDraft,mergedAt,headRefOid,state",
     ]);
     if (result.exitCode !== 0) throw new Error(result.output);
     const rows = decodePullRequests(JSON.parse(result.output));
@@ -52,6 +55,7 @@ export const github: GitHub = {
           draft: row.isDraft,
           merged: row.mergedAt !== null,
           commit: row.headRefOid,
+          closed: row.state !== "OPEN",
         }
       : null;
   },
@@ -73,6 +77,20 @@ export const github: GitHub = {
     ]);
     if (result.exitCode !== 0) throw new Error(result.output);
   },
+  async update(metadata, number) {
+    const result = await command("/", "gh", [
+      "pr",
+      "edit",
+      String(number),
+      "--repo",
+      metadata.repository,
+      "--title",
+      metadata.title,
+      "--body",
+      metadata.body,
+    ]);
+    if (result.exitCode !== 0) throw new Error(result.output);
+  },
 };
 
 export async function verifyCandidate(worktree: string, baseCommit: string, metadata: Metadata) {
@@ -84,10 +102,12 @@ export async function verifyCandidate(worktree: string, baseCommit: string, meta
 }
 export async function commit(worktree: string, baseCommit: string, metadata: Metadata) {
   await verifyCandidate(worktree, baseCommit, metadata);
+  const parent = metadata.parentCommit ?? baseCommit;
+  await git(worktree, ["merge-base", "--is-ancestor", baseCommit, parent]);
   const head = await git(worktree, ["rev-parse", "HEAD"]);
-  if (head !== baseCommit) {
+  if (head !== parent) {
     if (
-      (await git(worktree, ["rev-parse", "HEAD^"])) !== baseCommit ||
+      (await git(worktree, ["show", "-s", "--format=%P", "HEAD"])) !== parent ||
       (await git(worktree, ["rev-parse", "HEAD^{tree}"])) !== metadata.tree ||
       (await git(worktree, ["log", "-1", "--format=%B"])) !== metadata.commitMessage.trim()
     ) {
@@ -95,7 +115,7 @@ export async function commit(worktree: string, baseCommit: string, metadata: Met
     }
     return { commit: head, codeIdentity: metadata.codeIdentity };
   }
-  if ((await git(worktree, ["rev-parse", `${baseCommit}^{tree}`])) === metadata.tree)
+  if ((await git(worktree, ["rev-parse", `${parent}^{tree}`])) === metadata.tree)
     throw new Error("There are no approved changes to commit");
   // This index belongs exclusively to the playbook worktree. Populate the exact approved tree.
   await git(worktree, ["read-tree", metadata.tree]);
@@ -123,9 +143,11 @@ export async function push(worktree: string, baseCommit: string, metadata: Metad
   if ((await git(worktree, ["remote", "get-url", "origin"])) !== metadata.repository)
     throw new Error("Approved remote changed");
   const ref = `refs/heads/${metadata.headBranch}`;
-  let remote = (await git(worktree, ["ls-remote", "origin", ref])).split(/\s/)[0];
-  if (remote && remote !== sha) throw new Error("Remote branch has an unexpected commit");
-  if (!remote) await git(worktree, ["push", "origin", `${sha}:${ref}`]);
+  let remote = (await git(worktree, ["ls-remote", "origin", ref])).split(/\s/)[0] || undefined;
+  const previous = metadata.parentCommit === baseCommit ? undefined : metadata.parentCommit;
+  if (remote !== sha && remote !== previous)
+    throw new Error("Remote branch has an unexpected commit");
+  if (remote !== sha) await git(worktree, ["push", "origin", `${sha}:${ref}`]);
   remote = (await git(worktree, ["ls-remote", "origin", ref])).split(/\s/)[0];
   if (remote !== sha) throw new Error("Push could not be confirmed");
   return { commit: sha, remoteSha: sha };
@@ -136,8 +158,19 @@ export async function draft(metadata: Metadata, sha: string, api: GitHub) {
     await api.create(metadata);
     pr = await api.find(metadata);
   }
-  if (!pr || !pr.draft || pr.merged || pr.commit !== sha)
+  if (!pr || !pr.draft || pr.merged || pr.closed || pr.commit !== sha)
     throw new Error("Draft PR does not match approval");
+  await api.update(metadata, pr.number);
+  const updated = await api.find(metadata);
+  if (
+    !updated ||
+    updated.number !== pr.number ||
+    !updated.draft ||
+    updated.merged ||
+    updated.closed ||
+    updated.commit !== sha
+  )
+    throw new Error("Draft PR changed while updating publication metadata");
   return {
     commit: sha,
     url: pr.url,

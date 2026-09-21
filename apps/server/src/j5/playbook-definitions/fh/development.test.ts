@@ -284,6 +284,7 @@ it.effect(
       let pr: Awaited<ReturnType<GitHub["find"]>> = null;
       const api: GitHub = {
         find: async () => pr,
+        update: async () => {},
         create: async (metadata) => {
           creates++;
           pr = {
@@ -291,6 +292,7 @@ it.effect(
             number: 1,
             draft: true,
             merged: false,
+            closed: false,
             commit: await git(f.repository, ["rev-parse", metadata.headBranch]),
           };
         },
