@@ -56,6 +56,14 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
   assert.property(archiveSchema.properties ?? {}, "client_request_id");
   assert.property(archiveSchema.properties ?? {}, "confirmation_token");
   assert.sameMembers(Object.keys(J5Toolkit.tools), [
+    "playbook_back",
+    "playbook_cancel",
+    "playbook_complete",
+    "playbook_current",
+    "playbook_list",
+    "playbook_next",
+    "playbook_reselect",
+    "playbook_start",
     "send_message",
     "list_participants",
     "spawn_agent",

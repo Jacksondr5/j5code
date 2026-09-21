@@ -1,4 +1,6 @@
 import * as Layer from "effect/Layer";
+import { playbookHttpRouteLayer } from "../playbooks/PlaybookHttp.ts";
+import { playbookLibraryHttpRouteLayer } from "../playbooks/PlaybookLibraryHttp.ts";
 
 import {
   CLIENT_READS_OPEN_COUNT_PATH,
@@ -20,6 +22,8 @@ import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.
  * rather than adding another upstream server composition seam.
  */
 export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
+  playbookHttpRouteLayer,
+  playbookLibraryHttpRouteLayer,
   artifactHttpRouteLayer,
   humanInboxHttpRouteLayer,
   machineSenderHttpRouteLayer,

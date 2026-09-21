@@ -45,6 +45,7 @@ import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
+  BookOpenIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderIcon,
@@ -1651,6 +1652,17 @@ function OpenCommandPaletteDialog(props: {
     icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/settings" });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:playbooks",
+    searchTerms: ["playbooks", "runs", "progress", "overview"],
+    title: "Open playbook runs",
+    icon: <BookOpenIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/playbooks" });
     },
   });
 

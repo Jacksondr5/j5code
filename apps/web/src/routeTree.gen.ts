@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as UsageRouteImport } from './routes/usage'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as PlaybooksRouteImport } from './routes/playbooks'
 import { Route as PairRouteImport } from './routes/pair'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as ConnectRouteImport } from './routes/connect'
@@ -20,6 +21,7 @@ import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
 import { Route as SettingsScheduledTasksRouteImport } from './routes/settings.scheduled-tasks'
 import { Route as SettingsProvidersRouteImport } from './routes/settings.providers'
+import { Route as SettingsPlaybooksRouteImport } from './routes/settings.playbooks'
 import { Route as SettingsKeybindingsRouteImport } from './routes/settings.keybindings'
 import { Route as SettingsIntegrationsRouteImport } from './routes/settings.integrations'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
@@ -42,6 +44,11 @@ const UsageRoute = UsageRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlaybooksRoute = PlaybooksRouteImport.update({
+  id: '/playbooks',
+  path: '/playbooks',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PairRoute = PairRouteImport.update({
@@ -86,6 +93,11 @@ const SettingsScheduledTasksRoute = SettingsScheduledTasksRouteImport.update({
 const SettingsProvidersRoute = SettingsProvidersRouteImport.update({
   id: '/providers',
   path: '/providers',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsPlaybooksRoute = SettingsPlaybooksRouteImport.update({
+  id: '/playbooks',
+  path: '/playbooks',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsKeybindingsRoute = SettingsKeybindingsRouteImport.update({
@@ -161,6 +173,7 @@ export interface FileRoutesByFullPath {
   '/connect': typeof ConnectRoute
   '/inbox': typeof InboxRoute
   '/pair': typeof PairRoute
+  '/playbooks': typeof PlaybooksRoute
   '/settings': typeof SettingsRouteWithChildren
   '/usage': typeof UsageRoute
   '/pull-requests': typeof ChatPullRequestsRoute
@@ -174,6 +187,7 @@ export interface FileRoutesByFullPath {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/playbooks': typeof SettingsPlaybooksRoute
   '/settings/providers': typeof SettingsProvidersRoute
   '/settings/scheduled-tasks': typeof SettingsScheduledTasksRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
@@ -185,6 +199,7 @@ export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
   '/inbox': typeof InboxRoute
   '/pair': typeof PairRoute
+  '/playbooks': typeof PlaybooksRoute
   '/settings': typeof SettingsRouteWithChildren
   '/usage': typeof UsageRoute
   '/pull-requests': typeof ChatPullRequestsRoute
@@ -198,6 +213,7 @@ export interface FileRoutesByTo {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/playbooks': typeof SettingsPlaybooksRoute
   '/settings/providers': typeof SettingsProvidersRoute
   '/settings/scheduled-tasks': typeof SettingsScheduledTasksRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
@@ -212,6 +228,7 @@ export interface FileRoutesById {
   '/connect': typeof ConnectRoute
   '/inbox': typeof InboxRoute
   '/pair': typeof PairRoute
+  '/playbooks': typeof PlaybooksRoute
   '/settings': typeof SettingsRouteWithChildren
   '/usage': typeof UsageRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
@@ -225,6 +242,7 @@ export interface FileRoutesById {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/playbooks': typeof SettingsPlaybooksRoute
   '/settings/providers': typeof SettingsProvidersRoute
   '/settings/scheduled-tasks': typeof SettingsScheduledTasksRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
@@ -240,6 +258,7 @@ export interface FileRouteTypes {
     | '/connect'
     | '/inbox'
     | '/pair'
+    | '/playbooks'
     | '/settings'
     | '/usage'
     | '/pull-requests'
@@ -253,6 +272,7 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/playbooks'
     | '/settings/providers'
     | '/settings/scheduled-tasks'
     | '/settings/source-control'
@@ -264,6 +284,7 @@ export interface FileRouteTypes {
     | '/connect'
     | '/inbox'
     | '/pair'
+    | '/playbooks'
     | '/settings'
     | '/usage'
     | '/pull-requests'
@@ -277,6 +298,7 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/playbooks'
     | '/settings/providers'
     | '/settings/scheduled-tasks'
     | '/settings/source-control'
@@ -290,6 +312,7 @@ export interface FileRouteTypes {
     | '/connect'
     | '/inbox'
     | '/pair'
+    | '/playbooks'
     | '/settings'
     | '/usage'
     | '/_chat/pull-requests'
@@ -303,6 +326,7 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/playbooks'
     | '/settings/providers'
     | '/settings/scheduled-tasks'
     | '/settings/source-control'
@@ -317,6 +341,7 @@ export interface RootRouteChildren {
   ConnectRoute: typeof ConnectRoute
   InboxRoute: typeof InboxRoute
   PairRoute: typeof PairRoute
+  PlaybooksRoute: typeof PlaybooksRoute
   SettingsRoute: typeof SettingsRouteWithChildren
   UsageRoute: typeof UsageRoute
   ConnectCallbackRoute: typeof ConnectCallbackRoute
@@ -337,6 +362,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/playbooks': {
+      id: '/playbooks'
+      path: '/playbooks'
+      fullPath: '/playbooks'
+      preLoaderRoute: typeof PlaybooksRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/pair': {
@@ -400,6 +432,13 @@ declare module '@tanstack/react-router' {
       path: '/providers'
       fullPath: '/settings/providers'
       preLoaderRoute: typeof SettingsProvidersRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/playbooks': {
+      id: '/settings/playbooks'
+      path: '/playbooks'
+      fullPath: '/settings/playbooks'
+      preLoaderRoute: typeof SettingsPlaybooksRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/keybindings': {
@@ -521,6 +560,7 @@ interface SettingsRouteChildren {
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsIntegrationsRoute: typeof SettingsIntegrationsRoute
   SettingsKeybindingsRoute: typeof SettingsKeybindingsRoute
+  SettingsPlaybooksRoute: typeof SettingsPlaybooksRoute
   SettingsProvidersRoute: typeof SettingsProvidersRoute
   SettingsScheduledTasksRoute: typeof SettingsScheduledTasksRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
@@ -535,6 +575,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsIntegrationsRoute: SettingsIntegrationsRoute,
   SettingsKeybindingsRoute: SettingsKeybindingsRoute,
+  SettingsPlaybooksRoute: SettingsPlaybooksRoute,
   SettingsProvidersRoute: SettingsProvidersRoute,
   SettingsScheduledTasksRoute: SettingsScheduledTasksRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,
@@ -550,6 +591,7 @@ const rootRouteChildren: RootRouteChildren = {
   ConnectRoute: ConnectRoute,
   InboxRoute: InboxRoute,
   PairRoute: PairRoute,
+  PlaybooksRoute: PlaybooksRoute,
   SettingsRoute: SettingsRouteWithChildren,
   UsageRoute: UsageRoute,
   ConnectCallbackRoute: ConnectCallbackRoute,

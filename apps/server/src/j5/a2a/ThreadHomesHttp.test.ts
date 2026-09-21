@@ -1,3 +1,4 @@
+import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { AuthOrchestrationReadScope, AuthSessionId, ThreadId } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -76,6 +77,7 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
     },
   });
   const routes = j5AuthenticatedRoutesLayer.pipe(
+    Layer.provide(Layer.mock(PlaybookStore)({})),
     Layer.provide(homes),
     Layer.provide(
       Layer.mock(A2AArchiveFacts)({

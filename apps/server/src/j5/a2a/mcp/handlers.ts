@@ -1,4 +1,5 @@
 import { CommandId, MessageId, ThreadId, type ModelSelection } from "@t3tools/contracts";
+import { playbookHandlers } from "../../playbooks/mcp.ts";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -418,6 +419,7 @@ const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
 });
 
 const handlers = {
+  ...playbookHandlers,
   send_message: (input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;

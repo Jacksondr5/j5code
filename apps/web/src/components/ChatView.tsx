@@ -1,3 +1,5 @@
+import { expandPlaybookPrompt } from "@t3tools/client-runtime/j5/playbooks";
+import { PlaybookBoard } from "../j5/playbooks/PlaybookBoard";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import * as Schema from "effect/Schema";
 import { confirmTerminalClose, isTerminalCloseConfirmPending } from "../lib/terminalCloseConfirm";
@@ -6757,7 +6759,7 @@ export default function ChatView(props: ChatViewProps) {
             },
           ]
         : sendContextPreviewAnnotations;
-    const promptForSend = promptRef.current;
+    const promptForSend = expandPlaybookPrompt(promptRef.current);
     if (editingQueuedRun !== null) {
       // Edit mode repurposes the composer: sending saves the queued message
       // in place instead of dispatching a new turn.
@@ -7593,7 +7595,7 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
 
-    const trimmed = text.trim();
+    const trimmed = expandPlaybookPrompt(text.trim());
     if (!trimmed) {
       return;
     }
@@ -8376,6 +8378,14 @@ export default function ChatView(props: ChatViewProps) {
               : {})}
           />
         </header>
+
+        {isServerThread && (
+          <PlaybookBoard
+            key={`${activeThread.environmentId}:${activeThread.id}`}
+            environmentId={activeThread.environmentId}
+            threadId={activeThread.id}
+          />
+        )}
 
         {/* Main content area with optional plan sidebar */}
         <div

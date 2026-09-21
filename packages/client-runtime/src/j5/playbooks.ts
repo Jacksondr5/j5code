@@ -1,0 +1,162 @@
+import type { PlaybookProgress } from "@t3tools/contracts/j5";
+import type {
+  AgentPersonaCreateInput,
+  OrchestrationV2AgentPersonaCatalog,
+  ServerProvider,
+} from "@t3tools/contracts";
+import { defaultAgentPersonaModelRoute } from "./agentPersonas.ts";
+import type { EnvironmentProject, EnvironmentThreadShell } from "../state/shell.ts";
+
+export const CREATE_PLAYBOOK_PROMPT =
+  "Help me create an agent-led playbook in this workspace. Use the j5-new-playbook skill if available; otherwise follow your playbook authoring instructions. Ask what I want to accomplish, write .j5/playbooks/<name>.yaml, and validate it with playbook_list. Create the definition without starting a run.";
+
+export const PLAYBOOK_AUTHOR_ID = "playbook-author";
+export const PLAYBOOK_AUTHOR_INSTRUCTIONS = `You are Playbook Author. Help the user turn a repeatable task into a small, clear agent-led playbook in this thread's workspace.
+
+1. Start by asking what the playbook should accomplish. Clarify the desired result, inputs, constraints, and evidence of success one focused question at a time. Use details already provided instead of asking again.
+2. Inspect existing .j5/playbooks definitions and relevant workspace guidance. Propose the smallest useful sequence of phases, then write or refine the definition once the user's intent is clear. Ask before replacing an unrelated existing definition; preserve stable step IDs when editing.
+3. Save .j5/playbooks/<name>.yaml relative to this thread's workspace. Use YAML 1.2 with title, description, and steps. Each step has a unique stable id, a title, and a non-empty prompt. Use 1–100 steps, no YAML aliases, and at most 256 KiB. For example:
+
+title: Review a change
+description: Inspect a change and report evidence.
+steps:
+  - id: inspect
+    title: Inspect
+    prompt: Read the change, check its intended behavior, and record findings with evidence.
+  - id: report
+    title: Report
+    prompt: Summarize findings, checks performed, and remaining uncertainty.
+
+Each prompt tells the same agent what work to do, what evidence to retain, and when to advance. Use this flat step format; phases, edges, executable commands, and per-step persona assignments belong to a different playbook model.
+4. Call playbook_list in this thread after writing. Fix reported issues and repeat until the named definition is listed without an issue. If the tool is unavailable, state that runtime validation is still unverified.
+5. Report the file path, purpose, and phases. Explain that the user can refresh Settings → Playbooks to inspect it and send /playbook <name> when ready to run it.
+
+Stay within authoring and validation. Start a run only when the user explicitly asks. Make changes needed for the playbook; leave unrelated workspace files alone.`;
+
+/** Install once in the selected environment; subsequent launches retain the user's edits. */
+export async function ensurePlaybookAuthor(input: {
+  providers: ReadonlyArray<ServerProvider>;
+  readCatalog: () => Promise<OrchestrationV2AgentPersonaCatalog>;
+  createPersona: (definition: AgentPersonaCreateInput) => Promise<unknown>;
+}) {
+  const findAuthor = async () =>
+    (await input.readCatalog()).personas.find(({ personaId }) => personaId === PLAYBOOK_AUTHOR_ID);
+  let persona = await findAuthor();
+  if (!persona) {
+    // Workspace-writing personas currently require the Codex sandbox policy.
+    const modelRoute = defaultAgentPersonaModelRoute(
+      input.providers.filter(({ driver }) => driver === "codex"),
+    );
+    if (!modelRoute)
+      throw new Error(
+        "Playbook Author needs an authenticated Codex provider with an available model. Configure one in Settings → Providers for this environment.",
+      );
+    try {
+      await input.createPersona({
+        id: PLAYBOOK_AUTHOR_ID,
+        displayName: "Playbook Author",
+        description: "Helps you design, write, and validate agent-led playbooks.",
+        instructions: PLAYBOOK_AUTHOR_INSTRUCTIONS,
+        authorityPolicy: "workspace-write",
+        modelRoute,
+      });
+    } catch (cause) {
+      // Another client can create it between our catalog read and create request.
+      persona = await findAuthor();
+      if (!persona) throw cause;
+    }
+    persona ??= await findAuthor();
+  }
+  if (!persona || persona.availability.status !== "available")
+    throw new Error(
+      "Playbook Author is unavailable. Enable or restore it and check its model route in Settings → Agents for this environment.",
+    );
+  if (persona.defaultAuthorityPolicy !== "workspace-write")
+    throw new Error(
+      "Playbook Author needs Workspace write authority to save YAML. Update it in Settings → Agents for this environment.",
+    );
+  return persona.availability.resolvedModelSelection;
+}
+
+export function playbookWorkspaces(
+  projects: ReadonlyArray<
+    Pick<EnvironmentProject, "environmentId" | "id" | "title" | "workspaceRoot">
+  >,
+  threads: ReadonlyArray<
+    Pick<
+      EnvironmentThreadShell,
+      "environmentId" | "id" | "projectId" | "title" | "worktreePath" | "branch" | "deletedAt"
+    >
+  >,
+) {
+  return projects.flatMap((project) => [
+    {
+      key: `${project.environmentId}:project:${project.id}`,
+      environmentId: project.environmentId,
+      projectId: project.id,
+      threadId: null,
+      title: project.title,
+      workspaceRoot: project.workspaceRoot,
+      branch: null,
+    },
+    ...threads
+      .filter(
+        (thread) =>
+          thread.deletedAt === null &&
+          thread.environmentId === project.environmentId &&
+          thread.projectId === project.id &&
+          thread.worktreePath !== null &&
+          thread.worktreePath !== project.workspaceRoot,
+      )
+      .map((thread) => ({
+        key: `${project.environmentId}:thread:${thread.id}`,
+        environmentId: project.environmentId,
+        projectId: project.id,
+        threadId: thread.id,
+        title: `${project.title} / ${thread.title}`,
+        workspaceRoot: thread.worktreePath!,
+        branch: thread.branch,
+      })),
+  ]);
+}
+
+/** A composer text expansion. The ordinary agent-message path performs the work. */
+export function expandPlaybookPrompt(text: string): string {
+  return text.replace(
+    /^\s*\/playbook(?:[ \t]+([^\r\n]+))?\s*$/i,
+    (_match, name: string | undefined) =>
+      name?.trim()
+        ? `Start playbook ${name.trim()}`
+        : "List available playbooks and help me choose one to start.",
+  );
+}
+
+export function presentPlaybook(run: PlaybookProgress) {
+  const current = run.steps.find((step) => step.id === run.currentStepId);
+  return {
+    status:
+      run.status === "active"
+        ? run.issue
+          ? "Needs attention"
+          : "In progress"
+        : run.status === "completed"
+          ? "Completed"
+          : "Cancelled",
+    position: run.position === null ? "Step unavailable" : `Step ${run.position} of ${run.total}`,
+    currentTitle: current?.title ?? run.currentStepId,
+    steps: run.steps.map((step, index) => ({
+      ...step,
+      current: step.id === run.currentStepId,
+      label:
+        step.id === run.currentStepId
+          ? run.status === "active"
+            ? "Current"
+            : "Last position"
+          : run.position === null
+            ? "Available"
+            : index + 1 < run.position
+              ? "Earlier"
+              : "Later",
+    })),
+  };
+}

@@ -92,6 +92,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
             ),
           ),
           Layer.provide(database),
+          Layer.provide(NodeServices.layer),
         ),
       );
       return ledgers.size;

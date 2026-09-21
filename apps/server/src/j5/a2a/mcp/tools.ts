@@ -1,4 +1,5 @@
 import { Tool, Toolkit } from "effect/unstable/ai";
+import { playbookTools } from "../../playbooks/mcp.ts";
 import * as Schema from "effect/Schema";
 
 import {
@@ -401,6 +402,7 @@ export const J5ClearOwnAskTool = Tool.make("clear_own_ask", {
 
 /** Shared J5 toolkit bootstrap. Later J5 milestones append their tools here. */
 export const J5Toolkit = Toolkit.make(
+  ...playbookTools,
   J5SendMessageTool,
   J5ListParticipantsTool,
   J5ListSquadronsTool,

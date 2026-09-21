@@ -53,6 +53,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 11, name: "ReversibleLifecycle" },
       { migration_id: 12, name: "AgentHandoffs" },
       { migration_id: 13, name: "MachineParticipants" },
+      { migration_id: 14, name: "AgentLedPlaybooks" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -70,6 +71,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [11, "ReversibleLifecycle"],
         [12, "AgentHandoffs"],
         [13, "MachineParticipants"],
+        [14, "AgentLedPlaybooks"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),

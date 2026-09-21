@@ -1,4 +1,5 @@
 import * as Layer from "effect/Layer";
+import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
 
 import { layer as archiveFactsLayer, placementFactsLayer } from "./ArchiveFactsService.ts";
 import { layer as archiveAgentLayer } from "./ArchiveAgentService.ts";
@@ -75,6 +76,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provide(agentHandoffNudgeQueueLayer),
   );
   const runtimeWithoutClientReads = Layer.mergeAll(
+    playbookStoreLayer,
     agentHandoffNudgeWorkerProvided,
     // Exported to the routes so the J5 WebSocket handler streams the same revision counter the
     // observer bumps (server.ts provides this layer object to the observer; Effect memoizes it).

@@ -1,3 +1,4 @@
+import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { AuthOrchestrationReadScope, AuthSessionId, ThreadId } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -317,6 +318,7 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
     },
   });
   const routes = j5AuthenticatedRoutesLayer.pipe(
+    Layer.provide(Layer.mock(PlaybookStore)({})),
     Layer.provide(clientReads),
     Layer.provide(
       Layer.mock(A2AArchiveFacts)({

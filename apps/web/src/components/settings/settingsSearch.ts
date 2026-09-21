@@ -6,6 +6,7 @@ export type SettingsPath =
   | "/settings/appearance"
   | "/settings/keybindings"
   | "/settings/agents"
+  | "/settings/playbooks"
   | "/settings/providers"
   | "/settings/integrations"
   | "/settings/scheduled-tasks"
@@ -53,6 +54,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/agents": "Agents",
+  "/settings/playbooks": "Playbooks",
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
   "/settings/scheduled-tasks": "Schedule Tasks",
@@ -67,6 +69,12 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
  * that may not be mounted point at their nearest stable section instead.
  */
 export const SETTINGS_SEARCH_ITEMS = [
+  {
+    id: "playbooks",
+    title: "Playbooks",
+    to: "/settings/playbooks",
+    searchTerms: ["create playbook library prompt phases workflow yaml"],
+  },
   {
     id: "color-scheme",
     title: "Color scheme",

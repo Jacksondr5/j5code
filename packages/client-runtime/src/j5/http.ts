@@ -1,4 +1,12 @@
 import {
+  PLAYBOOK_LIBRARY_PATH,
+  PlaybookLibraryResponse,
+  type PlaybookLibraryRequest,
+  PLAYBOOK_PROGRESS_PATH,
+  PLAYBOOK_RUNS_PATH,
+  PlaybookRunsResponse,
+  type PlaybookRunsRequest,
+  ThreadPlaybooksResponse,
   AnswerHumanExchangeResponse,
   CreateSquadronResponse,
   HumanInboxResponse,
@@ -46,6 +54,39 @@ export const isJ5UnsupportedError = (error: unknown): boolean =>
 
 const READ_TIMEOUT_MS = 10_000;
 const WRITE_TIMEOUT_MS = 15_000;
+
+export const readPlaybookLibrary = Effect.fn("j5.http.readPlaybookLibrary")(function* (
+  prepared: PreparedConnection,
+  input: PlaybookLibraryRequest,
+) {
+  const request = yield* HttpClientRequest.post(PLAYBOOK_LIBRARY_PATH).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(PlaybookLibraryResponse)(response);
+});
+
+export const readThreadPlaybooks = Effect.fn("j5.http.readThreadPlaybooks")(function* (
+  prepared: PreparedConnection,
+  threadId: ThreadId,
+) {
+  const request = yield* HttpClientRequest.post(PLAYBOOK_PROGRESS_PATH).pipe(
+    HttpClientRequest.bodyJson({ threadId }),
+  );
+  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(ThreadPlaybooksResponse)(response);
+});
+
+export const readAllPlaybooks = Effect.fn("j5.http.readAllPlaybooks")(function* (
+  prepared: PreparedConnection,
+  input: PlaybookRunsRequest,
+) {
+  const request = yield* HttpClientRequest.post(PLAYBOOK_RUNS_PATH).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(PlaybookRunsResponse)(response);
+});
 
 /**
  * Authorizes against this prepared environment only, through the same
