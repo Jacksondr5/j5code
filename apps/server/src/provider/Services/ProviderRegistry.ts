@@ -36,10 +36,14 @@ export interface ProviderRegistryShape {
    *
    * @deprecated prefer `refreshInstance` for new call sites.
    */
-  readonly refresh: (provider?: ProviderDriverKind) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+  readonly refresh: (
+    provider?: ProviderDriverKind,
+    options?: { readonly refreshWorkspaces?: boolean },
+  ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
   /**
-   * Refresh the specific configured instance. Returns the updated snapshot
+   * Refresh the specific configured instance, including cached workspace
+   * skills and commands. Returns the updated snapshot
    * list. When the instance id is unknown the call resolves with the
    * currently cached list (no error) — matching the legacy `refresh` shim
    * behaviour so transport layers don't have to special-case unknowns.

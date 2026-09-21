@@ -165,6 +165,7 @@ import {
 } from "./j5/a2a/crewSeatArchiveGuard.ts";
 import { makeAgentPersonaRpcHandlers } from "./j5/agents/agentPersonaRpc.ts";
 import { makeArtifactRpcHandlers } from "./j5/artifacts/artifactRpc.ts";
+import { makeSkillCatalogRpcHandlers } from "./j5/skills/skillCatalogRpc.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
@@ -1702,6 +1703,9 @@ const makeWsRpcLayer = (
         observe: observeRpcEffect,
         observeStream: observeRpcStream,
       });
+      const skillCatalogRpcHandlers = yield* makeSkillCatalogRpcHandlers({
+        observe: observeRpcEffect,
+      });
       const handlers = ServerWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
@@ -1750,6 +1754,7 @@ const makeWsRpcLayer = (
             },
           ),
         ...agentPersonaRpcHandlers,
+        ...skillCatalogRpcHandlers,
         [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.getWorkflowScript,
@@ -3244,7 +3249,7 @@ const makeWsRpcLayer = (
               );
 
               yield* providerRegistry
-                .refresh()
+                .refresh(undefined, { refreshWorkspaces: false })
                 .pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped);
 
               const liveUpdates = Stream.merge(

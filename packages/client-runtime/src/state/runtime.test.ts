@@ -114,6 +114,7 @@ const makeEnvironmentQueryHarness = Effect.fn("TestEnvironmentQuery.makeHarness"
   });
 
   return {
+    runtime,
     atom: family({ environmentId: QUERY_ENVIRONMENT.environmentId, input: undefined }),
     supervisorSession,
     supervisorState,
@@ -274,6 +275,46 @@ describe("environmentRpcKey", () => {
 });
 
 describe("environment query lifecycle", () => {
+  it.effect("isolates source-keyed status from a previous source's late response", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const firstResult = yield* Deferred.make<string>();
+        const secondResult = yield* Deferred.make<string>();
+        const { runtime } = yield* makeEnvironmentQueryHarness(Effect.void);
+        const status = createEnvironmentQueryAtomFamily(runtime, {
+          label: "test.catalog-status",
+          execute: (input: { readonly expectedSource: string }) =>
+            Deferred.await(input.expectedSource === "/catalog/A" ? firstResult : secondResult),
+        });
+        const environmentId = QUERY_ENVIRONMENT.environmentId;
+        const first = status({ environmentId, input: { expectedSource: "/catalog/A" } });
+        const second = status({ environmentId, input: { expectedSource: "/catalog/B" } });
+        const registry = AtomRegistry.make();
+        const unmountFirst = registry.mount(first);
+        const unmountSecond = registry.mount(second);
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            unmountFirst();
+            unmountSecond();
+            registry.dispose();
+          }),
+        );
+
+        expect(Option.isNone(AsyncResult.value(registry.get(second)))).toBe(true);
+        yield* Deferred.succeed(secondResult, "B status");
+        expect(yield* AtomRegistry.getResult(registry, second, { suspendOnWaiting: true })).toBe(
+          "B status",
+        );
+        yield* Deferred.succeed(firstResult, "late A status");
+        expect(yield* AtomRegistry.getResult(registry, first, { suspendOnWaiting: true })).toBe(
+          "late A status",
+        );
+        expect(Option.getOrNull(AsyncResult.value(registry.get(second)))).toBe("B status");
+        expect(status({ environmentId, input: { expectedSource: "/catalog/B" } })).toBe(second);
+      }),
+    ),
+  );
+
   it.effect(
     "retries an interrupted query without exposing a failure during session replacement",
     () =>

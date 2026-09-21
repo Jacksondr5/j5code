@@ -124,6 +124,8 @@ export const ServerProviderWorkspaceSnapshot = Schema.Struct({
   checkedAt: IsoDateTime,
   slashCommands: Schema.Array(ServerProviderSlashCommand),
   skills: Schema.Array(ServerProviderSkill),
+  /** A failed refresh keeps the last successful inventory and checkedAt. */
+  refreshError: Schema.optional(TrimmedNonEmptyString),
 });
 export type ServerProviderWorkspaceSnapshot = typeof ServerProviderWorkspaceSnapshot.Type;
 
