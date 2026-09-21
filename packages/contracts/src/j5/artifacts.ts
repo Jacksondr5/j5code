@@ -3,6 +3,20 @@ import { Rpc, RpcGroup } from "effect/unstable/rpc";
 
 import { ArtifactChangeEvent, ArtifactWatchError, ArtifactWatchInput } from "../artifacts.ts";
 import { EnvironmentAuthorizationError } from "../auth.ts";
+import { ProjectId } from "../baseSchemas.ts";
+
+export const ARTIFACT_DELETE_PATH = "/api/j5/artifacts/delete";
+
+export const ArtifactDeleteRequest = Schema.Struct({
+  projectId: ProjectId,
+  path: Schema.String,
+});
+export type ArtifactDeleteRequest = typeof ArtifactDeleteRequest.Type;
+
+export const ArtifactDeleteResponse = Schema.Struct({
+  deleted: Schema.Literal(true),
+});
+export type ArtifactDeleteResponse = typeof ArtifactDeleteResponse.Type;
 
 /**
  * The J5 artifact WebSocket surface: one stream that tells a client a project's artifacts

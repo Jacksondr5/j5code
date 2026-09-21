@@ -3,8 +3,10 @@ import { executeJ5Request } from "@t3tools/client-runtime/j5/http";
 import {
   ARTIFACT_LIST_PATH,
   ARTIFACT_READ_PATH,
+  ARTIFACT_DELETE_PATH,
   ArtifactContent,
   ArtifactListResponse,
+  ArtifactDeleteResponse,
   type ArtifactContent as ArtifactContentValue,
   type ArtifactEntry,
   type EnvironmentId,
@@ -26,10 +28,10 @@ export class ArtifactHttpError extends Schema.TaggedErrorClass<ArtifactHttpError
   }
 }
 
-const READ_TIMEOUT_MS = 10_000;
+const REQUEST_TIMEOUT_MS = 10_000;
 
 /**
- * Both artifact reads go through the shared J5 request helper, which resolves the credential at
+ * Artifact requests go through the shared J5 request helper, which resolves the credential at
  * request time (cookie, static bearer, or relay access token with a fresh DPoP proof) and refreshes
  * a rejected relay token once. A hand-rolled bearer/DPoP branch here signed with whatever token the
  * prepared connection held at page load, so on T3 Connect the change stream kept flowing while
@@ -50,7 +52,7 @@ const post = Effect.fn("j5.artifacts.client.post")(function* (input: {
   const request = yield* HttpClientRequest.post(input.pathname).pipe(
     HttpClientRequest.bodyJson(input.body),
   );
-  return yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS).pipe(
+  return yield* executeJ5Request(prepared, request, REQUEST_TIMEOUT_MS).pipe(
     Effect.mapError((error) =>
       error._tag === "J5HttpError"
         ? new ArtifactHttpError({ status: error.status, detail: error.detail })
@@ -85,6 +87,19 @@ export const readArtifactEffect = Effect.fn("j5.artifacts.client.read")(function
   return yield* HttpClientResponse.schemaBodyJson(ArtifactContent)(response);
 });
 
+export const deleteArtifactEffect = Effect.fn("j5.artifacts.client.delete")(function* (input: {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+  readonly path: string;
+}) {
+  const response = yield* post({
+    environmentId: input.environmentId,
+    pathname: ARTIFACT_DELETE_PATH,
+    body: { projectId: input.projectId, path: input.path },
+  });
+  yield* HttpClientResponse.schemaBodyJson(ArtifactDeleteResponse)(response);
+});
+
 export const listArtifacts = (input: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
@@ -95,3 +110,9 @@ export const readArtifact = (input: {
   readonly projectId: ProjectId;
   readonly path: string;
 }): Promise<ArtifactContentValue> => runtime.runPromise(readArtifactEffect(input));
+
+export const deleteArtifact = (input: {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+  readonly path: string;
+}): Promise<void> => runtime.runPromise(deleteArtifactEffect(input));

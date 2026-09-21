@@ -12,6 +12,7 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as ProjectService from "../../project/ProjectService.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
+import { layer as agentHandoffRefreshesLayer } from "../agents/agentHandoffRefreshes.ts";
 import { ClientReadsService } from "./ClientReadsService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
@@ -115,6 +116,7 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
       ),
     ),
     Layer.provide(NodeSqliteClient.layerMemory()),
+    Layer.provide(agentHandoffRefreshesLayer),
     Layer.provideMerge(auth),
     Layer.provide(HttpServer.layerServices),
   );
