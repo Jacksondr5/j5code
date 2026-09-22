@@ -1,3 +1,4 @@
+import { expandPlaybookPrompt } from "@t3tools/client-runtime/j5/playbooks";
 import { useAtomValue } from "@effect/atom-react";
 import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/shell";
 import {
@@ -303,7 +304,7 @@ export function useThreadComposerState() {
     const threadKey = scopedThreadKey(selectedThreadShell.environmentId, selectedThreadShell.id);
     const draft = getComposerDraftSnapshot(threadKey);
     const thread = selectedThreadShell;
-    const text = draft.text.trim();
+    const text = expandPlaybookPrompt(draft.text.trim());
     const attachments = draft.attachments;
     if (
       composerAttachmentUploadBlockReason({

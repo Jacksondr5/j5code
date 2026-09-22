@@ -1,3 +1,4 @@
+import { expandPlaybookPrompt } from "@t3tools/client-runtime/j5/playbooks";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
@@ -958,7 +959,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         return null;
       }
       const draft = getComposerDraftSnapshot(selectedProjectDraftKey);
-      const text = draft.text.trim();
+      const text = expandPlaybookPrompt(draft.text.trim());
       // Use the displayed selection rules without substituting an unavailable
       // Antigravity model while the task is queued.
       const draftModelSelection =
