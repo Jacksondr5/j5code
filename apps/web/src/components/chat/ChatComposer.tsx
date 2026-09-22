@@ -2269,6 +2269,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (composerTrigger.kind === "slash-command") {
       const builtInSlashCommandItems = [
         {
+          id: "slash:playbook",
+          type: "slash-command",
+          command: "playbook",
+          label: "/playbook",
+          description: "Start a playbook in this thread",
+        },
+        {
           id: "slash:model",
           type: "slash-command",
           command: "model",
@@ -3095,6 +3102,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
       if (item.type === "slash-command") {
+        if (item.command === "playbook") {
+          applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "Start playbook ", {
+            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+          });
+          setComposerHighlightedItemId(null);
+          return;
+        }
         if (item.command === "model") {
           const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
             expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -5987,6 +6001,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   skills={selectedProviderSkills}
                   containerClassName={cn(isComposerResting && "min-w-0 flex-1")}
                   className={cn(
+                    activePendingProgress && "min-h-10 max-h-28",
                     showMobilePendingAnswerActions && "max-sm:pb-11",
                     isComposerResting &&
                       "max-h-8 min-h-8 overflow-hidden whitespace-pre! leading-8",

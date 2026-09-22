@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProjectId, ProviderInstanceId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
 import {
@@ -22,6 +22,9 @@ import {
   listSquadrons,
   previewCrewProposal,
   readOpenInboxCount,
+  readThreadPlaybooks,
+  readAllPlaybooks,
+  readPlaybookLibrary,
 } from "./http.ts";
 
 const relayToken = (accessToken: string) =>
@@ -52,6 +55,87 @@ it.effect(
       expect(requests[0]?.method).toBe("POST");
       expect(yield* Effect.promise(() => requests[0]!.json())).toEqual(input);
     }),
+);
+
+it.effect("reads each environment's run overview with its own credentials and paging filter", () =>
+  Effect.gen(function* () {
+    const requests: Request[] = [];
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      requests.push(new Request(input, init));
+      return Response.json({ runs: [], total: 101 });
+    };
+    for (const id of ["alpha", "bravo"]) {
+      const response = yield* readAllPlaybooks(
+        prepared(id, { _tag: "Bearer", token: `${id}-token` }),
+        {
+          status: "active",
+          offset: 100,
+        },
+      ).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+      expect(response.total).toBe(101);
+    }
+    expect(requests.map((request) => [request.url, request.headers.get("authorization")])).toEqual([
+      ["https://alpha.test/api/j5/playbooks/runs", "Bearer alpha-token"],
+      ["https://bravo.test/api/j5/playbooks/runs", "Bearer bravo-token"],
+    ]);
+    expect(
+      yield* Effect.promise(() => Promise.all(requests.map((request) => request.json()))),
+    ).toEqual([
+      { status: "active", offset: 100 },
+      { status: "active", offset: 100 },
+    ]);
+  }),
+);
+
+it.effect("reads the selected playbook workspace using only its environment credentials", () =>
+  Effect.gen(function* () {
+    const requests: Request[] = [];
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      requests.push(new Request(input, init));
+      return Response.json({ workspaceRoot: "/selected/worktree", playbooks: [] });
+    };
+    for (const id of ["alpha", "bravo"]) {
+      yield* readPlaybookLibrary(prepared(id, { _tag: "Bearer", token: `${id}-token` }), {
+        projectId: ProjectId.make("same-project"),
+        threadId: ThreadId.make("same-thread"),
+      }).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+    }
+    expect(requests.map((request) => [request.url, request.headers.get("authorization")])).toEqual([
+      ["https://alpha.test/api/j5/playbooks/library", "Bearer alpha-token"],
+      ["https://bravo.test/api/j5/playbooks/library", "Bearer bravo-token"],
+    ]);
+    const bodies = yield* Effect.promise(() =>
+      Promise.all(requests.map((request) => request.json())),
+    );
+    expect(bodies).toEqual([
+      { projectId: "same-project", threadId: "same-thread" },
+      { projectId: "same-project", threadId: "same-thread" },
+    ]);
+  }),
+);
+
+it.effect("reads playbook progress from the selected thread's environment", () =>
+  Effect.gen(function* () {
+    const requests: Request[] = [];
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      requests.push(new Request(input, init));
+      return Response.json({ runs: [] });
+    };
+    for (const id of ["alpha", "bravo"]) {
+      yield* readThreadPlaybooks(
+        prepared(id, { _tag: "Bearer", token: `${id}-token` }),
+        ThreadId.make(`${id}-thread`),
+      ).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+    }
+    expect(requests.map((request) => [request.url, request.headers.get("authorization")])).toEqual([
+      ["https://alpha.test/api/j5/playbooks/thread", "Bearer alpha-token"],
+      ["https://bravo.test/api/j5/playbooks/thread", "Bearer bravo-token"],
+    ]);
+    const bodies = yield* Effect.promise(() =>
+      Promise.all(requests.map((request) => request.json())),
+    );
+    expect(bodies).toEqual([{ threadId: "alpha-thread" }, { threadId: "bravo-thread" }]);
+  }),
 );
 
 /** Hands out relay credentials the way the live authorization service does, one per request. */

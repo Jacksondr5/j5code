@@ -1,4 +1,4 @@
-import type { ProjectId } from "@t3tools/contracts";
+import type { ProjectId, ThreadId } from "@t3tools/contracts";
 import type {
   AnswerHumanExchangeRequest,
   AssignImportedThreadsRequest,
@@ -7,6 +7,8 @@ import type {
   CrewArchiveRequest,
   CrewStopRequest,
   FleetReadRequest,
+  PlaybookLibraryRequest,
+  PlaybookRunsRequest,
 } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -34,6 +36,34 @@ export function createJ5EnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | HttpClient.HttpClient | R, E>,
 ) {
   return {
+    playbookRuns: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:playbook-runs",
+      staleTimeMs: 2_500,
+      execute: (input: PlaybookRunsRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.readAllPlaybooks(prepared, input)),
+          Effect.map((data) => ({ ...data, supported: true as const })),
+          Effect.catchIf(J5Http.isJ5UnsupportedError, () =>
+            Effect.succeed({ supported: false as const }),
+          ),
+        ),
+    }),
+    playbookLibrary: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:playbook-library",
+      staleTimeMs: 0,
+      execute: (input: PlaybookLibraryRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.readPlaybookLibrary(prepared, input)),
+        ),
+    }),
+    playbooks: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:playbooks",
+      staleTimeMs: 2_500,
+      execute: (input: { readonly threadId: ThreadId }) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.readThreadPlaybooks(prepared, input.threadId)),
+        ),
+    }),
     squadrons: createEnvironmentQueryAtomFamily(runtime, {
       label: "j5:squadrons",
       staleTimeMs: 30_000,
