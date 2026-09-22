@@ -185,8 +185,10 @@ export const layer = Layer.effect(
 
     /**
      * Restores a roster proposal's missing link to the Crew its launch recorded. A link that
-     * cannot be restored fails, naming the Crew: the caller must not launch more seats beneath a
-     * record the proposal cannot reach.
+     * cannot be restored refuses, naming the Crew: the caller must not launch more seats beneath
+     * a record the proposal cannot reach. The refusal is a request error so the gate shows it
+     * (the HTTP layer redacts operation failures to a generic message); the store's own error
+     * goes to the log, never to the card.
      */
     const restoreCrewLink = Effect.fn("j5.a2a.crewProposal.restoreCrewLink")(function* (
       proposal: CrewProposal,
@@ -194,13 +196,22 @@ export const layer = Layer.effect(
       if (proposal.crewInstanceId !== null) return;
       const crewInstanceId = yield* recordedCrewId(proposal);
       if (crewInstanceId === null) return;
-      yield* proposals
-        .attachInstance(proposal.id, crewInstanceId)
-        .pipe(
-          Effect.mapError(
-            operationError(`linking proposal ${proposal.id} to crew ${crewInstanceId}`),
-          ),
-        );
+      yield* proposals.attachInstance(proposal.id, crewInstanceId).pipe(
+        Effect.tapError((cause) =>
+          Effect.logWarning("J5 crew proposal could not restore its crew link", {
+            proposalId: proposal.id,
+            crewInstanceId,
+            cause,
+          }),
+        ),
+        Effect.mapError(
+          () =>
+            new CrewProposalRequestError({
+              detail: `Proposal ${proposal.id} recorded crew ${crewInstanceId}, but the link between them could not be restored, so no seat was launched.`,
+              nextStep: "Retry the approval, or decline to retire the crew.",
+            }),
+        ),
+      );
     });
 
     /**

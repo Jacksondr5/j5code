@@ -1431,8 +1431,11 @@ it.effect(
         const refused = yield* gate
           .resolve({ proposalId: opened.proposal.id, decision: "approve" })
           .pipe(Effect.flip);
-        assert.equal(refused._tag, "CrewProposalOperationError");
+        // A request error, not an operation error: the HTTP layer redacts operation failures, and
+        // the person must see which Crew the gate could not reach and what to do about it.
+        assert.equal(refused._tag, "CrewProposalRequestError");
         assert.include(refused.message, crewId);
+        assert.notInclude(refused.message, "disk I/O error");
         assert.equal((yield* proposals.read(opened.proposal.id))!.status, "open");
         assert.isNull((yield* proposals.read(opened.proposal.id))!.crewInstanceId);
         assert.deepStrictEqual(yield* Ref.get(watched), []);
