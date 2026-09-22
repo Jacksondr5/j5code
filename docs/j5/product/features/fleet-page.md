@@ -34,7 +34,7 @@ Everything on the page is a **measurement**. There is no health score, no "stall
 
 The **badge** on the rail entry counts agents with a measured problem across every Squadron the page can read, so the person learns that something is broken somewhere even while looking at one Squadron. It never counts what the inbox bell counts: the bell is where agents tell the person something, the badge is where the platform does, and one fact is counted once.
 
-A retired agent still matters on the page when it has working descendants. Such an **orphan** keeps its parent visible as a dimmed placeholder holding its place in the tree, so the children are never re-parented and the shape of what happened stays readable. A retired agent with no active descendants is not shown.
+A retired agent is never a row. The agents placed beneath it keep working and render at the Squadron root; a Crew's seats retire with their Crew, and what retired is read under the Squadron's retired Crews rather than in the tree.
 
 Cost is a product surface: what a Squadron costs, and what each of its agents contributed, rolls up on this page and nowhere in between ([fleet vision](../fleet-vision.md)).
 
@@ -60,7 +60,7 @@ The Fleet page is **not** the inbox: it never demands a reply. It is **not** a p
 8. The rows are every registered agent participant whose home is the selected Squadron, with no cap on their number; a large Squadron is paged or virtualized, never silently truncated.
 9. Rows are arranged as the placement tree, siblings in creation order, and are never reordered by activity or by problems.
 10. People are never rows; a person appears only as the counterparty on an agent's asks. Provider-native Subagents never appear.
-11. Every retired agent on the path from the Squadron to an active agent renders as a dimmed placeholder in its tree position, with its cells marked not applicable rather than unknown; its descendants stay beneath it; a retired agent with no active descendant is not shown.
+11. A retired agent is not a row; an agent still live beneath it renders at the Squadron root.
 12. Each row shows its provenance as a fact: spawned by which agent, forked, or unrecorded.
 13. Threads in the environment that have no Squadron home are not rows; one footer line states how many there are (unarchived, excluding provider-native Subagents), and no Squadron is invented for them.
 14. Clicking a row opens the agent's thread.
@@ -99,7 +99,7 @@ The Fleet page is **not** the inbox: it never demands a reply. It is **not** a p
 - **Reading one Squadron.** The user selects Billing Migration on the page's Squadron list. The coordinator agent is the first row; the two builders it spawned sit indented beneath it in the order they were created, each showing status, owed and awaited asks, and last activity. Clicking a builder opens its thread. (AC6, AC8, AC9, AC12, AC14)
 - **A run that never started.** A builder's run has sat undispatched for seven minutes: its status reads "Waiting to start · 7m" and the badge counts it. When the run starts, the status changes and the badge drops. (AC15, AC21, AC23)
 - **Owed and awaited.** An agent owes one answer to its coordinator and is waiting on two peers: "Owes 1 · Awaiting 2", with all three listed on hover with their ages. (AC18)
-- **An orphan.** A coordinator is archived while two builders it spawned are still working: its row dims to "retired" in place, and the builders stay beneath it, still Working. (AC11)
+- **An archived coordinator.** A coordinator is archived while two builders it spawned are still working: the archive dialog names both; once it commits the coordinator leaves the page and the builders render at the Squadron root, still Working. (AC11)
 - **A fact that cannot be read.** The placement query fails for one agent: its placement cell shows `?` with the reason on hover, the row renders, and the badge is unchanged. (AC20, AC23)
 - **Two problems, one agent.** An agent's latest run failed and it also has a delivery alarm: the badge counts it once and its row lists both. (AC21, AC23)
 - **Silence.** A silence notice exists for an agent: nothing on the page changes; its status is whatever the runtime says and the owed ask's age is the visible fact. (AC17)
@@ -114,4 +114,5 @@ The Fleet page is **not** the inbox: it never demands a reply. It is **not** a p
 - 2026-08-29 — the three-surface model, the Squadron scope, row language, and the roster as a Fleet page settled; former SB1–SB7 ([record](../../worklog/2026-08-29-sidebar-roster-session.md)).
 - 2026-09-04 — the Fleet page specified: one Squadron at a time from its own Squadron list, agents only, the four facts, silence notices omitted, the global badge, delivery alarms, orphans; the sidebar membership-by-provenance rule dropped; former FV1–FV11 ([record](../../worklog/2026-09-04-fleet-visibility-session.md)).
 - 2026-09-05 — status vocabulary corrected against the runtime's resolver (same record).
+- 2026-09-22 — a retired agent is never a row: the orphan placeholder the former AC11 described is gone and the agents beneath it render at the root; an archive touches one agent (#254, option A). Bryant read a "Retired" row as a bug, not a placeholder.
 - 2026-09-10 — rewritten into the definition shape and renamed from "Sidebar & roster". Former identifiers: SB1 → Definition; SB2 → AC3; SB3 → AC1; SB4 → AC2; SB5 → dropped (AC3 says the opposite); SB6 → AC4–AC14; SB7 → the inbox definition; FV1 → Definition, AC20; FV2 → AC15–AC17; FV3 → AC18; FV4 → AC19; FV5 → AC21, AC23; FV6 → AC20, AC25; FV7 → AC5–AC13; FV8 → AC3; FV9 → not a product matter (the server reads belong to the build); FV10 → the deferred items are backlog candidates, not part of this definition, except cost, which the fleet vision requires and AC26 carries; FV11 → AC22, AC24; the v0 override DV6 → AC3. The sidebar label's "extended with silence states" clause is not restated: silence facts are defined by agent-to-agent communication, and where they show is that definition's call. Mockup references are gone: mockups are decision aids in a design workspace, not part of the definition.
