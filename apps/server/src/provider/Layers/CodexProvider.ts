@@ -340,6 +340,95 @@ const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (
   return models;
 });
 
+/** Read effective enablement, which includes managed requirements as well as config. */
+export const readCodexFastModeEnabled = Effect.fn("readCodexFastModeEnabled")(
+  function* (
+    readPage: (
+      params: CodexSchema.V2ExperimentalFeatureListParams,
+    ) => Effect.Effect<
+      CodexSchema.V2ExperimentalFeatureListResponse,
+      CodexErrors.CodexAppServerError
+    >,
+  ) {
+    let cursor: string | null | undefined;
+    do {
+      const response = yield* readPage(cursor ? { cursor } : {});
+      const fastMode = response.data.find((feature) => feature.name === "fast_mode");
+      if (fastMode) return fastMode.enabled;
+      cursor = response.nextCursor;
+    } while (cursor);
+    return undefined;
+  },
+  Effect.catch((error) =>
+    Effect.logDebug("Codex feature discovery failed.", { cause: error }).pipe(Effect.as(undefined)),
+  ),
+  Effect.timeoutOption("3 seconds"),
+  Effect.map(Option.getOrUndefined),
+);
+
+/** Apply after custom models so their declared capabilities cannot reintroduce Fast. */
+export function applyCodexFastModeAvailability(
+  models: ReadonlyArray<ServerProviderModel>,
+  enabled: boolean | undefined,
+): ReadonlyArray<ServerProviderModel> {
+  if (enabled !== false) return models;
+  const isFastTier = (id: string) => id === "fast" || id === "priority";
+  return models.map((model) => {
+    if (!model.capabilities) return model;
+    return {
+      ...model,
+      capabilities: {
+        ...model.capabilities,
+        optionDescriptors: model.capabilities.optionDescriptors?.flatMap<ProviderOptionDescriptor>(
+          (descriptor) => {
+            if (descriptor.id === "fastMode") {
+              return model.capabilities?.optionDescriptors?.some(
+                (option) => option.id === "serviceTier",
+              )
+                ? []
+                : [
+                    {
+                      id: "serviceTier",
+                      label: "Service Tier",
+                      type: "select",
+                      options: [
+                        { id: DEFAULT_SERVICE_TIER_ID, label: "Standard", isDefault: true },
+                      ],
+                      currentValue: DEFAULT_SERVICE_TIER_ID,
+                    },
+                  ];
+            }
+            if (descriptor.id !== "serviceTier" || descriptor.type !== "select") {
+              return [descriptor];
+            }
+            const options = descriptor.options.filter((option) => !isFastTier(option.id));
+            if (options.length === descriptor.options.length) return [descriptor];
+            const defaultTier =
+              options.find((option) => option.isDefault)?.id ?? DEFAULT_SERVICE_TIER_ID;
+            // Keep Standard explicit so saved Fast selections normalize to an allowed tier.
+            if (!options.some((option) => option.id === DEFAULT_SERVICE_TIER_ID)) {
+              options.unshift({ id: DEFAULT_SERVICE_TIER_ID, label: "Standard" });
+            }
+            return [
+              {
+                ...descriptor,
+                options: options.map((option) => ({
+                  ...option,
+                  isDefault: option.id === defaultTier,
+                })),
+                currentValue:
+                  descriptor.currentValue && !isFastTier(descriptor.currentValue)
+                    ? descriptor.currentValue
+                    : defaultTier,
+              },
+            ];
+          },
+        ),
+      },
+    };
+  });
+}
+
 export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
   return {
     clientInfo: {
@@ -433,7 +522,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     } satisfies CodexAppServerProviderSnapshot;
   }
 
-  const [skillsResponse, models, rateLimits] = yield* Effect.all(
+  const [skillsResponse, models, rateLimits, fastModeEnabled] = yield* Effect.all(
     [
       client.request("skills/list", {
         cwds: [input.cwd],
@@ -459,6 +548,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
           ),
         ),
       ),
+      readCodexFastModeEnabled((params) => client.request("experimentalFeature/list", params)),
     ],
     { concurrency: "unbounded" },
   );
@@ -468,7 +558,10 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     rateLimits,
     version,
     models: applyPreferredCodexDefaultModel(
-      appendCustomCodexModels(models, input.customModels ?? []),
+      applyCodexFastModeAvailability(
+        appendCustomCodexModels(models, input.customModels ?? []),
+        fastModeEnabled,
+      ),
     ),
     skills: parseCodexSkillsListResponse(skillsResponse, input.cwd),
   } satisfies CodexAppServerProviderSnapshot;
