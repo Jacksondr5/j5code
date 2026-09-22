@@ -57,20 +57,26 @@ it.effect(
 
 const timestamp = "2026-08-29T21:00:00.000Z";
 
-const joinAgent = (squadronId: SquadronId, index: number) =>
+const agentFor = (squadronId: SquadronId, index: number) => ({
+  kind: "agent" as const,
+  id: ParticipantId.make(`agent:${squadronId}:${index}`),
+  threadId: ThreadId.make(`thread:${squadronId}:${index}`),
+});
+
+const appendMembership = (
+  squadronId: SquadronId,
+  index: number,
+  kind: "participant.joined" | "participant.archived",
+) =>
   Effect.gen(function* () {
     const ledger = yield* A2ALedger;
-    const participant = {
-      kind: "agent" as const,
-      id: ParticipantId.make(`agent:${squadronId}:${index}`),
-      threadId: ThreadId.make(`thread:${squadronId}:${index}`),
-    };
+    const participant = agentFor(squadronId, index);
     yield* ledger.append({
-      commandId: CommCommandId.make(`command:${squadronId}:${index}`),
+      commandId: CommCommandId.make(`command:${squadronId}:${index}:${kind}`),
       squadronId,
       acceptedAt: timestamp,
       event: {
-        kind: "participant.joined",
+        kind,
         sender: null,
         receiver: participant.id,
         exchangeId: null,
@@ -79,6 +85,19 @@ const joinAgent = (squadronId: SquadronId, index: number) =>
         createdAt: timestamp,
       },
     });
+  });
+
+const joinAgent = (squadronId: SquadronId, index: number) =>
+  appendMembership(squadronId, index, "participant.joined");
+
+const countWhere = (table: string, squadronId: SquadronId) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql.unsafe<{ readonly count: number }>(
+      `SELECT COUNT(*) AS count FROM ${table} WHERE squadron_id = ?`,
+      [squadronId],
+    );
+    return Number(rows[0]?.count ?? 0);
   });
 
 it.effect("renames a Squadron with a trimmed name and rejects a blank one", () =>
@@ -131,7 +150,39 @@ it.effect("deletes an empty Squadron together with its project references", () =
   }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("refuses to delete a Squadron that still has a member or an active Crew", () =>
+it.effect("deletes a Squadron whose only member is archived and purges its history", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`PRAGMA foreign_keys = ON`;
+    yield* runJ5A2AMigrations();
+    const service = yield* SquadronManagementService;
+    const retired = yield* service.create({ name: "Retired", projectId });
+    const kept = yield* service.create({ name: "Kept", projectId });
+    yield* joinAgent(retired.squadron.id, 1);
+    yield* appendMembership(retired.squadron.id, 1, "participant.archived");
+    yield* joinAgent(kept.squadron.id, 1);
+    assert.equal(yield* countWhere("j5_a2a_comm_event", retired.squadron.id), 2);
+
+    yield* service.delete(retired.squadron.id);
+
+    assert.deepStrictEqual(
+      (yield* service.list()).map(({ squadron }) => squadron.id),
+      [kept.squadron.id],
+    );
+    for (const table of [
+      "j5_a2a_comm_event",
+      "j5_a2a_comm_command_receipt",
+      "j5_a2a_squadron_membership",
+      "j5_a2a_squadron_project_reference",
+    ]) {
+      assert.equal(yield* countWhere(table, retired.squadron.id), 0, table);
+    }
+    assert.equal(yield* countWhere("j5_a2a_comm_event", kept.squadron.id), 1);
+    assert.equal(yield* countWhere("j5_a2a_squadron_membership", kept.squadron.id), 1);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("refuses to delete a Squadron that still has an active agent or a running Crew", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* sql`PRAGMA foreign_keys = ON`;
@@ -140,11 +191,12 @@ it.effect("refuses to delete a Squadron that still has a member or an active Cre
 
     const staffed = yield* service.create({ name: "Staffed", projectId });
     yield* joinAgent(staffed.squadron.id, 1);
+    yield* joinAgent(staffed.squadron.id, 2);
     const memberBlocked = yield* Effect.flip(service.delete(staffed.squadron.id));
     assert.equal(memberBlocked._tag, "SquadronDeleteBlockedError");
     assert.equal(
       memberBlocked.message,
-      'Squadron "Staffed" cannot be deleted while it still has 1 member, 1 ledger event and 1 command receipt.',
+      'Squadron "Staffed" cannot be deleted while it still has 2 active agents.',
     );
 
     const crewed = yield* service.create({ name: "Crewed", projectId });
@@ -159,12 +211,13 @@ it.effect("refuses to delete a Squadron that still has a member or an active Cre
     assert.equal(crewBlocked._tag, "SquadronDeleteBlockedError");
     assert.equal(
       crewBlocked.message,
-      'Squadron "Crewed" cannot be deleted while it still has 1 active Crew.',
+      'Squadron "Crewed" cannot be deleted while it still has 1 running Crew.',
     );
 
     assert.deepStrictEqual(
       (yield* service.list()).map(({ squadron }) => squadron.name),
       ["Staffed", "Crewed"],
     );
+    assert.equal(yield* countWhere("j5_a2a_comm_event", staffed.squadron.id), 2);
   }).pipe(Effect.provide(testLayer)),
 );
