@@ -35,6 +35,7 @@ import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as RpcSession from "../rpc/session.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import { v2Now, v2Projection, v2ThreadId } from "../state/orchestrationV2TestFixtures.ts";
+import { playbookAuthorLaunch } from "../j5/playbooks.ts";
 import {
   archiveThread,
   createProject,
@@ -136,6 +137,71 @@ const makeSupervisor = Effect.fn("TestEnvironmentCommands.makeSupervisor")(funct
 });
 
 describe("V2 environment commands", () => {
+  it.effect(
+    "launches Playbook Author with its Squadron and exact workspace in the wire request",
+    () =>
+      Effect.gen(function* () {
+        const launches: OrchestrationV2ThreadLaunchInput[] = [];
+        const supervisor = yield* makeSupervisor({ commands: [], projects: [], launches });
+        const environmentId = EnvironmentId.make("environment-1");
+        const projectId = ProjectId.make("project-1");
+        for (const useWorktree of [false, true]) {
+          const target = playbookAuthorLaunch({
+            workspace: {
+              key: "selected-workspace",
+              environmentId,
+              projectId,
+              title: "Project",
+              ...(useWorktree
+                ? {
+                    threadId: ThreadId.make("source-thread"),
+                    workspaceRoot: "/remote/feature",
+                    branch: "feature",
+                  }
+                : { threadId: null, workspaceRoot: "/remote/main", branch: null }),
+            },
+            squadron: {
+              environmentId,
+              environmentLabel: "Remote",
+              available: true,
+              squadron: {
+                id: "squadron:author",
+                name: "Authoring",
+                createdAt: DateTime.formatIso(v2Now),
+              },
+              projectIds: [projectId],
+            },
+            modelSelection: v2Projection.thread.modelSelection,
+            commandId: CommandId.make(`author-${useWorktree}`),
+            threadId: v2ThreadId,
+            messageId: MessageId.make(`author-message-${useWorktree}`),
+            createdAt: DateTime.formatIso(v2Now),
+          });
+          expect(target.environmentId).toBe(environmentId);
+          yield* startThreadTurn(target.input).pipe(
+            Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+          );
+        }
+        expect(launches).toHaveLength(2);
+        for (const launch of launches) {
+          expect(launch).toMatchObject({
+            squadronId: "squadron:author",
+            projectId,
+            agentPersona: { personaId: "playbook-author" },
+            initialMessage: {
+              text: "Help me create a playbook in this workspace. Start by asking what I want it to accomplish.",
+            },
+          });
+        }
+        expect(launches[0]?.workspaceStrategy).toEqual({ type: "root" });
+        expect(launches[1]?.workspaceStrategy).toEqual({
+          type: "existing_worktree",
+          worktreePath: "/remote/feature",
+          branch: "feature",
+        });
+      }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
   it.effect("routes projects through the event-sourced project transport", () =>
     Effect.gen(function* () {
       const projects: ProjectMutation[] = [];

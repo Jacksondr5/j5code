@@ -28,6 +28,28 @@ describe("composerSelectionAtEnd", () => {
 });
 
 describe("mobile slash commands", () => {
+  it("expands a playbook into ordinary text without changing interaction mode", () => {
+    const item = buildComposerSlashCommandItems({
+      query: "playbook",
+      atMessageStart: true,
+      hasThread: true,
+      allowInteractionMode: false,
+      selectedProviderStatus: null,
+    })[0];
+    if (!item) throw new Error("Expected playbook command");
+    expect(
+      resolveComposerCommandSelection({
+        draftMessage: "/playbook release",
+        trigger: { rangeStart: 0, rangeEnd: 10 },
+        item,
+        allowInteractionMode: false,
+      }),
+    ).toEqual({
+      text: "Start playbook release",
+      cursor: 15,
+      interactionMode: null,
+    });
+  });
   const antigravity = {
     driver: ProviderDriverKind.make("antigravity"),
     showInteractionModeToggle: false,
@@ -45,9 +67,8 @@ describe("mobile slash commands", () => {
         selectedProviderStatus: antigravity,
       });
 
-      expect(items).toHaveLength(1);
-      expect(items[0]?.type).toBe("provider-slash-command");
-      const item = items[0];
+      expect(items.map((item) => item.type)).toEqual(["slash-command", "provider-slash-command"]);
+      const item = items.find((item) => item.type === "provider-slash-command");
       if (!item) throw new Error("Expected the native plan command");
       expect(
         resolveComposerCommandSelection({

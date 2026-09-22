@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   AgentPersonaCreateInput,
+  CommandId,
   EnvironmentId,
+  MessageId,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -10,11 +12,14 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import type { PlaybookProgress } from "@t3tools/contracts/j5";
+import { PlaybookError, type PlaybookProgress } from "@t3tools/contracts/j5";
 import {
   ensurePlaybookAuthor,
+  playbookAuthorLaunch,
+  playbookAuthorSquadrons,
   expandPlaybookPrompt,
   presentPlaybook,
+  sortPlaybookRuns,
   playbookWorkspaces,
 } from "./playbooks.ts";
 
@@ -66,6 +71,56 @@ const codex: ServerProvider = {
   ],
 };
 const decodePersonaCreate = Schema.decodeUnknownSync(AgentPersonaCreateInput);
+
+describe("Playbook Author Squadron ownership", () => {
+  const workspace = {
+    key: "remote-project",
+    environmentId: EnvironmentId.make("remote"),
+    projectId: ProjectId.make("shared-project-id"),
+    threadId: null,
+    title: "Project",
+    workspaceRoot: "/remote/project",
+    branch: null,
+  };
+  const squadron = {
+    environmentId: workspace.environmentId,
+    environmentLabel: "Remote",
+    available: true,
+    squadron: { id: "squadron:author", name: "Authoring", createdAt: "2026-09-21T00:00:00Z" },
+    projectIds: [workspace.projectId],
+  };
+  const launch = {
+    workspace,
+    squadron,
+    commandId: CommandId.make("create-author"),
+    threadId: ThreadId.make("new-author"),
+    messageId: MessageId.make("first-message"),
+    createdAt: "2026-09-21T00:00:00Z",
+    modelSelection: { instanceId: codex.instanceId, model: "my-model" },
+  };
+
+  it("offers only Squadrons with exactly this environment-local project", () => {
+    expect(
+      playbookAuthorSquadrons(workspace, [
+        squadron,
+        { ...squadron, environmentId: EnvironmentId.make("local") },
+        { ...squadron, projectIds: [ProjectId.make("another-project")] },
+        { ...squadron, projectIds: [workspace.projectId, ProjectId.make("another-project")] },
+      ]),
+    ).toEqual([squadron]);
+  });
+
+  it.each([
+    undefined,
+    { ...squadron, available: false },
+    { ...squadron, environmentId: EnvironmentId.make("local") },
+    { ...squadron, projectIds: [ProjectId.make("another-project")] },
+  ])("blocks a missing or invalid home before a durable thread can be created", (invalid) => {
+    expect(() => playbookAuthorLaunch({ ...launch, squadron: invalid })).toThrow(
+      "Choose an available Squadron for this workspace",
+    );
+  });
+});
 
 describe("Playbook Author installation", () => {
   it("creates a valid editable author once and uses the server-resolved provider instance", async () => {
@@ -271,4 +326,79 @@ it("preserves the phase identity when live steps are reordered", () => {
   });
   expect(display.currentTitle).toBe("Build");
   expect(display.steps.map(({ current }) => current)).toEqual([true, false, false]);
+});
+
+it.each(["completed", "cancelled"] as const)(
+  "marks the last position without an active or successful step in a %s run",
+  (status) => {
+    const display = presentPlaybook({ ...run, status, currentStepId: "research", position: 1 });
+    expect(display.steps.map(({ state }) => state)).toEqual(["last", "later", "later"]);
+    expect(display.steps.some(({ current }) => current)).toBe(false);
+    expect(display.steps[0]?.label).toBe("Last position");
+  },
+);
+
+it("shows available steps without guessing progress when the live definition loses the current step", () => {
+  const display = presentPlaybook({ ...run, currentStepId: "removed", position: null });
+  expect(display.position).toBe("Step unavailable");
+  expect(display.currentTitle).toBe("removed");
+  expect(display.steps.every((step) => step.state === "available" && !step.current)).toBe(true);
+  expect(presentPlaybook({ ...run, steps: [], position: null, total: 0 }).steps).toEqual([]);
+});
+
+it("moves positional highlighting back without treating later steps as completed", () => {
+  const display = presentPlaybook({ ...run, currentStepId: "research", position: 1 });
+  expect(display.steps.map(({ state }) => state)).toEqual(["current", "later", "later"]);
+});
+
+it("retains all 100 step names and identifies the current position by stable ID", () => {
+  const steps = Array.from({ length: 100 }, (_, index) => ({
+    id: `step-${index + 1}`,
+    title: `Step ${index + 1}`,
+  }));
+  const display = presentPlaybook({
+    ...run,
+    steps,
+    total: 100,
+    position: 50,
+    currentStepId: "step-50",
+  });
+  expect(display.position).toBe("Step 50 of 100");
+  expect(display.steps.map(({ id, title }) => ({ id, title }))).toEqual(steps);
+  expect(display.steps.filter(({ current }) => current).map(({ id }) => id)).toEqual(["step-50"]);
+  expect(display.steps[48]?.state).toBe("earlier");
+  expect(display.steps[50]?.state).toBe("later");
+});
+
+it("prioritizes issues, then active runs and recency, without changing the fetched page", () => {
+  const issue = new PlaybookError({
+    code: "step_missing",
+    message: "Step removed",
+    availableStepIds: [],
+  });
+  const runs = Object.freeze([
+    { ...run, runId: "completed", status: "completed" as const, updatedAt: "2026-09-21T14:00:00Z" },
+    { ...run, runId: "older-active" },
+    {
+      ...run,
+      runId: "cancelled-issue",
+      status: "cancelled" as const,
+      issue,
+      updatedAt: "2026-09-21T15:00:00Z",
+    },
+    { ...run, runId: "active-issue", issue },
+    { ...run, runId: "recent-active", updatedAt: "2026-09-21T11:00:00Z" },
+    { ...run, runId: "tied-active", updatedAt: "2026-09-21T11:00:00Z" },
+  ]);
+  const original = [...runs];
+  expect(sortPlaybookRuns(runs).map(({ runId }) => runId)).toEqual([
+    "active-issue",
+    "cancelled-issue",
+    "recent-active",
+    "tied-active",
+    "older-active",
+    "completed",
+  ]);
+  expect(runs).toEqual(original);
+  expect(sortPlaybookRuns([])).toEqual([]);
 });

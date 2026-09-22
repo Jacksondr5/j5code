@@ -49,6 +49,13 @@ export function buildComposerSlashCommandItems(input: {
     input.allowInteractionMode && input.selectedProviderStatus?.showInteractionModeToggle !== false;
   const builtIn = [
     {
+      id: "cmd:playbook",
+      type: "slash-command",
+      command: "playbook",
+      label: "/playbook",
+      description: "Start a playbook in this thread",
+    },
+    {
       id: "cmd:model",
       type: "slash-command",
       command: "model",
@@ -71,7 +78,9 @@ export function buildComposerSlashCommandItems(input: {
     },
   ] satisfies ComposerCommandItem[];
   const items: ComposerCommandItem[] = builtIn.filter(
-    (item) => item.command.includes(query) && (item.command === "model" || allowInteractionMode),
+    (item) =>
+      item.command.includes(query) &&
+      (item.command === "model" || item.command === "playbook" || allowInteractionMode),
   );
 
   // Providers expand commands only at the start of a message. T3 commands
@@ -128,7 +137,7 @@ export function resolveComposerCommandSelection(input: {
   } else if (item.type === "skill") {
     replacement = `$${item.skill.name} `;
   } else if (item.type === "slash-command") {
-    replacement = `/${item.command} `;
+    replacement = item.command === "playbook" ? "Start playbook " : `/${item.command} `;
   } else if (item.type === "provider-slash-command") {
     replacement = `/${item.command.name} `;
   }

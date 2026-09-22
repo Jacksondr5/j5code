@@ -3,6 +3,7 @@ import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 import { useEnvironmentQuery } from "../../state/query";
 import { j5Environment } from "../state";
+import { PlaybookStepStrip } from "./PlaybookStepStrip";
 
 /** The visible thread owns this bounded live read; hidden tabs do no polling. */
 export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: ThreadId }) {
@@ -81,21 +82,9 @@ export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: T
             {run.issue.message}
           </p>
         )}
-        <ol className="mt-3 flex gap-3 overflow-x-auto pb-1" aria-label="Playbook phases">
-          {display.steps.map((step, index) => (
-            <li
-              key={step.id}
-              aria-current={step.current ? "step" : undefined}
-              className={`min-w-40 flex-1 rounded-lg border p-3 ${step.current ? "border-primary bg-primary/5" : "border-border bg-background"}`}
-            >
-              <div className="mb-1 flex justify-between gap-3 text-xs text-muted-foreground">
-                <span>{index + 1}</span>
-                <span>{step.label}</span>
-              </div>
-              <p className="text-sm font-medium">{step.title}</p>
-            </li>
-          ))}
-        </ol>
+        <div className="mt-2">
+          <PlaybookStepStrip steps={display.steps} />
+        </div>
       </details>
     </section>
   );

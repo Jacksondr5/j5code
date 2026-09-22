@@ -2,7 +2,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   ensurePlaybookAuthor,
-  PLAYBOOK_AUTHOR_ID,
+  playbookAuthorLaunch,
+  playbookAuthorSquadrons,
   playbookWorkspaces,
 } from "@t3tools/client-runtime/j5/playbooks";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
@@ -30,6 +31,7 @@ import { environmentThreadShells, threadEnvironment } from "../../state/threads"
 import { waitForAtomValue } from "../../state/waitForAtomValue";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
+import { useSquadronDirectory } from "../squadron/SquadronDirectory";
 import { j5Environment } from "../state";
 import { playbookImportName } from "./importPlaybookFile";
 import { openPlaybookDraft } from "./openPlaybookDraft";
@@ -39,6 +41,18 @@ export function PlaybookLibrarySettings() {
   const workspaces = playbookWorkspaces(useProjects(), useThreadShells());
   const [workspaceKey, setWorkspaceKey] = useState("");
   const workspace = workspaces.find((entry) => entry.key === workspaceKey) ?? workspaces[0];
+  const { squadrons, status: squadronStatus } = useSquadronDirectory();
+  const authorSquadrons = workspace ? playbookAuthorSquadrons(workspace, squadrons) : [];
+  const [authorScope, setAuthorScope] = useState<{
+    workspaceKey: string;
+    squadronId: string;
+  } | null>(null);
+  const authorSquadron =
+    authorScope?.workspaceKey === workspace?.key
+      ? authorSquadrons.find(({ squadron }) => squadron.id === authorScope?.squadronId)
+      : authorSquadrons.length === 1
+        ? authorSquadrons[0]
+        : undefined;
   const query = useEnvironmentQuery(
     workspace
       ? j5Environment.playbookLibrary({
@@ -79,13 +93,18 @@ export function PlaybookLibrarySettings() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function createPlaybook() {
-    if (!workspace || !query.data || busy || authorStarting.current) return;
+    if (!workspace || !query.data || !authorSquadron?.available || busy || authorStarting.current)
+      return;
     authorStarting.current = true;
     setBusy(true);
     setError(null);
     try {
-      const { environmentId, projectId } = workspace;
-      const workspaceKey = `${workspace.key}:${query.data.workspaceRoot}`;
+      const { environmentId } = workspace;
+      const workspaceKey = JSON.stringify([
+        workspace.key,
+        query.data.workspaceRoot,
+        authorSquadron.squadron.id,
+      ]);
       // Retain the command on failure: retrying a lost reply must reopen the same thread.
       if (authorLaunch.current?.workspaceKey !== workspaceKey) {
         const modelSelection = await ensurePlaybookAuthor({
@@ -103,36 +122,15 @@ export function PlaybookLibrarySettings() {
         const createdAt = new Date().toISOString();
         authorLaunch.current = {
           workspaceKey,
-          target: {
-            environmentId,
-            input: {
-              commandId: CommandId.make(randomUUID()),
-              threadId: newThreadId(),
-              createdAt,
-              message: {
-                messageId: newMessageId(),
-                role: "user",
-                text: "Help me create a playbook in this workspace. Start by asking what I want it to accomplish.",
-                attachments: [],
-              },
-              modelSelection,
-              runtimeMode: "auto-accept-edits",
-              interactionMode: "default",
-              bootstrap: {
-                createThread: {
-                  projectId,
-                  title: "Create playbook",
-                  modelSelection,
-                  runtimeMode: "auto-accept-edits",
-                  interactionMode: "default",
-                  branch: workspace.branch,
-                  worktreePath: workspace.threadId ? query.data.workspaceRoot : null,
-                  createdAt,
-                  agentPersona: { personaId: PLAYBOOK_AUTHOR_ID },
-                },
-              },
-            },
-          },
+          target: playbookAuthorLaunch({
+            workspace: { ...workspace, workspaceRoot: query.data.workspaceRoot },
+            squadron: authorSquadron,
+            modelSelection,
+            commandId: CommandId.make(randomUUID()),
+            threadId: newThreadId(),
+            messageId: newMessageId(),
+            createdAt,
+          }),
         };
       }
       const { target } = authorLaunch.current;
@@ -230,7 +228,9 @@ export function PlaybookLibrarySettings() {
           <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
             <Button
               size="xs"
-              disabled={!workspace || busy || !query.data || !!query.error}
+              disabled={
+                !workspace || !authorSquadron?.available || busy || !query.data || !!query.error
+              }
               onClick={() => void createPlaybook()}
             >
               Create playbook
@@ -298,6 +298,41 @@ export function PlaybookLibrarySettings() {
                   {environments.length > 1
                     ? ` · ${environments.find((env) => env.environmentId === entry.environmentId)?.label ?? entry.environmentId}`
                     : ""}
+                </option>
+              ))}
+            </select>
+          }
+        />
+        <SettingsRow
+          title="Authoring Squadron"
+          description="Where the Playbook Author chat starts."
+          control={
+            <select
+              aria-label="Playbook author Squadron"
+              value={authorSquadron?.squadron.id ?? ""}
+              disabled={!workspace || busy}
+              onChange={(event) => {
+                if (workspace)
+                  setAuthorScope({ workspaceKey: workspace.key, squadronId: event.target.value });
+                setError(null);
+              }}
+              className="w-full rounded-md border border-input bg-background p-2 text-foreground sm:w-72"
+            >
+              <option value="">
+                {squadronStatus === "loading"
+                  ? "Loading Squadrons…"
+                  : authorSquadrons.length === 0
+                    ? "No Squadron available for this workspace"
+                    : "Choose a Squadron"}
+              </option>
+              {authorSquadrons.map((entry) => (
+                <option
+                  key={entry.squadron.id}
+                  value={entry.squadron.id}
+                  disabled={!entry.available}
+                >
+                  {entry.squadron.name}
+                  {entry.available ? "" : " (unavailable)"}
                 </option>
               ))}
             </select>

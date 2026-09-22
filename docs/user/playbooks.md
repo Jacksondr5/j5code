@@ -9,6 +9,7 @@ Open **Settings → Playbooks** and select a project or thread worktree to see i
 definitions and phases. On web and desktop, **Create playbook** starts a conversation
 with **Playbook Author** in the selected workspace. It asks what you want to accomplish,
 helps shape the phases, writes the YAML, and validates it without starting a run.
+Choose its **Authoring Squadron** when several Squadrons use the same project.
 The persona is added to that environment on first use; customize its instructions
 and model in **Settings → Agents**. It currently requires an authenticated Codex
 provider because authoring needs Workspace write authority. Mobile prepares an

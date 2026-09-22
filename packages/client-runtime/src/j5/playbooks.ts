@@ -1,10 +1,16 @@
 import type { PlaybookProgress } from "@t3tools/contracts/j5";
 import type {
   AgentPersonaCreateInput,
+  CommandId,
+  MessageId,
+  ModelSelection,
   OrchestrationV2AgentPersonaCatalog,
   ServerProvider,
+  ThreadId,
 } from "@t3tools/contracts";
 import { defaultAgentPersonaModelRoute } from "./agentPersonas.ts";
+import type { ScopedManagedSquadron } from "./squadrons.ts";
+import type { StartThreadTurnInput } from "../operations/commands.ts";
 import type { EnvironmentProject, EnvironmentThreadShell } from "../state/shell.ts";
 
 export const CREATE_PLAYBOOK_PROMPT =
@@ -78,6 +84,64 @@ export async function ensurePlaybookAuthor(input: {
   return persona.availability.resolvedModelSelection;
 }
 
+export function playbookAuthorSquadrons(
+  workspace: ReturnType<typeof playbookWorkspaces>[number],
+  squadrons: ReadonlyArray<ScopedManagedSquadron>,
+) {
+  return squadrons.filter(
+    (entry) =>
+      entry.environmentId === workspace.environmentId &&
+      entry.projectIds.length === 1 &&
+      entry.projectIds[0] === workspace.projectId,
+  );
+}
+
+/** Keep the persona, workspace, and explicit Squadron together through the durable launch. */
+export function playbookAuthorLaunch(input: {
+  workspace: ReturnType<typeof playbookWorkspaces>[number];
+  squadron: ScopedManagedSquadron | undefined;
+  modelSelection: ModelSelection;
+  commandId: CommandId;
+  threadId: ThreadId;
+  messageId: MessageId;
+  createdAt: string;
+}) {
+  const { workspace, squadron, modelSelection, commandId, threadId, messageId, createdAt } = input;
+  if (!squadron?.available || playbookAuthorSquadrons(workspace, [squadron]).length === 0)
+    throw new Error("Choose an available Squadron for this workspace before creating a playbook.");
+  return {
+    environmentId: workspace.environmentId,
+    input: {
+      commandId,
+      threadId,
+      createdAt,
+      squadronId: squadron.squadron.id,
+      message: {
+        messageId,
+        role: "user",
+        text: "Help me create a playbook in this workspace. Start by asking what I want it to accomplish.",
+        attachments: [],
+      },
+      modelSelection,
+      runtimeMode: "auto-accept-edits",
+      interactionMode: "default",
+      bootstrap: {
+        createThread: {
+          projectId: workspace.projectId,
+          title: "Create playbook",
+          modelSelection,
+          runtimeMode: "auto-accept-edits",
+          interactionMode: "default",
+          branch: workspace.branch,
+          worktreePath: workspace.threadId ? workspace.workspaceRoot : null,
+          createdAt,
+          agentPersona: { personaId: PLAYBOOK_AUTHOR_ID },
+        },
+      },
+    } satisfies StartThreadTurnInput,
+  };
+}
+
 export function playbookWorkspaces(
   projects: ReadonlyArray<
     Pick<EnvironmentProject, "environmentId" | "id" | "title" | "workspaceRoot">
@@ -144,19 +208,39 @@ export function presentPlaybook(run: PlaybookProgress) {
           : "Cancelled",
     position: run.position === null ? "Step unavailable" : `Step ${run.position} of ${run.total}`,
     currentTitle: current?.title ?? run.currentStepId,
-    steps: run.steps.map((step, index) => ({
-      ...step,
-      current: step.id === run.currentStepId,
-      label:
+    steps: run.steps.map((step, index) => {
+      const state =
         step.id === run.currentStepId
           ? run.status === "active"
-            ? "Current"
-            : "Last position"
+            ? "current"
+            : "last"
           : run.position === null
-            ? "Available"
+            ? "available"
             : index + 1 < run.position
-              ? "Earlier"
-              : "Later",
-    })),
+              ? "earlier"
+              : "later";
+      return {
+        ...step,
+        state,
+        current: state === "current",
+        label: {
+          current: "Current",
+          last: "Last position",
+          available: "Available",
+          earlier: "Earlier",
+          later: "Later",
+        }[state],
+      } as const;
+    }),
   };
+}
+
+/** Prioritize issues within a fetched page without mutating the query's runs. */
+export function sortPlaybookRuns(runs: ReadonlyArray<PlaybookProgress>) {
+  return runs.toSorted(
+    (a, b) =>
+      Number(!!b.issue) - Number(!!a.issue) ||
+      Number(b.status === "active") - Number(a.status === "active") ||
+      Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+  );
 }

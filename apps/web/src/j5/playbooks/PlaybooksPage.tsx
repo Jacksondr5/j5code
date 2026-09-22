@@ -1,6 +1,6 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
-import { presentPlaybook } from "@t3tools/client-runtime/j5/playbooks";
+import { presentPlaybook, sortPlaybookRuns } from "@t3tools/client-runtime/j5/playbooks";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { PLAYBOOK_RUNS_PAGE_SIZE, type PlaybookProgress } from "@t3tools/contracts/j5";
 import { Link } from "@tanstack/react-router";
@@ -25,6 +25,7 @@ import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { j5Environment } from "../state";
 import { usePlaybookRunsRefresh } from "./usePlaybookRunsRefresh";
+import { PlaybookStepStrip } from "./PlaybookStepStrip";
 
 function PlaybookRunCard({
   run,
@@ -48,32 +49,56 @@ function PlaybookRunCard({
       ? (resolveThreadStatusPill({ thread: owner })?.label ?? "Idle")
       : "Activity unavailable";
   const age = formatElapsedDurationLabel(run.updatedAt, nowMs);
-  const content = (
-    <>
+  return (
+    <article className="relative rounded-lg border border-border bg-card p-4 hover:bg-accent/30">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-medium">{run.title}</h3>
+        <h3 className="font-medium">
+          {owner && environment.connection.phase === "connected" ? (
+            <Link
+              className="outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:ring-2 focus-visible:after:ring-ring"
+              to="/$environmentId/$threadId"
+              params={buildThreadRouteParams(
+                scopeThreadRef(environment.environmentId, run.ownerThreadId),
+              )}
+            >
+              {run.title}
+            </Link>
+          ) : (
+            run.title
+          )}
+        </h3>
         <Badge
-          variant={run.issue ? "warning" : run.status === "completed" ? "success" : "secondary"}
+          variant={
+            run.issue
+              ? "warning"
+              : run.status === "completed"
+                ? "success"
+                : run.status === "active"
+                  ? "default"
+                  : "secondary"
+          }
         >
           {display.status}
         </Badge>
       </div>
-      <p className="mt-2 text-sm">
+      {display.steps.length > 0 && (
+        <div className="mt-2">
+          <PlaybookStepStrip steps={display.steps} />
+        </div>
+      )}
+      <p className="mt-1 text-sm">
         {display.position} · {display.currentTitle}
       </p>
-      <p className="mt-2 break-words text-sm text-muted-foreground">
+      <p className="mt-3 break-words text-sm">
         {owner ? owner.title : `Owner unavailable · ${run.ownerThreadId}`}
-        {owner && (
-          <>
-            {" "}
-            ·{" "}
-            {provider?.displayName ??
-              owner.runtime?.providerName ??
-              owner.modelSelection.instanceId}{" "}
-            · {owner.modelSelection.model} · {activity}
-          </>
-        )}
       </p>
+      {owner && (
+        <p className="mt-1 break-words text-xs text-muted-foreground">
+          {provider?.displayName ?? owner.runtime?.providerName ?? owner.modelSelection.instanceId}
+          {" · "}
+          {owner.modelSelection.model} · Thread: {activity}
+        </p>
+      )}
       <p className="mt-1 text-xs text-muted-foreground">
         Updated <time dateTime={run.updatedAt}>{age === "just now" ? age : `${age} ago`}</time>
       </p>
@@ -81,39 +106,6 @@ function PlaybookRunCard({
         <p role="status" className="mt-3 text-sm text-amber-600">
           {run.issue.message}
         </p>
-      )}
-      {display.steps.length > 0 && (
-        <ol className="mt-3 flex gap-2 overflow-x-auto pb-1" aria-label={`${run.title} steps`}>
-          {display.steps.map((step, index) => (
-            <li
-              key={step.id}
-              aria-current={step.current ? "step" : undefined}
-              className={`min-w-32 flex-1 rounded-md border p-2 ${step.current ? "border-primary bg-primary/5" : "border-border bg-background"}`}
-            >
-              <p className="text-xs text-muted-foreground">
-                {index + 1} · {step.label}
-              </p>
-              <p className="mt-1 text-sm">{step.title}</p>
-            </li>
-          ))}
-        </ol>
-      )}
-    </>
-  );
-  return (
-    <article className="rounded-lg border border-border bg-card">
-      {owner && environment.connection.phase === "connected" ? (
-        <Link
-          className="block rounded-lg p-4 outline-none hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring"
-          to="/$environmentId/$threadId"
-          params={buildThreadRouteParams(
-            scopeThreadRef(environment.environmentId, run.ownerThreadId),
-          )}
-        >
-          {content}
-        </Link>
-      ) : (
-        <div className="p-4">{content}</div>
       )}
     </article>
   );
@@ -123,10 +115,12 @@ function EnvironmentRuns({
   environment,
   status,
   threads,
+  showEnvironmentLabel,
 }: {
   environment: EnvironmentPresentation;
   status: "active" | "all";
   threads: ReadonlyMap<string, EnvironmentThreadShell>;
+  showEnvironmentLabel: boolean;
 }) {
   const [offset, setOffset] = useState(0);
   const query = useEnvironmentQuery(
@@ -140,6 +134,8 @@ function EnvironmentRuns({
   const unsupported = query.data?.supported === false;
   usePlaybookRunsRefresh(query.refresh, connected && !unsupported && !query.isPending);
   const data = query.data?.supported ? query.data : null;
+  // ponytail: issue priority is page-local; global triage needs ordering before server pagination.
+  const runs = useMemo(() => sortPlaybookRuns(data?.runs ?? []), [data?.runs]);
   const providerEntries = useMemo(
     () =>
       new Map(
@@ -153,8 +149,10 @@ function EnvironmentRuns({
   const nowMs = Date.parse(`${useNowMinute()}:00Z`);
   return (
     <section aria-label={`${environment.label} playbook runs`} className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-medium">{environment.label}</h2>
+      <div className="flex items-center justify-end gap-3">
+        {showEnvironmentLabel && (
+          <h2 className="mr-auto text-sm font-medium">{environment.label}</h2>
+        )}
         <Button
           size="xs"
           variant="outline"
@@ -192,7 +190,7 @@ function EnvironmentRuns({
               : "No playbook runs yet. Start one from a thread with /playbook."}
         </p>
       )}
-      {data?.runs.map((run) => {
+      {runs.map((run) => {
         const thread = threads.get(run.ownerThreadId);
         return (
           <PlaybookRunCard
@@ -294,6 +292,7 @@ export function PlaybooksPage() {
               environment={environment}
               status={status}
               threads={threadsByEnvironment.get(environment.environmentId) ?? new Map()}
+              showEnvironmentLabel={environments.length > 1}
             />
           ))}
         </WorkspacePageContainer>

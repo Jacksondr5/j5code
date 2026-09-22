@@ -544,6 +544,7 @@ function GeneralSettingsSection() {
   return (
     <SettingsSection title="General">
       <SettingsRow icon="person.2" label="Agents" target="SettingsAgents" />
+      <SettingsRow icon="list.bullet" label="Playbooks" target="SettingsPlaybooks" />
       <SettingsRow icon="folder" label="Project Grouping" target="SettingsProjectGrouping" />
       <AutoSettleSettingsRows />
       <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
