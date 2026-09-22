@@ -103,6 +103,20 @@ export function createJ5EnvironmentAtoms<R, E>(
           Effect.flatMap((prepared) => J5Http.createSquadron(prepared, input)),
         ),
     }),
+    renameSquadron: createEnvironmentCommand(runtime, {
+      label: "j5:rename-squadron",
+      execute: (input: { readonly squadronId: string; readonly name: string }) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.renameSquadron(prepared, input)),
+        ),
+    }),
+    deleteSquadron: createEnvironmentCommand(runtime, {
+      label: "j5:delete-squadron",
+      execute: (input: { readonly squadronId: string }) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.deleteSquadron(prepared, input)),
+        ),
+    }),
     answerHumanExchange: createEnvironmentCommand(runtime, {
       label: "j5:answer-exchange",
       execute: (input: AnswerHumanExchangeRequest) =>
