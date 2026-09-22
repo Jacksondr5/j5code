@@ -232,6 +232,9 @@ const fixture = Effect.gen(function* () {
   // While set, the proposal-to-Crew link write fails with a database error after the Crew record
   // is durable, which is the state a decline or the boot sweep must be able to recover from.
   const attachFailure = yield* Ref.make(false);
+  // While set, the link write answers as if it succeeded but writes nothing: the row comes back
+  // still unlinked, which the gate must treat as a failed restore, not a success.
+  const attachNoop = yield* Ref.make(false);
   const store = Context.get(context, AgentCrewProposalService);
   const flakyStore = Layer.succeed(AgentCrewProposalService, {
     ...store,
@@ -240,15 +243,14 @@ const fixture = Effect.gen(function* () {
         Effect.flatMap((failing) => (failing ? Effect.succeed(null) : store.complete(input))),
       ),
     attachInstance: (id, crewInstanceId) =>
-      Ref.get(attachFailure).pipe(
-        Effect.flatMap((failing) =>
-          failing
-            ? Effect.fail(
-                new SqlError({ reason: new UnknownError({ cause: new Error("disk I/O error") }) }),
-              )
-            : store.attachInstance(id, crewInstanceId),
-        ),
-      ),
+      Effect.gen(function* () {
+        if (yield* Ref.get(attachFailure))
+          return yield* new SqlError({
+            reason: new UnknownError({ cause: new Error("disk I/O error") }),
+          });
+        if (yield* Ref.get(attachNoop)) return yield* store.read(id);
+        return yield* store.attachInstance(id, crewInstanceId);
+      }),
   });
   const layer = crewProposalLayer.pipe(
     Layer.provideMerge(flakyStore),
@@ -315,6 +317,7 @@ const fixture = Effect.gen(function* () {
     noticeFailure,
     completeFailure,
     attachFailure,
+    attachNoop,
     captainModel,
   };
 });
@@ -1404,7 +1407,7 @@ it.effect(
   "a database error on the link write is retryable: the retry restores the link and launches",
   () =>
     Effect.gen(function* () {
-      const { layer, attachFailure, watched } = yield* fixture;
+      const { layer, attachFailure, attachNoop, watched } = yield* fixture;
       yield* Effect.gen(function* () {
         const gate = withPreview(yield* CrewProposalService);
         const proposals = yield* AgentCrewProposalService;
@@ -1440,9 +1443,21 @@ it.effect(
         assert.isNull((yield* proposals.read(opened.proposal.id))!.crewInstanceId);
         assert.deepStrictEqual(yield* Ref.get(watched), []);
 
+        // A link write that reports success but lands nothing is the same refusal: the gate checks
+        // the row it gets back rather than trusting the write.
+        yield* Ref.set(attachFailure, false);
+        yield* Ref.set(attachNoop, true);
+        const unlanded = yield* gate
+          .resolve({ proposalId: opened.proposal.id, decision: "approve" })
+          .pipe(Effect.flip);
+        assert.equal(unlanded._tag, "CrewProposalRequestError");
+        assert.include(unlanded.message, crewId);
+        assert.equal((yield* proposals.read(opened.proposal.id))!.status, "open");
+        assert.deepStrictEqual(yield* Ref.get(watched), []);
+
         // The store recovers: the retry restores the link, converges on the recorded Crew, and
         // launches; the record gains no second copy of the seat.
-        yield* Ref.set(attachFailure, false);
+        yield* Ref.set(attachNoop, false);
         const approved = yield* gate.resolve({
           proposalId: opened.proposal.id,
           decision: "approve",

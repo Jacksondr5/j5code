@@ -196,7 +196,11 @@ export const layer = Layer.effect(
       if (proposal.crewInstanceId !== null) return;
       const crewInstanceId = yield* recordedCrewId(proposal);
       if (crewInstanceId === null) return;
-      yield* proposals.attachInstance(proposal.id, crewInstanceId).pipe(
+      const unrestored = new CrewProposalRequestError({
+        detail: `Proposal ${proposal.id} recorded crew ${crewInstanceId}, but the link between them could not be restored, so no seat was launched.`,
+        nextStep: "Retry the approval, or decline to retire the crew.",
+      });
+      const linked = yield* proposals.attachInstance(proposal.id, crewInstanceId).pipe(
         Effect.tapError((cause) =>
           Effect.logWarning("J5 crew proposal could not restore its crew link", {
             proposalId: proposal.id,
@@ -204,14 +208,10 @@ export const layer = Layer.effect(
             cause,
           }),
         ),
-        Effect.mapError(
-          () =>
-            new CrewProposalRequestError({
-              detail: `Proposal ${proposal.id} recorded crew ${crewInstanceId}, but the link between them could not be restored, so no seat was launched.`,
-              nextStep: "Retry the approval, or decline to retire the crew.",
-            }),
-        ),
+        Effect.mapError(() => unrestored),
       );
+      // The store hands back the row it wrote; a link that did not land is the same refusal.
+      if (linked?.crewInstanceId !== crewInstanceId) return yield* unrestored;
     });
 
     /**
