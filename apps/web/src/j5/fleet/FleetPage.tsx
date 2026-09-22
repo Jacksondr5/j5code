@@ -176,7 +176,7 @@ export function FleetPage() {
                     onOpenThread={openThread}
                   />
                 )}
-                <RetiredCrews squadron={squadron} onOpenThread={openThread} />
+                <RetiredCrews squadron={squadron} />
               </section>
             ))}
           </main>
@@ -395,14 +395,12 @@ function FleetNodeRows(
 }
 
 /**
- * Retired Crews of one Squadron, collapsed: the brief, the approved roster with who approved
- * each seat and why, and the Captain's thread, so a successor can be proposed from what was
- * decided rather than from memory (Crews AC20). Handoffs live on the Artifacts page.
+ * Retired Crews of one Squadron as one-line rows that open to the brief and the approved roster
+ * with each seat's approval version and reason, so a successor can be proposed from what was
+ * decided rather than from memory (Crews AC20). A retired Crew can never be reactivated, so its
+ * row offers no action; handoffs live on the Artifacts page.
  */
-function RetiredCrews(props: {
-  readonly squadron: ScopedFleetSquadron;
-  readonly onOpenThread: FleetRowsProps["onOpenThread"];
-}) {
+function RetiredCrews(props: { readonly squadron: ScopedFleetSquadron }) {
   const crews = retiredCrews(props.squadron);
   if (crews.length === 0) return null;
   return (
@@ -414,60 +412,60 @@ function RetiredCrews(props: {
         />
         Retired crews ({crews.length})
       </summary>
-      <ul className="mt-2 space-y-2">
+      <ul className="mt-2 divide-y divide-border/60 overflow-hidden rounded-md border border-border/60">
         {crews.map((crew) => (
-          <RetiredCrewItem
-            key={crew.crewInstanceId}
-            crew={crew}
-            environmentId={props.squadron.environmentId}
-            onOpenThread={props.onOpenThread}
-          />
+          <RetiredCrewItem key={crew.crewInstanceId} crew={crew} />
         ))}
       </ul>
     </details>
   );
 }
 
-function RetiredCrewItem(props: {
-  readonly crew: FleetCrew;
-  readonly environmentId: EnvironmentId;
-  readonly onOpenThread: FleetRowsProps["onOpenThread"];
-}) {
+function RetiredCrewItem(props: { readonly crew: FleetCrew }) {
   const { crew } = props;
-  const retired =
-    crew.archivedAt === null ? null : formatElapsedDurationLabel(crew.archivedAt) || "just now";
+  const seatCount = crew.roster.length;
   return (
-    <li className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-sm opacity-80">
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="font-medium">Crew · {crew.crewName}</span>
-        <span className="text-xs text-muted-foreground">
-          v{crew.version}
-          {retired === null ? "" : ` · retired ${retired}`}
-        </span>
-        {crew.captainThreadId === null ? null : (
-          <Button
-            className="ms-auto"
-            onClick={() => props.onOpenThread(props.environmentId, crew.captainThreadId!)}
-            size="xs"
-            variant="ghost"
-          >
-            Open Captain
-          </Button>
-        )}
-      </div>
-      <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-muted-foreground">{crew.brief}</p>
-      <ul className="mt-2 space-y-0.5 text-xs">
-        {crew.roster.map((member) => (
-          <li key={member.seat} className="flex flex-wrap items-baseline gap-x-2">
-            <span className="uppercase tracking-wide text-muted-foreground">{member.seat}</span>
-            <span>{member.agentId ?? "Custom seat"}</span>
-            <span className="text-muted-foreground">
-              {member.addedVersion > 1 ? `joined at v${member.addedVersion}` : "approved roster"}
-              {member.reason === null ? "" : ` · ${member.reason}`}
-            </span>
-          </li>
-        ))}
-      </ul>
+    <li>
+      <details className="group/retired-crew">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-sm outline-hidden marker:hidden hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+          <ChevronRightIcon
+            aria-hidden
+            className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 group-open/retired-crew:rotate-90"
+          />
+          <span className="min-w-0 truncate font-medium text-foreground/80">{crew.crewName}</span>
+          <span className="ms-auto shrink-0 text-xs text-muted-foreground tabular-nums">
+            v{crew.version} · {seatCount} {seatCount === 1 ? "seat" : "seats"} · retired{" "}
+            {crew.archivedAt === null ? (
+              "?"
+            ) : (
+              <time dateTime={crew.archivedAt}>
+                {formatElapsedDurationLabel(crew.archivedAt) || "just now"}
+              </time>
+            )}
+          </span>
+        </summary>
+        <div className="border-t border-border/40 px-3 py-2 ps-[2.125rem] text-xs">
+          <p className="whitespace-pre-wrap break-words text-muted-foreground">{crew.brief}</p>
+          {crew.roster.length === 0 ? (
+            <p className="mt-2 text-muted-foreground">No seats were approved.</p>
+          ) : (
+            <ul className="mt-2 space-y-0.5">
+              {crew.roster.map((member) => (
+                <li key={member.seat} className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="uppercase tracking-wide text-muted-foreground">
+                    {member.seat}
+                  </span>
+                  <span className="text-foreground/80">{member.agentId ?? "Custom seat"}</span>
+                  <span className="text-muted-foreground">
+                    approved at v{member.addedVersion}
+                    {member.reason === null ? "" : ` · ${member.reason}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </details>
     </li>
   );
 }
