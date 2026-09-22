@@ -3,14 +3,8 @@ import {
   createJ5ReadSourcesAtom,
   type J5ReadSources,
 } from "@t3tools/client-runtime/j5/readSources";
-import { createEnvironmentCommand, executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
+import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { J5_API_PATHS, ManagedSquadron } from "@t3tools/contracts/j5";
-import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
-import * as SubscriptionRef from "effect/SubscriptionRef";
-import { HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { AsyncResult, type Atom } from "effect/unstable/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
@@ -108,9 +102,3 @@ export async function refreshJ5Sources<A>(
     }),
   );
 }
-
-/** Rename and delete address the owning environment; the caller passes its id, never the primary. */
-export const squadronLifecycleCommands = {
-  rename: j5Environment.renameSquadron,
-  delete: j5Environment.deleteSquadron,
-};

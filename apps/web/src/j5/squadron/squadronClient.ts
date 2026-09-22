@@ -3,7 +3,7 @@ import * as Cause from "effect/Cause";
 import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
 
 import { appAtomRegistry } from "../../rpc/atomRegistry";
-import { j5Environment, squadronLifecycleCommands, squadronQueryAtom } from "../state";
+import { j5Environment, squadronQueryAtom } from "../state";
 
 export type { ManagedSquadron } from "@t3tools/contracts/j5";
 export {
@@ -32,10 +32,7 @@ export async function renameSquadron(
   environmentId: EnvironmentId,
   input: { readonly squadronId: string; readonly name: string },
 ) {
-  const result = await squadronLifecycleCommands.rename.run(appAtomRegistry, {
-    environmentId,
-    input,
-  });
+  const result = await j5Environment.renameSquadron.run(appAtomRegistry, { environmentId, input });
   if (result._tag === "Failure") throw Cause.squash(result.cause);
   return result.value;
 }
@@ -45,10 +42,7 @@ export async function deleteSquadron(
   environmentId: EnvironmentId,
   input: { readonly squadronId: string },
 ) {
-  const result = await squadronLifecycleCommands.delete.run(appAtomRegistry, {
-    environmentId,
-    input,
-  });
+  const result = await j5Environment.deleteSquadron.run(appAtomRegistry, { environmentId, input });
   if (result._tag === "Failure") throw Cause.squash(result.cause);
   return result.value;
 }
