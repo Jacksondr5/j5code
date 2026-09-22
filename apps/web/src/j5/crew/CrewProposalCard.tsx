@@ -108,7 +108,7 @@ export function CrewProposalCard(props: {
           Brief
           <span
             aria-hidden="true"
-            className="mt-0.5 line-clamp-2 block break-words text-sm text-foreground/90 group-open/brief:hidden"
+            className="mt-0.5 line-clamp-2 break-words text-sm text-foreground/90 group-open/brief:hidden"
           >
             {proposal.brief}
           </span>
