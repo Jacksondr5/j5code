@@ -133,7 +133,6 @@ export function CrewProposalCard(props: {
                         : describeSeatAgent(rows, seat.agentId)}
                     </span>
                   </div>
-                  <p className="break-words">{seat.reason}</p>
                   {runtime ? (
                     <p className="break-words">
                       {[runtime.provider, runtime.model, runtime.reasoning, runtime.access].join(
