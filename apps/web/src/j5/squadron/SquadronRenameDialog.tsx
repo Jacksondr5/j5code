@@ -88,7 +88,10 @@ function SquadronRenameForm({
   };
 
   return (
+    // The popup lays out header, panel, and footer as a flex column; an element between them
+    // must be one too, or the scroll panel overflows and pushes the footer outside the popup.
     <form
+      className="flex min-h-0 flex-col"
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
