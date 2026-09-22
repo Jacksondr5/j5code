@@ -214,10 +214,10 @@ it.effect("refuses to delete a Squadron that still has an active agent or a runn
       'Squadron "Crewed" cannot be deleted while it still has 1 running Crew.',
     );
 
-    assert.deepStrictEqual(
-      (yield* service.list()).map(({ squadron }) => squadron.name),
-      ["Staffed", "Crewed"],
-    );
+    assert.deepStrictEqual((yield* service.list()).map(({ squadron }) => squadron.name).sort(), [
+      "Crewed",
+      "Staffed",
+    ]);
     assert.equal(yield* countWhere("j5_a2a_comm_event", staffed.squadron.id), 2);
   }).pipe(Effect.provide(testLayer)),
 );
