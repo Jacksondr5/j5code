@@ -2,11 +2,15 @@ import { AuthOrchestrationOperateScope, AuthOrchestrationReadScope } from "@t3to
 import {
   CreateSquadronRequest,
   J5_API_PATHS,
+  RenameSquadronRequest,
   type SquadronListResponse,
   type CreateSquadronResponse,
+  type DeleteSquadronResponse,
+  type RenameSquadronResponse,
 } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import {
@@ -24,9 +28,27 @@ import {
   failEnvironmentScopeRequired,
 } from "../../auth/http.ts";
 import { SquadronManagementService } from "./SquadronManagementService.ts";
+import { SquadronId } from "./contracts.ts";
 
 const SQUADRONS_PATH = J5_API_PATHS.squadrons;
+const SQUADRON_ITEM_PATH = `${SQUADRONS_PATH}/:id` as const;
 const decodeCreateSquadronRequest = Schema.decodeUnknownEffect(CreateSquadronRequest);
+const decodeRenameSquadronRequest = Schema.decodeUnknownEffect(RenameSquadronRequest);
+const decodeSquadronId = Schema.decodeUnknownOption(SquadronId);
+
+/** The router hands params back raw, so the client's encoded `squadron:<uuid>` is decoded here. */
+const squadronIdParam = Effect.map(HttpRouter.params, (params) => {
+  const segment = params.id ?? "";
+  // A malformed escape falls through as the literal segment and fails the id decode below.
+  const raw = Option.getOrElse(Option.liftThrowable(decodeURIComponent)(segment), () => segment);
+  return { raw, id: decodeSquadronId(raw) };
+});
+
+const notFound = (squadronId: string) =>
+  HttpServerResponse.jsonUnsafe(
+    { error: "SquadronNotFoundError", message: `Squadron ${squadronId} does not exist.` },
+    { status: 404 },
+  );
 
 const authenticate = (
   scope: typeof AuthOrchestrationReadScope | typeof AuthOrchestrationOperateScope,
@@ -58,9 +80,12 @@ const operationFailure = (error: unknown) => {
   const message = error instanceof Error ? error.message : "Squadron operation failed.";
   const status =
     tag === "SquadronProjectNotFoundError" ||
-    tag === "SquadronProjectReferenceSquadronNotFoundError"
+    tag === "SquadronProjectReferenceSquadronNotFoundError" ||
+    tag === "SquadronNotFoundError"
       ? 404
-      : tag === "A2AHomeConflictError" || tag === "SquadronThreadCreationProjectReferenceError"
+      : tag === "A2AHomeConflictError" ||
+          tag === "SquadronThreadCreationProjectReferenceError" ||
+          tag === "SquadronDeleteBlockedError"
         ? 409
         : tag === "SquadronNameRequiredError" ||
             tag === "SquadronThreadCreationMissingSquadronError" ||
@@ -134,6 +159,62 @@ export const squadronHttpRouteLayer = Layer.unwrap(
         }),
       ),
     );
-    return Layer.mergeAll(listRoute, createRoute);
+    const renameRoute = HttpRouter.add(
+      "PATCH",
+      SQUADRON_ITEM_PATH,
+      Effect.gen(function* () {
+        yield* annotateEnvironmentRequest("j5.squadron.rename");
+        yield* authenticate(AuthOrchestrationOperateScope);
+        const param = yield* squadronIdParam;
+        if (Option.isNone(param.id)) return notFound(param.raw);
+        const squadronId = param.id.value;
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const body = yield* Effect.result(request.json);
+        if (Result.isFailure(body)) return requestFailure("The request body must be JSON.");
+        const decoded = yield* Effect.result(decodeRenameSquadronRequest(body.success));
+        if (Result.isFailure(decoded)) return requestFailure("A Squadron name is required.");
+        const result = yield* Effect.result(
+          management.rename({ squadronId, name: decoded.success.name }),
+        );
+        if (Result.isSuccess(result)) {
+          return HttpServerResponse.jsonUnsafe({
+            squadron: result.success,
+          } satisfies typeof RenameSquadronResponse.Type);
+        }
+        return yield* operationFailure(result.failure);
+      }).pipe(
+        Effect.catchTags({
+          EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+          EnvironmentInternalError: HttpServerRespondable.toResponse,
+          EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+        }),
+      ),
+    );
+    const deleteRoute = HttpRouter.add(
+      "DELETE",
+      SQUADRON_ITEM_PATH,
+      Effect.gen(function* () {
+        yield* annotateEnvironmentRequest("j5.squadron.delete");
+        yield* authenticate(AuthOrchestrationOperateScope);
+        const param = yield* squadronIdParam;
+        if (Option.isNone(param.id)) return notFound(param.raw);
+        const squadronId = param.id.value;
+        const result = yield* Effect.result(management.delete(squadronId));
+        if (Result.isSuccess(result)) {
+          return HttpServerResponse.jsonUnsafe({
+            deleted: true,
+            squadronId,
+          } satisfies typeof DeleteSquadronResponse.Type);
+        }
+        return yield* operationFailure(result.failure);
+      }).pipe(
+        Effect.catchTags({
+          EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+          EnvironmentInternalError: HttpServerRespondable.toResponse,
+          EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+        }),
+      ),
+    );
+    return Layer.mergeAll(listRoute, createRoute, renameRoute, deleteRoute);
   }),
 );

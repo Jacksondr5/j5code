@@ -11,7 +11,12 @@ import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { ConnectionError, SqlError } from "effect/unstable/sql/SqlError";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
-import { SquadronManagementService } from "./SquadronManagementService.ts";
+import { SquadronNotFoundError } from "./LedgerService.ts";
+import {
+  SquadronDeleteBlockedError,
+  SquadronManagementService,
+  SquadronNameRequiredError,
+} from "./SquadronManagementService.ts";
 import { squadronHttpRouteLayer } from "./SquadronHttp.ts";
 import { SquadronId } from "./contracts.ts";
 
@@ -33,6 +38,8 @@ it("allows read-only connections to list Squadrons but rejects creation", async 
       Layer.mock(SquadronManagementService)({
         list: () => Effect.succeed([]),
         create: () => Effect.die("Read-only creation reached the service"),
+        rename: () => Effect.die("Read-only rename reached the service"),
+        delete: () => Effect.die("Read-only delete reached the service"),
       }),
     ),
     Layer.provideMerge(auth),
@@ -49,6 +56,20 @@ it("allows read-only connections to list Squadrons but rejects creation", async 
       }),
     );
     assert.equal(created.status, 403);
+    const renamed = await handler(
+      new Request(`http://remote.test/api/j5/squadrons/${encodeURIComponent(squadronId)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Renamed" }),
+      }),
+    );
+    assert.equal(renamed.status, 403);
+    const deleted = await handler(
+      new Request(`http://remote.test/api/j5/squadrons/${encodeURIComponent(squadronId)}`, {
+        method: "DELETE",
+      }),
+    );
+    assert.equal(deleted.status, 403);
   } finally {
     await dispose();
   }
@@ -126,6 +147,8 @@ it("sanitizes and logs unmatched Squadron operation failures", async () => {
         }),
       ),
     create: () => Effect.die("not reached"),
+    rename: () => Effect.die("not reached"),
+    delete: () => Effect.die("not reached"),
   });
   const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
     authenticateHttpRequest: () =>
@@ -150,6 +173,145 @@ it("sanitizes and logs unmatched Squadron operation failures", async () => {
       error: "SquadronOperationError",
       message: "Squadron operation failed.",
     });
+  } finally {
+    await dispose();
+  }
+});
+
+const operatorAuth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+  authenticateHttpRequest: () =>
+    Effect.succeed({
+      sessionId: AuthSessionId.make("auth-session:squadron-http"),
+      subject: "squadron-http-test",
+      method: "bearer-access-token",
+      scopes: [AuthOrchestrationReadScope, AuthOrchestrationOperateScope],
+    }),
+});
+
+const itemUrl = (id: string) =>
+  `http://environment.test/api/j5/squadrons/${encodeURIComponent(id)}`;
+
+it("renames a Squadron by encoded id and maps blank names and unknown ids", async () => {
+  const renameInputs: Array<{ readonly squadronId: string; readonly name: string }> = [];
+  const management = Layer.mock(SquadronManagementService)({
+    list: () => Effect.die("not reached"),
+    create: () => Effect.die("not reached"),
+    delete: () => Effect.die("not reached"),
+    rename: (input) => {
+      renameInputs.push(input);
+      if (input.squadronId !== squadronId) {
+        return Effect.fail(new SquadronNotFoundError({ squadronId: input.squadronId }));
+      }
+      if (input.name.trim().length === 0) return Effect.fail(new SquadronNameRequiredError());
+      return Effect.succeed({
+        squadron: {
+          id: squadronId,
+          name: input.name.trim(),
+          createdAt: "2026-08-29T21:00:00.000Z",
+        },
+        projectIds: [projectId],
+      });
+    },
+  });
+  const routes = squadronHttpRouteLayer.pipe(
+    Layer.provide(management),
+    Layer.provideMerge(operatorAuth),
+    Layer.provide(HttpServer.layerServices),
+  );
+  const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
+  const patch = (id: string, body: string) =>
+    handler(
+      new Request(itemUrl(id), {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body,
+      }),
+    );
+
+  try {
+    const renamed = await patch(squadronId, JSON.stringify({ name: " Renamed " }));
+    assert.equal(renamed.status, 200);
+    assert.deepStrictEqual(await renamed.json(), {
+      squadron: {
+        squadron: { id: squadronId, name: "Renamed", createdAt: "2026-08-29T21:00:00.000Z" },
+        projectIds: [projectId],
+      },
+    });
+    assert.deepStrictEqual(renameInputs, [{ squadronId, name: " Renamed " }]);
+
+    const blank = await patch(squadronId, JSON.stringify({ name: "   " }));
+    assert.equal(blank.status, 400);
+    assert.deepStrictEqual(await blank.json(), {
+      error: "SquadronNameRequiredError",
+      message: "A Squadron name is required.",
+    });
+
+    const malformed = await patch(squadronId, JSON.stringify({ title: "nope" }));
+    assert.equal(malformed.status, 400);
+    assert.deepStrictEqual(await malformed.json(), {
+      error: "invalid_request",
+      message: "A Squadron name is required.",
+    });
+
+    const missing = await patch("squadron:missing", JSON.stringify({ name: "Ghost" }));
+    assert.equal(missing.status, 404);
+    assert.deepStrictEqual(await missing.json(), {
+      error: "SquadronNotFoundError",
+      message: "Squadron squadron:missing does not exist.",
+    });
+  } finally {
+    await dispose();
+  }
+});
+
+it("deletes an empty Squadron and reports 409 with the blocker when refused", async () => {
+  const deleted: Array<string> = [];
+  const blockedId = SquadronId.make("squadron:blocked");
+  const management = Layer.mock(SquadronManagementService)({
+    list: () => Effect.die("not reached"),
+    create: () => Effect.die("not reached"),
+    rename: () => Effect.die("not reached"),
+    delete: (id) => {
+      if (id === blockedId) {
+        return Effect.fail(
+          new SquadronDeleteBlockedError({
+            squadronId: id,
+            name: "Ops",
+            blockers: [
+              { kind: "members", count: 2 },
+              { kind: "crews", count: 1 },
+            ],
+          }),
+        );
+      }
+      if (id !== squadronId) return Effect.fail(new SquadronNotFoundError({ squadronId: id }));
+      deleted.push(id);
+      return Effect.void;
+    },
+  });
+  const routes = squadronHttpRouteLayer.pipe(
+    Layer.provide(management),
+    Layer.provideMerge(operatorAuth),
+    Layer.provide(HttpServer.layerServices),
+  );
+  const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
+  const remove = (id: string) => handler(new Request(itemUrl(id), { method: "DELETE" }));
+
+  try {
+    const ok = await remove(squadronId);
+    assert.equal(ok.status, 200);
+    assert.deepStrictEqual(await ok.json(), { deleted: true, squadronId });
+    assert.deepStrictEqual(deleted, [squadronId]);
+
+    const blocked = await remove(blockedId);
+    assert.equal(blocked.status, 409);
+    assert.deepStrictEqual(await blocked.json(), {
+      error: "SquadronDeleteBlockedError",
+      message: 'Squadron "Ops" cannot be deleted while it still has 2 members and 1 active Crew.',
+    });
+
+    const missing = await remove("squadron:missing");
+    assert.equal(missing.status, 404);
   } finally {
     await dispose();
   }

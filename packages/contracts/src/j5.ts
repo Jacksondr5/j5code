@@ -22,6 +22,12 @@ export type ManagedSquadron = typeof ManagedSquadron.Type;
 export const SquadronListResponse = Schema.Struct({ squadrons: Schema.Array(ManagedSquadron) });
 export const CreateSquadronRequest = Schema.Struct({ name: Schema.String, projectId: ProjectId });
 export const CreateSquadronResponse = Schema.Struct({ squadron: ManagedSquadron });
+export const RenameSquadronRequest = Schema.Struct({ name: Schema.String });
+export const RenameSquadronResponse = Schema.Struct({ squadron: ManagedSquadron });
+export const DeleteSquadronResponse = Schema.Struct({
+  deleted: Schema.Literal(true),
+  squadronId: Schema.String,
+});
 
 export const ThreadHome = Schema.Union([
   Schema.Struct({
@@ -338,6 +344,10 @@ export const J5_API_PATHS = {
   crewMemberships: "/api/j5/a2a/client-reads/crew-memberships",
   spawnedChildren: "/api/j5/a2a/client-reads/spawned-children",
 } as const;
+
+/** Item path for one Squadron (rename, delete); ids carry a colon so they are encoded. */
+export const j5SquadronPath = (squadronId: string): string =>
+  `${J5_API_PATHS.squadrons}/${encodeURIComponent(squadronId)}`;
 
 /**
  * Machine participants: registered non-agent senders (cron jobs, watchdogs,
