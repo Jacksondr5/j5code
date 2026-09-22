@@ -13,6 +13,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import { SqlError, UnknownError } from "effect/unstable/sql/SqlError";
 
 import { ServerConfig } from "../../config.ts";
 import {
@@ -50,7 +51,7 @@ import {
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
-import { crewSeatRequestKey, spawnThreadId } from "./spawnIds.ts";
+import { crewSeatRequestKey, spawnCrewInstanceId, spawnThreadId } from "./spawnIds.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
 
 const squadronId = SquadronId.make("squadron:crew-proposal");
@@ -80,10 +81,15 @@ const captain: CrewCaptain = {
 const launchFailure = (cause: unknown) =>
   new CrewLaunchOperationError({ phase: "test launcher", seatName: null, createdSeats: [], cause });
 
+/** The Crew id a roster proposal's launch records; the gate recovers a lost link through it. */
+const crewIdFor = (proposalId: string) =>
+  spawnCrewInstanceId({ providerSessionId: "j5-crew-proposal", requestKey: proposalId });
+
 /**
  * The launcher is exercised by its own test; here it records members so the gate can be proven.
- * Like the real one it records the Crew before any seat spawns and reports it through
- * `onRecorded`; a display name of "Boom" fails before recording, "Boom after record" fails after.
+ * Like the real one it records the Crew under its deterministic id before any seat spawns and
+ * reports it through `onRecorded`, whose failure stops the launch; a display name of "Boom"
+ * fails before recording, "Boom after record" fails after.
  */
 const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
   Layer.mock(CrewLaunchService)({
@@ -116,7 +122,10 @@ const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
         ? Effect.fail(launchFailure(new Error("provider unavailable")))
         : crews
             .record({
-              id: `crew:${input.requestKey}`,
+              id: spawnCrewInstanceId({
+                providerSessionId: input.providerSessionId,
+                requestKey: input.requestKey,
+              }),
               squadronId: input.captain.squadronId,
               captainParticipantId: input.captain.participantId,
               captainThreadId: input.captain.thread.id,
@@ -220,12 +229,25 @@ const fixture = Effect.gen(function* () {
   // While set, recording a resolution lands nothing: the store answers as if the row were no
   // longer claimed, which is what a decline sees when its final write fails after the notice.
   const completeFailure = yield* Ref.make(false);
+  // While set, the proposal-to-Crew link write fails with a database error after the Crew record
+  // is durable, which is the state a decline or the boot sweep must be able to recover from.
+  const attachFailure = yield* Ref.make(false);
   const store = Context.get(context, AgentCrewProposalService);
   const flakyStore = Layer.succeed(AgentCrewProposalService, {
     ...store,
     complete: (input) =>
       Ref.get(completeFailure).pipe(
         Effect.flatMap((failing) => (failing ? Effect.succeed(null) : store.complete(input))),
+      ),
+    attachInstance: (id, crewInstanceId) =>
+      Ref.get(attachFailure).pipe(
+        Effect.flatMap((failing) =>
+          failing
+            ? Effect.fail(
+                new SqlError({ reason: new UnknownError({ cause: new Error("disk I/O error") }) }),
+              )
+            : store.attachInstance(id, crewInstanceId),
+        ),
       ),
   });
   const layer = crewProposalLayer.pipe(
@@ -292,6 +314,7 @@ const fixture = Effect.gen(function* () {
     unreadableThreads,
     noticeFailure,
     completeFailure,
+    attachFailure,
     captainModel,
   };
 });
@@ -651,7 +674,7 @@ it.effect("declining a roster whose launch failed partway retires what the launc
       const reopened = (yield* proposals.read(opened.proposal.id))!;
       assert.equal(reopened.status, "open");
       assert.deepStrictEqual(reopened.approvedSeats, edited);
-      assert.equal(reopened.crewInstanceId, `crew:${opened.proposal.id}`);
+      assert.equal(reopened.crewInstanceId, crewIdFor(opened.proposal.id));
       assert.isNotNull(yield* crews.read(reopened.crewInstanceId!));
 
       const declined = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "decline" });
@@ -1244,6 +1267,191 @@ it.effect(
           .pipe(Effect.flip);
         assert.equal(agentOverride._tag, "CrewProposalRequestError");
         assert.include(agentOverride.message, "only the human can override");
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a Crew whose link write failed is found by its deterministic id when the roster is declined",
+  () =>
+    Effect.gen(function* () {
+      const { layer, notices, attachFailure, watched } = yield* fixture;
+      yield* Effect.gen(function* () {
+        const gate = withPreview(yield* CrewProposalService);
+        const proposals = yield* AgentCrewProposalService;
+        const crews = yield* AgentCrewInstanceService;
+        const opened = yield* gate.propose({
+          requestKey: "lost-link-1",
+          captain,
+          displayName: "Boom after record",
+          brief: "The second seat never spawns.",
+          seats: [
+            { seat: "builder", agentId: "builder", reason: "Builds" },
+            { seat: "critic", agentId: "critic", reason: "Reviews" },
+          ],
+        });
+        const crewId = crewIdFor(opened.proposal.id);
+        // The Crew record is durable, then the link write fails: the launch stops right there,
+        // naming the Crew, and the gate is handed back to a proposal that does not name it.
+        yield* Ref.set(attachFailure, true);
+        const failed = yield* gate
+          .resolve({ proposalId: opened.proposal.id, decision: "approve" })
+          .pipe(Effect.flip);
+        assert.equal(failed._tag, "CrewLaunchOperationError");
+        assert.include(failed.message, crewId);
+        const reopened = (yield* proposals.read(opened.proposal.id))!;
+        assert.equal(reopened.status, "open");
+        assert.isNull(reopened.crewInstanceId);
+        assert.deepStrictEqual(reopened.approvedSeats, opened.proposal.requestedSeats);
+        assert.isNull((yield* crews.read(crewId))!.archivedAt);
+        assert.deepStrictEqual(yield* Ref.get(watched), []);
+
+        // The decline needs no link: it reads the record by the id the proposal determines, retires
+        // it, archives every seat thread it names, and the declined row carries the Crew id.
+        const declined = yield* gate.resolve({
+          proposalId: opened.proposal.id,
+          decision: "decline",
+        });
+        assert.equal(declined.proposal.status, "declined");
+        assert.equal(declined.proposal.crewInstanceId, crewId);
+        assert.isNotNull((yield* crews.read(crewId))!.archivedAt);
+        assert.sameMembers(
+          (yield* Ref.get(notices))
+            .filter((command) => command.type === "thread.archive")
+            .map((command) => command.threadId),
+          [ThreadId.make("thread:builder"), ThreadId.make("thread:critic")],
+        );
+        assert.isNull(
+          yield* crews.findMembership(ParticipantId.make("agent:j5:a2a:thread:builder")),
+        );
+        const notice = (yield* Ref.get(notices)).at(-1);
+        if (notice?.type === "message.dispatch") assert.include(notice.text, "decision: declined");
+        else assert.fail("the decline notice was not dispatched");
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "the boot sweep restores a lost Crew link on an approval and retires the Crew on a decline",
+  () =>
+    Effect.gen(function* () {
+      const { layer, attachFailure } = yield* fixture;
+      yield* Effect.gen(function* () {
+        const gate = withPreview(yield* CrewProposalService);
+        const proposals = yield* AgentCrewProposalService;
+        const crews = yield* AgentCrewInstanceService;
+        yield* Ref.set(attachFailure, true);
+
+        // A roster whose link write failed, then claimed for a decline the server lost.
+        const lost = yield* gate.propose({
+          requestKey: "sweep-link-1",
+          captain,
+          displayName: "Boom after record",
+          brief: "The second seat never spawns.",
+          seats: [
+            { seat: "builder", agentId: "builder", reason: "Builds" },
+            { seat: "critic", agentId: "critic", reason: "Reviews" },
+          ],
+        });
+        yield* gate
+          .resolve({ proposalId: lost.proposal.id, decision: "approve" })
+          .pipe(Effect.flip);
+        yield* proposals.claim({ id: lost.proposal.id, decision: "decline", approvedSeats: null });
+        // Another whose link write failed, then claimed for an approval the server lost.
+        const handedBack = yield* gate.propose({
+          requestKey: "sweep-link-2",
+          captain,
+          displayName: "Sweep Link Crew",
+          brief: "Build it.",
+          seats: [{ seat: "maker", agentId: "builder", reason: "Builds" }],
+        });
+        yield* gate
+          .resolve({ proposalId: handedBack.proposal.id, decision: "approve" })
+          .pipe(Effect.flip);
+        yield* proposals.claim({
+          id: handedBack.proposal.id,
+          decision: "approve",
+          approvedSeats: handedBack.proposal.requestedSeats,
+        });
+        for (const proposal of [lost.proposal, handedBack.proposal]) {
+          assert.isNull((yield* proposals.read(proposal.id))!.crewInstanceId);
+          assert.isNotNull(yield* crews.read(crewIdFor(proposal.id)));
+        }
+
+        // While the store still refuses the link write, the sweep retires the declined Crew (that
+        // needs no link) and leaves the approval claimed rather than reopening it unlinked.
+        assert.deepStrictEqual(yield* gate.reconcile, [lost.proposal.id]);
+        const declined = (yield* proposals.read(lost.proposal.id))!;
+        assert.equal(declined.status, "declined");
+        assert.equal(declined.crewInstanceId, crewIdFor(lost.proposal.id));
+        assert.isNotNull((yield* crews.read(declined.crewInstanceId!))!.archivedAt);
+        assert.equal((yield* proposals.read(handedBack.proposal.id))!.status, "approving");
+
+        // Once the store recovers, the sweep restores the link before handing the gate back.
+        yield* Ref.set(attachFailure, false);
+        assert.deepStrictEqual(yield* gate.reconcile, [handedBack.proposal.id]);
+        const reopened = (yield* proposals.read(handedBack.proposal.id))!;
+        assert.equal(reopened.status, "open");
+        assert.equal(reopened.crewInstanceId, crewIdFor(handedBack.proposal.id));
+        assert.deepStrictEqual(reopened.approvedSeats, handedBack.proposal.requestedSeats);
+        assert.isNull((yield* crews.read(reopened.crewInstanceId!))!.archivedAt);
+        assert.deepStrictEqual(yield* gate.reconcile, []);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a database error on the link write is retryable: the retry restores the link and launches",
+  () =>
+    Effect.gen(function* () {
+      const { layer, attachFailure, watched } = yield* fixture;
+      yield* Effect.gen(function* () {
+        const gate = withPreview(yield* CrewProposalService);
+        const proposals = yield* AgentCrewProposalService;
+        const crews = yield* AgentCrewInstanceService;
+        const opened = yield* gate.propose({
+          requestKey: "retry-link-1",
+          captain,
+          displayName: "Retry Link Crew",
+          brief: "Build it.",
+          seats: [{ seat: "maker", agentId: "builder", reason: "Builds" }],
+        });
+        const crewId = crewIdFor(opened.proposal.id);
+        yield* Ref.set(attachFailure, true);
+        const failed = yield* gate
+          .resolve({ proposalId: opened.proposal.id, decision: "approve" })
+          .pipe(Effect.flip);
+        assert.equal(failed._tag, "CrewLaunchOperationError");
+        assert.equal((yield* proposals.read(opened.proposal.id))!.status, "open");
+        assert.isNull((yield* proposals.read(opened.proposal.id))!.crewInstanceId);
+        assert.lengthOf((yield* crews.read(crewId))!.members, 1);
+
+        // While the link still cannot be written, the approval is refused before anything is
+        // claimed or launched: the gate stays open and names the Crew it could not reach.
+        const refused = yield* gate
+          .resolve({ proposalId: opened.proposal.id, decision: "approve" })
+          .pipe(Effect.flip);
+        assert.equal(refused._tag, "CrewProposalOperationError");
+        assert.include(refused.message, crewId);
+        assert.equal((yield* proposals.read(opened.proposal.id))!.status, "open");
+        assert.isNull((yield* proposals.read(opened.proposal.id))!.crewInstanceId);
+        assert.deepStrictEqual(yield* Ref.get(watched), []);
+
+        // The store recovers: the retry restores the link, converges on the recorded Crew, and
+        // launches; the record gains no second copy of the seat.
+        yield* Ref.set(attachFailure, false);
+        const approved = yield* gate.resolve({
+          proposalId: opened.proposal.id,
+          decision: "approve",
+        });
+        assert.equal(approved.proposal.status, "approved");
+        assert.equal(approved.proposal.crewInstanceId, crewId);
+        assert.equal(approved.instance?.id, crewId);
+        assert.deepStrictEqual(
+          (yield* crews.read(crewId))!.members.map(({ seatName }) => seatName),
+          ["maker"],
+        );
+        assert.deepStrictEqual(yield* Ref.get(watched), [opened.proposal.id]);
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );

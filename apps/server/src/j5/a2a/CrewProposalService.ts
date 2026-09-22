@@ -21,6 +21,7 @@ import {
 } from "./AgentCrewProposalService.ts";
 import {
   CREW_SEAT_CAP,
+  CrewLaunchOperationError,
   CrewLaunchService,
   type CrewCaptain,
   type CrewLaunchError,
@@ -31,7 +32,12 @@ import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import { crewSeatShapeProblem } from "./crewLimits.ts";
 import { CREW_PROPOSAL_SESSION, crewSeatReservedBy } from "./crewSeatIds.ts";
 import { A2ALedger } from "./LedgerService.ts";
-import { crewSeatRequestKey, lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
+import {
+  crewSeatRequestKey,
+  lifecycleCommandId,
+  lifecycleId,
+  spawnCrewInstanceId,
+} from "./spawnIds.ts";
 import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 
 /** Hard cap on seats per Crew, initial roster and additions together. */
@@ -153,6 +159,49 @@ export const layer = Layer.effect(
 
     const operationError = (phase: string) => (cause: unknown) =>
       new CrewProposalOperationError({ phase, cause });
+
+    /**
+     * A roster proposal's Crew id is a function of the proposal alone (the launcher derives it the
+     * same way), so a proposal whose link to its Crew was never written can still find the record.
+     */
+    const rosterCrewInstanceId = (proposal: CrewProposal) =>
+      spawnCrewInstanceId({ providerSessionId: PROPOSAL_SESSION, requestKey: proposal.id });
+
+    /**
+     * The Crew id a roster proposal should carry: its link when it has one, else the record its
+     * launch left under the deterministic id, else null. The launch writes the record before the
+     * link, so a link write that failed is the one way a live record can exist unnamed.
+     */
+    const recordedCrewId = Effect.fn("j5.a2a.crewProposal.recordedCrewId")(function* (
+      proposal: CrewProposal,
+    ) {
+      if (proposal.kind !== "roster" || proposal.crewInstanceId !== null)
+        return proposal.crewInstanceId;
+      const recorded = yield* crews
+        .read(rosterCrewInstanceId(proposal))
+        .pipe(Effect.mapError(operationError("reading the crew")));
+      return recorded?.id ?? null;
+    });
+
+    /**
+     * Restores a roster proposal's missing link to the Crew its launch recorded. A link that
+     * cannot be restored fails, naming the Crew: the caller must not launch more seats beneath a
+     * record the proposal cannot reach.
+     */
+    const restoreCrewLink = Effect.fn("j5.a2a.crewProposal.restoreCrewLink")(function* (
+      proposal: CrewProposal,
+    ) {
+      if (proposal.crewInstanceId !== null) return;
+      const crewInstanceId = yield* recordedCrewId(proposal);
+      if (crewInstanceId === null) return;
+      yield* proposals
+        .attachInstance(proposal.id, crewInstanceId)
+        .pipe(
+          Effect.mapError(
+            operationError(`linking proposal ${proposal.id} to crew ${crewInstanceId}`),
+          ),
+        );
+    });
 
     /**
      * Persona seats must name known, enabled personas; the library is the source of truth, not the
@@ -292,8 +341,22 @@ export const layer = Layer.effect(
           seats: launchSeats,
           resolvedSeats,
           brief: proposal.brief,
+          // A link that cannot be written stops the launch before any seat spawns: the record
+          // stays under its deterministic id, and the retry, a decline, or the boot sweep
+          // recovers the link from it rather than launching seats the proposal cannot reach.
           onRecorded: (instance) =>
-            proposals.attachInstance(proposal.id, instance.id).pipe(Effect.ignore),
+            proposals.attachInstance(proposal.id, instance.id).pipe(
+              Effect.asVoid,
+              Effect.mapError(
+                (cause) =>
+                  new CrewLaunchOperationError({
+                    phase: `linking proposal ${proposal.id} to crew ${instance.id}`,
+                    seatName: null,
+                    createdSeats: [],
+                    cause,
+                  }),
+              ),
+            ),
         });
       }
       const instance =
@@ -555,16 +618,18 @@ export const layer = Layer.effect(
      * A claimed decline's work before it is recorded: an earlier approval may have failed partway
      * and handed the gate back, so the cleanup runs first and the Captain is told last. For an
      * addition, every row this proposal reserved is released; for a roster, the Crew record and
-     * any seat threads the failed launch created are retired.
+     * any seat threads the failed launch created are retired, found by the deterministic id when
+     * the launch never got to write the link. Returns the Crew id the declined row should keep.
      */
     const retireAndNotifyDeclined = Effect.fn("j5.a2a.crewProposal.retireAndNotifyDeclined")(
       function* (claimed: CrewProposal) {
-        if (claimed.crewInstanceId !== null) {
-          if (claimed.kind === "addition")
-            yield* retireFailedAddition(claimed, claimed.crewInstanceId);
-          else yield* retireFailedLaunch(claimed, claimed.crewInstanceId);
+        const crewInstanceId = yield* recordedCrewId(claimed);
+        if (crewInstanceId !== null) {
+          if (claimed.kind === "addition") yield* retireFailedAddition(claimed, crewInstanceId);
+          else yield* retireFailedLaunch(claimed, crewInstanceId);
         }
         yield* notifyDeclined(claimed);
+        return crewInstanceId;
       },
     );
 
@@ -572,8 +637,8 @@ export const layer = Layer.effect(
     const finishDecline = Effect.fn("j5.a2a.crewProposal.finishDecline")(function* (
       claimed: CrewProposal,
     ) {
-      yield* retireAndNotifyDeclined(claimed);
-      const declined = yield* complete(claimed, "decline", null);
+      const crewInstanceId = yield* retireAndNotifyDeclined(claimed);
+      const declined = yield* complete(claimed, "decline", crewInstanceId);
       return { proposal: declined, instance: null } satisfies CrewProposalOutcome;
     });
 
@@ -667,12 +732,12 @@ export const layer = Layer.effect(
           const claimed = yield* claim(proposal, "decline", null);
           // A cleanup or notice the store refused hands the gate back so the person can decline
           // again, rather than leaving a claimed row only the next boot would finish.
-          yield* retireAndNotifyDeclined(claimed).pipe(
+          const crewInstanceId = yield* retireAndNotifyDeclined(claimed).pipe(
             Effect.onError(() => proposals.reopen(claimed.id).pipe(Effect.ignore)),
           );
           // Once the decline notice is durable the row stays `declining` for the boot sweep to
           // record: reopening here would let a fresh approval launch beneath a declined card.
-          const declined = yield* complete(claimed, "decline", null);
+          const declined = yield* complete(claimed, "decline", crewInstanceId);
           return { proposal: declined, instance: null } satisfies CrewProposalOutcome;
         }
         const seats = input.seats ?? proposal.approvedSeats ?? proposal.requestedSeats;
@@ -684,6 +749,10 @@ export const layer = Layer.effect(
             detail: "The crew runtime preview is missing or has changed since it was shown.",
             nextStep: "Refresh the preview and review the current settings before approving.",
           });
+        // A launch whose link write failed left its Crew unnamed by the proposal. Restore the link
+        // before claiming; if it still cannot be written, the approval is refused with the gate
+        // open rather than launching seats beneath a Crew the proposal cannot reach.
+        yield* restoreCrewLink(proposal);
         const claimed = yield* claim(proposal, "approve", seats);
         return yield* settle(claimed, captain, seats, resolved);
       });
@@ -700,6 +769,9 @@ export const layer = Layer.effect(
               proposalId: proposal.id,
             });
           } else {
+            // The lost launch may have recorded its Crew and died before the link: restore it so
+            // the reopened gate names the Crew a retry converges on and a decline retires.
+            yield* restoreCrewLink(proposal);
             yield* proposals.reopen(proposal.id);
             yield* Effect.logInfo("J5 crew proposal sweep handed a lost approval back", {
               proposalId: proposal.id,
