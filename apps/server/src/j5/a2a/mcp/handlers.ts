@@ -1,4 +1,5 @@
 import { type ModelSelection } from "@t3tools/contracts";
+import { playbookHandlers } from "../../playbooks/mcp.ts";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -424,6 +425,7 @@ const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
 });
 
 const handlers = {
+  ...playbookHandlers,
   send_message: (input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;

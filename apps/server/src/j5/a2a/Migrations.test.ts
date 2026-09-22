@@ -58,6 +58,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 15, name: "CustomCrewSeats" },
       { migration_id: 16, name: "CrewProposalClaims" },
       { migration_id: 17, name: "EnsureCustomCrewSeats" },
+      { migration_id: 18, name: "AgentLedPlaybooks" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -79,8 +80,27 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [15, "CustomCrewSeats"],
         [16, "CrewProposalClaims"],
         [17, "EnsureCustomCrewSeats"],
+        [18, "AgentLedPlaybooks"],
       ],
     );
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect("adds playbooks after an environment has applied the Crew migrations", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 17 });
+    const before = yield* sql`SELECT * FROM ${sql(J5_A2A_MIGRATIONS_TABLE)} ORDER BY migration_id`;
+    yield* runJ5A2AMigrations();
+    assert.deepStrictEqual(
+      yield* sql`SELECT * FROM ${sql(J5_A2A_MIGRATIONS_TABLE)} WHERE migration_id <= 17 ORDER BY migration_id`,
+      before,
+    );
+    assert.deepStrictEqual(
+      yield* sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'j5_playbook_%' ORDER BY name`,
+      [{ name: "j5_playbook_request" }, { name: "j5_playbook_run" }],
+    );
+    yield* runJ5A2AMigrations();
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
 
@@ -1186,7 +1206,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
     `;
     assert.deepStrictEqual(
       applied.map((row) => row.migration_id),
-      [13, 14, 15, 16, 17],
+      [13, 14, 15, 16, 17, 18],
     );
     const memberColumns = yield* sql<{ readonly name: string }>`
       SELECT name FROM pragma_table_info('j5_agent_crew_member') ORDER BY cid

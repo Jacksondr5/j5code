@@ -1,3 +1,4 @@
+import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { A2AHomeRegistrar } from "./HomeRegistrar.ts";
 import { SquadronJoinService } from "./SquadronJoinService.ts";
 import { AuthOrchestrationReadScope, AuthSessionId, ThreadId } from "@t3tools/contracts";
@@ -86,6 +87,7 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
   });
   const routes = j5AuthenticatedRoutesLayer
     .pipe(
+      Layer.provide(Layer.mock(PlaybookStore)({})),
       Layer.provide(homes),
       Layer.provide(
         Layer.mock(A2AArchiveFacts)({

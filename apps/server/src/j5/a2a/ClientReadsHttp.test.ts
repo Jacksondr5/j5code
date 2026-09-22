@@ -1,3 +1,4 @@
+import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { A2AHomeRegistrar } from "./HomeRegistrar.ts";
 import { SquadronJoinService } from "./SquadronJoinService.ts";
 import { AuthOrchestrationReadScope, AuthSessionId, ThreadId } from "@t3tools/contracts";
@@ -321,6 +322,7 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
   });
   const routes = j5AuthenticatedRoutesLayer
     .pipe(
+      Layer.provide(Layer.mock(PlaybookStore)({})),
       Layer.provide(clientReads),
       Layer.provide(
         Layer.mock(A2AArchiveFacts)({

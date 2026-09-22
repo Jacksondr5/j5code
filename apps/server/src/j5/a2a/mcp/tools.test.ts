@@ -58,6 +58,14 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
   assert.include(J5SpawnAgentTool.description ?? "", "one of that persona's declared routes");
   assert.property(stopSchema.properties ?? {}, "client_request_id");
   assert.sameMembers(Object.keys(J5Toolkit.tools), [
+    "playbook_back",
+    "playbook_cancel",
+    "playbook_complete",
+    "playbook_current",
+    "playbook_list",
+    "playbook_next",
+    "playbook_reselect",
+    "playbook_start",
     "send_message",
     "list_personas",
     "list_participants",

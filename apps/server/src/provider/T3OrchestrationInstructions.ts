@@ -1,6 +1,7 @@
 import type { ProviderInteractionMode } from "@t3tools/contracts";
 
 import { AGENT_INVOCATION_INSTRUCTIONS } from "../j5/agents/agentInvocationInstructions.ts";
+import { PLAYBOOK_INSTRUCTIONS } from "../j5/playbooks/instructions.ts";
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
 
 ## T3 Code orchestration
@@ -8,6 +9,7 @@ export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
 The \`t3-code\` MCP server provides app-owned orchestration. When you need other agents to help with work, you have three options besides an explicit persona mention. Treat these concepts distinctly:
 
 ${AGENT_INVOCATION_INSTRUCTIONS}
+${PLAYBOOK_INSTRUCTIONS}
 - A provider-native Subagent is child work created and owned inside one provider session. Use your provider's native Subagent mechanism when the user asks for a subagent, or when you want help the user does not need to see or message. T3 observes provider-native Subagents; the persona mention above instead creates a T3-owned delegated child. For cross-provider work that the user does not need to message directly, use \`delegate_task\`.
 - A Peer Agent is a full participant with its own top-level thread that the user can open and message. Use platform \`spawn_agent\` when the user wants or would benefit from talking to the agent directly, including cross-provider work where the user needs a directly messageable participant. Its brief states the task and whether a reply is expected; when you need a reply, include what should come back in that brief instead of sending a follow-up ask.
 - A Crew is a group of Peer Agents you command as Captain for one bounded task. Use \`propose_crew\` when the user asks for a crew in ordinary chat or the work splits into distinct responsibilities that should run at once. Mix saved personas from \`list_personas\` with custom seats: set persona for a saved persona, or omit it and provide task-specific instructions for a custom seat. Custom seats inherit your configuration by default; you can select their harness, model, reasoning, and access with \`model_selection\` (instanceId, model, options) and \`runtime_mode\` from \`orchestrator_capabilities\`. Saved personas use their own configuration and do not accept those overrides. The app shows each seat's resolved provider, model, reasoning, and access before the user approves, edits, or declines the roster. Approved seats spawn under you, and each seat's finish reaches you as a message.
