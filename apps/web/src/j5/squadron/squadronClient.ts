@@ -3,7 +3,7 @@ import * as Cause from "effect/Cause";
 import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
 
 import { appAtomRegistry } from "../../rpc/atomRegistry";
-import { j5Environment, squadronQueryAtom } from "../state";
+import { j5Environment, squadronLifecycleCommands, squadronQueryAtom } from "../state";
 
 export type { ManagedSquadron } from "@t3tools/contracts/j5";
 export {
@@ -23,6 +23,32 @@ export async function createSquadron(
   input: { readonly name: string; readonly projectId: ProjectId },
 ) {
   const result = await j5Environment.createSquadron.run(appAtomRegistry, { environmentId, input });
+  if (result._tag === "Failure") throw Cause.squash(result.cause);
+  return result.value;
+}
+
+/** The id stays stable, so every home, membership, Crew, and thread label follows the new name. */
+export async function renameSquadron(
+  environmentId: EnvironmentId,
+  input: { readonly squadronId: string; readonly name: string },
+) {
+  const result = await squadronLifecycleCommands.rename.run(appAtomRegistry, {
+    environmentId,
+    input,
+  });
+  if (result._tag === "Failure") throw Cause.squash(result.cause);
+  return result.value;
+}
+
+/** Hard delete; the server answers 409 while live members, Crews, or other rows still depend on it. */
+export async function deleteSquadron(
+  environmentId: EnvironmentId,
+  input: { readonly squadronId: string },
+) {
+  const result = await squadronLifecycleCommands.delete.run(appAtomRegistry, {
+    environmentId,
+    input,
+  });
   if (result._tag === "Failure") throw Cause.squash(result.cause);
   return result.value;
 }
