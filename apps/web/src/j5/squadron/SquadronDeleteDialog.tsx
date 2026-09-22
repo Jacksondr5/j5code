@@ -66,8 +66,9 @@ export function SquadronDeleteDialog({
           <AlertDialogTitle>Delete “{target.name}”?</AlertDialogTitle>
           <AlertDialogDescription>
             Agents that called this Squadron home keep their threads, but their thread labels lose
-            their Squadron home and appear only under All Squadrons. A Squadron with live members or
-            Crews cannot be deleted; stop or archive them first. This cannot be undone.
+            their Squadron home and appear only under All Squadrons. The Squadron’s message history
+            is deleted with it. A Squadron with live members or Crews cannot be deleted; stop or
+            archive them first. This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         {failure !== null ? (
