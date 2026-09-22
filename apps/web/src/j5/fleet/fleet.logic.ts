@@ -1,6 +1,7 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ThreadId, type EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
 
+import { classifyCrewSeat, type CrewSeatState, type CrewSeatThread } from "../crew/crewState";
 import type { FleetAgent, FleetCrew, FleetSquadron } from "./fleetClient";
 
 /** One rendered row of the Roster tree. Crew members hang under their Captain as one unit. */
@@ -90,14 +91,107 @@ export function buildFleetTree(squadron: FleetSquadron): ReadonlyArray<FleetNode
   return roots;
 }
 
+/** A Crew paired with the Squadron it belonged to, for lists that span Squadrons. */
+export interface FleetSquadronCrew<S extends FleetSquadron = FleetSquadron> {
+  readonly squadron: S;
+  readonly crew: FleetCrew;
+}
+
 /**
- * Retired Crews of a Squadron, newest retirement first. Their roster snapshot stays readable so
- * whoever proposes a successor can start from the brief and the approved seats (Crews AC20).
+ * Retired Crews across every Squadron, newest retirement first, each paired with its Squadron so
+ * the row can name it. Their roster snapshot stays readable so whoever proposes a successor can
+ * start from the brief and the approved seats (Crews AC20).
  */
-export const retiredCrews = (squadron: FleetSquadron): ReadonlyArray<FleetCrew> =>
-  squadron.crews
-    .filter((crew) => crew.archivedAt !== null)
-    .toSorted((left, right) => (right.archivedAt ?? "").localeCompare(left.archivedAt ?? ""));
+export const retiredCrews = <S extends FleetSquadron>(
+  squadrons: ReadonlyArray<S>,
+): ReadonlyArray<FleetSquadronCrew<S>> =>
+  squadrons
+    .flatMap((squadron) =>
+      squadron.crews.filter((crew) => crew.archivedAt !== null).map((crew) => ({ squadron, crew })),
+    )
+    .toSorted((left, right) =>
+      (right.crew.archivedAt ?? "").localeCompare(left.crew.archivedAt ?? ""),
+    );
+
+/** A placement-tree root paired with the Squadron it belongs to, for tables that span Squadrons. */
+export interface FleetSectionRow<S extends FleetSquadron = FleetSquadron> {
+  readonly squadron: S;
+  readonly node: FleetNode;
+}
+
+/** The Active and Settled sections of the Fleet page; retired Crews are listed by `retiredCrews`. */
+export interface FleetSections<S extends FleetSquadron = FleetSquadron> {
+  readonly active: ReadonlyArray<FleetSectionRow<S>>;
+  readonly settled: ReadonlyArray<FleetSectionRow<S>>;
+  /** Every agent row in Settled, seats included, for the expander's label. */
+  readonly settledAgentCount: number;
+  /** Every agent that is a row in either section, for the page subtitle. */
+  readonly agentCount: number;
+}
+
+/** The client's thread shell for a thread on an environment; `undefined` when the client holds none. */
+export type FleetShellLookup = (
+  environmentId: EnvironmentId,
+  threadId: string,
+) => CrewSeatThread | undefined;
+
+/** Every agent in a subtree: the node itself, its plain children, and every Crew seat beneath it. */
+export function* fleetNodeAgents(node: FleetNode): Generator<FleetAgent> {
+  yield node.row.agent;
+  for (const crew of node.crews) for (const member of crew.members) yield* fleetNodeAgents(member);
+  for (const child of node.children) yield* fleetNodeAgents(child);
+}
+
+/**
+ * A subtree is settled only when every agent in it, Crew seats included, reads as settled from
+ * upstream's settle mechanic on its thread shell (`settledAt` / `settledOverride`, the facts
+ * `classifyCrewSeat` reads). One running, failed, needs-you, idle, or unknown agent anywhere
+ * beneath the root keeps the whole subtree in Active: a settled Captain whose seats still work is
+ * not done, and an agent the client cannot see is not assumed done. Idle is not settled; nothing
+ * is inferred from silence.
+ */
+export const isSettledFleetNode = (
+  node: FleetNode,
+  classify: (agent: FleetAgent) => CrewSeatState,
+): boolean => {
+  for (const agent of fleetNodeAgents(node)) if (classify(agent) !== "settled") return false;
+  return true;
+};
+
+/**
+ * The Active and Settled sections across every Squadron. An agent whose thread the client shows
+ * archived is dropped before the tree builds, since a retired agent is never a row (fleet-page
+ * AC11) and a stale roster read must not hold one on the page until the next poll. Roots keep the
+ * order `buildFleetTree` gives them, Squadron by Squadron, so nothing is reordered by activity
+ * (AC9); a root and its whole subtree land in one section together, placed by
+ * `isSettledFleetNode`.
+ */
+export function partitionFleet<S extends FleetSquadron & { readonly environmentId: EnvironmentId }>(
+  squadrons: ReadonlyArray<S>,
+  shellFor: FleetShellLookup,
+): FleetSections<S> {
+  const active: Array<FleetSectionRow<S>> = [];
+  const settled: Array<FleetSectionRow<S>> = [];
+  let settledAgentCount = 0;
+  let agentCount = 0;
+  for (const squadron of squadrons) {
+    const classify = (agent: FleetAgent) =>
+      classifyCrewSeat(
+        agent.threadId === null ? undefined : shellFor(squadron.environmentId, agent.threadId),
+      );
+    const agents = squadron.agents.filter((agent) => classify(agent) !== "archived");
+    agentCount += agents.length;
+    for (const node of buildFleetTree({ ...squadron, agents })) {
+      if (isSettledFleetNode(node, classify)) {
+        settled.push({ squadron, node });
+        settledAgentCount += [...fleetNodeAgents(node)].length;
+      } else {
+        active.push({ squadron, node });
+      }
+    }
+  }
+  return { active, settled, settledAgentCount, agentCount };
+}
 
 /** Roster alert badge: measured "needs a human" facts only, so nothing here is guessed. */
 export const countFleetAlerts = (squadrons: ReadonlyArray<FleetSquadron>) =>
