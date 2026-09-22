@@ -52,7 +52,8 @@ export class SquadronProjectNotFoundError extends Schema.TaggedErrorClass<Squadr
 
 /**
  * Only live state keeps a Squadron alive: unarchived agent members and Crews
- * that are still running. History never blocks; delete purges it.
+ * that are still running. History never blocks, and a send-only machine
+ * credential is not running work, so both are purged with the Squadron.
  */
 export const SquadronDeleteBlockerKind = Schema.Literals(["agents", "crews"]);
 export type SquadronDeleteBlockerKind = typeof SquadronDeleteBlockerKind.Type;
@@ -66,6 +67,33 @@ const blockerLabel = (kind: SquadronDeleteBlockerKind, count: number): string =>
       return `${count} running Crew${plural}`;
   }
 };
+
+/**
+ * Every table with a foreign key onto `j5_a2a_squadron`, children before
+ * parents. Three are ON DELETE RESTRICT (`j5_a2a_comm_event`,
+ * `j5_a2a_comm_command_receipt`, `j5_a2a_placement_event`) and must be
+ * deleted explicitly; the rest would cascade but are listed so the purge does
+ * not depend on the foreign_keys pragma. A test compares this list with the
+ * live schema so a new referencing table cannot be missed silently.
+ */
+export const SQUADRON_REFERENCING_TABLES: ReadonlyArray<{
+  readonly table: string;
+  readonly column: string;
+}> = [
+  { table: "j5_agent_crew_instance", column: "squadron_id" },
+  { table: "j5_agent_crew_proposal", column: "squadron_id" },
+  { table: "j5_a2a_human_inbox", column: "squadron_id" },
+  { table: "j5_a2a_human_inbox_data", column: "origin_squadron_id" },
+  { table: "j5_a2a_delivery", column: "squadron_id" },
+  { table: "j5_a2a_exchange", column: "squadron_id" },
+  { table: "j5_a2a_participant_placement", column: "squadron_id" },
+  { table: "j5_a2a_placement_event", column: "squadron_id" },
+  { table: "j5_a2a_machine_participant", column: "squadron_id" },
+  { table: "j5_a2a_squadron_membership", column: "squadron_id" },
+  { table: "j5_a2a_comm_command_receipt", column: "squadron_id" },
+  { table: "j5_a2a_comm_event", column: "squadron_id" },
+  { table: "j5_a2a_squadron_project_reference", column: "squadron_id" },
+];
 
 const joinBlockers = (labels: ReadonlyArray<string>): string =>
   labels.length <= 1
@@ -196,28 +224,15 @@ export const layer: Layer.Layer<
       } satisfies Record<SquadronDeleteBlockerKind, unknown>;
     };
 
-    // Every table keyed by squadron_id, children before parents. The three
-    // history tables (comm_event, comm_command_receipt, placement_event) are
-    // ON DELETE RESTRICT and must go explicitly; the rest would cascade but are
-    // listed so the purge does not depend on the foreign_keys pragma.
+    // Crew members hang off the crew instance, not the Squadron, so they go first.
     const purgeSquadronRows = (squadronId: SquadronId) =>
       Effect.gen(function* () {
         yield* sql`DELETE FROM j5_agent_crew_member WHERE crew_instance_id IN (
           SELECT id FROM j5_agent_crew_instance WHERE squadron_id = ${squadronId}
         )`;
-        yield* sql`DELETE FROM j5_agent_crew_instance WHERE squadron_id = ${squadronId}`;
-        yield* sql`DELETE FROM j5_agent_crew_proposal WHERE squadron_id = ${squadronId}`;
-        yield* sql`DELETE FROM j5_a2a_human_inbox WHERE squadron_id = ${squadronId}`;
-        yield* sql`DELETE FROM j5_a2a_human_inbox_data WHERE origin_squadron_id = ${squadronId}`;
-        yield* sql`DELETE FROM j5_a2a_delivery WHERE squadron_id = ${squadronId}`;
-        yield* sql`DELETE FROM j5_a2a_exchange WHERE squadron_id = ${squadronId}`;
-        yield* sql`DELETE FROM j5_a2a_participant_placement WHERE squadron_id = ${squadronId}`;
-        yield* sql`DELETE FROM j5_a2a_placement_event WHERE squadron_id = ${squadronId}`;
-        yield* sql`DELETE FROM j5_a2a_machine_participant WHERE squadron_id = ${squadronId}`;
-        yield* sql`DELETE FROM j5_a2a_squadron_membership WHERE squadron_id = ${squadronId}`;
-        yield* sql`DELETE FROM j5_a2a_comm_command_receipt WHERE squadron_id = ${squadronId}`;
-        yield* sql`DELETE FROM j5_a2a_comm_event WHERE squadron_id = ${squadronId}`;
-        yield* sql`DELETE FROM j5_a2a_squadron_project_reference WHERE squadron_id = ${squadronId}`;
+        for (const { table, column } of SQUADRON_REFERENCING_TABLES) {
+          yield* sql.unsafe(`DELETE FROM ${table} WHERE ${column} = ?`, [squadronId]);
+        }
       });
 
     // Hard delete in one transaction. Live agents or running Crews refuse

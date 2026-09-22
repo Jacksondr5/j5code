@@ -7,9 +7,13 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as ProjectService from "../../project/ProjectService.ts";
+import { runMigrations } from "../../persistence/Migrations.ts";
+import { ClientReadsService, layer as clientReadsLayer } from "./ClientReadsService.ts";
+import { layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import {
+  SQUADRON_REFERENCING_TABLES,
   SquadronManagementService,
   layer as squadronManagementServiceLayer,
 } from "./SquadronManagementService.ts";
@@ -29,7 +33,9 @@ const management = squadronManagementServiceLayer.pipe(
   Layer.provide(projects),
   Layer.provide(database),
 );
-const testLayer = Layer.mergeAll(database, ledger, management);
+const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+const clientReads = clientReadsLayer.pipe(Layer.provide(inbox), Layer.provide(database));
+const testLayer = Layer.mergeAll(database, ledger, management, clientReads);
 
 it.effect(
   "creates distinct Squadrons over one explicit project without inferring their identity",
@@ -90,11 +96,11 @@ const appendMembership = (
 const joinAgent = (squadronId: SquadronId, index: number) =>
   appendMembership(squadronId, index, "participant.joined");
 
-const countWhere = (table: string, squadronId: SquadronId) =>
+const countWhere = (table: string, squadronId: SquadronId, column = "squadron_id") =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const rows = yield* sql.unsafe<{ readonly count: number }>(
-      `SELECT COUNT(*) AS count FROM ${table} WHERE squadron_id = ?`,
+      `SELECT COUNT(*) AS count FROM ${table} WHERE ${column} = ?`,
       [squadronId],
     );
     return Number(rows[0]?.count ?? 0);
@@ -154,14 +160,35 @@ it.effect("deletes a Squadron whose only member is archived and purges its histo
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* sql`PRAGMA foreign_keys = ON`;
+    yield* runMigrations();
     yield* runJ5A2AMigrations();
     const service = yield* SquadronManagementService;
+    const reads = yield* ClientReadsService;
     const retired = yield* service.create({ name: "Retired", projectId });
     const kept = yield* service.create({ name: "Kept", projectId });
     yield* joinAgent(retired.squadron.id, 1);
     yield* appendMembership(retired.squadron.id, 1, "participant.archived");
     yield* joinAgent(kept.squadron.id, 1);
-    assert.equal(yield* countWhere("j5_a2a_comm_event", retired.squadron.id), 2);
+    const retiredThread = agentFor(retired.squadron.id, 1).threadId;
+    const keptThread = agentFor(kept.squadron.id, 1).threadId;
+    yield* sql`
+      INSERT INTO j5_a2a_placement_event (
+        seq, command_id, request_fingerprint, squadron_id, participant_id, kind, actor,
+        provenance_kind, created_at
+      ) VALUES (
+        1, 'command:placement', 'fingerprint', ${retired.squadron.id},
+        ${agentFor(retired.squadron.id, 1).id}, 'participant.placement_created', 'platform',
+        'unknown', ${timestamp}
+      )
+    `;
+    for (const table of ["j5_a2a_comm_event", "j5_a2a_comm_command_receipt"]) {
+      assert.equal(yield* countWhere(table, retired.squadron.id), 2, table);
+    }
+    assert.equal(yield* countWhere("j5_a2a_placement_event", retired.squadron.id), 1);
+    assert.deepStrictEqual(
+      (yield* reads.threadHomes([retiredThread])).map((entry) => entry.home.kind),
+      ["known"],
+    );
 
     yield* service.delete(retired.squadron.id);
 
@@ -169,16 +196,40 @@ it.effect("deletes a Squadron whose only member is archived and purges its histo
       (yield* service.list()).map(({ squadron }) => squadron.id),
       [kept.squadron.id],
     );
-    for (const table of [
-      "j5_a2a_comm_event",
-      "j5_a2a_comm_command_receipt",
-      "j5_a2a_squadron_membership",
-      "j5_a2a_squadron_project_reference",
-    ]) {
-      assert.equal(yield* countWhere(table, retired.squadron.id), 0, table);
+    for (const { table, column } of SQUADRON_REFERENCING_TABLES) {
+      assert.equal(yield* countWhere(table, retired.squadron.id, column), 0, table);
     }
+    assert.deepStrictEqual(yield* reads.threadHomes([retiredThread, keptThread]), [
+      { threadId: retiredThread, home: { kind: "unknown" } },
+      {
+        threadId: keptThread,
+        home: { kind: "known", squadron: { id: kept.squadron.id, name: "Kept" } },
+      },
+    ]);
     assert.equal(yield* countWhere("j5_a2a_comm_event", kept.squadron.id), 1);
     assert.equal(yield* countWhere("j5_a2a_squadron_membership", kept.squadron.id), 1);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("purge list matches every foreign key onto j5_a2a_squadron in the live schema", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations();
+    const tables = yield* sql<{ readonly name: string }>`
+      SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'j5%' ORDER BY name
+    `;
+    const referencing: Array<{ table: string; column: string }> = [];
+    for (const { name } of tables) {
+      const keys = yield* sql.unsafe<{ readonly table: string; readonly from: string }>(
+        `PRAGMA foreign_key_list(${name})`,
+      );
+      for (const key of keys) {
+        if (key.table === "j5_a2a_squadron") referencing.push({ table: name, column: key.from });
+      }
+    }
+    const byName = (left: { table: string }, right: { table: string }) =>
+      left.table.localeCompare(right.table);
+    assert.deepStrictEqual(referencing.sort(byName), [...SQUADRON_REFERENCING_TABLES].sort(byName));
   }).pipe(Effect.provide(testLayer)),
 );
 
