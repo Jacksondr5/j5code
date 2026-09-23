@@ -101,8 +101,11 @@ export interface CrewLaunchInput {
    * Runs once the Crew is recorded and before any seat spawns, so the caller can bind its own
    * record (the proposal) to the instance; a spawn or brief that fails afterwards then hands the
    * gate back to a proposal that already names its Crew, and a decline can retire what exists.
+   * A failure here aborts the launch with no seat spawned.
    */
-  readonly onRecorded?: (instance: AgentCrewInstance) => Effect.Effect<void>;
+  readonly onRecorded?: (
+    instance: AgentCrewInstance,
+  ) => Effect.Effect<void, CrewLaunchOperationError>;
 }
 
 export interface CrewAddSeatsInput {
@@ -472,7 +475,11 @@ export const layer = Layer.effect(
             placementCommandId: spawnPlacementCommandId(member.stableInput),
             squadronId: captain.squadronId,
             threadId: member.threadId,
-            spawnedByParticipantId: captain.participantId,
+            provenance: {
+              kind: "spawned-by",
+              spawnedByParticipantId: captain.participantId,
+              source: "j5_spawn",
+            },
             createdAt: DateTime.formatIso(child.thread.createdAt),
           })
           .pipe(

@@ -1,3 +1,4 @@
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   CommandId,
   type EventId,
@@ -454,7 +455,7 @@ export function routeProviderEvent(
 /**
  * ERRORS
  */
-export class RunExecutionStartError extends Schema.TaggedErrorClass<RunExecutionStartError>()(
+export class RunExecutionStartError extends Schema.TaggedError<RunExecutionStartError>()(
   "RunExecutionStartError",
   {
     commandId: CommandId,
@@ -467,7 +468,7 @@ export class RunExecutionStartError extends Schema.TaggedErrorClass<RunExecution
   }
 }
 
-export class RunExecutionIngestError extends Schema.TaggedErrorClass<RunExecutionIngestError>()(
+export class RunExecutionIngestError extends Schema.TaggedError<RunExecutionIngestError>()(
   "RunExecutionIngestError",
   {
     runId: Schema.String,
@@ -525,7 +526,7 @@ export class RunExecutionServiceV2 extends Context.Service<
   RunExecutionServiceV2Shape
 >()("t3/orchestration-v2/RunExecutionService/RunExecutionServiceV2") {}
 
-export function shouldDeliverProviderEvent(
+function shouldDeliverProviderEvent(
   event: ProviderAdapterV2Event,
   assistantStreamingEnabled: boolean,
 ): boolean {
@@ -786,7 +787,11 @@ export const layer: Layer.Layer<
       startRootRun: (input) =>
         Effect.gen(function* () {
           const assistantStreamingEnabled = yield* serverSettings.getSettings.pipe(
-            Effect.map((settings) => settings.enableLegacyTokenStreaming),
+            Effect.map(
+              (settings) =>
+                resolveProjectSettings(settings, input.appThread.projectId).settings
+                  .enableLegacyTokenStreaming,
+            ),
             Effect.mapError(
               (cause) =>
                 new RunExecutionStartError({

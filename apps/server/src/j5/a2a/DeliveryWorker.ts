@@ -14,7 +14,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import type * as Scope from "effect/Scope";
 
 import config from "./delivery-config.v1.json" with { type: "json" };
-import { A2ADeliveryTransport, type A2ADeliveryTransportError } from "./DeliveryTransport.ts";
+import { A2ADeliveryTransport, A2ADeliveryTransportError } from "./DeliveryTransport.ts";
 import {
   CommCommandId,
   type CommEvent,
@@ -23,6 +23,7 @@ import {
   ExchangeId,
   isHumanParticipantId,
   LedgerMessageId,
+  MessageSentPayload,
   ParticipantId,
   type DeliveryAlarm,
   type DeliveryMilestone,
@@ -30,6 +31,8 @@ import {
 import { A2ALedgerTransactionWriter, A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 
 export const A2A_DELIVERY_CONFIG_VERSION = config.version;
+
+const decodeSentPayload = Schema.decodeUnknownEffect(Schema.fromJsonString(MessageSentPayload));
 
 interface DeliveryRow {
   readonly squadron_id: string;
@@ -67,12 +70,12 @@ export interface A2ADeliveryHooksShape {
   ) => Effect.Effect<void, A2ADeliveryHookError>;
 }
 
-export class A2ADeliveryHookError extends Schema.TaggedErrorClass<A2ADeliveryHookError>()(
+export class A2ADeliveryHookError extends Schema.TaggedError<A2ADeliveryHookError>()(
   "A2ADeliveryHookError",
   { cause: Schema.Defect() },
 ) {}
 
-export class A2ADeliveryWorkerError extends Schema.TaggedErrorClass<A2ADeliveryWorkerError>()(
+export class A2ADeliveryWorkerError extends Schema.TaggedError<A2ADeliveryWorkerError>()(
   "A2ADeliveryWorkerError",
   { operation: Schema.String, cause: Schema.Defect() },
 ) {}
@@ -221,6 +224,23 @@ const makeLayer = (daemon: boolean) =>
             createdAt: row.created_at,
           });
         } else {
+          // Canonical references live in the immutable sent fact. Reading that
+          // indexed row avoids a second projection and a schema migration.
+          const sent = yield* sql<{ readonly kind: string; readonly payload: string }>`
+            SELECT kind, payload FROM j5_a2a_comm_event WHERE seq = ${row.sent_seq}
+          `;
+          const payload =
+            sent[0]?.kind === "message.sent"
+              ? yield* decodeSentPayload(sent[0].payload).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new A2ADeliveryTransportError({
+                        operation: "read delivery attachments",
+                        cause,
+                      }),
+                  ),
+                )
+              : undefined;
           yield* transport.deliverAgent({
             originSquadronId,
             receiverSquadronId,
@@ -230,6 +250,7 @@ const makeLayer = (daemon: boolean) =>
             exchangeId,
             exchangeRole: row.exchange_role,
             message: row.message_text,
+            ...(payload?.attachments === undefined ? {} : { attachments: payload.attachments }),
             envelopeChannel: row.envelope_channel,
           });
         }

@@ -50,7 +50,7 @@ const notFound = (squadronId: string) =>
     { status: 404 },
   );
 
-const authenticate = (
+export const authenticate = (
   scope: typeof AuthOrchestrationReadScope | typeof AuthOrchestrationOperateScope,
 ) =>
   Effect.gen(function* () {
@@ -69,10 +69,10 @@ const authenticate = (
     }
   });
 
-const requestFailure = (message: string) =>
+export const requestFailure = (message: string) =>
   HttpServerResponse.jsonUnsafe({ error: "invalid_request", message }, { status: 400 });
 
-const operationFailure = (error: unknown) => {
+export const operationFailure = (error: unknown) => {
   const tag =
     typeof error === "object" && error !== null && "_tag" in error
       ? String(error._tag)
@@ -85,7 +85,8 @@ const operationFailure = (error: unknown) => {
       ? 404
       : tag === "A2AHomeConflictError" ||
           tag === "SquadronThreadCreationProjectReferenceError" ||
-          tag === "SquadronDeleteBlockedError"
+          tag === "SquadronDeleteBlockedError" ||
+          tag === "SquadronJoinProjectReferenceError"
         ? 409
         : tag === "SquadronNameRequiredError" ||
             tag === "SquadronThreadCreationMissingSquadronError" ||

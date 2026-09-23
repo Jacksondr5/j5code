@@ -23,7 +23,7 @@ import {
   CodexAppServerClientFactory,
 } from "./CodexAdapterV2.ts";
 
-export class CodexReplayTranscriptDecodeError extends Schema.TaggedErrorClass<CodexReplayTranscriptDecodeError>()(
+export class CodexReplayTranscriptDecodeError extends Schema.TaggedError<CodexReplayTranscriptDecodeError>()(
   "CodexReplayTranscriptDecodeError",
   {
     driver: Schema.optional(Schema.String),
@@ -124,6 +124,7 @@ export function makeReplayServerConfig(
       providerStatusCacheDir,
       worktreesDir,
       attachmentsDir,
+      browserArtifactsDir: path.join(stateDir, "browser-artifacts"),
       environmentThemesDir,
       logsDir,
       serverLogPath: path.join(logsDir, "server.log"),

@@ -1,3 +1,5 @@
+import { A2AHomeRegistrar } from "./HomeRegistrar.ts";
+import { SquadronJoinService } from "./SquadronJoinService.ts";
 import { AuthOrchestrationReadScope, AuthSessionId, ThreadId } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -87,11 +89,9 @@ it("keeps B3 identity requests exact, ordered, and total before aggregate regist
         scopes: [AuthOrchestrationReadScope],
       }),
   });
-  const routes = makeClientReadsHttpRouteLayer(paths).pipe(
-    Layer.provide(clientReads),
-    Layer.provideMerge(auth),
-    Layer.provide(HttpServer.layerServices),
-  );
+  const routes = makeClientReadsHttpRouteLayer(paths)
+    .pipe(Layer.provide(clientReads), Layer.provideMerge(auth))
+    .pipe(Layer.provide(HttpServer.layerServices));
   const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
   try {
     const identities = await handler(
@@ -181,11 +181,9 @@ it("maps A4 resolver failures without treating a bad person selection as a serve
         scopes: [AuthOrchestrationReadScope],
       }),
   });
-  const routes = makeClientReadsHttpRouteLayer(paths).pipe(
-    Layer.provide(clientReads),
-    Layer.provideMerge(auth),
-    Layer.provide(HttpServer.layerServices),
-  );
+  const routes = makeClientReadsHttpRouteLayer(paths)
+    .pipe(Layer.provide(clientReads), Layer.provideMerge(auth))
+    .pipe(Layer.provide(HttpServer.layerServices));
   const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
   const count = (personId?: ParticipantId) =>
     handler(
@@ -246,11 +244,9 @@ it("executes home response validation before serializing a malformed Squadron na
         scopes: [AuthOrchestrationReadScope],
       }),
   });
-  const routes = makeClientReadsHttpRouteLayer(paths).pipe(
-    Layer.provide(clientReads),
-    Layer.provideMerge(auth),
-    Layer.provide(HttpServer.layerServices),
-  );
+  const routes = makeClientReadsHttpRouteLayer(paths)
+    .pipe(Layer.provide(clientReads), Layer.provideMerge(auth))
+    .pipe(Layer.provide(HttpServer.layerServices));
   const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
   try {
     const response = await handler(
@@ -323,52 +319,55 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
       });
     },
   });
-  const routes = j5AuthenticatedRoutesLayer.pipe(
-    Layer.provide(clientReads),
-    Layer.provide(
-      Layer.mock(A2AArchiveFacts)({
-        readForThread: (threadId) =>
-          Effect.succeed({
-            state: "not-an-a2a-participant" as const,
-            threadId,
-            openExchanges: [],
-            placementSubtree: { state: "not-applicable" as const },
-          }),
-      }),
-    ),
-    Layer.provide(
-      Layer.mock(ThreadHomesService)({ threadHomes: () => Effect.succeed({ entries: [] }) }),
-    ),
-    Layer.provide(Layer.mock(A2AHumanInbox)({})),
-    Layer.provide(Layer.mock(A2ADeliveryWorker)({})),
-    Layer.provide(Layer.mock(A2ASendService)({})),
-    Layer.provide(Layer.mock(MachineParticipantService)({})),
-    Layer.provide(Layer.mock(RosterService)({})),
-    Layer.provide(Layer.mock(A2ALedger)({})),
-    Layer.provide(Layer.mock(SquadronProjectReferences)({})),
-    Layer.provide(
-      Layer.mergeAll(
-        Layer.mock(AgentCrewInstanceService)({}),
-        Layer.mock(AgentCrewProposalService)({}),
-        Layer.mock(CrewProposalService)({}),
-        Layer.mock(CrewStopService)({}),
-        Layer.mock(ArchiveCrewService)({}),
-        Layer.mock(ParticipantPlacementService)({}),
+  const routes = j5AuthenticatedRoutesLayer
+    .pipe(
+      Layer.provide(clientReads),
+      Layer.provide(
+        Layer.mock(A2AArchiveFacts)({
+          readForThread: (threadId) =>
+            Effect.succeed({
+              state: "not-an-a2a-participant" as const,
+              threadId,
+              openExchanges: [],
+              placementSubtree: { state: "not-applicable" as const },
+            }),
+        }),
       ),
-    ),
-    Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
-    Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
-    Layer.provide(Layer.mock(VcsProcess.VcsProcess)({})),
-    Layer.provide(
-      ServerConfig.layerTest(process.cwd(), { prefix: "j5-client-reads-http-" }).pipe(
-        Layer.provide(NodeServices.layer),
+      Layer.provide(
+        Layer.mock(ThreadHomesService)({ threadHomes: () => Effect.succeed({ entries: [] }) }),
       ),
-    ),
-    Layer.provide(NodeSqliteClient.layerMemory()),
-    Layer.provide(agentHandoffRefreshesLayer),
-    Layer.provideMerge(auth),
-    Layer.provide(HttpServer.layerServices),
-  );
+      Layer.provide(Layer.mock(A2AHumanInbox)({})),
+      Layer.provide(Layer.mock(A2ADeliveryWorker)({})),
+      Layer.provide(Layer.mock(A2ASendService)({})),
+      Layer.provide(Layer.mock(MachineParticipantService)({})),
+      Layer.provide(Layer.mock(RosterService)({})),
+      Layer.provide(Layer.mock(A2ALedger)({})),
+      Layer.provide(Layer.mock(A2AHomeRegistrar)({})),
+      Layer.provide(Layer.mock(SquadronJoinService)({})),
+      Layer.provide(Layer.mock(SquadronProjectReferences)({})),
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(AgentCrewInstanceService)({}),
+          Layer.mock(AgentCrewProposalService)({}),
+          Layer.mock(CrewProposalService)({}),
+          Layer.mock(CrewStopService)({}),
+          Layer.mock(ArchiveCrewService)({}),
+          Layer.mock(ParticipantPlacementService)({}),
+        ),
+      ),
+      Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+      Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
+      Layer.provide(Layer.mock(VcsProcess.VcsProcess)({})),
+      Layer.provide(
+        ServerConfig.layerTest(process.cwd(), { prefix: "j5-client-reads-http-" }).pipe(
+          Layer.provide(NodeServices.layer),
+        ),
+      ),
+      Layer.provide(NodeSqliteClient.layerMemory()),
+      Layer.provide(agentHandoffRefreshesLayer),
+      Layer.provideMerge(auth),
+    )
+    .pipe(Layer.provide(HttpServer.layerServices));
   const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
   const request = (path: string, body: unknown) =>
     handler(

@@ -1,3 +1,7 @@
+import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
+import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
+import { useRightPanelStore } from "../rightPanelStore";
+import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
@@ -5,7 +9,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type { ContextMenuItem, EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { ChevronDownIcon, GitBranchIcon, RefreshCwIcon, SearchIcon } from "lucide-react";
+import { ChevronDownIcon, GitBranchIcon, SearchIcon } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -54,9 +58,10 @@ import {
   shouldIncludeBranchPickerItem,
 } from "./BranchToolbar.logic";
 import {
-  ChangeRequestStatusIcon,
+  ThreadPullRequestBadgeControl,
   prStatusIndicator,
-  resolveThreadPr,
+  resolveThreadPullRequestBadge,
+  useLinkedThreadPullRequest,
 } from "./ThreadStatusIndicators";
 import { Button } from "./ui/button";
 import { Switch } from "./ui/switch";
@@ -163,7 +168,7 @@ export function BranchToolbarBranchSelector({
   // Thread branch mutation (colocated — only this component calls it)
   // ---------------------------------------------------------------------------
   const setThreadBranch = useCallback(
-    (branch: string | null, worktreePath: string | null) => {
+    (branch: string | null, worktreePath: string | null, automatic = false) => {
       if (!activeThreadId || !activeProject) return;
       if (serverSession && worktreePath !== activeWorktreePath) {
         void stopThreadSession({
@@ -194,6 +199,7 @@ export function BranchToolbarBranchSelector({
         branch,
         worktreePath,
         envMode: nextDraftEnvMode,
+        environmentSelection: automatic ? (draftThread?.environmentSelection ?? "auto") : "manual",
         projectRef: scopeProjectRef(environmentId, activeProject.id),
       });
     },
@@ -209,6 +215,7 @@ export function BranchToolbarBranchSelector({
       threadRef,
       environmentId,
       effectiveEnvMode,
+      draftThread?.environmentSelection,
       stopThreadSession,
       updateThreadMetadata,
     ],
@@ -515,7 +522,7 @@ export function BranchToolbarBranchSelector({
     ) {
       return;
     }
-    setThreadBranch(worktreeBaseBranchCandidate, null);
+    setThreadBranch(worktreeBaseBranchCandidate, null, true);
   }, [
     activeThreadBranch,
     activeWorktreePath,
@@ -622,20 +629,36 @@ export function BranchToolbarBranchSelector({
     startFromOrigin,
   });
 
-  // PR pill shown next to the branch selector when the active branch has one.
-  const branchPr = resolveThreadPr({
-    threadBranch: resolveBranchToolbarPrBranch({
-      activeThreadBranch,
-      resolvedActiveBranch,
-    }),
-    gitStatus: branchStatusQuery.data ?? null,
+  // Branch status is the fallback when this thread has no linked pull requests.
+  const branchPrBranch = resolveBranchToolbarPrBranch({
+    activeThreadBranch,
+    resolvedActiveBranch,
   });
-  const branchPrStatus = prStatusIndicator(branchPr, branchStatusQuery.data?.sourceControlProvider);
-  // Action-oriented tooltip (the pill opens the PR), distinct from the sidebar's
-  // state-description tooltip.
-  const branchPrTooltip = branchPr
-    ? `Open ${sourceControlPresentation.terminology.singular} #${branchPr.number} (${branchPr.state})`
-    : "";
+  const branchPr =
+    branchPrBranch !== null && branchStatusQuery.data?.refName === branchPrBranch
+      ? (branchStatusQuery.data.pr ?? null)
+      : null;
+  const supportsMultiplePullRequests = useSupportsMultiplePullRequests(environmentId);
+  const linkedStatus = useLinkedThreadPullRequest(
+    environmentId,
+    serverThread?.linkedPullRequest,
+    true,
+    serverThread?.pullRequests,
+    serverThread?.branchPullRequest,
+  );
+  const currentLinkedPr = supportsMultiplePullRequests
+    ? resolveThreadCurrentPullRequestLink(serverThread?.pullRequests ?? [])
+    : null;
+  const prBadge = supportsMultiplePullRequests
+    ? resolveThreadPullRequestBadge(serverThread?.pullRequests)
+    : null;
+  const displayedPr = linkedStatus?.pr ?? (currentLinkedPr === null ? branchPr : null);
+  const displayedPrStatus = prStatusIndicator(
+    displayedPr,
+    linkedStatus?.sourceControlProvider ?? branchStatusQuery.data?.sourceControlProvider,
+  );
+  const prNumber = currentLinkedPr?.number ?? displayedPr?.number;
+  const prUrl = currentLinkedPr?.url ?? displayedPr?.url;
   const openPrLink = useOpenPrLink(threadRef);
   const panelPrLabel = branchPr
     ? `#${branchPr.number}${branchPr.title.trim() ? `: ${branchPr.title}` : ""}`
@@ -745,40 +768,18 @@ export function BranchToolbarBranchSelector({
           className,
         )}
       >
-        {displayMode !== "panel" && branchPr && branchPrStatus ? (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label={branchPrTooltip}
-                  onClick={(event) => openPrLink(event, branchPrStatus.url)}
-                  className={cn(
-                    "inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[11px] font-medium tabular-nums transition-colors hover:bg-muted/60",
-                    branchPrStatus.colorClass,
-                  )}
-                />
-              }
-            >
-              <ChangeRequestStatusIcon
-                state={branchPr.state}
-                isDraft={branchPr.isDraft}
-                className="size-3"
-              />
-              <span
-                data-composer-label
-                className="min-w-0 max-w-12 overflow-hidden group-data-[compact]/composer-context:max-w-0"
-              >
-                <span
-                  data-composer-label-motion
-                  className="block w-full min-w-0 max-w-12 origin-left truncate transition-[opacity,transform] duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:[transform:translateX(-0.25rem)_scaleX(0.95)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transform-none motion-reduce:transition-opacity"
-                >
-                  #{branchPr.number}
-                </span>
-              </span>
-            </TooltipTrigger>
-            <TooltipPopup side="top">{branchPrTooltip}</TooltipPopup>
-          </Tooltip>
+        {displayMode !== "panel" ? (
+          <ThreadPullRequestBadgeControl
+            variant="ghost"
+            badge={prBadge}
+            number={prNumber}
+            url={prUrl}
+            status={displayedPrStatus}
+            onOpenStack={() => useRightPanelStore.getState().open(threadRef, "pull-requests")}
+            onOpenPullRequest={(event) => {
+              if (prUrl) openPrLink(event, prUrl);
+            }}
+          />
         ) : null}
         <span
           className="flex min-w-0"
@@ -787,7 +788,7 @@ export function BranchToolbarBranchSelector({
           <ComboboxTrigger
             render={<Button variant="ghost" size={displayMode === "panel" ? "sm" : "xs"} />}
             className={cn(
-              "min-w-0 max-w-full font-normal text-muted-foreground/70 text-xs! hover:text-foreground/80",
+              "min-w-0 max-w-full font-normal text-muted-foreground/70 text-xs! hover:text-foreground/80 active:scale-100",
               displayMode === "panel" && THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,
             )}
             disabled={isInitialBranchesLoadPending || isBranchActionPending}
@@ -807,7 +808,12 @@ export function BranchToolbarBranchSelector({
                   : "transition-[max-width,opacity] duration-300 ease-out group-data-[compact]/composer-context:max-w-0 group-data-[compact]/composer-context:opacity-0",
               )}
             >
-              {triggerLabel}
+              <span
+                data-composer-label-motion
+                className="block w-full min-w-0 max-w-[240px] truncate transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
+              >
+                {triggerLabel}
+              </span>
             </span>
             {displayMode === "panel" ? (
               <span data-slot="select-icon">
@@ -818,15 +824,15 @@ export function BranchToolbarBranchSelector({
             )}
           </ComboboxTrigger>
         </span>
-        {displayMode === "panel" && branchPr && branchPrStatus ? (
+        {displayMode === "panel" && branchPr && displayedPrStatus ? (
           <ThreadDetailsPrRow
             environmentId={environmentId}
             pr={branchPr}
-            status={branchPrStatus}
+            status={displayedPrStatus}
             project={activeProject}
             label={panelPrLabel}
-            openAriaLabel={branchPrTooltip}
-            onOpen={(event) => openPrLink(event, branchPrStatus.url)}
+            openAriaLabel={prUrl ?? "Open pull request"}
+            onOpen={(event) => openPrLink(event, displayedPrStatus.url)}
             onActed={() => branchStatusQuery.refresh()}
           />
         ) : null}
@@ -905,7 +911,7 @@ export function BranchToolbarBranchSelector({
                     className="flex cursor-pointer items-center justify-between gap-3 border-t border-border/60 px-3 py-2 text-xs"
                   >
                     <span className="flex min-w-0 items-center gap-1.5 font-medium text-muted-foreground">
-                      <RefreshCwIcon aria-hidden="true" className="size-3 shrink-0 opacity-70" />
+                      <RefreshIcon aria-hidden="true" className="size-3 shrink-0 opacity-70" />
                       <span className="truncate">Start from origin</span>
                     </span>
                     <Switch

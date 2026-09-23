@@ -1,5 +1,6 @@
 import {
   MessageId,
+  RuntimeRequestId,
   NodeId,
   PlanId,
   ProviderInstanceId,
@@ -7,12 +8,14 @@ import {
   ProviderThreadId,
   RunId,
   RunAttemptId,
+  ScheduledTaskId,
   ThreadId,
   TurnItemId,
   type OrchestrationV2RunAttempt,
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
+import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -118,6 +121,62 @@ function assistantMessage(updatedAt = "2026-06-20T00:00:03.000Z") {
 }
 
 describe("buildThreadFeed", () => {
+  it("omits cached tool output and patch bodies from expanded and copied activity", () => {
+    const rawOutput = "RAW_TOOL_OUTPUT";
+    const items: OrchestrationV2TurnItem[] = [
+      { ...command(), output: rawOutput },
+      {
+        ...base("dynamic-output", "2026-06-20T00:00:03.000Z", 2),
+        type: "dynamic_tool",
+        toolName: "example",
+        input: { query: "keep input" },
+        output: { text: rawOutput },
+      },
+      {
+        ...base("file-output", "2026-06-20T00:00:04.000Z", 3),
+        type: "file_change",
+        fileName: "src/example.ts",
+        diffStr: rawOutput,
+        oldStr: rawOutput,
+        newStr: rawOutput,
+      },
+    ];
+    const activities = buildThreadFeed(items.map((item, index) => projected(item, index))).flatMap(
+      (entry) => (entry.type === "activity-group" ? entry.activities : []),
+    );
+    expect(activities).toHaveLength(3);
+    for (const activity of activities) {
+      expect(activity.workEntry.detail).toBeUndefined();
+      expect(activity.getFullDetail()).not.toContain(rawOutput);
+      expect(activity.getCopyText()).not.toContain(rawOutput);
+    }
+    expect(activities[0]?.detail).toBe("vp check");
+    expect(activities[1]?.getFullDetail()).toContain("keep input");
+    expect(activities[2]?.detail).toBe("src/example.ts");
+    expect(items[0]).toMatchObject({ output: rawOutput });
+  });
+
+  it("recognizes automation attribution after projecting a user message", () => {
+    const feed = buildThreadFeed([
+      projected(
+        {
+          ...userMessage(),
+          createdBy: "agent",
+          creationSource: "server",
+          scheduledTaskId: ScheduledTaskId.make("daily-audit"),
+        },
+        0,
+      ),
+    ]);
+    const messageEntry = feed.find((entry) => entry.type === "message");
+
+    expect(messageEntry).toBeDefined();
+    expect(resolveUserMessagePresentation(messageEntry!.message)).toMatchObject({
+      text: "Run checks",
+      isAutomation: true,
+    });
+  });
+
   it("adds local feedback messages to an otherwise server-authored feed", () => {
     const feed = buildThreadFeed([], {
       localMessages: [
@@ -798,11 +857,16 @@ describe("buildThreadFeed", () => {
     });
   });
 
-  it("does not append synthetic timeline work without a projected item", () => {
+  it("uses a stable Thinking row while work has started without a projected item", () => {
     const startedAt = "2026-04-01T00:00:01.000Z";
     const presented = deriveThreadFeedPresentation([], null, new Set(), new Set(), startedAt);
 
-    expect(presented).toEqual([]);
+    expect(presented).toEqual([
+      { type: "thinking", id: "live-activity-row", createdAt: startedAt, runId: null },
+    ]);
+    expect(deriveThreadFeedPresentation([], null, new Set(), new Set(), startedAt)[0]).toBe(
+      presented[0],
+    );
   });
 
   it("keeps expanded work in one group with stable row identities", () => {
@@ -884,6 +948,19 @@ describe("buildThreadFeed", () => {
         { id: "activity-3", groupedToolDetail: true, live: false },
       ],
     });
+  });
+
+  it("retains Claude Read image previews without tool output", () => {
+    const item = {
+      ...base("image-read", "2026-06-20T00:00:04.000Z", 3),
+      type: "dynamic_tool" as const,
+      toolName: "Read",
+      input: { file_path: "/workspace/reference.png" },
+      viewedImagePath: "/workspace/reference.png",
+    } satisfies OrchestrationV2TurnItem;
+    const feed = buildThreadFeed([projected(item, 0)]);
+    const activity = feed[0]?.type === "activity-group" ? feed[0].activities[0] : null;
+    expect(activity?.workEntry.viewedImagePath).toBe("/workspace/reference.png");
   });
 
   it("pretty prints T3 MCP dynamic tool activities and attaches the product logo", () => {
@@ -988,6 +1065,49 @@ describe("retained v2 feed presentation", () => {
     expect(afterPresentation[0]).toBe(beforePresentation[0]);
     expect(afterPresentation[1]).toBe(beforePresentation[1]);
   });
+
+  it.each(["running", "completed", "interrupted"] as const)(
+    "uses the compaction row as the live activity only while %s",
+    (status) => {
+      const compact = projected(
+        {
+          ...base("compacted", "2026-06-20T00:00:02.000Z", 1),
+          type: "compaction",
+          status,
+          driver: null,
+          beforeTokenCount: 899_000,
+          ...(status === "completed" ? { afterTokenCount: 19_000 } : {}),
+        },
+        1,
+      );
+      const latestRun = {
+        runId,
+        status: "running" as const,
+        startedAt: "2026-06-20T00:00:01.000Z",
+        completedAt: null,
+      };
+      const rows = deriveThreadFeedPresentation(
+        buildThreadFeed([projected(userMessage(), 0), compact]),
+        latestRun,
+        new Set(),
+        new Set(),
+        latestRun.startedAt,
+      );
+      expect(rows.some((row) => row.type === "thinking")).toBe(status !== "running");
+      expect(rows.find((row) => row.type === "activity-group")).toMatchObject({
+        activities: [
+          {
+            summary:
+              status === "running"
+                ? "Compacting context"
+                : status === "completed"
+                  ? "Context compacted 899K → 19K tokens"
+                  : "Context compacted",
+          },
+        ],
+      });
+    },
+  );
 
   it("keeps a standalone compaction visible and folds it with other completed work", () => {
     const compact = projected(
@@ -1288,4 +1408,111 @@ describe("provider question values", () => {
       }),
     ).toEqual({ runtime: "second" });
   });
+});
+
+it("accepts ready attachment-only answers while preserving selected options", () => {
+  const question = {
+    id: "q",
+    header: "Spec",
+    question: "Provide a specification",
+    options: [{ label: "Yes", description: "Approve" }],
+    multiSelect: false,
+  };
+  expect(buildPendingUserInputAnswers([question], { q: { attachmentCount: 1 } })).toEqual({
+    q: "",
+  });
+  expect(
+    buildPendingUserInputAnswers([question], {
+      q: { attachmentCount: 1, selectedOptionValues: ["Yes"] },
+    }),
+  ).toEqual({ q: "Yes" });
+  expect(
+    buildPendingUserInputAnswers([question], {
+      q: { attachmentCount: 1, attachmentsBlocked: true },
+    }),
+  ).toBeNull();
+  expect(
+    buildPendingUserInputAnswers([{ ...question, allowCustomAnswer: false }], {
+      q: { attachmentCount: 1 },
+    }),
+  ).toBeNull();
+});
+
+it("makes attachment-only question answers expandable in the mobile feed", () => {
+  const answer = {
+    requestId: RuntimeRequestId.make("question-request"),
+    answers: { q: "" },
+    questionTextById: { q: "Attach the specification" },
+    attachmentsByQuestionId: {
+      q: [
+        {
+          type: "file" as const,
+          id: "question-file",
+          name: "spec.txt",
+          mimeType: "text/plain",
+          sizeBytes: 4,
+        },
+      ],
+    },
+  };
+  const [group] = buildThreadFeed([
+    projected(
+      {
+        ...base("answer-history", "2026-09-08T00:00:00.000Z", 0),
+        type: "user_input_request",
+        requestId: answer.requestId,
+        questions: [],
+        questionAnswer: answer,
+      },
+      0,
+    ),
+  ]);
+  expect(group?.type).toBe("activity-group");
+  if (group?.type !== "activity-group") return;
+  expect(group.activities[0]).toMatchObject({
+    canExpand: true,
+    workEntry: { questionAnswer: answer },
+  });
+  expect(group.activities[0]?.getFullDetail()).toContain("spec.txt");
+});
+
+it("renders automatic completion as a neutral activity while retaining its details", () => {
+  const item = {
+    ...base("notification", "2026-06-20T00:00:01.000Z", 0),
+    type: "notification" as const,
+    source: { kind: "monitor" as const },
+    outcome: "updated" as const,
+    summary: "Monitor reported an update",
+    detail: "Build checks changed",
+  };
+  const feed = buildThreadFeed([
+    projected(item, 0),
+    projected(command(), 1),
+    projected(assistantMessage(), 2),
+  ]);
+  expect(feed[0]?.type).toBe("activity-group");
+  if (feed[0]?.type !== "activity-group") throw new Error("Expected notification activity");
+  const activity = feed[0].activities[0]!;
+  expect(activity.summary).toBe("Monitor reported an update");
+  expect(activity.detail).toBeNull();
+  expect(activity.status).toBeNull();
+  expect(activity.getFullDetail()).toContain(item.detail);
+  const presented = deriveThreadFeedPresentation(
+    feed,
+    {
+      runId,
+      status: "completed",
+      startedAt: "2026-06-20T00:00:01.000Z",
+      completedAt: "2026-06-20T00:00:03.000Z",
+    },
+    new Set(),
+  );
+  expect(
+    presented.some(
+      (entry) =>
+        entry.type === "activity-group" &&
+        entry.activities.some((activity) => activity.summary === "Monitor reported an update"),
+    ),
+  ).toBe(true);
+  expect(buildThreadFeed([projected(userMessage(), 0)])[0]?.type).toBe("message");
 });

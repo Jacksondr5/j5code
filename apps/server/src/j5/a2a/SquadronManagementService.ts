@@ -32,7 +32,7 @@ export interface RenameSquadronInput {
   readonly name: string;
 }
 
-export class SquadronNameRequiredError extends Schema.TaggedErrorClass<SquadronNameRequiredError>()(
+export class SquadronNameRequiredError extends Schema.TaggedError<SquadronNameRequiredError>()(
   "SquadronNameRequiredError",
   {},
 ) {
@@ -41,7 +41,7 @@ export class SquadronNameRequiredError extends Schema.TaggedErrorClass<SquadronN
   }
 }
 
-export class SquadronProjectNotFoundError extends Schema.TaggedErrorClass<SquadronProjectNotFoundError>()(
+export class SquadronProjectNotFoundError extends Schema.TaggedError<SquadronProjectNotFoundError>()(
   "SquadronProjectNotFoundError",
   { projectId: ProjectId },
 ) {
@@ -100,7 +100,7 @@ const joinBlockers = (labels: ReadonlyArray<string>): string =>
     ? (labels[0] ?? "")
     : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
 
-export class SquadronDeleteBlockedError extends Schema.TaggedErrorClass<SquadronDeleteBlockedError>()(
+export class SquadronDeleteBlockedError extends Schema.TaggedError<SquadronDeleteBlockedError>()(
   "SquadronDeleteBlockedError",
   {
     squadronId: SquadronId,

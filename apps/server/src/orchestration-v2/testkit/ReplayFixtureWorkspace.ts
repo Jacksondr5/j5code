@@ -6,7 +6,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-class ReplayFixtureGitCommandError extends Schema.TaggedErrorClass<ReplayFixtureGitCommandError>()(
+class ReplayFixtureGitCommandError extends Schema.TaggedError<ReplayFixtureGitCommandError>()(
   "ReplayFixtureGitCommandError",
   {
     command: Schema.String,
@@ -38,7 +38,7 @@ function runGit(
   });
 }
 
-export const makeCheckpointWorkspaceEffect = Effect.fn("makeCheckpointWorkspace")(function* (
+const makeCheckpointWorkspaceEffect = Effect.fn("makeCheckpointWorkspace")(function* (
   fixtureName: string,
 ) {
   const fs = yield* FileSystem.FileSystem;
@@ -55,7 +55,7 @@ export const makeCheckpointWorkspaceEffect = Effect.fn("makeCheckpointWorkspace"
   return cwd;
 });
 
-export const removeCheckpointWorkspaceEffect = Effect.fn("removeCheckpointWorkspace")(function* (
+const removeCheckpointWorkspaceEffect = Effect.fn("removeCheckpointWorkspace")(function* (
   cwd: string,
 ) {
   const fs = yield* FileSystem.FileSystem;

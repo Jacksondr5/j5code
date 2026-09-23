@@ -33,6 +33,7 @@ export interface ThreadPendingUserInput {
   readonly questions: ReadonlyArray<ThreadUserInputQuestion>;
   readonly responseCapability: OrchestrationV2RuntimeRequest["responseCapability"]["type"];
   readonly responseMode?: "message";
+  readonly dismissible: boolean;
 }
 
 export interface PendingThreadRequests {
@@ -42,7 +43,7 @@ export interface PendingThreadRequests {
 
 /** Joins pending request entities to the request items that carry display data. */
 export function derivePendingThreadRequests(
-  projection: OrchestrationV2ThreadProjection,
+  projection: Pick<OrchestrationV2ThreadProjection, "runtimeRequests" | "turnItems">,
 ): PendingThreadRequests {
   const approvals: ThreadPendingApproval[] = [];
   const userInputs: ThreadPendingUserInput[] = [];
@@ -64,6 +65,7 @@ export function derivePendingThreadRequests(
           multiSelect: question.multiSelect ?? false,
         })),
         responseCapability,
+        dismissible: item.responseMode === "message" || responseCapability === "message",
         ...(item.responseMode === "message" || responseCapability === "message"
           ? { responseMode: "message" as const }
           : {}),

@@ -1,3 +1,6 @@
+import { ProjectionStoreV2 } from "../../../orchestration-v2/ProjectionStore.ts";
+import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { DeviceService } from "../../../device/DeviceService.ts";
 import { expect, it } from "@effect/vitest";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -26,6 +29,10 @@ import * as McpSessionRegistry from "../../McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 
 const StubServicesLive = Layer.mergeAll(
+  Layer.mock(OrchestratorV2)({}),
+  Layer.mock(ProjectionStoreV2)({}),
+  Layer.mock(ProjectionSnapshotQuery)({}),
+  Layer.mock(DeviceService)({}),
   Layer.mock(ThreadManagementService)({}),
   Layer.mock(OrchestratorV2)({
     getShellSnapshot: () =>
@@ -69,6 +76,10 @@ const ToolsListPayload = Schema.fromJsonString(
 );
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+
+const decodeRpcFailure = Schema.decodeUnknownEffect(
+  Schema.Struct({ error: Schema.Struct({ code: Schema.Number, message: Schema.String }) }),
+);
 
 const decodeToolsListPayload = Schema.decodeUnknownEffect(ToolsListPayload);
 const decodeToolCallPayload = Schema.decodeUnknownEffect(
@@ -185,6 +196,15 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(toolNames).toContain("task_status");
       expect(toolNames).toContain("task_cancel");
       for (const excluded of [
+        "t3_thread_launch",
+        "t3_project_create",
+        "t3_project_update",
+        "t3_project_delete",
+        "t3_environment_preferences_update",
+        "t3_queue_edit",
+        "t3_queue_cancel",
+        "t3_queue_reorder",
+        "t3_queue_promote_to_steer",
         "create_threads",
         "t3_thread_start",
         "t3_thread_send",
@@ -197,17 +217,22 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(toolNames).toContain("send_message");
       expect(toolNames).toContain("list_participants");
       expect(toolNames.toSorted()).toEqual([
-        "archive_agent",
         "archive_crew",
         "clear_own_ask",
         "delegate_task",
         "delete_scheduled_task",
+        "device_close",
+        "device_list",
+        "device_open",
+        "device_screenshot",
         "join_squadron",
+        "link_pull_request",
         "list_artifacts",
         "list_participants",
         "list_personas",
         "list_scheduled_tasks",
         "list_squadrons",
+        "list_thread_pull_requests",
         "orchestrator_capabilities",
         "preview_click",
         "preview_evaluate",
@@ -226,17 +251,42 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "propose_crew",
         "read_artifact",
         "request_crew_member",
+        "run_scheduled_task_now",
         "schedule_task",
         "send_message",
         "spawn_agent",
         "stop_agent",
         "stop_crew",
+        "t3_attachment_discard",
+        "t3_attachment_prepare_upload",
+        "t3_environment_read",
+        "t3_pending_request_list",
+        "t3_pending_request_read",
+        "t3_pending_request_respond",
+        "t3_preview_close",
+        "t3_preview_list",
+        "t3_project_clone",
+        "t3_project_list",
+        "t3_project_read",
+        "t3_queue_list",
+        "t3_queue_read",
+        "t3_thread_configuration",
+        "t3_thread_configure",
+        "t3_thread_fork",
         "t3_thread_list",
+        "t3_thread_merge_back",
+        "t3_thread_organize",
         "t3_thread_read",
+        "t3_thread_search",
+        "t3_thread_send_attachments",
+        "t3_thread_transfers",
+        "t3_thread_update",
         "t3_worktree_handoff",
+        "t3_worktree_list",
         "t3_worktree_status",
         "task_cancel",
         "task_status",
+        "unlink_pull_request",
         "update_scheduled_task",
         "write_artifact",
       ]);
@@ -290,6 +340,39 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         const text = yield* response.text;
         return yield* decodeToolCallPayload(text.match(/\{.*\}/s)![0]);
       });
+      for (const [index, name] of [
+        "t3_thread_launch",
+        "t3_project_create",
+        "t3_project_update",
+        "t3_project_delete",
+        "t3_environment_preferences_update",
+        "t3_queue_edit",
+        "t3_queue_cancel",
+        "t3_queue_reorder",
+        "t3_queue_promote_to_steer",
+      ].entries()) {
+        const response = yield* httpClient.post("/mcp", {
+          headers: {
+            accept: "application/json, text/event-stream",
+            authorization: restricted!.config.authorizationHeader,
+            "mcp-protocol-version": "2025-06-18",
+            ...(restrictedSessionId ? { "mcp-session-id": restrictedSessionId } : {}),
+          },
+          body: HttpBody.text(
+            encodeJson({
+              jsonrpc: "2.0",
+              id: 100 + index,
+              method: "tools/call",
+              params: { name, arguments: {} },
+            }),
+            "application/json",
+          ),
+        });
+        const responseText = yield* response.text;
+        const refused = yield* decodeRpcFailure(decodeJson(responseText.match(/\{.*\}/s)![0]));
+        expect(refused.error.code).toBe(-32602);
+        expect(refused.error.message).toContain(name);
+      }
       const deniedPreview = yield* callRestricted(3, "preview_status");
       expect(deniedPreview.result.isError).toBe(true);
       expect(deniedPreview.result.content[0]?.text).toContain("preview");

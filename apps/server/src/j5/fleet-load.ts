@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { J5SquadronCreationLayer } from "./a2a/runtimeLayer.ts";
 // @effect-diagnostics nodeBuiltinImport:off globalTimersInEffect:off globalDateInEffect:off globalConsole:off - Standalone host-side benchmark owns an isolated process and temporary SQLite state.
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -26,7 +27,7 @@ import { ProjectService } from "../project/ProjectService.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../mcp/McpSessionRegistry.testkit.ts";
 import {
   OrchestrationV2EventSinkLayerLive,
-  OrchestrationV2LayerLive,
+  OrchestrationV2LayerLive as UpstreamOrchestrationV2LayerLive,
 } from "../orchestration-v2/runtimeLayer.ts";
 import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import { OrchestratorV2, type OrchestratorV2Shape } from "../orchestration-v2/Orchestrator.ts";
@@ -37,6 +38,10 @@ import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+
+const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
+  Layer.provideMerge(J5SquadronCreationLayer),
+);
 
 const FLEET_SIZE = 30;
 const BASELINE_SAMPLES = 30;

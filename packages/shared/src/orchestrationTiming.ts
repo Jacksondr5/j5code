@@ -1,5 +1,7 @@
 type LatestRunTiming = {
   readonly runId: string | null;
+  /** Set when the turn is created; `startedAt` waits for the provider. */
+  readonly requestedAt?: string | null;
   readonly startedAt: string | null;
   readonly completedAt: string | null;
 };
@@ -28,34 +30,37 @@ export function formatDuration(durationMs: number): string {
   return parts.join(" ");
 }
 
-export function formatElapsed(startIso: string, endIso: string | undefined): string | null {
-  if (!endIso) return null;
-  const startedAt = Date.parse(startIso);
-  const endedAt = Date.parse(endIso);
-  if (Number.isNaN(startedAt) || Number.isNaN(endedAt) || endedAt < startedAt) {
-    return null;
-  }
-  return formatDuration(endedAt - startedAt);
-}
-
-export function isLatestRunSettled(
+function isLatestRunSettled(
   latestRun: LatestRunTiming | null,
   runtime: RuntimeActivityState | null,
 ): boolean {
-  if (!latestRun?.startedAt) return false;
+  if (!latestRun) return false;
   if (!latestRun.completedAt) return false;
   if (!runtime) return true;
   if (runtime.orchestrationStatus === "running") return false;
   return true;
 }
 
+/**
+ * When the working indicator should be counting, and from when.
+ *
+ * `requestedAt` is the floor for an unsettled turn. The projector only stamps
+ * `startedAt` in the same update that moves the session to "running", so while
+ * the provider spins up (session "starting") a requested turn has no
+ * `startedAt` at all — and returning null there blinks the indicator out for
+ * the whole spin-up. A settled turn still falls through to `sendStartedAt`, so
+ * this cannot leave the indicator counting after the work is done.
+ */
 export function deriveActiveWorkStartedAt(
   latestRun: LatestRunTiming | null,
   runtime: RuntimeActivityState | null,
   sendStartedAt: string | null,
 ): string | null {
+  if (runtime?.activeRunId && runtime.activeRunId !== latestRun?.runId) {
+    return sendStartedAt;
+  }
   if (!isLatestRunSettled(latestRun, runtime)) {
-    return latestRun?.startedAt ?? sendStartedAt;
+    return latestRun?.startedAt ?? latestRun?.requestedAt ?? sendStartedAt;
   }
   return sendStartedAt;
 }

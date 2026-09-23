@@ -61,7 +61,7 @@ interface JsonSchemaFile {
   readonly qualifiedName: string;
 }
 
-class GeneratorError extends Schema.TaggedErrorClass<GeneratorError>()("GeneratorError", {
+class GeneratorError extends Schema.TaggedError<GeneratorError>()("GeneratorError", {
   detail: Schema.String,
   cause: Schema.optional(Schema.Defect()),
 }) {
@@ -144,6 +144,63 @@ const ManualSchemas: Record<string, Schema.Json> = {
     required: ["authMethod", "authToken", "requiresOpenaiAuth"],
   },
 };
+
+// Pinned protocol JSON omits later CodexErrorInfo variants. Keep historical
+// thread payloads decodable; do not fold unknown values into "other".
+const CodexErrorInfoCompatibilityValues = [
+  "rateLimitExceeded",
+  "misalignmentPolicyViolation",
+] as const;
+
+const CodexErrorInfoCompatibilityExports = new Set([
+  "V2ThreadReadResponse",
+  "V2ThreadResumeResponse",
+  "V2ThreadRollbackResponse",
+  "V2ThreadForkResponse",
+  "V2TurnCompletedNotification",
+]);
+
+function applyCodex0151DefinitionCompatibility(
+  exportName: string,
+  definitionName: string,
+  definitionSchema: Schema.Json,
+): Schema.Json {
+  if (
+    !CodexErrorInfoCompatibilityExports.has(exportName) ||
+    definitionName !== "CodexErrorInfo" ||
+    typeof definitionSchema !== "object"
+  ) {
+    return definitionSchema;
+  }
+
+  const schema = definitionSchema as {
+    readonly oneOf?: ReadonlyArray<{ readonly enum?: ReadonlyArray<string> }>;
+  };
+  const [firstVariant, ...remainingVariants] = schema.oneOf ?? [];
+  const currentEnum = firstVariant?.enum;
+  if (!currentEnum) {
+    return definitionSchema;
+  }
+
+  const missingValues = CodexErrorInfoCompatibilityValues.filter(
+    (value) => !currentEnum.includes(value),
+  );
+  if (missingValues.length === 0) {
+    return definitionSchema;
+  }
+
+  const enumValues = [...currentEnum];
+  const otherIndex = enumValues.indexOf("other");
+  const nextEnum =
+    otherIndex === -1
+      ? [...enumValues, ...missingValues]
+      : [...enumValues.slice(0, otherIndex), ...missingValues, ...enumValues.slice(otherIndex)];
+
+  return {
+    ...definitionSchema,
+    oneOf: [{ ...firstVariant, enum: nextEnum }, ...remainingVariants],
+  };
+}
 
 const getGeneratedPaths = Effect.fn("getGeneratedPaths")(function* () {
   const path = yield* Path.Path;
@@ -263,6 +320,58 @@ function normalizeNullableTypes(value: Schema.Json): Schema.Json {
       },
       { type: "null" },
     ],
+  };
+}
+
+// Effect's OpenAPI importer cannot intersect a common object with a oneOf.
+// Codex flattens elicitation variants this way. Distribute only disjoint
+// properties; schemas with other object constraints keep their original shape.
+function distributeObjectUnion(value: Schema.Json): Schema.Json {
+  if (Array.isArray(value)) return value.map(distributeObjectUnion);
+  if (value === null || typeof value !== "object") return value;
+  const normalized = Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [key, distributeObjectUnion(child)]),
+  );
+  const { type, properties, required, oneOf, ...rest } = normalized;
+  if (
+    type !== "object" ||
+    properties === null ||
+    typeof properties !== "object" ||
+    Array.isArray(properties) ||
+    !Array.isArray(oneOf) ||
+    (required !== undefined && !Array.isArray(required)) ||
+    Object.keys(rest).some((key) => !["$schema", "title", "description"].includes(key)) ||
+    !oneOf.every(
+      (branch) =>
+        branch !== null &&
+        typeof branch === "object" &&
+        !Array.isArray(branch) &&
+        branch.type === "object" &&
+        branch.properties !== null &&
+        typeof branch.properties === "object" &&
+        !Array.isArray(branch.properties) &&
+        (branch.required === undefined || Array.isArray(branch.required)) &&
+        !Object.keys(branch.properties).some((key) => key in properties) &&
+        !Object.keys(branch).some(
+          (key) => !["type", "properties", "required", "title", "description"].includes(key),
+        ),
+    )
+  )
+    return normalized;
+  return {
+    ...rest,
+    oneOf: oneOf.map((branch) => {
+      // The guard above limits this rewrite to plain object alternatives.
+      const alternative = branch as Record<string, Schema.Json>;
+      return {
+        ...alternative,
+        properties: { ...properties, ...(alternative.properties as Record<string, Schema.Json>) },
+        required: [
+          ...(required ?? []),
+          ...((alternative.required as Schema.Json[] | undefined) ?? []),
+        ],
+      };
+    }),
   };
 }
 
@@ -542,7 +651,7 @@ function rewriteExternalRefs(
         const definitionName = child.slice("#/definitions/".length);
         const localRewrite = localDefinitionNames.get(definitionName);
         if (localRewrite) {
-          return [key, `#/definitions/${localRewrite}`];
+          return [key, `#/components/schemas/${localRewrite}`];
         }
 
         const candidates = [
@@ -563,7 +672,7 @@ function rewriteExternalRefs(
           throw new Error(`Missing rewritten definition for ref: ${child}`);
         }
 
-        return [key, `#/definitions/${rewritten}`];
+        return [key, `#/components/schemas/${rewritten}`];
       }
 
       return [
@@ -610,10 +719,15 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
     );
 
     for (const [definitionName, definitionSchema] of Object.entries(parsed.definitions ?? {})) {
+      const compatibleDefinitionSchema = applyCodex0151DefinitionCompatibility(
+        file.exportName,
+        definitionName,
+        definitionSchema,
+      );
       aggregateSchemas[localDefinitionNames.get(definitionName)!] = stripNullDefaults(
         normalizeNullableTypes(
           rewriteExternalRefs(
-            definitionSchema,
+            compatibleDefinitionSchema,
             localDefinitionNames,
             file.namespace,
             exportNameByQualifiedName,
@@ -652,7 +766,7 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
     left.localeCompare(right),
   )) {
     // Referenced definitions and registered roots must receive the same extension.
-    const compatibleSchema = addAsyncQuestionFields(schema);
+    const compatibleSchema = distributeObjectUnion(addAsyncQuestionFields(schema));
     aggregateSchemas[name] = compatibleSchema;
     generator.addSchema(name, compatibleSchema as never);
   }

@@ -202,12 +202,11 @@ const dependencies = (
               placement: {
                 squadronId,
                 participantId: participantIdForThread(input.threadId),
-                provenance: {
-                  kind: "spawned-by" as const,
-                  spawnedByParticipantId: input.spawnedByParticipantId,
-                  source: "j5_spawn" as const,
-                },
-                placementParentId: input.spawnedByParticipantId,
+                provenance: input.provenance,
+                placementParentId:
+                  input.provenance.kind === "spawned-by"
+                    ? input.provenance.spawnedByParticipantId
+                    : null,
                 createdEventSeq: 1,
                 updatedEventSeq: 1,
               },

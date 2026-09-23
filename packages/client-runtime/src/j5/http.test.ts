@@ -14,6 +14,7 @@ import { remoteHttpClientLayer } from "../rpc/http.ts";
 import { ManagedRelayDpopSigner } from "../relay/managedRelay.ts";
 import {
   answerHumanExchange,
+  assignImportedThreads,
   createSquadron,
   isJ5UnsupportedError,
   J5HttpError,
@@ -25,6 +26,33 @@ import {
 
 const relayToken = (accessToken: string) =>
   ({ _tag: "Dpop", accessToken, expiresAtEpochMs: 4_102_444_800_000 }) as const;
+
+it.effect(
+  "assigns imports on the selected owner with its credentials and preserves partial outcomes",
+  () =>
+    Effect.gen(function* () {
+      const requests: Request[] = [];
+      const entries = [
+        { threadId: "import:one", status: "assigned" },
+        { threadId: "import:two", status: "kept_elsewhere" },
+        { threadId: "import:three", status: "failed" },
+      ];
+      const fetch: typeof globalThis.fetch = async (input, init) => {
+        requests.push(new Request(input, init));
+        return Response.json({ entries });
+      };
+      const input = { squadronId: "squadron:bravo", projectId: ProjectId.make("project:bravo") };
+      const result = yield* assignImportedThreads(
+        prepared("bravo", { _tag: "Bearer", token: "bravo-token" }),
+        input,
+      ).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+      expect(result.entries).toEqual(entries);
+      expect(requests[0]?.url).toBe("https://bravo.test/api/j5/squadrons/assign-imported");
+      expect(requests[0]?.headers.get("authorization")).toBe("Bearer bravo-token");
+      expect(requests[0]?.method).toBe("POST");
+      expect(yield* Effect.promise(() => requests[0]!.json())).toEqual(input);
+    }),
+);
 
 /** Hands out relay credentials the way the live authorization service does, one per request. */
 function relayAuthorization(tokens: ReadonlyArray<string>, httpBaseUrl = "https://relay.test") {

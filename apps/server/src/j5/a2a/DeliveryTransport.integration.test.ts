@@ -1,3 +1,19 @@
+import {
+  AgentCrewInstanceService,
+  layer as crewInstanceLayer,
+} from "./AgentCrewInstanceService.ts";
+import { PlacementCommandId } from "./placementContracts.ts";
+import { dispatchCommand as dispatchIntakeCommand } from "../../orchestration-v2/ThreadMessageIntake.ts";
+import { J5AdaptedThreadToolkit, J5AdaptedThreadHandlersLive } from "./mcp/threadTools.ts";
+import { ParticipantPlacementService } from "./PlacementService.ts";
+import { J5SquadronCreationLayer } from "./runtimeLayer.ts";
+import { ChatAttachmentId, EnvironmentId } from "@t3tools/contracts";
+import * as Sink from "effect/Sink";
+import * as Schema from "effect/Schema";
+import { createPendingAttachmentId, resolveAttachmentPath } from "../../attachmentStore.ts";
+import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
+import { J5AttachmentSendToolkit, J5AttachmentSendHandlersLive } from "./mcp/attachments.ts";
+import { SendMessageResult, MessageSentPayload } from "./contracts.ts";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as GitWorkflow from "../../git/GitWorkflowService.ts";
@@ -49,7 +65,7 @@ import type {
 } from "../../orchestration-v2/ProviderAdapter.ts";
 import {
   OrchestrationV2EventSinkLayerLive,
-  OrchestrationV2LayerLive,
+  OrchestrationV2LayerLive as UpstreamOrchestrationV2LayerLive,
   ProjectServiceLayerLive,
 } from "../../orchestration-v2/runtimeLayer.ts";
 import { ProjectEnrichmentService } from "../../project/ProjectEnrichmentService.ts";
@@ -111,6 +127,17 @@ import {
   ParticipantId,
   type AgentParticipant,
 } from "./contracts.ts";
+
+const decodeSendResult = Schema.decodeUnknownEffect(SendMessageResult);
+const decodeSentFact = Schema.decodeUnknownEffect(Schema.fromJsonString(MessageSentPayload));
+const decodeToolFailure = Schema.decodeUnknownEffect(
+  Schema.Struct({ code: Schema.String, message: Schema.String }),
+);
+const decodeForkResult = Schema.decodeUnknownEffect(Schema.Struct({ targetThreadId: ThreadId }));
+
+const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
+  Layer.provideMerge(J5SquadronCreationLayer),
+);
 
 const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-j5-a2a-delivery-transport-",
@@ -793,17 +820,21 @@ for (const model of ["gpt-6-astra", "astra"]) {
           ...target.delivery,
           messageId: LedgerMessageId.make(`message:${model}:race`),
         };
-        for (let retry = 0; retry < 2; retry++) {
-          const failure = yield* Effect.flip(transport.deliverAgent(racedDelivery));
-          assert.equal(failure._tag, "A2ADeliveryTransportError");
-        }
+        for (let retry = 0; retry < 2; retry++) yield* transport.deliverAgent(racedDelivery);
         yield* Ref.set(harness.staleProjection, undefined);
         const afterRace = yield* threads.getThreadProjection(target.threadId);
-        assert.isFalse(
-          afterRace.messages.some(
+        assert.lengthOf(
+          afterRace.messages.filter(
             (message) => message.id === deliveryMessageId(racedDelivery.messageId),
           ),
+          1,
         );
+        const queuedFollowUps = afterRace.runs.filter(
+          (run) => run.userMessageId === deliveryMessageId(racedDelivery.messageId),
+        );
+        assert.lengthOf(queuedFollowUps, 1);
+        assert.equal(queuedFollowUps[0]!.status, "queued");
+        assert.equal(queuedFollowUps[0]!.modelSelection.model, model);
         assert.lengthOf(yield* Ref.get(harness.interruptInputs), 0);
       }).pipe(Effect.provide(makeTestLayer(harness)));
     }),
@@ -1204,95 +1235,113 @@ it.effect("routes real archive and delete commands through lifecycle closure exa
   }),
 );
 
-it.effect("does not acknowledge a committed Astra steer when its turn ends before execution", () =>
-  Effect.gen(function* () {
-    const harness = yield* makeHarness;
-    yield* Effect.gen(function* () {
-      const threads = yield* ThreadManagementService;
-      const transport = yield* A2ADeliveryTransport;
-      const worker = yield* OrchestrationEffectWorkerV2;
-      const sink = yield* EventSinkV2;
-      const target = yield* seedTarget("post-commit-race", "gpt-6-astra");
-      const running = yield* sink.stream({ threadId: target.threadId }).pipe(
-        Stream.filter(
-          (stored) =>
-            stored.event.type === "provider-turn.updated" &&
-            stored.event.payload.status === "running",
-        ),
-        Stream.runHead,
-        Effect.forkChild({ startImmediately: true }),
-      );
-      yield* threads.sendToThread({
-        projectId: target.projectId,
-        threadId: target.threadId,
-        commandId: CommandId.make("command:post-commit-race:start"),
-        messageId: MessageId.make("message:post-commit-race:start"),
-        text: "Inspect until the update arrives.",
-        attachments: [],
-        mode: "queue",
-        createdBy: "user",
-        creationSource: "web",
-      });
-      yield* worker.runOnce;
-      yield* Fiber.join(running);
-      const projection = yield* threads.getThreadProjection(target.threadId);
-      const turn = (yield* Ref.get(harness.activeTurns)).get(target.threadId)!;
-      const committed = yield* sink.stream({ threadId: target.threadId }).pipe(
-        Stream.filter(
-          (stored) =>
-            stored.event.type === "turn-item.updated" &&
-            stored.event.payload.type === "user_message" &&
-            stored.event.payload.inputIntent === "steer",
-        ),
-        Stream.runHead,
-        Effect.forkChild({ startImmediately: true }),
-      );
-      const delivery = yield* transport
-        .deliverAgent(target.delivery)
-        .pipe(Effect.exit, Effect.forkChild({ startImmediately: true }));
-      yield* Fiber.join(committed);
-      const ended = yield* sink.stream({ threadId: target.threadId }).pipe(
-        Stream.filter(
-          (stored) =>
-            stored.event.type === "provider-turn.updated" &&
-            stored.event.payload.status === "completed",
-        ),
-        Stream.runHead,
-        Effect.forkChild({ startImmediately: true }),
-      );
-      yield* PubSub.publish(turn.events, {
-        type: "provider_turn.updated",
-        driver,
-        providerTurn: {
-          ...projection.providerTurns[0]!,
-          status: "completed",
-          completedAt: yield* DateTime.now,
-        },
-      });
-      yield* Fiber.join(ended);
-      // Drive the real worker's five attempts with controlled time, never sleeps.
-      for (const delay of [0, 100, 200, 400, 800]) {
-        yield* TestClock.adjust(delay);
-        yield* worker.drain();
-      }
-      const outcome = yield* Fiber.join(delivery);
-      assert.equal(outcome._tag, "Failure", "A2A must fail when no adapter call occurred");
-      // Once the turn has ended, retries still read the same failed steer receipt.
-      for (let retry = 0; retry < 2; retry++) {
-        const failure = yield* Effect.flip(transport.deliverAgent(target.delivery));
-        assert.equal(failure._tag, "A2ADeliveryTransportError");
-      }
-      const after = yield* threads.getThreadProjection(target.threadId);
-      assert.lengthOf(after.runs, 1);
-      assert.lengthOf(
-        after.messages.filter((message) => message.id === deliveryMessageId(target.messageId)),
-        1,
-      );
-      assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
-      assert.lengthOf(yield* Ref.get(harness.interruptInputs), 0);
-    }).pipe(Effect.provide(makeTestLayer(harness)));
-  }),
-);
+for (const terminal of ["completed", "interrupted", "failed", "stop_pending"] as const) {
+  it.effect(`settles a committed Astra steer truthfully after ${terminal} before execution`, () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const threads = yield* ThreadManagementService;
+        const transport = yield* A2ADeliveryTransport;
+        const worker = yield* OrchestrationEffectWorkerV2;
+        const sink = yield* EventSinkV2;
+        const target = yield* seedTarget(`post-commit-race-${terminal}`, "gpt-6-astra");
+        const running = yield* sink.stream({ threadId: target.threadId }).pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "provider-turn.updated" &&
+              stored.event.payload.status === "running",
+          ),
+          Stream.runHead,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* threads.sendToThread({
+          projectId: target.projectId,
+          threadId: target.threadId,
+          commandId: CommandId.make("command:post-commit-race:start"),
+          messageId: MessageId.make("message:post-commit-race:start"),
+          text: "Inspect until the update arrives.",
+          attachments: [],
+          mode: "queue",
+          createdBy: "user",
+          creationSource: "web",
+        });
+        yield* worker.runOnce;
+        yield* Fiber.join(running);
+        const projection = yield* threads.getThreadProjection(target.threadId);
+        const turn = (yield* Ref.get(harness.activeTurns)).get(target.threadId)!;
+        const committed = yield* sink.stream({ threadId: target.threadId }).pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "turn-item.updated" &&
+              stored.event.payload.type === "user_message" &&
+              stored.event.payload.inputIntent === "steer",
+          ),
+          Stream.runHead,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const delivery = yield* transport
+          .deliverAgent(target.delivery)
+          .pipe(Effect.exit, Effect.forkChild({ startImmediately: true }));
+        yield* Fiber.join(committed);
+        if (terminal === "stop_pending") {
+          yield* threads.dispatch({
+            type: "run.interrupt",
+            commandId: CommandId.make("command:steer-race-stop"),
+            threadId: target.threadId,
+            runId: projection.runs[0]!.id,
+          });
+        }
+        const terminalStatus = terminal === "stop_pending" ? "completed" : terminal;
+        const ended = yield* sink.stream({ threadId: target.threadId }).pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "provider-turn.updated" &&
+              stored.event.payload.status === terminalStatus,
+          ),
+          Stream.runHead,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* PubSub.publish(turn.events, {
+          type: "provider_turn.updated",
+          driver,
+          providerTurn: {
+            ...projection.providerTurns[0]!,
+            status: terminalStatus,
+            completedAt: yield* DateTime.now,
+          },
+        });
+        yield* Fiber.join(ended);
+        // Drive the real worker's five attempts with controlled time, never sleeps.
+        for (const delay of [0, 100, 200, 400, 800]) {
+          yield* TestClock.adjust(delay);
+          yield* worker.drain();
+        }
+        const outcome = yield* Fiber.join(delivery);
+        assert.equal(outcome._tag, terminal === "completed" ? "Success" : "Failure");
+        for (let retry = 0; retry < 2; retry++) {
+          if (terminal === "completed") yield* transport.deliverAgent(target.delivery);
+          else
+            assert.equal(
+              (yield* transport.deliverAgent(target.delivery).pipe(Effect.flip))._tag,
+              "A2ADeliveryTransportError",
+            );
+        }
+        const after = yield* threads.getThreadProjection(target.threadId);
+        assert.lengthOf(after.runs, terminal === "completed" ? 2 : 1);
+        const messages = after.messages.filter(
+          (message) => message.id === deliveryMessageId(target.messageId),
+        );
+        assert.lengthOf(messages, 1);
+        if (terminal === "completed") {
+          const followUp = after.runs.find((run) => run.userMessageId === messages[0]!.id);
+          assert.equal(followUp?.modelSelection.model, "gpt-6-astra");
+        }
+        assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
+        assert.lengthOf(yield* Ref.get(harness.interruptInputs), 0);
+      }).pipe(Effect.provide(makeTestLayer(harness)));
+    }),
+  );
+}
 
 it.effect(
   "bounds a missing steer acknowledgment and recognizes a later success without reinjection",
@@ -2378,4 +2427,539 @@ it.effect(
         assert.lengthOf(yield* Ref.get(harness.startedInputs), 1);
       }).pipe(Effect.provide(makeMessageLifecycleLayer(harness)));
     }),
+);
+
+it.effect("delivers attachment-tool claims from the ledger after the pending upload is gone", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    const base = makeMessageLifecycleLayer(harness).pipe(
+      Layer.provideMerge(serverConfigLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    const layer = J5AttachmentSendHandlersLive.pipe(Layer.provideMerge(base));
+    yield* Effect.gen(function* () {
+      const registrar = yield* A2AHomeRegistrar;
+      const sender = yield* seedTarget("attachment-sender", modelSelection.model, registrar);
+      const target = yield* seedTarget(
+        "attachment-target",
+        modelSelection.model,
+        registrar,
+        sender.squadronId,
+        sender.projectId,
+      );
+      const threads = yield* ThreadManagementService;
+      yield* threads.sendToThread({
+        commandId: CommandId.make("command:attachment:sender-start"),
+        projectId: sender.projectId,
+        threadId: sender.threadId,
+        messageId: MessageId.make("message:attachment:sender-start"),
+        text: "Send a file to the other agent.",
+        attachments: [],
+        mode: "queue",
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* startPendingTestTurn(sender.threadId);
+      const config = yield* ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const attachment = {
+        type: "image" as const,
+        id: ChatAttachmentId.make(createPendingAttachmentId()!),
+        name: "screen.png",
+        mimeType: "image/png",
+        sizeBytes: 3,
+      };
+      const pendingPath = resolveAttachmentPath({
+        attachmentsDir: config.attachmentsDir,
+        attachment,
+      });
+      assert.isNotNull(pendingPath);
+      yield* fs.writeFile(pendingPath!, new Uint8Array([1, 2, 3]));
+      const toolkit = yield* J5AttachmentSendToolkit;
+      const call = (threadId: ThreadId) =>
+        toolkit
+          .handle("t3_thread_send_attachments", {
+            threadId,
+            message: "Inspect this screenshot.",
+            attachments: [attachment],
+          })
+          .pipe(
+            Stream.unwrap,
+            Stream.run(Sink.last()),
+            Effect.flatMap(Effect.fromOption),
+            Effect.provideService(McpInvocationContext, {
+              environmentId: EnvironmentId.make("environment:attachment-test"),
+              threadId: sender.threadId,
+              providerSessionId: "attachment-test",
+              providerInstanceId: modelSelection.instanceId,
+              capabilities: new Set(["orchestration"] as const),
+              issuedAt: 1,
+            }),
+          );
+      assert.isTrue((yield* call(sender.threadId)).isFailure);
+      const send = yield* A2ASendService;
+      const filesBefore = yield* fs.readDirectory(config.attachmentsDir);
+      const refused = yield* call(target.threadId).pipe(
+        Effect.provideService(A2ASendService, {
+          ...send,
+          send: (input) =>
+            Effect.gen(function* () {
+              assert.lengthOf(
+                yield* fs.readDirectory(config.attachmentsDir),
+                filesBefore.length + 1,
+              );
+              return yield* send.send({
+                ...input,
+                senderThreadId: ThreadId.make("native-unjoined-sender"),
+              });
+            }),
+        }),
+      );
+      assert.isTrue(refused.isFailure);
+      assert.deepEqual(
+        (yield* fs.readDirectory(config.attachmentsDir)).sort(),
+        [...filesBefore].sort(),
+      );
+      assert.isTrue(yield* fs.exists(pendingPath!));
+      const outcome = yield* call(target.threadId);
+      assert.isFalse(outcome.isFailure);
+      assert.notProperty(outcome.result, "runId");
+      const accepted = yield* decodeSendResult(outcome.result);
+      const sql = yield* SqlClient.SqlClient;
+      const facts = yield* sql<{
+        readonly payload: string;
+      }>`SELECT payload FROM j5_a2a_comm_event WHERE seq = ${accepted.durableAtSeq}`;
+      const sent = yield* decodeSentFact(facts[0]!.payload);
+      assert.lengthOf(sent.attachments ?? [], 1);
+      const canonical = sent.attachments![0]!;
+      assert.notEqual(canonical.id, attachment.id);
+      yield* fs.remove(pendingPath!);
+      const delivery = yield* A2ADeliveryWorker;
+      assert.deepEqual(
+        (yield* delivery.drain).map(({ messageId, state }) => ({ messageId, state })),
+        [{ messageId: accepted.messageId, state: "delivered" }],
+      );
+      const projection = yield* threads.getThreadProjection(target.threadId);
+      const delivered = projection.messages.filter(
+        (message) => message.id === deliveryMessageId(accepted.messageId),
+      );
+      assert.lengthOf(delivered, 1);
+      assert.deepEqual(delivered[0]!.attachments, [canonical]);
+      const storedPath = resolveAttachmentPath({
+        attachmentsDir: config.attachmentsDir,
+        attachment: canonical,
+      });
+      assert.deepEqual(yield* fs.readFile(storedPath!), new Uint8Array([1, 2, 3]));
+      assert.deepEqual(yield* delivery.drain, []);
+      yield* startPendingTestTurn(target.threadId);
+      const targetInput = (yield* Ref.get(harness.startedInputs)).find(
+        (input) => input.threadId === target.threadId,
+      );
+      assert.isDefined(targetInput);
+      assert.deepEqual(targetInput!.message.attachments, [canonical]);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect(
+  "registers forks through both intake and MCP and retries post-commit facts without another fork",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      const base = makeMessageLifecycleLayer(harness).pipe(
+        Layer.provideMerge(serverConfigLayer),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const registrar = yield* A2AHomeRegistrar;
+        const source = yield* seedTarget("fork-source", modelSelection.model, registrar);
+        const threads = yield* ThreadManagementService;
+        const sendSource = (suffix: string) =>
+          threads.sendToThread({
+            commandId: CommandId.make(`command:fork-source:${suffix}`),
+            projectId: source.projectId,
+            threadId: source.threadId,
+            messageId: MessageId.make(`message:fork-source:${suffix}`),
+            text: "Source context",
+            attachments: [],
+            mode: "queue",
+            createdBy: "user",
+            creationSource: "web",
+          });
+        const first = yield* sendSource("first");
+        yield* startPendingTestTurn(source.threadId);
+        yield* finishTestTurn(harness, source.threadId);
+        const sourcePoint = { type: "run" as const, runId: first.run.id };
+        const fork = {
+          type: "thread.fork" as const,
+          commandId: CommandId.make("command:fork-intake"),
+          sourceThreadId: source.threadId,
+          targetThreadId: ThreadId.make("thread:fork-intake"),
+          sourcePoint,
+          createdBy: "user" as const,
+          creationSource: "web" as const,
+        };
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`CREATE TEMP TRIGGER fail_fork_placement BEFORE INSERT ON j5_a2a_placement_event
+        BEGIN SELECT RAISE(ABORT, 'injected placement failure'); END`;
+        const failed = yield* dispatchIntakeCommand(fork).pipe(Effect.flip);
+        assert.include(failed.message, "Replay command command:fork-intake");
+        assert.equal(
+          (yield* threads.getThreadProjection(fork.targetThreadId)).thread.id,
+          fork.targetThreadId,
+        );
+        assert.equal(
+          (yield* registrar.getHomeForThread(fork.targetThreadId).pipe(Effect.flip))._tag,
+          "A2AHomeNotFoundError",
+        );
+        yield* sql`DROP TRIGGER fail_fork_placement`;
+        const repaired = yield* dispatchIntakeCommand(fork);
+        const replay = yield* dispatchIntakeCommand(fork);
+        assert.equal(repaired.sequence, replay.sequence);
+        const home = yield* registrar.getHomeForThread(fork.targetThreadId);
+        assert.equal(home.squadronId, source.squadronId);
+        const placement = yield* (yield* ParticipantPlacementService).readPlacement(home);
+        assert.deepEqual(placement?.provenance, {
+          kind: "forked-from",
+          sourceParticipantId: source.receiverId,
+          source: "upstream_lineage",
+        });
+        assert.isNull(placement?.placementParentId);
+        const placementFacts = yield* sql<{
+          readonly count: number;
+        }>`SELECT COUNT(*) AS count FROM j5_a2a_placement_event WHERE participant_id = ${home.participantId}`;
+        assert.equal(placementFacts[0]!.count, 1);
+        const group = yield* seedTarget(
+          "fork-group",
+          modelSelection.model,
+          registrar,
+          source.squadronId,
+          source.projectId,
+        );
+        yield* (yield* ParticipantPlacementService).recordCreation({
+          commandId: PlacementCommandId.make("command:fork-source-placement"),
+          squadronId: source.squadronId,
+          participantId: source.receiverId,
+          actor: "agent",
+          createdAt: "2026-08-17T12:00:00.000Z",
+          provenance: {
+            kind: "spawned-by",
+            spawnedByParticipantId: group.receiverId,
+            source: "j5_spawn",
+          },
+        });
+        yield* sendSource("second");
+        yield* startPendingTestTurn(source.threadId);
+        const toolkit = yield* J5AdaptedThreadToolkit;
+        const invokeFork = toolkit.handle("t3_thread_fork", { sourcePoint }).pipe(
+          Stream.unwrap,
+          Stream.run(Sink.last()),
+          Effect.flatMap(Effect.fromOption),
+          Effect.provideService(McpInvocationContext, {
+            environmentId: EnvironmentId.make("environment:fork-test"),
+            threadId: source.threadId,
+            providerSessionId: "fork-test",
+            providerInstanceId: modelSelection.instanceId,
+            capabilities: new Set(["orchestration"] as const),
+            issuedAt: 1,
+          }),
+        );
+        yield* sql`CREATE TEMP TRIGGER fail_mcp_fork_placement BEFORE INSERT ON j5_a2a_placement_event
+          BEGIN SELECT RAISE(ABORT, 'injected MCP placement failure'); END`;
+        const mcpFailure = yield* invokeFork;
+        assert.isTrue(mcpFailure.isFailure);
+        const repair = yield* decodeToolFailure(mcpFailure.result);
+        assert.equal(repair.code, "orchestration_error");
+        assert.include(repair.message, "exists but its Squadron registration could not complete");
+        assert.include(repair.message, "Replay command mcp:");
+        yield* sql`DROP TRIGGER fail_mcp_fork_placement`;
+        const output = yield* invokeFork;
+        assert.isFalse(output.isFailure);
+        const mcpFork = yield* decodeForkResult(output.result);
+        assert.notEqual(mcpFork.targetThreadId, fork.targetThreadId);
+        const mcpHome = yield* registrar.getHomeForThread(mcpFork.targetThreadId);
+        assert.equal(mcpHome.squadronId, source.squadronId);
+        assert.equal(
+          (yield* (yield* ParticipantPlacementService).readPlacement(mcpHome))?.placementParentId,
+          group.receiverId,
+        );
+        const mismatch = yield* seedTarget("fork-other-squadron", modelSelection.model, registrar);
+        const merge = {
+          ...fork,
+          type: "thread.merge_back" as const,
+          commandId: CommandId.make("command:fork-mismatch"),
+          targetThreadId: mismatch.threadId,
+        };
+        const before = yield* threads.getThreadProjection(source.threadId);
+        assert.include(
+          (yield* dispatchIntakeCommand(merge).pipe(Effect.flip)).message,
+          "share a registered Squadron",
+        );
+        assert.deepEqual(
+          (yield* threads.getThreadProjection(source.threadId)).contextTransfers,
+          before.contextTransfers,
+        );
+        // Matching registration passes J5 admission; upstream still owns lineage validation.
+        const sameHome = yield* seedTarget(
+          "fork-unrelated-same-home",
+          modelSelection.model,
+          registrar,
+          source.squadronId,
+          source.projectId,
+        );
+        const rejected = yield* threads
+          .dispatch({
+            ...merge,
+            commandId: CommandId.make("command:fork-unrelated"),
+            targetThreadId: sameHome.threadId,
+          })
+          .pipe(Effect.flip);
+        assert.notInclude(rejected.message, "J5 thread lineage");
+        yield* finishTestTurn(harness, source.threadId);
+        const native = {
+          threadId: ThreadId.make("thread:fork-native"),
+          projectId: source.projectId,
+        };
+        yield* (yield* OrchestratorV2).dispatch({
+          type: "thread.create",
+          commandId: CommandId.make("command:fork-native:create"),
+          ...native,
+          title: "Native source without membership",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: (yield* threads.getThreadProjection(source.threadId)).thread.worktreePath,
+          createdBy: "user",
+          creationSource: "web",
+        });
+        const nativeRun = yield* threads.sendToThread({
+          commandId: CommandId.make("command:fork-native:start"),
+          projectId: native.projectId,
+          threadId: native.threadId,
+          messageId: MessageId.make("message:fork-native:start"),
+          text: "Native context",
+          attachments: [],
+          mode: "queue",
+          createdBy: "user",
+          creationSource: "web",
+        });
+        yield* startPendingTestTurn(native.threadId);
+        yield* finishTestTurn(harness, native.threadId);
+        const nativeFork = {
+          ...fork,
+          commandId: CommandId.make("command:fork-native"),
+          sourceThreadId: native.threadId,
+          targetThreadId: ThreadId.make("thread:fork-native-child"),
+          sourcePoint: { type: "run" as const, runId: nativeRun.run.id },
+        };
+        yield* dispatchIntakeCommand(nativeFork);
+        assert.equal(
+          (yield* registrar.getHomeForThread(nativeFork.targetThreadId).pipe(Effect.flip))._tag,
+          "A2AHomeNotFoundError",
+        );
+        assert.include(
+          (yield* threads
+            .dispatch({
+              ...merge,
+              commandId: CommandId.make("command:native-to-registered"),
+              sourceThreadId: nativeFork.targetThreadId,
+              targetThreadId: source.threadId,
+            })
+            .pipe(Effect.flip)).message,
+          "share a registered Squadron",
+        );
+      }).pipe(Effect.provide(J5AdaptedThreadHandlersLive.pipe(Layer.provideMerge(base))));
+    }),
+);
+
+it.effect(
+  "organize enforces Squadron archive authority and applies reversible lifecycle once",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      const base = crewInstanceLayer.pipe(
+        Layer.provideMerge(makeMessageLifecycleLayer(harness)),
+        Layer.provideMerge(serverConfigLayer),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const registrar = yield* A2AHomeRegistrar;
+        const source = yield* seedTarget("organize-source", modelSelection.model, registrar);
+        const target = yield* seedTarget(
+          "organize-target",
+          modelSelection.model,
+          registrar,
+          source.squadronId,
+          source.projectId,
+        );
+        const other = yield* seedTarget(
+          "organize-other",
+          modelSelection.model,
+          registrar,
+          undefined,
+          source.projectId,
+        );
+        const threads = yield* ThreadManagementService;
+        yield* threads.sendToThread({
+          commandId: CommandId.make("command:organize-start"),
+          projectId: source.projectId,
+          threadId: source.threadId,
+          messageId: MessageId.make("message:organize-start"),
+          text: "Organize agents",
+          attachments: [],
+          mode: "queue",
+          createdBy: "user",
+          creationSource: "web",
+        });
+        yield* startPendingTestTurn(source.threadId);
+        const toolkit = yield* J5AdaptedThreadToolkit;
+        const call = (threadId: ThreadId, action: "archive" | "unarchive") =>
+          toolkit.handle("t3_thread_organize", { threadId, action }).pipe(
+            Stream.unwrap,
+            Stream.run(Sink.last()),
+            Effect.flatMap(Effect.fromOption),
+            Effect.provideService(McpInvocationContext, {
+              environmentId: EnvironmentId.make("environment:organize-test"),
+              threadId: source.threadId,
+              providerSessionId: "organize-test",
+              providerInstanceId: modelSelection.instanceId,
+              capabilities: new Set(["orchestration"] as const),
+              issuedAt: 1,
+            }),
+          );
+        for (const action of ["archive", "unarchive"] as const) {
+          const denied = yield* call(other.threadId, action);
+          assert.isTrue(denied.isFailure);
+          assert.equal((denied.result as { code: string }).code, "capability_denied");
+        }
+        assert.isNull((yield* threads.getThreadProjection(other.threadId)).thread.archivedAt);
+        const member = yield* seedTarget(
+          "organize-member",
+          modelSelection.model,
+          registrar,
+          source.squadronId,
+          source.projectId,
+        );
+        yield* (yield* AgentCrewInstanceService).record({
+          id: "crew:organize-guard",
+          squadronId: source.squadronId,
+          captainParticipantId: source.receiverId,
+          captainThreadId: source.threadId,
+          displayName: "Organize crew",
+          brief: "Protect the member",
+          createdAt: "2026-08-17T12:00:00.000Z",
+          members: [
+            {
+              seatName: "builder",
+              agentId: null,
+              participantId: member.receiverId,
+              threadId: member.threadId,
+              reason: null,
+            },
+          ],
+        });
+        const memberArchive = yield* call(member.threadId, "archive");
+        assert.isTrue(memberArchive.isFailure);
+        assert.include(
+          (memberArchive.result as { message: string }).message,
+          "never archived one by one",
+        );
+        assert.isNull((yield* threads.getThreadProjection(member.threadId)).thread.archivedAt);
+        const send = yield* A2ASendService;
+        const opened = yield* send.send({
+          commandId: CommCommandId.make("command:organize-ask"),
+          senderThreadId: source.threadId,
+          to: target.receiverId,
+          message: "Please answer",
+          expectReply: true,
+          intent: "Check lifecycle",
+          acceptedAt: "2026-08-17T12:00:00.000Z",
+        });
+        const lifecycle = yield* A2ALifecycleService;
+        for (const action of ["archive", "unarchive"] as const) {
+          const event = yield* threads.streamStoredEventsFrom().pipe(
+            Stream.filter(
+              (stored) =>
+                stored.event.threadId === target.threadId &&
+                stored.event.type ===
+                  (action === "archive" ? "thread.archived" : "thread.unarchived"),
+            ),
+            Stream.runHead,
+            Effect.forkChild({ startImmediately: true }),
+          );
+          assert.isFalse((yield* call(target.threadId, action)).isFailure);
+          const stored = yield* Fiber.join(event).pipe(Effect.flatMap(Effect.fromOption));
+          yield* lifecycle.handleStoredEvent(stored);
+          yield* lifecycle.handleStoredEvent(stored);
+          const directory = yield* send.listParticipants(source.threadId);
+          assert.equal(
+            directory.some(
+              (row) => row.participantId === target.receiverId && row.canReceiveMessage,
+            ),
+            action === "unarchive",
+          );
+          const inclusive = yield* send.listParticipants(source.threadId, true);
+          assert.equal(
+            inclusive.find((row) => row.participantId === target.receiverId)?.archived,
+            action === "archive",
+          );
+          assert.deepEqual(yield* registrar.getHomeForThread(target.threadId), {
+            squadronId: source.squadronId,
+            participantId: target.receiverId,
+          });
+        }
+        const sql = yield* SqlClient.SqlClient;
+        const counts = yield* sql<{ readonly dropped: number; readonly notices: number }>`SELECT
+        (SELECT COUNT(*) FROM j5_a2a_comm_event WHERE kind = 'exchange.dropped' AND exchange_id = ${opened.exchangeId}) AS dropped,
+        (SELECT COUNT(*) FROM j5_a2a_delivery WHERE exchange_role = 'terminal_notice' AND exchange_id = ${opened.exchangeId}) AS notices`;
+        assert.deepEqual(counts, [{ dropped: 1, notices: 1 }]);
+        // Self-archive adopts upstream semantics and does not acquire a second confirmation protocol.
+        assert.isFalse((yield* call(source.threadId, "archive")).isFailure);
+        assert.isNotNull((yield* threads.getThreadProjection(source.threadId)).thread.archivedAt);
+      }).pipe(Effect.provide(J5AdaptedThreadHandlersLive.pipe(Layer.provideMerge(base))));
+    }),
+);
+
+it.effect("rejects a stale Astra steer after Stop commits before admission", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const target = yield* seedTarget("stop-before-steer", "gpt-6-astra");
+      const threads = yield* ThreadManagementService;
+      const running = yield* threads.sendToThread({
+        commandId: CommandId.make("command:stop-before-steer:start"),
+        projectId: target.projectId,
+        threadId: target.threadId,
+        messageId: MessageId.make("message:stop-before-steer:start"),
+        text: "Wait for an update",
+        attachments: [],
+        mode: "queue",
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* startPendingTestTurn(target.threadId);
+      const snapshot = yield* threads.getThreadProjection(target.threadId);
+      yield* threads.dispatch({
+        type: "run.interrupt",
+        commandId: CommandId.make("command:stop-before-steer:stop"),
+        threadId: target.threadId,
+        runId: running.run.id,
+      });
+      yield* Ref.set(harness.staleProjection, snapshot);
+      const error = yield* (yield* A2ADeliveryTransport)
+        .deliverAgent(target.delivery)
+        .pipe(Effect.flip);
+      assert.equal(error._tag, "A2ADeliveryTransportError");
+      const actual = yield* (yield* OrchestratorV2).getThreadProjection(target.threadId);
+      assert.isFalse(
+        actual.messages.some((message) => message.id === deliveryMessageId(target.messageId)),
+      );
+      assert.deepEqual(
+        yield* (yield* EffectOutboxV2).listByCommandId(deliveryCommandId(target.messageId)),
+        [],
+      );
+      assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
+    }).pipe(Effect.provide(makeTestLayer(harness)));
+  }),
 );

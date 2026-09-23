@@ -23,7 +23,7 @@ import { ProviderEventLoggers } from "../../provider/Layers/ProviderEventLoggers
 export const CURSOR_AGENT_SDK_PROTOCOL = "cursor-agent-sdk.local" as const;
 export const CURSOR_PROVIDER = ProviderDriverKind.make("cursor");
 
-export class CursorAgentSdkRunnerError extends Schema.TaggedErrorClass<CursorAgentSdkRunnerError>()(
+export class CursorAgentSdkRunnerError extends Schema.TaggedError<CursorAgentSdkRunnerError>()(
   "CursorAgentSdkRunnerError",
   {
     method: Schema.String,
@@ -271,7 +271,7 @@ export function loggedCursorSendOptions(
   };
 }
 
-export function makeCursorAgentSdkProtocolLogger(input: {
+function makeCursorAgentSdkProtocolLogger(input: {
   readonly nativeEventLogger: EventNdjsonLogger | undefined;
   readonly threadId: ThreadId;
   readonly providerSessionId: OrchestrationV2ProviderSession["id"];

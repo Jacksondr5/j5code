@@ -71,14 +71,6 @@ export const selectDraftSquadron = (draftKey: string, squadronId: string) => {
   notify();
 };
 
-/** Keep the explicit carrier when upstream retargets the same reserved draft to another environment. */
-export const copyDraftSquadronScope = (sourceKey: string, destinationKey: string) => {
-  const current = snapshot.draftStates[sourceKey];
-  if (current === undefined || current.squadronId === null || sourceKey === destinationKey) return;
-  snapshot = { ...snapshot, draftStates: { ...snapshot.draftStates, [destinationKey]: current } };
-  notify();
-};
-
 export const freezeDraftSquadronAtFirstSend = (draftKey: string) => {
   const current = draftStateFor(draftKey);
   const next = freezeSquadronForFirstSend(current);

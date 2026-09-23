@@ -1,4 +1,6 @@
+import { withAgentDeviceEnvironment } from "../../mcp/McpProviderSession.ts";
 import { AntigravitySettings, ProviderDriverKind, ProviderSetupError } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -52,7 +54,7 @@ import {
 } from "../ProviderDriver.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
-import { discoverAntigravitySkills } from "./AntigravitySkills.ts";
+import { discoverAntigravitySkills, resolveAntigravityUserHome } from "./AntigravitySkills.ts";
 
 const DRIVER = ProviderDriverKind.make("antigravity");
 const decodeSettings = Schema.decodeSync(AntigravitySettings);
@@ -98,6 +100,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
       };
       const authConfigIssue = antigravityAuthConfigIssue(auth);
       const processEnvironment = mergeProviderInstanceEnvironment(environment);
+      const userHome = resolveAntigravityUserHome(yield* HostProcessPlatform, processEnvironment);
       const profileDirectory = resolveAntigravityProfileDirectory(
         serverConfig.stateDir,
         instanceId,
@@ -153,6 +156,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
           profileDirectory,
           baseEnv: processEnvironment,
           auth,
+          userHome,
         }).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
@@ -166,7 +170,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
             installation: executable,
             profile,
             cwd: input.cwd,
-            baseEnv: processEnvironment,
+            baseEnv: withAgentDeviceEnvironment(processEnvironment, input),
             auth,
           }),
         }).pipe(Effect.provideService(Crypto.Crypto, crypto));
@@ -399,7 +403,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
         snapshotForCwd: (cwd) =>
           !enabled
             ? provider.snapshot.getSnapshot
-            : discoverAntigravitySkills({ cwd, profileDirectory }).pipe(
+            : discoverAntigravitySkills({ cwd, userHome }).pipe(
                 Effect.provideService(FileSystem.FileSystem, fileSystem),
                 Effect.provideService(Path.Path, path),
                 Effect.flatMap((skills) => provider.snapshotForCwd(cwd, skills)),

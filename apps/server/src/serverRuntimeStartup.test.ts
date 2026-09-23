@@ -1,5 +1,10 @@
 import { assert, it } from "@effect/vitest";
-import { DEFAULT_MODEL, ProviderInstanceId } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  DEFAULT_MODEL,
+  ProjectId,
+  ProviderInstanceId,
+} from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -18,47 +23,23 @@ it("uses the canonical Codex model for auto-bootstrap", () => {
   });
 });
 
-it.effect("runs projection repair, recovery, worker startup, and bootstrap in order", () =>
+it.effect("starts without scanning or rebuilding projection history", () =>
   Effect.gen(function* () {
     const calls = yield* Ref.make<ReadonlyArray<string>>([]);
     const record = (label: string) => Ref.update(calls, (current) => [...current, label]);
 
     const result = yield* ServerRuntimeStartup.runOrderedV2StartupPhases({
       importLegacyShells: record("import"),
-      verify: record("verify").pipe(Effect.as({ valid: false })),
-      rebuild: record("rebuild").pipe(Effect.as({ valid: true })),
       recover: record("recover").pipe(Effect.as({ closedRequests: 2 })),
       startEffectWorker: record("worker"),
       autoBootstrap: record("bootstrap").pipe(Effect.as({ projectId: "project-1" })),
     });
 
-    assert.deepEqual(yield* Ref.get(calls), [
-      "import",
-      "verify",
-      "rebuild",
-      "recover",
-      "worker",
-      "bootstrap",
-    ]);
+    assert.deepEqual(yield* Ref.get(calls), ["import", "recover", "worker", "bootstrap"]);
     assert.deepEqual(result, {
       recovery: { closedRequests: 2 },
       bootstrap: { projectId: "project-1" },
     });
-  }),
-);
-
-it.effect("does not rebuild valid projections", () =>
-  Effect.gen(function* () {
-    const rebuilt = yield* Ref.make(false);
-    yield* ServerRuntimeStartup.runOrderedV2StartupPhases({
-      importLegacyShells: Effect.void,
-      verify: Effect.succeed({ valid: true }),
-      rebuild: Ref.set(rebuilt, true).pipe(Effect.as({ valid: true })),
-      recover: Effect.void,
-      startEffectWorker: Effect.void,
-      autoBootstrap: Effect.void,
-    });
-    assert.isFalse(yield* Ref.get(rebuilt));
   }),
 );
 
@@ -163,18 +144,44 @@ it.effect("automatic pull only updates enabled, behind, clean default-branch che
           };
         }),
     } as unknown as GitVcsDriver.GitVcsDriver["Service"];
-    const project = (workspaceRoot: string, autoPull = true) =>
-      ({ workspaceRoot, autoPull }) as never;
+    const project = (workspaceRoot: string) =>
+      ({ id: ProjectId.make(workspaceRoot), workspaceRoot }) as never;
+    const overrides = (entries: Record<string, boolean>) => ({
+      ...DEFAULT_SERVER_SETTINGS,
+      projectSettingsOverrides: Object.fromEntries(
+        Object.entries(entries).map(([root, defaultAutoPull]) => [
+          ProjectId.make(root),
+          { defaultAutoPull },
+        ]),
+      ),
+    });
 
-    yield* ServerRuntimeStartup.autoPullProjects([
-      project("/clean"),
-      project("/current"),
-      project("/dirty"),
-      project("/ahead"),
-      project("/feature"),
-      project("/disabled", false),
-    ]).pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, git));
+    yield* ServerRuntimeStartup.autoPullProjects(
+      [
+        project("/clean"),
+        project("/current"),
+        project("/dirty"),
+        project("/ahead"),
+        project("/feature"),
+        project("/disabled"),
+      ],
+      overrides({
+        "/clean": true,
+        "/current": true,
+        "/dirty": true,
+        "/ahead": true,
+        "/feature": true,
+        "/disabled": false,
+      }),
+    ).pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, git));
 
     assert.deepStrictEqual(pulled, ["/clean"]);
+
+    pulled.length = 0;
+    yield* ServerRuntimeStartup.autoPullProjects(
+      [project("/inherited"), project("/opted-out"), project("/dirty")],
+      { ...overrides({ "/opted-out": false }), defaultAutoPull: true },
+    ).pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, git));
+    assert.deepStrictEqual(pulled, ["/inherited"]);
   }),
 );

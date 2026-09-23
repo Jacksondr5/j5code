@@ -13,6 +13,7 @@ import {
   makeClientReadsHttpRouteLayer,
 } from "./ClientReadsHttp.ts";
 import { humanInboxHttpRouteLayer } from "./HumanInboxHttp.ts";
+import { importedThreadsHttpRouteLayer } from "./ImportedThreadsHttp.ts";
 import { machineSenderHttpRouteLayer } from "./MachineSenderHttp.ts";
 import { preArchiveFactsHttpRouteLayer } from "./PreArchiveFactsHttp.ts";
 import { layer as squadronManagementServiceLayer } from "./SquadronManagementService.ts";
@@ -35,6 +36,7 @@ export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
   spawnedChildrenHttpRouteLayer,
   artifactHttpRouteLayer,
   humanInboxHttpRouteLayer,
+  importedThreadsHttpRouteLayer,
   machineSenderHttpRouteLayer,
   preArchiveFactsHttpRouteLayer,
   squadronHttpRouteLayer,

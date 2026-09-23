@@ -10,7 +10,8 @@ import { participantIdForThread } from "./HomeRegistrar.ts";
  * Archive crew, on the Fleet page or by its Captain's `archive_crew`, or when the Captain's own
  * thread is archived and the cascade retires its Crews. Every client door sends its archive as
  * one `dispatchCommand` over the socket, so this check sits on that handler and covers the web
- * sidebar, a mobile swipe, and any future door alike; the web's pre-archive read still gives the
+ * sidebar, a mobile swipe, and any future client door alike. The adapted organize MCP tool
+ * applies this same guard before dispatch; the web's pre-archive read still gives the
  * person the friendlier early toast. `archive_crew` and the cascade archive seats through the
  * lifecycle service, not this handler, so the unit paths are untouched.
  */

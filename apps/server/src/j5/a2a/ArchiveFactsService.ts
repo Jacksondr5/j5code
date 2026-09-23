@@ -20,7 +20,7 @@ export type ArchivePlacementSubtree =
       readonly participantIds: readonly [ParticipantId, ...Array<ParticipantId>];
     };
 
-export class A2AArchivePlacementFactsProviderError extends Schema.TaggedErrorClass<A2AArchivePlacementFactsProviderError>()(
+export class A2AArchivePlacementFactsProviderError extends Schema.TaggedError<A2AArchivePlacementFactsProviderError>()(
   "A2AArchivePlacementFactsProviderError",
   { operation: Schema.String, cause: Schema.Defect() },
 ) {}
@@ -101,7 +101,7 @@ export type ThreadPreArchiveFacts =
       readonly placementSubtree: ArchivePlacementSubtree;
     };
 
-export class A2AArchiveFactsError extends Schema.TaggedErrorClass<A2AArchiveFactsError>()(
+export class A2AArchiveFactsError extends Schema.TaggedError<A2AArchiveFactsError>()(
   "A2AArchiveFactsError",
   { operation: Schema.String, cause: Schema.Defect() },
 ) {}

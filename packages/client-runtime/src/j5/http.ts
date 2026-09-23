@@ -1,5 +1,7 @@
 import {
   AnswerHumanExchangeResponse,
+  AssignImportedThreadsResponse,
+  type AssignImportedThreadsRequest,
   CreateSquadronResponse,
   CrewMembershipsResponse,
   CrewProposalResolveResponse,
@@ -34,7 +36,7 @@ import { RemoteEnvironmentAuthorization } from "../authorization/service.ts";
 import type { PreparedConnection } from "../connection/model.ts";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
 import { ManagedRelayDpopSigner } from "../relay/managedRelay.ts";
-import { executeAuthenticatedEnvironmentHttpRequest } from "../state/environmentHttpAuth.ts";
+import { executeAuthenticatedEnvironmentRawHttpRequest } from "../state/environmentHttpAuth.ts";
 
 const ErrorResponse = Schema.Struct({
   message: Schema.optionalKey(Schema.String),
@@ -42,7 +44,7 @@ const ErrorResponse = Schema.Struct({
 });
 const decodeErrorResponse = Schema.decodeUnknownOption(ErrorResponse);
 
-export class J5HttpError extends Schema.TaggedErrorClass<J5HttpError>()("J5HttpError", {
+export class J5HttpError extends Schema.TaggedError<J5HttpError>()("J5HttpError", {
   status: Schema.Number,
   detail: Schema.String,
   code: Schema.optionalKey(Schema.String),
@@ -87,7 +89,7 @@ export const executeJ5Request = Effect.fn("j5.http.executeRequest")(function* (
     return url.toString();
   };
   let requestUrl = resolveUrl(prepared.httpBaseUrl);
-  const response = yield* executeAuthenticatedEnvironmentHttpRequest({
+  const response = yield* executeAuthenticatedEnvironmentRawHttpRequest({
     prepared,
     signer,
     remoteAuthorization,
@@ -155,6 +157,17 @@ export const deleteSquadron = Effect.fn("j5.http.deleteSquadron")(function* (
     WRITE_TIMEOUT_MS,
   );
   yield* HttpClientResponse.schemaBodyJson(DeleteSquadronResponse)(response);
+});
+
+export const assignImportedThreads = Effect.fn("j5.http.assignImportedThreads")(function* (
+  prepared: PreparedConnection,
+  input: AssignImportedThreadsRequest,
+) {
+  const request = yield* HttpClientRequest.post(J5_API_PATHS.assignImportedThreads).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(AssignImportedThreadsResponse)(response);
 });
 
 export const listThreadHomes = Effect.fn("j5.http.listThreadHomes")(function* (
