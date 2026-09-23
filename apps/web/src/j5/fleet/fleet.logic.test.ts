@@ -177,7 +177,6 @@ describe("fleet sections", () => {
   const settled = shell({ settledAt: "2026-09-22T08:00:00.000Z" });
   const idle = shell();
   const running = shell({ runtime: { status: "running" } });
-  const archived = shell({ archivedAt: "2026-09-22T08:30:00.000Z" });
   // Test agents' thread ids are `thread:<participantId>`, so shells are keyed by participant.
   const lookupFrom =
     (shells: Record<string, CrewSeatThread | undefined>) => (_: EnvironmentId, threadId: string) =>
@@ -203,18 +202,12 @@ describe("fleet sections", () => {
     expect(sections.agentCount).toBe(4);
   });
 
-  it("drops an agent whose thread shows archived before the tree builds", () => {
+  it("places the child of a retired agent at the root in its own section", () => {
+    // The roster read leaves the retired parent out; its child keeps the parent id.
     const sections = partitionFleet(
-      [
-        squadron("Alpha", [
-          agent("gone"),
-          agent("child", { placementParentId: "gone" }),
-          agent("done"),
-        ]),
-      ],
-      lookupFrom({ gone: archived, child: running, done: settled }),
+      [squadron("Alpha", [agent("child", { placementParentId: "gone" }), agent("done")])],
+      lookupFrom({ child: running, done: settled }),
     );
-    // The child of a retired agent surfaces at the root rather than beneath a placeholder.
     expect(roots(sections.active)).toEqual(["Alpha/child"]);
     expect(sections.active[0]?.node.row.depth).toBe(0);
     expect(roots(sections.settled)).toEqual(["Alpha/done"]);

@@ -159,11 +159,11 @@ export const isSettledFleetNode = (
 };
 
 /**
- * The Active and Settled sections across every Squadron. An agent whose thread the client shows
- * archived is dropped before the tree builds, since a retired agent is never a row (fleet-page
- * AC11) and a stale roster read must not hold one on the page until the next poll. Roots keep the
- * order `buildFleetTree` gives them, Squadron by Squadron, so nothing is reordered by activity
- * (AC9); a root and its whole subtree land in one section together, placed by
+ * The Active and Settled sections across every Squadron. The roster read already leaves out
+ * retired agents (fleet-page AC11), and the client's thread shells never hold archived threads,
+ * so the child of a retired agent roots through `buildFleetTree` and nothing here filters. Roots
+ * keep the order `buildFleetTree` gives them, Squadron by Squadron, so nothing is reordered by
+ * activity (AC9); a root and its whole subtree land in one section together, placed by
  * `isSettledFleetNode`.
  */
 export function partitionFleet<S extends FleetSquadron & { readonly environmentId: EnvironmentId }>(
@@ -179,9 +179,8 @@ export function partitionFleet<S extends FleetSquadron & { readonly environmentI
       classifyCrewSeat(
         agent.threadId === null ? undefined : shellFor(squadron.environmentId, agent.threadId),
       );
-    const agents = squadron.agents.filter((agent) => classify(agent) !== "archived");
-    agentCount += agents.length;
-    for (const node of buildFleetTree({ ...squadron, agents })) {
+    agentCount += squadron.agents.length;
+    for (const node of buildFleetTree(squadron)) {
       if (isSettledFleetNode(node, classify)) {
         settled.push({ squadron, node });
         settledAgentCount += [...fleetNodeAgents(node)].length;
