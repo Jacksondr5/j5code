@@ -88,6 +88,14 @@ export function CrewSeatDialog(props: {
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="grid gap-4">
+            {/* The Captain's reason is why this seat exists. It is read here, never edited: the
+                roster keeps the original reason when the member is saved (see saveSeat). */}
+            {props.seat?.reason ? (
+              <p className="text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Reason</span>{" "}
+                <span className="break-words">{props.seat.reason}</span>
+              </p>
+            ) : null}
             <CrewSeatEditor
               value={draft}
               environmentId={props.environmentId}

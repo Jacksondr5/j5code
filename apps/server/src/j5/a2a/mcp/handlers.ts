@@ -26,7 +26,11 @@ import {
   ArchiveCrewService,
   type ArchiveCrewConsequenceFacts,
 } from "../ArchiveCrewService.ts";
-import { CrewProposalService, type CrewProposalOutcome } from "../CrewProposalService.ts";
+import {
+  CrewProposalService,
+  type CrewProposalError,
+  type CrewProposalOutcome,
+} from "../CrewProposalService.ts";
 import { CrewStopService } from "../CrewStopService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { A2AHomeRegistrar, participantIdForThread } from "../HomeRegistrar.ts";
@@ -396,9 +400,9 @@ const preflightCrewCaptain = Effect.fn("j5.a2a.mcp.preflightCrewCaptain")(functi
   };
 });
 
-const crewProposalNextStep = (error: { readonly _tag: string }) =>
+const crewProposalNextStep = (error: CrewProposalError) =>
   error._tag === "CrewProposalRequestError"
-    ? "Correct the request and retry."
+    ? error.nextStep
     : error._tag === "CrewLaunchSeatUnavailableError"
       ? "Choose a different persona from list_personas or ask the user to fix that persona, then retry."
       : error._tag === "CrewLaunchCapError"
