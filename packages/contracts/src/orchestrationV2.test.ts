@@ -11,6 +11,7 @@ import {
   EventId,
   MessageId,
   NodeId,
+  NonNegativeInt,
   ProjectId,
   ProviderInstanceId,
   ProviderReplayTranscript,
@@ -24,13 +25,17 @@ import {
   OrchestrationV2CheckpointScope,
   OrchestrationV2Command,
   OrchestrationV2DomainEvent,
+  OrchestrationV2ProviderCapabilities,
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderThreadJson,
   OrchestrationV2ShellSnapshot,
+  OrchestrationV2SubscribeThreadInput,
   OrchestrationV2Subagent,
   OrchestrationV2ThreadProjection,
+  OrchestrationV2ThreadStreamItem,
   OrchestrationV2ThreadShell,
   OrchestrationV2TurnItem,
+  OrchestrationV2TurnItemJson,
 } from "./orchestrationV2.ts";
 
 const now = DateTime.makeUnsafe("2026-04-20T00:00:00.000Z");
@@ -41,9 +46,17 @@ const LegacyShellStreamItem = Schema.Union([
     snapshot: OrchestrationV2ShellSnapshot,
   }),
 ]);
+const LegacySubscribeThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  afterSequence: Schema.optionalKey(NonNegativeInt),
+  requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
+});
 const decodeLegacyShellStreamItem = Schema.decodeUnknownSync(LegacyShellStreamItem);
+const decodeLegacySubscribeThreadInput = Schema.decodeUnknownSync(LegacySubscribeThreadInput);
 const decodeOrchestrationV2Command = Schema.decodeUnknownSync(OrchestrationV2Command);
 const decodeOrchestrationV2TurnItem = Schema.decodeUnknownSync(OrchestrationV2TurnItem);
+const decodeOrchestrationV2TurnItemJson = Schema.decodeUnknownSync(OrchestrationV2TurnItemJson);
+const encodeOrchestrationV2TurnItemJson = Schema.encodeSync(OrchestrationV2TurnItemJson);
 const decodeOrchestrationV2CheckpointScope = Schema.decodeUnknownSync(
   OrchestrationV2CheckpointScope,
 );
@@ -54,13 +67,185 @@ const decodeOrchestrationV2Subagent = Schema.decodeUnknownSync(OrchestrationV2Su
 const decodeOrchestrationV2ThreadProjection = Schema.decodeUnknownSync(
   OrchestrationV2ThreadProjection,
 );
+const decodeOrchestrationV2ThreadStreamItem = Schema.decodeUnknownSync(
+  OrchestrationV2ThreadStreamItem,
+);
 const decodeOrchestrationV2ProviderThreadJson = Schema.decodeUnknownSync(
   OrchestrationV2ProviderThreadJson,
 );
 const decodeOrchestrationV2ProviderThread = Schema.decodeUnknownSync(OrchestrationV2ProviderThread);
 const decodeOrchestrationV2ThreadShell = Schema.decodeUnknownSync(OrchestrationV2ThreadShell);
+const decodeOrchestrationV2ProviderCapabilities = Schema.decodeUnknownSync(
+  OrchestrationV2ProviderCapabilities,
+);
+
+const decodeOrchestrationV2SubscribeThreadInput = Schema.decodeUnknownSync(
+  OrchestrationV2SubscribeThreadInput,
+);
 
 describe("orchestration V2 contracts", () => {
+  it("carries command failure metadata through runtime and JSON schemas without output text", () => {
+    const base = {
+      id: "command-item",
+      type: "command_execution",
+      threadId: "thread-1",
+      runId: null,
+      nodeId: null,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: 1,
+      status: "completed",
+      title: "Command",
+      input: "example",
+      startedAt: null,
+      completedAt: null,
+    };
+    for (const metadata of [
+      {},
+      { outputIndicatesFailure: true },
+      { outputIndicatesFailure: false },
+    ]) {
+      const runtime = decodeOrchestrationV2TurnItem({ ...base, ...metadata, updatedAt: now });
+      const json = decodeOrchestrationV2TurnItemJson({
+        ...base,
+        ...metadata,
+        updatedAt: DateTime.formatIso(now),
+      });
+      expect(runtime.type).toBe("command_execution");
+      expect(json.type).toBe("command_execution");
+      expect(runtime).toMatchObject(metadata);
+      expect(json).toMatchObject(metadata);
+      expect(runtime).not.toHaveProperty("output");
+      expect(json).not.toHaveProperty("output");
+    }
+  });
+
+  it("negotiates bounded socket snapshots as an optional capability", () => {
+    expect(
+      decodeOrchestrationV2SubscribeThreadInput({
+        threadId: "thread-1",
+        acceptBoundedSnapshot: true,
+      }).acceptBoundedSnapshot,
+    ).toBe(true);
+    expect(
+      decodeOrchestrationV2SubscribeThreadInput({ threadId: "thread-1" }).acceptBoundedSnapshot,
+    ).toBeUndefined();
+
+    const legacyDecoded = decodeLegacySubscribeThreadInput({
+      threadId: "thread-1",
+      afterSequence: 12,
+      acceptBoundedSnapshot: true,
+    });
+    expect(legacyDecoded.afterSequence).toBe(12);
+    expect("acceptBoundedSnapshot" in legacyDecoded).toBe(false);
+  });
+
+  it("decodes persisted capability snapshots that predate runtimePolicy", () => {
+    // Events written before the field existed must replay; absent decodes to
+    // the weaker client-boundary guarantee so history never overclaims.
+    const legacyCapabilities = {
+      sessions: {
+        supportsMultipleProviderThreadsPerSession: false,
+        supportsModelSwitchInSession: false,
+        supportsProviderSwitchingViaHandoff: true,
+        supportsRuntimeModeSwitchInSession: false,
+        pendingRequestsSurviveRestart: false,
+      },
+      threads: {
+        canCreateEmptyThread: true,
+        canReadThreadSnapshot: false,
+        canRollbackThread: true,
+        canForkThread: false,
+        canForkFromTurn: false,
+        canForkFromSubagentThread: false,
+        exposesNativeThreadId: true,
+      },
+      turns: {
+        exposesNativeTurnId: false,
+        emitsTurnStarted: true,
+        emitsTurnCompleted: true,
+        supportsInterrupt: true,
+        supportsActiveSteering: false,
+        supportsSteeringByInterruptRestart: true,
+        supportsQueuedMessages: true,
+        terminalStatusQuality: "strong",
+      },
+      streaming: {
+        streamsAssistantText: true,
+        streamsReasoning: true,
+        streamsToolOutput: true,
+        streamsPlanText: false,
+        emitsMessageCompleted: true,
+      },
+      tools: {
+        exposesToolItemIds: true,
+        emitsToolStarted: true,
+        emitsToolCompleted: true,
+        emitsToolOutput: true,
+        supportsMcpTools: false,
+        supportsDynamicToolCallbacks: false,
+      },
+      approvals: {
+        supportsCommandApproval: true,
+        supportsFileReadApproval: true,
+        supportsFileChangeApproval: true,
+        supportsApplyPatchApproval: false,
+        approvalsHaveNativeRequestIds: false,
+        approvalCallbacksAreLiveOnly: true,
+        approvalsCanOriginateFromSubagents: false,
+      },
+      planning: {
+        emitsPlanUpdated: true,
+        emitsTodoList: true,
+        emitsProposedPlan: false,
+        supportsStructuredQuestions: true,
+        planDeltasHaveItemIds: false,
+      },
+      subagents: {
+        supportsSubagents: false,
+        exposesSubagentThreadIds: false,
+        emitsSubagentLifecycle: false,
+        canWaitForSubagents: false,
+        canCloseSubagents: false,
+        canForkSubagentThread: false,
+      },
+      context: {
+        acceptsSystemContext: false,
+        acceptsDeveloperContext: false,
+        acceptsSyntheticUserContext: true,
+        canGenerateSummaries: true,
+        canConsumeHandoffSummaries: true,
+        supportsDeltaHandoff: true,
+        supportsFullThreadHandoff: true,
+        maxRecommendedHandoffChars: null,
+      },
+      checkpointing: {
+        appCanCheckpointFilesystem: true,
+        supportsNestedCheckpointScopes: true,
+        providerCanRollbackConversation: true,
+        providerRollbackReturnsSnapshot: true,
+        providerCanReadConversationSnapshot: false,
+      },
+      identity: {
+        nativeThreadIds: "strong",
+        nativeTurnIds: "weak",
+        nativeItemIds: "weak",
+        nativeRequestIds: "weak",
+      },
+    };
+
+    const decoded = decodeOrchestrationV2ProviderCapabilities(legacyCapabilities);
+    expect(decoded.runtimePolicy).toEqual({ enforcement: "client-boundary" });
+
+    const explicit = decodeOrchestrationV2ProviderCapabilities({
+      ...legacyCapabilities,
+      runtimePolicy: { enforcement: "native" },
+    });
+    expect(explicit.runtimePolicy).toEqual({ enforcement: "native" });
+  });
+
   it("lets legacy snapshot decoders ignore enrichment metadata", () => {
     const decoded = decodeLegacyShellStreamItem({
       kind: "snapshot",
@@ -596,6 +781,23 @@ describe("orchestration V2 contracts", () => {
     });
 
     expect(projection.turnItems.map((item) => item.type)).toEqual(["command_execution"]);
+
+    const boundedSnapshot = decodeOrchestrationV2ThreadStreamItem({
+      kind: "snapshot",
+      snapshotSequence: 12,
+      projection,
+      historyCursor: "older-page",
+      hasMoreHistory: true,
+      latestLocalTurnOrdinal: 1,
+      payloadBudgetExceeded: false,
+    });
+    expect(boundedSnapshot).toMatchObject({
+      kind: "snapshot",
+      historyCursor: "older-page",
+      hasMoreHistory: true,
+      latestLocalTurnOrdinal: 1,
+      payloadBudgetExceeded: false,
+    });
   });
 
   it("decodes orchestration lifecycle turn items for compaction, handoff, and fork UI", () => {
@@ -706,6 +908,8 @@ describe("orchestration V2 contracts", () => {
     });
 
     expect(providerThread.pendingBackgroundTasks).toEqual([]);
+    expect(providerThread.contextUsage).toBeNull();
+    expect(providerThread.nativeMetadata).toBeNull();
 
     const runtimeThread = decodeOrchestrationV2ProviderThread({
       id: "provider-thread-2",
@@ -725,6 +929,8 @@ describe("orchestration V2 contracts", () => {
       updatedAt: now,
     });
     expect(runtimeThread.pendingBackgroundTasks).toEqual([]);
+    expect(runtimeThread.contextUsage).toBeNull();
+    expect(runtimeThread.nativeMetadata).toBeNull();
   });
 
   it("decodes historical thread shell JSON without pendingBackgroundTasks as empty roster", () => {
@@ -769,4 +975,45 @@ describe("orchestration V2 contracts", () => {
 
     expect(shell.pendingBackgroundTasks).toEqual([]);
   });
+});
+
+it("round-trips typed notifications and keeps work outcome separate from item status", () => {
+  const now = DateTime.makeUnsafe("2026-09-09T00:00:00Z");
+  const base = {
+    id: "notification",
+    threadId: "parent",
+    runId: null,
+    nodeId: null,
+    providerThreadId: null,
+    providerTurnId: null,
+    nativeItemRef: null,
+    parentItemId: null,
+    ordinal: 1,
+    status: "completed",
+    title: null,
+    startedAt: null,
+    completedAt: null,
+    type: "notification",
+    outcome: "failed",
+    summary: "Build failed",
+    detail: "Exit code 1",
+  };
+  for (const source of [
+    { kind: "delegated_task", taskIds: ["task-1", "task-2"] },
+    { kind: "background_task" },
+    { kind: "background_command" },
+    { kind: "monitor" },
+  ]) {
+    const runtime = decodeOrchestrationV2TurnItem({ ...base, source, updatedAt: now });
+    const wire = encodeOrchestrationV2TurnItemJson(runtime);
+    expect(decodeOrchestrationV2TurnItemJson(wire)).toEqual(runtime);
+    expect(runtime).toMatchObject({ status: "completed", outcome: "failed", source });
+    expect(runtime).not.toHaveProperty("messageId");
+    expect(() =>
+      decodeOrchestrationV2TurnItem({ ...base, source, summary: "", updatedAt: now }),
+    ).toThrow();
+  }
+  expect(() =>
+    decodeOrchestrationV2TurnItem({ ...base, source: { kind: "delegated_task" }, updatedAt: now }),
+  ).toThrow();
 });

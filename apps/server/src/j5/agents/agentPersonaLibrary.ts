@@ -29,7 +29,7 @@ import {
   AgentPersonaDefinition,
 } from "./agentPersonas.ts";
 
-export class AgentPersonaLibraryError extends Schema.TaggedErrorClass<AgentPersonaLibraryError>()(
+export class AgentPersonaLibraryError extends Schema.TaggedError<AgentPersonaLibraryError>()(
   "AgentPersonaLibraryError",
   { message: Schema.String, cause: Schema.optional(Schema.Defect()) },
 ) {}

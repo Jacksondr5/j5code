@@ -1,6 +1,7 @@
 import type { ProjectId } from "@t3tools/contracts";
 import type {
   AnswerHumanExchangeRequest,
+  AssignImportedThreadsRequest,
   CrewProposalResolveRequest,
   CrewProposalPreviewRequest,
   CrewArchiveRequest,
@@ -101,6 +102,13 @@ export function createJ5EnvironmentAtoms<R, E>(
       execute: (input: { readonly name: string; readonly projectId: ProjectId }) =>
         preparedConnection.pipe(
           Effect.flatMap((prepared) => J5Http.createSquadron(prepared, input)),
+        ),
+    }),
+    assignImportedThreads: createEnvironmentCommand(runtime, {
+      label: "j5:assign-imported-threads",
+      execute: (input: AssignImportedThreadsRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.assignImportedThreads(prepared, input)),
         ),
     }),
     answerHumanExchange: createEnvironmentCommand(runtime, {

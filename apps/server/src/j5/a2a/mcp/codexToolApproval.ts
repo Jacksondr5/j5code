@@ -35,7 +35,6 @@ export const J5_CODEX_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
   "task_cancel",
   "stop_agent",
   "stop_crew",
-  "archive_agent",
   "archive_crew",
   "clear_own_ask",
 ];

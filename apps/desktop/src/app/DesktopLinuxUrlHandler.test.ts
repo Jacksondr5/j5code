@@ -23,7 +23,8 @@ const makeEnvironment = (overrides: Record<string, unknown> = {}) =>
     isPackaged: true,
     isDevelopment: false,
     displayName: "T3 Code (Alpha)",
-    linuxWmClass: "t3code",
+    linuxDesktopEntryName: "j5code.desktop",
+    linuxWmClass: "j5code",
     linuxApplicationsDir: "/home/alice/.local/share/applications",
     appImagePath: Option.some("/home/alice/Applications/T3-Code.AppImage"),
     path: { join: (...parts: ReadonlyArray<string>) => parts.join("/") },
@@ -51,6 +52,7 @@ const makeHandlerLayer = (
     readonly environment?: Record<string, unknown>;
     readonly xdgMimeExitCode?: number;
     readonly writeError?: PlatformError.PlatformError;
+    readonly existingEntry?: string;
   } = {},
 ) =>
   DesktopLinuxUrlHandler.layer.pipe(
@@ -58,6 +60,7 @@ const makeHandlerLayer = (
       Layer.mergeAll(
         Layer.succeed(DesktopEnvironment.DesktopEnvironment, makeEnvironment(input.environment)),
         FileSystem.layerNoop({
+          readFileString: () => Effect.succeed(input.existingEntry ?? ""),
           makeDirectory: (path) =>
             Effect.sync(() => {
               recorded.directories.push(path);
@@ -107,7 +110,7 @@ describe("DesktopLinuxUrlHandler", () => {
     const entry = DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
       displayName: "T3 Code (Nightly)",
       execTarget: '/home/al ice/Apps/T3 "100%" $HOME\\x.AppImage',
-      scheme: "t3code",
+      scheme: "j5code",
     });
 
     assert.include(entry, "[Desktop Entry]");
@@ -121,33 +124,33 @@ describe("DesktopLinuxUrlHandler", () => {
     );
     assert.include(entry, "NoDisplay=true");
     assert.notInclude(entry, "StartupWMClass=");
-    assert.include(entry, "MimeType=x-scheme-handler/t3code;");
+    assert.include(entry, "MimeType=x-scheme-handler/j5code;");
   });
 
   it("carries structured context on registration errors", () => {
     const writeError = new DesktopLinuxUrlHandler.DesktopLinuxUrlHandlerRegistrationError({
       step: "write-desktop-entry",
-      scheme: "t3code",
-      desktopEntryPath: "/home/alice/.local/share/applications/t3code-url-handler.desktop",
+      scheme: "j5code",
+      desktopEntryPath: "/home/alice/.local/share/applications/j5code.desktop",
       cause: new Error("boom"),
     });
     assert.equal(
       writeError.message,
-      "Failed to register the t3code:// URL handler (step: write-desktop-entry).",
+      "Failed to register the j5code:// URL handler (step: write-desktop-entry).",
     );
     assert.equal(
       writeError.desktopEntryPath,
-      "/home/alice/.local/share/applications/t3code-url-handler.desktop",
+      "/home/alice/.local/share/applications/j5code.desktop",
     );
 
     const exitError = new DesktopLinuxUrlHandler.DesktopLinuxUrlHandlerRegistrationError({
       step: "set-default-handler",
-      scheme: "t3code",
+      scheme: "j5code",
       exitCode: 4,
     });
     assert.equal(
       exitError.message,
-      "Failed to register the t3code:// URL handler (step: set-default-handler, xdg-mime exit code 4).",
+      "Failed to register the j5code:// URL handler (step: set-default-handler, xdg-mime exit code 4).",
     );
   });
 
@@ -159,10 +162,7 @@ describe("DesktopLinuxUrlHandler", () => {
 
       assert.deepEqual(recorded.directories, ["/home/alice/.local/share/applications"]);
       assert.equal(recorded.files.length, 1);
-      assert.equal(
-        recorded.files[0]?.path,
-        "/home/alice/.local/share/applications/j5code-url-handler.desktop",
-      );
+      assert.equal(recorded.files[0]?.path, "/home/alice/.local/share/applications/j5code.desktop");
       assert.include(
         recorded.files[0]?.content,
         'Exec="/home/alice/Applications/T3-Code.AppImage" %U',
@@ -171,7 +171,7 @@ describe("DesktopLinuxUrlHandler", () => {
       assert.deepEqual(recorded.commands, [
         {
           command: "xdg-mime",
-          args: ["default", "j5code-url-handler.desktop", "x-scheme-handler/j5code"],
+          args: ["default", "j5code.desktop", "x-scheme-handler/j5code"],
         },
       ]);
     });
@@ -190,19 +190,43 @@ describe("DesktopLinuxUrlHandler", () => {
     });
   });
 
-  it.effect("does nothing on other platforms or unpackaged builds", () => {
+  it.effect("does not rewrite the pre-ready entry while the portal can be reading it", () => {
+    const recorded = emptyRecording();
+
+    return Effect.gen(function* () {
+      yield* runRegister(recorded, {
+        existingEntry: DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
+          displayName: "T3 Code (Alpha)",
+          execTarget: "/home/alice/Applications/T3-Code.AppImage",
+          scheme: "j5code",
+        }),
+      });
+
+      assert.deepEqual(recorded.files, []);
+      assert.deepEqual(recorded.directories, []);
+      assert.equal(recorded.commands.length, 1);
+    });
+  });
+
+  it.effect("writes the portal identity without claiming the URL scheme in development", () => {
     const nonLinux = emptyRecording();
     const unpackaged = emptyRecording();
 
     return Effect.gen(function* () {
       yield* runRegister(nonLinux, { environment: { platform: "darwin" } });
-      yield* runRegister(unpackaged, { environment: { isPackaged: false } });
+      yield* runRegister(unpackaged, {
+        environment: {
+          isPackaged: false,
+          linuxDesktopEntryName: "j5code-dev.desktop",
+        },
+      });
 
-      for (const recorded of [nonLinux, unpackaged]) {
-        assert.deepEqual(recorded.directories, []);
-        assert.deepEqual(recorded.files, []);
-        assert.deepEqual(recorded.commands, []);
-      }
+      assert.deepEqual(nonLinux.files, []);
+      assert.equal(
+        unpackaged.files[0]?.path,
+        "/home/alice/.local/share/applications/j5code-dev.desktop",
+      );
+      assert.deepEqual(unpackaged.commands, []);
     });
   });
 
@@ -218,7 +242,7 @@ describe("DesktopLinuxUrlHandler", () => {
           module: "FileSystem",
           method: "writeFileString",
           description: "read-only filesystem",
-          pathOrDescriptor: "/home/alice/.local/share/applications/j5code-url-handler.desktop",
+          pathOrDescriptor: "/home/alice/.local/share/applications/j5code.desktop",
         }),
       });
 

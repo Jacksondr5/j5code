@@ -94,7 +94,11 @@ const inputFor = (input: {
   placementCommandId: PlacementCommandId.make(`command:spawn-placement:${input.name}`),
   squadronId: input.squadronId,
   threadId: input.threadId,
-  spawnedByParticipantId: input.spawnedByParticipantId,
+  provenance: {
+    kind: "spawned-by" as const,
+    spawnedByParticipantId: input.spawnedByParticipantId,
+    source: "j5_spawn" as const,
+  },
   createdAt,
 });
 

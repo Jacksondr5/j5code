@@ -1,3 +1,4 @@
+import { threadPullRequestsOf } from "@t3tools/shared/threadPullRequests";
 import type {
   ThreadLinkedPullRequest,
   EnvironmentId,
@@ -46,17 +47,31 @@ export interface ThreadRunSummary {
 export interface ThreadRuntimeSummary {
   readonly status: OrchestrationV2RunStatus | "idle";
   readonly activeRunId: RunId | null;
+  readonly activityStartedAt?: string | null | undefined;
   readonly providerInstanceId: ProviderInstanceId;
   readonly providerName: string | null;
   readonly lastError: string | null;
   readonly updatedAt: string;
 }
 
-export function threadRuntimeIsActive(runtime: ThreadRuntimeSummary | null | undefined): boolean {
+export function threadRuntimeIsActive(
+  runtime: Pick<ThreadRuntimeSummary, "status"> | null | undefined,
+): boolean {
   return runtime !== null && runtime !== undefined && threadRunStatusIsActive(runtime.status);
 }
 
-export function threadRunStatusIsActive(status: ThreadRuntimeSummary["status"]): boolean {
+/** Archiving may discard queued work, but it must not detach a provider that
+ * is preparing, starting, or running a turn. */
+export function threadRuntimeCanArchive(runtime: ThreadRuntimeSummary | null | undefined): boolean {
+  if (runtime?.status === "queued") return runtime.activeRunId === null;
+  return (
+    runtime?.status !== "preparing" &&
+    runtime?.status !== "starting" &&
+    runtime?.status !== "running"
+  );
+}
+
+function threadRunStatusIsActive(status: ThreadRuntimeSummary["status"]): boolean {
   return (
     status === "preparing" ||
     status === "queued" ||
@@ -92,6 +107,8 @@ export interface EnvironmentThreadShell {
   readonly pendingBackgroundTasks: ReadonlyArray<
     NonNullable<OrchestrationV2ThreadShell["pendingBackgroundTasks"]>[number]
   >;
+  /** Provider instances that have owned the root conversation, oldest first. */
+  readonly providerInstanceHistory: ReadonlyArray<ProviderInstanceId>;
   readonly itemCount: number;
   readonly visibleItemCount: number;
   readonly createdAt: string;
@@ -99,17 +116,17 @@ export interface EnvironmentThreadShell {
   readonly archivedAt: string | null;
   readonly settledOverride: "settled" | "active" | null;
   readonly settledAt: string | null;
+  readonly unsettledAt: string | null;
   readonly snoozedUntil: string | null;
   readonly snoozedAt: string | null;
   readonly pinnedAt: string | null;
   /** Slot in the user-arranged pinned order; null for keyless (legacy) pins. */
   readonly pinOrderKey: string | null;
-  /**
-   * Pull request the user linked to the thread (#8160). The v2 server does not
-   * project this yet, so it stays undefined on v2 environments; UI treats
-   * undefined and null alike.
-   */
+  /** Slot in the user-arranged active order; null for keyless active threads. */
+  readonly activeOrderKey: string | null;
+  readonly pullRequests: ReadonlyArray<import("@t3tools/contracts").ThreadPullRequestLink>;
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
+  readonly branchPullRequest?: ThreadLinkedPullRequest | null;
   /**
    * Server-tracked visited watermark. `undefined` means the environment's
    * server predates visited tracking and clients should fall back to any
@@ -152,6 +169,10 @@ function shellRuntime(thread: OrchestrationV2ThreadShell): ThreadRuntimeSummary 
   return {
     status,
     activeRunId: thread.activeRunId,
+    activityStartedAt:
+      thread.activityRunStartedAt === undefined
+        ? undefined
+        : nullableIso(thread.activityRunStartedAt),
     providerInstanceId: thread.providerInstanceId,
     providerName: null,
     lastError: thread.lastError ?? null,
@@ -201,7 +222,9 @@ export function presentThreadShell(
       : { agentPersonaAssignment: thread.agentPersonaAssignment }),
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    pullRequests: threadPullRequestsOf(thread),
     linkedPullRequest: thread.linkedPullRequest ?? null,
+    branchPullRequest: thread.branchPullRequest ?? null,
     lineage: thread.lineage,
     forkedFrom: thread.forkedFrom,
     activeProviderThreadId: thread.activeProviderThreadId,
@@ -215,6 +238,7 @@ export function presentThreadShell(
     hasPendingUserInput: thread.pendingRuntimeRequest?.kind === "user_input",
     hasActionableProposedPlan: thread.hasActionableProposedPlan,
     pendingBackgroundTasks: thread.pendingBackgroundTasks ?? [],
+    providerInstanceHistory: thread.providerInstanceHistory ?? [],
     itemCount: thread.itemCount,
     visibleItemCount: thread.visibleItemCount,
     createdAt: iso(thread.createdAt),
@@ -222,10 +246,12 @@ export function presentThreadShell(
     archivedAt: nullableIso(thread.archivedAt),
     settledOverride: thread.settledOverride,
     settledAt: nullableIso(thread.settledAt),
+    unsettledAt: nullableIso(thread.unsettledAt ?? null),
     snoozedUntil: nullableIso(thread.snoozedUntil ?? null),
     snoozedAt: nullableIso(thread.snoozedAt ?? null),
     pinnedAt: nullableIso(thread.pinnedAt ?? null),
     pinOrderKey: thread.pinOrderKey ?? null,
+    activeOrderKey: thread.activeOrderKey ?? null,
     ...(thread.lastVisitedAt === undefined
       ? {}
       : { lastVisitedAt: nullableIso(thread.lastVisitedAt) }),
@@ -241,4 +267,43 @@ export function presentThreadShell(
   };
 }
 
-export const scopeThreadShell = presentThreadShell;
+export function scopeThreadShell(
+  environmentId: EnvironmentId,
+  thread: OrchestrationV2ThreadShell,
+): EnvironmentThreadShell {
+  return presentThreadShell(environmentId, thread);
+}
+
+const THREAD_PROVIDER_STACK_LIMIT = 3;
+
+/**
+ * Provider instances to draw in a thread row's trailing stack, back to front:
+ * the current one is always last, earlier owners precede it oldest first.
+ * Newest history wins when the thread has been handed off more times than fit.
+ */
+export function resolveThreadProviderStack(
+  thread: Pick<EnvironmentThreadShell, "providerInstanceHistory" | "modelSelection" | "runtime">,
+): ReadonlyArray<ProviderInstanceId> {
+  const current = thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId;
+  const previous = thread.providerInstanceHistory.filter((instanceId) => instanceId !== current);
+  return [...previous.slice(-(THREAD_PROVIDER_STACK_LIMIT - 1)), current];
+}
+
+/** Both shell and detail timers use the activity-owning run, never last activity. */
+export function resolveThreadWorkingStartedAt(input: {
+  readonly latestRun: Pick<
+    ThreadRunSummary,
+    "runId" | "startedAt" | "requestedAt" | "completedAt"
+  > | null;
+  readonly runtime: Pick<ThreadRuntimeSummary, "activeRunId" | "activityStartedAt"> | null;
+}): string | null {
+  const valid = (value: string | null | undefined) =>
+    value != null && Number.isFinite(Date.parse(value)) ? value : null;
+  if (input.runtime?.activityStartedAt !== undefined) return valid(input.runtime.activityStartedAt);
+  // Older servers can supply a timestamp only if the newest run owns the work.
+  const run = input.latestRun;
+  if (run?.completedAt === null && run.runId === input.runtime?.activeRunId) {
+    return valid(run.startedAt) ?? valid(run.requestedAt);
+  }
+  return null;
+}

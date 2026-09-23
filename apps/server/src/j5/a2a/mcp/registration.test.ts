@@ -9,7 +9,6 @@ import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagem
 import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
 import { ScheduledTaskService } from "../../../scheduledTasks/ScheduledTaskService.ts";
 import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
-import { ArchiveAgentService } from "../ArchiveAgentService.ts";
 import { ArchiveCrewService } from "../ArchiveCrewService.ts";
 import { CrewStopService } from "../CrewStopService.ts";
 import { CrewProposalService } from "../CrewProposalService.ts";
@@ -39,7 +38,6 @@ const Dependencies = Layer.mergeAll(
   Layer.mock(A2ASendService)({}),
   Layer.mock(SpawnCompositionService)({}),
   Layer.mock(AgentCrewInstanceService)({}),
-  Layer.mock(ArchiveAgentService)({}),
   Layer.mock(SquadronJoinService)({}),
   Layer.mock(SquadronProjectReferences)({}),
   Layer.mock(ArchiveCrewService)({}),
@@ -57,7 +55,6 @@ it.effect("registers the exact composed production J5 orchestration surface", ()
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
     assert.deepStrictEqual(server.tools.map(({ tool }) => tool.name).toSorted(), [
-      "archive_agent",
       "archive_crew",
       "clear_own_ask",
       "delegate_task",

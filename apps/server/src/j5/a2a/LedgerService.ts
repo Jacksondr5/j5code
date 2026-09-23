@@ -32,17 +32,17 @@ import {
 } from "./contracts.ts";
 import { decideAppendCommEvent } from "./decider.ts";
 
-export class A2AStorageError extends Schema.TaggedErrorClass<A2AStorageError>()("A2AStorageError", {
+export class A2AStorageError extends Schema.TaggedError<A2AStorageError>()("A2AStorageError", {
   operation: Schema.String,
   cause: Schema.optional(Schema.Defect()),
 }) {}
 
-export class SquadronNotFoundError extends Schema.TaggedErrorClass<SquadronNotFoundError>()(
+export class SquadronNotFoundError extends Schema.TaggedError<SquadronNotFoundError>()(
   "SquadronNotFoundError",
   { squadronId: Schema.String },
 ) {}
 
-export class CommCommandConflictError extends Schema.TaggedErrorClass<CommCommandConflictError>()(
+export class CommCommandConflictError extends Schema.TaggedError<CommCommandConflictError>()(
   "CommCommandConflictError",
   {
     commandId: Schema.String,
@@ -51,7 +51,7 @@ export class CommCommandConflictError extends Schema.TaggedErrorClass<CommComman
   },
 ) {}
 
-export class LedgerCursorError extends Schema.TaggedErrorClass<LedgerCursorError>()(
+export class LedgerCursorError extends Schema.TaggedError<LedgerCursorError>()(
   "LedgerCursorError",
   {
     squadronId: Schema.String,
@@ -60,7 +60,7 @@ export class LedgerCursorError extends Schema.TaggedErrorClass<LedgerCursorError
   },
 ) {}
 
-export class LedgerGapError extends Schema.TaggedErrorClass<LedgerGapError>()("LedgerGapError", {
+export class LedgerGapError extends Schema.TaggedError<LedgerGapError>()("LedgerGapError", {
   squadronId: Schema.String,
   expectedSeq: Schema.Number,
   actualSeq: Schema.NullOr(Schema.Number),

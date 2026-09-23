@@ -23,6 +23,28 @@ export const SquadronListResponse = Schema.Struct({ squadrons: Schema.Array(Mana
 export const CreateSquadronRequest = Schema.Struct({ name: Schema.String, projectId: ProjectId });
 export const CreateSquadronResponse = Schema.Struct({ squadron: ManagedSquadron });
 
+export const AssignImportedThreadsRequest = Schema.Struct({
+  squadronId: Schema.String.check(Schema.isNonEmpty()),
+  projectId: ProjectId,
+});
+export type AssignImportedThreadsRequest = typeof AssignImportedThreadsRequest.Type;
+export const AssignImportedThreadsResponse = Schema.Struct({
+  entries: Schema.Array(
+    Schema.Struct({
+      threadId: ThreadId,
+      status: Schema.Literals([
+        "assigned",
+        "already_assigned",
+        "kept_elsewhere",
+        "kept_retired",
+        "kept_archived",
+        "failed",
+      ]),
+    }),
+  ),
+});
+export type AssignImportedThreadsResponse = typeof AssignImportedThreadsResponse.Type;
+
 export const ThreadHome = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("known"),
@@ -325,6 +347,7 @@ export type CrewArchiveResponse = typeof CrewArchiveResponse.Type;
 
 export const J5_API_PATHS = {
   squadrons: "/api/j5/squadrons",
+  assignImportedThreads: "/api/j5/squadrons/assign-imported",
   threadHomes: "/api/j5/a2a/client-reads/participant-homes",
   inbox: "/api/j5/a2a/inbox",
   answer: "/api/j5/a2a/inbox/answer",

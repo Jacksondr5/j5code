@@ -63,6 +63,15 @@ export class CheckpointStore extends Context.Service<
       input: CaptureCheckpointInput,
     ) => Effect.Effect<void, CheckpointStoreError>;
 
+    /**
+     * Best-effort warm-up of the driver's checkpoint machinery so the first
+     * blocking capture in a fresh workspace is fast. No-op for drivers
+     * without warm support.
+     */
+    readonly warmCheckpoint: (input: {
+      readonly cwd: string;
+    }) => Effect.Effect<void, CheckpointStoreError>;
+
     /** Check whether a checkpoint ref exists. */
     readonly hasCheckpointRef: (
       input: Omit<RestoreCheckpointInput, "fallbackToHead">,
@@ -98,6 +107,7 @@ export class CheckpointStore extends Context.Service<
   }
 >()("t3/checkpointing/CheckpointStore") {}
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
 
@@ -127,6 +137,13 @@ export const make = Effect.gen(function* () {
     const checkpoints = yield* resolveCheckpoints("CheckpointStore.captureCheckpoint", input.cwd);
     return yield* checkpoints.captureCheckpoint(input);
   });
+
+  const warmCheckpoint: CheckpointStore["Service"]["warmCheckpoint"] = Effect.fn("warmCheckpoint")(
+    function* (input) {
+      const checkpoints = yield* resolveCheckpoints("CheckpointStore.warmCheckpoint", input.cwd);
+      return yield* checkpoints.warmCheckpoint?.(input) ?? Effect.void;
+    },
+  );
 
   const hasCheckpointRef: CheckpointStore["Service"]["hasCheckpointRef"] = Effect.fn(
     "hasCheckpointRef",
@@ -162,6 +179,7 @@ export const make = Effect.gen(function* () {
   return CheckpointStore.of({
     isGitRepository,
     captureCheckpoint,
+    warmCheckpoint,
     hasCheckpointRef,
     restoreCheckpoint,
     diffCheckpoints,

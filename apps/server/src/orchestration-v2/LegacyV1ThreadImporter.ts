@@ -1,3 +1,4 @@
+import { threadPullRequestsOf } from "@t3tools/shared/threadPullRequests";
 import {
   ChatAttachment,
   DEFAULT_MODEL,
@@ -13,6 +14,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   ThreadLinkedPullRequest,
+  ThreadPullRequestLink,
   TurnItemId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -26,6 +28,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { EventSinkV2 } from "./EventSink.ts";
 import { EventStoreV2 } from "./EventStore.ts";
 import { makeKeyedSerialExecutor } from "./KeyedSerialExecutor.ts";
+import { randomUuidV4 } from "./RandomUuid.ts";
 
 const IMPORT_EVENT_PREFIX = "migration:v1";
 const TRANSCRIPT_EVENT_BATCH_SIZE = 100;
@@ -49,7 +52,10 @@ interface LegacyThreadRow {
   readonly snoozed_at: string | null;
   readonly pinned_at: string | null;
   readonly pin_order_key: string | null;
+  readonly pull_requests_json: string;
   readonly linked_pull_request_json: string | null;
+  readonly branch_pull_request_json: string | null;
+  readonly active_order_key: string | null;
   readonly deleted_at: string | null;
 }
 
@@ -79,7 +85,7 @@ export interface LegacyV1ImportSummary {
   readonly importedMessageCount: number;
 }
 
-export class LegacyV1ThreadImportError extends Schema.TaggedErrorClass<LegacyV1ThreadImportError>()(
+export class LegacyV1ThreadImportError extends Schema.TaggedError<LegacyV1ThreadImportError>()(
   "LegacyV1ThreadImportError",
   {
     operation: Schema.String,
@@ -110,6 +116,7 @@ export class LegacyV1ThreadImporter extends Context.Service<
 
 const decodeModelSelection = Schema.decodeUnknownOption(ModelSelection);
 const decodeAttachments = Schema.decodeUnknownOption(Schema.Array(ChatAttachment));
+const decodePullRequests = Schema.decodeUnknownOption(Schema.Array(ThreadPullRequestLink));
 const decodeLinkedPullRequest = Schema.decodeUnknownOption(ThreadLinkedPullRequest);
 const decodeStoredThread = Schema.decodeUnknownOption(
   Schema.fromJsonString(OrchestrationV2AppThreadJson),
@@ -144,6 +151,11 @@ function linkedPullRequestFor(row: LegacyThreadRow) {
   return Option.getOrNull(decodeLinkedPullRequest(parseJson(row.linked_pull_request_json)));
 }
 
+function branchPullRequestFor(row: LegacyThreadRow) {
+  if (row.branch_pull_request_json === null) return null;
+  return Option.getOrNull(decodeLinkedPullRequest(parseJson(row.branch_pull_request_json)));
+}
+
 function runtimeModeFor(value: string): OrchestrationV2AppThread["runtimeMode"] {
   return value === "approval-required" ||
     value === "auto-accept-edits" ||
@@ -174,6 +186,10 @@ function importedThread(row: LegacyThreadRow): OrchestrationV2AppThread {
   const modelSelection = modelSelectionFor(row);
   const branch = row.branch?.trim() || null;
   const worktreePath = row.worktree_path?.trim() || null;
+  const pullRequests = Option.getOrElse(
+    decodePullRequests(parseJson(row.pull_requests_json)),
+    () => [],
+  );
   return {
     createdBy: "system",
     creationSource: "server",
@@ -187,6 +203,12 @@ function importedThread(row: LegacyThreadRow): OrchestrationV2AppThread {
     branch,
     worktreePath,
     linkedPullRequest: linkedPullRequestFor(row),
+    pullRequests:
+      pullRequests.length > 0
+        ? pullRequests
+        : threadPullRequestsOf({ linkedPullRequest: linkedPullRequestFor(row) }),
+    branchPullRequest: branchPullRequestFor(row),
+    activeOrderKey: row.active_order_key?.trim() || null,
     activeProviderThreadId: null,
     historyOrigin: "v1_import",
     lineage: {
@@ -407,7 +429,10 @@ const make = Effect.gen(function* () {
         thread.snoozed_at,
         thread.pinned_at,
         thread.pin_order_key,
+        (SELECT json_group_array(json_object('host', pr.host, 'repository', pr.repository, 'number', pr.number, 'url', pr.url, 'source', pr.source, 'linkedAt', pr.linked_at, 'snapshot', json(pr.snapshot_json), 'stack', json(pr.stack_json))) FROM projection_thread_pull_requests pr WHERE pr.thread_id = thread.thread_id) AS pull_requests_json,
         thread.linked_pull_request_json,
+        thread.branch_pull_request_json,
+        thread.active_order_key,
         thread.deleted_at,
         projection.payload_json
       FROM orchestration_v2_legacy_imports AS legacy_import
@@ -421,6 +446,8 @@ const make = Effect.gen(function* () {
          OR json_type(projection.payload_json, '$.snoozedAt') IS NULL
          OR json_type(projection.payload_json, '$.unsettledAt') IS NULL
          OR json_type(projection.payload_json, '$.linkedPullRequest') IS NULL
+         OR json_type(projection.payload_json, '$.branchPullRequest') IS NULL
+         OR json_type(projection.payload_json, '$.activeOrderKey') IS NULL
       ORDER BY thread.created_at ASC, thread.thread_id ASC
     `;
     let repairedThreadCount = 0;
@@ -441,11 +468,21 @@ const make = Effect.gen(function* () {
           current.linkedPullRequest === undefined
             ? legacy.linkedPullRequest
             : current.linkedPullRequest,
+        branchPullRequest:
+          current.branchPullRequest === undefined
+            ? legacy.branchPullRequest
+            : current.branchPullRequest,
+        activeOrderKey:
+          current.activeOrderKey === undefined ? legacy.activeOrderKey : current.activeOrderKey,
       };
+      // Later schema additions can require another repair for the same thread.
+      const repairId = yield* randomUuidV4;
       yield* eventSink.write({
         events: [
           {
-            id: EventId.make(`${IMPORT_EVENT_PREFIX}:thread:${row.thread_id}:metadata-repair`),
+            id: EventId.make(
+              `${IMPORT_EVENT_PREFIX}:thread:${row.thread_id}:metadata-repair:${repairId}`,
+            ),
             type: "thread.metadata-updated",
             threadId: repaired.id,
             providerInstanceId: repaired.providerInstanceId,
@@ -476,7 +513,10 @@ const make = Effect.gen(function* () {
         thread.snoozed_at,
         thread.pinned_at,
         thread.pin_order_key,
+        (SELECT json_group_array(json_object('host', pr.host, 'repository', pr.repository, 'number', pr.number, 'url', pr.url, 'source', pr.source, 'linkedAt', pr.linked_at, 'snapshot', json(pr.snapshot_json), 'stack', json(pr.stack_json))) FROM projection_thread_pull_requests pr WHERE pr.thread_id = thread.thread_id) AS pull_requests_json,
         thread.linked_pull_request_json,
+        thread.branch_pull_request_json,
+        thread.active_order_key,
         thread.deleted_at
       FROM projection_threads AS thread
       WHERE NOT EXISTS (

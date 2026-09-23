@@ -8,7 +8,13 @@ import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstance
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import type { TextGenerationPolicy } from "./TextGenerationPolicy.ts";
 
-export type TextGenerationProvider = "codex" | "claudeAgent" | "cursor" | "grok" | "opencode";
+export type TextGenerationProvider =
+  | "codex"
+  | "claudeAgent"
+  | "cursor"
+  | "grok"
+  | "pi"
+  | "opencode";
 
 export interface CommitMessageGenerationInput {
   cwd: string;
@@ -153,6 +159,7 @@ export const makeTextGenerationFromRegistry = (
       ),
   });
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const registry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
   return makeTextGenerationFromRegistry(registry);

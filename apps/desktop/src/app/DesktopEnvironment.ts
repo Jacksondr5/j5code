@@ -15,6 +15,7 @@ import { J5_BRANDING } from "../../../../scripts/lib/j5-branding.ts";
 
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
+import { resolveLinuxDesktopEntryName } from "./DesktopEarlyElectronStartup.ts";
 import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
 import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
 
@@ -100,7 +101,7 @@ function resolveDesktopAppStageLabel(input: {
   return isNightlyDesktopVersion(input.appVersion) ? "Nightly" : "Alpha";
 }
 
-function resolveDesktopAppBranding(input: {
+export function resolveDesktopAppBranding(input: {
   readonly isDevelopment: boolean;
   readonly appVersion: string;
 }): DesktopAppBranding {
@@ -237,11 +238,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () =>
       isDevelopment ? J5_BRANDING.desktop.developmentAppId : J5_BRANDING.desktop.appId,
     ),
-    linuxDesktopEntryName: `${
-      isDevelopment
-        ? J5_BRANDING.desktop.developmentUserDataDirName
-        : J5_BRANDING.desktop.linuxExecutableName
-    }.desktop`,
+    linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment),
     linuxWmClass: isDevelopment
       ? J5_BRANDING.desktop.developmentUserDataDirName
       : J5_BRANDING.desktop.linuxExecutableName,

@@ -118,7 +118,7 @@ export function scopeClaudeModelCatalog(
   return { models: [...builtInModels, ...customCatalogModels] };
 }
 
-export function resolveClaudeCatalogModel(
+function resolveClaudeCatalogModel(
   catalog: ClaudeModelCatalog,
   slugOrAlias: string | null | undefined,
 ): ClaudeCatalogModel | undefined {
@@ -249,7 +249,7 @@ export function resolveClaudeCatalogApiModelId(
   return slug;
 }
 
-export function resolveClaudeCatalogContextWindowTokens(
+function resolveClaudeCatalogContextWindowTokens(
   catalog: ClaudeModelCatalog,
   modelSelection: ModelSelection | undefined,
 ): number | undefined {

@@ -197,6 +197,26 @@ function fixtureEvents(now: DateTime.Utc): ReadonlyArray<OrchestrationV2DomainEv
 for (const storage of ["sqlite", "memory"] as const) {
   const storeLayer =
     storage === "sqlite" ? layer.pipe(Layer.provideMerge(SqlitePersistenceMemory)) : layerMemory;
+  it.effect(`${storage}: finds the active root turn without an attempt reverse link`, () =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const events = fixtureEvents(now).map((event) =>
+        event.type === "run-attempt.created"
+          ? { ...event, payload: { ...event.payload, providerTurnId: null } }
+          : event,
+      );
+      yield* Effect.forEach(events, (event) => store.apply(event), { discard: true });
+      const running = yield* store.getRunningTurnContext(threadId);
+      assert.equal(running.providerTurn?.id, providerTurnId);
+      const turnEvent = events.find((event) => event.type === "provider-turn.updated")!;
+      yield* store.apply({
+        ...turnEvent,
+        payload: { ...turnEvent.payload, status: "completed", completedAt: now },
+      });
+      assert.isUndefined((yield* store.getRunningTurnContext(threadId)).providerTurn);
+    }).pipe(Effect.provide(storeLayer)),
+  );
   it.effect(`${storage}: controls and replies read only their exact durable targets`, () =>
     Effect.gen(function* () {
       const store = yield* ProjectionStoreV2;
@@ -210,7 +230,26 @@ for (const storage of ["sqlite", "memory"] as const) {
         VALUES ('message:unrelated-obsolete', ${threadId}, ${runId}, ${nodeId}, 'assistant', 0,
           ${DateTime.formatIso(now)}, ${DateTime.formatIso(now)}, '{"obsolete":"transcript"}')`;
         assert.equal((yield* Effect.exit(store.getThreadProjection(threadId)))._tag, "Failure");
+        const queryPlan = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+          SELECT payload_json FROM orchestration_v2_projection_turn_items
+          WHERE thread_id = ${threadId} AND node_id = ${nodeId}
+            AND type IN ('approval_request', 'user_input_request')
+            AND json_extract(payload_json, '$.requestId') = ${requestId}
+          ORDER BY ordinal ASC LIMIT 1`;
+        assert.isTrue(queryPlan.some((row) => row.detail.includes("turn_items_node_ordinal_idx")));
       }
+      const running = yield* store.getRunningTurnContext(threadId);
+      assert.equal(running.run?.id, runId);
+      assert.equal(running.providerThread?.id, providerThreadId);
+      assert.equal(running.providerTurn?.id, providerTurnId);
+      const providerContext = yield* store.getThreadProviderContext(threadId, providerInstanceId);
+      assert.equal(providerContext.thread.id, threadId);
+      assert.deepEqual(
+        providerContext.providerThreads.map((thread) => thread.id),
+        [providerThreadId],
+      );
+      const responseContext = yield* store.getRuntimeResponseContext(threadId, requestId);
+      assert.equal(responseContext.request?.id, requestId);
       const target = { providerThreadId, providerTurnId, attemptId, messageId };
       const context = yield* store.getProviderControlContext(threadId, target);
       assert.equal(context.providerThread?.id, providerThreadId);

@@ -1,6 +1,6 @@
+import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
 import {
   type AssetResource,
-  ProviderDriverKind,
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2PlanArtifact,
   type OrchestrationV2ProjectedTurnItem,
@@ -9,12 +9,15 @@ import {
   type OrchestrationV2TurnItem,
   type PlanId,
   type RunId,
-  type ThreadId,
   type ToolActivitySurface,
   type ToolActivityIcon,
   type ToolActivitySource,
 } from "@t3tools/contracts";
 import { extractToolActivityPresentation } from "@t3tools/client-runtime/work-log/tool-presentation";
+import {
+  contextCompactionLabel,
+  workEntryIndicatesToolFailure,
+} from "@t3tools/client-runtime/work-log/presentation";
 import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
 import type {
   ThreadPendingApproval,
@@ -35,38 +38,11 @@ import * as DateTime from "effect/DateTime";
 import * as Equal from "effect/Equal";
 import { shallow } from "zustand/vanilla/shallow";
 
-export { formatDuration, formatElapsed } from "@t3tools/shared/orchestrationTiming";
-
-export type ProviderPickerKind = ProviderDriverKind;
-
-export const PROVIDER_OPTIONS: Array<{
-  value: ProviderPickerKind;
-  label: string;
-  available: boolean;
-  pickerSidebarBadge?: "new" | "soon";
-}> = [
-  { value: ProviderDriverKind.make("codex"), label: "Codex", available: true },
-  { value: ProviderDriverKind.make("claudeAgent"), label: "Claude", available: true },
-  {
-    value: ProviderDriverKind.make("opencode"),
-    label: "OpenCode",
-    available: true,
-    pickerSidebarBadge: "new",
-  },
-  {
-    value: ProviderDriverKind.make("cursor"),
-    label: "Cursor",
-    available: true,
-    pickerSidebarBadge: "new",
-  },
-  { value: ProviderDriverKind.make("grok"), label: "Grok", available: true },
-  {
-    value: ProviderDriverKind.make("antigravity"),
-    label: "Antigravity",
-    available: true,
-    pickerSidebarBadge: "new",
-  },
-];
+export { formatDuration } from "@t3tools/shared/orchestrationTiming";
+export {
+  workEntryDisplayIndicatesToolFailure,
+  workEntryIndicatesToolFailure,
+} from "@t3tools/client-runtime/work-log/presentation";
 
 export type WorkLogToolLifecycleStatus =
   | "idle"
@@ -77,6 +53,7 @@ export type WorkLogToolLifecycleStatus =
   | "stopped";
 
 export interface WorkLogEntry {
+  readonly questionAnswer?: import("@t3tools/contracts").UserInputAttachmentAnswerPayload;
   readonly id: string;
   readonly createdAt: string;
   readonly runId?: RunId | null;
@@ -114,6 +91,7 @@ export interface ActivePlanState {
   readonly steps: Array<{
     readonly step: string;
     readonly status: "pending" | "inProgress" | "completed";
+    readonly durationMs?: number;
   }>;
 }
 
@@ -172,90 +150,6 @@ export function workLogEntryIsToolLike(entry: WorkLogEntry): boolean {
   );
 }
 
-/** Heuristic: providers often emit successful item status while error text lives in `detail` / `command`. */
-function toolDetailTextLooksLikeFailure(text: string): boolean {
-  const t = text.toLowerCase();
-  if (t.includes("file not found")) {
-    return true;
-  }
-  if (t.includes("no files found")) {
-    return true;
-  }
-  if (
-    t.includes("enoent") ||
-    t.includes("no such file or directory") ||
-    t.includes("no such file")
-  ) {
-    return true;
-  }
-  if (t.includes("cannot find path") && t.includes("because it does not exist")) {
-    return true;
-  }
-  if (t.includes("commandnotfoundexception")) {
-    return true;
-  }
-  if (t.includes("is not recognized as the name of a cmdlet")) {
-    return true;
-  }
-  if (t.includes("is not recognized") && t.includes("the term '")) {
-    return true;
-  }
-  if (t.includes("a parameter cannot be found that matches parameter name")) {
-    return true;
-  }
-  if (t.includes("command not found")) {
-    return true;
-  }
-  if (/<exited with exit code\s+[1-9]\d*\s*>/i.test(text)) {
-    return true;
-  }
-  if (/exit(?:ed)? with exit code\s+[1-9]\d*/i.test(text)) {
-    return true;
-  }
-  if (/exit code\s*[:\s]\s*[1-9]\d*\b/i.test(text)) {
-    return true;
-  }
-  return false;
-}
-
-function workEntryIndicatesToolFailureFromOutput(
-  entry: WorkLogEntry,
-  includeCommand: boolean,
-): boolean {
-  if (entry.tone === "error") {
-    return true;
-  }
-  const ls = entry.toolLifecycleStatus;
-  if (ls === "failed" || ls === "declined") {
-    return true;
-  }
-  if (!workLogEntryIsToolLike(entry)) {
-    return false;
-  }
-  const parts: string[] = [];
-  if (entry.detail) {
-    parts.push(entry.detail);
-  }
-  if (includeCommand && entry.command) {
-    parts.push(entry.command);
-  }
-  const blob = parts.join("\n");
-  if (blob.length === 0) {
-    return false;
-  }
-  return toolDetailTextLooksLikeFailure(blob);
-}
-
-/** True when a tool failed, including providers that put error output in `command`. */
-export function workEntryIndicatesToolFailure(entry: WorkLogEntry): boolean {
-  return workEntryIndicatesToolFailureFromOutput(entry, true);
-}
-
-/** True when the rendered result indicates failure. The command itself is user intent, not output. */
-export function workEntryDisplayIndicatesToolFailure(entry: WorkLogEntry): boolean {
-  return workEntryIndicatesToolFailureFromOutput(entry, false);
-}
-
 /** Severe failures keep the red treatment ordinary tool failures lost: provider
  *  runtime errors mean the turn or a core side effect broke, not that a
  *  command exited nonzero. */
@@ -281,6 +175,7 @@ export function workEntryIndicatesToolSuccess(entry: WorkLogEntry): boolean {
   );
 }
 
+/** Tool-like row with neither clear success nor failure (empty, incomplete, in progress, etc.). */
 export function workEntryIndicatesToolNeutralStatus(entry: WorkLogEntry): boolean {
   return (
     workLogEntryIsToolLike(entry) &&
@@ -306,18 +201,16 @@ export function isLatestRunSettled(
 }
 
 export function deriveActiveWorkStartedAt(
-  latestRun: Pick<ThreadRunSummary, "runId" | "startedAt" | "completedAt" | "status"> | null,
-  runtime: Pick<ThreadRuntimeSummary, "status" | "activeRunId"> | null,
+  latestRun: Pick<
+    ThreadRunSummary,
+    "runId" | "startedAt" | "requestedAt" | "completedAt" | "status"
+  > | null,
+  runtime: Pick<ThreadRuntimeSummary, "status" | "activeRunId" | "activityStartedAt"> | null,
   sendStartedAt: string | null,
 ): string | null {
-  if (runtime?.activeRunId !== null && runtime?.activeRunId !== undefined) {
-    return latestRun?.runId === runtime.activeRunId
-      ? (latestRun.startedAt ?? sendStartedAt)
-      : sendStartedAt;
-  }
-  return isLatestRunSettled(latestRun, runtime)
-    ? sendStartedAt
-    : (latestRun?.startedAt ?? sendStartedAt);
+  const startedAt = resolveThreadWorkingStartedAt({ latestRun, runtime });
+  // Local dispatch has a clock only until the server supplies the owning run.
+  return startedAt ?? (runtime?.activeRunId == null ? sendStartedAt : null);
 }
 
 export function derivePendingApprovals(
@@ -347,9 +240,10 @@ export function deriveActivePlanState(
     createdAt: planItemTime(projection, plan.id),
     runId: plan.runId,
     explanation: plan.explanation ?? null,
-    steps: plan.steps.map(({ text, status }) => ({
+    steps: plan.steps.map(({ text, status, durationMs }) => ({
       step: text,
       status: status === "running" ? "inProgress" : status,
+      ...(durationMs === undefined ? {} : { durationMs }),
     })),
   };
 }
@@ -395,49 +289,20 @@ export function findLatestProposedPlan(
   return plan === undefined ? null : toLatestProposedPlanState(projection, plan);
 }
 
-export function findSidebarProposedPlan(input: {
-  readonly threads: ReadonlyArray<{
-    readonly id: ThreadId;
-    readonly projection: OrchestrationV2ThreadProjection;
-  }>;
-  readonly latestRun: Pick<ThreadRunSummary, "runId" | "sourcePlanRef"> | null;
-  readonly latestRunSettled: boolean;
-  readonly threadId: ThreadId | string | null | undefined;
-}): LatestProposedPlanState | null {
-  if (!input.latestRunSettled && input.latestRun?.sourcePlanRef !== undefined) {
-    const source = input.latestRun.sourcePlanRef;
-    const sourceProjection = input.threads.find(
-      (thread) => thread.id === source.threadId,
-    )?.projection;
-    const plan = sourceProjection?.plans.find(
-      (candidate) => candidate.kind === "proposed_plan" && candidate.id === source.planId,
-    );
-    if (sourceProjection !== undefined && plan?.kind === "proposed_plan") {
-      return toLatestProposedPlanState(sourceProjection, plan);
-    }
-  }
-  const activeProjection = input.threads.find((thread) => thread.id === input.threadId)?.projection;
-  return findLatestProposedPlan(activeProjection ?? null, input.latestRun?.runId);
-}
-
 export function hasActionableProposedPlan(plan: LatestProposedPlanState | null): boolean {
   return plan?.status === "active";
 }
 
 const STANDALONE_V2_ITEM_TYPES = new Set<OrchestrationV2ProjectedTurnItem["item"]["type"]>([
-  "approval_request",
   "fork",
   "handoff",
   "run_interrupt_request",
   "run_interrupt_result",
   "subagent",
-  "thread_created",
-  "user_input_request",
 ]);
 
 const PERSISTENT_RESOURCE_V2_ITEM_TYPES = new Set<OrchestrationV2TurnItem["type"]>([
   "fork",
-  "subagent",
   "thread_created",
 ]);
 
@@ -481,6 +346,9 @@ function projectedWorkEntryTone(item: OrchestrationV2TurnItem): WorkLogEntry["to
     case "web_search":
     case "dynamic_tool":
     case "subagent":
+    case "thread_created":
+    case "user_input_request":
+    case "approval_request":
       return "tool";
     default:
       return "info";
@@ -536,10 +404,15 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
   } as const;
 
   switch (item.type) {
+    case "thread_created":
+      return {
+        ...common,
+        label: "Created thread",
+      };
     case "compaction":
       return {
         ...common,
-        label: item.status === "running" ? "Compacting context" : "Context compacted",
+        label: contextCompactionLabel(item),
         sourceActivityKind: "context-compaction",
         ...(item.summary ? { detail: item.summary } : {}),
       };
@@ -555,17 +428,18 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
         label: title ?? "Ran command",
         command: item.input,
         rawCommand: item.input,
-        ...(item.output ? { detail: item.output } : {}),
         toolTitle: title ?? "Command",
         toolData: item,
       };
     case "file_change": {
-      const detail = item.diffStr ?? item.newStr;
       return {
         ...common,
-        label: title ?? `Changed ${item.fileName}`,
-        changedFiles: [item.fileName],
-        ...(detail ? { detail } : {}),
+        label:
+          title ??
+          (item.changes !== undefined && item.changes.length > 1
+            ? `Changed ${item.changes.length} files`
+            : `Changed ${item.fileName}`),
+        changedFiles: item.changes?.map((change) => change.path) ?? [item.fileName],
         toolTitle: title ?? "File change",
         toolData: item,
       };
@@ -614,6 +488,20 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
         label: title ?? item.toolName ?? "Tool call",
         toolTitle: title ?? item.toolName ?? "Tool",
         toolData: { input: item.input, output: item.output },
+      };
+    case "approval_request":
+      return {
+        ...common,
+        label: title ?? "Approval requested",
+        detail: item.prompt ?? item.requestKind,
+        toolData: item,
+      };
+    case "user_input_request":
+      return {
+        ...common,
+        label: title ?? (item.questionAnswer ? "Answered questions" : "Input requested"),
+        ...(item.questionAnswer ? { questionAnswer: item.questionAnswer } : {}),
+        toolData: item,
       };
     default:
       return {
@@ -682,6 +570,25 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
     const createdAt = projectedItemCreatedAt(row);
     const attempt = resolveAttempt(item);
     const attemptMetadata = attempt === undefined ? {} : { attempt };
+    if (item.type === "notification") {
+      entries.push({
+        id: item.id,
+        kind: "work",
+        createdAt,
+        entry: {
+          id: item.id,
+          createdAt,
+          runId: item.runId,
+          label: item.summary,
+          tone: "info",
+          itemType: item.type,
+          structuredPayload: item,
+          projectedItem: row,
+        },
+        ...attemptMetadata,
+      });
+      continue;
+    }
     if (item.type === "user_message" || item.type === "assistant_message") {
       const message: ChatMessage = {
         id: item.messageId,
@@ -698,7 +605,13 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
         runId: item.runId,
         streaming: item.type === "assistant_message" && item.streaming,
         ...(item.type === "user_message"
-          ? { createdBy: item.createdBy, creationSource: item.creationSource }
+          ? {
+              createdBy: item.createdBy,
+              creationSource: item.creationSource,
+              ...(item.scheduledTaskId !== undefined
+                ? { scheduledTaskId: item.scheduledTaskId }
+                : {}),
+            }
           : {}),
         createdAt,
         updatedAt: DateTime.formatIso(item.updatedAt),

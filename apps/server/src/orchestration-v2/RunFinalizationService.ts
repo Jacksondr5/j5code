@@ -11,7 +11,7 @@ import { QueuedRunWatchdog } from "../j5/run-observability/QueuedRunWatchdog.ts"
 import * as CheckpointCapture from "./CheckpointCaptureService.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 
-export class RunFinalizationError extends Schema.TaggedErrorClass<RunFinalizationError>()(
+export class RunFinalizationError extends Schema.TaggedError<RunFinalizationError>()(
   "RunFinalizationError",
   {
     threadId: ThreadId,
@@ -22,7 +22,7 @@ export class RunFinalizationError extends Schema.TaggedErrorClass<RunFinalizatio
   },
 ) {}
 
-export class RunFinalizationRefreshError extends Schema.TaggedErrorClass<RunFinalizationRefreshError>()(
+export class RunFinalizationRefreshError extends Schema.TaggedError<RunFinalizationRefreshError>()(
   "RunFinalizationRefreshError",
   { cwd: Schema.String, cause: Schema.Defect() },
 ) {}
@@ -49,7 +49,7 @@ export class RunFinalizationService extends Context.Service<
   }
 >()("t3/orchestration-v2/RunFinalizationService") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const checkpointCapture = yield* CheckpointCapture.CheckpointCaptureServiceV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const observer = yield* RunFinalizationObserver;

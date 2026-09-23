@@ -1,8 +1,11 @@
-import { threadRunStatusIsActive } from "@t3tools/client-runtime/state/models";
+import {
+  threadRuntimeIsActive,
+  type ThreadRuntimeSummary,
+} from "@t3tools/client-runtime/state/models";
 
 /** The seat facts a Crew summary reads; every field is something the client already holds. */
 export interface CrewSeatThread {
-  readonly runtime?: { readonly status: Parameters<typeof threadRunStatusIsActive>[0] } | null;
+  readonly runtime?: Pick<ThreadRuntimeSummary, "status"> | null;
   readonly hasPendingApprovals: boolean;
   readonly hasPendingUserInput: boolean;
   readonly archivedAt: string | null;
@@ -37,7 +40,7 @@ export interface CrewStateSummary {
 export const classifyCrewSeat = (thread: CrewSeatThread | undefined): CrewSeatState => {
   if (thread === undefined) return "unknown";
   if (thread.archivedAt !== null) return "archived";
-  if (thread.runtime != null && threadRunStatusIsActive(thread.runtime.status)) return "running";
+  if (threadRuntimeIsActive(thread.runtime)) return "running";
   if (thread.runtime?.status === "failed") return "failed";
   if (thread.hasPendingApprovals || thread.hasPendingUserInput) return "needs-you";
   if (

@@ -101,6 +101,19 @@ export function upsertProviderWorkspaceSnapshot(
 }
 
 const shouldRetainMissingProviderModels = (provider: ServerProvider): boolean => {
+  if (provider.driver === ProviderDriverKind.make("acpRegistry")) {
+    // ACP Registry discovery probes return the agent's complete inventory, so
+    // a completed probe (ready and authenticated) replaces the model list —
+    // otherwise agents that rename or collapse models leave stale entries
+    // pinned forever through the snapshot cache. Readiness-only and failed
+    // probe snapshots only know the "default" placeholder and stay partial.
+    return !(
+      provider.installed &&
+      provider.status === "ready" &&
+      provider.auth.status === "authenticated"
+    );
+  }
+
   const isAntigravity = provider.driver === ProviderDriverKind.make("antigravity");
   const isCodex = provider.driver === ProviderDriverKind.make("codex");
   if (!isAntigravity && !isCodex && provider.driver !== ProviderDriverKind.make("opencode")) {
@@ -162,31 +175,69 @@ const mergeProviderModels = (
     : mergedModels;
 };
 
+/**
+ * Antigravity's health check only initializes the agent, so after a server
+ * restart it reports the account as unchecked. The saved Google login still
+ * works, and the previous snapshot proves it. Carry that account state until
+ * a session, refresh, or sign-out reports something new. A confirmed missing
+ * installation, sign-out, disabled instance, or a changed sign-in method is
+ * never overridden.
+ */
+const carrySavedAntigravityAccount = (
+  previousProvider: ServerProvider,
+  nextProvider: ServerProvider,
+): Pick<ServerProvider, "auth" | "status"> | undefined => {
+  const antigravity = ProviderDriverKind.make("antigravity");
+  if (
+    nextProvider.driver !== antigravity ||
+    previousProvider.driver !== antigravity ||
+    !nextProvider.enabled ||
+    nextProvider.auth.status !== "unknown" ||
+    previousProvider.auth.status !== "authenticated" ||
+    (nextProvider.auth.type !== undefined &&
+      nextProvider.auth.type !== previousProvider.auth.type) ||
+    (!nextProvider.installed && nextProvider.status !== "warning")
+  ) {
+    return undefined;
+  }
+  // The pending boot probe (`installed: false`, warning) and a failed probe
+  // keep their own status; only a passed health check reads as ready.
+  const status =
+    nextProvider.installed && nextProvider.status === "warning" ? "ready" : nextProvider.status;
+  return { auth: previousProvider.auth, status };
+};
+
 export const mergeProviderSnapshot = (
   previousProvider: ServerProvider | undefined,
   nextProvider: ServerProvider,
-): ServerProvider =>
-  !previousProvider
-    ? nextProvider
-    : {
-        ...nextProvider,
-        models: mergeProviderModels(nextProvider, previousProvider.models, nextProvider.models),
-        ...(nextProvider.workspaceSnapshots !== undefined
-          ? { workspaceSnapshots: nextProvider.workspaceSnapshots }
-          : previousProvider.workspaceSnapshots !== undefined
-            ? { workspaceSnapshots: previousProvider.workspaceSnapshots }
-            : {}),
-        ...(shouldRetainMissingOpenCodeMetadata(nextProvider)
-          ? {
-              slashCommands:
-                nextProvider.slashCommands.length === 0
-                  ? previousProvider.slashCommands
-                  : nextProvider.slashCommands,
-              skills:
-                nextProvider.skills.length === 0 ? previousProvider.skills : nextProvider.skills,
-            }
-          : {}),
-      };
+): ServerProvider => {
+  if (!previousProvider) {
+    return nextProvider;
+  }
+  const savedAccount = carrySavedAntigravityAccount(previousProvider, nextProvider);
+  // "Google account access is not checked yet" describes the probe, not the
+  // account; it must not outlive the state it explained.
+  const { message: _uncheckedMessage, ...nextWithoutMessage } = nextProvider;
+  return {
+    ...(savedAccount?.status === "ready" ? nextWithoutMessage : nextProvider),
+    ...savedAccount,
+    models: mergeProviderModels(nextProvider, previousProvider.models, nextProvider.models),
+    ...(nextProvider.workspaceSnapshots !== undefined
+      ? { workspaceSnapshots: nextProvider.workspaceSnapshots }
+      : previousProvider.workspaceSnapshots !== undefined
+        ? { workspaceSnapshots: previousProvider.workspaceSnapshots }
+        : {}),
+    ...(shouldRetainMissingOpenCodeMetadata(nextProvider)
+      ? {
+          slashCommands:
+            nextProvider.slashCommands.length === 0
+              ? previousProvider.slashCommands
+              : nextProvider.slashCommands,
+          skills: nextProvider.skills.length === 0 ? previousProvider.skills : nextProvider.skills,
+        }
+      : {}),
+  };
+};
 
 export const mergeProviderSnapshots = (
   previousProviders: ReadonlyArray<ServerProvider>,
@@ -212,7 +263,7 @@ export const selectProvidersByKind = (
 ): ReadonlyArray<ServerProvider> =>
   providers.filter((provider) => providerKinds.has(provider.driver));
 
-export const haveProvidersChanged = (
+const haveProvidersChanged = (
   previousProviders: ReadonlyArray<ServerProvider>,
   nextProviders: ReadonlyArray<ServerProvider>,
 ): boolean => !Equal.equals(previousProviders, nextProviders);

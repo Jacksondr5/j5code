@@ -11,7 +11,7 @@ import * as Layer from "effect/Layer";
 import { Command } from "effect/unstable/cli";
 import { afterEach, beforeEach, vi } from "vite-plus/test";
 
-import { cli } from "../../bin.ts";
+import { cli } from "../../binCli.ts";
 import { A2A_EXIT_CODES } from "./a2a.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
