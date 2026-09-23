@@ -132,16 +132,18 @@ export const J5AdaptedThreadHandlersLive = J5AdaptedThreadToolkit.toLayer({
         default:
           command = { ...common, type: `thread.${input.action}` };
       }
-      const guard = yield* makeCrewSeatArchiveGuard;
-      yield* guard(command).pipe(
-        Effect.mapError(
-          (cause) =>
-            new OrchestratorMcpFailure({
-              code: "capability_denied",
-              message: cause.message,
-            }),
-        ),
-      );
+      if (command.type === "thread.archive") {
+        const guard = yield* makeCrewSeatArchiveGuard;
+        yield* guard(command).pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestratorMcpFailure({
+                code: "capability_denied",
+                message: cause.message,
+              }),
+          ),
+        );
+      }
       const result = yield* threads.dispatch(command).pipe(Effect.mapError(unavailable));
       return { sequence: result.sequence };
     }),
