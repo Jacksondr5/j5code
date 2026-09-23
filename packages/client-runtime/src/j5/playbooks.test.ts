@@ -111,6 +111,35 @@ describe("Playbook Author Squadron ownership", () => {
   });
 
   it.each([
+    { threadId: null, workspaceRoot: "/remote/project", branch: null },
+    {
+      threadId: ThreadId.make("source-thread"),
+      workspaceRoot: "/remote/feature",
+      branch: "feature",
+    },
+  ])("launches the author in the selected workspace with Squadron ownership", (selection) => {
+    const target = playbookAuthorLaunch({
+      ...launch,
+      workspace: { ...workspace, ...selection },
+    });
+    expect(target.environmentId).toBe(workspace.environmentId);
+    expect(target.input).toMatchObject({
+      squadronId: squadron.squadron.id,
+      bootstrap: {
+        createThread: {
+          projectId: workspace.projectId,
+          worktreePath: selection.threadId ? selection.workspaceRoot : null,
+          branch: selection.branch,
+          agentPersona: { personaId: "playbook-author" },
+        },
+      },
+      message: {
+        text: "Help me create a playbook in this workspace. Start by asking what I want it to accomplish.",
+      },
+    });
+  });
+
+  it.each([
     undefined,
     { ...squadron, available: false },
     { ...squadron, environmentId: EnvironmentId.make("local") },

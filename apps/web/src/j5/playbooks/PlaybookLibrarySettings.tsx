@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
@@ -8,13 +9,10 @@ import {
 } from "@t3tools/client-runtime/j5/playbooks";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { CommandId } from "@t3tools/contracts";
+import { Atom } from "effect/unstable/reactivity";
 import { RefreshCwIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import {
-  SettingsPageContainer,
-  SettingsRow,
-  SettingsSection,
-} from "../../components/settings/settingsLayout";
+import { SettingsRow, SettingsSection } from "../../components/settings/settingsLayout";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { toastManager } from "../../components/ui/toast";
@@ -22,9 +20,9 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/toolt
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { newMessageId, newThreadId, randomUUID } from "../../lib/utils";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
-import { useProjects, useServerConfigs, useThreadShells } from "../../state/entities";
+import { useServerConfigs } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
-import { projectEnvironment } from "../../state/projects";
+import { environmentProjects, projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
@@ -37,9 +35,30 @@ import { j5Environment } from "../state";
 import { playbookImportName } from "./importPlaybookFile";
 import { openPlaybookDraft } from "./openPlaybookDraft";
 
+let previousWorkspaces: ReturnType<typeof playbookWorkspaces> = [];
+const playbookWorkspacesAtom = Atom.make((get) => {
+  const next = playbookWorkspaces(
+    get(environmentProjects.projectsAtom),
+    get(environmentThreadShells.threadShellsAtom),
+  );
+  if (
+    next.length === previousWorkspaces.length &&
+    next.every(
+      (workspace, index) =>
+        workspace.key === previousWorkspaces[index]?.key &&
+        workspace.title === previousWorkspaces[index]?.title &&
+        workspace.workspaceRoot === previousWorkspaces[index]?.workspaceRoot &&
+        workspace.branch === previousWorkspaces[index]?.branch,
+    )
+  )
+    return previousWorkspaces;
+  previousWorkspaces = next;
+  return next;
+}).pipe(Atom.withLabel("j5-playbook-workspaces"));
+
 export function PlaybookLibrarySettings() {
   const { environments } = useEnvironments();
-  const workspaces = playbookWorkspaces(useProjects(), useThreadShells());
+  const workspaces = useAtomValue(playbookWorkspacesAtom);
   const [workspaceKey, setWorkspaceKey] = useState("");
   const workspace = workspaces.find((entry) => entry.key === workspaceKey) ?? workspaces[0];
   const { squadrons, status: squadronStatus } = useSquadronDirectory();
@@ -260,7 +279,7 @@ export function PlaybookLibrarySettings() {
     }
   }
   return (
-    <SettingsPageContainer>
+    <>
       <input
         ref={fileInput}
         type="file"
@@ -274,10 +293,10 @@ export function PlaybookLibrarySettings() {
           void importFiles(files);
         }}
       />
-      <SettingsSection title="Playbooks" id="playbooks" hideTitle variant="plain">
+      <SettingsSection title="Playbooks" id="playbooks">
         <div className="flex flex-col gap-3 px-3 pb-3 sm:flex-row sm:items-start sm:justify-between sm:px-4">
           <p className="min-w-0 text-sm text-muted-foreground">
-            Reusable prompts that guide an agent through ordered phases. Create and refine them in a
+            Reusable prompts that guide an agent through ordered steps. Create and refine them in a
             conversation.
           </p>
           <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
@@ -457,7 +476,7 @@ export function PlaybookLibrarySettings() {
                     <h3 className="font-medium">{playbook.title}</h3>
                   )}
                   <p className="text-xs text-muted-foreground">
-                    {playbook.name}.yaml · {playbook.stepCount} phases
+                    {playbook.name}.yaml · {playbook.stepCount} steps
                   </p>
                   {renameTarget?.name === playbook.name && (error || query.error) ? (
                     <p role="alert" className="mt-2 text-sm text-destructive">
@@ -503,7 +522,7 @@ export function PlaybookLibrarySettings() {
               ) : (
                 <ol
                   className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
-                  aria-label={`${playbook.title} phases`}
+                  aria-label={`${playbook.title} steps`}
                 >
                   {playbook.steps.map((step, index) => (
                     <li key={step.id} className="min-w-0 break-words">
@@ -516,6 +535,6 @@ export function PlaybookLibrarySettings() {
           ))}
         </div>
       </SettingsSection>
-    </SettingsPageContainer>
+    </>
   );
 }

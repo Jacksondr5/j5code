@@ -38,6 +38,7 @@ import { useOpenInPreferredEditor } from "../../editorPreferences";
 import { useServerConfigs } from "../../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
+import { PlaybookLibrarySettings } from "../playbooks/PlaybookLibrarySettings";
 import { useEnvironmentQuery } from "../../state/query";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -806,6 +807,7 @@ export function AgentLibrarySettings() {
           }}
         />
       ) : null}
+      <PlaybookLibrarySettings />
     </SettingsPageContainer>
   );
 }
