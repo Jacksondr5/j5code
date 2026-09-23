@@ -21,6 +21,7 @@ import {
 } from "./AgentCrewProposalService.ts";
 import {
   CREW_SEAT_CAP,
+  CrewLaunchOperationError,
   CrewLaunchService,
   type CrewCaptain,
   type CrewLaunchError,
@@ -308,8 +309,21 @@ export const layer = Layer.effect(
           seats: launchSeats,
           resolvedSeats,
           brief: proposal.brief,
+          // The proposal must name its Crew: declining a reopened proposal retires the Crew
+          // through this link, so a lost write fails the approval before any seat spawns.
           onRecorded: (instance) =>
-            proposals.attachInstance(proposal.id, instance.id).pipe(Effect.ignore),
+            proposals.attachInstance(proposal.id, instance.id).pipe(
+              Effect.asVoid,
+              Effect.mapError(
+                (cause) =>
+                  new CrewLaunchOperationError({
+                    phase: `linking proposal ${proposal.id} to crew ${instance.id}`,
+                    seatName: null,
+                    createdSeats: [],
+                    cause,
+                  }),
+              ),
+            ),
         });
       }
       const instance =

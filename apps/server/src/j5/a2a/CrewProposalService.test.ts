@@ -14,6 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
+import { SqlError, UnknownError } from "effect/unstable/sql/SqlError";
 
 import { ServerConfig } from "../../config.ts";
 import {
@@ -246,12 +247,24 @@ const fixture = Effect.gen(function* () {
   // While set, recording a resolution lands nothing: the store answers as if the row were no
   // longer claimed, which is what a decline sees when its final write fails after the notice.
   const completeFailure = yield* Ref.make(false);
+  // While set, the proposal-to-Crew link write fails with a database error.
+  const attachFailure = yield* Ref.make(false);
   const store = Context.get(context, AgentCrewProposalService);
   const flakyStore = Layer.succeed(AgentCrewProposalService, {
     ...store,
     complete: (input) =>
       Ref.get(completeFailure).pipe(
         Effect.flatMap((failing) => (failing ? Effect.succeed(null) : store.complete(input))),
+      ),
+    attachInstance: (id, crewInstanceId) =>
+      Ref.get(attachFailure).pipe(
+        Effect.flatMap((failing) =>
+          failing
+            ? Effect.fail(
+                new SqlError({ reason: new UnknownError({ cause: new Error("disk I/O error") }) }),
+              )
+            : store.attachInstance(id, crewInstanceId),
+        ),
       ),
   });
   const layer = crewProposalLayer.pipe(
@@ -318,6 +331,7 @@ const fixture = Effect.gen(function* () {
     unreadableThreads,
     noticeFailure,
     completeFailure,
+    attachFailure,
     captainModel,
   };
 });
@@ -1338,6 +1352,37 @@ it.effect(
         assertCrewFull(
           yield* request(winnerKey === "race-a" ? "race-b" : "race-a", "late").pipe(Effect.flip),
         );
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a roster whose Crew link cannot be written fails its approval and is never reported",
+  () =>
+    Effect.gen(function* () {
+      const { layer, attachFailure, watched } = yield* fixture;
+      yield* Effect.gen(function* () {
+        const gate = withPreview(yield* CrewProposalService);
+        const proposals = yield* AgentCrewProposalService;
+        const opened = yield* gate.propose({
+          requestKey: "link-fails",
+          captain,
+          displayName: "Unlinked Crew",
+          brief: "Build it.",
+          seats: [{ seat: "maker", agentId: "builder", reason: "Builds" }],
+        });
+        yield* Ref.set(attachFailure, true);
+        // The launch report finds its Crew through the link, so a swallowed failure would launch
+        // seats the Captain is never told about; the approval fails instead, before any spawn.
+        const failed = yield* gate
+          .resolve({ proposalId: opened.proposal.id, decision: "approve" })
+          .pipe(Effect.flip);
+        assert.equal(failed._tag, "CrewLaunchOperationError");
+        assert.include(failed.message, `linking proposal ${opened.proposal.id}`);
+        const after = (yield* proposals.read(opened.proposal.id))!;
+        assert.notEqual(after.status, "approved");
+        assert.isNull(after.crewInstanceId);
+        assert.deepStrictEqual(yield* Ref.get(watched), []);
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );
