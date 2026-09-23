@@ -15,9 +15,7 @@ import {
 import { Input } from "../../components/ui/input";
 import { resolveSquadronRenameState } from "./SquadronActions.logic";
 import { renameSquadron } from "./squadronClient";
-import { refreshSquadronDirectory } from "./SquadronDirectory";
-import { refreshRequestedThreadHomes } from "./ThreadHomesClient";
-import { refreshFleet } from "../fleet/fleetClient";
+import { refreshAfterSquadronChange } from "./refreshAfterSquadronChange";
 
 export interface SquadronActionTarget {
   readonly environmentId: EnvironmentId;
@@ -35,8 +33,16 @@ export function SquadronRenameDialog({
   readonly open: boolean;
   readonly target: SquadronActionTarget;
 }) {
+  // Held here so Escape or an outside click cannot unmount the form mid-request.
+  const [submitting, setSubmitting] = useState(false);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (submitting) return;
+        onOpenChange(next);
+      }}
+    >
       <DialogPopup>
         <DialogHeader>
           <DialogTitle>Rename Squadron</DialogTitle>
@@ -48,6 +54,8 @@ export function SquadronRenameDialog({
         <SquadronRenameForm
           key={`${target.environmentId}:${target.id}`}
           target={target}
+          submitting={submitting}
+          onSubmittingChange={setSubmitting}
           onRenamed={() => onOpenChange(false)}
         />
       </DialogPopup>
@@ -57,13 +65,16 @@ export function SquadronRenameDialog({
 
 function SquadronRenameForm({
   onRenamed,
+  onSubmittingChange: setSubmitting,
+  submitting,
   target,
 }: {
   readonly onRenamed: () => void;
+  readonly onSubmittingChange: (submitting: boolean) => void;
+  readonly submitting: boolean;
   readonly target: SquadronActionTarget;
 }) {
   const [name, setName] = useState(target.name);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const renameState = resolveSquadronRenameState({ draftName: name, currentName: target.name });
 
@@ -76,9 +87,7 @@ function SquadronRenameForm({
         squadronId: target.id,
         name: renameState.name,
       });
-      await refreshSquadronDirectory({ environmentId: target.environmentId, force: true });
-      refreshRequestedThreadHomes();
-      void refreshFleet();
+      await refreshAfterSquadronChange(target.environmentId);
       onRenamed();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not rename the Squadron.");

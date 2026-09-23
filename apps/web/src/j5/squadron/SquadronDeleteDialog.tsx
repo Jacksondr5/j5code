@@ -12,11 +12,9 @@ import {
 } from "../../components/ui/alert-dialog";
 import { describeSquadronDeleteFailure } from "./SquadronActions.logic";
 import { deleteSquadron } from "./squadronClient";
-import { refreshSquadronDirectory } from "./SquadronDirectory";
 import { forgetDeletedSquadron } from "./SquadronDraftState";
 import type { SquadronActionTarget } from "./SquadronRenameDialog";
-import { refreshRequestedThreadHomes } from "./ThreadHomesClient";
-import { refreshFleet } from "../fleet/fleetClient";
+import { refreshAfterSquadronChange } from "./refreshAfterSquadronChange";
 
 /** Delete has no undo, so it names the Squadron and states what happens before asking. */
 export function SquadronDeleteDialog({
@@ -39,9 +37,7 @@ export function SquadronDeleteDialog({
     try {
       await deleteSquadron(target.environmentId, { squadronId: target.id });
       forgetDeletedSquadron({ environmentId: target.environmentId, squadronId: target.id });
-      await refreshSquadronDirectory({ environmentId: target.environmentId, force: true });
-      refreshRequestedThreadHomes();
-      void refreshFleet();
+      await refreshAfterSquadronChange(target.environmentId);
       onOpenChange(false);
     } catch (cause) {
       setFailure(describeSquadronDeleteFailure(cause));
@@ -67,7 +63,7 @@ export function SquadronDeleteDialog({
           <AlertDialogDescription>
             Agents that called this Squadron home keep their threads, but their thread labels lose
             their Squadron home and appear only under All Squadrons. The Squadron’s message history
-            is deleted with it. A Squadron with live members or Crews cannot be deleted; stop or
+            is deleted with it. A Squadron with unarchived agents or Crews cannot be deleted;
             archive them first. This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -80,11 +76,8 @@ export function SquadronDeleteDialog({
           <AlertDialogClose disabled={submitting} render={<Button variant="outline" />}>
             Cancel
           </AlertDialogClose>
-          <Button
-            disabled={submitting || failure?.kind === "refused"}
-            variant="destructive"
-            onClick={() => void confirm()}
-          >
+          {/* A refusal stays retryable: the blockers may be archived elsewhere meanwhile. */}
+          <Button disabled={submitting} variant="destructive" onClick={() => void confirm()}>
             {submitting ? "Deleting…" : "Delete Squadron"}
           </Button>
         </AlertDialogFooter>
