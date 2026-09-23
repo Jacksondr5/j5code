@@ -99,6 +99,13 @@ import {
 } from "../../j5/a2a/ThreadA2ARenderer";
 import { useParticipantLabels } from "../../j5/a2a/ParticipantIdentitiesClient";
 import {
+  displayedSpawnBriefState,
+  participantIdsForSpawnBrief,
+  presentSpawnBrief,
+  SpawnBriefAttribution,
+  SpawnerIdentity,
+} from "../../j5/a2a/SpawnBrief";
+import {
   BotIcon,
   BrainIcon,
   CheckIcon,
@@ -481,11 +488,29 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const participantIds = useMemo(
     () =>
       timelineEntries.flatMap((entry) =>
-        entry.kind === "message" ? participantIdsForThreadA2ADelivery(entry.message) : [],
+        entry.kind === "message"
+          ? [
+              ...participantIdsForThreadA2ADelivery(entry.message),
+              ...participantIdsForSpawnBrief(entry.message),
+            ]
+          : [],
       ),
     [timelineEntries],
   );
   const participantLabels = useParticipantLabels(activeThreadEnvironmentId, participantIds);
+  // A Peer Agent's thread opens with its spawner's brief. Spawned threads carry
+  // no parentThreadId (J5 keeps them top-level), so the brief itself is the
+  // lineage fact the header shows. Only the first user message can be one.
+  // Known gap: with paged history the divider appears once that first turn is
+  // loaded; a thread-level spawner fact would remove the dependency.
+  const spawnBrief = useMemo(() => {
+    const firstUserMessage = timelineEntries.find(
+      (entry) => entry.kind === "message" && entry.message.role === "user",
+    );
+    return firstUserMessage?.kind === "message"
+      ? presentSpawnBrief(firstUserMessage.message)
+      : null;
+  }, [timelineEntries]);
   const disclosureAnchorKeyRef = useRef<string | null>(null);
   const disclosureSettleFrameRef = useRef<number | null>(null);
   const disclosureSettleSecondFrameRef = useRef<number | null>(null);
@@ -917,8 +942,36 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const listHeader = useMemo(() => {
+    const spawnerThreadId = spawnBrief?.spawnerThreadId ?? null;
+    const lineageDivider =
+      parentThreadLink !== null ? (
+        <TimelineSystemDivider
+          label="Subagent of"
+          detail={parentThreadLink.title}
+          icon={BotIcon}
+          actionLabel="Open parent thread"
+          onAction={() => onOpenThread(parentThreadLink.threadId)}
+        />
+      ) : spawnBrief !== null ? (
+        <TimelineSystemDivider
+          label="Spawned by"
+          detail={
+            <SpawnerIdentity
+              spawnedBy={spawnBrief.spawnedBy}
+              participantLabels={participantLabels}
+            />
+          }
+          icon={BotIcon}
+          {...(spawnerThreadId === null
+            ? {}
+            : {
+                actionLabel: "Open spawner thread",
+                onAction: () => onOpenThread(spawnerThreadId),
+              })}
+        />
+      ) : null;
     const leadingContent =
-      parentThreadLink === null ? (
+      lineageDivider === null ? (
         topFadeEnabled ? (
           TIMELINE_LIST_FADE_HEADER
         ) : (
@@ -926,25 +979,24 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         )
       ) : (
         <div className="messages-timeline-row-frame">
-          <div className="chat-content-lane pt-1 sm:pt-2">
-            <TimelineSystemDivider
-              label="Subagent of"
-              detail={parentThreadLink.title}
-              icon={BotIcon}
-              actionLabel="Open parent thread"
-              onAction={() => onOpenThread(parentThreadLink.threadId)}
-            />
-          </div>
+          <div className="chat-content-lane pt-1 sm:pt-2">{lineageDivider}</div>
         </div>
       );
     return (
       <>
-        {parentThreadLink === null ? leadingContent : null}
+        {lineageDivider === null ? leadingContent : null}
         {historyControls ? <TimelineHistoryControl {...historyControls} /> : null}
-        {parentThreadLink !== null ? leadingContent : null}
+        {lineageDivider !== null ? leadingContent : null}
       </>
     );
-  }, [historyControls, onOpenThread, parentThreadLink, topFadeEnabled]);
+  }, [
+    historyControls,
+    onOpenThread,
+    parentThreadLink,
+    participantLabels,
+    spawnBrief,
+    topFadeEnabled,
+  ]);
 
   // Stable renderItem — no closure deps. Row components read shared state
   // from TimelineRowCtx, which propagates through LegendList's memo.
@@ -1581,17 +1633,29 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
     (attachment) => !isImageAttachment(attachment) && !isFileAttachment(attachment),
   );
   const userMessage = resolveUserMessagePresentation(row.message);
-  const displayedUserMessage = deriveDisplayedUserMessageState(userMessage.text);
+  // A spawn brief shows only the spawner's words; the platform identity block
+  // is already reflected in the thread header and the "Spawned by" divider.
+  // It is literal text, so the composer-context extractors below skip it.
+  const spawnBrief = presentSpawnBrief(row.message);
+  const displayedUserMessage =
+    spawnBrief === null
+      ? deriveDisplayedUserMessageState(userMessage.text)
+      : displayedSpawnBriefState(spawnBrief.brief);
   const terminalContexts = displayedUserMessage.contexts;
   const previewAnnotations: ParsedPreviewAnnotation[] = [];
   let visibleText = displayedUserMessage.visibleText;
-  while (true) {
-    const extracted = extractTrailingPreviewAnnotation(visibleText);
-    if (!extracted.annotation) break;
-    previewAnnotations.unshift(extracted.annotation);
-    visibleText = extracted.promptText;
+  if (spawnBrief === null) {
+    while (true) {
+      const extracted = extractTrailingPreviewAnnotation(visibleText);
+      if (!extracted.annotation) break;
+      previewAnnotations.unshift(extracted.annotation);
+      visibleText = extracted.promptText;
+    }
   }
-  const elementContextState = extractTrailingElementContexts(visibleText);
+  const elementContextState =
+    spawnBrief === null
+      ? extractTrailingElementContexts(visibleText)
+      : { promptText: visibleText, contextCount: 0, contexts: [] };
   const elementContexts = [
     ...displayedUserMessage.elementContexts,
     ...elementContextState.contexts,
@@ -1602,7 +1666,12 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      {userMessage.isAutomation ? (
+      {spawnBrief !== null ? (
+        <SpawnBriefAttribution
+          spawnedBy={spawnBrief.spawnedBy}
+          participantLabels={ctx.participantLabels}
+        />
+      ) : userMessage.isAutomation ? (
         <p
           className="me-1 text-[11px] text-muted-foreground/70"
           data-user-message-attribution="automation"

@@ -517,6 +517,8 @@ export const layer = Layer.effect(
           participantId: member.participantId,
           squadronId: captain.squadronId,
           squadronName: captain.squadronName,
+          spawnedByParticipantId: captain.participantId,
+          spawnerThreadId: captain.thread.id,
           crew: {
             displayName: instance.displayName,
             instanceId: instance.id,
