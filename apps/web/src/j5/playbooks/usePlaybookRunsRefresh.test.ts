@@ -67,3 +67,37 @@ it("lets slow reads finish, pauses when hidden, refreshes on return, and stops o
   expect(refresh).toHaveBeenCalledTimes(2);
   expect(vi.getTimerCount()).toBe(0);
 });
+
+it("keeps polling an empty supported thread and pauses while unsupported or disconnected", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-21T12:00:00Z"));
+  vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
+  vi.stubGlobal("window", new EventTarget());
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const refresh = vi.fn();
+  function Consumer({ enabled }: { enabled: boolean }) {
+    usePlaybookRunsRefresh(refresh, enabled);
+    return null;
+  }
+  await act(async () => {
+    renderer = create(createElement(Consumer, { enabled: true }));
+  });
+  await act(async () => {
+    vi.advanceTimersByTime(5_000);
+  });
+  expect(refresh).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    renderer!.update(createElement(Consumer, { enabled: false }));
+  });
+  await act(async () => {
+    vi.advanceTimersByTime(10_000);
+  });
+  expect(refresh).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    renderer!.update(createElement(Consumer, { enabled: true }));
+  });
+  await act(async () => {
+    vi.advanceTimersByTime(2_500);
+  });
+  expect(refresh).toHaveBeenCalledTimes(3);
+});

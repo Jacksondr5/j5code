@@ -8,6 +8,8 @@ import type {
   CrewStopRequest,
   FleetReadRequest,
   PlaybookLibraryRequest,
+  PlaybookDeleteRequest,
+  PlaybookRenameRequest,
   PlaybookRunsRequest,
 } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
@@ -31,6 +33,14 @@ const preparedConnection = Effect.gen(function* () {
   return prepared.value;
 });
 
+export const supportedJ5Read = <A extends object, E, R>(read: Effect.Effect<A, E, R>) =>
+  read.pipe(
+    Effect.map((data) => ({ ...data, supported: true as const })),
+    Effect.catchIf(J5Http.isJ5UnsupportedError, () =>
+      Effect.succeed({ supported: false as const }),
+    ),
+  );
+
 /** J5 uses the same environment registry, query lifecycle, and command dispatch as other features. */
 export function createJ5EnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | HttpClient.HttpClient | R, E>,
@@ -40,11 +50,9 @@ export function createJ5EnvironmentAtoms<R, E>(
       label: "j5:playbook-runs",
       staleTimeMs: 2_500,
       execute: (input: PlaybookRunsRequest) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.readAllPlaybooks(prepared, input)),
-          Effect.map((data) => ({ ...data, supported: true as const })),
-          Effect.catchIf(J5Http.isJ5UnsupportedError, () =>
-            Effect.succeed({ supported: false as const }),
+        supportedJ5Read(
+          preparedConnection.pipe(
+            Effect.flatMap((prepared) => J5Http.readAllPlaybooks(prepared, input)),
           ),
         ),
     }),
@@ -56,12 +64,28 @@ export function createJ5EnvironmentAtoms<R, E>(
           Effect.flatMap((prepared) => J5Http.readPlaybookLibrary(prepared, input)),
         ),
     }),
+    deletePlaybook: createEnvironmentCommand(runtime, {
+      label: "j5:delete-playbook",
+      execute: (input: PlaybookDeleteRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.deletePlaybook(prepared, input)),
+        ),
+    }),
+    renamePlaybook: createEnvironmentCommand(runtime, {
+      label: "j5:rename-playbook",
+      execute: (input: PlaybookRenameRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.renamePlaybook(prepared, input)),
+        ),
+    }),
     playbooks: createEnvironmentQueryAtomFamily(runtime, {
       label: "j5:playbooks",
       staleTimeMs: 2_500,
       execute: (input: { readonly threadId: ThreadId }) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.readThreadPlaybooks(prepared, input.threadId)),
+        supportedJ5Read(
+          preparedConnection.pipe(
+            Effect.flatMap((prepared) => J5Http.readThreadPlaybooks(prepared, input.threadId)),
+          ),
         ),
     }),
     squadrons: createEnvironmentQueryAtomFamily(runtime, {

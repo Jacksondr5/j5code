@@ -1,4 +1,10 @@
 import {
+  PLAYBOOK_DELETE_PATH,
+  PlaybookDeleteResponse,
+  type PlaybookDeleteRequest,
+  PLAYBOOK_RENAME_PATH,
+  PlaybookRenameResponse,
+  type PlaybookRenameRequest,
   PLAYBOOK_LIBRARY_PATH,
   PlaybookLibraryResponse,
   type PlaybookLibraryRequest,
@@ -82,6 +88,28 @@ export const readPlaybookLibrary = Effect.fn("j5.http.readPlaybookLibrary")(func
   );
   const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
   return yield* HttpClientResponse.schemaBodyJson(PlaybookLibraryResponse)(response);
+});
+
+export const deletePlaybook = Effect.fn("j5.http.deletePlaybook")(function* (
+  prepared: PreparedConnection,
+  input: PlaybookDeleteRequest,
+) {
+  const request = yield* HttpClientRequest.post(PLAYBOOK_DELETE_PATH).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(PlaybookDeleteResponse)(response);
+});
+
+export const renamePlaybook = Effect.fn("j5.http.renamePlaybook")(function* (
+  prepared: PreparedConnection,
+  input: PlaybookRenameRequest,
+) {
+  const request = yield* HttpClientRequest.post(PLAYBOOK_RENAME_PATH).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(PlaybookRenameResponse)(response);
 });
 
 export const readThreadPlaybooks = Effect.fn("j5.http.readThreadPlaybooks")(function* (

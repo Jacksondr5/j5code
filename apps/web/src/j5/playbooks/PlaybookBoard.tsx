@@ -1,12 +1,15 @@
 import { presentPlaybook } from "@t3tools/client-runtime/j5/playbooks";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useEnvironment } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { j5Environment } from "../state";
 import { PlaybookStepStrip } from "./PlaybookStepStrip";
+import { usePlaybookRunsRefresh } from "./usePlaybookRunsRefresh";
 
 /** The visible thread owns this bounded live read; hidden tabs do no polling. */
 export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: ThreadId }) {
+  const environment = useEnvironment(props.environmentId);
   const query = useEnvironmentQuery(
     j5Environment.playbooks({
       environmentId: props.environmentId,
@@ -14,30 +17,13 @@ export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: T
     }),
   );
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const { isPending, refresh: refreshQuery } = query;
-  useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | undefined;
-    const refresh = () => {
-      if (!isPending) refreshQuery();
-    };
-    const sync = () => {
-      clearInterval(timer);
-      if (document.visibilityState === "visible") {
-        timer = setInterval(refresh, 2_500);
-      }
-    };
-    const onVisible = () => {
-      sync();
-      if (document.visibilityState === "visible") refresh();
-    };
-    sync();
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [refreshQuery, isPending]);
-  const runs = query.data?.runs ?? [];
+  usePlaybookRunsRefresh(
+    query.refresh,
+    environment?.connection.phase === "connected" &&
+      query.data?.supported !== false &&
+      !query.isPending,
+  );
+  const runs = query.data?.supported ? query.data.runs : [];
   const run = runs.find((entry) => entry.runId === selectedRunId) ?? runs[0];
   if (!run) return null;
   const display = presentPlaybook(run);

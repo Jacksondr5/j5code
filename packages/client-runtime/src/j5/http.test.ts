@@ -16,6 +16,7 @@ import {
   answerHumanExchange,
   assignImportedThreads,
   createSquadron,
+  deletePlaybook,
   isJ5UnsupportedError,
   J5HttpError,
   listHumanInbox,
@@ -25,6 +26,7 @@ import {
   readThreadPlaybooks,
   readAllPlaybooks,
   readPlaybookLibrary,
+  renamePlaybook,
 } from "./http.ts";
 
 const relayToken = (accessToken: string) =>
@@ -110,6 +112,71 @@ it.effect("reads the selected playbook workspace using only its environment cred
     expect(bodies).toEqual([
       { projectId: "same-project", threadId: "same-thread" },
       { projectId: "same-project", threadId: "same-thread" },
+    ]);
+  }),
+);
+
+it.effect("deletes from the selected environment and workspace with its own credentials", () =>
+  Effect.gen(function* () {
+    const requests: Request[] = [];
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      requests.push(new Request(input, init));
+      return Response.json({ deleted: true });
+    };
+    for (const id of ["alpha", "bravo"]) {
+      yield* deletePlaybook(prepared(id, { _tag: "Bearer", token: `${id}-token` }), {
+        projectId: ProjectId.make("same-project"),
+        threadId: ThreadId.make("same-thread"),
+        name: "demo",
+      }).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+    }
+    expect(requests.map((request) => [request.url, request.headers.get("authorization")])).toEqual([
+      ["https://alpha.test/api/j5/playbooks/delete", "Bearer alpha-token"],
+      ["https://bravo.test/api/j5/playbooks/delete", "Bearer bravo-token"],
+    ]);
+    expect(
+      yield* Effect.promise(() => Promise.all(requests.map((request) => request.json()))),
+    ).toEqual([
+      { projectId: "same-project", threadId: "same-thread", name: "demo" },
+      { projectId: "same-project", threadId: "same-thread", name: "demo" },
+    ]);
+  }),
+);
+
+it.effect("renames in the selected environment and workspace with its own credentials", () =>
+  Effect.gen(function* () {
+    const requests: Request[] = [];
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      requests.push(new Request(input, init));
+      return Response.json({ renamed: true });
+    };
+    for (const id of ["alpha", "bravo"]) {
+      yield* renamePlaybook(prepared(id, { _tag: "Bearer", token: `${id}-token` }), {
+        projectId: ProjectId.make("same-project"),
+        threadId: ThreadId.make("same-thread"),
+        name: "demo",
+        title: "Renamed playbook",
+      }).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+    }
+    expect(requests.map((request) => [request.url, request.headers.get("authorization")])).toEqual([
+      ["https://alpha.test/api/j5/playbooks/rename", "Bearer alpha-token"],
+      ["https://bravo.test/api/j5/playbooks/rename", "Bearer bravo-token"],
+    ]);
+    expect(
+      yield* Effect.promise(() => Promise.all(requests.map((request) => request.json()))),
+    ).toEqual([
+      {
+        projectId: "same-project",
+        threadId: "same-thread",
+        name: "demo",
+        title: "Renamed playbook",
+      },
+      {
+        projectId: "same-project",
+        threadId: "same-thread",
+        name: "demo",
+        title: "Renamed playbook",
+      },
     ]);
   }),
 );
