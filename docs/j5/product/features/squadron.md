@@ -19,6 +19,8 @@ Every agent has exactly one **Squadron home**, recorded by the **Registrar** whe
 
 Only a person creates a Squadron. Agents never do, and the platform never creates one automatically — an unnamed default container is the junk drawer that defeats the concept. Creating one is deliberately small: a name and one folder are required; a description and further folders can be added later. First run begins by creating the first Squadron, because agents need a home.
 
+Onboarding import is an explicit exception to the ordering: the selected folders become projects before the human creates or selects their Squadrons. Each selected folder gets one Squadron for its imported conversations. Repeating import preserves existing homes and never revives retired participants. Skipping import still reaches the first-Squadron gate.
+
 A Squadron **targets folders** rather than living in one: the Squadron is created first and targets one or more folders on one environment, while the same folder may be targeted by many Squadrons. Targeting is a **palette, never a wall** — when an agent is created in a Squadron, the Squadron's folders are offered first, and everything else on the machine stays reachable.
 
 The Squadron is **the unit of user choice**. Every surface where a person chooses a working context offers Squadrons; upstream's "project" is implementation substrate that a Squadron references, never a noun the user picks. Agent creation takes its Squadron from where the person already is — the sidebar's Squadron scope — and shows it in the composer, changeable until send and immutable after. Agents never see any of this: a spawned Peer Agent inherits its spawner's Squadron.

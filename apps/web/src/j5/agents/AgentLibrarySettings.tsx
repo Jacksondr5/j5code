@@ -667,10 +667,11 @@ export function AgentLibrarySettings() {
       </SettingsSection>
 
       {effectiveEnvironmentId !== null ? (
-        <SettingsSection
-          title="Library sources"
-          description="Folders this environment reads YAML definitions from. Paths are on the environment's machine; relative paths resolve from its state directory."
-        >
+        <SettingsSection title="Library sources">
+          <SettingsRow
+            title="Source folders"
+            description="Folders this environment reads YAML definitions from. Paths are on the environment's machine; relative paths resolve from its state directory."
+          />
           {librarySources.isPending ? (
             <SettingsRow title="Loading folders" description="Reading the library configuration." />
           ) : librarySources.error ? (

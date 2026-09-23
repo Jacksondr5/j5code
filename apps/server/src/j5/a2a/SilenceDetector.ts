@@ -87,7 +87,7 @@ interface SilenceNoticeBase {
   readonly observedAt: string;
 }
 
-export class A2ASilenceDetectorError extends Schema.TaggedErrorClass<A2ASilenceDetectorError>()(
+export class A2ASilenceDetectorError extends Schema.TaggedError<A2ASilenceDetectorError>()(
   "A2ASilenceDetectorError",
   { operation: Schema.String, cause: Schema.Defect() },
 ) {}

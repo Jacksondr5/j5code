@@ -1,4 +1,4 @@
-import { ThreadId } from "@t3tools/contracts";
+import { ChatAttachment, ThreadId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 const Identifier = Schema.String.check(Schema.isNonEmpty());
@@ -227,6 +227,7 @@ export const ExchangeOpenedPayload = Schema.Struct({
 export type ExchangeOpenedPayload = typeof ExchangeOpenedPayload.Type;
 
 export const MessageSentPayload = Schema.Struct({
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
   messageId: LedgerMessageId,
   text: Schema.String.check(Schema.isNonEmpty()),
   originSquadronId: SquadronId,
@@ -293,6 +294,7 @@ export const ClearOwnAskResult = Schema.Struct({
 export type ClearOwnAskResult = typeof ClearOwnAskResult.Type;
 
 export const SendMessageInput = Schema.Struct({
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
   commandId: CommCommandId,
   senderThreadId: ThreadId,
   to: ParticipantId,

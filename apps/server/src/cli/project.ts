@@ -30,6 +30,7 @@ import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.t
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import { projectMutationOperation } from "../project/ProjectMutation.ts";
 import * as T3ProjectFileLoader from "../project/T3ProjectFileLoader.ts";
 import {
   clearPersistedServerRuntimeState,
@@ -49,7 +50,7 @@ type ProjectCliDispatchCommand = ProjectMutation;
 
 const isEnvironmentHttpCommonError = Schema.is(EnvironmentHttpCommonError);
 
-export class ProjectCommandIdGenerationError extends Schema.TaggedErrorClass<ProjectCommandIdGenerationError>()(
+export class ProjectCommandIdGenerationError extends Schema.TaggedError<ProjectCommandIdGenerationError>()(
   "ProjectCommandIdGenerationError",
   {
     operation: Schema.Literal("generateProjectCommandId"),
@@ -61,7 +62,7 @@ export class ProjectCommandIdGenerationError extends Schema.TaggedErrorClass<Pro
   }
 }
 
-export class ProjectLiveServerDeclaredResponseError extends Schema.TaggedErrorClass<ProjectLiveServerDeclaredResponseError>()(
+export class ProjectLiveServerDeclaredResponseError extends Schema.TaggedError<ProjectLiveServerDeclaredResponseError>()(
   "ProjectLiveServerDeclaredResponseError",
   {
     operation: Schema.Literal("callLiveServer"),
@@ -75,7 +76,7 @@ export class ProjectLiveServerDeclaredResponseError extends Schema.TaggedErrorCl
   }
 }
 
-export class ProjectLiveServerUndeclaredStatusError extends Schema.TaggedErrorClass<ProjectLiveServerUndeclaredStatusError>()(
+export class ProjectLiveServerUndeclaredStatusError extends Schema.TaggedError<ProjectLiveServerUndeclaredStatusError>()(
   "ProjectLiveServerUndeclaredStatusError",
   {
     operation: Schema.Literal("callLiveServer"),
@@ -88,7 +89,7 @@ export class ProjectLiveServerUndeclaredStatusError extends Schema.TaggedErrorCl
   }
 }
 
-export class ProjectLiveServerRequestError extends Schema.TaggedErrorClass<ProjectLiveServerRequestError>()(
+export class ProjectLiveServerRequestError extends Schema.TaggedError<ProjectLiveServerRequestError>()(
   "ProjectLiveServerRequestError",
   {
     operation: Schema.Literal("callLiveServer"),
@@ -100,7 +101,7 @@ export class ProjectLiveServerRequestError extends Schema.TaggedErrorClass<Proje
   }
 }
 
-export class ProjectTitleEmptyError extends Schema.TaggedErrorClass<ProjectTitleEmptyError>()(
+export class ProjectTitleEmptyError extends Schema.TaggedError<ProjectTitleEmptyError>()(
   "ProjectTitleEmptyError",
   {
     operation: Schema.Literal("validateProjectTitle"),
@@ -112,7 +113,7 @@ export class ProjectTitleEmptyError extends Schema.TaggedErrorClass<ProjectTitle
   }
 }
 
-export class ProjectIdentifierEmptyError extends Schema.TaggedErrorClass<ProjectIdentifierEmptyError>()(
+export class ProjectIdentifierEmptyError extends Schema.TaggedError<ProjectIdentifierEmptyError>()(
   "ProjectIdentifierEmptyError",
   {
     operation: Schema.Literal("resolveProjectTarget"),
@@ -124,7 +125,7 @@ export class ProjectIdentifierEmptyError extends Schema.TaggedErrorClass<Project
   }
 }
 
-export class ProjectNotFoundError extends Schema.TaggedErrorClass<ProjectNotFoundError>()(
+export class ProjectNotFoundError extends Schema.TaggedError<ProjectNotFoundError>()(
   "ProjectNotFoundError",
   {
     operation: Schema.Literal("resolveProjectTarget"),
@@ -139,7 +140,7 @@ export class ProjectNotFoundError extends Schema.TaggedErrorClass<ProjectNotFoun
   }
 }
 
-export class ProjectAlreadyExistsError extends Schema.TaggedErrorClass<ProjectAlreadyExistsError>()(
+export class ProjectAlreadyExistsError extends Schema.TaggedError<ProjectAlreadyExistsError>()(
   "ProjectAlreadyExistsError",
   {
     operation: Schema.Literal("addProject"),
@@ -425,42 +426,7 @@ const runProjectMutation = Effect.fn("runProjectMutation")(function* (
       const projects = yield* ProjectService.ProjectService;
       const output = yield* run({
         snapshot,
-        dispatch: (command) =>
-          command.type === "project.create"
-            ? projects
-                .create({
-                  commandId: command.commandId,
-                  projectId: command.projectId,
-                  title: command.title,
-                  workspaceRoot: command.workspaceRoot,
-                  ...(command.defaultModelSelection === undefined
-                    ? {}
-                    : { defaultModelSelection: command.defaultModelSelection }),
-                  ...(command.scripts === undefined ? {} : { scripts: command.scripts }),
-                })
-                .pipe(Effect.asVoid)
-            : command.type === "project.update"
-              ? projects
-                  .update({
-                    commandId: command.commandId,
-                    projectId: command.projectId,
-                    ...(command.title === undefined ? {} : { title: command.title }),
-                    ...(command.workspaceRoot === undefined
-                      ? {}
-                      : { workspaceRoot: command.workspaceRoot }),
-                    ...(command.defaultModelSelection === undefined
-                      ? {}
-                      : { defaultModelSelection: command.defaultModelSelection }),
-                    ...(command.scripts === undefined ? {} : { scripts: command.scripts }),
-                  })
-                  .pipe(Effect.asVoid)
-              : projects
-                  .delete({
-                    commandId: command.commandId,
-                    projectId: command.projectId,
-                    ...(command.force === undefined ? {} : { force: command.force }),
-                  })
-                  .pipe(Effect.asVoid),
+        dispatch: (command) => projectMutationOperation(projects, command).pipe(Effect.asVoid),
         mode: "offline",
       });
       yield* Console.log(output);

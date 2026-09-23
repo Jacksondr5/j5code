@@ -475,7 +475,11 @@ export const layer = Layer.effect(
             placementCommandId: spawnPlacementCommandId(member.stableInput),
             squadronId: captain.squadronId,
             threadId: member.threadId,
-            spawnedByParticipantId: captain.participantId,
+            provenance: {
+              kind: "spawned-by",
+              spawnedByParticipantId: captain.participantId,
+              source: "j5_spawn",
+            },
             createdAt: DateTime.formatIso(child.thread.createdAt),
           })
           .pipe(

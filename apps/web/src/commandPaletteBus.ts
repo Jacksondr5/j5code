@@ -1,4 +1,10 @@
 import type { ScopedProjectRef } from "@t3tools/contracts";
+import type { EnvironmentId, PullRequestLinkedThreadsResult } from "@t3tools/contracts";
+
+export interface CommandPaletteLinkedThreads {
+  readonly environmentId: EnvironmentId;
+  readonly threads: PullRequestLinkedThreadsResult["threads"];
+}
 
 // Tiny event bus allowing components to programmatically open the command palette
 // without owning its React state.
@@ -13,6 +19,8 @@ export interface CommandPaletteProjectSelection {
 
 export interface CommandPaletteOpenDetail {
   readonly open?: "add-project" | "new-thread-in";
+  readonly query?: string;
+  readonly linkedThreads?: CommandPaletteLinkedThreads;
   /**
    * Opts into returning the normal Add Project picker result instead of opening a thread.
    * Absent callers retain the normal Add Project navigation behavior.

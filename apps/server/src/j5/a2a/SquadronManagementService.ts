@@ -26,7 +26,7 @@ export interface CreateSquadronInput {
   readonly projectId: ProjectId;
 }
 
-export class SquadronNameRequiredError extends Schema.TaggedErrorClass<SquadronNameRequiredError>()(
+export class SquadronNameRequiredError extends Schema.TaggedError<SquadronNameRequiredError>()(
   "SquadronNameRequiredError",
   {},
 ) {
@@ -35,7 +35,7 @@ export class SquadronNameRequiredError extends Schema.TaggedErrorClass<SquadronN
   }
 }
 
-export class SquadronProjectNotFoundError extends Schema.TaggedErrorClass<SquadronProjectNotFoundError>()(
+export class SquadronProjectNotFoundError extends Schema.TaggedError<SquadronProjectNotFoundError>()(
   "SquadronProjectNotFoundError",
   { projectId: ProjectId },
 ) {

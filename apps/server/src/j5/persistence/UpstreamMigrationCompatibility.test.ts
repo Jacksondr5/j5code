@@ -6,33 +6,16 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import * as Migrator from "effect/unstable/sql/Migrator";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import {
-  migrationEntries,
-  migrationManifest,
-  runMigrations,
-} from "../../persistence/Migrations.ts";
+import { migrationManifest, runMigrations } from "../../persistence/Migrations.ts";
 import { migrationEntries as j5MigrationEntries, runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { makeSqlitePersistenceLive } from "../../persistence/Layers/Sqlite.ts";
 import { runJ5CompatibleUpstreamMigrations } from "./UpstreamMigrationCompatibility.ts";
 
-const runLegacy = Migrator.make({});
-const installLegacy = Effect.fn("installLegacy")(function* () {
-  const sql = yield* SqlClient.SqlClient;
-  yield* sql`PRAGMA foreign_keys = ON`;
-  yield* runLegacy({
-    loader: Migrator.fromRecord(
-      Object.fromEntries(
-        migrationEntries
-          .filter(([id]) => id <= 40 || (id >= 48 && id <= 56))
-          .map(([id, name, migration]) => [`${id >= 48 ? id - 7 : id}_${name}`, migration]),
-      ),
-    ),
-  });
-  yield* sql`UPDATE effect_sql_migrations SET created_at = '2026-08-15 12:00:00'`;
-});
+import { installHistorical } from "./test-support/historicalMigrations.ts";
+import collapse from "./reviewed-v2-collapse.v1.json" with { type: "json" };
+const installLegacy = () => installHistorical("august");
 
 const readHistory = Effect.fn("readHistory")(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -135,33 +118,22 @@ it.effect("upgrades legacy history without rerunning V2 SQL or changing J5/nativ
     const exchanges = yield* sql`SELECT * FROM j5_a2a_exchange`;
     const nativeThreads = yield* sql`SELECT * FROM orchestration_v2_projection_provider_threads`;
 
-    // This is the actual bad path: the ordinary runner skips the inserted SQL
-    // and attempts the already-applied Foundation migration at its new id.
-    const unbridged = yield* Effect.exit(runMigrations());
-    assert.isTrue(Exit.isFailure(unbridged));
-    if (Exit.isFailure(unbridged))
-      assert.match(Cause.pretty(unbridged.cause), /duplicate column name: driver/);
-    assert.deepStrictEqual(yield* readHistory(), history);
-
     const executed = yield* runJ5CompatibleUpstreamMigrations();
     assert.deepStrictEqual(
       executed.map(([id]) => id),
-      [41, 42, 43, 44, 45, 46, 47, 57, 58, 59],
+      [41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51],
     );
     const upgraded = yield* readHistory();
     assert.deepStrictEqual(
       upgraded.map(({ migration_id, name }) => [migration_id, name] as const),
       migrationManifest,
     );
-    for (const row of history) {
-      assert.deepStrictEqual(
-        upgraded.find(({ name }) => name === row.name),
-        {
-          ...row,
-          migration_id: row.migration_id >= 41 ? row.migration_id + 7 : row.migration_id,
-        },
-      );
-    }
+    assert.deepStrictEqual(upgraded.slice(0, 40), history.slice(0, 40));
+    assert.deepStrictEqual(
+      yield* sql`SELECT migration_id, name, created_at
+      FROM j5_upstream_migration_history ORDER BY migration_id`,
+      history,
+    );
     assert.deepStrictEqual(
       yield* sql`SELECT * FROM j5_a2a_migrations ORDER BY migration_id`,
       j5History,
@@ -177,7 +149,7 @@ it.effect("upgrades legacy history without rerunning V2 SQL or changing J5/nativ
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
 
-for (const through of [40, 47, 56, 59]) {
+for (const through of [40, 47, 48, 49, 50, 51]) {
   it.effect(`accepts the current migration prefix through ${through}`, () =>
     Effect.gen(function* () {
       yield* runMigrations({ toMigrationInclusive: through });
@@ -210,15 +182,15 @@ it.effect("refuses incomplete, renamed, or ahead migration histories without wri
     const sql = yield* SqlClient.SqlClient;
     yield* installLegacy();
     yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 49`;
-    yield* assertRefused(/neither a current prefix nor the reviewed legacy history/);
+    yield* assertRefused(/neither a current prefix nor a reviewed historical history/);
     yield* sql`INSERT INTO effect_sql_migrations (migration_id, name)
       VALUES (49, 'LegacyV1ImportState')`;
     yield* sql`UPDATE effect_sql_migrations SET name = 'Unexpected' WHERE migration_id = 20`;
-    yield* assertRefused(/neither a current prefix nor the reviewed legacy history/);
+    yield* assertRefused(/neither a current prefix nor a reviewed historical history/);
     yield* sql`UPDATE effect_sql_migrations SET name = 'AuthAccessManagement' WHERE migration_id = 20`;
     yield* runJ5CompatibleUpstreamMigrations();
     yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (60, 'Future')`;
-    yield* assertRefused(/neither a current prefix nor the reviewed legacy history/);
+    yield* assertRefused(/neither a current prefix nor a reviewed historical history/);
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
 
@@ -227,7 +199,7 @@ it.effect("refuses legacy schema drift even when the recorded history matches", 
     const sql = yield* SqlClient.SqlClient;
     yield* installLegacy();
     yield* sql`DROP INDEX orchestration_v2_effect_outbox_claim_idx`;
-    yield* assertRefused(/legacy history does not match the reviewed schema/);
+    yield* assertRefused(/historical migration history does not match the reviewed schema/);
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
 
@@ -285,10 +257,10 @@ it.effect(
       const sql = yield* SqlClient.SqlClient;
       yield* installLegacy();
       yield* sql`CREATE TRIGGER reject_pending_migrations BEFORE INSERT ON effect_sql_migrations
-      WHEN NEW.migration_id = 57 BEGIN SELECT RAISE(ABORT, 'injected migration failure'); END`;
+      WHEN NEW.migration_id = 51 BEGIN SELECT RAISE(ABORT, 'injected migration failure'); END`;
       yield* assertRefused(/injected migration failure/);
       yield* sql`DROP TRIGGER reject_pending_migrations`;
-      assert.lengthOf(yield* runJ5CompatibleUpstreamMigrations(), 10);
+      assert.lengthOf(yield* runJ5CompatibleUpstreamMigrations(), 11);
     }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );
 
@@ -301,8 +273,202 @@ it.effect("serializes concurrent upgrade attempts on the same client", () =>
     );
     assert.deepStrictEqual(
       results.map((rows) => rows.length).sort((a, b) => a - b),
-      [0, 10],
+      [0, 11],
     );
-    assert.lengthOf(yield* readHistory(), 59);
+    assert.lengthOf(yield* readHistory(), 51);
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+for (let through = 48; through <= 59; through++) {
+  it.effect(`completes reviewed September prefix ${through} without replaying existing steps`, () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* installHistorical("september", through);
+      const original = yield* readHistory();
+      yield* runJ5CompatibleUpstreamMigrations();
+      assert.deepStrictEqual(
+        (yield* readHistory()).map(({ migration_id, name }) => [migration_id, name] as const),
+        migrationManifest,
+      );
+      assert.deepStrictEqual((yield* readHistory()).slice(0, 47), original.slice(0, 47));
+      assert.deepStrictEqual(
+        yield* sql`SELECT migration_id, name, created_at FROM j5_upstream_migration_history
+        WHERE source_ref = ${collapse.sourceRef} ORDER BY migration_id`,
+        original,
+      );
+      assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);
+      assert.deepStrictEqual(yield* sql`PRAGMA integrity_check`, [{ integrity_check: "ok" }]);
+      assert.deepStrictEqual(yield* runJ5CompatibleUpstreamMigrations(), []);
+    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  );
+}
+
+it.effect("rejects September schema drift without rewriting history", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* installHistorical("september");
+    yield* sql`DROP INDEX orchestration_v2_effect_outbox_claim_idx`;
+    yield* assertRefused(/does not match the reviewed schema/);
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect(
+  "rolls back new SQL and archived history when composition recording fails, then retries",
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* installHistorical("september", 56);
+      yield* sql`CREATE TRIGGER reject_composition BEFORE INSERT ON effect_sql_migrations
+      WHEN NEW.migration_id = 51 BEGIN SELECT RAISE(ABORT, 'composition failure'); END`;
+      yield* assertRefused(/composition failure/);
+      yield* sql`DROP TRIGGER reject_composition`;
+      assert.lengthOf(yield* runJ5CompatibleUpstreamMigrations(), 4);
+    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect("demonstrates why the unbridged runner cannot upgrade August history", () =>
+  Effect.gen(function* () {
+    yield* installLegacy();
+    const history = yield* readHistory();
+    const unbridged = yield* Effect.exit(runMigrations());
+    assert.isTrue(Exit.isFailure(unbridged));
+    if (Exit.isFailure(unbridged))
+      assert.match(Cause.pretty(unbridged.cause), /no such column: linked_pull_request_json/);
+    assert.deepStrictEqual(yield* readHistory(), history);
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect(
+  "the bridge applies changes the normal high-water runner silently skips for September",
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* installHistorical("september");
+      assert.deepStrictEqual(yield* runMigrations(), []);
+      assert.deepStrictEqual(
+        yield* sql`SELECT name FROM sqlite_master WHERE name = 'projection_thread_pull_requests'`,
+        [],
+      );
+      yield* runJ5CompatibleUpstreamMigrations();
+      assert.lengthOf(
+        yield* sql`SELECT name FROM sqlite_master WHERE name = 'projection_thread_pull_requests'`,
+        1,
+      );
+    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect(
+  "completes a partial September application-event migration without losing its old events",
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* installHistorical("september", 52);
+      yield* sql`INSERT INTO orchestration_v2_events
+      (event_id, thread_id, event_type, occurred_at, payload_json, driver, provider_instance_id)
+      VALUES ('event:preserve', 'thread:preserve', 'test.preserve', '2026-09-01', '{"keep":true}', 'codex', 'codex')`;
+      yield* runJ5CompatibleUpstreamMigrations();
+      assert.deepStrictEqual(
+        yield* sql`SELECT event_id, payload_json, application_event_version FROM orchestration_events
+      WHERE event_id = 'event:preserve'`,
+        [
+          {
+            event_id: "event:preserve",
+            payload_json: '{"keep":true}',
+            application_event_version: 2,
+          },
+        ],
+      );
+      yield* runJ5CompatibleUpstreamMigrations();
+      assert.lengthOf(
+        yield* sql`SELECT event_id FROM orchestration_events WHERE event_id = 'event:preserve'`,
+        1,
+      );
+    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect("upgrades to the same upstream schema as a fresh install", () =>
+  Effect.gen(function* () {
+    const fresh = yield* Effect.gen(function* () {
+      yield* runMigrations();
+      return yield* readSchema();
+    }).pipe(Effect.provide(NodeSqliteClient.layerMemory()));
+    yield* installHistorical("september", 56);
+    yield* runJ5CompatibleUpstreamMigrations();
+    const upgraded = yield* readSchema();
+    assert.deepStrictEqual(
+      upgraded.filter((row) => !String(row.name).includes("j5_upstream_migration_history")),
+      fresh,
+    );
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect("backfills September PR links once while preserving malformed legacy data", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* installHistorical("september");
+    yield* sql`INSERT INTO projection_projects
+      (project_id, title, workspace_root, scripts_json, created_at, updated_at)
+      VALUES ('project:links', 'Links', '/test/links', '[]', '2026-09-01', '2026-09-01')`;
+    for (const [id, link] of [
+      [
+        "github",
+        '{"repository":"Acme/Widgets","number":42,"url":"https://GitHub.com/Acme/Widgets/pull/42"}',
+      ],
+      [
+        "azure",
+        '{"repository":"widgets","number":7,"url":"https://dev.azure.com/acme/project/_git/widgets/pullrequest/7"}',
+      ],
+      ["malformed", "{broken"],
+    ]) {
+      yield* sql`INSERT INTO projection_threads
+        (thread_id, project_id, title, model_selection_json, linked_pull_request_json, created_at, updated_at)
+        VALUES (${id}, 'project:links', ${id}, ${modelSelection}, ${link}, '2026-09-01', '2026-09-02')`;
+    }
+    const original =
+      yield* sql`SELECT thread_id, linked_pull_request_json FROM projection_threads ORDER BY thread_id`;
+    for (let startup = 0; startup < 2; startup++) {
+      yield* runJ5CompatibleUpstreamMigrations();
+      assert.deepStrictEqual(
+        yield* sql`SELECT thread_id, host, repository, number, source, linked_at
+        FROM projection_thread_pull_requests ORDER BY thread_id`,
+        [
+          {
+            thread_id: "azure",
+            host: "dev.azure.com",
+            repository: "acme/project/_git/widgets",
+            number: 7,
+            source: "manual",
+            linked_at: "2026-09-02",
+          },
+          {
+            thread_id: "github",
+            host: "github.com",
+            repository: "acme/widgets",
+            number: 42,
+            source: "manual",
+            linked_at: "2026-09-02",
+          },
+        ],
+      );
+      assert.deepStrictEqual(
+        yield* sql`SELECT thread_id, linked_pull_request_json FROM projection_threads ORDER BY thread_id`,
+        original,
+      );
+    }
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect("refuses gaps, renamed entries and unknown September suffixes before writes", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* installHistorical("september");
+    yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 52`;
+    yield* assertRefused(/neither a current prefix nor a reviewed historical history/);
+    yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (52, 'OrchestrationV2ThreadLaunchWorkflows')`;
+    yield* sql`UPDATE effect_sql_migrations SET name = 'Unexpected' WHERE migration_id = 59`;
+    yield* assertRefused(/neither a current prefix nor a reviewed historical history/);
+    yield* sql`UPDATE effect_sql_migrations SET name = 'OrchestrationV2ShellIndexes' WHERE migration_id = 59`;
+    yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (60, 'Unreviewed')`;
+    yield* assertRefused(/neither a current prefix nor a reviewed historical history/);
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );

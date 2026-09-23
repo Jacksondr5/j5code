@@ -1,3 +1,4 @@
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   type ChatAttachment,
   CommandId,
@@ -10,6 +11,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schedule from "effect/Schedule";
 
 import type { ProjectionRepositoryError } from "../persistence/Errors.ts";
 import { ProjectionProjectRepository } from "../persistence/Services/ProjectionProjects.ts";
@@ -160,7 +162,7 @@ export class ThreadTitleRegenerationService extends Context.Service<
   }
 >()("t3/orchestration-v2/ThreadTitleRegenerationService") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const threads = yield* ThreadManagementService;
   const projects = yield* ProjectionProjectRepository;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
@@ -219,7 +221,10 @@ export const make = Effect.gen(function* () {
         return { type: "complete" as const };
       }
 
-      const settings = yield* serverSettings.getSettings;
+      const settings = resolveProjectSettings(
+        yield* serverSettings.getSettings,
+        projection.thread.projectId,
+      ).settings;
       const result = yield* textGeneration.generateThreadTitle({
         cwd: projection.thread.worktreePath ?? project.value.workspaceRoot,
         message: context.message,
@@ -233,6 +238,10 @@ export const make = Effect.gen(function* () {
         ? { type: "complete" as const }
         : { type: "complete" as const, title: result.title };
     }).pipe(
+      Effect.retry({
+        times: input.kind.type === "initial" ? 2 : 0,
+        schedule: Schedule.exponential("2 seconds"),
+      }),
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.interrupt

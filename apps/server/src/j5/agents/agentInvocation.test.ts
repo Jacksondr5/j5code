@@ -133,6 +133,7 @@ const fixture = Effect.gen(function* () {
                 childRunId: null,
                 childNodeId: NodeId.make("child-node"),
                 status: "running" as const,
+                workState: "working" as const,
                 hasPendingChildRuns: true,
                 latestTerminalRunId: null,
                 latestTerminalStatus: null,

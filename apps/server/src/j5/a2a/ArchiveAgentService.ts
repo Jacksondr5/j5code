@@ -77,7 +77,7 @@ export interface ArchiveAgentInput {
   readonly confirmationToken?: string;
   /**
    * The Crew archive path has already shown the unit's facts and holds a valid crew token, so
-   * per-member confirmation is satisfied; never set from the single-agent tool.
+   * per-member confirmation is satisfied; set only by the internal crew archive flow.
    */
   readonly confirmationSatisfied?: boolean;
   readonly archivedAt: string;
@@ -94,7 +94,7 @@ export class ArchiveAgentConfirmationRequiredError extends Data.TaggedError(
   readonly confirmationToken: string;
 }> {
   override get message(): string {
-    return "Archiving would end active work. Review the exact facts and retry archive_agent with the confirmation_token.";
+    return "Archiving would end active work. Review the exact facts and retry the archive operation with the confirmation_token.";
   }
 }
 
@@ -106,8 +106,8 @@ export class ArchiveAgentConfirmationStaleError extends Data.TaggedError(
 }> {
   override get message(): string {
     return this.confirmationToken === null
-      ? "The confirmation_token is stale because the target no longer has consequential work. Retry archive_agent without a token."
-      : "The confirmation_token is stale because the target facts changed. Review the current facts and retry archive_agent with the new confirmation_token.";
+      ? "The confirmation_token is stale because the target no longer has consequential work. Retry the archive operation without a token."
+      : "The confirmation_token is stale because the target facts changed. Review the current facts and retry the archive operation with the new confirmation_token.";
   }
 }
 
@@ -118,8 +118,8 @@ export class ArchiveAgentConfirmationTokenError extends Data.TaggedError(
 }> {
   override get message(): string {
     return this.reason === "unsupported-version"
-      ? "The confirmation_token uses an unsupported version. Call archive_agent without a token to receive a current refusal."
-      : "The confirmation_token is malformed or has an invalid signature. Call archive_agent without a token to receive a current refusal.";
+      ? "The confirmation_token uses an unsupported version. Retry the archive operation without a token to receive a current refusal."
+      : "The confirmation_token is malformed or has an invalid signature. Retry the archive operation without a token to receive a current refusal.";
   }
 }
 
@@ -130,7 +130,7 @@ export class ArchiveAgentTargetMismatchError extends Data.TaggedError(
   readonly observed: string;
 }> {
   override get message(): string {
-    return `archive_agent selected ${this.expected.squadronId}/${this.expected.participantId}/${this.expected.threadId}, but the durable target reads resolve ${this.observed}. No archive side effect was attempted.`;
+    return `The archive operation selected ${this.expected.squadronId}/${this.expected.participantId}/${this.expected.threadId}, but the durable target reads resolve ${this.observed}. No archive side effect was attempted.`;
   }
 }
 
@@ -139,7 +139,7 @@ export class ArchiveAgentOperationError extends Data.TaggedError("ArchiveAgentOp
   readonly cause: unknown;
 }> {
   override get message(): string {
-    return `archive_agent failed while ${this.phase}: ${this.cause instanceof Error ? this.cause.message : String(this.cause)}.`;
+    return `The archive operation failed while ${this.phase}: ${this.cause instanceof Error ? this.cause.message : String(this.cause)}.`;
   }
 }
 
@@ -160,12 +160,12 @@ export class ArchiveAgentPartialFailureError extends Data.TaggedError(
         ? "No active run is currently observed."
         : `Run ${this.runningTurn.runId} is still observed as ${this.runningTurn.status}; an interrupt may have been requested, but terminal state is not yet observed.`;
     return [
-      `archive_agent committed thread archive=${this.threadArchived}, participant archived=${this.participantArchived}, legacy retirement=${this.participantRetired}.`,
+      `The archive operation committed thread archive=${this.threadArchived}, participant archived=${this.participantArchived}, legacy retirement=${this.participantRetired}.`,
       this.pendingExchangeIds.length === 0
         ? "All observed lifecycle obligation events are committed."
         : `Lifecycle obligation events remain in flight for exchanges ${this.pendingExchangeIds.join(", ")}.`,
       runClaim,
-      "Retry archive_agent with the same client_request_id; recovery is forward-only and idempotent.",
+      "Retry the archive operation with the same client_request_id; recovery is forward-only and idempotent.",
       `Cause: ${this.cause instanceof Error ? this.cause.message : String(this.cause)}.`,
     ].join(" ");
   }
@@ -588,7 +588,7 @@ export const layer = Layer.effect(
               commandId: input.interruptCommandId,
               threadId: input.target.threadId,
               runId: before.facts.runningTurn.runId,
-              reason: "Peer Agent archived by archive_agent",
+              reason: "Peer Agent archived as part of Crew retirement",
             })
             .pipe(Effect.mapError(operationError("requesting interruption of the active run")));
           interruptRequested = true;

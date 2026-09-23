@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { ThreadId } from "@t3tools/contracts";
+import { ThreadId, TurnItemId, type OrchestrationV2TurnItem } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 
 import {
   commandDetailRepeatsCommand,
@@ -10,10 +11,186 @@ import {
   summarizeToolGroup,
   toolGroupAction,
   toolGroupSummaryKind,
+  toolItemForDisplay,
   type WorkLogPresentationEntry,
   type WorkLogToolLifecycleStatus,
   workEntryViewedImagePath,
+  workEntryIndicatesToolFailure,
+  workEntryDisplayIndicatesToolFailure,
+  workEntryIndicatesToolSuccess,
 } from "./presentation.js";
+
+function commandItem(
+  fields: Partial<Extract<OrchestrationV2TurnItem, { type: "command_execution" }>> = {},
+): OrchestrationV2TurnItem {
+  return {
+    id: TurnItemId.make("command"),
+    threadId: ThreadId.make("thread"),
+    runId: null,
+    nodeId: null,
+    providerThreadId: null,
+    providerTurnId: null,
+    nativeItemRef: null,
+    parentItemId: null,
+    ordinal: 1,
+    status: "completed",
+    title: null,
+    startedAt: null,
+    completedAt: null,
+    updatedAt: DateTime.makeUnsafe("2026-09-08T00:00:00.000Z"),
+    type: "command_execution",
+    input: 'rg "command not found"',
+    exitCode: 0,
+    ...fields,
+  };
+}
+
+describe("workEntryIndicatesToolFailure", () => {
+  const base = {
+    id: "w1",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    label: "Read",
+  };
+
+  it.each([
+    [{ outputIndicatesFailure: true }, true],
+    [{ exitCode: 2 }, true],
+    [{ output: "sh: missing-command: command not found" }, true],
+    [{ output: "Found 3 matches" }, false],
+    [{ output: `${"x".repeat(32_768)} command not found` }, false],
+    [{}, false],
+  ] as const)(
+    "preserves command failure state after removing displayed output: %j",
+    (fields, failed) => {
+      const structuredPayload = commandItem(fields);
+      const entry: WorkLogPresentationEntry = {
+        ...base,
+        tone: "tool",
+        itemType: "command_execution",
+        toolLifecycleStatus: "completed",
+        structuredPayload,
+      };
+      expect(workEntryDisplayIndicatesToolFailure(entry)).toBe(failed);
+      expect(workEntryIndicatesToolSuccess(entry)).toBe(!failed);
+      expect(JSON.stringify(toolItemForDisplay(structuredPayload))).not.toContain('"output":');
+    },
+  );
+
+  it("is true for error tone", () => {
+    expect(
+      workEntryIndicatesToolFailure({
+        ...base,
+        tone: "error",
+        detail: "nothing special",
+      }),
+    ).toBe(true);
+  });
+
+  it("is true when lifecycle says failed even if detail is empty", () => {
+    expect(
+      workEntryIndicatesToolFailure({
+        ...base,
+        tone: "tool",
+        toolLifecycleStatus: "failed",
+      }),
+    ).toBe(true);
+  });
+
+  it("detects file-not-found style tool output with completed lifecycle", () => {
+    expect(
+      workEntryIndicatesToolFailure({
+        ...base,
+        tone: "tool",
+        toolLifecycleStatus: "completed",
+        detail: "File not found: C:\\foo\\nonexistent.ts",
+      }),
+    ).toBe(true);
+  });
+
+  it("detects glob no files and PowerShell command errors", () => {
+    expect(
+      workEntryIndicatesToolFailure({
+        ...base,
+        label: "Glob",
+        tone: "tool",
+        detail: "No files found",
+      }),
+    ).toBe(true);
+    expect(
+      workEntryIndicatesToolFailure({
+        ...base,
+        label: "Bash",
+        tone: "tool",
+        detail:
+          "The term 'this_is_not_a_command' is not recognized as the name of a cmdlet, function, script file, or operable program.",
+      }),
+    ).toBe(true);
+  });
+
+  it("is false for successful completed tools", () => {
+    expect(
+      workEntryIndicatesToolFailure({
+        ...base,
+        tone: "tool",
+        toolLifecycleStatus: "completed",
+        detail: "Found 3 matching files",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not treat error text in a command as rendered failure", () => {
+    const entry = {
+      ...base,
+      label: "Ran command",
+      tone: "tool",
+      toolLifecycleStatus: "completed",
+      command: 'rg "file not found"',
+      detail: "Found 3 matches",
+    } satisfies WorkLogPresentationEntry;
+
+    expect(workEntryDisplayIndicatesToolFailure(entry)).toBe(false);
+    // Older activities can store output in this field, so that path stays separate.
+    expect(workEntryIndicatesToolFailure(entry)).toBe(true);
+    expect(workEntryDisplayIndicatesToolFailure({ ...entry, detail: "File not found" })).toBe(true);
+  });
+
+  it("treats successful tool rows as success candidates", () => {
+    expect(
+      workEntryIndicatesToolSuccess({
+        ...base,
+        tone: "tool",
+        toolLifecycleStatus: "completed",
+        detail: "ok",
+      }),
+    ).toBe(true);
+    expect(
+      workEntryIndicatesToolSuccess({
+        ...base,
+        tone: "tool",
+        toolLifecycleStatus: "inProgress",
+        detail: "…",
+      }),
+    ).toBe(false);
+    expect(workEntryIndicatesToolSuccess({ ...base, tone: "thinking", detail: "…" })).toBe(false);
+    expect(
+      workEntryIndicatesToolSuccess({ ...base, tone: "tool", toolLifecycleStatus: "stopped" }),
+    ).toBe(false);
+    expect(
+      workEntryIndicatesToolSuccess({ ...base, tone: "tool", toolLifecycleStatus: "idle" }),
+    ).toBe(false);
+  });
+
+  it("does not run heuristics on non-tool info rows", () => {
+    expect(
+      workEntryIndicatesToolFailure({
+        ...base,
+        label: "Context compacted",
+        tone: "info",
+        detail: "File not found in conversation",
+      }),
+    ).toBe(false);
+  });
+});
 
 describe("summarizeToolGroup", () => {
   const entry = (
@@ -25,6 +202,19 @@ describe("summarizeToolGroup", () => {
     label: "Tool call",
     tone: "tool",
     ...overrides,
+  });
+
+  it("counts created threads alongside adjacent commands", () => {
+    expect(
+      summarizeToolGroup([
+        entry("command", { itemType: "command_execution", command: "vp test run" }),
+        entry("created", {
+          itemType: "thread_created",
+
+          label: "Created thread",
+        }),
+      ]).summary,
+    ).toBe("Ran 1 command and created 1 thread");
   });
 
   it("deduplicates named sources ahead of ordinary actions", () => {
@@ -71,6 +261,19 @@ describe("resolveWorkEntryToolPresentation", () => {
     expect(resolveWorkEntryToolPresentation({ label })).toEqual({
       displayName: "Clicking in the preview browser",
       icon: "browser",
+    });
+  });
+
+  it("labels device tools with the device icon", () => {
+    expect(
+      resolveWorkEntryToolPresentation({
+        label: "mcp__t3-code__device_open",
+        toolLifecycleStatus: "completed",
+      }),
+    ).toEqual({ displayName: "Opened a device in the Device panel", icon: "device" });
+    expect(resolveWorkEntryToolPresentation({ label: "t3-code · device_screenshot" })).toEqual({
+      displayName: "Taking a screenshot of the device",
+      icon: "device",
     });
   });
 
@@ -441,5 +644,148 @@ describe("resolveViewedImageAsset", () => {
       srcFragment: "#mark",
     });
     expect(resolveViewedImageAsset("https://example.com/logo.png", { threadId })).toBeNull();
+  });
+});
+
+describe("pull request tool presentation", () => {
+  it.each([
+    "mcp__t3-code__link_pull_request",
+    "mcp__t3_code__link_pull_request",
+    "T3-code · link_pull_request",
+    "t3code/link_pull_request",
+    "link_pull_request",
+  ])("recognizes the native linking tool: %s", (label) => {
+    const entry: WorkLogPresentationEntry = {
+      id: "link",
+      createdAt: "2026-09-10T00:00:00.000Z",
+      label,
+      tone: "tool",
+      toolLifecycleStatus: "completed",
+    };
+    expect(resolveWorkEntryToolPresentation(entry)).toMatchObject({
+      displayName: "Linked a pull request",
+      icon: "pull-request",
+    });
+    expect(toolGroupAction(entry)).toBe("link-pr");
+  });
+
+  it.each([
+    ["inProgress", "Linking PR #42"],
+    ["completed", "Linked PR #42"],
+    ["failed", "Failed to link PR #42"],
+    ["declined", "Declined to link PR #42"],
+    ["stopped", "Stopped linking PR #42"],
+  ] as const)("describes the target and %s status", (toolLifecycleStatus, displayName) => {
+    expect(
+      resolveWorkEntryToolPresentation({
+        label: "MCP tool call",
+        toolTitle: "Custom title",
+        toolLifecycleStatus,
+        toolData: {
+          server: "t3-code",
+          tool: "link_pull_request",
+          arguments: { url: "https://github.com/acme/web/pull/42" },
+        },
+      })?.displayName,
+    ).toBe(displayName);
+  });
+
+  it("recognizes unlink targets supplied as repository and number", () => {
+    expect(
+      resolveWorkEntryToolPresentation({
+        label: "MCP tool call",
+        toolLifecycleStatus: "completed",
+        toolData: {
+          toolName: "mcp__t3-code__unlink_pull_request",
+          rawInput: { repository: "acme/web", number: 42 },
+        },
+      }),
+    ).toMatchObject({ displayName: "Unlinked PR #42", icon: "pull-request", action: "unlink-pr" });
+  });
+
+  it("summarizes native PR work separately from ordinary tools and integration metadata", () => {
+    const link: WorkLogPresentationEntry = {
+      id: "link",
+      createdAt: "2026-09-10T00:00:00.000Z",
+      label: "T3-code · link_pull_request",
+      tone: "tool",
+      itemType: "dynamic_tool",
+      toolLifecycleStatus: "completed",
+      toolSource: { key: "t3-code", name: "T3 Code", kind: "integration" },
+    };
+    const list: WorkLogPresentationEntry = {
+      ...link,
+      label: "T3-code · list_thread_pull_requests",
+    };
+    expect(summarizeToolGroup([link, link, list]).summary).toBe(
+      "Linked 2 pull requests and checked linked pull requests",
+    );
+    expect(summarizeToolGroup([{ ...link, label: "T3-code · unlink_pull_request" }]).summary).toBe(
+      "Unlinked 1 pull request",
+    );
+    expect(toolGroupSummaryKind([link, link, list])).toBe("pull-request");
+    expect(summarizeToolGroup([list, list]).summary).toBe("Checked linked pull requests 2 times");
+    expect(
+      resolveWorkEntryToolPresentation({ label: "mcp__another-server__link_pull_request" }),
+    ).toBeNull();
+  });
+});
+
+describe("device group summaries", () => {
+  const deviceEntry = (tool: string): WorkLogPresentationEntry => ({
+    id: tool,
+    createdAt: "2026-09-10T00:00:00.000Z",
+    label: "MCP tool call",
+    toolData: { server: "t3-code", tool },
+    itemType: "dynamic_tool",
+    toolLifecycleStatus: "completed",
+    tone: "tool",
+  });
+
+  it.each(["device_list", "device_open", "device_screenshot", "device_close"])(
+    "recognizes %s as device controls",
+    (tool) => {
+      const entry = deviceEntry(tool);
+      expect(summarizeToolGroup([entry]).summary).toBe("Used device controls 1 time");
+      expect(toolGroupSummaryKind([entry])).toBe("device");
+    },
+  );
+
+  it("summarizes device calls alongside shell commands", () => {
+    expect(
+      summarizeToolGroup([
+        {
+          id: "command",
+          createdAt: "2026-09-10T00:00:00.000Z",
+          label: "Ran command",
+          itemType: "command_execution",
+          command: "pwd",
+          tone: "tool",
+        },
+        deviceEntry("device_list"),
+        deviceEntry("device_open"),
+      ]).summary,
+    ).toBe("Ran 1 command and used device controls 2 times");
+  });
+
+  it("recognizes Claude tool names and preserves screenshot previews", () => {
+    const entry = {
+      ...deviceEntry("device_screenshot"),
+      toolData: { toolName: "mcp__t3_code__device_screenshot" },
+      viewedImagePath: "/workspace/device.png",
+    };
+    expect(summarizeToolGroup([entry]).summary).toBe("Used device controls 1 time");
+    expect(workEntryViewedImagePath(entry)).toBe("/workspace/device.png");
+  });
+
+  it("does not classify another server's tools as T3 device controls", () => {
+    expect(
+      summarizeToolGroup([
+        {
+          ...deviceEntry("device_open"),
+          toolData: { server: "another-server", tool: "device_open" },
+        },
+      ]).summary,
+    ).toBe("Used 1 tool");
   });
 });

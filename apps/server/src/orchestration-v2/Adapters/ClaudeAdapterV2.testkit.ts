@@ -26,7 +26,6 @@ import { ServerConfig } from "../../config.ts";
 import {
   CLAUDE_PROVIDER,
   CLAUDE_DEFAULT_INSTANCE_ID,
-  CLAUDE_DRIVER_KIND,
   ClaudeAdapterV2Driver,
   ClaudeAgentSdkQueryRunner,
   ClaudeAgentSdkQueryRunnerError,
@@ -60,7 +59,7 @@ const ClaudeAgentSdkReplayTranscript = Schema.Struct({
 });
 type ClaudeAgentSdkReplayTranscript = typeof ClaudeAgentSdkReplayTranscript.Type;
 
-export class ClaudeReplayTranscriptDecodeError extends Schema.TaggedErrorClass<ClaudeReplayTranscriptDecodeError>()(
+export class ClaudeReplayTranscriptDecodeError extends Schema.TaggedError<ClaudeReplayTranscriptDecodeError>()(
   "ClaudeReplayTranscriptDecodeError",
   {
     driver: Schema.optional(Schema.String),
@@ -74,7 +73,7 @@ export class ClaudeReplayTranscriptDecodeError extends Schema.TaggedErrorClass<C
   }
 }
 
-export class ClaudeReplayExhaustedError extends Schema.TaggedErrorClass<ClaudeReplayExhaustedError>()(
+export class ClaudeReplayExhaustedError extends Schema.TaggedError<ClaudeReplayExhaustedError>()(
   "ClaudeReplayExhaustedError",
   {
     scenario: Schema.String,
@@ -87,7 +86,7 @@ export class ClaudeReplayExhaustedError extends Schema.TaggedErrorClass<ClaudeRe
   }
 }
 
-export class ClaudeReplayUnexpectedOutboundError extends Schema.TaggedErrorClass<ClaudeReplayUnexpectedOutboundError>()(
+export class ClaudeReplayUnexpectedOutboundError extends Schema.TaggedError<ClaudeReplayUnexpectedOutboundError>()(
   "ClaudeReplayUnexpectedOutboundError",
   {
     scenario: Schema.String,
@@ -101,7 +100,7 @@ export class ClaudeReplayUnexpectedOutboundError extends Schema.TaggedErrorClass
   }
 }
 
-export class ClaudeReplayFrameMismatchError extends Schema.TaggedErrorClass<ClaudeReplayFrameMismatchError>()(
+export class ClaudeReplayFrameMismatchError extends Schema.TaggedError<ClaudeReplayFrameMismatchError>()(
   "ClaudeReplayFrameMismatchError",
   {
     scenario: Schema.String,
@@ -116,7 +115,7 @@ export class ClaudeReplayFrameMismatchError extends Schema.TaggedErrorClass<Clau
   }
 }
 
-export class ClaudeReplayRuntimeExitError extends Schema.TaggedErrorClass<ClaudeReplayRuntimeExitError>()(
+export class ClaudeReplayRuntimeExitError extends Schema.TaggedError<ClaudeReplayRuntimeExitError>()(
   "ClaudeReplayRuntimeExitError",
   {
     scenario: Schema.String,
@@ -130,7 +129,7 @@ export class ClaudeReplayRuntimeExitError extends Schema.TaggedErrorClass<Claude
   }
 }
 
-export class ClaudeReplayIncompleteError extends Schema.TaggedErrorClass<ClaudeReplayIncompleteError>()(
+export class ClaudeReplayIncompleteError extends Schema.TaggedError<ClaudeReplayIncompleteError>()(
   "ClaudeReplayIncompleteError",
   {
     scenario: Schema.String,
@@ -143,7 +142,7 @@ export class ClaudeReplayIncompleteError extends Schema.TaggedErrorClass<ClaudeR
   }
 }
 
-export class ClaudeReplayDriverError extends Schema.TaggedErrorClass<ClaudeReplayDriverError>()(
+export class ClaudeReplayDriverError extends Schema.TaggedError<ClaudeReplayDriverError>()(
   "ClaudeReplayDriverError",
   {
     scenario: Schema.String,
@@ -820,7 +819,7 @@ const makeClaudeAgentSdkReplayQueryRunner = Effect.fn("ClaudeAgentSdkReplayQuery
   },
 );
 
-export function makeClaudeAgentSdkReplayQueryRunnerLayer(
+function makeClaudeAgentSdkReplayQueryRunnerLayer(
   transcript: ClaudeAgentSdkReplayTranscript,
   options: { readonly replayGate?: ProviderReplayGate } = {},
 ): Layer.Layer<ClaudeAgentSdkQueryRunner> {
@@ -830,7 +829,7 @@ export function makeClaudeAgentSdkReplayQueryRunnerLayer(
   );
 }
 
-export function makeClaudeAgentSdkReplayLayer(
+function makeClaudeAgentSdkReplayLayer(
   transcript: ClaudeAgentSdkReplayTranscript,
   options: { readonly replayGate?: ProviderReplayGate } = {},
 ): Layer.Layer<ClaudeAgentSdkQueryRunner> {
@@ -865,7 +864,7 @@ export function makeClaudeAgentSdkReplayLayer(
   );
 }
 
-export function makeClaudeProviderAdapterRegistryReplayLayer(
+function makeClaudeProviderAdapterRegistryReplayLayer(
   transcript: ClaudeAgentSdkReplayTranscript,
   options: { readonly replayGate?: ProviderReplayGate } = {},
 ) {
@@ -877,7 +876,7 @@ export function makeClaudeProviderAdapterRegistryReplayLayer(
     drivers: [ClaudeAdapterV2Driver],
     configMap: {
       [CLAUDE_DEFAULT_INSTANCE_ID]: {
-        driver: CLAUDE_DRIVER_KIND,
+        driver: CLAUDE_PROVIDER,
       },
     },
   }).pipe(

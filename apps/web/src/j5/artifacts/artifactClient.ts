@@ -19,7 +19,7 @@ import { HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { runtime } from "../../lib/runtime";
 import { readPreparedConnection } from "../../state/session";
 
-export class ArtifactHttpError extends Schema.TaggedErrorClass<ArtifactHttpError>()(
+export class ArtifactHttpError extends Schema.TaggedError<ArtifactHttpError>()(
   "ArtifactHttpError",
   { status: Schema.Number, detail: Schema.String },
 ) {

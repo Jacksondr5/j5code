@@ -1,5 +1,13 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as FileSystem from "effect/FileSystem";
+import * as ServerConfig from "../config.ts";
+import { createPendingAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
+import * as ThreadMessageIntake from "./ThreadMessageIntake.ts";
 import { assert, it, vi } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import {
+  ChatAttachmentId,
+  type ChatAttachment,
   CommandId,
   DEFAULT_SERVER_SETTINGS,
   GitCommandError,
@@ -7,6 +15,8 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  OrchestrationV2ThreadProjectionJson,
+  ScheduledTaskId,
   type ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
@@ -19,6 +29,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -29,12 +40,14 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import { makeProviderRegistryLayer } from "../provider/testUtils/providerRegistryMock.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import {
   SquadronThreadCreationMissingSquadronError,
   SquadronThreadCreationService,
 } from "../j5/a2a/SquadronThreadCreationService.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
+import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import * as IdAllocator from "./IdAllocator.ts";
@@ -46,6 +59,7 @@ import * as ThreadTitleRegeneration from "./ThreadTitleRegenerationService.ts";
 import { makeOrchestratorV2ReplayLayerWithRegistry } from "./testkit/ProviderReplayHarness.ts";
 
 const projectId = ProjectId.make("project:launch-test");
+const encodeThreadProjection = Schema.encodeEffect(OrchestrationV2ThreadProjectionJson);
 const modelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
   model: "gpt-5.1-codex",
@@ -141,6 +155,9 @@ function makeHarness(options: HarnessOptions = {}) {
     Layer.mock(TextGeneration.TextGeneration)({
       generateThreadTitle,
       generateBranchName,
+    }),
+    Layer.mock(CheckpointStore.CheckpointStore)({
+      warmCheckpoint: () => Effect.void,
     }),
     ServerSettings.layerTest(options.serverSettings),
     makeProviderRegistryLayer(options.providers),
@@ -369,6 +386,110 @@ it.effect("keeps a proposed-plan child of a no-home legacy parent native", () =>
       },
     });
     assert.equal(launched.threadId, ThreadId.make("thread:launch:legacy-plan"));
+  }).pipe(Effect.provide(harness.layer));
+});
+
+for (const target of ["new", "existing"] as const) {
+  for (const createdBy of ["user", "agent"] as const) {
+    it.effect(
+      `attributes ${createdBy}-configured automations in ${target} threads without changing their prompt`,
+      () => {
+        const harness = makeHarness();
+        const scheduledTasks = ScheduledTasks.layer.pipe(
+          Layer.provide(Layer.mergeAll(harness.layer, NodeCrypto.layer)),
+        );
+        return Effect.gen(function* () {
+          const tasks = yield* ScheduledTasks.ScheduledTaskService;
+          const launches = yield* ThreadLaunch.ThreadLaunchService;
+          const threads = yield* ThreadManagement.ThreadManagementService;
+          const existing =
+            target === "existing"
+              ? yield* launches.launch(
+                  launchInput({ command: "command:existing", thread: "thread:existing" }),
+                )
+              : null;
+          const { task } = yield* tasks.upsert({
+            id: ScheduledTaskId.make("scheduled-task:attribution"),
+            title: "Daily audit",
+            prompt: "Audit performance and crashes.",
+            enabled: false,
+            schedule: { type: "interval", everyMs: 60_000 },
+            projectId,
+            threadId: existing?.threadId ?? null,
+            workspaceStrategy: { type: "root" },
+            modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            createdBy,
+            creationSource: createdBy === "agent" ? "mcp" : "web",
+          });
+          const result = yield* tasks.runNow({ id: task.id });
+          if (target === "new") {
+            assert.equal(result.task.lastRunStatus, "failed");
+            assert.match(
+              result.task.lastRunError ?? "",
+              /Scheduled new-thread execution is unsupported/,
+            );
+            assert.deepEqual(
+              yield* threads.listProjectThreads({ projectId, includeSubagents: false }),
+              [],
+            );
+            return;
+          }
+          assert.equal(result.task.lastRunStatus, "succeeded");
+          const projectThreads = yield* threads.listProjectThreads({
+            projectId,
+            includeSubagents: false,
+          });
+          const thread =
+            projectThreads.find((candidate) => candidate.id === existing?.threadId) ??
+            projectThreads[0];
+          assert.isDefined(thread);
+          const projection = yield* threads.getThreadProjection(thread!.id);
+          // Encoding the persisted projection exercises both message and turn-item wire schemas.
+          const wire = yield* encodeThreadProjection(projection);
+          assert.equal(wire.messages[0]?.text, task.prompt);
+          assert.equal(wire.messages[0]?.scheduledTaskId, task.id);
+          assert.equal(wire.messages[0]?.createdBy, createdBy);
+          const turnItem = wire.turnItems.find((item) => item.type === "user_message");
+          assert.equal(turnItem?.text, task.prompt);
+          assert.equal(turnItem?.scheduledTaskId, task.id);
+        }).pipe(Effect.provide(Layer.mergeAll(harness.layer, scheduledTasks)));
+      },
+    );
+  }
+}
+
+it.effect("retains automation attribution while a message waits in the queue", () => {
+  const harness = makeHarness({ runSetup: () => Effect.never });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const launched = yield* launches.launch(
+      launchInput({
+        command: "command:automation:queue",
+        thread: "thread:automation:queue",
+        message: "First message",
+      }),
+    );
+    const scheduledTaskId = ScheduledTaskId.make("scheduled-task:queued");
+    const queued = yield* threads.sendToThread({
+      projectId,
+      commandId: CommandId.make("command:automation:queued"),
+      threadId: launched.threadId,
+      messageId: MessageId.make("message:automation:queued"),
+      scheduledTaskId,
+      text: "Run the audit",
+      attachments: [],
+      mode: "queue",
+      createdBy: "agent",
+      creationSource: "mcp",
+    });
+    assert.equal(queued.delivery, "queued");
+    const projection = yield* threads.getThreadProjection(launched.threadId);
+    const message = projection.messages.find((item) => item.id === queued.message.id);
+    assert.equal(message?.scheduledTaskId, scheduledTaskId);
+    assert.equal(message?.text, "Run the audit");
   }).pipe(Effect.provide(harness.layer));
 });
 
@@ -1424,6 +1545,50 @@ it.effect("schedules an accepted preparing message exactly once across concurren
   }),
 );
 
+it.effect("creates a strong provider-thread mapping for an imported native session", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const input = {
+      ...launchInput({
+        command: "command:launch:imported-native-session",
+        thread: "thread:launch:imported-native-session",
+      }),
+      importedNativeThread: {
+        ref: {
+          driver: ProviderDriverKind.make("codex"),
+          nativeId: "native-session-42",
+          strength: "strong" as const,
+        },
+        metadata: {
+          title: "Native session",
+          updatedAt: "2026-08-23T00:00:00Z",
+        },
+      },
+    };
+
+    const launched = yield* launches.launch(input);
+
+    assert.deepInclude(launched.projection.providerThreads[0], {
+      id: IdAllocator.deriveProviderThread({
+        driver: input.importedNativeThread.ref.driver,
+        providerInstanceId: modelSelection.instanceId,
+        nativeThreadId: input.importedNativeThread.ref.nativeId,
+      }),
+      driver: input.importedNativeThread.ref.driver,
+      providerInstanceId: modelSelection.instanceId,
+      appThreadId: input.threadId,
+      nativeThreadRef: input.importedNativeThread.ref,
+      status: "not_loaded",
+      nativeMetadata: input.importedNativeThread.metadata,
+    });
+    assert.equal(
+      launched.projection.thread.activeProviderThreadId,
+      launched.projection.providerThreads[0]?.id,
+    );
+  }).pipe(Effect.provide(harness.layer));
+});
+
 it.effect("does not depend on the legacy launch workflow table", () => {
   const harness = makeHarness();
   return Effect.gen(function* () {
@@ -1439,4 +1604,200 @@ it.effect("does not depend on the legacy launch workflow table", () => {
     );
     assert.equal(launched.projection.messages[0]?.text, "No private workflow state");
   }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("shared intake preserves durable attachment bytes after a lost launch result", () => {
+  const harness = makeHarness();
+  const files = ServerConfig.layerTest(process.cwd(), { prefix: "t3-message-intake-" }).pipe(
+    Layer.provideMerge(NodeServices.layer),
+  );
+  return Effect.gen(function* () {
+    const config = yield* ServerConfig.ServerConfig;
+    const fs = yield* FileSystem.FileSystem;
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const pendingId = createPendingAttachmentId();
+    assert.isNotNull(pendingId);
+    const attachment: ChatAttachment = {
+      type: "image",
+      id: ChatAttachmentId.make(pendingId),
+      name: "image.png",
+      mimeType: "image/png",
+      sizeBytes: 4,
+    };
+    const pendingPath = resolveAttachmentPath({
+      attachmentsDir: config.attachmentsDir,
+      attachment,
+    });
+    assert.isNotNull(pendingPath);
+    yield* fs.makeDirectory(config.attachmentsDir, { recursive: true });
+    yield* fs.writeFile(pendingPath, new Uint8Array([1, 2, 3, 4]));
+    const input = {
+      ...launchInput({ command: "intake-launch", thread: "intake-thread" }),
+      initialMessage: {
+        messageId: MessageId.make("intake-first"),
+        text: "First",
+        attachments: [attachment],
+      },
+    };
+    const failed = yield* ThreadMessageIntake.launchThread(input).pipe(
+      Effect.provideService(ThreadLaunch.ThreadLaunchService, {
+        launch: (request) =>
+          launches.launch(request).pipe(
+            Effect.andThen(
+              new ThreadLaunch.ThreadLaunchError({
+                operation: "create-thread",
+                commandId: request.commandId,
+                projectId,
+                cause: "lost result after acceptance",
+              }),
+            ),
+          ),
+      }),
+      Effect.flip,
+    );
+    assert.equal(failed._tag, "ThreadLaunchError");
+    // The observer failed, but the real V2 message and its bytes were accepted.
+    const accepted = yield* threads.getThreadProjection(input.threadId);
+    const stored = accepted.messages.find(
+      (message) => message.id === input.initialMessage.messageId,
+    );
+    assert.isDefined(stored);
+    assert.notEqual(stored.attachments[0]?.id, attachment.id);
+    const storedPath = resolveAttachmentPath({
+      attachmentsDir: config.attachmentsDir,
+      attachment: stored.attachments[0]!,
+    });
+    assert.isNotNull(storedPath);
+    assert.deepEqual(yield* fs.readFile(storedPath), new Uint8Array([1, 2, 3, 4]));
+    assert.deepEqual(yield* fs.readFile(pendingPath), new Uint8Array([1, 2, 3, 4]));
+
+    const replayed = yield* ThreadMessageIntake.launchThread(input);
+    assert.equal(replayed.projection.messages[0]?.id, stored.id);
+    assert.deepEqual(replayed.projection.messages[0]?.attachments, stored.attachments);
+    const claimedFiles = Effect.map(fs.readDirectory(config.attachmentsDir), (files) =>
+      files.filter((name) => !name.startsWith("pending-")),
+    );
+    assert.equal((yield* claimedFiles).length, 1);
+
+    const missingProject = yield* ThreadMessageIntake.launchThread({
+      ...input,
+      commandId: CommandId.make("intake-no-project"),
+      projectId: ProjectId.make("missing-project"),
+    }).pipe(Effect.flip);
+    assert.equal(missingProject._tag, "ThreadLaunchError");
+    assert.equal((yield* claimedFiles).length, 1);
+    const missingThread = yield* ThreadMessageIntake.dispatchCommand({
+      type: "message.dispatch",
+      commandId: CommandId.make("intake-no-thread"),
+      threadId: ThreadId.make("missing-thread"),
+      messageId: MessageId.make("intake-missing"),
+      text: "Missing",
+      attachments: [attachment],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    }).pipe(Effect.flip);
+    assert.equal(missingThread._tag, "OrchestratorProjectionError");
+    assert.equal((yield* claimedFiles).length, 1);
+
+    // Both ordinary command intake (RPC) and send intake (MCP) use the same store.
+    const dispatch = ThreadMessageIntake.dispatchCommand({
+      type: "message.dispatch",
+      commandId: CommandId.make("intake-dispatch"),
+      threadId: input.threadId,
+      messageId: MessageId.make("intake-second"),
+      text: "Second",
+      attachments: [attachment],
+      dispatchMode: { type: "queue_after_active" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* dispatch;
+    yield* dispatch;
+    const queuedProjection = yield* threads.getThreadProjection(input.threadId);
+    const queuedRun = queuedProjection.runs.find(
+      (run) => run.userMessageId === MessageId.make("intake-second"),
+    );
+    assert.isDefined(queuedRun);
+    assert.equal(queuedRun.status, "queued");
+    const queuedMessage = queuedProjection.messages.find(
+      (message) => message.id === queuedRun.userMessageId,
+    );
+    assert.isDefined(queuedMessage);
+    const file: ChatAttachment = {
+      type: "file",
+      id: ChatAttachmentId.make(createPendingAttachmentId("pdf")),
+      name: "queued.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 4,
+    };
+    const filePath = resolveAttachmentPath({
+      attachmentsDir: config.attachmentsDir,
+      attachment: file,
+    });
+    assert.isNotNull(filePath);
+    yield* fs.writeFile(filePath, new Uint8Array([5, 6, 7, 8]));
+    const edit = ThreadMessageIntake.dispatchCommand({
+      type: "queued-run.edit",
+      commandId: CommandId.make("intake-edit"),
+      threadId: input.threadId,
+      runId: queuedRun.id,
+      text: "Edited with a file",
+      attachments: [...queuedMessage.attachments, file],
+    });
+    yield* edit;
+    yield* edit;
+    const editedProjection = yield* threads.getThreadProjection(input.threadId);
+    const editedMessage = editedProjection.messages.find(
+      (message) => message.id === queuedRun.userMessageId,
+    );
+    assert.isDefined(editedMessage);
+    assert.equal(editedMessage.attachments.length, 2);
+    assert.deepEqual(editedMessage.attachments[0], queuedMessage.attachments[0]);
+    assert.notEqual(editedMessage.attachments[1]?.id, file.id);
+    const durableFilePath = resolveAttachmentPath({
+      attachmentsDir: config.attachmentsDir,
+      attachment: editedMessage.attachments[1]!,
+    });
+    assert.isNotNull(durableFilePath);
+    assert.deepEqual(yield* fs.readFile(durableFilePath), new Uint8Array([5, 6, 7, 8]));
+    assert.deepEqual(yield* fs.readFile(filePath), new Uint8Array([5, 6, 7, 8]));
+    const beforeRejectedEdit = (yield* claimedFiles).length;
+    const rejectedEdit = yield* ThreadMessageIntake.dispatchCommand({
+      type: "queued-run.edit",
+      commandId: CommandId.make("intake-edit-rejected"),
+      threadId: input.threadId,
+      runId: queuedRun.id,
+      text: "",
+      attachments: [file],
+    }).pipe(Effect.flip);
+    assert.equal(rejectedEdit._tag, "OrchestratorCommandRejectedError");
+    assert.equal((yield* claimedFiles).length, beforeRejectedEdit);
+    assert.deepEqual(yield* fs.readFile(filePath), new Uint8Array([5, 6, 7, 8]));
+    const send = ThreadMessageIntake.sendToThread({
+      commandId: CommandId.make("intake-send"),
+      projectId,
+      threadId: input.threadId,
+      messageId: MessageId.make("intake-third"),
+      text: "Third",
+      attachments: [attachment],
+      mode: "queue",
+      createdBy: "agent",
+      creationSource: "mcp",
+    });
+    yield* send;
+    yield* send;
+    assert.equal((yield* claimedFiles).length, 4);
+    const final = yield* threads.getThreadProjection(input.threadId);
+    assert.equal(final.messages.length, 3);
+    for (const message of final.messages) {
+      const path = resolveAttachmentPath({
+        attachmentsDir: config.attachmentsDir,
+        attachment: message.attachments[0]!,
+      });
+      assert.isNotNull(path);
+      assert.deepEqual(yield* fs.readFile(path), new Uint8Array([1, 2, 3, 4]));
+    }
+  }).pipe(Effect.provide(Layer.mergeAll(harness.layer, files)));
 });

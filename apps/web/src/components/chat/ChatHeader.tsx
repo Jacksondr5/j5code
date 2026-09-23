@@ -1,4 +1,4 @@
-import { type EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { memo } from "react";
 import { readLocalApi } from "~/localApi";
 
@@ -7,26 +7,18 @@ import { ProjectFavicon } from "../ProjectFavicon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 interface ChatHeaderProps {
-  activeThreadEnvironmentId: EnvironmentId;
   activeThreadTitle: string;
   newThreadSquadronName: string | null;
-  activeProjectName: string | undefined;
-  activeProjectCwd: string | null;
-  activeProjectFaviconPath: string | null;
-  activeProjectIcon: import("@t3tools/contracts").ProjectIconOverride | null;
+  activeProject: EnvironmentProject | null;
   rightPanelOpen: boolean;
   onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
 }
 
 export const ChatHeader = memo(function ChatHeader({
-  activeThreadEnvironmentId,
   activeThreadTitle,
   newThreadSquadronName,
-  activeProjectName,
-  activeProjectCwd,
-  activeProjectFaviconPath,
-  activeProjectIcon,
+  activeProject,
   rightPanelOpen,
   onNewThreadInProject,
   onOpenProjectSettings,
@@ -56,7 +48,7 @@ export const ChatHeader = memo(function ChatHeader({
       )}
     >
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
-        {activeProjectName || newThreadSquadronName ? (
+        {activeProject || newThreadSquadronName ? (
           <span className="inline-flex shrink-0 items-center gap-2">
             <Tooltip>
               <TooltipTrigger
@@ -73,22 +65,15 @@ export const ChatHeader = memo(function ChatHeader({
                   />
                 }
               >
-                {activeProjectName ? (
-                  <ProjectFavicon
-                    environmentId={activeThreadEnvironmentId}
-                    cwd={activeProjectCwd ?? ""}
-                    faviconPath={activeProjectFaviconPath}
-                    projectIcon={activeProjectIcon}
-                    projectName={activeProjectName}
-                    className="size-3.5"
-                  />
+                {activeProject ? (
+                  <ProjectFavicon project={activeProject} className="size-3.5" />
                 ) : null}
                 <span className="max-w-40 truncate text-sm font-medium">
                   {newThreadSquadronName ?? "Choose Squadron"}
                 </span>
-                {activeProjectName ? (
+                {activeProject ? (
                   <span className="max-w-32 truncate text-xs text-muted-foreground/70">
-                    {activeProjectName}
+                    {activeProject.title}
                   </span>
                 ) : null}
               </TooltipTrigger>

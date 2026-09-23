@@ -219,7 +219,12 @@ it.effect(
           getThread: () => Ref.get(projection).pipe(Effect.map((state) => state.thread)),
           getSettlementCandidates: () => Effect.die("unused getSettlementCandidates"),
           getThreadProjection: () => Effect.die("control effects must not load transcript"),
+          getRuntimeRecoveryProjection: () => Effect.die("unused getRuntimeRecoveryProjection"),
+          getPlan: () => Effect.die("unused"),
           getRuntimeRequest: () => Effect.die("unused getRuntimeRequest"),
+          getRunningTurnContext: () => Effect.die("unused getRunningTurnContext"),
+          getThreadProviderContext: () => Effect.die("unused getThreadProviderContext"),
+          getRuntimeResponseContext: () => Effect.die("unused getRuntimeResponseContext"),
           getPendingNativeUserInputs: () => Effect.die("unused getPendingNativeUserInputs"),
           getProviderControlContext: (_threadId, target) =>
             Ref.get(projection).pipe(
@@ -252,6 +257,7 @@ it.effect(
               providerSessionId === oldSessionId ? Option.some(runtime) : Option.none(),
             ),
           close: () => Effect.void,
+          closeInstance: () => Effect.void,
           release: () => Effect.void,
           detach: () => Effect.void,
         }),

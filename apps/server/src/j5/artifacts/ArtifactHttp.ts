@@ -98,7 +98,7 @@ const requireProject = Effect.fn("j5.artifacts.requireProject")(function* (
   }
 });
 
-class ArtifactProjectUnavailableError extends Schema.TaggedErrorClass<ArtifactProjectUnavailableError>()(
+class ArtifactProjectUnavailableError extends Schema.TaggedError<ArtifactProjectUnavailableError>()(
   "ArtifactProjectUnavailableError",
   { projectId: ProjectId },
 ) {

@@ -17,6 +17,8 @@ import type * as EffectAcpErrors from "effect-acp/errors";
 import { ServerConfig } from "../../config.ts";
 import { makeAcpNativeLoggerFactory } from "../../provider/acp/AcpNativeLogging.ts";
 import {
+  applyGrokAcpModelSelection,
+  currentGrokModelIdFromSessionSetup,
   makeGrokAcpRuntime,
   resolveGrokAcpBaseModelId,
 } from "../../provider/acp/GrokAcpSupport.ts";
@@ -60,7 +62,7 @@ import {
 } from "./AcpAdapterV2.ts";
 
 export const GROK_PROVIDER = ProviderDriverKind.make("grok");
-export const GROK_DRIVER_KIND = GROK_PROVIDER;
+const GROK_DRIVER_KIND = GROK_PROVIDER;
 export const GROK_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(GROK_DRIVER_KIND);
 const DEFAULT_GROK_SETTINGS = Schema.decodeSync(GrokSettings)({});
 
@@ -115,7 +117,7 @@ export interface GrokAdapterV2Options {
   readonly assertComplete?: Effect.Effect<void, EffectAcpErrors.AcpError>;
 }
 
-export const registerGrokAcpExtensions: NonNullable<AcpAdapterV2Flavor["registerExtensions"]> = ({
+const registerGrokAcpExtensions: NonNullable<AcpAdapterV2Flavor["registerExtensions"]> = ({
   runtime,
   requestUserInput,
   applyBackgroundTaskMutation,
@@ -170,7 +172,7 @@ const registerGrokAskUserQuestionExtensions = ({
   Effect.forEach(
     ["x.ai/ask_user_question", "_x.ai/ask_user_question"] as const,
     (method) =>
-      runtime.handleExtRequest(method, XAiAskUserQuestionRequest, (params) => {
+      runtime.handleExtRequest(method, XAiAskUserQuestionRequest, (params, requestContext) => {
         const identity = extractXAiAskUserQuestionIdentity(params);
         const questions = extractXAiAskUserQuestions(params).map((question) => ({
           id: question.id,
@@ -178,13 +180,14 @@ const registerGrokAskUserQuestionExtensions = ({
           question: question.question,
           options: [...question.options],
         }));
-        return requestUserInput({
-          nativeItemId: `${identity.sessionId}:xai-question:${identity.toolCallId}`,
-          nativeMethod: method,
-          nativeRequestId: identity.toolCallId,
-          nativeSessionId: identity.sessionId,
-          questions,
-        }).pipe(
+        return requestUserInput(
+          {
+            nativeItemId: `${identity.sessionId}:xai-question:${identity.toolCallId}`,
+            nativeRequestId: identity.toolCallId,
+            questions,
+          },
+          requestContext,
+        ).pipe(
           Effect.flatMap(({ acknowledgeNativeResponse, answers }) =>
             Effect.succeed(
               answers === null
@@ -202,9 +205,6 @@ export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdap
     driver: GROK_PROVIDER,
     runtimeHarness: "Grok",
     capabilities: GrokProviderCapabilitiesV2,
-    // Idle settle over-settled preamble-before-tools turns and cancelled the
-    // prompt while Grok continued, freezing T3 projection mid-turn.
-    settleRootTurnWhenIdle: false,
     interruptPromptOnCancel: false,
     // User Stop (requestRuntimeRestart) still hard-kills the process group and
     // respawns so existing background tasks stop too. Older 0.2.x builds could
@@ -225,6 +225,24 @@ export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdap
     supportsImagePrompts: true,
     supportsCompaction: true,
     resolveModelId: (selection) => resolveGrokAcpBaseModelId(selection.model),
+    applyModelSelection: ({ runtime, startResult, modelSelection }) =>
+      Effect.gen(function* () {
+        const legacy = startResult.initializeResult.protocolVersion === 1;
+        const options = legacy ? [] : yield* runtime.getConfigOptions;
+        const configuredModel = options.find((option) => option.category === "model")?.currentValue;
+        return yield* applyGrokAcpModelSelection({
+          runtime: legacy
+            ? runtime
+            : { setSessionModel: (model) => runtime.setModel(model).pipe(Effect.as({})) },
+          currentModelId: legacy
+            ? currentGrokModelIdFromSessionSetup(startResult.sessionSetupResult)
+            : typeof configuredModel === "string"
+              ? configuredModel
+              : undefined,
+          requestedModelId: resolveGrokAcpBaseModelId(modelSelection.model),
+          mapError: (cause) => cause,
+        });
+      }),
     makeRuntime:
       options.makeRuntime ??
       ((input) =>
@@ -333,7 +351,7 @@ export const GrokAdapterV2Driver: ProviderAdapterDriver<GrokSettings, GrokAdapte
   ),
 };
 
-export const layer: Layer.Layer<
+const layer: Layer.Layer<
   ProviderAdapterV2,
   never,
   | ChildProcessSpawner.ChildProcessSpawner

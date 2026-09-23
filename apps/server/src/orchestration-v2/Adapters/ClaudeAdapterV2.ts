@@ -1,3 +1,4 @@
+import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import { normalizeClaudeTurnTokenUsage } from "../../provider/ClaudeTurnTokenUsage.ts";
 import {
   type CanUseTool,
@@ -80,7 +81,10 @@ import { planClaudeSkillDispatch } from "../../provider/Drivers/ClaudeSkillDispa
 import { discoverClaudeSkills } from "../../provider/Drivers/ClaudeSkills.ts";
 import { compileClaudeModelSelection } from "../../claudeModelOptions.ts";
 import { ServerConfig } from "../../config.ts";
-import { makeClaudeEnvironment } from "../../provider/Drivers/ClaudeHome.ts";
+import {
+  claudeSignedOutMessage,
+  makeClaudeEnvironment,
+} from "../../provider/Drivers/ClaudeHome.ts";
 import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
   resolveClaudeCatalogContextWindow,
@@ -183,8 +187,7 @@ export function claudeProviderTurnTokenUsage(
     updatedAt,
   };
 }
-export const CLAUDE_DRIVER_KIND = CLAUDE_PROVIDER;
-export const CLAUDE_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(CLAUDE_DRIVER_KIND);
+export const CLAUDE_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(CLAUDE_PROVIDER);
 const DEFAULT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({});
 
 export const ClaudeProviderCapabilitiesV2 = {
@@ -276,6 +279,9 @@ export const ClaudeProviderCapabilitiesV2 = {
     nativeItemIds: "strong",
     nativeRequestIds: "strong",
   },
+  runtimePolicy: {
+    enforcement: "native",
+  },
 } satisfies OrchestrationV2ProviderCapabilities;
 
 const CLAUDE_CODE_PRESET_TOOLS = {
@@ -342,7 +348,7 @@ export interface ClaudeAgentSdkQuerySession {
 
 type ClaudeQueryStreamExit = Exit.Exit<void, ClaudeAgentSdkQueryRunnerError>;
 
-export class ClaudeAgentSdkQueryRunnerError extends Schema.TaggedErrorClass<ClaudeAgentSdkQueryRunnerError>()(
+export class ClaudeAgentSdkQueryRunnerError extends Schema.TaggedError<ClaudeAgentSdkQueryRunnerError>()(
   "ClaudeAgentSdkQueryRunnerError",
   {
     method: Schema.String,
@@ -733,8 +739,11 @@ export function makeClaudeQueryOptions(input: {
   readonly agentPersonaInstructions?: string | undefined;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
-  const extraArgs =
-    input.settings === undefined ? {} : parseCliArgs(input.settings.launchArgs).flags;
+  const {
+    "permission-mode": launchArgPermissionMode,
+    "dangerously-skip-permissions": launchArgSkipPermissions,
+    ...extraArgs
+  } = input.settings === undefined ? {} : parseCliArgs(input.settings.launchArgs).flags;
   const threadIdentity: ClaudeAgentSdkThreadIdentity = input.resume
     ? { resume: input.nativeThreadId }
     : { sessionId: input.nativeThreadId };
@@ -759,7 +768,11 @@ export function makeClaudeQueryOptions(input: {
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
     tools: claudeAgentSdkQueryToolsForSdk(selectedTools),
-    permissionMode: input.permissionMode ?? "default",
+    permissionMode:
+      (launchArgPermissionMode as PermissionMode | null | undefined) ??
+      (launchArgSkipPermissions === null || launchArgSkipPermissions === "true"
+        ? "bypassPermissions"
+        : (input.permissionMode ?? "default")),
     includePartialMessages: true,
     ...(compiledSelection.effort === undefined
       ? {}
@@ -814,6 +827,19 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__t3-code__t3_thread_wait",
   "mcp__t3-code__list_artifacts",
   "mcp__t3-code__read_artifact",
+  "mcp__t3-code__t3_pending_request_list",
+  "mcp__t3-code__t3_pending_request_read",
+  "mcp__t3-code__t3_thread_configuration",
+  "mcp__t3-code__t3_thread_transfers",
+  "mcp__t3-code__t3_worktree_status",
+  "mcp__t3-code__t3_worktree_list",
+  "mcp__t3-code__t3_project_list",
+  "mcp__t3-code__t3_project_read",
+  "mcp__t3-code__t3_thread_search",
+  "mcp__t3-code__t3_preview_list",
+  "mcp__t3-code__t3_environment_read",
+  "mcp__t3-code__t3_queue_list",
+  "mcp__t3-code__t3_queue_read",
 ];
 
 // The SDK's `allowedTools` only pre-approves tool calls; availability is the
@@ -1996,31 +2022,74 @@ const awaitClaudeUserInputAnswers = Effect.fn("awaitClaudeUserInputAnswers")(fun
  * so they must never become the error banner (#5557).
  */
 function resultUserFacingError(result: SDKResultMessage): string | undefined {
-  if (result.subtype === "success" || !Array.isArray(result.errors)) {
+  const errors = "errors" in result && Array.isArray(result.errors) ? result.errors : [];
+  if (result.subtype === "success" && !result.is_error) {
     return undefined;
   }
-  return result.errors.find((error) => !error.startsWith("[ede_diagnostic]"));
+  return errors.find(
+    (error): error is string => typeof error === "string" && !error.startsWith("[ede_diagnostic]"),
+  );
+}
+
+function terminalResultError(
+  reason: SDKResultMessage["terminal_reason"],
+  failureHint?: string,
+): string | undefined {
+  switch (reason) {
+    case "api_error":
+      return failureHint ?? "Claude gave up after repeated API errors.";
+    case "malformed_tool_use_exhausted":
+      return "Claude gave up after repeated malformed tool calls.";
+    case "budget_exhausted":
+      return "Claude stopped: the turn's token budget was exhausted.";
+    case "structured_output_retry_exhausted":
+      return "Claude could not produce the requested structured output.";
+    case "tool_deferred_unavailable":
+      return "Claude could not resume a deferred tool call: the tool is no longer available.";
+    case "turn_setup_failed":
+      return "Claude could not start the turn.";
+    case "blocking_limit":
+      return "Claude stopped: a usage limit blocked the request.";
+    case "rapid_refill_breaker":
+      return "Claude stopped: the context refilled too quickly after compaction.";
+    case "prompt_too_long":
+      return "Claude stopped: the prompt exceeds the model's context window.";
+    case "image_error":
+      return "Claude stopped: an image in the conversation could not be processed.";
+    case "model_error":
+      return "Claude stopped: the model returned an error.";
+    default:
+      return undefined;
+  }
+}
+
+function isOverloadedResult(result: SDKResultMessage): boolean {
+  return result.subtype === "success" && result.api_error_status === 529;
 }
 
 function terminalStatusFromResult(
   message: SDKResultMessage,
+  failureHint?: string,
 ): Extract<
   OrchestrationV2ProviderTurn["status"],
   "completed" | "interrupted" | "failed" | "cancelled"
 > {
-  if (message.subtype === "success") {
-    // The SDK reports API-level failures (401 auth, 529 overloaded, …) as
-    // subtype "success" with is_error set; the turn produced no real work.
-    return message.is_error ? "failed" : "completed";
-  }
-  // The CLI stamps user aborts explicitly: interrupting mid-tool-call yields
-  // "aborted_tools" (with an internal "[ede_diagnostic] ..." error and
-  // is_error: true), interrupting mid-stream yields "aborted_streaming".
+  // The CLI can label an abort as success with is_error=false. Its explicit
+  // terminal reason takes precedence over that envelope.
   if (
     message.terminal_reason === "aborted_tools" ||
     message.terminal_reason === "aborted_streaming"
   ) {
     return "interrupted";
+  }
+  if (message.subtype === "success") {
+    // The SDK reports API-level failures (401 auth, 529 overloaded, …) as
+    // subtype "success" with is_error set; the turn produced no real work.
+    return isOverloadedResult(message) ||
+      terminalResultError(message.terminal_reason, failureHint) !== undefined ||
+      (message.is_error && failureHint !== undefined)
+      ? "failed"
+      : "completed";
   }
   const errorText = message.errors.join("\n").toLowerCase();
   if (errorText.includes("interrupt")) {
@@ -2033,7 +2102,9 @@ function terminalStatusFromResult(
 }
 
 function isClaudeActiveSteeringAbortResult(message: SDKResultMessage): boolean {
-  return message.terminal_reason === "aborted_streaming";
+  return (
+    message.terminal_reason === "aborted_streaming" || message.terminal_reason === "aborted_tools"
+  );
 }
 
 function isClaudeProviderContinuationTurn(input: ProviderAdapterV2TurnInput): boolean {
@@ -2051,21 +2122,29 @@ function isClaudeTaskNotificationOriginResult(message: SDKMessage): message is S
 
 function providerFailureFromResult(
   message: SDKResultMessage,
+  failureHint?: string,
 ): OrchestrationV2ProviderFailure | null {
+  const listedError = resultUserFacingError(message);
+  const structuredError = isOverloadedResult(message)
+    ? "Claude API is overloaded (529). Try again shortly."
+    : terminalResultError(message.terminal_reason, failureHint);
   if (message.subtype !== "success") {
     return makeProviderFailure({
-      message: resultUserFacingError(message) ?? message.errors.join("\n"),
+      message: listedError ?? structuredError ?? message.errors.join("\n"),
       code: message.subtype,
       class: "provider_error",
     });
   }
-  if (!message.is_error) {
+  if (!message.is_error && structuredError === undefined) {
     return null;
   }
   const apiErrorStatus = message.api_error_status ?? null;
   return makeProviderFailure({
-    message: message.result,
-    code: apiErrorStatus === null ? "sdk_result_error" : `api_error_${apiErrorStatus}`,
+    message: listedError ?? structuredError ?? failureHint ?? message.result,
+    code:
+      apiErrorStatus === null
+        ? (message.terminal_reason ?? "sdk_result_error")
+        : `api_error_${apiErrorStatus}`,
     class: "provider_error",
     retryable: apiErrorStatus === 429 || apiErrorStatus === 529 ? true : null,
   });
@@ -2235,6 +2314,9 @@ interface ActiveClaudeTurnContext {
   readonly toolCalls: Map<string, ActiveClaudeToolCall>;
   readonly ignoredTaskIds: Set<string>;
   readonly announcedUsageLimits: Set<string>;
+  authenticationFailureMessage: string | undefined;
+  readonly rejectedRateLimitTypes: Set<string>;
+  latestAssistantRateLimited: boolean;
   readonly subagentsByTaskId: Map<string, ActiveClaudeSubagent>;
   readonly subagentsByToolUseId: Map<string, ActiveClaudeSubagent>;
   readonly subagentNodesByTaskId: Map<string, OrchestrationV2ExecutionNode["id"]>;
@@ -3067,6 +3149,16 @@ export function makeClaudeAdapterV2(
             | "completedAt"
             | "updatedAt"
           >;
+          const readPath = ["read", "read file"].includes(input.classification.normalizedName)
+            ? firstStringInputField(input.toolInput, ["file_path", "path"])?.trim()
+            : undefined;
+          const viewedImagePath =
+            readPath &&
+            readPath.length <= 4096 &&
+            !/[\r\n]/.test(readPath) &&
+            isWorkspaceImagePreviewPath(readPath)
+              ? readPath
+              : undefined;
           const itemType = input.classification.itemType;
           const webSearchPatterns = webSearchPatternsFromClaudeTool({
             toolInput: input.toolInput,
@@ -3103,6 +3195,7 @@ export function makeClaudeAdapterV2(
                       ...itemBase,
                       type: "dynamic_tool",
                       toolName: input.toolName,
+                      ...(viewedImagePath === undefined ? {} : { viewedImagePath }),
                       input: claudeNativeToolInputValue(input.toolInput),
                       ...(outputValue === undefined ? {} : { output: outputValue }),
                     };
@@ -4378,17 +4471,28 @@ export function makeClaudeAdapterV2(
               });
             }
             const context = yield* Ref.get(activeTurn);
+            const overageAllowed =
+              rateLimitInfo.overageStatus === "allowed" ||
+              rateLimitInfo.overageStatus === "allowed_warning" ||
+              rateLimitInfo.isUsingOverage === true ||
+              rateLimitInfo.overageInUse === true;
+            const blocked = rateLimitInfo.status === "rejected" && !overageAllowed;
+            const limitType = rateLimitInfo.rateLimitType ?? "unknown";
+            if (context !== null) {
+              if (blocked) {
+                context.rejectedRateLimitTypes.add(limitType);
+              } else if (
+                rateLimitInfo.status === "allowed" ||
+                rateLimitInfo.status === "allowed_warning" ||
+                overageAllowed
+              ) {
+                context.rejectedRateLimitTypes.delete(limitType);
+              }
+            }
             // Rejected windows pause the SDK without ending its turn. Overage
             // and warnings keep running; repeats of a window need only one notice.
-            if (
-              context !== null &&
-              rateLimitInfo.status === "rejected" &&
-              rateLimitInfo.overageStatus !== "allowed" &&
-              rateLimitInfo.overageStatus !== "allowed_warning" &&
-              rateLimitInfo.isUsingOverage !== true &&
-              rateLimitInfo.overageInUse !== true
-            ) {
-              const limitKey = `${rateLimitInfo.rateLimitType ?? "unknown"}:${rateLimitInfo.resetsAt ?? "unknown"}`;
+            if (context !== null && blocked) {
+              const limitKey = `${limitType}:${rateLimitInfo.resetsAt ?? "unknown"}`;
               if (!context.announcedUsageLimits.has(limitKey)) {
                 context.announcedUsageLimits.add(limitKey);
                 const nativeItemId = `usage-limit:${context.providerTurnId}:${limitKey}`;
@@ -4454,6 +4558,15 @@ export function makeClaudeAdapterV2(
 
           if (message.type === "assistant") {
             context.nativeMessageCursor = message.uuid;
+            if (message.parent_tool_use_id === null) {
+              context.latestAssistantRateLimited = message.error === "rate_limit";
+              if (message.error === "authentication_failed") {
+                context.authenticationFailureMessage = claudeSignedOutMessage({
+                  configDir: adapterOptions.environment.CLAUDE_CONFIG_DIR,
+                  cwd: path.resolve(context.input.runtimePolicy.cwd ?? "."),
+                });
+              }
+            }
           }
 
           if (message.type === "system" && message.subtype === "compact_boundary") {
@@ -4898,10 +5011,12 @@ export function makeClaudeAdapterV2(
             });
           }
 
-          // An is_error result's text is the error message; it belongs on the
-          // terminal-failure item, not on a synthetic assistant message.
+          // Failed result text belongs on the terminal-failure item, including
+          // structured failures whose SDK result still has is_error=false.
           const resultText =
-            message.type === "result" && message.subtype === "success" && message.is_error
+            message.type === "result" &&
+            ((message.subtype === "success" && message.is_error) ||
+              terminalStatusFromResult(message) === "failed")
               ? null
               : resultTextFromSdkMessage(message);
           if (
@@ -4926,10 +5041,17 @@ export function makeClaudeAdapterV2(
               next.delete(context.providerTurnId);
               return next;
             });
-            const resultFailure = interrupted ? null : providerFailureFromResult(message);
+            const failureHint =
+              context.authenticationFailureMessage ??
+              (context.rejectedRateLimitTypes.size > 0 || context.latestAssistantRateLimited
+                ? "Claude usage limit reached. Send the message again once the limit resets."
+                : undefined);
+            const resultFailure = interrupted
+              ? null
+              : providerFailureFromResult(message, failureHint);
             yield* finalizeActiveTurn({
               context,
-              status: interrupted ? "interrupted" : terminalStatusFromResult(message),
+              status: interrupted ? "interrupted" : terminalStatusFromResult(message, failureHint),
               completedAt,
               result: message,
               ...(resultFailure === null ? {} : { failure: resultFailure }),
@@ -5392,6 +5514,9 @@ export function makeClaudeAdapterV2(
               toolCalls: new Map(),
               ignoredTaskIds: new Set(),
               announcedUsageLimits: new Set(),
+              authenticationFailureMessage: undefined,
+              rejectedRateLimitTypes: new Set(),
+              latestAssistantRateLimited: false,
               subagentsByTaskId: new Map(),
               subagentsByToolUseId: new Map(),
               subagentNodesByTaskId: new Map(),
@@ -5997,7 +6122,7 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
       Effect.mapError(
         (cause) =>
           new ProviderAdapterDriverCreateError({
-            driver: CLAUDE_DRIVER_KIND,
+            driver: CLAUDE_PROVIDER,
             instanceId: input.instanceId,
             detail: "Failed to create Claude Agent SDK adapter.",
             cause,
@@ -6010,7 +6135,7 @@ export const ClaudeAdapterV2Driver: ProviderAdapterDriver<
   ClaudeSettings,
   ClaudeAdapterV2DriverEnv
 > = {
-  driverKind: CLAUDE_DRIVER_KIND,
+  driverKind: CLAUDE_PROVIDER,
   configSchema: ClaudeSettings,
   defaultConfig: (): ClaudeSettings => DEFAULT_CLAUDE_SETTINGS,
   create: (input) => createClaudeAdapterV2(input, {}),
@@ -6038,7 +6163,7 @@ const makeDefaultClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2.layer")(function* 
   });
 });
 
-export const layer: Layer.Layer<
+const layer: Layer.Layer<
   ProviderAdapterV2,
   never,
   ClaudeAgentSdkQueryRunner | FileSystem.FileSystem | IdAllocatorV2 | Path.Path | ServerConfig

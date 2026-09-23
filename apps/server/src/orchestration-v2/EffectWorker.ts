@@ -1,3 +1,4 @@
+import { CommandId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -32,7 +33,7 @@ import { ThreadManagementService } from "./ThreadManagementService.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { continueRestartedRun } from "./RestartContinuation.ts";
 
-export class OrchestrationEffectExecutionError extends Schema.TaggedErrorClass<OrchestrationEffectExecutionError>()(
+export class OrchestrationEffectExecutionError extends Schema.TaggedError<OrchestrationEffectExecutionError>()(
   "OrchestrationEffectExecutionError",
   {
     effectId: Schema.String,
@@ -181,6 +182,65 @@ export const executorLayer: Layer.Layer<
                 messageId: effect.request.messageId,
               })
               .pipe(
+                Effect.tap(() =>
+                  Effect.gen(function* () {
+                    if (effect.request.type !== "provider-turn.steer") return;
+                    const messageId = effect.request.messageId;
+                    const projection = yield* threads.getThreadProjection(effect.threadId);
+                    const message = projection.messages.find((row) => row.id === messageId);
+                    if (message?.delegatedCompletion === undefined) return;
+                    yield* threads.dispatch({
+                      type: "notification.delivery.accept",
+                      commandId: CommandId.make(`command:mailbox-accepted:${effect.id}`),
+                      threadId: effect.threadId,
+                      messageId: message.id,
+                    });
+                  }),
+                ),
+                Effect.catch((error) =>
+                  Effect.gen(function* () {
+                    if (
+                      !("turnCompleted" in error) ||
+                      !error.turnCompleted ||
+                      effect.request.type !== "provider-turn.steer"
+                    ) {
+                      return yield* error;
+                    }
+                    const projection = yield* threads.getThreadProjection(effect.threadId);
+                    const messageId = effect.request.messageId;
+                    const message = projection.messages.find((item) => item.id === messageId);
+                    const run = projection.runs.find((item) => item.id === message?.runId);
+                    if (message === undefined || run === undefined) return yield* error;
+                    // Reuse the message identity and a stable command receipt so an outbox
+                    // retry cannot append a duplicate message or start a second follow-up.
+                    yield* threads.dispatch({
+                      type: "message.dispatch",
+                      commandId: CommandId.make(`command:steer-follow-up:${effect.id}`),
+                      threadId: effect.threadId,
+                      messageId: message.id,
+                      text: message.text,
+                      attachments: message.attachments,
+                      modelSelection: run.modelSelection,
+                      dispatchMode: {
+                        type:
+                          message.delegatedCompletion === undefined
+                            ? "start_immediately"
+                            : "queue_after_active",
+                      },
+                      createdBy: message.createdBy,
+                      creationSource: message.creationSource,
+                      ...(message.delegatedCompletion === undefined
+                        ? {}
+                        : { delegatedCompletion: message.delegatedCompletion }),
+                      ...(message.notification === undefined
+                        ? {}
+                        : { notification: message.notification }),
+                      ...(message.scheduledTaskId === undefined
+                        ? {}
+                        : { scheduledTaskId: message.scheduledTaskId }),
+                    });
+                  }),
+                ),
                 Effect.mapError(
                   (cause) =>
                     new OrchestrationEffectExecutionError({
@@ -339,7 +399,7 @@ export const executorLayer: Layer.Layer<
   }),
 );
 
-export class OrchestrationEffectWorkerError extends Schema.TaggedErrorClass<OrchestrationEffectWorkerError>()(
+export class OrchestrationEffectWorkerError extends Schema.TaggedError<OrchestrationEffectWorkerError>()(
   "OrchestrationEffectWorkerError",
   {
     operation: Schema.String,
@@ -619,8 +679,8 @@ export interface OrchestrationEffectDaemonOptions {
   readonly livenessPollIntervalMs?: number;
 }
 
-export const DEFAULT_EFFECT_WORKER_CONCURRENCY = 4;
-export const DEFAULT_EFFECT_WORKER_LIVENESS_POLL_INTERVAL_MS = 30_000;
+const DEFAULT_EFFECT_WORKER_CONCURRENCY = 4;
+const DEFAULT_EFFECT_WORKER_LIVENESS_POLL_INTERVAL_MS = 30_000;
 
 export const runDaemonWithOptions = (options: OrchestrationEffectDaemonOptions = {}) =>
   Effect.scoped(
@@ -695,5 +755,6 @@ export const runDaemonWithOptions = (options: OrchestrationEffectDaemonOptions =
 
 export const runDaemon = runDaemonWithOptions();
 
-export const daemonLayer: Layer.Layer<never, never, OrchestrationEffectWorkerV2> =
-  Layer.effectDiscard(runDaemon.pipe(Effect.forkScoped));
+const daemonLayer: Layer.Layer<never, never, OrchestrationEffectWorkerV2> = Layer.effectDiscard(
+  runDaemon.pipe(Effect.forkScoped),
+);

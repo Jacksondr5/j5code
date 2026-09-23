@@ -1,3 +1,4 @@
+import { J5SquadronCreationLayer } from "../runtimeLayer.ts";
 import * as GitWorkflow from "../../../git/GitWorkflowService.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 /**
@@ -36,7 +37,7 @@ import { ServerConfig } from "../../../config.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../../../mcp/McpSessionRegistry.testkit.ts";
 import {
   OrchestrationV2EventSinkLayerLive,
-  OrchestrationV2LayerLive,
+  OrchestrationV2LayerLive as UpstreamOrchestrationV2LayerLive,
 } from "../../../orchestration-v2/runtimeLayer.ts";
 import {
   EffectOutboxV2,
@@ -77,6 +78,10 @@ import {
   SILENCE_DETECTOR_PARTICIPANT_ID,
   SquadronId,
 } from "../contracts.ts";
+
+const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
+  Layer.provideMerge(J5SquadronCreationLayer),
+);
 
 const fakeProviderInstanceId = ProviderInstanceId.make("j5-dev-seed-unavailable");
 const fakeModelSelection = {
@@ -147,12 +152,12 @@ export interface DevDeliverySeedReceipt {
   };
 }
 
-export class DevDeliverySeedArgumentError extends Schema.TaggedErrorClass<DevDeliverySeedArgumentError>()(
+export class DevDeliverySeedArgumentError extends Schema.TaggedError<DevDeliverySeedArgumentError>()(
   "DevDeliverySeedArgumentError",
   { message: Schema.String },
 ) {}
 
-export class DevDeliverySeedServerOffError extends Schema.TaggedErrorClass<DevDeliverySeedServerOffError>()(
+export class DevDeliverySeedServerOffError extends Schema.TaggedError<DevDeliverySeedServerOffError>()(
   "DevDeliverySeedServerOffError",
   { cause: Schema.Defect() },
 ) {
@@ -161,17 +166,17 @@ export class DevDeliverySeedServerOffError extends Schema.TaggedErrorClass<DevDe
   }
 }
 
-class DevDeliverySeedPreflightRollback extends Schema.TaggedErrorClass<DevDeliverySeedPreflightRollback>()(
+class DevDeliverySeedPreflightRollback extends Schema.TaggedError<DevDeliverySeedPreflightRollback>()(
   "DevDeliverySeedPreflightRollback",
   {},
 ) {}
 
-class DevDeliverySeedScenarioError extends Schema.TaggedErrorClass<DevDeliverySeedScenarioError>()(
+class DevDeliverySeedScenarioError extends Schema.TaggedError<DevDeliverySeedScenarioError>()(
   "DevDeliverySeedScenarioError",
   { name: Schema.String, cause: Schema.Defect() },
 ) {}
 
-class DevDeliverySeedControlledRollbackError extends Schema.TaggedErrorClass<DevDeliverySeedControlledRollbackError>()(
+class DevDeliverySeedControlledRollbackError extends Schema.TaggedError<DevDeliverySeedControlledRollbackError>()(
   "DevDeliverySeedControlledRollbackError",
   {},
 ) {}

@@ -40,7 +40,7 @@ import {
 import { RuntimePolicyV2 } from "./RuntimePolicy.ts";
 import { QueuedRunWatchdog } from "../j5/run-observability/QueuedRunWatchdog.ts";
 
-export class ProviderTurnStartError extends Schema.TaggedErrorClass<ProviderTurnStartError>()(
+export class ProviderTurnStartError extends Schema.TaggedError<ProviderTurnStartError>()(
   "ProviderTurnStartError",
   {
     runId: RunId,
@@ -385,6 +385,14 @@ export const layer: Layer.Layer<
         ...(existingSessionProjection === undefined
           ? {}
           : { resumeFromSession: existingSessionProjection }),
+        ...(providerThread.nativeThreadRef?.nativeId == null
+          ? {}
+          : { initialNativeThreadId: providerThread.nativeThreadRef.nativeId }),
+        ...(providerThread.nativeMetadata?.itemIdentityVersion === undefined
+          ? {}
+          : {
+              initialProviderItemIdentityVersion: providerThread.nativeMetadata.itemIdentityVersion,
+            }),
       });
       let effectiveHandoffs = handoffs;
       const loadProviderThread = Effect.gen(function* () {
@@ -422,11 +430,16 @@ export const layer: Layer.Layer<
           });
         }
         if (providerThread.nativeThreadRef === null) {
+          // Hand the run's provider thread to the adapter so it adopts this
+          // row's identity when attaching native state. An adapter that mints
+          // its own row instead leaves two live rows per app thread, and
+          // `activeProviderThreadId` then flaps between them on every update.
           return yield* openedSession.ensureThread({
             threadId: projection.thread.id,
             modelSelection: run.modelSelection,
             runtimePolicy: resolvedRuntimePolicy,
             providerSessionId,
+            existingProviderThread: providerThread,
           });
         }
         const resumed = yield* Effect.result(
@@ -466,6 +479,10 @@ export const layer: Layer.Layer<
           modelSelection: run.modelSelection,
           runtimePolicy: resolvedRuntimePolicy,
           providerSessionId,
+          // The native ref is dropped so the adapter binds a fresh native
+          // session instead of retrying the resume that just failed, while
+          // still adopting this row's identity.
+          existingProviderThread: { ...providerThread, nativeThreadRef: null },
         });
         const transferId = requestedResumeFallback.id;
         const createdAt = yield* DateTime.now;
@@ -745,6 +762,9 @@ export const layer: Layer.Layer<
           attachments: message.attachments,
           createdBy: message.createdBy,
           creationSource: message.creationSource,
+          ...(message.scheduledTaskId === undefined
+            ? {}
+            : { scheduledTaskId: message.scheduledTaskId }),
         },
         modelSelection: run.modelSelection,
         runtimePolicy: resolvedRuntimePolicy,
