@@ -16,6 +16,7 @@ import {
   SettingsSection,
 } from "../../components/settings/settingsLayout";
 import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
 import { toastManager } from "../../components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
@@ -90,6 +91,9 @@ export function PlaybookLibrarySettings() {
   } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const writeFile = useAtomCommand(projectEnvironment.writeFile, { reportFailure: false });
+  const deletePlaybook = useAtomCommand(j5Environment.deletePlaybook, { reportFailure: false });
+  const renamePlaybook = useAtomCommand(j5Environment.renamePlaybook, { reportFailure: false });
+  const [renameTarget, setRenameTarget] = useState<{ name: string; title: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function createPlaybook() {
@@ -183,6 +187,57 @@ export function PlaybookLibrarySettings() {
       setError(cause instanceof Error ? cause.message : "Could not import playbook YAML files.");
     } finally {
       refresh();
+      setBusy(false);
+    }
+  }
+  async function removePlaybook(name: string) {
+    if (!workspace || !query.data || busy) return;
+    if (!window.confirm(`Delete ${name}.yaml from ${workspace.title}?`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await deletePlaybook({
+        environmentId: workspace.environmentId,
+        input: {
+          projectId: workspace.projectId,
+          ...(workspace.threadId ? { threadId: workspace.threadId } : {}),
+          name,
+        },
+      });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not delete playbook.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function submitRename() {
+    if (!workspace || !renameTarget || busy) return;
+    const title = renameTarget.title.trim();
+    if (!title) return;
+    if (title === query.data?.playbooks.find(({ name }) => name === renameTarget.name)?.title) {
+      setRenameTarget(null);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await renamePlaybook({
+        environmentId: workspace.environmentId,
+        input: {
+          projectId: workspace.projectId,
+          ...(workspace.threadId ? { threadId: workspace.threadId } : {}),
+          name: renameTarget.name,
+          title,
+        },
+      });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      setRenameTarget(null);
+      refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not rename playbook.");
+    } finally {
       setBusy(false);
     }
   }
@@ -286,6 +341,7 @@ export function PlaybookLibrarySettings() {
               value={workspace?.key ?? ""}
               disabled={busy}
               onChange={(event) => {
+                setRenameTarget(null);
                 setWorkspaceKey(event.target.value);
                 setError(null);
               }}
@@ -339,7 +395,7 @@ export function PlaybookLibrarySettings() {
           }
         />
         <div className="space-y-4 px-3 py-3 sm:px-4">
-          {(error || query.error) && (
+          {(error || query.error) && !renameTarget && (
             <p role="alert" className="text-sm text-destructive">
               {error ?? query.error}
             </p>
@@ -362,20 +418,82 @@ export function PlaybookLibrarySettings() {
           {query.data?.playbooks.map((playbook) => (
             <article key={playbook.name} className="border-t border-border/60 pt-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h3 className="font-medium">{playbook.title}</h3>
+                <div className="min-w-0 flex-1">
+                  {renameTarget?.name === playbook.name ? (
+                    <form
+                      className="flex max-w-xl items-center gap-2"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void submitRename();
+                      }}
+                    >
+                      <Input
+                        nativeInput
+                        autoFocus
+                        aria-label={`Name for ${playbook.name} playbook`}
+                        value={renameTarget.title}
+                        disabled={busy}
+                        onChange={(event) =>
+                          setRenameTarget({ ...renameTarget, title: event.currentTarget.value })
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape") setRenameTarget(null);
+                        }}
+                      />
+                      <Button size="xs" type="submit" disabled={busy || !renameTarget.title.trim()}>
+                        Save
+                      </Button>
+                      <Button
+                        size="xs"
+                        type="button"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => setRenameTarget(null)}
+                      >
+                        Cancel
+                      </Button>
+                    </form>
+                  ) : (
+                    <h3 className="font-medium">{playbook.title}</h3>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     {playbook.name}.yaml · {playbook.stepCount} phases
                   </p>
+                  {renameTarget?.name === playbook.name && (error || query.error) ? (
+                    <p role="alert" className="mt-2 text-sm text-destructive">
+                      {error ?? query.error}
+                    </p>
+                  ) : null}
                 </div>
-                <Button
-                  size="xs"
-                  variant="outline"
-                  disabled={busy || !!query.error || !!playbook.issue}
-                  onClick={() => void openDraft(`Start playbook ${playbook.name}`)}
-                >
-                  Prepare playbook chat
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={busy || !!query.error || !!playbook.issue}
+                    onClick={() => void openDraft(`Start playbook ${playbook.name}`)}
+                  >
+                    Prepare playbook chat
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={busy || !!query.error || !!playbook.issue}
+                    onClick={() => {
+                      setError(null);
+                      setRenameTarget({ name: playbook.name, title: playbook.title });
+                    }}
+                  >
+                    Rename
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={busy || !!query.error}
+                    onClick={() => void removePlaybook(playbook.name)}
+                  >
+                    Delete
+                  </Button>
+                </div>
               </div>
               <p className="mt-2 text-sm text-muted-foreground">{playbook.description}</p>
               {playbook.issue ? (
