@@ -308,7 +308,7 @@ it("deletes an empty Squadron and reports 409 with the blocker when refused", as
     assert.deepStrictEqual(await blocked.json(), {
       error: "SquadronDeleteBlockedError",
       message:
-        'Squadron "Ops" cannot be deleted while it still has 2 active agents and 1 running Crew.',
+        'Squadron "Ops" cannot be deleted while it still has 2 active agents and 1 unarchived Crew.',
     });
 
     const missing = await remove("squadron:missing");

@@ -860,23 +860,22 @@ export const layer: Layer.Layer<
         }).pipe(Effect.mapError(preserveDomainError("read squadron"))),
       renameSquadron: (input) =>
         Effect.gen(function* () {
-          yield* ensureSquadron(input.squadronId);
-          yield* sql`
-            UPDATE j5_a2a_squadron SET name = ${input.name} WHERE id = ${input.squadronId}
-          `;
-          return yield* squadronFromRow(
-            (yield* sql<SquadronRow>`
-              SELECT id, name, created_at
-              FROM j5_a2a_squadron
-              WHERE id = ${input.squadronId}
-              LIMIT 1
-            `)[0]!,
-          );
+          const row = (yield* sql<SquadronRow>`
+            UPDATE j5_a2a_squadron SET name = ${input.name}
+            WHERE id = ${input.squadronId}
+            RETURNING id, name, created_at
+          `)[0];
+          if (row === undefined) {
+            return yield* new SquadronNotFoundError({ squadronId: input.squadronId });
+          }
+          return yield* squadronFromRow(row);
         }).pipe(Effect.mapError(preserveDomainError("rename squadron"))),
       deleteSquadron: (squadronId) =>
         Effect.gen(function* () {
-          yield* ensureSquadron(squadronId);
-          yield* sql`DELETE FROM j5_a2a_squadron WHERE id = ${squadronId}`;
+          const deleted = yield* sql<{ readonly id: string }>`
+            DELETE FROM j5_a2a_squadron WHERE id = ${squadronId} RETURNING id
+          `;
+          if (deleted.length === 0) return yield* new SquadronNotFoundError({ squadronId });
         }).pipe(Effect.mapError(preserveDomainError("delete squadron"))),
       append: (command) =>
         appendPermit

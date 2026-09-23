@@ -13,7 +13,6 @@ import { layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import {
-  SQUADRON_REFERENCING_TABLES,
   SquadronManagementService,
   layer as squadronManagementServiceLayer,
 } from "./SquadronManagementService.ts";
@@ -36,6 +35,24 @@ const management = squadronManagementServiceLayer.pipe(
 const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));
 const clientReads = clientReadsLayer.pipe(Layer.provide(inbox), Layer.provide(database));
 const testLayer = Layer.mergeAll(database, ledger, management, clientReads);
+
+/** Read from the live schema so a new table that references Squadrons is checked without edits. */
+const squadronReferencingColumns = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const tables = yield* sql<{ readonly name: string }>`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'j5%'
+  `;
+  const columns: Array<{ readonly table: string; readonly column: string }> = [];
+  for (const { name } of tables) {
+    const keys = yield* sql.unsafe<{ readonly table: string; readonly from: string }>(
+      `PRAGMA foreign_key_list(${name})`,
+    );
+    for (const key of keys) {
+      if (key.table === "j5_a2a_squadron") columns.push({ table: name, column: key.from });
+    }
+  }
+  return columns;
+});
 
 it.effect(
   "creates distinct Squadrons over one explicit project without inferring their identity",
@@ -196,7 +213,7 @@ it.effect("deletes a Squadron whose only member is archived and purges its histo
       (yield* service.list()).map(({ squadron }) => squadron.id),
       [kept.squadron.id],
     );
-    for (const { table, column } of SQUADRON_REFERENCING_TABLES) {
+    for (const { table, column } of yield* squadronReferencingColumns) {
       assert.equal(yield* countWhere(table, retired.squadron.id, column), 0, table);
     }
     assert.deepStrictEqual(yield* reads.threadHomes([retiredThread, keptThread]), [
@@ -211,29 +228,7 @@ it.effect("deletes a Squadron whose only member is archived and purges its histo
   }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("purge list matches every foreign key onto j5_a2a_squadron in the live schema", () =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    yield* runJ5A2AMigrations();
-    const tables = yield* sql<{ readonly name: string }>`
-      SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'j5%' ORDER BY name
-    `;
-    const referencing: Array<{ table: string; column: string }> = [];
-    for (const { name } of tables) {
-      const keys = yield* sql.unsafe<{ readonly table: string; readonly from: string }>(
-        `PRAGMA foreign_key_list(${name})`,
-      );
-      for (const key of keys) {
-        if (key.table === "j5_a2a_squadron") referencing.push({ table: name, column: key.from });
-      }
-    }
-    const byName = (left: { table: string }, right: { table: string }) =>
-      left.table.localeCompare(right.table);
-    assert.deepStrictEqual(referencing.sort(byName), [...SQUADRON_REFERENCING_TABLES].sort(byName));
-  }).pipe(Effect.provide(testLayer)),
-);
-
-it.effect("refuses to delete a Squadron that still has an active agent or a running Crew", () =>
+it.effect("refuses to delete a Squadron that still has an active agent or an unarchived Crew", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* sql`PRAGMA foreign_keys = ON`;
@@ -262,7 +257,7 @@ it.effect("refuses to delete a Squadron that still has an active agent or a runn
     assert.equal(crewBlocked._tag, "SquadronDeleteBlockedError");
     assert.equal(
       crewBlocked.message,
-      'Squadron "Crewed" cannot be deleted while it still has 1 running Crew.',
+      'Squadron "Crewed" cannot be deleted while it still has 1 unarchived Crew.',
     );
 
     assert.deepStrictEqual((yield* service.list()).map(({ squadron }) => squadron.name).sort(), [
