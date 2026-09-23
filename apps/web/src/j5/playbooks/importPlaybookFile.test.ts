@@ -1,5 +1,5 @@
 import { expect, it } from "vite-plus/test";
-import { PLAYBOOK_DEFINITION_MAX_BYTES } from "@t3tools/contracts/j5";
+import { PLAYBOOK_MAX_BYTES } from "@t3tools/contracts/j5";
 import { playbookImportName } from "./importPlaybookFile";
 
 it.each([
@@ -27,8 +27,6 @@ it.each([
 });
 
 it("accepts the server size limit and rejects larger files", () => {
-  expect(playbookImportName("review.yaml", PLAYBOOK_DEFINITION_MAX_BYTES)).toBe("review");
-  expect(() => playbookImportName("review.yaml", PLAYBOOK_DEFINITION_MAX_BYTES + 1)).toThrow(
-    '"review.yaml"',
-  );
+  expect(playbookImportName("review.yaml", PLAYBOOK_MAX_BYTES)).toBe("review");
+  expect(() => playbookImportName("review.yaml", PLAYBOOK_MAX_BYTES + 1)).toThrow('"review.yaml"');
 });

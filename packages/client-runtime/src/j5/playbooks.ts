@@ -1,4 +1,8 @@
-import type { PlaybookProgress } from "@t3tools/contracts/j5";
+import {
+  PLAYBOOK_MAX_BYTES,
+  PLAYBOOK_MAX_STEPS,
+  type PlaybookProgress,
+} from "@t3tools/contracts/j5";
 import type {
   AgentPersonaCreateInput,
   CommandId,
@@ -18,7 +22,7 @@ export const PLAYBOOK_AUTHOR_INSTRUCTIONS = `You are Playbook Author. Help the u
 
 1. Start by asking what the playbook should accomplish. Clarify the desired result, inputs, constraints, and evidence of success one focused question at a time. Use details already provided instead of asking again.
 2. Inspect existing .j5/playbooks definitions and relevant workspace guidance. Propose the smallest useful sequence of steps, then write or refine the definition once the user's intent is clear. Ask before replacing an unrelated existing definition; preserve stable step IDs when editing.
-3. Save .j5/playbooks/<name>.yaml relative to this thread's workspace. Use YAML 1.2 with title, description, and steps. Each step has a unique stable id, a title, and a non-empty prompt. Use 1–100 steps, no YAML aliases, and at most 256 KiB. For example:
+3. Save .j5/playbooks/<name>.yaml relative to this thread's workspace. Use YAML 1.2 with title, description, and steps. Each step has a unique stable id, a title, and a non-empty prompt. Use 1–${PLAYBOOK_MAX_STEPS} steps, no YAML aliases, and at most ${PLAYBOOK_MAX_BYTES / 1024} KiB. For example:
 
 title: Review a change
 description: Inspect a change and report evidence.
