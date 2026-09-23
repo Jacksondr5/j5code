@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { AppState, Pressable, ScrollView, Text, View } from "react-native";
 import { connectionAtomRuntime } from "../../connection/runtime";
 import { useEnvironmentQuery } from "../../state/query";
+import { useRemoteEnvironmentRuntime } from "../../state/use-remote-environment-registry";
 
 const environment = createJ5EnvironmentAtoms(connectionAtomRuntime);
 const stepColor = {
@@ -18,6 +19,7 @@ const stepColor = {
 
 export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: ThreadId }) {
   const focused = useIsFocused();
+  const runtime = useRemoteEnvironmentRuntime(props.environmentId);
   const query = useEnvironmentQuery(
     environment.playbooks({
       environmentId: props.environmentId,
@@ -28,26 +30,26 @@ export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: T
   const [showSteps, setShowSteps] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const { isPending, refresh: refreshQuery } = query;
+  const enabled =
+    runtime?.connectionState === "connected" && query.data?.supported !== false && !isPending;
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
-    const refresh = () => {
-      if (!isPending) refreshQuery();
-    };
     const sync = () => {
       clearInterval(timer);
-      if (focused && AppState.currentState === "active") timer = setInterval(refresh, 2_500);
+      if (focused && enabled && AppState.currentState === "active")
+        timer = setInterval(refreshQuery, 2_500);
     };
     const subscription = AppState.addEventListener("change", () => {
       sync();
-      if (focused && AppState.currentState === "active") refresh();
+      if (focused && enabled && AppState.currentState === "active") refreshQuery();
     });
     sync();
     return () => {
       clearInterval(timer);
       subscription.remove();
     };
-  }, [focused, refreshQuery, isPending]);
-  const runs = query.data?.runs ?? [];
+  }, [focused, refreshQuery, enabled]);
+  const runs = query.data?.supported ? query.data.runs : [];
   const run = runs.find((entry) => entry.runId === selectedRunId) ?? runs[0];
   if (!run) return null;
   const display = presentPlaybook(run);
