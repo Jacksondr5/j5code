@@ -17,7 +17,7 @@ import { SidebarInset } from "../../components/ui/sidebar";
 import { toastManager } from "../../components/ui/toast";
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
-import { useThreadShells } from "../../state/entities";
+import { useAllEnvironmentShellsBootstrapped, useThreadShells } from "../../state/entities";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { CaptainMark } from "../squadron/CaptainMark";
@@ -487,9 +487,10 @@ function RetiredCrewItem(props: FleetRowsProps & { readonly crew: FleetCrew }) {
 /**
  * The Captain's thread keeps the retired Crew's ledger. Archived threads are not in the active
  * thread shells (nor are deleted ones), and the thread route redirects home for them, so only a
- * live Captain is linked.
+ * live Captain is linked. Until the shells load, a missing thread says nothing about archive.
  */
 function RetiredCrewCaptain(props: FleetRowsProps & { readonly crew: FleetCrew }) {
+  const shellsBootstrapped = useAllEnvironmentShellsBootstrapped();
   const { captainThreadId } = props.crew;
   if (captainThreadId === null) return null;
   const thread = props.threadsByKey.get(
@@ -498,8 +499,12 @@ function RetiredCrewCaptain(props: FleetRowsProps & { readonly crew: FleetCrew }
   return (
     <p className="text-muted-foreground">
       Captain:{" "}
-      {thread === undefined || thread.archivedAt !== null ? (
-        "no longer active. If it was archived, unarchive it from Settings → Archived to read its ledger."
+      {thread === undefined ? (
+        shellsBootstrapped ? (
+          "no longer active. If it was archived, unarchive it from Settings → Archived to read its ledger."
+        ) : (
+          "unavailable."
+        )
       ) : (
         <button
           type="button"
