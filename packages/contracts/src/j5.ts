@@ -368,9 +368,12 @@ export const J5_API_PATHS = {
   spawnedChildren: "/api/j5/a2a/client-reads/spawned-children",
 } as const;
 
-/** Item path for one Squadron (rename, delete); ids carry a colon so they are encoded. */
-export const j5SquadronPath = (squadronId: string): string =>
-  `${J5_API_PATHS.squadrons}/${encodeURIComponent(squadronId)}`;
+/**
+ * Action path for one Squadron; ids carry a colon so they are encoded. Both
+ * actions are POST so cross-origin browser clients pass the CORS allowlist.
+ */
+export const j5SquadronActionPath = (squadronId: string, action: "rename" | "delete"): string =>
+  `${J5_API_PATHS.squadrons}/${encodeURIComponent(squadronId)}/${action}`;
 
 /**
  * Machine participants: registered non-agent senders (cron jobs, watchdogs,

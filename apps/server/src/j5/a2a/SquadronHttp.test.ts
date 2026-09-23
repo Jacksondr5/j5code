@@ -57,16 +57,16 @@ it("allows read-only connections to list Squadrons but rejects creation", async 
     );
     assert.equal(created.status, 403);
     const renamed = await handler(
-      new Request(`http://remote.test/api/j5/squadrons/${encodeURIComponent(squadronId)}`, {
-        method: "PATCH",
+      new Request(`http://remote.test/api/j5/squadrons/${encodeURIComponent(squadronId)}/rename`, {
+        method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name: "Renamed" }),
       }),
     );
     assert.equal(renamed.status, 403);
     const deleted = await handler(
-      new Request(`http://remote.test/api/j5/squadrons/${encodeURIComponent(squadronId)}`, {
-        method: "DELETE",
+      new Request(`http://remote.test/api/j5/squadrons/${encodeURIComponent(squadronId)}/delete`, {
+        method: "POST",
       }),
     );
     assert.equal(deleted.status, 403);
@@ -188,8 +188,8 @@ const operatorAuth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
     }),
 });
 
-const itemUrl = (id: string) =>
-  `http://environment.test/api/j5/squadrons/${encodeURIComponent(id)}`;
+const itemUrl = (id: string, action: "rename" | "delete") =>
+  `http://environment.test/api/j5/squadrons/${encodeURIComponent(id)}/${action}`;
 
 it("renames a Squadron by encoded id and maps blank names and unknown ids", async () => {
   const renameInputs: Array<{ readonly squadronId: string; readonly name: string }> = [];
@@ -219,17 +219,17 @@ it("renames a Squadron by encoded id and maps blank names and unknown ids", asyn
     Layer.provide(HttpServer.layerServices),
   );
   const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
-  const patch = (id: string, body: string) =>
+  const rename = (id: string, body: string) =>
     handler(
-      new Request(itemUrl(id), {
-        method: "PATCH",
+      new Request(itemUrl(id, "rename"), {
+        method: "POST",
         headers: { "content-type": "application/json" },
         body,
       }),
     );
 
   try {
-    const renamed = await patch(squadronId, JSON.stringify({ name: " Renamed " }));
+    const renamed = await rename(squadronId, JSON.stringify({ name: " Renamed " }));
     assert.equal(renamed.status, 200);
     assert.deepStrictEqual(await renamed.json(), {
       squadron: {
@@ -239,21 +239,21 @@ it("renames a Squadron by encoded id and maps blank names and unknown ids", asyn
     });
     assert.deepStrictEqual(renameInputs, [{ squadronId, name: " Renamed " }]);
 
-    const blank = await patch(squadronId, JSON.stringify({ name: "   " }));
+    const blank = await rename(squadronId, JSON.stringify({ name: "   " }));
     assert.equal(blank.status, 400);
     assert.deepStrictEqual(await blank.json(), {
       error: "SquadronNameRequiredError",
       message: "A Squadron name is required.",
     });
 
-    const malformed = await patch(squadronId, JSON.stringify({ title: "nope" }));
+    const malformed = await rename(squadronId, JSON.stringify({ title: "nope" }));
     assert.equal(malformed.status, 400);
     assert.deepStrictEqual(await malformed.json(), {
       error: "invalid_request",
       message: "A Squadron name is required.",
     });
 
-    const missing = await patch("squadron:missing", JSON.stringify({ name: "Ghost" }));
+    const missing = await rename("squadron:missing", JSON.stringify({ name: "Ghost" }));
     assert.equal(missing.status, 404);
     assert.deepStrictEqual(await missing.json(), {
       error: "SquadronNotFoundError",
@@ -295,7 +295,7 @@ it("deletes an empty Squadron and reports 409 with the blocker when refused", as
     Layer.provide(HttpServer.layerServices),
   );
   const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
-  const remove = (id: string) => handler(new Request(itemUrl(id), { method: "DELETE" }));
+  const remove = (id: string) => handler(new Request(itemUrl(id, "delete"), { method: "POST" }));
 
   try {
     const ok = await remove(squadronId);

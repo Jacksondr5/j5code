@@ -27,11 +27,14 @@ import {
   failEnvironmentInternal,
   failEnvironmentScopeRequired,
 } from "../../auth/http.ts";
+import { SquadronNotFoundError } from "./LedgerService.ts";
 import { SquadronManagementService } from "./SquadronManagementService.ts";
 import { SquadronId } from "./contracts.ts";
 
 const SQUADRONS_PATH = J5_API_PATHS.squadrons;
-const SQUADRON_ITEM_PATH = `${SQUADRONS_PATH}/:id` as const;
+// Rename and delete ride POST so browser clients on other origins pass the CORS method allowlist.
+const SQUADRON_RENAME_PATH = `${SQUADRONS_PATH}/:id/rename` as const;
+const SQUADRON_DELETE_PATH = `${SQUADRONS_PATH}/:id/delete` as const;
 const decodeCreateSquadronRequest = Schema.decodeUnknownEffect(CreateSquadronRequest);
 const decodeRenameSquadronRequest = Schema.decodeUnknownEffect(RenameSquadronRequest);
 const decodeSquadronId = Schema.decodeUnknownOption(SquadronId);
@@ -43,12 +46,6 @@ const squadronIdParam = Effect.map(HttpRouter.params, (params) => {
   const raw = Option.getOrElse(Option.liftThrowable(decodeURIComponent)(segment), () => segment);
   return { raw, id: decodeSquadronId(raw) };
 });
-
-const notFound = (squadronId: string) =>
-  HttpServerResponse.jsonUnsafe(
-    { error: "SquadronNotFoundError", message: `Squadron ${squadronId} does not exist.` },
-    { status: 404 },
-  );
 
 export const authenticate = (
   scope: typeof AuthOrchestrationReadScope | typeof AuthOrchestrationOperateScope,
@@ -161,13 +158,15 @@ export const squadronHttpRouteLayer = Layer.unwrap(
       ),
     );
     const renameRoute = HttpRouter.add(
-      "PATCH",
-      SQUADRON_ITEM_PATH,
+      "POST",
+      SQUADRON_RENAME_PATH,
       Effect.gen(function* () {
         yield* annotateEnvironmentRequest("j5.squadron.rename");
         yield* authenticate(AuthOrchestrationOperateScope);
         const param = yield* squadronIdParam;
-        if (Option.isNone(param.id)) return notFound(param.raw);
+        if (Option.isNone(param.id)) {
+          return yield* operationFailure(new SquadronNotFoundError({ squadronId: param.raw }));
+        }
         const squadronId = param.id.value;
         const request = yield* HttpServerRequest.HttpServerRequest;
         const body = yield* Effect.result(request.json);
@@ -192,13 +191,15 @@ export const squadronHttpRouteLayer = Layer.unwrap(
       ),
     );
     const deleteRoute = HttpRouter.add(
-      "DELETE",
-      SQUADRON_ITEM_PATH,
+      "POST",
+      SQUADRON_DELETE_PATH,
       Effect.gen(function* () {
         yield* annotateEnvironmentRequest("j5.squadron.delete");
         yield* authenticate(AuthOrchestrationOperateScope);
         const param = yield* squadronIdParam;
-        if (Option.isNone(param.id)) return notFound(param.raw);
+        if (Option.isNone(param.id)) {
+          return yield* operationFailure(new SquadronNotFoundError({ squadronId: param.raw }));
+        }
         const squadronId = param.id.value;
         const result = yield* Effect.result(management.delete(squadronId));
         if (Result.isSuccess(result)) {

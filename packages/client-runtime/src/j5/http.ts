@@ -24,7 +24,7 @@ import {
   type CrewArchiveRequest,
   type CrewStopRequest,
   type FleetReadRequest,
-  j5SquadronPath,
+  j5SquadronActionPath,
 } from "@t3tools/contracts/j5";
 import type { ProjectId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -140,9 +140,9 @@ export const renameSquadron = Effect.fn("j5.http.renameSquadron")(function* (
   prepared: PreparedConnection,
   input: { readonly squadronId: string; readonly name: string },
 ) {
-  const request = yield* HttpClientRequest.patch(j5SquadronPath(input.squadronId)).pipe(
-    HttpClientRequest.bodyJson({ name: input.name }),
-  );
+  const request = yield* HttpClientRequest.post(
+    j5SquadronActionPath(input.squadronId, "rename"),
+  ).pipe(HttpClientRequest.bodyJson({ name: input.name }));
   const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
   return (yield* HttpClientResponse.schemaBodyJson(RenameSquadronResponse)(response)).squadron;
 });
@@ -153,7 +153,7 @@ export const deleteSquadron = Effect.fn("j5.http.deleteSquadron")(function* (
 ) {
   const response = yield* executeJ5Request(
     prepared,
-    HttpClientRequest.delete(j5SquadronPath(input.squadronId)),
+    HttpClientRequest.post(j5SquadronActionPath(input.squadronId, "delete")),
     WRITE_TIMEOUT_MS,
   );
   yield* HttpClientResponse.schemaBodyJson(DeleteSquadronResponse)(response);
