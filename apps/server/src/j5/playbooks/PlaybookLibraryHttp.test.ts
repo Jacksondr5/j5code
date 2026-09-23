@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   AuthOrchestrationReadScope,
+  AuthOrchestrationOperateScope,
   AuthSessionId,
   EnvironmentAuthInvalidError,
   EnvironmentInternalError,
@@ -11,7 +12,12 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
-import { PLAYBOOK_LIBRARY_PATH, PlaybookLibraryResponse } from "@t3tools/contracts/j5";
+import {
+  PLAYBOOK_DELETE_PATH,
+  PLAYBOOK_LIBRARY_PATH,
+  PLAYBOOK_RENAME_PATH,
+  PlaybookLibraryResponse,
+} from "@t3tools/contracts/j5";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -153,14 +159,23 @@ const fixture = Effect.gen(function* () {
   const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
     authenticateHttpRequest: (request) => {
       const authorization = request.headers.authorization;
-      if (authorization !== "Bearer read" && authorization !== "Bearer without-read") {
+      if (
+        authorization !== "Bearer read" &&
+        authorization !== "Bearer operate" &&
+        authorization !== "Bearer without-read"
+      ) {
         return Effect.fail(new EnvironmentAuth.ServerAuthMissingCredentialError({}));
       }
       return Effect.succeed({
         sessionId: AuthSessionId.make("session:playbook-library-http"),
         subject: "playbook-library-test",
         method: "bearer-access-token" as const,
-        scopes: authorization === "Bearer read" ? [AuthOrchestrationReadScope] : [],
+        scopes:
+          authorization === "Bearer operate"
+            ? [AuthOrchestrationReadScope, AuthOrchestrationOperateScope]
+            : authorization === "Bearer read"
+              ? [AuthOrchestrationReadScope]
+              : [],
       });
     },
   });
@@ -188,6 +203,32 @@ const fixture = Effect.gen(function* () {
         }),
       ),
     );
+  const postDelete = (body: Schema.Json, authorization: string | null = "Bearer operate") =>
+    Effect.promise(() =>
+      handler(
+        new Request(`http://environment.test${PLAYBOOK_DELETE_PATH}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(authorization === null ? {} : { authorization }),
+          },
+          body: encodeBody(body),
+        }),
+      ),
+    );
+  const postRename = (body: Schema.Json, authorization: string | null = "Bearer operate") =>
+    Effect.promise(() =>
+      handler(
+        new Request(`http://environment.test${PLAYBOOK_RENAME_PATH}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(authorization === null ? {} : { authorization }),
+          },
+          body: encodeBody(body),
+        }),
+      ),
+    );
   const read = Effect.fn("test.playbooks.library.read")(function* (threadId?: ThreadId) {
     const response = yield* post({ projectId, ...(threadId === undefined ? {} : { threadId }) });
     assert.equal(response.status, 200);
@@ -200,6 +241,8 @@ const fixture = Effect.gen(function* () {
     worktree,
     store,
     post,
+    postDelete,
+    postRename,
     read,
     handler,
     projectReads,
@@ -339,5 +382,93 @@ it.effect("rejects missing project IDs and malformed JSON", () =>
       ),
     );
     assert.equal(malformed.status, 400);
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("deletes only a selected workspace file after operate authentication", () =>
+  Effect.gen(function* () {
+    const { fs, filename, projectRoot, worktree, store, read, postDelete, projectReads } =
+      yield* fixture;
+    const request = { projectId, name: "demo" };
+    assert.equal((yield* postDelete(request, null)).status, 401);
+    assert.equal((yield* postDelete(request, "Bearer read")).status, 403);
+    assert.deepStrictEqual(projectReads, []);
+    for (const body of [
+      { projectId, name: "../demo" },
+      { projectId, name: "demo/other" },
+      { projectId: missingProjectId, name: "demo" },
+      { projectId, threadId: mismatchedThread, name: "demo" },
+    ]) {
+      const response = yield* postDelete(body);
+      assert.equal(response.status, body.name === "demo" ? 404 : 400);
+    }
+    const run = yield* store.start(ThreadId.make("delete-owner"), projectRoot, "demo", "start");
+    const inUse = yield* postDelete(request);
+    assert.equal(inUse.status, 409);
+    assert.equal(
+      (yield* Effect.promise(() => inUse.json()).pipe(Effect.flatMap(decodeRequestError))).error,
+      "in_use",
+    );
+    yield* store.mutate(run.ownerThreadId, {
+      operation: "cancel",
+      runId: run.runId,
+      client_request_id: "cancel",
+    });
+    const deleted = yield* postDelete(request);
+    assert.equal(deleted.status, 200);
+    assert.deepStrictEqual(yield* Effect.promise(() => deleted.json()), { deleted: true });
+    assert.isFalse(yield* fs.exists(filename(projectRoot)));
+    assert.isTrue(yield* fs.exists(filename(worktree)));
+    assert.deepStrictEqual((yield* read()).playbooks, []);
+    assert.equal((yield* postDelete(request)).status, 404);
+    assert.equal((yield* store.listForThread(run.ownerThreadId)).runs[0]?.status, "cancelled");
+    assert.equal((yield* postDelete({ ...request, threadId: worktreeThread })).status, 200);
+    assert.isFalse(yield* fs.exists(filename(worktree)));
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("can delete an invalid YAML definition without reading its contents", () =>
+  Effect.gen(function* () {
+    const { fs, filename, projectRoot, postDelete } = yield* fixture;
+    yield* fs.writeFileString(filename(projectRoot), "title: [broken");
+    assert.equal((yield* postDelete({ projectId, name: "demo" })).status, 200);
+    assert.isFalse(yield* fs.exists(filename(projectRoot)));
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("renames the YAML title without changing its stable filename or active run", () =>
+  Effect.gen(function* () {
+    const { fs, filename, projectRoot, store, read, postRename } = yield* fixture;
+    const request = { projectId, name: "demo", title: "Renamed playbook" };
+    assert.equal((yield* postRename(request, null)).status, 401);
+    assert.equal((yield* postRename(request, "Bearer read")).status, 403);
+    const run = yield* store.start(ThreadId.make("rename-owner"), projectRoot, "demo", "start");
+    const renamed = yield* postRename(request);
+    assert.equal(renamed.status, 200);
+    assert.deepStrictEqual(yield* Effect.promise(() => renamed.json()), { renamed: true });
+    assert.isTrue(yield* fs.exists(filename(projectRoot)));
+    const library = yield* read();
+    assert.equal(library.playbooks[0]?.title, "Renamed playbook");
+    assert.equal(library.playbooks[0]?.description, "Purpose of Project library.");
+    assert.equal(library.playbooks[0]?.steps[0]?.id, "first");
+    assert.equal((yield* store.current(run.ownerThreadId, run.runId)).title, "Renamed playbook");
+    const unchanged = yield* postRename(request);
+    assert.deepStrictEqual(yield* Effect.promise(() => unchanged.json()), { renamed: false });
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("rejects invalid rename inputs and invalid YAML", () =>
+  Effect.gen(function* () {
+    const { fs, filename, projectRoot, postRename } = yield* fixture;
+    for (const body of [
+      { projectId, name: "../demo", title: "Nope" },
+      { projectId, name: "demo", title: "   " },
+      { projectId, name: "missing", title: "Nope" },
+    ]) {
+      const response = yield* postRename(body);
+      assert.equal(response.status, body.name === "missing" ? 404 : 400);
+    }
+    yield* fs.writeFileString(filename(projectRoot), "title: [broken");
+    assert.equal((yield* postRename({ projectId, name: "demo", title: "Nope" })).status, 400);
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );

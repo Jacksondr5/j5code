@@ -103,6 +103,44 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
+it.effect("reads one definition for twenty thread runs on each request", () =>
+  Effect.gen(function* () {
+    const { workspaceRoot, fs, write, filename } = yield* makeFixture;
+    let reads = 0;
+    const store = yield* makePlaybookStore.pipe(
+      Effect.provideService(FileSystem.FileSystem, {
+        ...fs,
+        readFileString: (file, encoding) => {
+          reads += 1;
+          return fs.readFileString(file, encoding);
+        },
+      }),
+    );
+    for (let index = 0; index < 20; index++) {
+      const run = yield* store.start(owner, workspaceRoot, "demo", `start-${index}`);
+      yield* store.mutate(owner, {
+        operation: "complete",
+        runId: run.runId,
+        expectedStepId: "research",
+        client_request_id: `complete-${index}`,
+      });
+    }
+    reads = 0;
+    const first = yield* store.listForThread(owner);
+    assert.equal(first.runs.length, 20);
+    assert.equal(reads, 1);
+    assert.isFalse(first.runs.some((run) => "currentStep" in run));
+    yield* write("demo", { ...definition(), title: "Changed title" });
+    const second = yield* store.listForThread(owner);
+    assert.equal(reads, 2);
+    assert.isTrue(second.runs.every((run) => run.title === "Changed title"));
+    yield* fs.writeFileString(filename("demo"), "title: [invalid");
+    const broken = yield* store.listForThread(owner);
+    assert.equal(reads, 3);
+    assert.isTrue(broken.runs.every((run) => run.issue?.code === "invalid_definition"));
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
 it.effect("pages beyond 100 runs without losing older active owners", () =>
   Effect.gen(function* () {
     const { store, workspaceRoot } = yield* makeFixture;

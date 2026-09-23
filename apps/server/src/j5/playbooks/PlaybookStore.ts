@@ -71,7 +71,7 @@ export const makePlaybookStore = Effect.gen(function* () {
   const permit = yield* Semaphore.make(1);
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
-  const readDefinition = Effect.fn("PlaybookStore.readDefinition")(
+  const readDefinitionDocument = Effect.fn("PlaybookStore.readDefinitionDocument")(
     function* (definitionPath: string) {
       const root = path.resolve(definitionPath, "../../..");
       const realRoot = yield* fs.realPath(root);
@@ -91,11 +91,11 @@ export const makePlaybookStore = Effect.gen(function* () {
         );
       }
       const text = yield* fs.readFileString(realFile);
-      const raw = yield* Effect.try((): unknown => {
+      const { document, raw } = yield* Effect.try(() => {
         const document = parseDocument(text, { version: "1.2", uniqueKeys: true });
         const issue = document.errors[0] ?? document.warnings[0];
         if (issue) throw issue;
-        return document.toJS({ maxAliasCount: 0 });
+        return { document, raw: document.toJS({ maxAliasCount: 0 }) as unknown };
       });
       const definition = yield* decodeDefinition(raw);
       const ids = definition.steps.map((step) => step.id);
@@ -106,7 +106,7 @@ export const makePlaybookStore = Effect.gen(function* () {
           ids,
         );
       }
-      return definition;
+      return { definition, document };
     },
     Effect.mapError((error) =>
       isPlaybookError(error)
@@ -117,6 +117,11 @@ export const makePlaybookStore = Effect.gen(function* () {
           ),
     ),
   );
+  const readDefinition = Effect.fn("PlaybookStore.readDefinition")(function* (
+    definitionPath: string,
+  ) {
+    return (yield* readDefinitionDocument(definitionPath)).definition;
+  });
 
   const readRun = Effect.fn("PlaybookStore.readRun")(function* (owner: ThreadId, runId?: string) {
     const rows =
@@ -234,6 +239,58 @@ export const makePlaybookStore = Effect.gen(function* () {
       ),
     );
     return { playbooks };
+  }, Effect.mapError(storageError));
+
+  const removeDefinition = Effect.fn("PlaybookStore.removeDefinition")(function* (
+    workspaceRoot: string,
+    name: string,
+  ) {
+    if (!namePattern.test(name))
+      return yield* playbookError("invalid_name", "Choose a playbook in this workspace.");
+    const directory = path.resolve(workspaceRoot, ".j5/playbooks");
+    const filename = path.join(directory, `${name}.yaml`);
+    return yield* Effect.gen(function* () {
+      if (!(yield* fs.exists(filename)))
+        return yield* playbookError("not_found", "This playbook no longer exists.");
+      const realRoot = yield* fs.realPath(workspaceRoot);
+      const realDirectory = yield* fs.realPath(directory);
+      const relative = path.relative(realRoot, realDirectory);
+      if (relative !== path.join(".j5", "playbooks"))
+        return yield* playbookError("invalid_path", "Playbooks must stay inside the workspace.");
+      const info = yield* fs.stat(filename);
+      if (info.type !== "File")
+        return yield* playbookError("invalid_path", "Only playbook YAML files can be deleted.");
+      const active = yield* sql<{ run_id: string }>`SELECT run_id FROM j5_playbook_run
+        WHERE definition_path = ${filename} AND status = 'active' LIMIT 1`;
+      if (active[0])
+        return yield* playbookError(
+          "in_use",
+          `Run '${active[0].run_id}' is active. Complete or cancel it before deleting this playbook.`,
+        );
+      yield* fs.remove(filename);
+      return { deleted: true };
+    }).pipe(permit.withPermits(1));
+  }, Effect.mapError(storageError));
+
+  const renameDefinition = Effect.fn("PlaybookStore.renameDefinition")(function* (
+    workspaceRoot: string,
+    name: string,
+    title: string,
+  ) {
+    if (!namePattern.test(name))
+      return yield* playbookError("invalid_name", "Choose a playbook in this workspace.");
+    const nextTitle = title.trim();
+    if (!nextTitle) return yield* playbookError("invalid_title", "Enter a name for the playbook.");
+    const filename = path.resolve(workspaceRoot, ".j5/playbooks", `${name}.yaml`);
+    return yield* Effect.gen(function* () {
+      if (!(yield* fs.exists(filename)))
+        return yield* playbookError("not_found", "This playbook no longer exists.");
+      const { definition, document } = yield* readDefinitionDocument(filename);
+      if (definition.title === nextTitle) return { renamed: false };
+      document.set("title", nextTitle);
+      yield* fs.writeFileString(filename, document.toString());
+      return { renamed: true };
+    }).pipe(permit.withPermits(1));
   }, Effect.mapError(storageError));
 
   const start = Effect.fn("PlaybookStore.start")(function* (
@@ -360,14 +417,30 @@ export const makePlaybookStore = Effect.gen(function* () {
       );
     return result;
   }, Effect.mapError(storageError));
+  const progressRows = (rows: ReadonlyArray<RunRow>) =>
+    Effect.gen(function* () {
+      // Keep the cache inside the request, including failed reads; the next request sees live YAML.
+      const definitions = new Map<string, ReturnType<typeof readDefinition>>();
+      return yield* Effect.forEach(rows, (row) =>
+        Effect.gen(function* () {
+          let definition = definitions.get(row.definition_path);
+          if (!definition) {
+            definition = yield* Effect.cached(readDefinition(row.definition_path));
+            definitions.set(row.definition_path, definition);
+          }
+          const {
+            currentStep: _prompt,
+            replayed: _replayed,
+            ...progress
+          } = yield* view(fromRow(row), false, definition);
+          return progress;
+        }),
+      );
+    });
   const listForThread = Effect.fn("PlaybookStore.listForThread")(function* (owner: ThreadId) {
     const rows = yield* sql<RunRow>`SELECT * FROM j5_playbook_run WHERE owner_thread_id = ${owner}
       ORDER BY (status = 'active') DESC, rowid DESC LIMIT 20`;
-    const runs = yield* Effect.forEach(rows, (row) =>
-      view(fromRow(row)).pipe(
-        Effect.map(({ currentStep: _prompt, replayed: _replayed, ...progress }) => progress),
-      ),
-    );
+    const runs = yield* progressRows(rows);
     return { runs };
   }, Effect.mapError(storageError));
   const listAll = Effect.fn("PlaybookStore.listAll")(function* (input: PlaybookRunsRequest) {
@@ -378,26 +451,19 @@ export const makePlaybookStore = Effect.gen(function* () {
     const rows = yield* sql<RunRow>`SELECT * FROM j5_playbook_run WHERE ${filter}
       ORDER BY (status = 'active') DESC, updated_at DESC, rowid DESC
       LIMIT ${PLAYBOOK_RUNS_PAGE_SIZE} OFFSET ${input.offset ?? 0}`;
-    // Read each live definition once per page, including failures. The next poll reads it afresh.
-    const definitions = new Map<string, ReturnType<typeof readDefinition>>();
-    const runs = yield* Effect.forEach(rows, (row) =>
-      Effect.gen(function* () {
-        let definition = definitions.get(row.definition_path);
-        if (!definition) {
-          definition = yield* Effect.cached(readDefinition(row.definition_path));
-          definitions.set(row.definition_path, definition);
-        }
-        const {
-          currentStep: _prompt,
-          replayed: _replayed,
-          ...progress
-        } = yield* view(fromRow(row), false, definition);
-        return progress;
-      }),
-    );
+    const runs = yield* progressRows(rows);
     return { runs, total: counts[0]?.total ?? 0 };
   }, Effect.mapError(storageError));
-  return { discover, start, current, mutate, listForThread, listAll };
+  return {
+    discover,
+    removeDefinition,
+    renameDefinition,
+    start,
+    current,
+    mutate,
+    listForThread,
+    listAll,
+  };
 });
 
 export class PlaybookStore extends Context.Service<

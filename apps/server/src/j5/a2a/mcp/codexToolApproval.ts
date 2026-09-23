@@ -37,6 +37,14 @@ export const J5_CODEX_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
   "stop_crew",
   "archive_crew",
   "clear_own_ask",
+  "playbook_list",
+  "playbook_start",
+  "playbook_current",
+  "playbook_next",
+  "playbook_back",
+  "playbook_reselect",
+  "playbook_complete",
+  "playbook_cancel",
 ];
 
 /** These calls coordinate approved work or file a request in the app's human approval inbox. */

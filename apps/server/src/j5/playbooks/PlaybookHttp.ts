@@ -1,4 +1,3 @@
-import { AuthOrchestrationReadScope } from "@t3tools/contracts";
 import {
   PLAYBOOK_PROGRESS_PATH,
   PLAYBOOK_RUNS_PATH,
@@ -17,13 +16,8 @@ import {
   HttpServerRespondable,
   HttpServerResponse,
 } from "effect/unstable/http";
-import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
-import {
-  annotateEnvironmentRequest,
-  failEnvironmentAuthInvalid,
-  failEnvironmentInternal,
-  failEnvironmentScopeRequired,
-} from "../../auth/http.ts";
+import { annotateEnvironmentRequest, failEnvironmentInternal } from "../../auth/http.ts";
+import { authenticateClientRead, invalidRequest } from "../a2a/ClientReadsHttp.ts";
 import { PlaybookStore } from "./PlaybookStore.ts";
 
 const decodeRequest = Schema.decodeUnknownEffect(ThreadPlaybooksRequest);
@@ -40,23 +34,9 @@ export const playbookHttpRouteLayer = Layer.unwrap(
       Effect.gen(function* () {
         yield* annotateEnvironmentRequest("j5.playbooks.thread");
         const request = yield* HttpServerRequest.HttpServerRequest;
-        const auth = yield* EnvironmentAuth.EnvironmentAuth;
-        const session = yield* auth.authenticateHttpRequest(request).pipe(
-          Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
-            failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
-          ),
-          Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
-            failEnvironmentInternal("internal_error", error),
-          ),
-        );
-        if (!session.scopes.includes(AuthOrchestrationReadScope))
-          return yield* failEnvironmentScopeRequired(AuthOrchestrationReadScope);
+        yield* authenticateClientRead;
         const body = yield* Effect.result(request.json.pipe(Effect.flatMap(decodeRequest)));
-        if (Result.isFailure(body))
-          return HttpServerResponse.jsonUnsafe(
-            { error: "invalid_request", message: "A threadId is required." },
-            { status: 400 },
-          );
+        if (Result.isFailure(body)) return invalidRequest("A threadId is required.");
         return yield* store.listForThread(body.success.threadId).pipe(
           Effect.flatMap(encodeResponse),
           Effect.map((data) => HttpServerResponse.jsonUnsafe(data)),
@@ -76,26 +56,10 @@ export const playbookHttpRouteLayer = Layer.unwrap(
       Effect.gen(function* () {
         yield* annotateEnvironmentRequest("j5.playbooks.runs");
         const request = yield* HttpServerRequest.HttpServerRequest;
-        const auth = yield* EnvironmentAuth.EnvironmentAuth;
-        const session = yield* auth.authenticateHttpRequest(request).pipe(
-          Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
-            failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
-          ),
-          Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
-            failEnvironmentInternal("internal_error", error),
-          ),
-        );
-        if (!session.scopes.includes(AuthOrchestrationReadScope))
-          return yield* failEnvironmentScopeRequired(AuthOrchestrationReadScope);
+        yield* authenticateClientRead;
         const body = yield* Effect.result(request.json.pipe(Effect.flatMap(decodeRunsRequest)));
         if (Result.isFailure(body))
-          return HttpServerResponse.jsonUnsafe(
-            {
-              error: "invalid_request",
-              message: "Use an active/all filter and a non-negative integer offset.",
-            },
-            { status: 400 },
-          );
+          return invalidRequest("Use an active/all filter and a non-negative integer offset.");
         return yield* store.listAll(body.success).pipe(
           Effect.flatMap(encodeRunsResponse),
           Effect.map((data) => HttpServerResponse.jsonUnsafe(data)),

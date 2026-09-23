@@ -80,3 +80,18 @@ export const PlaybookLibraryResponse = Schema.Struct({
   ...PlaybookDiscovery.fields,
 });
 export const PLAYBOOK_LIBRARY_PATH = "/api/j5/playbooks/library";
+export const PlaybookDeleteRequest = Schema.Struct({
+  ...PlaybookLibraryRequest.fields,
+  name: Text,
+});
+export type PlaybookDeleteRequest = typeof PlaybookDeleteRequest.Type;
+export const PlaybookDeleteResponse = Schema.Struct({ deleted: Schema.Boolean });
+export const PLAYBOOK_DELETE_PATH = "/api/j5/playbooks/delete";
+export const PlaybookRenameRequest = Schema.Struct({
+  ...PlaybookLibraryRequest.fields,
+  name: Text,
+  title: Text,
+});
+export type PlaybookRenameRequest = typeof PlaybookRenameRequest.Type;
+export const PlaybookRenameResponse = Schema.Struct({ renamed: Schema.Boolean });
+export const PLAYBOOK_RENAME_PATH = "/api/j5/playbooks/rename";
