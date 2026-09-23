@@ -1,9 +1,24 @@
 import * as Schema from "effect/Schema";
+import { Rpc, RpcGroup } from "effect/unstable/rpc";
+import { EnvironmentAuthorizationError } from "../auth.ts";
 import { ProjectId, ThreadId } from "../baseSchemas.ts";
 
 export const PLAYBOOK_MAX_BYTES = 262144;
 export const PLAYBOOK_MAX_STEPS = 100;
 export const PLAYBOOK_NAME_PATTERN = /^[^/\\\p{Cc}]+$/u;
+
+export const J5_PLAYBOOK_WS_METHODS = {
+  subscribeChanges: "j5.playbooks.subscribeChanges",
+} as const;
+
+export const J5PlaybookRpcGroup = RpcGroup.make(
+  Rpc.make(J5_PLAYBOOK_WS_METHODS.subscribeChanges, {
+    payload: Schema.Struct({}),
+    success: Schema.Int,
+    error: EnvironmentAuthorizationError,
+    stream: true,
+  }),
+);
 
 const Text = Schema.String.check(Schema.isPattern(/\S/));
 export const PlaybookStep = Schema.Struct({ id: Text, title: Text, prompt: Text });

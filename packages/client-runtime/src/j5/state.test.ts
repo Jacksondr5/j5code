@@ -1,5 +1,6 @@
 import { expect, it } from "@effect/vitest";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { J5_PLAYBOOK_WS_METHODS } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -28,8 +29,11 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const supervisors = new Map<EnvironmentId, EnvironmentSupervisor["Service"]>();
+      const revisions = new Map<EnvironmentId, SubscriptionRef.SubscriptionRef<number>>();
       for (const id of ["alpha", "bravo"]) {
         const environmentId = EnvironmentId.make(id);
+        const revision = yield* SubscriptionRef.make(0);
+        revisions.set(environmentId, revision);
         const target = new BearerConnectionTarget({ environmentId, label: id, connectionId: id });
         const prepared: PreparedConnection = {
           environmentId,
@@ -51,7 +55,12 @@ it.effect(
             }),
             prepared: yield* SubscriptionRef.make(Option.some(prepared)),
             session: yield* SubscriptionRef.make<Option.Option<RpcSession>>(
-              Option.some({} as RpcSession),
+              Option.some({
+                client: {
+                  [J5_PLAYBOOK_WS_METHODS.subscribeChanges]: () =>
+                    SubscriptionRef.changes(revision),
+                },
+              } as unknown as RpcSession),
             ),
             connect: Effect.void,
             disconnect: Effect.void,
@@ -116,6 +125,24 @@ it.effect(
         atoms.squadrons({ environmentId: alphaId, input: {} }),
       );
       expect(calls).toHaveLength(2);
+
+      const alphaChanges = atoms.playbookChanges({ environmentId: alphaId, input: {} });
+      const bravoChanges = atoms.playbookChanges({
+        environmentId: EnvironmentId.make("bravo"),
+        input: {},
+      });
+      expect(atoms.playbookChanges({ environmentId: alphaId, input: {} })).toBe(alphaChanges);
+      yield* AtomRegistry.mount(registry, alphaChanges);
+      yield* AtomRegistry.mount(registry, bravoChanges);
+      expect(yield* AtomRegistry.getResult(registry, alphaChanges)).toBe(0);
+      expect(yield* AtomRegistry.getResult(registry, bravoChanges)).toBe(0);
+      yield* SubscriptionRef.set(revisions.get(alphaId)!, 1);
+      const changed = yield* AtomRegistry.toStream(registry, alphaChanges).pipe(
+        Stream.filter((result) => AsyncResult.isSuccess(result) && result.value === 1),
+        Stream.runHead,
+      );
+      expect(Option.isSome(changed)).toBe(true);
+      expect(yield* AtomRegistry.getResult(registry, bravoChanges)).toBe(0);
 
       const threadInput = { threadId: ThreadId.make("thread:playbooks") };
       const alphaThread = atoms.playbooks({ environmentId: alphaId, input: threadInput });

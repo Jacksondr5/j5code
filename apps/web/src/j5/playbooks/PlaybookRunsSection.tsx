@@ -150,17 +150,23 @@ function EnvironmentRuns({
   const connected = environment.connection.phase === "connected";
   const unsupported = query.data?.supported === false;
   const data = query.data?.supported ? query.data : null;
+  const changes = useEnvironmentQuery(
+    data
+      ? j5Environment.playbookChanges({ environmentId: environment.environmentId, input: {} })
+      : null,
+  );
   useVisibleRefresh(
     query.refresh,
     data?.runs.some((run) => run.status === "active") ? 7_500 : null,
     connected && !unsupported && !query.isPending,
-    JSON.stringify(
-      Array.from(threads.values(), (thread) => [
+    JSON.stringify([
+      changes.data,
+      ...Array.from(threads.values(), (thread) => [
         thread.id,
         thread.latestRun?.runId,
         thread.latestRun?.status,
       ]),
-    ),
+    ]),
   );
   const runs = useMemo(() => sortPlaybookRuns(data?.runs ?? []), [data?.runs]);
   const providerEntries = useMemo(

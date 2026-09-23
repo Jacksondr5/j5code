@@ -1,4 +1,5 @@
 import type { ProjectId, ThreadId } from "@t3tools/contracts";
+import { J5_PLAYBOOK_WS_METHODS } from "@t3tools/contracts/j5";
 import type {
   AnswerHumanExchangeRequest,
   AssignImportedThreadsRequest,
@@ -20,7 +21,11 @@ import type { Atom } from "effect/unstable/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
-import { createEnvironmentCommand, createEnvironmentQueryAtomFamily } from "../state/runtime.ts";
+import {
+  createEnvironmentCommand,
+  createEnvironmentQueryAtomFamily,
+  createEnvironmentRpcSubscriptionAtomFamily,
+} from "../state/runtime.ts";
 import * as J5Http from "./http.ts";
 
 const preparedConnection = Effect.gen(function* () {
@@ -46,6 +51,11 @@ export function createJ5EnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | HttpClient.HttpClient | R, E>,
 ) {
   return {
+    playbookChanges: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "j5:playbook-changes",
+      tag: J5_PLAYBOOK_WS_METHODS.subscribeChanges,
+      idleTtlMs: 0,
+    }),
     playbookRuns: createEnvironmentQueryAtomFamily(runtime, {
       label: "j5:playbook-runs",
       staleTimeMs: 2_500,

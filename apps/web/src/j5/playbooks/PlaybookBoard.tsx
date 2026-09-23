@@ -20,6 +20,11 @@ export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: T
     }),
   );
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const changes = useEnvironmentQuery(
+    query.data?.supported
+      ? j5Environment.playbookChanges({ environmentId: props.environmentId, input: {} })
+      : null,
+  );
   const runs = query.data?.supported ? query.data.runs : [];
   useVisibleRefresh(
     query.refresh,
@@ -27,7 +32,7 @@ export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: T
     environment?.connection.phase === "connected" &&
       query.data?.supported !== false &&
       !query.isPending,
-    `${thread?.latestRun?.runId}:${thread?.latestRun?.status}`,
+    `${thread?.latestRun?.runId}:${thread?.latestRun?.status}:${changes.data}`,
   );
   const run = runs.find((entry) => entry.runId === selectedRunId) ?? runs[0];
   if (!run) return null;
