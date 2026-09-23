@@ -176,7 +176,11 @@ export function FleetPage() {
                     onOpenThread={openThread}
                   />
                 )}
-                <RetiredCrews squadron={squadron} />
+                <RetiredCrews
+                  squadron={squadron}
+                  threadsByKey={threadsByKey}
+                  onOpenThread={openThread}
+                />
               </section>
             ))}
           </main>
@@ -398,9 +402,12 @@ function FleetNodeRows(
  * Retired Crews of one Squadron as one-line rows that open to the brief and the approved roster
  * with each seat's approval version and reason, so a successor can be proposed from what was
  * decided rather than from memory (Crews AC20). A retired Crew can never be reactivated, so its
- * row offers no action; handoffs live on the Artifacts page.
+ * row offers no action beyond naming its Captain, whose thread holds the ledger; handoffs live on
+ * the Artifacts page.
  */
-function RetiredCrews(props: { readonly squadron: ScopedFleetSquadron }) {
+function RetiredCrews(
+  props: Omit<FleetRowsProps, "environmentId"> & { readonly squadron: ScopedFleetSquadron },
+) {
   const crews = retiredCrews(props.squadron);
   if (crews.length === 0) return null;
   return (
@@ -414,14 +421,20 @@ function RetiredCrews(props: { readonly squadron: ScopedFleetSquadron }) {
       </summary>
       <ul className="mt-2 divide-y divide-border/60 overflow-hidden rounded-md border border-border/60">
         {crews.map((crew) => (
-          <RetiredCrewItem key={crew.crewInstanceId} crew={crew} />
+          <RetiredCrewItem
+            key={crew.crewInstanceId}
+            crew={crew}
+            environmentId={props.squadron.environmentId}
+            threadsByKey={props.threadsByKey}
+            onOpenThread={props.onOpenThread}
+          />
         ))}
       </ul>
     </details>
   );
 }
 
-function RetiredCrewItem(props: { readonly crew: FleetCrew }) {
+function RetiredCrewItem(props: FleetRowsProps & { readonly crew: FleetCrew }) {
   const { crew } = props;
   const seatCount = crew.roster.length;
   return (
@@ -445,7 +458,8 @@ function RetiredCrewItem(props: { readonly crew: FleetCrew }) {
           </span>
         </summary>
         <div className="border-t border-border/40 px-3 py-2 ps-[2.125rem] text-xs">
-          <p className="whitespace-pre-wrap break-words text-muted-foreground">{crew.brief}</p>
+          <RetiredCrewCaptain {...props} />
+          <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">{crew.brief}</p>
           {crew.roster.length === 0 ? (
             <p className="mt-2 text-muted-foreground">No seats were approved.</p>
           ) : (
@@ -467,6 +481,35 @@ function RetiredCrewItem(props: { readonly crew: FleetCrew }) {
         </div>
       </details>
     </li>
+  );
+}
+
+/**
+ * The Captain's thread keeps the retired Crew's ledger. Archived threads are not in the active
+ * thread shells (nor are deleted ones), and the thread route redirects home for them, so only a
+ * live Captain is linked.
+ */
+function RetiredCrewCaptain(props: FleetRowsProps & { readonly crew: FleetCrew }) {
+  const { captainThreadId } = props.crew;
+  if (captainThreadId === null) return null;
+  const thread = props.threadsByKey.get(
+    scopedThreadKey(scopeThreadRef(props.environmentId, ThreadId.make(captainThreadId))),
+  );
+  return (
+    <p className="text-muted-foreground">
+      Captain:{" "}
+      {thread === undefined || thread.archivedAt !== null ? (
+        "no longer active. If it was archived, unarchive it from Settings → Archived to read its ledger."
+      ) : (
+        <button
+          type="button"
+          className="text-foreground/80 underline underline-offset-2 outline-hidden hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => props.onOpenThread(props.environmentId, captainThreadId)}
+        >
+          {thread.title}
+        </button>
+      )}
+    </p>
   );
 }
 
