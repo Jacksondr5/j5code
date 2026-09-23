@@ -1,12 +1,19 @@
 import * as Schema from "effect/Schema";
 import { ProjectId, ThreadId } from "../baseSchemas.ts";
 
+export const PLAYBOOK_MAX_BYTES = 262144;
+export const PLAYBOOK_MAX_STEPS = 100;
+export const PLAYBOOK_NAME_PATTERN = /^[^/\\\p{Cc}]+$/u;
+
 const Text = Schema.String.check(Schema.isPattern(/\S/));
 export const PlaybookStep = Schema.Struct({ id: Text, title: Text, prompt: Text });
 export const PlaybookDefinition = Schema.Struct({
   title: Text,
   description: Text,
-  steps: Schema.Array(PlaybookStep).check(Schema.isMinLength(1), Schema.isMaxLength(100)),
+  steps: Schema.Array(PlaybookStep).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(PLAYBOOK_MAX_STEPS),
+  ),
 });
 export type PlaybookDefinition = typeof PlaybookDefinition.Type;
 

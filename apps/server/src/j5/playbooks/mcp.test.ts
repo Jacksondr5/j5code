@@ -1,3 +1,4 @@
+import { seedPlaybookOwners } from "./testFixtures.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -81,6 +82,7 @@ const fixture = Effect.gen(function* () {
     yield* fs.writeFileString(path.join(root, ".j5/playbooks/demo.yaml"), stringify(sample(title)));
   }
   yield* runJ5A2AMigrations();
+  yield* seedPlaybookOwners([owner, rootOwner]);
   const store = yield* makePlaybookStore;
   const dependencies = Layer.mergeAll(
     Layer.succeed(PlaybookStore, store),

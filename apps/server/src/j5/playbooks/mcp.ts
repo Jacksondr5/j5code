@@ -24,7 +24,7 @@ const common = {
   dependencies,
 };
 const mutationDescription =
-  " Reuse client_request_id only to retry this exact operation; use a fresh ID for each new action. A replay returns current live progress without moving again.";
+  " Reuse client_request_id only to retry this exact operation; use a fresh ID for each new action. Active-run retries return current live progress without moving again. After completion or cancellation, only start and finish retries are retained.";
 
 export const playbookTools = [
   Tool.make("playbook_list", {

@@ -1,13 +1,21 @@
+import { seedPlaybookOwners } from "./testFixtures.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
-import { PLAYBOOK_RUNS_PAGE_SIZE, type PlaybookDefinition } from "@t3tools/contracts/j5";
+import {
+  PLAYBOOK_MAX_BYTES,
+  PLAYBOOK_MAX_STEPS,
+  PLAYBOOK_RUNS_PAGE_SIZE,
+  type PlaybookDefinition,
+} from "@t3tools/contracts/j5";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Option from "effect/Option";
 import { stringify } from "yaml";
 
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
@@ -37,6 +45,12 @@ const makeWorkspace = Effect.gen(function* () {
 
 const initializeStore = Effect.gen(function* () {
   yield* runJ5A2AMigrations();
+  yield* seedPlaybookOwners([
+    owner,
+    otherOwner,
+    "healthy-owner",
+    ...Array.from({ length: PLAYBOOK_RUNS_PAGE_SIZE + 1 }, (_, index) => `owner-${index}`),
+  ]);
   return yield* makePlaybookStore;
 });
 
@@ -98,8 +112,8 @@ it.effect(
       const broken = yield* store.listAll({});
       assert.equal(reads, 2);
       assert.equal(broken.runs.length, 3);
-      assert.equal(broken.runs.filter((run) => run.issue?.code === "invalid_definition").length, 2);
-      assert.equal(broken.runs.filter((run) => run.issue === null).length, 1);
+      assert.equal(broken.runs.filter((run) => run.issue?.code === "invalid_definition").length, 1);
+      assert.equal(broken.runs.filter((run) => run.issue === null).length, 2);
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
@@ -137,7 +151,7 @@ it.effect("reads one definition for twenty thread runs on each request", () =>
     yield* fs.writeFileString(filename("demo"), "title: [invalid");
     const broken = yield* store.listForThread(owner);
     assert.equal(reads, 3);
-    assert.isTrue(broken.runs.every((run) => run.issue?.code === "invalid_definition"));
+    assert.isTrue(broken.runs.every((run) => run.issue === null));
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
@@ -376,7 +390,7 @@ it.effect("preserves progress for invalid or missing YAML and always permits can
         client_request_id: `cancel-${broken}`,
       });
       assert.equal(cancelled.status, "cancelled");
-      assert.equal(cancelled.issue?.code, "invalid_definition");
+      assert.isNull(cancelled.issue);
       assert.equal((yield* store.current(owner, run.runId)).status, "cancelled");
     }
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
@@ -706,4 +720,190 @@ it.effect(
         assert.equal((yield* newStore.current(owner, runId)).currentStepId, "implement");
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: databasePath })));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "cancels deleted and missing owners before reads or deletion, while archived owners remain active",
+  () =>
+    Effect.gen(function* () {
+      const { store, workspaceRoot, write, fs, filename } = yield* makeFixture;
+      const sql = yield* SqlClient.SqlClient;
+      yield* write("archived");
+      const archived = yield* store.start(otherOwner, workspaceRoot, "archived", "archived");
+      yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = '2026-09-23' WHERE thread_id = ${otherOwner}`;
+      for (const entry of ["current", "thread", "active", "delete"] as const) {
+        for (const missing of [false, true]) {
+          yield* seedPlaybookOwners([owner]);
+          yield* sql`UPDATE orchestration_v2_projection_threads SET deleted_at = NULL WHERE thread_id = ${owner}`;
+          yield* write("demo");
+          const run = yield* store.start(owner, workspaceRoot, "demo", `${entry}-${missing}`);
+          if (missing)
+            yield* sql`DELETE FROM orchestration_v2_projection_threads WHERE thread_id = ${owner}`;
+          else
+            yield* sql`UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-09-23' WHERE thread_id = ${owner}`;
+          if (entry === "current")
+            assert.equal((yield* store.current(owner, run.runId)).status, "cancelled");
+          if (entry === "thread")
+            assert.equal((yield* store.listForThread(owner)).runs[0]?.status, "cancelled");
+          if (entry === "active")
+            assert.deepStrictEqual(
+              (yield* store.listAll({ status: "active" })).runs.map((run) => run.runId),
+              [archived.runId],
+            );
+          yield* store.removeDefinition(workspaceRoot, "demo");
+          assert.isFalse(yield* fs.exists(filename("demo")));
+          const history = yield* store.current(owner, run.runId);
+          assert.equal(history.status, "cancelled");
+          assert.isNull(history.issue);
+          yield* write("demo");
+          assert.equal(
+            (yield* Effect.flip(
+              store.start(owner, workspaceRoot, "demo", `deleted-${entry}-${missing}`),
+            )).code,
+            "thread_not_found",
+          );
+        }
+      }
+      assert.equal((yield* store.current(otherOwner, archived.runId)).status, "active");
+      assert.equal(
+        (yield* Effect.flip(store.removeDefinition(workspaceRoot, "archived"))).code,
+        "in_use",
+      );
+    }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("keeps completed and cancelled history warning-free after steps or files disappear", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot, write, fs, filename } = yield* makeFixture;
+    for (const operation of ["complete", "cancel"] as const) {
+      yield* write("demo");
+      const run = yield* store.start(owner, workspaceRoot, "demo", `start-${operation}`);
+      yield* store.mutate(owner, {
+        operation,
+        runId: run.runId,
+        expectedStepId: "research",
+        client_request_id: operation,
+      });
+      yield* write("demo", definition(["review"]));
+      assert.isNull((yield* store.current(owner, run.runId)).issue);
+      yield* fs.remove(filename("demo"));
+      assert.isNull((yield* store.current(owner, run.runId)).issue);
+      assert.isTrue((yield* store.listForThread(owner)).runs.every((run) => run.issue === null));
+      assert.isTrue((yield* store.listAll({})).runs.every((run) => run.issue === null));
+    }
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect(
+  "prunes movement receipts only after termination and preserves start and finish retries",
+  () =>
+    Effect.gen(function* () {
+      const { store, workspaceRoot } = yield* makeFixture;
+      const sql = yield* SqlClient.SqlClient;
+      for (const operation of ["complete", "cancel"] as const) {
+        const run = yield* store.start(owner, workspaceRoot, "demo", `start-${operation}`);
+        const next = {
+          operation: "next",
+          runId: run.runId,
+          expectedStepId: "research",
+          client_request_id: `next-${operation}`,
+        } as const;
+        yield* store.mutate(owner, next);
+        yield* store.mutate(owner, {
+          operation: "back",
+          runId: run.runId,
+          expectedStepId: "implement",
+          client_request_id: `back-${operation}`,
+        });
+        assert.isTrue((yield* store.mutate(owner, next)).replayed);
+        assert.equal(
+          (yield* sql`SELECT * FROM j5_playbook_request WHERE run_id = ${run.runId}`).length,
+          3,
+        );
+        const finish = {
+          operation,
+          runId: run.runId,
+          expectedStepId: "research",
+          client_request_id: operation,
+        } as const;
+        yield* store.mutate(owner, finish);
+        assert.equal(
+          (yield* sql`SELECT * FROM j5_playbook_request WHERE run_id = ${run.runId}`).length,
+          2,
+        );
+        assert.isTrue((yield* store.mutate(owner, finish)).replayed);
+        assert.equal(
+          (yield* store.start(owner, workspaceRoot, "demo", `start-${operation}`)).runId,
+          run.runId,
+        );
+        assert.equal((yield* Effect.flip(store.mutate(owner, next))).code, "run_terminal");
+      }
+    }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("reads YAML outside SQL transactions and rechecks the pointer after the read", () =>
+  Effect.gen(function* () {
+    const { workspaceRoot, fs } = yield* makeFixture;
+    const sql = yield* SqlClient.SqlClient;
+    let moveDuringRead = false;
+    const store = yield* makePlaybookStore.pipe(
+      Effect.provideService(FileSystem.FileSystem, {
+        ...fs,
+        readFileString: (file, encoding) =>
+          Effect.gen(function* () {
+            assert.isTrue(Option.isNone(yield* Effect.serviceOption(sql.transactionService)));
+            if (moveDuringRead) {
+              moveDuringRead = false;
+              yield* sql`UPDATE j5_playbook_run SET current_step_id = 'review' WHERE owner_thread_id = ${owner}`;
+            }
+            return yield* fs.readFileString(file, encoding);
+          }),
+      }),
+    );
+    const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+    yield* store.start(owner, workspaceRoot, "demo", "start");
+    const next = {
+      operation: "next",
+      runId: run.runId,
+      expectedStepId: "research",
+      client_request_id: "next",
+    } as const;
+    yield* store.mutate(owner, next);
+    yield* store.mutate(owner, next);
+    moveDuringRead = true;
+    assert.equal(
+      (yield* Effect.flip(
+        store.mutate(owner, { ...next, expectedStepId: "implement", client_request_id: "stale" }),
+      )).code,
+      "step_conflict",
+    );
+    assert.equal((yield* store.current(owner)).currentStepId, "review");
+    yield* store.mutate(owner, {
+      operation: "cancel",
+      runId: run.runId,
+      client_request_id: "cancel",
+    });
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("enforces the shared byte and step limits at their boundaries", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot, fs, filename, write } = yield* makeFixture;
+    const ids = Array.from({ length: PLAYBOOK_MAX_STEPS }, (_, index) => `step-${index}`);
+    yield* write("demo", definition(ids));
+    assert.isNull((yield* store.discover(workspaceRoot)).playbooks[0]?.issue);
+    yield* write("demo", definition([...ids, "too-many"]));
+    assert.equal(
+      (yield* Effect.flip(store.start(owner, workspaceRoot, "demo", "steps"))).code,
+      "invalid_definition",
+    );
+    const yaml = stringify(definition()) + "#";
+    yield* fs.writeFileString(filename("demo"), yaml.padEnd(PLAYBOOK_MAX_BYTES, " "));
+    assert.isNull((yield* store.discover(workspaceRoot)).playbooks[0]?.issue);
+    yield* fs.writeFileString(filename("demo"), yaml.padEnd(PLAYBOOK_MAX_BYTES + 1, " "));
+    assert.equal(
+      (yield* Effect.flip(store.start(owner, workspaceRoot, "demo", "bytes"))).code,
+      "invalid_definition",
+    );
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );

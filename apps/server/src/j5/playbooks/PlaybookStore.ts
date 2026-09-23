@@ -3,6 +3,8 @@ import {
   PlaybookDefinition,
   PlaybookError,
   PLAYBOOK_RUNS_PAGE_SIZE,
+  PLAYBOOK_MAX_BYTES,
+  PLAYBOOK_NAME_PATTERN,
   type PlaybookRun,
   type PlaybookRunsRequest,
   type PlaybookStepResponse,
@@ -34,7 +36,6 @@ const storageError = (error: unknown) =>
 const encodeRequest = Schema.encodeSync(
   Schema.fromJsonString(Schema.Array(Schema.NullOr(Schema.String))),
 );
-const namePattern = /^[^/\\\p{Cc}]+$/u;
 type RunRow = {
   run_id: string;
   owner_thread_id: string;
@@ -67,7 +68,7 @@ export const makePlaybookStore = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
-  // ponytail: one permit per environment; split by owner only if tool traffic warrants it.
+  // Serialize definition edits and run mutations within this environment.
   const permit = yield* Semaphore.make(1);
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
@@ -84,10 +85,10 @@ export const makePlaybookStore = Effect.gen(function* () {
         );
       }
       const info = yield* fs.stat(realFile);
-      if (info.type !== "File" || info.size > 262144n) {
+      if (info.type !== "File" || info.size > BigInt(PLAYBOOK_MAX_BYTES)) {
         return yield* playbookError(
           "invalid_definition",
-          "Use a YAML file no larger than 256 KiB.",
+          `Use a YAML file no larger than ${PLAYBOOK_MAX_BYTES / 1024} KiB.`,
         );
       }
       const text = yield* fs.readFileString(realFile);
@@ -121,6 +122,20 @@ export const makePlaybookStore = Effect.gen(function* () {
     definitionPath: string,
   ) {
     return (yield* readDefinitionDocument(definitionPath)).definition;
+  });
+
+  const cancelOrphans = Effect.fn("PlaybookStore.cancelOrphans")(function* () {
+    const timestamp = yield* now;
+    yield* sql`UPDATE j5_playbook_run SET status = 'cancelled', updated_at = ${timestamp}
+      WHERE status = 'active' AND NOT EXISTS (
+        SELECT 1 FROM orchestration_v2_projection_threads AS thread
+        WHERE thread.thread_id = owner_thread_id AND thread.deleted_at IS NULL
+      )`;
+  });
+  const requireOwner = Effect.fn("PlaybookStore.requireOwner")(function* (owner: ThreadId) {
+    const rows = yield* sql`SELECT thread_id FROM orchestration_v2_projection_threads
+      WHERE thread_id = ${owner} AND deleted_at IS NULL`;
+    if (!rows[0]) return yield* playbookError("thread_not_found", "The owner thread was deleted.");
   });
 
   const readRun = Effect.fn("PlaybookStore.readRun")(function* (owner: ThreadId, runId?: string) {
@@ -159,7 +174,7 @@ export const makePlaybookStore = Effect.gen(function* () {
       currentStep: definition.steps[index] ?? null,
       replayed,
       issue:
-        index < 0
+        run.status === "active" && index < 0
           ? playbookError(
               "step_missing",
               `Step '${run.currentStepId}' no longer exists. Call playbook_reselect with expectedStepId '${run.currentStepId}' and one of the available step IDs, or cancel.`,
@@ -184,7 +199,7 @@ export const makePlaybookStore = Effect.gen(function* () {
           position: null,
           total: 0,
           currentStep: null,
-          issue,
+          issue: run.status === "active" ? issue : null,
           replayed,
         } satisfies PlaybookStepResponse),
       ),
@@ -204,7 +219,7 @@ export const makePlaybookStore = Effect.gen(function* () {
         "request_conflict",
         "This client_request_id belongs to a different operation. Use a new key for a new operation.",
       );
-    return yield* view(yield* readRun(owner, receipt.run_id), true);
+    return yield* readRun(owner, receipt.run_id);
   });
   const remember = (owner: ThreadId, key: string, request: string, runId: string) =>
     sql`INSERT INTO j5_playbook_request (owner_thread_id, request_id, request_json, run_id)
@@ -214,7 +229,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     const directory = path.join(workspaceRoot, ".j5/playbooks");
     if (!(yield* fs.exists(directory))) return { playbooks: [] };
     const names = (yield* fs.readDirectory(directory))
-      .filter((name) => name.endsWith(".yaml") && namePattern.test(name.slice(0, -5)))
+      .filter((name) => name.endsWith(".yaml") && PLAYBOOK_NAME_PATTERN.test(name.slice(0, -5)))
       .sort();
     const playbooks = yield* Effect.forEach(names, (file) =>
       readDefinition(path.join(directory, file)).pipe(
@@ -245,7 +260,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     workspaceRoot: string,
     name: string,
   ) {
-    if (!namePattern.test(name))
+    if (!PLAYBOOK_NAME_PATTERN.test(name))
       return yield* playbookError("invalid_name", "Choose a playbook in this workspace.");
     const directory = path.resolve(workspaceRoot, ".j5/playbooks");
     const filename = path.join(directory, `${name}.yaml`);
@@ -260,6 +275,7 @@ export const makePlaybookStore = Effect.gen(function* () {
       const info = yield* fs.stat(filename);
       if (info.type !== "File")
         return yield* playbookError("invalid_path", "Only playbook YAML files can be deleted.");
+      yield* cancelOrphans();
       const active = yield* sql<{ run_id: string }>`SELECT run_id FROM j5_playbook_run
         WHERE definition_path = ${filename} AND status = 'active' LIMIT 1`;
       if (active[0])
@@ -277,7 +293,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     name: string,
     title: string,
   ) {
-    if (!namePattern.test(name))
+    if (!PLAYBOOK_NAME_PATTERN.test(name))
       return yield* playbookError("invalid_name", "Choose a playbook in this workspace.");
     const nextTitle = title.trim();
     if (!nextTitle) return yield* playbookError("invalid_title", "Enter a name for the playbook.");
@@ -300,27 +316,31 @@ export const makePlaybookStore = Effect.gen(function* () {
     key: string,
   ) {
     const stem = name.endsWith(".yaml") ? name.slice(0, -5) : name;
-    if (!namePattern.test(stem))
+    if (!PLAYBOOK_NAME_PATTERN.test(stem))
       return yield* playbookError(
         "invalid_name",
         "Pass the name of a .yaml file inside .j5/playbooks, without directories.",
       );
     const definitionPath = path.resolve(workspaceRoot, ".j5/playbooks", `${stem}.yaml`);
     const request = encodeRequest(["start", definitionPath]);
-    return yield* sql
-      .withTransaction(
+    return yield* Effect.gen(function* () {
+      yield* cancelOrphans();
+      const previous = yield* replay(owner, key, request);
+      if (previous) return yield* view(previous, true);
+      // Capture the live file before taking the shared SQLite write transaction.
+      const definition = yield* readDefinition(definitionPath);
+      const result = yield* sql.withTransaction(
         Effect.gen(function* () {
           const previous = yield* replay(owner, key, request);
-          if (previous) return previous;
-          const active = yield* sql<{
-            run_id: string;
-          }>`SELECT run_id FROM j5_playbook_run WHERE owner_thread_id = ${owner} AND status = 'active'`;
+          if (previous) return { run: previous, replayed: true };
+          yield* requireOwner(owner);
+          const active = yield* sql<{ run_id: string }>`SELECT run_id FROM j5_playbook_run
+          WHERE owner_thread_id = ${owner} AND status = 'active'`;
           if (active[0])
             return yield* playbookError(
               "already_active",
               `Run '${active[0].run_id}' is active. Retrieve, complete, or cancel it before starting another.`,
             );
-          const definition = yield* readDefinition(definitionPath);
           const timestamp = yield* now;
           const run: PlaybookRun = {
             runId: yield* crypto.randomUUIDv4,
@@ -332,12 +352,13 @@ export const makePlaybookStore = Effect.gen(function* () {
             updatedAt: timestamp,
           };
           yield* sql`INSERT INTO j5_playbook_run (run_id, owner_thread_id, definition_path, current_step_id, status, created_at, updated_at)
-        VALUES (${run.runId}, ${owner}, ${definitionPath}, ${run.currentStepId}, ${run.status}, ${timestamp}, ${timestamp})`;
+          VALUES (${run.runId}, ${owner}, ${definitionPath}, ${run.currentStepId}, ${run.status}, ${timestamp}, ${timestamp})`;
           yield* remember(owner, key, request, run.runId);
-          return present(run, definition);
+          return { run, replayed: false };
         }),
-      )
-      .pipe(permit.withPermits(1));
+      );
+      return result.replayed ? yield* view(result.run, true) : present(result.run, definition);
+    }).pipe(permit.withPermits(1));
   }, Effect.mapError(storageError));
 
   const mutate = Effect.fn("PlaybookStore.mutate")(function* (
@@ -350,25 +371,32 @@ export const makePlaybookStore = Effect.gen(function* () {
       "expectedStepId" in input ? input.expectedStepId : null,
       "stepId" in input ? input.stepId : null,
     ]);
-    return yield* sql
-      .withTransaction(
+    return yield* Effect.gen(function* () {
+      yield* cancelOrphans();
+      const previous = yield* replay(owner, input.client_request_id, request);
+      if (previous) return yield* view(previous, true);
+      const before = yield* readRun(owner, input.runId);
+      const definition =
+        input.operation === "cancel" || before.status !== "active"
+          ? null
+          : yield* readDefinition(before.definitionPath);
+      const result = yield* sql.withTransaction(
         Effect.gen(function* () {
           const previous = yield* replay(owner, input.client_request_id, request);
-          if (previous) return previous;
+          if (previous) return { run: previous, replayed: true };
           const run = yield* readRun(owner, input.runId);
           if (run.status !== "active")
             return yield* playbookError(
               "run_terminal",
               `This run is ${run.status}. Start a new run to continue.`,
             );
+          yield* requireOwner(owner);
           if ("expectedStepId" in input && input.expectedStepId !== run.currentStepId) {
             return yield* playbookError(
               "step_conflict",
               `Expected '${input.expectedStepId}', but the run is at '${run.currentStepId}'. Retrieve playbook_current and use a new request ID.`,
             );
           }
-          const definition =
-            input.operation === "cancel" ? null : yield* readDefinition(run.definitionPath);
           let currentStepId = run.currentStepId;
           let status: PlaybookRun["status"] = run.status;
           if (input.operation === "cancel") status = "cancelled";
@@ -398,16 +426,19 @@ export const makePlaybookStore = Effect.gen(function* () {
           }
           const updatedAt = yield* now;
           yield* sql`UPDATE j5_playbook_run SET current_step_id = ${currentStepId}, status = ${status}, updated_at = ${updatedAt}
-        WHERE run_id = ${run.runId} AND owner_thread_id = ${owner}`;
+          WHERE run_id = ${run.runId} AND owner_thread_id = ${owner}`;
           yield* remember(owner, input.client_request_id, request, run.runId);
-          const updated = { ...run, currentStepId, status, updatedAt };
-          return definition ? present(updated, definition) : yield* view(updated);
+          return { run: { ...run, currentStepId, status, updatedAt }, replayed: false };
         }),
-      )
-      .pipe(permit.withPermits(1));
+      );
+      return definition && !result.replayed
+        ? present(result.run, definition)
+        : yield* view(result.run, result.replayed);
+    }).pipe(permit.withPermits(1));
   }, Effect.mapError(storageError));
 
   const current = Effect.fn("PlaybookStore.current")(function* (owner: ThreadId, runId?: string) {
+    yield* cancelOrphans();
     const result = yield* view(yield* readRun(owner, runId));
     if (result.issue && result.status === "active")
       return yield* playbookError(
@@ -438,18 +469,20 @@ export const makePlaybookStore = Effect.gen(function* () {
       );
     });
   const listForThread = Effect.fn("PlaybookStore.listForThread")(function* (owner: ThreadId) {
+    yield* cancelOrphans();
     const rows = yield* sql<RunRow>`SELECT * FROM j5_playbook_run WHERE owner_thread_id = ${owner}
       ORDER BY (status = 'active') DESC, rowid DESC LIMIT 20`;
     const runs = yield* progressRows(rows);
     return { runs };
   }, Effect.mapError(storageError));
   const listAll = Effect.fn("PlaybookStore.listAll")(function* (input: PlaybookRunsRequest) {
+    yield* cancelOrphans();
     const filter = input.status === "active" ? sql`status = 'active'` : sql`1 = 1`;
     const counts = yield* sql<{
       total: number;
     }>`SELECT COUNT(*) AS total FROM j5_playbook_run WHERE ${filter}`;
     const rows = yield* sql<RunRow>`SELECT * FROM j5_playbook_run WHERE ${filter}
-      ORDER BY (status = 'active') DESC, updated_at DESC, rowid DESC
+      ORDER BY ${input.status === "active" ? sql`updated_at DESC, rowid DESC` : sql`(status = 'active') DESC, updated_at DESC, rowid DESC`}
       LIMIT ${PLAYBOOK_RUNS_PAGE_SIZE} OFFSET ${input.offset ?? 0}`;
     const runs = yield* progressRows(rows);
     return { runs, total: counts[0]?.total ?? 0 };

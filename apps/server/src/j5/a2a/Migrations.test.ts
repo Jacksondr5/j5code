@@ -59,6 +59,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 16, name: "CrewProposalClaims" },
       { migration_id: 17, name: "EnsureCustomCrewSeats" },
       { migration_id: 18, name: "AgentLedPlaybooks" },
+      { migration_id: 19, name: "PlaybookRunMaintenance" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -81,6 +82,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [16, "CrewProposalClaims"],
         [17, "EnsureCustomCrewSeats"],
         [18, "AgentLedPlaybooks"],
+        [19, "PlaybookRunMaintenance"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
@@ -1206,7 +1208,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
     `;
     assert.deepStrictEqual(
       applied.map((row) => row.migration_id),
-      [13, 14, 15, 16, 17, 18],
+      [13, 14, 15, 16, 17, 18, 19],
     );
     const memberColumns = yield* sql<{ readonly name: string }>`
       SELECT name FROM pragma_table_info('j5_agent_crew_member') ORDER BY cid
@@ -1318,3 +1320,49 @@ for (const skipped15 of [false, true]) {
       }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
   );
 }
+
+it.effect(
+  "upgrades existing playbook runs, prunes terminal movement receipts, and indexes both board queries",
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runJ5A2AMigrations({ toMigrationInclusive: 18 });
+      for (const status of ["active", "completed", "cancelled"] as const) {
+        yield* sql`INSERT INTO j5_playbook_run VALUES (${status}, ${status}, '/workspace/.j5/playbooks/demo.yaml', 'first', ${status}, '2026-09-23', '2026-09-23')`;
+        for (const operation of [
+          "start",
+          "next",
+          "back",
+          status === "cancelled" ? "cancel" : "complete",
+        ]) {
+          yield* sql`INSERT INTO j5_playbook_request VALUES (${status}, ${operation}, json_array(${operation}), ${status})`;
+        }
+      }
+      const before = yield* sql`SELECT * FROM j5_playbook_run ORDER BY run_id`;
+      yield* runJ5A2AMigrations();
+      assert.deepStrictEqual(yield* sql`SELECT * FROM j5_playbook_run ORDER BY run_id`, before);
+      assert.equal(
+        (yield* sql`SELECT * FROM j5_playbook_request WHERE run_id = 'active'`).length,
+        4,
+      );
+      for (const status of ["completed", "cancelled"]) {
+        assert.equal(
+          (yield* sql`SELECT * FROM j5_playbook_request WHERE run_id = ${status}`).length,
+          2,
+        );
+      }
+      const activePlan = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+      SELECT * FROM j5_playbook_run WHERE status = 'active' ORDER BY updated_at DESC, rowid DESC LIMIT 100`;
+      const allPlan = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+      SELECT * FROM j5_playbook_run ORDER BY (status = 'active') DESC, updated_at DESC, rowid DESC LIMIT 100`;
+      assert.isTrue(activePlan.some((row) => row.detail.includes("j5_playbook_status_updated")));
+      assert.isTrue(allPlan.some((row) => row.detail.includes("j5_playbook_active_updated")));
+      assert.isFalse([...activePlan, ...allPlan].some((row) => row.detail.includes("TEMP B-TREE")));
+      yield* sql`UPDATE j5_playbook_run SET status = 'cancelled' WHERE run_id = 'active'`;
+      assert.equal(
+        (yield* sql`SELECT * FROM j5_playbook_request WHERE run_id = 'active'`).length,
+        2,
+      );
+      yield* runJ5A2AMigrations();
+    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);

@@ -19,6 +19,7 @@ import Migration0015 from "./migrations/015_CustomCrewSeats.ts";
 import Migration0016 from "./migrations/016_CrewProposalClaims.ts";
 import Migration0017 from "./migrations/017_EnsureCustomCrewSeats.ts";
 import Migration0018 from "./migrations/018_AgentLedPlaybooks.ts";
+import Migration0019 from "./migrations/019_PlaybookRunMaintenance.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
@@ -47,6 +48,7 @@ export const migrationEntries = [
   // Covers databases that ran the lower stack through 16 before 15 became available.
   [17, "EnsureCustomCrewSeats", Migration0017],
   [18, "AgentLedPlaybooks", Migration0018],
+  [19, "PlaybookRunMaintenance", Migration0019],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>

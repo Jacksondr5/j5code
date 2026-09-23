@@ -1,3 +1,4 @@
+import { seedPlaybookOwners } from "./testFixtures.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -57,6 +58,7 @@ const fixture = Effect.gen(function* () {
     }),
   );
   yield* runJ5A2AMigrations();
+  yield* seedPlaybookOwners([owner, otherOwner]);
   const store = yield* makePlaybookStore;
   const run = yield* store.start(owner, workspaceRoot, "demo", "start-owner");
   const other = yield* store.start(otherOwner, workspaceRoot, "demo", "start-other");
@@ -237,7 +239,7 @@ it.effect("keeps broken definitions visible and reflects cancellation in HTTP pr
     });
     const cancelled = (yield* read(owner)).runs[0]!;
     assert.equal(cancelled.status, "cancelled");
-    assert.equal(cancelled.issue?.code, "invalid_definition");
+    assert.isNull(cancelled.issue);
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 

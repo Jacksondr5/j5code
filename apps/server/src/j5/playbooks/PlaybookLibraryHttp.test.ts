@@ -1,3 +1,4 @@
+import { seedPlaybookOwners } from "./testFixtures.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -85,6 +86,7 @@ const fixture = Effect.gen(function* () {
     yield* fs.writeFileString(filename(root), stringify(definition(title)));
   }
   yield* runJ5A2AMigrations();
+  yield* seedPlaybookOwners(["delete-owner", "rename-owner"]);
   const store = yield* makePlaybookStore;
   const projectReads: ProjectId[] = [];
   const threadReads: ThreadId[] = [];

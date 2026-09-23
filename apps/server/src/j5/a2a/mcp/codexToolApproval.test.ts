@@ -48,7 +48,18 @@ it("pre-approves exactly the J5 verbs, never the whole t3-code server", () => {
 });
 
 it("pre-approves only coordination across interactive policies, retaining other approval boundaries", () => {
-  const names = ["send_message", "clear_own_ask", "propose_crew", "request_crew_member"];
+  const names = [
+    "send_message",
+    "clear_own_ask",
+    "propose_crew",
+    "request_crew_member",
+    "playbook_start",
+    "playbook_next",
+    "playbook_back",
+    "playbook_reselect",
+    "playbook_complete",
+    "playbook_cancel",
+  ];
   assert.sameMembers([...J5_CODEX_COORDINATION_TOOLS], names);
   for (const policy of [
     undefined,

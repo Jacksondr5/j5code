@@ -33,5 +33,6 @@ Ask the agent to go back when you want to revisit a phase. Going back changes it
 position, not your files or previous work. Progress survives context compaction and
 provider restarts.
 
-Playbooks operate within one thread. Shared Squadron progression, executable steps,
-automatic scheduling, and agent spawning are outside this version.
+Each run belongs to one thread. Deleting that thread cancels its active run, so
+you can remove the playbook file. Archiving a thread leaves its run available when
+you return to it.
