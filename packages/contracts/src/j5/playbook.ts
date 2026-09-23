@@ -17,7 +17,7 @@ export const PlaybookDefinition = Schema.Struct({
 });
 export type PlaybookDefinition = typeof PlaybookDefinition.Type;
 
-export class PlaybookError extends Schema.TaggedErrorClass<PlaybookError>()("PlaybookError", {
+export class PlaybookError extends Schema.TaggedError<PlaybookError>()("PlaybookError", {
   code: Schema.String,
   message: Schema.String,
   availableStepIds: Schema.Array(Schema.String),
