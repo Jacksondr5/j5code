@@ -2035,7 +2035,11 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
   }
   const presentation = v2EventPresentation(item);
   const Icon = presentation.icon;
-  if (item.type === "error") {
+  if (
+    item.type === "error" ||
+    item.type === "approval_request" ||
+    item.type === "user_input_request"
+  ) {
     return (
       <details
         className={cn(
