@@ -1,14 +1,13 @@
-import { createJ5EnvironmentAtoms } from "@t3tools/client-runtime/j5/state";
 import { presentPlaybook } from "@t3tools/client-runtime/j5/playbooks";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useIsFocused } from "@react-navigation/native";
-import { useEffect, useState } from "react";
-import { AppState, Pressable, ScrollView, Text, View } from "react-native";
-import { connectionAtomRuntime } from "../../connection/runtime";
+import { useState } from "react";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { useEnvironmentQuery } from "../../state/query";
 import { useRemoteEnvironmentRuntime } from "../../state/use-remote-environment-registry";
+import { j5Environment } from "../state";
+import { useActivePlaybookRefresh } from "./useActivePlaybookRefresh";
 
-const environment = createJ5EnvironmentAtoms(connectionAtomRuntime);
 const stepColor = {
   current: "bg-primary",
   last: "bg-foreground-muted/60",
@@ -21,7 +20,7 @@ export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: T
   const focused = useIsFocused();
   const runtime = useRemoteEnvironmentRuntime(props.environmentId);
   const query = useEnvironmentQuery(
-    environment.playbooks({
+    j5Environment.playbooks({
       environmentId: props.environmentId,
       input: { threadId: props.threadId },
     }),
@@ -29,26 +28,15 @@ export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: T
   const [expanded, setExpanded] = useState(true);
   const [showSteps, setShowSteps] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const { isPending, refresh: refreshQuery } = query;
-  const enabled =
-    runtime?.connectionState === "connected" && query.data?.supported !== false && !isPending;
-  useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | undefined;
-    const sync = () => {
-      clearInterval(timer);
-      if (focused && enabled && AppState.currentState === "active")
-        timer = setInterval(refreshQuery, 2_500);
-    };
-    const subscription = AppState.addEventListener("change", () => {
-      sync();
-      if (focused && enabled && AppState.currentState === "active") refreshQuery();
-    });
-    sync();
-    return () => {
-      clearInterval(timer);
-      subscription.remove();
-    };
-  }, [focused, refreshQuery, enabled]);
+  useActivePlaybookRefresh({
+    focused,
+    connected: runtime?.connectionState === "connected",
+    supported: query.data?.supported !== false,
+    activeRun:
+      query.data?.supported === true && query.data.runs.some((run) => run.status === "active"),
+    isPending: query.isPending,
+    refresh: query.refresh,
+  });
   const runs = query.data?.supported ? query.data.runs : [];
   const run = runs.find((entry) => entry.runId === selectedRunId) ?? runs[0];
   if (!run) return null;

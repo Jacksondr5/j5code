@@ -53,7 +53,6 @@ import { NewTaskFlowProvider } from "./features/threads/new-task-flow-provider";
 import { NewTaskRouteScreen } from "./features/threads/NewTaskRouteScreen";
 import { SettingsAppearanceRouteScreen } from "./features/settings/SettingsAppearanceRouteScreen";
 import { SettingsAgentsRouteScreen } from "./features/settings/SettingsAgentsRouteScreen";
-import { PlaybookLibrarySettingsScreen } from "./j5/playbooks/PlaybookLibrarySettingsScreen";
 import { SettingsClientStorageRouteScreen } from "./features/settings/SettingsClientStorageRouteScreen";
 import { SettingsAuthRouteScreen } from "./features/settings/SettingsAuthRouteScreen";
 import { SettingsEnvironmentsRouteScreen } from "./features/settings/SettingsEnvironmentsRouteScreen";
@@ -188,11 +187,6 @@ const SettingsContentStack = createNativeStackNavigator({
       options: {
         title: "Personas",
       },
-    }),
-    SettingsPlaybooks: createNativeStackScreen({
-      screen: PlaybookLibrarySettingsScreen,
-      linking: "playbooks",
-      options: { title: "Playbooks" },
     }),
     SettingsProjectGrouping: createNativeStackScreen({
       screen: SettingsProjectGroupingRouteScreen,

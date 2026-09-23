@@ -1,6 +1,5 @@
 export type SettingsSheetTarget =
   | "SettingsAgents"
-  | "SettingsPlaybooks"
   | "SettingsEnvironments"
   | "SettingsArchive"
   | "SettingsAppearance"
