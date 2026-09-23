@@ -21,6 +21,7 @@ import { useAllEnvironmentShellsBootstrapped, useThreadShells } from "../../stat
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { CaptainMark } from "../squadron/CaptainMark";
+import { PlaybookRunsSection } from "../playbooks/PlaybookRunsSection";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { fleetDetailSourcesAtom } from "../state";
 import { requestConfirmDialog } from "../../confirmDialog";
@@ -205,6 +206,7 @@ export function FleetPage() {
                 <RetiredCrews retired={retired} {...tableProps} />
               </div>
             ) : null}
+            <PlaybookRunsSection />
           </main>
         </ScrollArea>
       </div>

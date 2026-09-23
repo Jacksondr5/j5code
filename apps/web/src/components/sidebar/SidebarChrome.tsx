@@ -1,6 +1,5 @@
 import {
   ArrowLeftIcon,
-  BookOpenIcon,
   ChartNoAxesColumnIcon,
   FolderArchiveIcon,
   GitPullRequestIcon,
@@ -156,15 +155,13 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             ? "inbox"
             : location.pathname === "/fleet"
               ? "fleet"
-              : location.pathname === "/playbooks"
-                ? "playbooks"
-                : location.pathname === "/usage"
-                  ? "usage"
-                  : location.pathname === "/artifacts"
-                    ? "artifacts"
-                    : location.pathname === "/pull-requests"
-                      ? "pull-requests"
-                      : null,
+              : location.pathname === "/usage"
+                ? "usage"
+                : location.pathname === "/artifacts"
+                  ? "artifacts"
+                  : location.pathname === "/pull-requests"
+                    ? "pull-requests"
+                    : null,
   });
   const { environments } = useEnvironments();
   const threads = useThreadShells();
@@ -188,11 +185,6 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const handleSettingsClick = useCallback(() => {
     closeMobileSidebar();
     void navigate({ to: "/settings" });
-  }, [closeMobileSidebar, navigate]);
-
-  const handlePlaybooksClick = useCallback(() => {
-    closeMobileSidebar();
-    void navigate({ to: "/playbooks" });
   }, [closeMobileSidebar, navigate]);
 
   const handleUsageClick = useCallback(() => {
@@ -267,11 +259,6 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             icon={<ChartNoAxesColumnIcon />}
             label="Usage"
             onClick={handleUsageClick}
-          />
-          <SidebarUtilityItem
-            icon={<BookOpenIcon />}
-            label="Playbooks"
-            onClick={handlePlaybooksClick}
           />
         </>
       )}

@@ -51,11 +51,11 @@ export function presentPlaybook(run: PlaybookProgress) {
   };
 }
 
-/** Prioritize issues within a fetched page without mutating the query's runs. */
+/** Prioritize active runs with issues within a fetched page without mutating the query's runs. */
 export function sortPlaybookRuns(runs: ReadonlyArray<PlaybookProgress>) {
   return runs.toSorted(
     (a, b) =>
-      Number(!!b.issue) - Number(!!a.issue) ||
+      Number(b.status === "active" && !!b.issue) - Number(a.status === "active" && !!a.issue) ||
       Number(b.status === "active") - Number(a.status === "active") ||
       Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
   );

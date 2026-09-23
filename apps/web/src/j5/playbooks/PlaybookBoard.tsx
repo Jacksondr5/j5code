@@ -1,15 +1,18 @@
 import { presentPlaybook } from "@t3tools/client-runtime/j5/playbooks";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useState } from "react";
 import { useEnvironment } from "../../state/environments";
+import { useThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { j5Environment } from "../state";
 import { PlaybookStepStrip } from "./PlaybookStepStrip";
-import { usePlaybookRunsRefresh } from "./usePlaybookRunsRefresh";
+import { useVisibleRefresh } from "../useVisibleRefresh";
 
 /** The visible thread owns this bounded live read; hidden tabs do no polling. */
 export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: ThreadId }) {
   const environment = useEnvironment(props.environmentId);
+  const thread = useThreadShell(scopeThreadRef(props.environmentId, props.threadId));
   const query = useEnvironmentQuery(
     j5Environment.playbooks({
       environmentId: props.environmentId,
@@ -17,13 +20,15 @@ export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: T
     }),
   );
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  usePlaybookRunsRefresh(
+  const runs = query.data?.supported ? query.data.runs : [];
+  useVisibleRefresh(
     query.refresh,
+    runs.some((run) => run.status === "active") ? 7_500 : null,
     environment?.connection.phase === "connected" &&
       query.data?.supported !== false &&
       !query.isPending,
+    `${thread?.latestRun?.runId}:${thread?.latestRun?.status}`,
   );
-  const runs = query.data?.supported ? query.data.runs : [];
   const run = runs.find((entry) => entry.runId === selectedRunId) ?? runs[0];
   if (!run) return null;
   const display = presentPlaybook(run);

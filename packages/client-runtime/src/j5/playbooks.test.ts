@@ -99,7 +99,7 @@ it("retains all 100 step names and identifies the current position by stable ID"
   expect(display.steps[50]?.state).toBe("later");
 });
 
-it("prioritizes issues, then active runs and recency, without changing the fetched page", () => {
+it("prioritizes active issues, then active runs and recency, without changing the fetched page", () => {
   const issue = new PlaybookError({
     code: "step_missing",
     message: "Step removed",
@@ -122,10 +122,10 @@ it("prioritizes issues, then active runs and recency, without changing the fetch
   const original = [...runs];
   expect(sortPlaybookRuns(runs).map(({ runId }) => runId)).toEqual([
     "active-issue",
-    "cancelled-issue",
     "recent-active",
     "tied-active",
     "older-active",
+    "cancelled-issue",
     "completed",
   ]);
   expect(runs).toEqual(original);

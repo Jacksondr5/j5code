@@ -5,12 +5,11 @@ in its existing thread and decides when to advance. The thread's phase board
 shows the current step and whether the run is active, completed, or cancelled.
 Earlier steps describe position, not a guarantee that their work passed validation.
 
-Open **Playbooks** in the sidebar or **Open playbook runs** in the command palette
-to follow agent-led runs across your connected environments. The overview shows
+Open **Fleet** and use its **Playbook runs** section to follow runs across your
+connected environments. The overview shows
 each run's owner thread, agent activity, and current step. Select a run to open
-its thread, or choose **All** to include completed and cancelled runs. This
-overview contains runs from the agent-led model; earlier playbook history is not
-imported. Unavailable environments keep their last received progress marked as stale.
+its thread, or choose **All** to include completed and cancelled runs.
+Unavailable environments keep their last received progress marked as stale.
 
 Ask your agent to create a playbook, or save a YAML file in your thread's workspace
 under `.j5/playbooks/`. For example, `.j5/playbooks/review.yaml`:

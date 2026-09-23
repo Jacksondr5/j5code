@@ -4,17 +4,11 @@ import { presentPlaybook, sortPlaybookRuns } from "@t3tools/client-runtime/j5/pl
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { PLAYBOOK_RUNS_PAGE_SIZE, type PlaybookProgress } from "@t3tools/contracts/j5";
 import { Link } from "@tanstack/react-router";
-import { BookOpenIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { resolveThreadStatusPill } from "../../components/Sidebar.logic";
-import { WorkspacePageContainer } from "../../components/WorkspacePageContainer";
-import { WorkspacePageHeader } from "../../components/WorkspacePageHeader";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { ScrollArea } from "../../components/ui/scroll-area";
-import { SidebarInset } from "../../components/ui/sidebar";
-import { isElectron } from "../../env";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../../providerInstances";
 import { useThreadShells } from "../../state/entities";
@@ -24,8 +18,8 @@ import { environmentShell } from "../../state/shell";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { j5Environment } from "../state";
-import { usePlaybookRunsRefresh } from "./usePlaybookRunsRefresh";
-import { PlaybookStepStrip } from "./PlaybookStepStrip";
+import { useVisibleRefresh } from "../useVisibleRefresh";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 
 function PlaybookRunCard({
   run,
@@ -81,10 +75,33 @@ function PlaybookRunCard({
           {display.status}
         </Badge>
       </div>
-      {display.steps.length > 0 && (
-        <div className="mt-2">
-          <PlaybookStepStrip steps={display.steps} />
-        </div>
+      {run.position !== null && run.total > 0 && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <div
+                role="progressbar"
+                aria-label="Playbook position"
+                aria-valuemin={0}
+                aria-valuemax={run.total}
+                aria-valuenow={run.position}
+                aria-valuetext={`${display.position} · ${display.currentTitle}`}
+                tabIndex={0}
+                className="relative z-10 mt-2 h-2 overflow-hidden rounded-sm bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            }
+          >
+            <div
+              className={
+                run.status === "active" ? "h-full bg-primary" : "h-full bg-muted-foreground/60"
+              }
+              style={{ width: `${(run.position / run.total) * 100}%` }}
+            />
+          </TooltipTrigger>
+          <TooltipPopup>
+            {display.position} · {display.currentTitle}
+          </TooltipPopup>
+        </Tooltip>
       )}
       <p className="mt-1 text-sm">
         {display.position} · {display.currentTitle}
@@ -132,9 +149,19 @@ function EnvironmentRuns({
   const shell = useEnvironmentQuery(environmentShell.stateAtom(environment.environmentId));
   const connected = environment.connection.phase === "connected";
   const unsupported = query.data?.supported === false;
-  usePlaybookRunsRefresh(query.refresh, connected && !unsupported && !query.isPending);
   const data = query.data?.supported ? query.data : null;
-  // ponytail: issue priority is page-local; global triage needs ordering before server pagination.
+  useVisibleRefresh(
+    query.refresh,
+    data?.runs.some((run) => run.status === "active") ? 7_500 : null,
+    connected && !unsupported && !query.isPending,
+    JSON.stringify(
+      Array.from(threads.values(), (thread) => [
+        thread.id,
+        thread.latestRun?.runId,
+        thread.latestRun?.status,
+      ]),
+    ),
+  );
   const runs = useMemo(() => sortPlaybookRuns(data?.runs ?? []), [data?.runs]);
   const providerEntries = useMemo(
     () =>
@@ -240,7 +267,7 @@ function EnvironmentRuns({
   );
 }
 
-export function PlaybooksPage() {
+export function PlaybookRunsSection() {
   const { environments, isReady } = useEnvironments();
   const threads = useThreadShells();
   const [status, setStatus] = useState<"active" | "all">("active");
@@ -254,49 +281,40 @@ export function PlaybooksPage() {
     return groups;
   }, [threads]);
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
-      <WorkspacePageHeader electron={isElectron}>
-        <BookOpenIcon aria-hidden className="size-4" />
-        <h1 className="text-sm font-medium">Playbooks</h1>
-      </WorkspacePageHeader>
-      <ScrollArea className="min-h-0 flex-1">
-        <WorkspacePageContainer>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-muted-foreground">
-              Follow playbook runs across your threads.
-            </p>
-            <div className="flex gap-2" role="group" aria-label="Run status">
-              {(["active", "all"] as const).map((filter) => (
-                <Button
-                  key={filter}
-                  size="sm"
-                  variant={status === filter ? "secondary" : "outline"}
-                  aria-pressed={status === filter}
-                  onClick={() => setStatus(filter)}
-                >
-                  {filter === "active" ? "Active" : "All"}
-                </Button>
-              ))}
-            </div>
-          </div>
-          {!isReady ? (
-            <p role="status">Loading environments…</p>
-          ) : environments.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Connect an environment to see playbook runs.
-            </p>
-          ) : null}
-          {environments.map((environment) => (
-            <EnvironmentRuns
-              key={`${environment.environmentId}:${status}`}
-              environment={environment}
-              status={status}
-              threads={threadsByEnvironment.get(environment.environmentId) ?? new Map()}
-              showEnvironmentLabel={environments.length > 1}
-            />
+    <section aria-label="Playbook runs" className="mt-8 space-y-4 border-t border-border pt-6">
+      <h2 className="text-lg font-semibold">Playbook runs</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">Follow playbook runs across your threads.</p>
+        <div className="flex gap-2" role="group" aria-label="Run status">
+          {(["active", "all"] as const).map((filter) => (
+            <Button
+              key={filter}
+              size="sm"
+              variant={status === filter ? "secondary" : "outline"}
+              aria-pressed={status === filter}
+              onClick={() => setStatus(filter)}
+            >
+              {filter === "active" ? "Active" : "All"}
+            </Button>
           ))}
-        </WorkspacePageContainer>
-      </ScrollArea>
-    </SidebarInset>
+        </div>
+      </div>
+      {!isReady ? (
+        <p role="status">Loading environments…</p>
+      ) : environments.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Connect an environment to see playbook runs.
+        </p>
+      ) : null}
+      {environments.map((environment) => (
+        <EnvironmentRuns
+          key={`${environment.environmentId}:${status}`}
+          environment={environment}
+          status={status}
+          threads={threadsByEnvironment.get(environment.environmentId) ?? new Map()}
+          showEnvironmentLabel={environments.length > 1}
+        />
+      ))}
+    </section>
   );
 }
