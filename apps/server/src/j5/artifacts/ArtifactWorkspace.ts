@@ -27,6 +27,8 @@ export class ArtifactWorkspaceError extends Schema.TaggedError<ArtifactWorkspace
   {
     operation: Schema.String,
     detail: Schema.String,
+    /** Set when the failure is the caller's target, not the workspace: routes map it to 404. */
+    reason: Schema.optional(Schema.Literal("not_found")),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -44,6 +46,10 @@ export interface ArtifactWorkspaceShape {
     readonly projectId: ProjectId;
     readonly relativePath: string;
   }) => Effect.Effect<ArtifactContent, ArtifactWorkspaceError>;
+  readonly delete: (input: {
+    readonly projectId: ProjectId;
+    readonly relativePath: string;
+  }) => Effect.Effect<string, ArtifactWorkspaceError>;
   readonly write: (input: {
     readonly projectId: ProjectId;
     readonly relativePath: string;
@@ -371,13 +377,14 @@ export const layer = Layer.effect(
               workspaceError("list-artifacts", "The artifacts directory could not be listed."),
             ),
           );
+        // Fail fast on an absurd directory rather than stat and sort tens of thousands of entries
+        // for a 500-row page; the cap below still sorts before it truncates.
         if (names.length > MAX_ARTIFACT_COUNT * 4) {
           return yield* new ArtifactWorkspaceError({
             operation: "list-artifacts",
             detail: `The artifacts directory is too large to browse (maximum ${MAX_ARTIFACT_COUNT} files).`,
           });
         }
-
         const entries = yield* Effect.forEach(
           names,
           (name) =>
@@ -403,10 +410,12 @@ export const layer = Layer.effect(
             }),
           { concurrency: 16 },
         );
+        // Sort first so a directory past the cap shows its first entries by path, not whichever
+        // files the filesystem happened to enumerate first.
         return entries
           .filter((entry): entry is ArtifactEntry => entry !== null)
-          .slice(0, MAX_ARTIFACT_COUNT)
-          .toSorted((left, right) => left.path.localeCompare(right.path));
+          .toSorted((left, right) => left.path.localeCompare(right.path))
+          .slice(0, MAX_ARTIFACT_COUNT);
       },
     );
 
@@ -417,6 +426,7 @@ export const layer = Layer.effect(
           return yield* new ArtifactWorkspaceError({
             operation: "read-artifact",
             detail: "The artifact does not exist.",
+            reason: "not_found",
           });
         }
         const relativePath = normalizeArtifactRelativePath(input.relativePath);
@@ -433,9 +443,17 @@ export const layer = Layer.effect(
             detail: "Artifact paths cannot leave the artifacts directory.",
           });
         }
-        const realPath = yield* fileSystem
-          .realPath(requestedPath)
-          .pipe(Effect.mapError(workspaceError("read-artifact", "The artifact does not exist.")));
+        const realPath = yield* fileSystem.realPath(requestedPath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ArtifactWorkspaceError({
+                operation: "read-artifact",
+                detail: "The artifact does not exist.",
+                reason: "not_found",
+                cause,
+              }),
+          ),
+        );
         if (!isPathWithin(path, workspace.realArtifactRoot, realPath)) {
           return yield* new ArtifactWorkspaceError({
             operation: "read-artifact",
@@ -473,6 +491,78 @@ export const layer = Layer.effect(
           encoding: binary ? "base64" : "utf8",
           content: binary ? Buffer.from(bytes).toString("base64") : new TextDecoder().decode(bytes),
         } satisfies ArtifactContent;
+      },
+    );
+
+    const deleteArtifact: ArtifactWorkspaceShape["delete"] = Effect.fn("ArtifactWorkspace.delete")(
+      function* (input) {
+        const workspace = yield* resolveExistingArtifactRoot(input.projectId);
+        if (workspace.realArtifactRoot === null) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "delete-artifact",
+            detail: "The artifact does not exist.",
+            reason: "not_found",
+          });
+        }
+        const relativePath = normalizeArtifactRelativePath(input.relativePath);
+        if (relativePath.trim().length === 0 || path.isAbsolute(relativePath)) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "delete-artifact",
+            detail: "Artifact paths must be relative to the artifacts directory.",
+          });
+        }
+        const requestedPath = path.resolve(workspace.realArtifactRoot, relativePath);
+        if (!isPathWithin(path, workspace.realArtifactRoot, requestedPath)) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "delete-artifact",
+            detail: "Artifact paths cannot leave the artifacts directory.",
+          });
+        }
+        const realPath = yield* fileSystem.realPath(requestedPath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ArtifactWorkspaceError({
+                operation: "delete-artifact",
+                detail: "The artifact does not exist.",
+                reason: "not_found",
+                cause,
+              }),
+          ),
+        );
+        if (!isPathWithin(path, workspace.realArtifactRoot, realPath)) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "delete-artifact",
+            detail: "Artifact links cannot leave the artifacts directory.",
+          });
+        }
+        if (realPath !== requestedPath) {
+          return yield* new ArtifactWorkspaceError({
+            operation: "delete-artifact",
+            detail: "Artifact links cannot be deleted.",
+          });
+        }
+        const info = yield* fileSystem
+          .stat(realPath)
+          .pipe(
+            Effect.mapError(
+              workspaceError("delete-artifact", "The artifact could not be inspected."),
+            ),
+          );
+        if (info.type !== "File") {
+          return yield* new ArtifactWorkspaceError({
+            operation: "delete-artifact",
+            detail: "Only artifact files can be deleted.",
+          });
+        }
+        // Remove only the validated file; never recursively remove artifact directories.
+        yield* fileSystem
+          .remove(realPath)
+          .pipe(
+            Effect.mapError(
+              workspaceError("delete-artifact", "The artifact could not be deleted."),
+            ),
+          );
+        return path.relative(workspace.realArtifactRoot, realPath).replaceAll("\\", "/");
       },
     );
 
@@ -541,7 +631,10 @@ export const layer = Layer.effect(
           });
         }
 
-        yield* writeFileStringAtomically({ filePath: requestedPath, contents: input.content }).pipe(
+        yield* writeFileStringAtomically({
+          filePath: requestedPath,
+          contents: input.content,
+        }).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
           Effect.mapError(workspaceError("write-artifact", "The artifact could not be written.")),
@@ -646,6 +739,7 @@ export const layer = Layer.effect(
                   new ArtifactWorkspaceError({
                     operation: "watch-artifacts",
                     detail: "The artifacts directory does not exist.",
+                    reason: "not_found",
                   }),
                 )
               : Effect.succeed(watchArtifactDirectory(fileSystem, workspace.realArtifactRoot)),
@@ -653,6 +747,15 @@ export const layer = Layer.effect(
         ),
       );
 
-    return ArtifactWorkspace.of({ prepare, list, read, write, writeVersioned, exportPlan, watch });
+    return ArtifactWorkspace.of({
+      prepare,
+      list,
+      read,
+      delete: deleteArtifact,
+      write,
+      writeVersioned,
+      exportPlan,
+      watch,
+    });
   }),
 );

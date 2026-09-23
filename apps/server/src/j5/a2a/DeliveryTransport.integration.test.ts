@@ -1,3 +1,7 @@
+import {
+  AgentCrewInstanceService,
+  layer as crewInstanceLayer,
+} from "./AgentCrewInstanceService.ts";
 import { PlacementCommandId } from "./placementContracts.ts";
 import { dispatchCommand as dispatchIntakeCommand } from "../../orchestration-v2/ThreadMessageIntake.ts";
 import { J5AdaptedThreadToolkit, J5AdaptedThreadHandlersLive } from "./mcp/threadTools.ts";
@@ -2774,7 +2778,8 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness;
-      const base = makeMessageLifecycleLayer(harness).pipe(
+      const base = crewInstanceLayer.pipe(
+        Layer.provideMerge(makeMessageLifecycleLayer(harness)),
         Layer.provideMerge(serverConfigLayer),
         Layer.provideMerge(NodeServices.layer),
       );
@@ -2829,6 +2834,38 @@ it.effect(
           assert.equal((denied.result as { code: string }).code, "capability_denied");
         }
         assert.isNull((yield* threads.getThreadProjection(other.threadId)).thread.archivedAt);
+        const member = yield* seedTarget(
+          "organize-member",
+          modelSelection.model,
+          registrar,
+          source.squadronId,
+          source.projectId,
+        );
+        yield* (yield* AgentCrewInstanceService).record({
+          id: "crew:organize-guard",
+          squadronId: source.squadronId,
+          captainParticipantId: source.receiverId,
+          captainThreadId: source.threadId,
+          displayName: "Organize crew",
+          brief: "Protect the member",
+          createdAt: "2026-08-17T12:00:00.000Z",
+          members: [
+            {
+              seatName: "builder",
+              agentId: null,
+              participantId: member.receiverId,
+              threadId: member.threadId,
+              reason: null,
+            },
+          ],
+        });
+        const memberArchive = yield* call(member.threadId, "archive");
+        assert.isTrue(memberArchive.isFailure);
+        assert.include(
+          (memberArchive.result as { message: string }).message,
+          "never archived one by one",
+        );
+        assert.isNull((yield* threads.getThreadProjection(member.threadId)).thread.archivedAt);
         const send = yield* A2ASendService;
         const opened = yield* send.send({
           commandId: CommCommandId.make("command:organize-ask"),

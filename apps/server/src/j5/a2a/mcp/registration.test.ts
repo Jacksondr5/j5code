@@ -8,6 +8,10 @@ import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
 import { ScheduledTaskService } from "../../../scheduledTasks/ScheduledTaskService.ts";
+import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
+import { ArchiveCrewService } from "../ArchiveCrewService.ts";
+import { CrewStopService } from "../CrewStopService.ts";
+import { CrewProposalService } from "../CrewProposalService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
 import { A2ALedger } from "../LedgerService.ts";
@@ -33,8 +37,12 @@ const Dependencies = Layer.mergeAll(
   Layer.mock(ParticipantPlacementService)({}),
   Layer.mock(A2ASendService)({}),
   Layer.mock(SpawnCompositionService)({}),
+  Layer.mock(AgentCrewInstanceService)({}),
   Layer.mock(SquadronJoinService)({}),
   Layer.mock(SquadronProjectReferences)({}),
+  Layer.mock(ArchiveCrewService)({}),
+  Layer.mock(CrewStopService)({}),
+  Layer.mock(CrewProposalService)({}),
   NodeServices.layer,
 );
 
@@ -47,21 +55,25 @@ it.effect("registers the exact composed production J5 orchestration surface", ()
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
     assert.deepStrictEqual(server.tools.map(({ tool }) => tool.name).toSorted(), [
+      "archive_crew",
       "clear_own_ask",
       "delegate_task",
       "delete_scheduled_task",
       "join_squadron",
       "list_participants",
+      "list_personas",
       "list_scheduled_tasks",
       "list_squadrons",
       "orchestrator_capabilities",
+      "propose_crew",
+      "request_crew_member",
       "schedule_task",
       "send_message",
       "spawn_agent",
       "stop_agent",
+      "stop_crew",
       "t3_thread_list",
       "t3_thread_read",
-      "t3_thread_wait",
       "task_cancel",
       "task_status",
       "update_scheduled_task",

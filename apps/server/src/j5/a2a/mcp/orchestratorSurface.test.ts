@@ -15,7 +15,6 @@ import {
   J5OrchestratorSurface,
   J5_ORCHESTRATOR_CAPABILITIES_DESCRIPTION,
   J5_THREAD_READ_DESCRIPTION,
-  J5_THREAD_WAIT_DESCRIPTION,
 } from "./orchestratorSurface.ts";
 import { J5OrchestratorSurfaceHandlersLive } from "./orchestratorSurfaceHandlers.ts";
 
@@ -115,7 +114,6 @@ it.effect("registers the exact fail-closed orchestration surface with factual de
       "schedule_task",
       "t3_thread_list",
       "t3_thread_read",
-      "t3_thread_wait",
       "task_cancel",
       "task_status",
       "update_scheduled_task",
@@ -126,9 +124,6 @@ it.effect("registers the exact fail-closed orchestration surface with factual de
     ).toBe(J5_ORCHESTRATOR_CAPABILITIES_DESCRIPTION);
     expect(server.tools.find(({ tool }) => tool.name === "t3_thread_read")?.tool.description).toBe(
       J5_THREAD_READ_DESCRIPTION,
-    );
-    expect(server.tools.find(({ tool }) => tool.name === "t3_thread_wait")?.tool.description).toBe(
-      J5_THREAD_WAIT_DESCRIPTION,
     );
   }).pipe(Effect.provide(TestLayer)),
 );

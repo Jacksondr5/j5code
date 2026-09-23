@@ -84,6 +84,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
         ).pipe(
           Layer.provide(runtime),
           Layer.provide(threadManagement),
+          Layer.provide(Layer.mock(ProviderRegistry)({})),
           Layer.provide(Layer.mock(OrchestratorV2)({})),
           Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
           Layer.provide(archiveDependencies),
@@ -93,6 +94,8 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
             ),
           ),
           Layer.provide(database),
+          // The crew artifact writer reaches the project artifacts directory through the file system.
+          Layer.provide(NodeServices.layer),
         ),
       );
       return ledgers.size;

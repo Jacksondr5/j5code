@@ -1212,7 +1212,8 @@ export function codexThreadRuntimeParams(input: {
                 http_headers: {
                   Authorization: mcpSession.authorizationHeader,
                 },
-                // J5: saved agents run with approvals off; pre-approve their handoff write only.
+                // J5 fork extension: Codex would otherwise reject non-read-only platform tools
+                // under approval policy `never` (see codexToolApproval.ts).
                 ...j5CodexT3McpServerConfig(input.runtimePolicy),
               },
             },

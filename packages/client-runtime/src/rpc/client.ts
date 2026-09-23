@@ -1,5 +1,6 @@
 import {
   J5_AGENT_PERSONA_WS_METHODS,
+  J5_ARTIFACT_WS_METHODS,
   ORCHESTRATION_V2_WS_METHODS,
   WS_METHODS,
 } from "@t3tools/contracts";
@@ -55,7 +56,7 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.subscribeTerminalEvents
   | typeof WS_METHODS.subscribeTerminalMetadata
   | typeof WS_METHODS.subscribePreviewEvents
-  | typeof WS_METHODS.subscribeArtifactChanges
+  | typeof J5_ARTIFACT_WS_METHODS.subscribeArtifactChanges
   | typeof WS_METHODS.subscribeDiscoveredLocalServers
   | typeof WS_METHODS.subscribeDeviceState
   | typeof WS_METHODS.subscribeResourceTelemetry

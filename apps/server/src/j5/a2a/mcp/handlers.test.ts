@@ -10,6 +10,7 @@ import {
   ThreadId,
   type OrchestrationV2Command,
   type OrchestrationV2ThreadProjection,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -19,6 +20,7 @@ import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 
+import { ServerConfig } from "../../../config.ts";
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import {
@@ -27,6 +29,16 @@ import {
   OrchestratorV2,
 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
+import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
+import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
+import {
+  ArchiveCrewConfirmationRequiredError,
+  ArchiveCrewService,
+  type ArchiveCrewInput,
+} from "../ArchiveCrewService.ts";
+import { CrewStopService } from "../CrewStopService.ts";
+import { CrewProposalService, type CrewProposalOutcome } from "../CrewProposalService.ts";
+import type { CrewProposal, CrewProposalSeat } from "../AgentCrewProposalService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import {
   A2AHomeNotFoundError,
@@ -52,7 +64,10 @@ import { J5ToolkitHandlersLive } from "./handlers.ts";
 import {
   J5ListParticipantsResult,
   J5Toolkit,
+  type J5ArchiveCrewInput,
   type J5SendMessageInput,
+  type J5ProposeCrewInput,
+  type J5RequestCrewMemberInput,
   type J5SpawnAgentInput,
   type J5StopAgentInput,
 } from "./tools.ts";
@@ -114,6 +129,14 @@ const unusedLifecycleDependencies = Layer.mergeAll(
   Layer.mock(SpawnCompositionService)({}),
   Layer.mock(ThreadManagementService)({}),
   Layer.mock(OrchestratorMcpService)({}),
+  Layer.mock(AgentCrewInstanceService)({
+    findMembership: () => Effect.succeed(null),
+    listForCaptain: () => Effect.succeed([]),
+  }),
+  Layer.mock(ArchiveCrewService)({}),
+  Layer.mock(CrewStopService)({}),
+  Layer.mock(CrewProposalService)({}),
+
   Layer.mock(SquadronJoinService)({}),
   Layer.mock(SquadronProjectReferences)({}),
 );
@@ -121,13 +144,18 @@ const unusedLifecycleDependencies = Layer.mergeAll(
 it.effect("namespaces mutating-tool idempotency and sender identity from authenticated scope", () =>
   Effect.gen(function* () {
     assert.deepStrictEqual(Object.keys(J5Toolkit.tools).sort(), [
+      "archive_crew",
       "clear_own_ask",
       "join_squadron",
       "list_participants",
+      "list_personas",
       "list_squadrons",
+      "propose_crew",
+      "request_crew_member",
       "send_message",
       "spawn_agent",
       "stop_agent",
+      "stop_crew",
     ]);
     const sends = yield* Ref.make<ReadonlyArray<SendMessageInput>>([]);
     const clears = yield* Ref.make<ReadonlyArray<ClearOwnAskInput>>([]);
@@ -705,6 +733,7 @@ it.effect("preflights home before creation and records facts before the one stab
     const squadronName = "Release proof Squadron";
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-spawn-caller");
     const childParticipantId = ParticipantId.make("agent:j5:mcp-spawn-child");
+    const failFacts = yield* Ref.make(false);
     const order = yield* Ref.make<ReadonlyArray<string>>([]);
     const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
     const facts = yield* Ref.make<
@@ -750,47 +779,51 @@ it.effect("preflights home before creation and records facts before the one stab
     });
     const composition = Layer.mock(SpawnCompositionService)({
       recordFacts: (input) =>
-        String(input.threadId).includes("spawn-facts-fail")
-          ? Effect.fail(
-              new PlacementStorageError({
-                operation: "record spawn facts",
-                cause: new Error("injected placement failure"),
-              }),
-            )
-          : Effect.all(
-              [
-                Ref.update(order, (items) => [...items, "facts"]),
-                Ref.update(facts, (items) => [
-                  ...items,
-                  {
-                    homeCommandId: input.homeCommandId,
-                    placementCommandId: input.placementCommandId,
-                    spawnedByParticipantId:
-                      input.provenance.kind === "spawned-by"
-                        ? input.provenance.spawnedByParticipantId
-                        : callerParticipantId,
-                    threadId: input.threadId,
-                  },
-                ]),
-              ],
-              { discard: true },
-            ).pipe(
-              Effect.as({
-                home: { squadronId, participantId: childParticipantId },
-                placement: {
-                  squadronId,
-                  participantId: childParticipantId,
-                  provenance: {
-                    kind: "spawned-by" as const,
-                    spawnedByParticipantId: callerParticipantId,
-                    source: "j5_spawn" as const,
-                  },
-                  placementParentId: callerParticipantId,
-                  createdEventSeq: 1,
-                  updatedEventSeq: 1,
-                },
-              }),
-            ),
+        Ref.get(failFacts).pipe(
+          Effect.flatMap((fail) =>
+            fail
+              ? Effect.fail(
+                  new PlacementStorageError({
+                    operation: "record spawn facts",
+                    cause: new Error("injected placement failure"),
+                  }),
+                )
+              : Effect.all(
+                  [
+                    Ref.update(order, (items) => [...items, "facts"]),
+                    Ref.update(facts, (items) => [
+                      ...items,
+                      {
+                        homeCommandId: input.homeCommandId,
+                        placementCommandId: input.placementCommandId,
+                        spawnedByParticipantId:
+                          input.provenance.kind === "spawned-by"
+                            ? input.provenance.spawnedByParticipantId
+                            : callerParticipantId,
+                        threadId: input.threadId,
+                      },
+                    ]),
+                  ],
+                  { discard: true },
+                ).pipe(
+                  Effect.as({
+                    home: { squadronId, participantId: childParticipantId },
+                    placement: {
+                      squadronId,
+                      participantId: childParticipantId,
+                      provenance: {
+                        kind: "spawned-by" as const,
+                        spawnedByParticipantId: callerParticipantId,
+                        source: "j5_spawn" as const,
+                      },
+                      placementParentId: callerParticipantId,
+                      createdEventSeq: 1,
+                      updatedEventSeq: 1,
+                    },
+                  }),
+                ),
+          ),
+        ),
     });
     const threadManagement = Layer.mock(ThreadManagementService)({
       getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
@@ -870,7 +903,13 @@ it.effect("preflights home before creation and records facts before the one stab
       threadManagement,
       orchestrator,
       Layer.mock(ParticipantPlacementService)({}),
+      Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+      Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      Layer.mock(ArchiveCrewService)({}),
+      Layer.mock(CrewStopService)({}),
+      Layer.mock(CrewProposalService)({}),
+
       Layer.mock(SquadronJoinService)({}),
       Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
@@ -986,6 +1025,7 @@ it.effect("preflights home before creation and records facts before the one stab
       );
       assert.lengthOf(yield* Ref.get(commands), 4);
 
+      yield* Ref.set(failFacts, true);
       const orphaned = yield* call({
         ...args,
         client_request_id: "spawn-facts-fail",
@@ -1014,7 +1054,13 @@ it.effect("refuses spawn before thread creation when the caller has no home", ()
       Layer.mock(ThreadManagementService)({
         dispatch: () => Ref.update(dispatches, (count) => count + 1).pipe(Effect.as({} as never)),
       }),
+      Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+      Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      Layer.mock(ArchiveCrewService)({}),
+      Layer.mock(CrewStopService)({}),
+      Layer.mock(CrewProposalService)({}),
+
       Layer.mock(SquadronJoinService)({}),
       Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
@@ -1042,6 +1088,732 @@ it.effect("refuses spawn before thread creation when the caller has no home", ()
         "no usable immutable Squadron home",
       );
       assert.equal(yield* Ref.get(dispatches), 0);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+const personaProvider = (
+  instanceId: string,
+  driver: string,
+  models: ReadonlyArray<{ readonly slug: string; readonly options: ReadonlyArray<string> }>,
+): ServerProvider => ({
+  instanceId: ProviderInstanceId.make(instanceId),
+  driver: ProviderDriverKind.make(driver),
+  enabled: true,
+  installed: true,
+  version: null,
+  status: "ready",
+  auth: { status: "authenticated" },
+  checkedAt: "2026-09-09T00:00:00Z",
+  availability: "available",
+  slashCommands: [],
+  skills: [],
+  models: models.map((model) => ({
+    slug: model.slug,
+    name: model.slug,
+    isCustom: false,
+    capabilities: {
+      optionDescriptors: [
+        {
+          id: driver === "codex" ? "reasoningEffort" : "effort",
+          label: "Reasoning",
+          type: "select",
+          options: model.options.map((id) => ({ id, label: id })),
+        },
+      ],
+    },
+  })),
+});
+
+const personaCapabilityProvider = (provider: ServerProvider) => ({
+  providerInstanceId: provider.instanceId,
+  driverKind: provider.driver,
+  displayName: String(provider.instanceId),
+  models: provider.models.map((model) => ({
+    id: model.slug,
+    label: model.name,
+    options: model.capabilities?.optionDescriptors?.map((descriptor) => ({
+      id: descriptor.id,
+      label: descriptor.label,
+      type: "select" as const,
+      options: descriptor.type === "select" ? descriptor.options : [],
+    })),
+  })),
+  canRunChildTask: true,
+  canRunCrossProviderChildTask: true,
+  constraints: [],
+});
+
+it.effect("spawns a saved agent as a Peer Agent only within its declared routes", () =>
+  Effect.gen(function* () {
+    const squadronId = SquadronId.make("squadron:j5:mcp-spawn-persona");
+    const callerParticipantId = ParticipantId.make("agent:j5:mcp-spawn-persona-caller");
+    const childParticipantId = ParticipantId.make("agent:j5:mcp-spawn-persona-child");
+    const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+    const codex = personaProvider("codex", "codex", [
+      { slug: "gpt-5.6-terra", options: ["medium", "high"] },
+      { slug: "gpt-5.6-sol", options: ["high"] },
+    ]);
+    const claude = personaProvider("claudeAgent", "claudeAgent", [
+      { slug: "claude-opus-5", options: ["high"] },
+    ]);
+    const callerRow = {
+      squadronId,
+      participantId: callerParticipantId,
+      participant: {
+        kind: "agent" as const,
+        id: callerParticipantId,
+        threadId: invocation.threadId,
+      },
+      archived: false,
+      canReceiveMessage: true,
+      canOpenExchange: true,
+      acceptsUrgency: false,
+    } satisfies ParticipantDirectoryRow;
+    const dependencies = Layer.mergeAll(
+      Layer.mock(A2ASendService)({ listParticipants: () => Effect.succeed([callerRow]) }),
+      Layer.mock(A2AHomeRegistrar)({
+        getHomeForThread: () => Effect.succeed({ squadronId, participantId: callerParticipantId }),
+      }),
+      Layer.mock(A2ALedger)({
+        readSquadron: () =>
+          Effect.succeed({
+            id: squadronId,
+            name: "Persona",
+            createdAt: DateTime.formatIso(createdAt),
+          }),
+      }),
+      Layer.mock(SpawnCompositionService)({
+        recordFacts: (input) =>
+          Effect.succeed({
+            home: { squadronId, participantId: childParticipantId },
+            placement: {
+              squadronId,
+              participantId: childParticipantId,
+              provenance: input.provenance,
+              placementParentId:
+                input.provenance.kind === "spawned-by"
+                  ? input.provenance.spawnedByParticipantId
+                  : null,
+              createdEventSeq: 1,
+              updatedEventSeq: 1,
+            },
+          }),
+      }),
+      Layer.mock(ThreadManagementService)({
+        getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
+        dispatch: (command) =>
+          Ref.update(commands, (items) => [...items, command]).pipe(
+            Effect.as({ events: [], effects: [] } as never),
+          ),
+      }),
+      Layer.mock(OrchestratorMcpService)({
+        capabilities: () =>
+          Effect.succeed({
+            parentThreadId: invocation.threadId,
+            inheritedProviderInstanceId: invocation.providerInstanceId,
+            inheritedModel: "gpt-5.6-sol",
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            providers: [personaCapabilityProvider(codex), personaCapabilityProvider(claude)],
+            features: {
+              appOwnedSubagents: true,
+              asyncPolling: true,
+              cancellation: true,
+              batchThreadCreation: true,
+              threadManagement: true,
+              incrementalThreadRead: true,
+              scheduledTasks: true,
+              maxBatchThreads: 8,
+            },
+          }),
+      }),
+      Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([codex, claude]) }),
+      Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
+      Layer.mock(ParticipantPlacementService)({}),
+      Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      Layer.mock(ArchiveCrewService)({}),
+      Layer.mock(CrewStopService)({}),
+      Layer.mock(CrewProposalService)({}),
+
+      ServerConfig.layerTest(process.cwd(), { prefix: "j5-mcp-spawn-persona-" }),
+    ).pipe(Layer.provideMerge(NodeServices.layer));
+    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+
+    yield* Effect.gen(function* () {
+      const toolkit = yield* J5Toolkit;
+      const call = (args: J5SpawnAgentInput) =>
+        toolkit
+          .handle("spawn_agent", args)
+          .pipe(
+            Stream.unwrap,
+            Stream.run(Sink.last()),
+            Effect.flatMap(Effect.fromOption),
+            Effect.provideService(McpInvocationContext, invocation),
+          );
+      const failureMessage = (response: { readonly result: unknown }) =>
+        (response.result as { readonly message: string }).message;
+      const createdThreads = () =>
+        Ref.get(commands).pipe(
+          Effect.map((items) =>
+            items.flatMap((command) => (command.type === "thread.create" ? [command] : [])),
+          ),
+        );
+      const briefs = () =>
+        Ref.get(commands).pipe(
+          Effect.map((items) =>
+            items.flatMap((command) => (command.type === "message.dispatch" ? [command] : [])),
+          ),
+        );
+      const scout = {
+        brief: "Collect evidence about the auth flow and report back.",
+        persona: "scout",
+        provider: ProviderInstanceId.make("codex"),
+        model: "gpt-5.6-terra",
+        reasoning: "high",
+        client_request_id: "spawn-persona-primary",
+      } satisfies J5SpawnAgentInput;
+
+      const primary = yield* call(scout);
+      assert.isFalse(primary.isFailure, failureMessage(primary));
+      const created = yield* createdThreads();
+      assert.lengthOf(created, 1);
+      const assignment = created[0]!.agentPersonaAssignment;
+      assert.isDefined(assignment);
+      assert.equal(assignment?.personaId, "scout");
+      assert.equal(assignment?.displayName, "Scout");
+      assert.equal(assignment?.resolvedRoute, "primary");
+      assert.equal(assignment?.resolvedDriver, "codex");
+      assert.equal(assignment?.authorityPolicy, "read-only");
+      assert.match(assignment?.definitionDigest ?? "", /^[a-f0-9]{64}$/);
+      const expectedSelection = {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.6-terra",
+        options: [{ id: "reasoningEffort", value: "high" }],
+      };
+      assert.deepStrictEqual(created[0]!.modelSelection, expectedSelection);
+      assert.deepStrictEqual(assignment?.resolvedModelSelection, expectedSelection);
+      assert.equal(created[0]!.runtimeMode, "approval-required");
+      assert.deepStrictEqual((yield* briefs())[0]!.modelSelection, expectedSelection);
+
+      const fallback = yield* call({
+        ...scout,
+        provider: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-opus-5",
+        client_request_id: "spawn-persona-fallback",
+      });
+      assert.isFalse(fallback.isFailure, failureMessage(fallback));
+      const fallbackCreate = (yield* createdThreads())[1]!;
+      assert.equal(fallbackCreate.agentPersonaAssignment?.resolvedRoute, "fallback");
+      assert.equal(fallbackCreate.agentPersonaAssignment?.resolvedDriver, "claudeAgent");
+      assert.deepStrictEqual(fallbackCreate.modelSelection, {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-opus-5",
+        options: [{ id: "effort", value: "high" }],
+      });
+
+      const plain = yield* call({
+        brief: "No saved agent here.",
+        provider: ProviderInstanceId.make("codex"),
+        model: "gpt-5.6-sol",
+        reasoning: "high",
+        client_request_id: "spawn-persona-plain",
+      });
+      assert.isFalse(plain.isFailure, failureMessage(plain));
+      const plainCreate = (yield* createdThreads())[2]!;
+      assert.notProperty(plainCreate, "agentPersonaAssignment");
+      assert.equal(plainCreate.runtimeMode, "full-access");
+
+      const commandCount = (yield* Ref.get(commands)).length;
+      const outOfRoute = yield* call({
+        ...scout,
+        reasoning: "medium",
+        client_request_id: "spawn-persona-out-of-route",
+      });
+      assert.isTrue(outOfRoute.isFailure);
+      assert.include(failureMessage(outOfRoute), "Agent scout allows only");
+      assert.include(failureMessage(outOfRoute), "outside its declared routes");
+      assert.include(failureMessage(outOfRoute), "or omit persona");
+
+      const unenforceable = yield* call({
+        ...scout,
+        persona: "builder",
+        provider: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-opus-5",
+        client_request_id: "spawn-persona-unenforceable",
+      });
+      assert.isTrue(unenforceable.isFailure);
+      assert.include(
+        failureMessage(unenforceable),
+        "cannot enforce its workspace-write permissions on claudeAgent",
+      );
+
+      const unknown = yield* call({
+        ...scout,
+        persona: "nobody",
+        client_request_id: "spawn-persona-unknown",
+      });
+      assert.isTrue(unknown.isFailure);
+      assert.include(failureMessage(unknown), "Unknown agent nobody");
+      assert.lengthOf(yield* Ref.get(commands), commandCount);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("archives a crew only as a unit through its captain with one confirmation", () =>
+  Effect.gen(function* () {
+    const squadronId = SquadronId.make("squadron:j5:mcp-archive-crew");
+    const callerParticipantId = ParticipantId.make("agent:j5:mcp-archive-crew-captain");
+    const memberParticipantId = ParticipantId.make("agent:j5:mcp-archive-crew-member");
+    const archiveCalls = yield* Ref.make<ReadonlyArray<ArchiveCrewInput>>([]);
+    const callerRow = {
+      squadronId,
+      participantId: callerParticipantId,
+      participant: {
+        kind: "agent" as const,
+        id: callerParticipantId,
+        threadId: invocation.threadId,
+      },
+      archived: false,
+      canReceiveMessage: true,
+      canOpenExchange: true,
+      acceptsUrgency: false,
+    } satisfies ParticipantDirectoryRow;
+    const memberRow = {
+      squadronId,
+      participantId: memberParticipantId,
+      participant: {
+        kind: "agent" as const,
+        id: memberParticipantId,
+        threadId: ThreadId.make("thread:j5:mcp-archive-crew-member"),
+      },
+      archived: false,
+      canReceiveMessage: true,
+      canOpenExchange: true,
+      acceptsUrgency: false,
+    } satisfies ParticipantDirectoryRow;
+    const facts = {
+      members: [
+        {
+          seatName: "builder",
+          participantId: memberParticipantId,
+          threadId: memberRow.participant.threadId,
+          alreadyArchived: false,
+          facts: {
+            openExchanges: [
+              {
+                exchangeId: ExchangeId.make("exchange:j5:mcp-archive-crew"),
+                direction: "inbound" as const,
+                replyObligation: "participant-owes-reply" as const,
+                counterpartyId: callerParticipantId,
+                intent: "Review the login fix",
+                urgency: null,
+                openedAt: DateTime.formatIso(createdAt),
+              },
+            ],
+            runningTurn: null,
+          },
+        },
+      ],
+    };
+    const dependencies = Layer.mergeAll(
+      Layer.mock(A2ASendService)({
+        listParticipants: () => Effect.succeed([callerRow, memberRow]),
+      }),
+      Layer.mock(A2AHomeRegistrar)({}),
+      Layer.mock(A2ALedger)({}),
+      Layer.mock(SpawnCompositionService)({}),
+      Layer.mock(ThreadManagementService)({}),
+      Layer.mock(OrchestratorMcpService)({}),
+      Layer.mock(ProviderRegistry)({}),
+      Layer.mock(ParticipantPlacementService)({}),
+      Layer.mock(AgentCrewInstanceService)({}),
+      Layer.mock(CrewProposalService)({}),
+      Layer.mock(ArchiveCrewService)({
+        archive: (input) =>
+          Ref.update(archiveCalls, (items) => [...items, input]).pipe(
+            Effect.andThen(
+              input.confirmationToken === undefined
+                ? Effect.fail(
+                    new ArchiveCrewConfirmationRequiredError({
+                      facts,
+                      confirmationToken: "crew-token",
+                    }),
+                  )
+                : Effect.succeed({
+                    status: "archived" as const,
+                    members: [
+                      {
+                        seatName: "builder",
+                        participantId: memberParticipantId,
+                        result: "archived" as const,
+                      },
+                    ],
+                  }),
+            ),
+          ),
+      }),
+      Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      Layer.mock(CrewStopService)({}),
+      NodeServices.layer,
+    );
+    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+
+    yield* Effect.gen(function* () {
+      const toolkit = yield* J5Toolkit;
+      const message = (response: { readonly result: unknown }) =>
+        (response.result as { readonly message: string }).message;
+      const run = (args: J5ArchiveCrewInput) =>
+        toolkit
+          .handle("archive_crew", args)
+          .pipe(
+            Stream.unwrap,
+            Stream.run(Sink.last()),
+            Effect.flatMap(Effect.fromOption),
+            Effect.provideService(McpInvocationContext, invocation),
+          );
+      const refused = yield* run({
+        squadron_id: squadronId,
+        crew_instance_id: "crew:j5:test",
+        client_request_id: "archive-crew-1",
+      });
+      assert.isTrue(refused.isFailure);
+      const refusal = refused.result as {
+        readonly code: string;
+        readonly confirmation_token: string;
+        readonly members: ReadonlyArray<{
+          readonly seat: string;
+          readonly participant_id: string;
+          readonly already_archived: boolean;
+          readonly open_exchanges: ReadonlyArray<{ readonly exchange_id: string }>;
+          readonly running_turn: unknown;
+        }>;
+      };
+      assert.equal(refusal.code, "ArchiveCrewConfirmationRequiredError");
+      assert.equal(refusal.confirmation_token, "crew-token");
+      assert.deepStrictEqual(
+        refusal.members.map((member) => [
+          member.seat,
+          member.participant_id,
+          member.already_archived,
+          member.open_exchanges.map(({ exchange_id }) => exchange_id),
+          member.running_turn,
+        ]),
+        [["builder", memberParticipantId, false, ["exchange:j5:mcp-archive-crew"], null]],
+      );
+      assert.include(message(refused), "check with the user");
+
+      const confirmed = yield* run({
+        squadron_id: squadronId,
+        crew_instance_id: "crew:j5:test",
+        client_request_id: "archive-crew-1",
+        confirmation_token: "crew-token",
+      });
+      assert.isFalse(confirmed.isFailure, message(confirmed));
+      assert.deepStrictEqual(confirmed.result, {
+        status: "archived",
+        crew_instance_id: "crew:j5:test",
+        members: [{ seat: "builder", participant_id: memberParticipantId, result: "archived" }],
+      });
+      const calls = yield* Ref.get(archiveCalls);
+      assert.lengthOf(calls, 2);
+      assert.equal(calls[1]?.callerParticipantId, callerParticipantId);
+      assert.equal(calls[1]?.clientRequestKey, "archive-crew-1");
+      const ids = calls[1]!.commandIds("builder");
+      assert.include(ids.archiveCommandId, "archive-crew-thread");
+      assert.include(ids.archiveCommandId, encodeURIComponent("archive-crew-1/seat/builder"));
+      assert.notEqual(ids.archiveCommandId, calls[1]!.commandIds("critic").archiveCommandId);
+
+      const wrongSquadron = yield* run({
+        squadron_id: SquadronId.make("squadron:j5:other"),
+        crew_instance_id: "crew:j5:test",
+      });
+      assert.isTrue(wrongSquadron.isFailure);
+      assert.include(message(wrongSquadron), "archive_crew targeted squadron:j5:other");
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("lists saved agents with purpose, policy, availability, and route", () =>
+  Effect.gen(function* () {
+    const codex = personaProvider("codex", "codex", [
+      { slug: "gpt-5.6-terra", options: ["high"] },
+      { slug: "gpt-5.6-sol", options: ["high"] },
+    ]);
+    const dependencies = Layer.mergeAll(
+      Layer.mock(A2ASendService)({}),
+      Layer.mock(A2AHomeRegistrar)({}),
+      Layer.mock(A2ALedger)({}),
+      Layer.mock(SpawnCompositionService)({}),
+      Layer.mock(ThreadManagementService)({}),
+      Layer.mock(OrchestratorMcpService)({}),
+      Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([codex]) }),
+      Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
+      Layer.mock(ParticipantPlacementService)({}),
+      Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+
+      Layer.mock(ArchiveCrewService)({}),
+      Layer.mock(CrewStopService)({}),
+      Layer.mock(CrewProposalService)({}),
+      ServerConfig.layerTest(process.cwd(), { prefix: "j5-mcp-list-agents-" }),
+    ).pipe(Layer.provideMerge(NodeServices.layer));
+    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+    yield* Effect.gen(function* () {
+      const toolkit = yield* J5Toolkit;
+      const response = yield* toolkit
+        .handle("list_personas", {})
+        .pipe(
+          Stream.unwrap,
+          Stream.run(Sink.last()),
+          Effect.flatMap(Effect.fromOption),
+          Effect.provideService(McpInvocationContext, invocation),
+        );
+      assert.isFalse(response.isFailure);
+      const { personas } = response.result as {
+        readonly personas: ReadonlyArray<{
+          readonly id: string;
+          readonly runtime_policy: string;
+          readonly availability: string;
+          readonly route: string | null;
+        }>;
+      };
+      assert.lengthOf(personas, 11);
+      const scout = personas.find((persona) => persona.id === "scout");
+      assert.deepStrictEqual(
+        [scout?.runtime_policy, scout?.availability, scout?.route],
+        ["read-only", "available", "codex · gpt-5.6-terra · high"],
+      );
+      // Publisher's publish-only policy has no enforceable provider yet, so it cannot start.
+      const publisher = personas.find((persona) => persona.id === "publisher");
+      assert.deepStrictEqual([publisher?.availability, publisher?.route], ["blocked", null]);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("routes crew proposals through a captain that is not itself a crew member", () =>
+  Effect.gen(function* () {
+    const squadronId = SquadronId.make("squadron:j5:mcp-propose");
+    const callerParticipantId = ParticipantId.make("agent:j5:mcp-propose-captain");
+    const proposals = yield* Ref.make<ReadonlyArray<string>>([]);
+    const proposedSeats = yield* Ref.make<ReadonlyArray<CrewProposalSeat>>([]);
+    const addedSeats = yield* Ref.make<ReadonlyArray<CrewProposalSeat>>([]);
+    const membership = yield* Ref.make<{ crewInstanceId: string; seatName: string } | null>(null);
+    const callerRow = {
+      squadronId,
+      participantId: callerParticipantId,
+      participant: {
+        kind: "agent" as const,
+        id: callerParticipantId,
+        threadId: invocation.threadId,
+      },
+      archived: false,
+      canReceiveMessage: true,
+      canOpenExchange: true,
+      acceptsUrgency: false,
+    } satisfies ParticipantDirectoryRow;
+    const proposal = (requestKey: string, kind: "roster" | "addition"): CrewProposal => ({
+      id: `proposal:${requestKey}`,
+      squadronId,
+      captainParticipantId: callerParticipantId,
+      captainThreadId: invocation.threadId,
+      crewInstanceId: kind === "addition" ? "crew:1" : null,
+      kind,
+      status: "open",
+      brief: "Fix the flaky login test.",
+      displayName: "Login Fix Crew",
+      requestedSeats: [{ seat: "builder", agentId: "builder", reason: "Implements" }],
+      approvedSeats: null,
+      createdAt: "2026-09-09T16:00:00.000Z",
+      resolvedAt: null,
+      reportedAt: null,
+    });
+    const dependencies = Layer.mergeAll(
+      Layer.mock(A2ASendService)({ listParticipants: () => Effect.succeed([callerRow]) }),
+      Layer.mock(A2AHomeRegistrar)({
+        getHomeForThread: () => Effect.succeed({ squadronId, participantId: callerParticipantId }),
+      }),
+      Layer.mock(A2ALedger)({
+        readSquadron: () =>
+          Effect.succeed({
+            id: squadronId,
+            name: "Propose",
+            createdAt: DateTime.formatIso(createdAt),
+          }),
+      }),
+      Layer.mock(SpawnCompositionService)({}),
+      Layer.mock(ThreadManagementService)({
+        getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
+      }),
+      Layer.mock(OrchestratorMcpService)({}),
+      Layer.mock(ProviderRegistry)({}),
+      Layer.mock(AgentCrewInstanceService)({
+        findMembership: () => Ref.get(membership),
+        listForCaptain: () => Effect.succeed([]),
+      }),
+      Layer.mock(CrewProposalService)({
+        propose: (input) =>
+          Ref.update(proposals, (items) => [...items, input.requestKey]).pipe(
+            Effect.as({
+              proposal: proposal(input.requestKey, "roster"),
+              instance: null,
+            } satisfies CrewProposalOutcome),
+            Effect.tap(() => Ref.set(proposedSeats, input.seats)),
+          ),
+        requestMember: (input) =>
+          Ref.update(proposals, (items) => [...items, input.requestKey]).pipe(
+            Effect.tap(() => Ref.update(addedSeats, (seats) => [...seats, input.seat])),
+            Effect.as({
+              proposal: {
+                ...proposal(input.requestKey, "addition"),
+                status: "approved" as const,
+              },
+              instance: {
+                id: "crew:1",
+                squadronId,
+                captainParticipantId: callerParticipantId,
+                captainThreadId: invocation.threadId,
+                displayName: "Login Fix Crew",
+                brief: "Fix the flaky login test.",
+                version: 2,
+                createdAt: "2026-09-09T16:00:00.000Z",
+                archivedAt: null,
+                members: [
+                  {
+                    seatName: input.seat.seat,
+                    agentId: input.seat.agentId,
+                    participantId: ParticipantId.make("agent:j5:a2a:thread:new"),
+                    threadId: ThreadId.make("thread:new"),
+                    addedVersion: 2,
+                    reason: input.seat.reason,
+                  },
+                ],
+              },
+            } satisfies CrewProposalOutcome),
+          ),
+      }),
+      Layer.mock(ParticipantPlacementService)({}),
+      Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+
+      Layer.mock(ArchiveCrewService)({}),
+      Layer.mock(CrewStopService)({}),
+      NodeServices.layer,
+    );
+    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+    yield* Effect.gen(function* () {
+      const toolkit = yield* J5Toolkit;
+      const run = <K extends "propose_crew" | "request_crew_member" | "spawn_agent">(
+        tool: K,
+        args: K extends "propose_crew"
+          ? J5ProposeCrewInput
+          : K extends "spawn_agent"
+            ? J5SpawnAgentInput
+            : J5RequestCrewMemberInput,
+      ) =>
+        toolkit
+          .handle(tool, args as never)
+          .pipe(
+            Stream.unwrap,
+            Stream.run(Sink.last()),
+            Effect.flatMap(Effect.fromOption),
+            Effect.provideService(McpInvocationContext, invocation),
+          );
+      const message = (response: { readonly result: unknown }) =>
+        (response.result as { readonly message: string }).message;
+
+      const customSelection: ModelSelection = {
+        instanceId: ProviderInstanceId.make("codex-custom"),
+        model: "gpt-6-astra",
+        options: [{ id: "reasoningEffort", value: "high" }],
+      };
+      const proposed = yield* run("propose_crew", {
+        name: "Login Fix Crew",
+        brief: "Fix the flaky login test.",
+        seats: [
+          { seat: "builder", persona: "builder", reason: "Implements" },
+          {
+            seat: "reviewer",
+            reason: "Reviews correctness",
+            instructions: "Review and report concrete risks.",
+            model_selection: customSelection,
+            runtime_mode: "approval-required",
+          },
+          { seat: "researcher", reason: "Researches", instructions: "Inspect related behavior." },
+        ],
+        client_request_id: "propose-1",
+      });
+      assert.isFalse(proposed.isFailure, message(proposed));
+      assert.deepStrictEqual(proposed.result, {
+        proposal_id: `proposal:${invocation.providerSessionId}:propose-1`,
+        status: "open",
+        crew_instance_id: null,
+        members: [],
+      });
+
+      assert.deepStrictEqual(yield* Ref.get(proposedSeats), [
+        { seat: "builder", agentId: "builder", reason: "Implements" },
+        {
+          seat: "reviewer",
+          agentId: null,
+          reason: "Reviews correctness",
+          instructions: "Review and report concrete risks.",
+          modelSelection: customSelection,
+          runtimeMode: "approval-required",
+        },
+        {
+          seat: "researcher",
+          agentId: null,
+          reason: "Researches",
+          instructions: "Inspect related behavior.",
+        },
+      ]);
+
+      const added = yield* run("request_crew_member", {
+        seat: "security",
+        reason: "Security pass",
+        instructions: "Review authorization boundaries.",
+        model_selection: customSelection,
+        runtime_mode: "auto-accept-edits",
+        client_request_id: "add-1",
+      });
+      assert.isFalse(added.isFailure, message(added));
+      const addedResult = added.result as unknown as {
+        status: string;
+        crew_instance_id: string;
+        members: unknown[];
+      };
+      assert.equal(addedResult.status, "approved");
+      assert.equal(addedResult.crew_instance_id, "crew:1");
+      assert.lengthOf(addedResult.members, 1);
+      assert.deepStrictEqual(yield* Ref.get(addedSeats), [
+        {
+          seat: "security",
+          agentId: null,
+          reason: "Security pass",
+          instructions: "Review authorization boundaries.",
+          modelSelection: customSelection,
+          runtimeMode: "auto-accept-edits",
+        },
+      ]);
+
+      yield* Ref.set(membership, { crewInstanceId: "crew:1", seatName: "builder" });
+      const refused = yield* run("propose_crew", {
+        name: "Nested",
+        brief: "x",
+        seats: [{ seat: "s", persona: "scout", reason: "r" }],
+      });
+      assert.isTrue(refused.isFailure);
+      assert.include(message(refused), "crew members cannot request crews or seats");
+      assert.lengthOf(yield* Ref.get(proposals), 2);
+      // Nor may a seat spawn a solo Peer Agent: only the Captain grows a Crew, through the gate.
+      const spawned = yield* run("spawn_agent", {
+        brief: "Help me",
+        provider: "codex",
+        model: "gpt-5.6-terra",
+        reasoning: "high",
+      } as J5SpawnAgentInput);
+      assert.isTrue(spawned.isFailure);
+      assert.include(message(spawned), "crew members cannot spawn Peer Agents");
+      assert.include(message(spawned), "delegate_task");
     }).pipe(Effect.provide(layer));
   }),
 );
@@ -1142,6 +1914,14 @@ it.effect("stops exactly one placed agent without consulting or touching descend
       Layer.mock(SpawnCompositionService)({}),
       Layer.mock(OrchestratorMcpService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      Layer.mock(AgentCrewInstanceService)({
+        findMembership: () => Effect.succeed(null),
+        listForCaptain: () => Effect.succeed([]),
+      }),
+      Layer.mock(ArchiveCrewService)({}),
+      Layer.mock(CrewStopService)({}),
+      Layer.mock(CrewProposalService)({}),
+
       Layer.mock(SquadronJoinService)({}),
       Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,

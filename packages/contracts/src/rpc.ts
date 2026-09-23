@@ -38,7 +38,6 @@ import {
   AcpRegistrySetProviderResult,
 } from "./acpRegistry.ts";
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
-import { ArtifactChangeEvent, ArtifactWatchError, ArtifactWatchInput } from "./artifacts.ts";
 import {
   AuthAccessStreamError,
   AuthAccessStreamEvent,
@@ -126,6 +125,7 @@ import {
 } from "./provider.ts";
 import { ProviderInstanceId, ProviderInstanceMutation } from "./providerInstance.ts";
 import { J5AgentPersonaRpcGroup } from "./j5/agentPersona.ts";
+import { J5ArtifactRpcGroup } from "./j5/artifacts.ts";
 import {
   PullRequestActionInput,
   PullRequestActivity,
@@ -479,7 +479,6 @@ export const WS_METHODS = {
   subscribeAuthAccess: "subscribeAuthAccess",
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
-  subscribeArtifactChanges: "subscribeArtifactChanges",
 } as const;
 
 const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -1253,13 +1252,6 @@ const WsSubscribePreviewEventsRpc = Rpc.make(WS_METHODS.subscribePreviewEvents, 
   stream: true,
 });
 
-export const WsSubscribeArtifactChangesRpc = Rpc.make(WS_METHODS.subscribeArtifactChanges, {
-  payload: ArtifactWatchInput,
-  success: ArtifactChangeEvent,
-  error: Schema.Union([ArtifactWatchError, EnvironmentAuthorizationError]),
-  stream: true,
-});
-
 const WsSubscribeDiscoveredLocalServersRpc = Rpc.make(WS_METHODS.subscribeDiscoveredLocalServers, {
   payload: Schema.Struct({
     configuredUrls: Schema.optional(ConfiguredLocalServerUrls),
@@ -1639,7 +1631,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewAutomationRespondRpc,
   WsPreviewAutomationFocusHostRpc,
   WsSubscribePreviewEventsRpc,
-  WsSubscribeArtifactChangesRpc,
   WsSubscribeDiscoveredLocalServersRpc,
   WsDeviceConfigureRpc,
   WsDeviceListRpc,
@@ -1666,4 +1657,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeArchivedShellRpc,
   WsOrchestrationV2SubscribeShellRpc,
   WsOrchestrationV2SubscribeThreadRpc,
-).merge(J5AgentPersonaRpcGroup);
+)
+  .merge(J5AgentPersonaRpcGroup)
+  .merge(J5ArtifactRpcGroup);

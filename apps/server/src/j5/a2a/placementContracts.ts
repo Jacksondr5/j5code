@@ -115,6 +115,8 @@ export const ParticipantPlacementView = Schema.Struct({
   threadId: Schema.NullOr(ThreadId),
   provenance: ParticipantProvenanceView,
   placementParentId: Schema.NullOr(ParticipantId),
+  /** When the participant was archived (reversible), from its membership row; absent or null while live. */
+  archivedAt: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type ParticipantPlacementView = typeof ParticipantPlacementView.Type;
 

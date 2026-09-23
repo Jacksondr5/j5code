@@ -10,7 +10,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/toolt
 import { AgentHandoffChip } from "./AgentHandoffChip";
 import { useThreadShell } from "../../state/entities";
 
-/** Compact "which saved agent is this" chip for thread cards and runtime rows. */
+/** Compact "which persona is this" chip for thread cards and runtime rows. */
 export function AgentIdentityChip(props: {
   readonly assignment: OrchestrationV2AgentPersonaAssignment | undefined;
   readonly className?: string;
@@ -33,7 +33,7 @@ export function AgentIdentityChip(props: {
         <span className="truncate">{presentation.personaLabel}</span>
       </TooltipTrigger>
       <TooltipPopup side="top">
-        Agent {presentation.personaLabel} · {presentation.routeLabel} ·{" "}
+        Persona {presentation.personaLabel} · {presentation.routeLabel} ·{" "}
         {props.assignment.authorityPolicy}
       </TooltipPopup>
     </Tooltip>

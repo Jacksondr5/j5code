@@ -1,12 +1,19 @@
 import { Link } from "@tanstack/react-router";
-import { BellIcon } from "lucide-react";
+import { InboxIcon } from "lucide-react";
 import { useCallback } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { mergeOpenInboxCounts } from "@t3tools/client-runtime/j5/inbox";
 
 import { useSidebar } from "../../components/ui/sidebar";
 import { cn } from "../../lib/utils";
-import { inboxCountQueryAtom, inboxCountSourcesAtom, refreshJ5Sources } from "../state";
+import { inboxCrewRequests } from "../crew/crewProposals.logic";
+import { mergeCrewProposalSources, useCrewProposalsRefresh } from "../crew/crewProposalsClient";
+import {
+  crewProposalSourcesAtom,
+  inboxCountQueryAtom,
+  inboxCountSourcesAtom,
+  refreshJ5Sources,
+} from "../state";
 import { createVisibleRefreshHook } from "../useVisibleRefresh";
 
 export const COUNT_POLL_INTERVAL_MS = 7_500;
@@ -19,8 +26,16 @@ export const shouldShowOpenInboxCount = (count: number | null) => count !== null
 export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean }) {
   const { isMobile, setOpenMobile } = useSidebar();
   const sources = useAtomValue(inboxCountSourcesAtom);
-  const { count, incomplete } = mergeOpenInboxCounts(sources);
+  const crewSources = useAtomValue(crewProposalSourcesAtom);
+  const merged = mergeOpenInboxCounts(sources);
+  // Mid-run seat requests are a human gate too; the inbox badge counts them beside open questions.
+  // The initial roster is answered inline in the Captain's thread and stays off the inbox badge.
+  const crewRequests = inboxCrewRequests(mergeCrewProposalSources(crewSources)).length;
+  const count =
+    merged.count === null ? (crewRequests > 0 ? crewRequests : null) : merged.count + crewRequests;
+  const incomplete = merged.incomplete;
   useCountRefresh();
+  useCrewProposalsRefresh();
 
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) setOpenMobile(false);
@@ -40,7 +55,7 @@ export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean })
       title={label}
       to="/inbox"
     >
-      <BellIcon aria-hidden className="size-4" />
+      <InboxIcon aria-hidden className="size-4" />
       {shouldShowOpenInboxCount(count) || incomplete ? (
         <span className="absolute -end-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] font-semibold leading-none text-primary-foreground tabular-nums ring-2 ring-sidebar">
           {incomplete ? (count !== null && count > 0 ? `${count}*` : "?") : count}

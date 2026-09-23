@@ -2,6 +2,11 @@ import type { PreparedConnection } from "@t3tools/client-runtime/connection";
 import { environmentEndpointUrl } from "@t3tools/client-runtime/environment";
 import { ManagedRelay } from "@t3tools/client-runtime/relay";
 import { type EnvironmentId, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import {
+  PreArchiveCrewSeat,
+  PreArchiveLiveCrew,
+  type PreArchiveLiveCrew as PreArchiveLiveCrewType,
+} from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -42,6 +47,7 @@ const PlacementSubtree = Schema.Union([
     ),
   }),
 ]);
+export type LiveCrew = PreArchiveLiveCrewType;
 const PreArchiveFacts = Schema.Union([
   Schema.Struct({
     state: Schema.Literal("not-an-a2a-participant"),
@@ -57,6 +63,10 @@ const PreArchiveFacts = Schema.Union([
     retired: Schema.Boolean,
     openExchanges: Schema.Array(OpenExchange),
     placementSubtree: PlacementSubtree,
+    /** Absent from older servers, null when the Crew read failed: both read as "couldn't check". */
+    liveCrews: Schema.optional(Schema.NullOr(Schema.Array(PreArchiveLiveCrew))),
+    /** The seat this agent holds in a live Crew; seats are never archived one by one. */
+    crewSeat: Schema.optional(Schema.NullOr(PreArchiveCrewSeat)),
   }),
 ]);
 export type PreArchiveFacts = typeof PreArchiveFacts.Type;
@@ -222,6 +232,7 @@ export const readArchivePreflightEffect = Effect.fn("j5.a2a.archiveFlowClient.re
       new Set([
         ...facts.openExchanges.map((exchange) => exchange.counterpartyId),
         ...(facts.placementSubtree.state === "known" ? facts.placementSubtree.participantIds : []),
+        ...(facts.liveCrews ?? []).flatMap((crew) => crew.seats.map((seat) => seat.participantId)),
       ]),
     );
     const participantLabels = yield* readParticipantLabelsEffect({

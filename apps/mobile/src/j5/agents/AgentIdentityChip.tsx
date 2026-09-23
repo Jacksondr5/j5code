@@ -5,7 +5,7 @@ import { View } from "react-native";
 import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
 
-/** Compact "which saved agent is this" chip for thread rows. */
+/** Compact "which persona is this" chip for thread rows. */
 export function AgentIdentityChip(props: {
   readonly assignment: OrchestrationV2AgentPersonaAssignment | undefined;
 }) {
@@ -13,7 +13,7 @@ export function AgentIdentityChip(props: {
   const presentation = presentAgentPersonaAssignment(props.assignment);
   return (
     <View
-      accessibilityLabel={`Agent ${presentation.personaLabel}, ${presentation.routeLabel}`}
+      accessibilityLabel={`Persona ${presentation.personaLabel}, ${presentation.routeLabel}`}
       className="mt-1 flex-row items-center gap-1 self-start rounded-full border border-border px-2 py-0.5"
     >
       <SymbolView

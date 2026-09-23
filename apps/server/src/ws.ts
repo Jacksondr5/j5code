@@ -17,7 +17,6 @@ import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
-  ArtifactWatchError,
   AcpRegistryOperationError,
   CommandId,
   AuthAccessStreamError,
@@ -160,7 +159,12 @@ import {
   toAcpRegistryOperationError,
 } from "./provider/acp/AcpRegistrySupport.ts";
 import { AcpRegistryRuntimeCoordinator } from "./provider/acp/AcpRegistryRuntimeCoordinator.ts";
+import {
+  makeCrewSeatArchiveGuard,
+  type CrewSeatArchiveGuard,
+} from "./j5/a2a/crewSeatArchiveGuard.ts";
 import { makeAgentPersonaRpcHandlers } from "./j5/agents/agentPersonaRpc.ts";
+import { makeArtifactRpcHandlers } from "./j5/artifacts/artifactRpc.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
@@ -573,6 +577,8 @@ const makeWsRpcLayer = (
   clientAnalyticsProps: Readonly<Record<string, unknown>>,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
   artifactWorkspace: ArtifactWorkspace.ArtifactWorkspace["Service"],
+  // J5: a Crew member is never archived or deleted alone, whichever client door asks.
+  j5CrewSeatArchiveGuard: CrewSeatArchiveGuard,
 ) =>
   ServerWsRpcGroup.toLayer(
     Effect.gen(function* () {
@@ -1685,6 +1691,12 @@ const makeWsRpcLayer = (
         return yield* projectMutationOperation(projectService, mutation);
       });
 
+      // J5 fork extension: the artifact change stream is a J5 RPC group (see artifactRpc.ts).
+      const artifactRpcHandlers = makeArtifactRpcHandlers({
+        projects: projectService,
+        artifacts: artifactWorkspace,
+        observeStream: observeRpcStreamEffect,
+      });
       const agentPersonaRpcHandlers = yield* makeAgentPersonaRpcHandlers({
         providers: providerRegistry.getProviders,
         observe: observeRpcEffect,
@@ -1694,29 +1706,30 @@ const makeWsRpcLayer = (
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.dispatchCommand,
-            startup
-              .enqueueCommand(
-                ThreadMessageIntake.dispatchCommand(
-                  ThreadManagementService.withCreationProvenance(command, {
-                    createdBy: "user",
-                    creationSource: "creationSource" in command ? command.creationSource : "web",
-                  }),
-                ).pipe(Effect.provide(intakeContext)),
-              )
-              .pipe(
-                Effect.tap(() => recordClientCommandAnalytics(command)),
-                Effect.map((result) => ({ sequence: result.sequence })),
-                Effect.mapError((cause) => {
-                  const detail = userFacingDispatchErrorMessage(cause);
-                  return new OrchestrationV2DispatchCommandError({
-                    commandId: command.commandId,
-                    commandType: command.type,
-                    message: detail ?? "Failed to dispatch orchestration V2 command",
-                    ...(detail === undefined ? {} : { detail }),
-                    cause,
-                  });
-                }),
+            j5CrewSeatArchiveGuard(command).pipe(
+              Effect.andThen(() =>
+                startup.enqueueCommand(
+                  ThreadMessageIntake.dispatchCommand(
+                    ThreadManagementService.withCreationProvenance(command, {
+                      createdBy: "user",
+                      creationSource: "creationSource" in command ? command.creationSource : "web",
+                    }),
+                  ).pipe(Effect.provide(intakeContext)),
+                ),
               ),
+              Effect.tap(() => recordClientCommandAnalytics(command)),
+              Effect.map((result) => ({ sequence: result.sequence })),
+              Effect.mapError((cause) => {
+                const detail = userFacingDispatchErrorMessage(cause);
+                return new OrchestrationV2DispatchCommandError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                  message: detail ?? "Failed to dispatch orchestration V2 command",
+                  ...(detail === undefined ? {} : { detail }),
+                  cause,
+                });
+              }),
+            ),
             {
               "rpc.aggregate": "orchestrationV2",
               "orchestration_v2.command_id": command.commandId,
@@ -3085,56 +3098,6 @@ const makeWsRpcLayer = (
           observeRpcStream(WS_METHODS.subscribePreviewEvents, previewManager.events, {
             "rpc.aggregate": "preview",
           }),
-        [WS_METHODS.subscribeArtifactChanges]: (input) =>
-          observeRpcStreamEffect(
-            WS_METHODS.subscribeArtifactChanges,
-            projectService.getById(input.projectId).pipe(
-              Effect.flatMap(
-                Option.match({
-                  onNone: () =>
-                    Effect.fail(
-                      new ArtifactWatchError({
-                        projectId: input.projectId,
-                        detail: `Project ${input.projectId} is not available.`,
-                      }),
-                    ),
-                  onSome: () =>
-                    Effect.succeed(
-                      Stream.merge(
-                        Stream.make({ projectId: input.projectId, revision: 0 }),
-                        artifactWorkspace.watch(input.projectId).pipe(
-                          Stream.mapError(
-                            (cause) =>
-                              new ArtifactWatchError({
-                                projectId: input.projectId,
-                                detail: cause.message,
-                              }),
-                          ),
-                          Stream.mapAccum(
-                            () => 0,
-                            (revision) => {
-                              const nextRevision = revision + 1;
-                              return [
-                                nextRevision,
-                                [{ projectId: input.projectId, revision: nextRevision }],
-                              ] as const;
-                            },
-                          ),
-                        ),
-                      ),
-                    ),
-                }),
-              ),
-              Effect.mapError(
-                (cause) =>
-                  new ArtifactWatchError({
-                    projectId: input.projectId,
-                    detail: cause.message,
-                  }),
-              ),
-            ),
-            { "rpc.aggregate": "artifacts" },
-          ),
         [WS_METHODS.deviceConfigure]: (input) =>
           observeRpcEffect(WS_METHODS.deviceConfigure, deviceService.configure(input), {
             "rpc.aggregate": "device",
@@ -3173,6 +3136,7 @@ const makeWsRpcLayer = (
             DeviceService.stateStream(deviceService),
             { "rpc.aggregate": "device" },
           ),
+        ...artifactRpcHandlers,
         [WS_METHODS.subscribeDiscoveredLocalServers]: (input) =>
           observeRpcStream(
             WS_METHODS.subscribeDiscoveredLocalServers,
@@ -3381,6 +3345,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const artifactWorkspace = yield* ArtifactWorkspace.ArtifactWorkspace;
+    const j5CrewSeatArchiveGuard = yield* makeCrewSeatArchiveGuard;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const sql = yield* SqlClient.SqlClient;
@@ -3430,6 +3395,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               clientAnalyticsProps,
               previewAutomationBroker,
               artifactWorkspace,
+              j5CrewSeatArchiveGuard,
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),

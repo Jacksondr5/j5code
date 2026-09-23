@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "@effect/vitest";
 
-import { ThreadCardIdentity } from "./ThreadCardIdentity";
+import { ThreadCardIdentity, ThreadCardIdentityView } from "./ThreadCardIdentity";
 
 it("leads a registered thread card with its Registrar Squadron instead of its folder", () => {
   const markup = renderToStaticMarkup(
@@ -55,4 +55,36 @@ it("keeps two Squadrons over one folder distinguishable", () => {
   expect(bravo).toContain("Bravo");
   expect(alpha).not.toContain("Shared folder");
   expect(bravo).not.toContain("Shared folder");
+});
+
+it("adds a seat chip for a crew member and the anchor mark for its Captain", () => {
+  const home = { kind: "known" as const, squadron: { id: "squadron:alpha", name: "Alpha" } };
+  const live = { crewInstanceId: "crew:1", crewName: "Review Pair" };
+  const member = renderToStaticMarkup(
+    <ThreadCardIdentityView
+      home={home}
+      fallbackFolder={null}
+      membership={{ kind: "member", seat: "builder", crew: live }}
+    />,
+  );
+  expect(member).toContain("Alpha");
+  expect(member).toContain("Review Pair · builder");
+  expect(member).toContain('data-testid="thread-card-crew-chip"');
+
+  const captain = renderToStaticMarkup(
+    <ThreadCardIdentityView
+      home={home}
+      fallbackFolder={null}
+      membership={{ kind: "captain", crews: [live] }}
+    />,
+  );
+  expect(captain).toContain('aria-label="Captain. Commands Review Pair"');
+  expect(captain).not.toContain(">Captain<");
+  expect(captain).toContain("Commands Review Pair");
+
+  const plain = renderToStaticMarkup(
+    <ThreadCardIdentity home={home} fallbackFolder="Shared folder" />,
+  );
+  expect(plain).toContain("Alpha");
+  expect(plain).not.toContain("thread-card-crew-chip");
 });

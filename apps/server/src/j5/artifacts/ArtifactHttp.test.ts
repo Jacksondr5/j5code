@@ -1,6 +1,8 @@
 import {
   ARTIFACT_LIST_PATH,
   ARTIFACT_READ_PATH,
+  ARTIFACT_DELETE_PATH,
+  AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthSessionId,
   ProjectId,
@@ -13,20 +15,25 @@ import { HttpRouter, HttpServer } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
+import { AgentHandoffArtifactDelete } from "../agents/agentHandoffArtifactDelete.ts";
 import { artifactHttpRouteLayer } from "./ArtifactHttp.ts";
 import { ArtifactWorkspace } from "./ArtifactWorkspace.ts";
 
-it("reads artifacts through the authenticated project boundary", async () => {
+it("reads and deletees artifacts through the authenticated project boundary", async () => {
   const projectId = ProjectId.make("project:artifacts-http");
-  let authorized = false;
+  let scopes: ReadonlyArray<
+    typeof AuthOrchestrationReadScope | typeof AuthOrchestrationOperateScope
+  > = [];
+  const deleted: Array<string> = [];
+  const reconciled: Array<string> = [];
   const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
     authenticateHttpRequest: () =>
-      authorized
+      scopes.length > 0
         ? Effect.succeed({
             sessionId: AuthSessionId.make("auth-session:artifacts"),
             subject: "artifacts-test",
             method: "bearer-access-token" as const,
-            scopes: [AuthOrchestrationReadScope],
+            scopes,
           })
         : Effect.fail(new EnvironmentAuth.ServerAuthMissingCredentialError({})),
   });
@@ -45,10 +52,19 @@ it("reads artifacts through the authenticated project boundary", async () => {
         encoding: "utf8" as const,
         content: "# Plan\n",
       }),
+    delete: ({ relativePath }) =>
+      Effect.sync(() => {
+        deleted.push(relativePath);
+        return "plan.md";
+      }),
+  });
+  const handoffDelete = Layer.mock(AgentHandoffArtifactDelete)({
+    reconcile: ({ path }) => Effect.sync(() => void reconciled.push(path)),
   });
   const routes = artifactHttpRouteLayer.pipe(
     Layer.provide(projects),
     Layer.provide(artifacts),
+    Layer.provide(handoffDelete),
     Layer.provideMerge(auth),
     Layer.provide(HttpServer.layerServices),
   );
@@ -64,7 +80,7 @@ it("reads artifacts through the authenticated project boundary", async () => {
 
   try {
     assert.equal((await post(ARTIFACT_LIST_PATH, { projectId })).status, 401);
-    authorized = true;
+    scopes = [AuthOrchestrationReadScope];
 
     const list = await post(ARTIFACT_LIST_PATH, { projectId });
     assert.equal(list.status, 200);
@@ -80,6 +96,16 @@ it("reads artifacts through the authenticated project boundary", async () => {
       encoding: "utf8",
       content: "# Plan\n",
     });
+
+    assert.equal((await post(ARTIFACT_DELETE_PATH, { projectId, path: "plan.md" })).status, 403);
+    assert.deepStrictEqual(deleted, []);
+
+    scopes = [AuthOrchestrationReadScope, AuthOrchestrationOperateScope];
+    const deletion = await post(ARTIFACT_DELETE_PATH, { projectId, path: "./plan.md" });
+    assert.equal(deletion.status, 200);
+    assert.deepStrictEqual(await deletion.json(), { deleted: true });
+    assert.deepStrictEqual(deleted, ["./plan.md"]);
+    assert.deepStrictEqual(reconciled, ["plan.md"]);
   } finally {
     await dispose();
   }

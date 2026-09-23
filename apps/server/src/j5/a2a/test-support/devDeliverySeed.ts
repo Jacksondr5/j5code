@@ -67,6 +67,7 @@ import { A2AHumanInbox, layer as humanInboxLayer } from "../HumanInboxService.ts
 import { ensureLocalOperatorHumanPerson } from "../HumanPersonRegistry.ts";
 import { A2ALedger, layer as ledgerLayer } from "../LedgerService.ts";
 import { A2ASendService, layer as sendServiceLayer } from "../SendService.ts";
+import { layer as agentCrewInstanceLayer } from "../AgentCrewInstanceService.ts";
 import { A2ASilenceDetector, manualLayer as silenceDetectorLayer } from "../SilenceDetector.ts";
 import {
   CommCommandId,
@@ -323,7 +324,10 @@ const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
     Layer.provideMerge(database),
   );
   const deliveryWorker = deliveryWorkerLayer.pipe(Layer.provideMerge(deliveryTransportLayer));
-  const silenceDetector = silenceDetectorLayer.pipe(Layer.provideMerge(deliveryWorker));
+  const silenceDetector = silenceDetectorLayer.pipe(
+    Layer.provideMerge(deliveryWorker),
+    Layer.provideMerge(agentCrewInstanceLayer),
+  );
   const a2a = Layer.mergeAll(
     sendServiceLayer,
     deliveryWorker,

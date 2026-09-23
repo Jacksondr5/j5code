@@ -30,11 +30,11 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { AgentRoutePolicyFields } from "./AgentDefinitionFields";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 
-const INSTRUCTIONS_PLACEHOLDER = `# Who this agent is
+const INSTRUCTIONS_PLACEHOLDER = `# Who this persona is
 
 Describe its identity, what it looks for, and how it works.`;
 
-/** Author a personal agent; it is stored as an imported definition of this environment. */
+/** Author a personal persona; it is stored as an imported definition of this environment. */
 export function AgentCreateDialog(props: {
   environmentId: EnvironmentId;
   /** Prefill from an existing agent (Duplicate); the ID is treated as user-chosen. */
@@ -119,10 +119,10 @@ export function AgentCreateDialog(props: {
           }}
         >
           <DialogHeader>
-            <DialogTitle>{props.initial ? "Duplicate agent" : "Create agent"}</DialogTitle>
+            <DialogTitle>{props.initial ? "Duplicate persona" : "Create persona"}</DialogTitle>
             <DialogDescription>
-              A personal agent for this environment. It joins the library like an import, so you can
-              edit, switch off, or remove it later.
+              A personal persona for this environment. It joins the library like an import, so you
+              can edit, switch off, or remove it later.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="grid gap-4">
@@ -155,7 +155,7 @@ export function AgentCreateDialog(props: {
               <span className="text-xs text-muted-foreground">
                 {draft.id !== "" && idError !== null
                   ? idError
-                  : "Stable identifier used in @agent: mentions. Lowercase letters, digits, hyphens."}
+                  : "Stable identifier used in @persona: mentions. Lowercase letters, digits, hyphens."}
               </span>
             </label>
             <label className="grid gap-1.5 text-sm">
@@ -164,7 +164,7 @@ export function AgentCreateDialog(props: {
                 value={draft.description}
                 required
                 disabled={saving}
-                placeholder="One sentence on what this agent is for."
+                placeholder="One sentence on what this persona is for."
                 onChange={(event) => setDraft({ ...draft, description: event.target.value })}
               />
             </label>
@@ -206,7 +206,7 @@ export function AgentCreateDialog(props: {
               Cancel
             </Button>
             <Button type="submit" disabled={!ready}>
-              {saving ? "Creating…" : "Create agent"}
+              {saving ? "Creating…" : "Create persona"}
             </Button>
           </DialogFooter>
         </form>

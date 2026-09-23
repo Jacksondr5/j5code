@@ -60,7 +60,12 @@ export function unavailableAgentPersonaReason(
     : "routes-unavailable";
 }
 
-function unavailableReason(
+/** Codex advertises reasoning as `reasoningEffort`; every other supported driver uses `effort`. */
+export const agentPersonaReasoningOptionId = (driver: AgentModelTarget["driver"]) =>
+  driver === "codex" ? "reasoningEffort" : "effort";
+
+/** Why one provider instance cannot serve one declared route target right now. */
+export function agentPersonaTargetUnavailableReason(
   provider: ServerProvider,
   target: AgentModelTarget,
 ): AgentPersonaRouteFailureCode | undefined {
@@ -72,7 +77,7 @@ function unavailableReason(
   const model = provider.models.find((candidate) => candidate.slug === target.model);
   if (model === undefined) return "model-not-advertised";
 
-  const optionId = target.driver === "codex" ? "reasoningEffort" : "effort";
+  const optionId = agentPersonaReasoningOptionId(target.driver);
   const descriptor = model.capabilities?.optionDescriptors?.find(
     (candidate) => candidate.id === optionId,
   );
@@ -131,13 +136,13 @@ export function resolveAgentPersonaRoute(input: {
     }
 
     for (const provider of candidates) {
-      const reason = unavailableReason(provider, target);
+      const reason = agentPersonaTargetUnavailableReason(provider, target);
       if (reason !== undefined) {
         failures.push({ code: reason, instanceId: provider.instanceId });
         continue;
       }
 
-      const optionId = target.driver === "codex" ? "reasoningEffort" : "effort";
+      const optionId = agentPersonaReasoningOptionId(target.driver);
       return {
         status: "available",
         personaId: definition.id,

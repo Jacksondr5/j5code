@@ -66,6 +66,10 @@ import {
   resolveCodexRollbackTurnCount,
 } from "./CodexAdapterV2.ts";
 import { makeReplayServerConfig } from "./CodexAdapterV2.testkit.ts";
+import {
+  J5_CODEX_T3_MCP_SERVER_CONFIG,
+  J5_CODEX_COORDINATION_MCP_SERVER_CONFIG,
+} from "../../j5/a2a/mcp/codexToolApproval.ts";
 
 const encodeUnknownJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -586,13 +590,33 @@ describe("CodexAdapterV2 process spawning", () => {
                 http_headers: {
                   Authorization: "Bearer secret-codex-token",
                 },
-                // Full access defaults to approval policy never, so the J5 handoff write is pre-approved.
-                tools: { write_artifact: { approval_mode: "approve" } },
+                ...J5_CODEX_T3_MCP_SERVER_CONFIG,
               },
             },
           },
         },
       );
+      // Supervised custom seats still communicate and file roster requests without a second
+      // provider approval. Other mutations retain the runtime's ordinary approval policy.
+      for (const runtimeMode of ["approval-required", "auto-accept-edits", "auto"] as const) {
+        assert.deepEqual(
+          codexThreadRuntimeParams({
+            threadId,
+            runtimePolicy: { runtimeMode, interactionMode: "default", cwd: null },
+          }),
+          {
+            config: {
+              mcp_servers: {
+                "t3-code": {
+                  url: "http://127.0.0.1:43123/mcp",
+                  http_headers: { Authorization: "Bearer secret-codex-token" },
+                  ...J5_CODEX_COORDINATION_MCP_SERVER_CONFIG,
+                },
+              },
+            },
+          },
+        );
+      }
     } finally {
       McpProviderSession.clearMcpProviderSession(threadId);
     }

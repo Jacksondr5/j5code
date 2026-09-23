@@ -14,6 +14,14 @@ import {
 } from "./agentPersonaProviderPolicy.ts";
 import { agentPersonaArtifactInstructions } from "./agentPersonaArtifacts.ts";
 
+/**
+ * Read-only personas run with shell approvals disabled ("approval policy never"). Models have read
+ * that as "no human can approve anything" and refused gated platform work, so the runtime says
+ * plainly that platform gates are resolved in the app, not by the sandbox.
+ */
+const PLATFORM_TOOLS_NOTE =
+  "Platform tools on the t3-code MCP server stay available under every sandbox and approval policy. Their human gates (for example propose_crew) are resolved by the user in the app, not by a shell approval, so an approval policy of never does not block them.";
+
 /** Persona instructions express behavior; the translated sandbox supplies the actual runtime boundary. */
 export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime")(function* (
   thread: Pick<OrchestrationV2AppThread, "agentPersonaAssignment" | "runtimeMode"> &
@@ -29,10 +37,11 @@ export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime"
     const definition = yield* library.readSnapshot(assignment);
     if (
       !definition.authority.allowedPolicies.includes(assignment.authorityPolicy) ||
-      !providerCanEnforceAgentPersonaAuthority(
-        assignment.resolvedDriver,
-        assignment.authorityPolicy,
-      )
+      (assignment.runtimeModeOverride === undefined &&
+        !providerCanEnforceAgentPersonaAuthority(
+          assignment.resolvedDriver,
+          assignment.authorityPolicy,
+        ))
     ) {
       return yield* new AgentPersonaLibraryError({
         message: "The assigned persona runtime permissions are unsupported.",
@@ -45,16 +54,18 @@ export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime"
         : "Never commit or push."
     }\n${rules.mayWritePullRequest ? "Open or update pull requests only within the authorized scope." : "Do not mutate pull requests."}\nNever merge a pull request.\n${
       assignment.authorityPolicy === "critic-fix"
-        ? "Edit only to address the requested review findings."
+        ? "Edit only to address the requested review findings.\n"
         : ""
-    }`;
+    }${PLATFORM_TOOLS_NOTE}`;
     // Declared handoffs bind to the shared artifacts system; the section names the exact path.
     const artifactSection =
       thread.id === undefined ? undefined : agentPersonaArtifactInstructions(definition, thread.id);
     if (artifactSection !== undefined) instructions = `${instructions}\n\n${artifactSection}`;
   }
   return {
-    ...translateAgentPersonaProviderPolicy(assignment.authorityPolicy, assignment.resolvedDriver),
+    ...(assignment.runtimeModeOverride === undefined
+      ? translateAgentPersonaProviderPolicy(assignment.authorityPolicy, assignment.resolvedDriver)
+      : { runtimeMode: assignment.runtimeModeOverride }),
     ...(instructions === undefined ? {} : { agentPersonaInstructions: instructions }),
   };
 });

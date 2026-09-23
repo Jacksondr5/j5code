@@ -18,6 +18,7 @@ import {
 } from "@t3tools/shared/usageLimits";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
 import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
+import { CrewRosterGate } from "../j5/crew/CrewRosterGate";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import * as Schema from "effect/Schema";
 import { Minimize2Icon } from "lucide-react";
@@ -9476,6 +9477,10 @@ export default function ChatView(props: ChatViewProps) {
                               />
                             </div>
                           ) : null}
+                          <CrewRosterGate
+                            environmentId={environmentId}
+                            threadId={isServerThread ? activeThreadId : null}
+                          />
                           <ChatComposer
                             composerRef={composerRef}
                             composerDraftTarget={composerDraftTarget}

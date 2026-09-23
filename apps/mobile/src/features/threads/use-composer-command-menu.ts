@@ -390,7 +390,7 @@ export function useComposerCommandMenu({
 
     if (trigger.kind === "path") {
       return [
-        // J5: saved agents whose id or name starts with the typed text lead the file results.
+        // J5: personas whose id or name starts with the typed text lead the file results.
         ...agentPicker.items,
         ...pathSearch.entries.map((entry) => {
           const parts = entry.path.split("/");

@@ -1,6 +1,20 @@
 import * as Layer from "effect/Layer";
 
+import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.ts";
+import { layer as agentCrewInstanceLayer } from "./AgentCrewInstanceService.ts";
 import { layer as archiveFactsLayer, placementFactsLayer } from "./ArchiveFactsService.ts";
+import { layer as archiveAgentLayer } from "./ArchiveAgentService.ts";
+import { layer as archiveCrewLayer } from "./ArchiveCrewService.ts";
+import { layer as agentCrewProposalLayer } from "./AgentCrewProposalService.ts";
+import { manualLayer as crewLaunchReporterLayer } from "./CrewLaunchReporter.ts";
+import { layer as crewLaunchLayer } from "./CrewLaunchService.ts";
+import {
+  bootSweepLayer as crewProposalBootSweepLayer,
+  layer as crewProposalLayer,
+} from "./CrewProposalService.ts";
+import { layer as crewSeatFinishNotifierLayer } from "./CrewSeatFinishNotifier.ts";
+import { layer as captainArchiveCascadeLayer } from "./CrewCaptainArchiveCascade.ts";
+import { layer as crewStopLayer } from "./CrewStopService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import {
@@ -53,8 +67,10 @@ export const makeJ5A2AAuxiliaryLayer = (
   const deliveryWorkerProvided = deliveryWorkerLayer.pipe(
     Layer.provideMerge(deliveryTransportProvided),
   );
+  // The detector reads Crew membership to stay quiet about a seat failure its Captain hears elsewhere.
   const silenceDetectorProvided = silenceDetectorLayer.pipe(
     Layer.provideMerge(deliveryWorkerProvided),
+    Layer.provideMerge(agentCrewInstanceLayer),
   );
   const lifecycleServiceProvided = lifecycleServiceLayer.pipe(
     Layer.provideMerge(deliveryWorkerProvided),
@@ -67,6 +83,42 @@ export const makeJ5A2AAuxiliaryLayer = (
   // queue layer is the same instance server.ts provides to that observer.
   const agentHandoffNudgeWorkerProvided = agentHandoffNudgeWorkerLayer.pipe(
     Layer.provide(agentHandoffNudgeQueueLayer),
+  );
+  const archiveAgentProvided = archiveAgentLayer.pipe(
+    Layer.provideMerge(lifecycleServiceProvided),
+    Layer.provideMerge(archiveFactsProvided),
+  );
+  const archiveCrewProvided = archiveCrewLayer.pipe(
+    Layer.provideMerge(archiveAgentProvided),
+    Layer.provideMerge(agentCrewInstanceLayer),
+  );
+  const crewLaunchProvided = crewLaunchLayer.pipe(Layer.provideMerge(agentCrewInstanceLayer));
+  // The report watches the seats an approval launched and tells the Captain how they started; the
+  // finish notifier's stream feeds it, so one stream serves every Crew reaction.
+  const crewLaunchReporterProvided = crewLaunchReporterLayer.pipe(
+    Layer.provideMerge(agentCrewProposalLayer),
+    Layer.provideMerge(agentCrewInstanceLayer),
+  );
+  const crewStopProvided = crewStopLayer.pipe(Layer.provideMerge(agentCrewInstanceLayer));
+  const crewProposalProvided = crewProposalLayer.pipe(
+    Layer.provideMerge(crewLaunchProvided),
+    Layer.provideMerge(crewLaunchReporterProvided),
+  );
+  // Same layer object, so the sweep runs against the one gate instance the routes use.
+  const crewProposalBootSweepProvided = crewProposalBootSweepLayer.pipe(
+    Layer.provide(crewProposalProvided),
+  );
+  // A person's archive of a Captain retires its Crews from the same event stream the notifier reads.
+  const captainArchiveCascadeProvided = captainArchiveCascadeLayer.pipe(
+    Layer.provideMerge(archiveCrewProvided),
+    Layer.provideMerge(agentCrewInstanceLayer),
+  );
+  // The finish notifier tells a Captain when a seat's handoff file appears, so it reads the workspace.
+  const crewSeatFinishNotifierProvided = crewSeatFinishNotifierLayer.pipe(
+    Layer.provideMerge(crewLaunchReporterProvided),
+    Layer.provideMerge(captainArchiveCascadeProvided),
+    Layer.provideMerge(agentCrewInstanceLayer),
+    Layer.provide(artifactWorkspaceLayer),
   );
   const runtimeWithoutClientReads = Layer.mergeAll(
     agentHandoffNudgeWorkerProvided,
@@ -84,6 +136,12 @@ export const makeJ5A2AAuxiliaryLayer = (
     archiveFactsProvided,
     threadHomesServiceLayer,
     squadronJoinProvided,
+    agentCrewInstanceLayer,
+    archiveCrewProvided,
+    crewProposalProvided,
+    crewProposalBootSweepProvided,
+    crewStopProvided,
+    crewSeatFinishNotifierProvided,
   );
   return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };

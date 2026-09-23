@@ -13,6 +13,9 @@ describe("T3 orchestration provider instructions", () => {
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "your provider's native Subagent mechanism");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Use platform `spawn_agent`");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "what should come back in that brief");
+    // Crews are the third shape of help; without this bullet an agent asked for a crew makes subagents.
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "A Crew is a group of Peer Agents");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Use `propose_crew`");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Use `list_participants`");
     assert.include(
       T3_CODE_ORCHESTRATION_INSTRUCTIONS,
@@ -21,8 +24,9 @@ describe("T3 orchestration provider instructions", () => {
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "expect_reply=true");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "open an Exchange");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "continue with other work");
-    // J5 re-declares delegate_task for saved agents; only its saved-agent use is advertised.
-    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`delegate_task` with agent=ID");
+    // J5 re-declares delegate_task for personas; only its persona use is advertised.
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`delegate_task` with persona=ID");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`@persona:ID`");
     for (const excluded of [
       "task_status",
       "task_cancel",
@@ -41,6 +45,41 @@ describe("T3 orchestration provider instructions", () => {
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "structured object, never as JSON text");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, '"everyMs":3600000');
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "bindToCurrentThread=false");
+  });
+
+  it("creates mixed crews from chat and keeps coordination independent of approvals and artifacts", () => {
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "asks for a crew in ordinary chat");
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "saved personas from `list_personas` with custom seats",
+    );
+    assert.notInclude(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`list_agents`");
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "Custom seats inherit your configuration by default",
+    );
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "`model_selection` (instanceId, model, options)",
+    );
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`runtime_mode`");
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "Saved personas use their own configuration",
+    );
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "resolved provider, model, reasoning, and access",
+    );
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Captains of other crews");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Do not wait for an artifact");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`request_crew_member`");
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "reason naming the concern and needed responsibility",
+    );
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "while that request is pending");
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "otherwise they queue for its next turn");
   });
 
   it("routes durable planning outputs into artifacts and excludes working files", () => {

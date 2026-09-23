@@ -3,12 +3,25 @@ import {
   AssignImportedThreadsResponse,
   type AssignImportedThreadsRequest,
   CreateSquadronResponse,
+  CrewMembershipsResponse,
+  CrewProposalResolveResponse,
+  CrewProposalPreviewResponse,
+  CrewProposalsResponse,
+  CrewArchiveResponse,
+  CrewStopResponse,
+  FleetResponse,
   HumanInboxResponse,
   J5_API_PATHS,
   OpenInboxCountResponse,
+  SpawnedChildrenResponse,
   SquadronListResponse,
   ThreadHomesResponse,
   type AnswerHumanExchangeRequest,
+  type CrewProposalResolveRequest,
+  type CrewProposalPreviewRequest,
+  type CrewArchiveRequest,
+  type CrewStopRequest,
+  type FleetReadRequest,
 } from "@t3tools/contracts/j5";
 import type { ProjectId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -177,4 +190,91 @@ export const answerHumanExchange = Effect.fn("j5.http.answerHumanExchange")(func
   );
   const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
   return yield* HttpClientResponse.schemaBodyJson(AnswerHumanExchangeResponse)(response);
+});
+
+export const listCrewProposals = Effect.fn("j5.http.listCrewProposals")(function* (
+  prepared: PreparedConnection,
+) {
+  const request = yield* HttpClientRequest.post(J5_API_PATHS.crewProposals).pipe(
+    HttpClientRequest.bodyJson({}),
+  );
+  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
+  return (yield* HttpClientResponse.schemaBodyJson(CrewProposalsResponse)(response)).proposals;
+});
+
+export const previewCrewProposal = Effect.fn("j5.http.previewCrewProposal")(function* (
+  prepared: PreparedConnection,
+  input: CrewProposalPreviewRequest,
+) {
+  const request = yield* HttpClientRequest.post(J5_API_PATHS.crewProposalPreview).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(CrewProposalPreviewResponse)(response);
+});
+
+export const resolveCrewProposal = Effect.fn("j5.http.resolveCrewProposal")(function* (
+  prepared: PreparedConnection,
+  input: CrewProposalResolveRequest,
+) {
+  const request = yield* HttpClientRequest.post(J5_API_PATHS.crewProposalResolve).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(CrewProposalResolveResponse)(response);
+});
+
+export const readFleet = Effect.fn("j5.http.readFleet")(function* (
+  prepared: PreparedConnection,
+  input: FleetReadRequest = {},
+) {
+  const request = yield* HttpClientRequest.post(J5_API_PATHS.fleet).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(FleetResponse)(response);
+});
+
+export const listCrewMemberships = Effect.fn("j5.http.listCrewMemberships")(function* (
+  prepared: PreparedConnection,
+  threadIds: ReadonlyArray<ThreadId>,
+) {
+  const request = yield* HttpClientRequest.post(J5_API_PATHS.crewMemberships).pipe(
+    HttpClientRequest.bodyJson({ threadIds: [...new Set(threadIds)] }),
+  );
+  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
+  return (yield* HttpClientResponse.schemaBodyJson(CrewMembershipsResponse)(response)).entries;
+});
+
+export const listSpawnedChildren = Effect.fn("j5.http.listSpawnedChildren")(function* (
+  prepared: PreparedConnection,
+  threadIds: ReadonlyArray<ThreadId>,
+) {
+  const request = yield* HttpClientRequest.post(J5_API_PATHS.spawnedChildren).pipe(
+    HttpClientRequest.bodyJson({ threadIds: [...new Set(threadIds)] }),
+  );
+  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
+  return (yield* HttpClientResponse.schemaBodyJson(SpawnedChildrenResponse)(response)).entries;
+});
+
+export const archiveCrew = Effect.fn("j5.http.archiveCrew")(function* (
+  prepared: PreparedConnection,
+  input: CrewArchiveRequest,
+) {
+  const request = yield* HttpClientRequest.post(J5_API_PATHS.crewArchive).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(CrewArchiveResponse)(response);
+});
+
+export const stopCrew = Effect.fn("j5.http.stopCrew")(function* (
+  prepared: PreparedConnection,
+  input: CrewStopRequest,
+) {
+  const request = yield* HttpClientRequest.post(J5_API_PATHS.crewStop).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(CrewStopResponse)(response);
 });

@@ -106,7 +106,7 @@ export function AgentCreateModal(props: {
         >
           <View className="flex-row items-center justify-between px-5 py-3">
             <Text className="text-xl font-t3-semibold">
-              {props.initial ? "Duplicate agent" : "Create agent"}
+              {props.initial ? "Duplicate persona" : "Create persona"}
             </Text>
             <Pressable
               accessibilityRole="button"
@@ -122,8 +122,8 @@ export function AgentCreateModal(props: {
             contentContainerClassName="gap-4 px-5 pb-6"
           >
             <Text className="text-sm text-foreground-muted">
-              A personal agent for this environment. It joins the library like an import, so you can
-              edit, switch off, or remove it later.
+              A personal persona for this environment. It joins the library like an import, so you
+              can edit, switch off, or remove it later.
             </Text>
             <View className="gap-2">
               <Text>Name</Text>
@@ -153,7 +153,7 @@ export function AgentCreateModal(props: {
               <Text className="text-xs text-foreground-muted">
                 {draft.id !== "" && idError !== null
                   ? idError
-                  : "Stable identifier used in @agent: mentions. Lowercase letters, digits, hyphens."}
+                  : "Stable identifier used in @persona: mentions. Lowercase letters, digits, hyphens."}
               </Text>
             </View>
             <View className="gap-2">
@@ -161,7 +161,7 @@ export function AgentCreateModal(props: {
               <TextInput
                 accessibilityLabel="Description"
                 multiline
-                placeholder="One sentence on what this agent is for."
+                placeholder="One sentence on what this persona is for."
                 value={draft.description}
                 editable={!saving}
                 onChangeText={(description) => setDraft({ ...draft, description })}
@@ -175,7 +175,7 @@ export function AgentCreateModal(props: {
                 autoCapitalize="none"
                 autoCorrect={false}
                 style={{ minHeight: 160 }}
-                placeholder="# Who this agent is"
+                placeholder="# Who this persona is"
                 value={draft.instructions}
                 editable={!saving}
                 onChangeText={(instructions) => setDraft({ ...draft, instructions })}
@@ -187,7 +187,7 @@ export function AgentCreateModal(props: {
             </View>
             {modelRoute === null ? (
               <Text className="text-sm text-foreground-muted">
-                Sign in to Codex or Claude on this environment to choose the agent's models.
+                Sign in to Codex or Claude on this environment to choose the persona's models.
               </Text>
             ) : (
               <AgentRoutePolicyFields
@@ -210,7 +210,7 @@ export function AgentCreateModal(props: {
               onPress={() => void submit()}
             >
               <Text className="font-t3-semibold text-primary-foreground">
-                {saving ? "Creating…" : "Create agent"}
+                {saving ? "Creating…" : "Create persona"}
               </Text>
             </Pressable>
           </ScrollView>

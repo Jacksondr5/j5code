@@ -70,29 +70,36 @@ export function validateAgentPersonaAssignment(
   assignment: OrchestrationV2AgentPersonaAssignment,
   definition: AgentPersonaDefinition = getBuiltInAgentPersona(assignment.personaId),
 ): string | undefined {
+  if (assignment.definitionVersion !== definition.version) {
+    return "Persona assignment uses an unknown definition version.";
+  }
+  if (
+    !definition.authority.allowedPolicies.some((policy) => policy === assignment.authorityPolicy)
+  ) {
+    return "Persona assignment uses an authority policy outside its definition.";
+  }
+  if (
+    assignment.runtimeModeOverride === undefined &&
+    !providerCanEnforceAgentPersonaAuthority(assignment.resolvedDriver, assignment.authorityPolicy)
+  ) {
+    return "Persona assignment targets a provider that cannot enforce its authority policy.";
+  }
+  if (assignment.resolvedRoute === "override") {
+    return assignment.definitionDigest === undefined
+      ? "Human runtime overrides require a saved persona snapshot."
+      : undefined;
+  }
   const target = definition.modelRoute[assignment.resolvedRoute === "primary" ? 0 : 1];
   const optionId = target.driver === "codex" ? "reasoningEffort" : "effort";
   const selectedEffort = assignment.resolvedModelSelection.options?.find(
     (option) => option.id === optionId,
   )?.value;
-
-  if (assignment.definitionVersion !== definition.version) {
-    return "Agent persona assignment uses an unknown definition version.";
-  }
-  if (
-    !definition.authority.allowedPolicies.some((policy) => policy === assignment.authorityPolicy)
-  ) {
-    return "Agent persona assignment uses an authority policy outside its definition.";
-  }
-  if (!providerCanEnforceAgentPersonaAuthority(target.driver, assignment.authorityPolicy)) {
-    return "Agent persona assignment targets a provider that cannot enforce its authority policy.";
-  }
   if (
     assignment.resolvedDriver !== target.driver ||
     assignment.resolvedModelSelection.model !== target.model ||
     selectedEffort !== target.reasoningEffort
   ) {
-    return "Agent persona assignment does not match its declared model route.";
+    return "Persona assignment does not match its declared model route.";
   }
   return undefined;
 }

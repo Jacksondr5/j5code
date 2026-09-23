@@ -8,6 +8,8 @@ import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
 import { newCommandId, readWritableThread, unavailable } from "../../../mcp/threadAccess.ts";
 import { ThreadToolkit } from "../../../mcp/toolkits/thread/tools.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
+import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
+import { makeCrewSeatArchiveGuard } from "../crewSeatArchiveGuard.ts";
 import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
 import { J5ThreadLineageError } from "../ThreadLineage.ts";
 
@@ -33,10 +35,11 @@ export const J5AdaptedThreadToolkit = Toolkit.make(
   }).annotate(Tool.Destructive, true),
   Tool.make("t3_thread_organize", {
     ...common,
+    dependencies: [...common.dependencies, AgentCrewInstanceService],
     parameters: ThreadToolkit.tools.t3_thread_organize.parametersSchema,
     success: ThreadToolkit.tools.t3_thread_organize.successSchema,
     description:
-      "Pin, snooze, settle, archive, restore, or mark a thread unread in the calling project. Omit threadId for this thread. Archive hides the agent and closes its Exchanges; unarchive restores visibility without reopening Exchanges. Archiving another registered agent requires the same Squadron. Archive does not interrupt a running turn. snooze requires snoozedUntil.",
+      "Pin, snooze, settle, archive, restore, or mark a thread unread in the calling project. Omit threadId for this thread. Archive hides the agent and closes its Exchanges; unarchive restores visibility without reopening Exchanges. Archiving another registered agent requires the same Squadron. Crew seats cannot be archived individually; use archive_crew or the Fleet page. Captain archive retains the crew cascade. Ordinary archive does not interrupt a running turn. snooze requires snoozedUntil.",
   }).annotate(Tool.Destructive, true),
 );
 
@@ -129,6 +132,16 @@ export const J5AdaptedThreadHandlersLive = J5AdaptedThreadToolkit.toLayer({
         default:
           command = { ...common, type: `thread.${input.action}` };
       }
+      const guard = yield* makeCrewSeatArchiveGuard;
+      yield* guard(command).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestratorMcpFailure({
+              code: "capability_denied",
+              message: cause.message,
+            }),
+        ),
+      );
       const result = yield* threads.dispatch(command).pipe(Effect.mapError(unavailable));
       return { sequence: result.sequence };
     }),

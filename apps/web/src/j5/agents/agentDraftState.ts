@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * Which saved agent a new-task draft should launch as, keyed by the route's thread key.
+ * Which persona a new-task draft should launch as, keyed by the route's thread key.
  * Session-local like the squadron draft carrier: the server resolves and pins the real
  * assignment at first send, so nothing here needs to persist.
  */

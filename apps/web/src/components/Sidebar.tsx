@@ -200,6 +200,7 @@ import {
   useThreadHomesScopeReadState,
   type ThreadHome,
 } from "../j5/squadron/ThreadHomesClient";
+import { SpawnedChildren } from "../j5/squadron/SpawnedChildren";
 import { ThreadCardIdentity } from "../j5/squadron/ThreadCardIdentity";
 import {
   createSidebarCollisionDetection,
@@ -1837,6 +1838,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 data-testid={`thread-card-identity-${thread.id}`}
               >
                 <ThreadCardIdentity
+                  threadId={thread.id}
+                  environmentId={thread.environmentId}
                   home={props.threadHome}
                   fallbackFolder={props.projectDisplayName}
                   agentPersonaAssignment={thread.agentPersonaAssignment}
@@ -2025,6 +2028,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         </TooltipTrigger>
         {detailsTooltip}
       </Tooltip>
+      <SpawnedChildren thread={thread} />
     </li>
   );
 });

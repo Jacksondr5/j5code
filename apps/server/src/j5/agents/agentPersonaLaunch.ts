@@ -2,7 +2,53 @@ import type { OrchestrationV2AgentPersonaRequest, ServerProvider } from "@t3tool
 import * as Effect from "effect/Effect";
 import { buildAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
-import { resolveAgentPersonaRoute, unavailableAgentPersonaReason } from "./agentPersonaRouting.ts";
+import {
+  resolveAgentPersonaRoute,
+  unavailableAgentPersonaReason,
+  type AgentPersonaRouteAttempt,
+} from "./agentPersonaRouting.ts";
+
+const routeFailurePhrase = (
+  target: AgentPersonaRouteAttempt["target"],
+  failure: AgentPersonaRouteAttempt["failures"][number],
+) => {
+  switch (failure.code) {
+    case "provider-not-configured":
+      return `no ${target.driver} provider is configured`;
+    case "provider-unavailable":
+      return `${target.driver} is unavailable`;
+    case "provider-disabled":
+      return `${target.driver} is disabled`;
+    case "provider-not-installed":
+      return `${target.driver} is not installed`;
+    case "provider-error":
+      return `${target.driver} reports an error`;
+    case "provider-unauthenticated":
+      return `${target.driver} is signed out`;
+    case "model-not-advertised":
+      return `${target.driver} does not advertise ${target.model}`;
+    case "reasoning-effort-not-advertised":
+      return `${target.driver} does not advertise reasoning effort ${target.reasoningEffort} for ${target.model}`;
+    case "authority-not-enforceable":
+      return `${target.driver} cannot enforce the persona's authority policy`;
+  }
+};
+
+/**
+ * Why each route was refused, so the person who approved a seat (or the agent that asked for one)
+ * learns "codex is signed out" rather than "unavailable" (Jackson's dogfood, 2026-09-17).
+ */
+const describeRouteAttempts = (attempts: ReadonlyArray<AgentPersonaRouteAttempt>) =>
+  attempts
+    .map(
+      (attempt) =>
+        `${attempt.route} ${attempt.target.model} (${[
+          ...new Set(
+            attempt.failures.map((failure) => routeFailurePhrase(attempt.target, failure)),
+          ),
+        ].join(", ")})`,
+    )
+    .join("; ");
 
 /** Resolve once and save the exact definition before the ordinary durable thread-creation command. */
 export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(function* (
@@ -13,12 +59,12 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
   const catalog = yield* library.catalog();
   if (catalog.disabledIds.includes(request.personaId))
     return yield* new AgentPersonaLibraryError({
-      message: "Agent persona is disabled in this environment.",
+      message: "Persona is disabled in this environment.",
     });
   const definition = catalog.definitions.find(({ id }) => id === request.personaId);
   if (definition === undefined)
     return yield* new AgentPersonaLibraryError({
-      message: "Unknown agent persona in this environment.",
+      message: "Unknown persona in this environment.",
     });
   if (
     request.authorityPolicy !== undefined &&
@@ -40,8 +86,8 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
     return yield* new AgentPersonaLibraryError({
       message:
         unavailableAgentPersonaReason(resolution) === "authority-not-enforceable"
-          ? `Agent persona ${request.personaId} is blocked because neither route can enforce its authority policy.`
-          : `Agent persona ${request.personaId} is blocked because its primary and fallback models are unavailable.`,
+          ? `Persona ${request.personaId} is blocked because neither route can enforce its authority policy.`
+          : `Persona ${request.personaId} is blocked because its primary and fallback models are unavailable: ${describeRouteAttempts(resolution.attempts)}.`,
     });
   }
   const result = buildAgentPersonaAssignment({ ...authority, definition, resolution });

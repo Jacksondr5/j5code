@@ -13,6 +13,8 @@ import { environmentCatalog } from "../../connection/catalog";
 import { runtime } from "../../lib/runtime";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { environmentSession } from "../../state/session";
+import { refreshCrewMemberships, requestCrewMemberships } from "./CrewMembershipsClient";
+import { refreshSpawnedChildren, requestSpawnedChildren } from "./SpawnedChildrenClient";
 
 export type { ThreadHome, ThreadHomeEntry } from "@t3tools/contracts/j5";
 export type { ThreadHomesScopeReadState } from "@t3tools/client-runtime/j5/threadHomes";
@@ -41,8 +43,12 @@ const requestThreadHomes = (refs: ReadonlyArray<ScopedThreadRef>, force = false)
   store.request(refs, force);
 };
 
-export const refreshThreadHomes = (refs: ReadonlyArray<ScopedThreadRef>) =>
+export const refreshThreadHomes = (refs: ReadonlyArray<ScopedThreadRef>) => {
   requestThreadHomes(refs, true);
+  // A launch or a Crew decision changes chips and children too; re-read them with the homes.
+  refreshCrewMemberships();
+  refreshSpawnedChildren();
+};
 export const retryScopedThreadHomes = refreshThreadHomes;
 export const shouldRequestThreadHome = (home: unknown, force: boolean) =>
   force || home === undefined;
@@ -69,6 +75,10 @@ export function useThreadHomes(
   useEffect(() => {
     store.setConnections(connections);
     store.request(requested);
+    // Crew chips and children ride the same row set, incrementally: only rows not yet answered
+    // for are fetched here, and the Fleet poll re-reads the involved rows on its own cadence.
+    requestCrewMemberships(requested, connections);
+    requestSpawnedChildren(requested, connections);
   }, [connections, requested]);
   useEffect(() => {
     if (scope !== null)

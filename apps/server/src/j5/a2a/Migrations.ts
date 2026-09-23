@@ -14,6 +14,10 @@ import Migration0011 from "./migrations/011_ReversibleLifecycle.ts";
 import Migration0012 from "./migrations/012_AgentHandoffs.ts";
 import Migration0010 from "./migrations/010_OpenInboxCountIndex.ts";
 import Migration0013 from "./migrations/013_MachineParticipants.ts";
+import Migration0014 from "./migrations/014_AgentCrews.ts";
+import Migration0015 from "./migrations/015_CustomCrewSeats.ts";
+import Migration0016 from "./migrations/016_CrewProposalClaims.ts";
+import Migration0017 from "./migrations/017_EnsureCustomCrewSeats.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
@@ -33,6 +37,14 @@ export const migrationEntries = [
   [11, "ReversibleLifecycle", Migration0011],
   [12, "AgentHandoffs", Migration0012],
   [13, "MachineParticipants", Migration0013],
+  [14, "AgentCrews", Migration0014],
+  [15, "CustomCrewSeats", Migration0015],
+  // 16 sits below 15 in the stack that introduced both (the claims change under the custom-seats
+  // change). Ids are never renumbered once a development database has run them: the migrator
+  // skips every id at or below the latest applied.
+  [16, "CrewProposalClaims", Migration0016],
+  // Covers databases that ran the lower stack through 16 before 15 became available.
+  [17, "EnsureCustomCrewSeats", Migration0017],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>

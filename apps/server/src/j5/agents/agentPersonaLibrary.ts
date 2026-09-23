@@ -393,7 +393,7 @@ export function createAgentPersonaLibrary(storage?: {
         Effect.mapError(
           (cause) =>
             new AgentPersonaLibraryError({
-              message: `Invalid agent definition: ${file.name}`,
+              message: `Invalid persona definition: ${file.name}`,
               cause,
             }),
         ),
@@ -481,7 +481,7 @@ export function createAgentPersonaLibrary(storage?: {
     );
     const encoded = yield* encodeDefinition(updated);
     if (new TextEncoder().encode(encoded).byteLength > AGENT_PERSONA_IMPORT_MAX_BYTES)
-      return yield* new AgentPersonaLibraryError({ message: "Agent definition exceeds 64 KiB." });
+      return yield* new AgentPersonaLibraryError({ message: "Persona definition exceeds 64 KiB." });
     yield* writeImports(
       imported.map((definition) =>
         definition.id === input.personaId
@@ -531,7 +531,7 @@ export function createAgentPersonaLibrary(storage?: {
     );
     const encoded = yield* encodeDefinition(definition);
     if (new TextEncoder().encode(encoded).byteLength > AGENT_PERSONA_IMPORT_MAX_BYTES)
-      return yield* new AgentPersonaLibraryError({ message: "Agent definition exceeds 64 KiB." });
+      return yield* new AgentPersonaLibraryError({ message: "Persona definition exceeds 64 KiB." });
     yield* writeImports([...(yield* readImports()), { ...definition, enabled: true }]);
     return { personaId: definition.id };
   }, importPermit.withPermit);

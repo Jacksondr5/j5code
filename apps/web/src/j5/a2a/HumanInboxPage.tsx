@@ -31,9 +31,20 @@ import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { answerHumanExchange } from "./humanInboxClient";
+import { CrewProposalCard } from "../crew/CrewProposalCard";
+import { inboxCrewRequests } from "../crew/crewProposals.logic";
+import {
+  mergeCrewProposalSources,
+  refreshCrewProposals,
+  resolveCrewProposal,
+  useCrewProposalsRefresh,
+  type CrewProposalSeat,
+  type ScopedCrewProposal,
+} from "../crew/crewProposalsClient";
 import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
+  crewProposalSourcesAtom,
   openInboxQueryAtom,
   openInboxSourcesAtom,
   refreshJ5Sources,
@@ -332,6 +343,13 @@ export function HumanInboxPage() {
   const [error, setError] = useState<string | null>(null);
   const answerAttempts = useRef(new Map<string, HumanInboxAnswerAttempt>());
   useInboxRefresh();
+  const crewSources = useAtomValue(crewProposalSourcesAtom);
+  const proposals = useMemo(
+    () => inboxCrewRequests(mergeCrewProposalSources(crewSources)),
+    [crewSources],
+  );
+  const [resolvingProposalId, setResolvingProposalId] = useState<string | null>(null);
+  useCrewProposalsRefresh();
   const previousOpenItems = useRef(new Map<EnvironmentId, ReadonlySet<string>>());
   useEffect(() => {
     const next = new Map<EnvironmentId, ReadonlySet<string>>();
@@ -423,6 +441,43 @@ export function HumanInboxPage() {
     });
   };
 
+  const resolveProposal = async (
+    proposal: ScopedCrewProposal,
+    decision: "approve" | "decline",
+    seats: ReadonlyArray<CrewProposalSeat>,
+    approvalToken?: string,
+  ) => {
+    setResolvingProposalId(proposal.id);
+    setError(null);
+    try {
+      if (decision === "approve" && approvalToken === undefined)
+        throw new Error("Refresh the runtime preview before approving.");
+      await resolveCrewProposal(
+        proposal.environmentId,
+        decision === "approve"
+          ? { proposalId: proposal.id, decision, seats, approvalToken: approvalToken! }
+          : { proposalId: proposal.id, decision },
+      );
+      notifyHumanInboxChanged(proposal.environmentId);
+      await refreshCrewProposals(proposal.environmentId).catch(() => undefined);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not resolve the crew request.");
+    } finally {
+      setResolvingProposalId(null);
+    }
+  };
+  const openCaptain = useCallback(
+    (proposal: ScopedCrewProposal) => {
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(
+          scopeThreadRef(proposal.environmentId, ThreadId.make(proposal.captainThreadId)),
+        ),
+      });
+    },
+    [navigate],
+  );
+
   const openThread = useCallback(
     (item: HumanInboxItem) => {
       if (!item.connected || item.senderThreadId === null) return;
@@ -458,7 +513,11 @@ export function HumanInboxPage() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   {loading && items.length === 0
                     ? "Loading questions waiting on you…"
-                    : `${items.length} ${complete ? "open" : "loaded"} ${items.length === 1 ? "question" : "questions"}`}
+                    : `${items.length} ${complete ? "open" : "loaded"} ${items.length === 1 ? "question" : "questions"}${
+                        proposals.length === 0
+                          ? ""
+                          : ` · ${proposals.length} crew ${proposals.length === 1 ? "request" : "requests"}`
+                      }`}
                 </p>
               </div>
               <Button
@@ -499,7 +558,33 @@ export function HumanInboxPage() {
               </div>
             ) : null}
 
-            {complete && !loading && error === null && items.length === 0 ? (
+            {proposals.length > 0 ? (
+              <section aria-label="Crew requests" className="mt-6">
+                <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Crew requests
+                </h2>
+                <ul className="space-y-4">
+                  {proposals.map((proposal) => (
+                    <CrewProposalCard
+                      key={`${proposal.environmentId}:${proposal.id}`}
+                      proposal={proposal}
+                      environmentId={proposal.environmentId}
+                      busy={resolvingProposalId === proposal.id}
+                      onResolve={(decision, seats, approvalToken) =>
+                        void resolveProposal(proposal, decision, seats, approvalToken)
+                      }
+                      onOpenCaptain={() => openCaptain(proposal)}
+                    />
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
+            {complete &&
+            !loading &&
+            error === null &&
+            items.length === 0 &&
+            proposals.length === 0 ? (
               <div className="flex min-h-56 flex-col items-center justify-center px-6 py-12 text-center">
                 <span className="flex size-10 items-center justify-center rounded-full bg-success/10 text-success">
                   <InboxIcon aria-hidden className="size-5" />

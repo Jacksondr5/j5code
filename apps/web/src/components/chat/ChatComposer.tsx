@@ -967,6 +967,7 @@ import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AgentPersonaAssignmentControl } from "../../j5/agents/AgentPersonaAssignmentControl";
 import { AgentDraftPicker } from "../../j5/agents/AgentDraftPicker";
+import { composerModelSelectionForThread } from "../../j5/agents/personaComposerSelection";
 import { useDraftAgentAssignment } from "../../j5/agents/useDraftAgentAssignment";
 import { toastManager } from "../ui/toast";
 import {
@@ -2057,9 +2058,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     provider: selectedProviderStatus,
     interactionMode: requestedInteractionMode,
   });
+  // J5: a saved-agent thread always sends its immutable launch route (see personaComposerSelection).
   const selectedModelSelection = useMemo<ModelSelection>(
-    () => createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
-    [selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
+    () =>
+      composerModelSelectionForThread(
+        agentPersonaAssignment,
+        createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
+      ),
+    [agentPersonaAssignment, selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
   );
   const selectedModelForPicker = selectedModel;
   // Instance-keyed option list so the picker can show each configured
@@ -2248,7 +2254,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (composerTrigger.kind === "agent") return agentPicker.items;
     if (composerTrigger.kind === "path") {
       return [
-        // J5: saved agents whose id or name starts with the typed text lead the file results.
+        // J5: personas whose id or name starts with the typed text lead the file results.
         ...agentPicker.items,
         ...workspaceEntries.entries.map((entry) => ({
           id: `path:${entry.kind}:${entry.path}`,
@@ -2422,7 +2428,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     (composerTriggerKind === "agent" && agentPicker.isPending) ||
     (composerTriggerKind === "path" && pathTriggerQuery.length > 0 && workspaceEntries.isPending);
   const composerMenuEmptyState = useMemo(() => {
-    if (composerTriggerKind === "agent") return agentPicker.error ?? "No available agents found.";
+    if (composerTriggerKind === "agent") return agentPicker.error ?? "No available personas found.";
     if (composerTriggerKind === "skill") {
       return "No skills found. Try / to browse provider commands.";
     }

@@ -189,13 +189,13 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(toolNames).toContain("schedule_task");
       expect(toolNames).toContain("t3_thread_list");
       expect(toolNames).toContain("t3_thread_read");
-      expect(toolNames).toContain("t3_thread_wait");
+      // Blocking on another thread starves a participant of the notices it waits for.
+      expect(toolNames).not.toContain("t3_thread_wait");
       // J5 re-declares delegate_task with a saved-agent parameter and keeps its status/cancel pair.
       expect(toolNames).toContain("delegate_task");
       expect(toolNames).toContain("task_status");
       expect(toolNames).toContain("task_cancel");
       for (const excluded of [
-        "archive_agent",
         "t3_thread_launch",
         "t3_project_create",
         "t3_project_update",
@@ -217,6 +217,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(toolNames).toContain("send_message");
       expect(toolNames).toContain("list_participants");
       expect(toolNames.toSorted()).toEqual([
+        "archive_crew",
         "clear_own_ask",
         "delegate_task",
         "delete_scheduled_task",
@@ -228,6 +229,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "link_pull_request",
         "list_artifacts",
         "list_participants",
+        "list_personas",
         "list_scheduled_tasks",
         "list_squadrons",
         "list_thread_pull_requests",
@@ -246,12 +248,15 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "preview_status",
         "preview_type",
         "preview_wait_for",
+        "propose_crew",
         "read_artifact",
+        "request_crew_member",
         "run_scheduled_task_now",
         "schedule_task",
         "send_message",
         "spawn_agent",
         "stop_agent",
+        "stop_crew",
         "t3_attachment_discard",
         "t3_attachment_prepare_upload",
         "t3_environment_read",
@@ -276,7 +281,6 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "t3_thread_send_attachments",
         "t3_thread_transfers",
         "t3_thread_update",
-        "t3_thread_wait",
         "t3_worktree_handoff",
         "t3_worktree_list",
         "t3_worktree_status",
@@ -337,7 +341,6 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         return yield* decodeToolCallPayload(text.match(/\{.*\}/s)![0]);
       });
       for (const [index, name] of [
-        "archive_agent",
         "t3_thread_launch",
         "t3_project_create",
         "t3_project_update",

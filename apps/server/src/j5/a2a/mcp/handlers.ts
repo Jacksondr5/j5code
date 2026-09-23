@@ -1,4 +1,4 @@
-import { CommandId, MessageId, ThreadId, type ModelSelection } from "@t3tools/contracts";
+import { type ModelSelection } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -12,6 +12,22 @@ import {
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
+import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
+import { makeAgentPersonaLibrary } from "../../agents/agentPersonaLibrary.ts";
+import { buildAgentPersonaCatalog } from "../../agents/agentPersonaRouting.ts";
+import { translateAgentPersonaProviderPolicy } from "../../agents/agentPersonaProviderPolicy.ts";
+import { prepareAgentPersonaPeerSpawn } from "../../agents/agentPersonaSpawn.ts";
+import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
+import type { ArchiveAgentConsequenceFacts } from "../ArchiveAgentService.ts";
+import {
+  ArchiveCrewConfirmationRequiredError,
+  ArchiveCrewConfirmationStaleError,
+  ArchiveCrewPartialFailureError,
+  ArchiveCrewService,
+  type ArchiveCrewConsequenceFacts,
+} from "../ArchiveCrewService.ts";
+import { CrewProposalService, type CrewProposalOutcome } from "../CrewProposalService.ts";
+import { CrewStopService } from "../CrewStopService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { A2AHomeRegistrar, participantIdForThread } from "../HomeRegistrar.ts";
 import { A2ALedger } from "../LedgerService.ts";
@@ -20,9 +36,22 @@ import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
 import { SquadronJoinService } from "../SquadronJoinService.ts";
 import { SquadronProjectReferences } from "../SquadronProjectReferences.ts";
+import {
+  crewSeatRequestKey,
+  lifecycleCommandId,
+  lifecycleId,
+  spawnFirstTurnText,
+  spawnHomeCommandId,
+  spawnMessageId,
+  spawnPlacementCommandId,
+  spawnThreadId,
+  spawnTitle,
+  stablePart,
+} from "../spawnIds.ts";
+import { PlacementCommandId } from "../placementContracts.ts";
 import { CommCommandId, type ParticipantDirectoryRow, type SquadronId } from "../contracts.ts";
-import { PlacementCommandId, type ParticipantProvenanceView } from "../placementContracts.ts";
-import { J5Toolkit, type J5McpFailure } from "./tools.ts";
+import type { ParticipantProvenanceView } from "../placementContracts.ts";
+import { J5Toolkit, type J5ArchiveCrewFailure, type J5McpFailure } from "./tools.ts";
 
 class J5AgentToolStateError extends Data.TaggedError("J5AgentToolStateError")<{
   readonly state: string;
@@ -41,7 +70,52 @@ const failure = (error: unknown): J5McpFailure => ({
   message: error instanceof Error ? error.message : String(error),
 });
 
-const stablePart = (value: string) => encodeURIComponent(value);
+const projectArchiveFacts = (facts: ArchiveAgentConsequenceFacts) => ({
+  open_exchanges: facts.openExchanges.map((exchange) => ({
+    exchange_id: exchange.exchangeId,
+    direction: exchange.direction,
+    reply_obligation: exchange.replyObligation,
+    counterparty_id: exchange.counterpartyId,
+    intent: exchange.intent,
+    urgency: exchange.urgency,
+    opened_at: exchange.openedAt,
+  })),
+  running_turn:
+    facts.runningTurn === null
+      ? null
+      : { run_id: facts.runningTurn.runId, status: facts.runningTurn.status },
+});
+
+const projectCrewArchiveFacts = (facts: ArchiveCrewConsequenceFacts) => ({
+  members: facts.members.map((member) => ({
+    seat: member.seatName,
+    participant_id: member.participantId,
+    already_archived: member.alreadyArchived,
+    ...projectArchiveFacts(member.facts),
+  })),
+});
+
+const archiveCrewFailure = (error: unknown): J5ArchiveCrewFailure => {
+  const base = failure(error);
+  if (
+    error instanceof ArchiveCrewConfirmationRequiredError ||
+    error instanceof ArchiveCrewConfirmationStaleError
+  ) {
+    return {
+      ...base,
+      ...projectCrewArchiveFacts(error.facts),
+      confirmation_token: error.confirmationToken,
+    };
+  }
+  if (error instanceof ArchiveCrewPartialFailureError) {
+    return {
+      ...base,
+      archived_seats: [...error.archivedSeats],
+      failed_seat: error.failedSeat,
+    };
+  }
+  return base;
+};
 
 const projectProvenance = (provenance: ParticipantProvenanceView) => {
   switch (provenance.kind) {
@@ -61,49 +135,6 @@ const projectProvenance = (provenance: ParticipantProvenanceView) => {
       return provenance;
   }
 };
-
-const lifecycleId = (input: {
-  readonly kind: "command" | "message" | "thread";
-  readonly providerSessionId: string;
-  readonly requestKey: string;
-  readonly operation: string;
-}) =>
-  [
-    input.kind,
-    "j5",
-    "a2a",
-    "mcp",
-    stablePart(input.providerSessionId),
-    stablePart(input.operation),
-    stablePart(input.requestKey),
-  ].join(":");
-
-const lifecycleCommandId = (input: {
-  readonly providerSessionId: string;
-  readonly requestKey: string;
-  readonly operation: string;
-}) => CommandId.make(lifecycleId({ kind: "command", ...input }));
-
-const spawnThreadId = (input: {
-  readonly providerSessionId: string;
-  readonly requestKey: string;
-}) => ThreadId.make(lifecycleId({ kind: "thread", operation: "spawn", ...input }));
-
-const spawnMessageId = (input: {
-  readonly providerSessionId: string;
-  readonly requestKey: string;
-}) => MessageId.make(lifecycleId({ kind: "message", operation: "spawn-brief", ...input }));
-
-const spawnHomeCommandId = (input: {
-  readonly providerSessionId: string;
-  readonly requestKey: string;
-}) => CommCommandId.make(lifecycleId({ kind: "command", operation: "spawn-home", ...input }));
-
-const spawnPlacementCommandId = (input: {
-  readonly providerSessionId: string;
-  readonly requestKey: string;
-}) =>
-  PlacementCommandId.make(lifecycleId({ kind: "command", operation: "spawn-placement", ...input }));
 
 const joinHomeCommandId = (input: {
   readonly providerSessionId: string;
@@ -206,7 +237,7 @@ const preflightSpawnCaller = Effect.fn("j5.a2a.mcp.preflightSpawnCaller")(functi
 const requireCallerSquadron = Effect.fn("j5.a2a.mcp.requireCallerSquadron")(function* (
   scope: McpInvocationScope,
   squadronId: SquadronId,
-  command: "stop_agent",
+  command: "stop_agent" | "archive_crew" | "stop_crew",
 ) {
   const caller = yield* resolveCallerMembership(scope);
   if (caller.squadronId !== squadronId) {
@@ -217,19 +248,6 @@ const requireCallerSquadron = Effect.fn("j5.a2a.mcp.requireCallerSquadron")(func
   }
   return caller;
 });
-
-const spawnTitle = (brief: string, title: string | undefined): string => {
-  const value = title?.trim() || brief.trim();
-  return value.length > 80 ? `${value.slice(0, 77)}...` : value;
-};
-
-const spawnFirstTurnText = (input: {
-  readonly brief: string;
-  readonly participantId: string;
-  readonly squadronId: string;
-  readonly squadronName: string;
-}) =>
-  `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${input.participantId}\nsquadron_id: ${input.squadronId}\nsquadron_name: ${input.squadronName}\n</j5_spawn_context>\n\n<spawner_brief>\n${input.brief}\n</spawner_brief>`;
 
 const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
   scope: McpInvocationScope,
@@ -289,6 +307,116 @@ const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
     model: model.id,
     options: [{ id: reasoningDescriptor.id, value: input.reasoning }],
   } satisfies ModelSelection;
+});
+
+/**
+ * A Role-ful spawn keeps the explicit provider/model/reasoning pick; the saved agent's declared
+ * routes constrain it and its authority policy becomes the child's runtime mode. A child's
+ * permissions come from its own saved agent's policy or from the human's approval, never from
+ * the parent: J5 carries no parent-child permission ceiling (Jackson, 2026-09-16), because any
+ * such guard is one message to a trusting peer away from bypass and every child-creation door
+ * would have to enforce it identically.
+ */
+const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function* (
+  input: {
+    readonly persona: string;
+    readonly provider: string;
+    readonly model: string;
+    readonly reasoning: string;
+  },
+  modelSelection: ModelSelection,
+) {
+  const library = yield* makeAgentPersonaLibrary;
+  const providers = yield* (yield* ProviderRegistry).getProviders;
+  const assignment = yield* prepareAgentPersonaPeerSpawn(
+    {
+      personaId: input.persona,
+      provider: providers.find((candidate) => candidate.instanceId === modelSelection.instanceId),
+      instanceId: modelSelection.instanceId,
+      model: input.model,
+      reasoning: input.reasoning,
+    },
+    library,
+  ).pipe(
+    Effect.mapError((error) =>
+      stateError(
+        `Persona ${input.persona} cannot be spawned as requested: ${error.message}`,
+        "Call orchestrator_capabilities, then retry spawn_agent with a provider, model, and reasoning from that persona's declared routes, or omit persona for a plain Peer Agent.",
+      ),
+    ),
+  );
+  const policy = translateAgentPersonaProviderPolicy(
+    assignment.authorityPolicy,
+    assignment.resolvedDriver,
+  );
+  return {
+    assignment,
+    modelSelection: assignment.resolvedModelSelection,
+    runtimeMode: policy.runtimeMode,
+  };
+});
+
+/** Crew requests come from a Peer Agent with a home that is not itself a crew member (R20). */
+const preflightCrewCaptain = Effect.fn("j5.a2a.mcp.preflightCrewCaptain")(function* (
+  scope: McpInvocationScope,
+  command: "propose_crew" | "request_crew_member",
+) {
+  const caller = yield* preflightSpawnCaller(scope);
+  const membership = yield* (yield* AgentCrewInstanceService)
+    .findMembership(caller.participantId)
+    .pipe(
+      Effect.mapError((error) =>
+        stateError(
+          `Crew membership for ${caller.participantId} cannot be read: ${error.message}.`,
+          `Retry ${command} once crew records are readable.`,
+        ),
+      ),
+    );
+  if (membership !== null) {
+    return yield* stateError(
+      `Caller ${caller.participantId} is seat ${membership.seatName} of crew ${membership.crewInstanceId}; crew members cannot request crews or seats.`,
+      "Send your Captain an ask describing the extra hands you need.",
+    );
+  }
+  const parent = yield* (yield* ThreadManagementService)
+    .getThreadProjection(scope.threadId)
+    .pipe(
+      Effect.mapError((error) =>
+        stateError(
+          `Caller thread ${scope.threadId} cannot be read for ${command}: ${error.message}.`,
+          `Read the caller thread state and retry ${command} after it is available.`,
+        ),
+      ),
+    );
+  return {
+    squadronId: caller.squadronId,
+    squadronName: caller.squadron.name,
+    participantId: caller.participantId,
+    thread: parent.thread,
+  };
+});
+
+const crewProposalNextStep = (error: { readonly _tag: string }) =>
+  error._tag === "CrewProposalRequestError"
+    ? "Correct the request and retry."
+    : error._tag === "CrewLaunchSeatUnavailableError"
+      ? "Choose a different persona from list_personas or ask the user to fix that persona, then retry."
+      : error._tag === "CrewLaunchCapError"
+        ? "The crew is full. Work with the seats it has, or propose a new crew for the extra work."
+        : error._tag === "CrewLaunchSeatConflictError"
+          ? "Choose a seat name the crew does not already use, then retry."
+          : "Retry with the same client_request_id; recovery is forward-only.";
+
+const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
+  proposal_id: outcome.proposal.id,
+  status: outcome.proposal.status,
+  crew_instance_id: outcome.instance?.id ?? null,
+  members: (outcome.instance?.members ?? []).map((member) => ({
+    seat: member.seatName,
+    persona_id: member.agentId,
+    participant_id: member.participantId,
+    thread_id: member.threadId,
+  })),
 });
 
 const handlers = {
@@ -495,7 +623,25 @@ const handlers = {
       const scope = yield* McpInvocationContext;
       const crypto = yield* Crypto.Crypto;
       const caller = yield* preflightSpawnCaller(scope);
-      const modelSelection = yield* selectSpawnModel(scope, input);
+      // Only a Captain grows a Crew, and only through the human gate (Bryant, 2026-09-14): a seat
+      // that wants more hands escalates to its Captain; its own helpers are subagents.
+      const membership = yield* (yield* AgentCrewInstanceService)
+        .findMembership(caller.participantId)
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              `Crew membership for ${caller.participantId} cannot be read: ${error.message}.`,
+              "Retry spawn_agent once crew records are readable.",
+            ),
+          ),
+        );
+      if (membership !== null) {
+        return yield* stateError(
+          `Caller ${caller.participantId} is seat ${membership.seatName} of crew ${membership.crewInstanceId}; crew members cannot spawn Peer Agents.`,
+          "Ask your Captain for the seat with send_message, or run the work yourself as a subagent with delegate_task.",
+        );
+      }
+      const selected = yield* selectSpawnModel(scope, input);
       const threadManagement = yield* ThreadManagementService;
       const parent = yield* threadManagement
         .getThreadProjection(scope.threadId)
@@ -507,6 +653,12 @@ const handlers = {
             ),
           ),
         );
+      const personaId = input.persona;
+      const persona =
+        personaId === undefined
+          ? undefined
+          : yield* prepareSpawnPersona({ ...input, persona: personaId }, selected);
+      const modelSelection = persona?.modelSelection ?? selected;
       const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
       const stableInput = {
         providerSessionId: scope.providerSessionId,
@@ -523,8 +675,9 @@ const handlers = {
           projectId: parent.thread.projectId,
           title: spawnTitle(input.brief, input.title),
           modelSelection,
-          runtimeMode: parent.thread.runtimeMode,
+          runtimeMode: persona?.runtimeMode ?? parent.thread.runtimeMode,
           interactionMode: parent.thread.interactionMode,
+          ...(persona === undefined ? {} : { agentPersonaAssignment: persona.assignment }),
           branch: parent.thread.branch,
           worktreePath: parent.thread.worktreePath,
         })
@@ -619,6 +772,98 @@ const handlers = {
         },
       };
     }).pipe(Effect.mapError(failure)),
+  propose_crew: (input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
+      const crypto = yield* Crypto.Crypto;
+      const captain = yield* preflightCrewCaptain(scope, "propose_crew");
+      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
+      const outcome = yield* (yield* CrewProposalService)
+        .propose({
+          requestKey: `${scope.providerSessionId}:${requestKey}`,
+          captain,
+          displayName: input.name,
+          brief: input.brief,
+          seats: input.seats.map((seat) => ({
+            seat: seat.seat,
+            agentId: seat.persona ?? null,
+            reason: seat.reason,
+            ...(seat.instructions === undefined ? {} : { instructions: seat.instructions }),
+            ...(seat.model_selection === undefined ? {} : { modelSelection: seat.model_selection }),
+            ...(seat.runtime_mode === undefined ? {} : { runtimeMode: seat.runtime_mode }),
+          })),
+        })
+        .pipe(Effect.mapError((error) => stateError(error.message, crewProposalNextStep(error))));
+      return projectCrewProposal(outcome);
+    }).pipe(Effect.mapError(failure)),
+  request_crew_member: (input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
+      const crypto = yield* Crypto.Crypto;
+      const captain = yield* preflightCrewCaptain(scope, "request_crew_member");
+      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
+      const outcome = yield* (yield* CrewProposalService)
+        .requestMember({
+          requestKey: `${scope.providerSessionId}:${requestKey}`,
+          captain,
+          crewInstanceId: input.crew_instance_id ?? null,
+          seat: {
+            seat: input.seat,
+            agentId: input.persona ?? null,
+            reason: input.reason,
+            ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
+            ...(input.model_selection === undefined
+              ? {}
+              : { modelSelection: input.model_selection }),
+            ...(input.runtime_mode === undefined ? {} : { runtimeMode: input.runtime_mode }),
+          },
+          brief: input.brief ?? null,
+        })
+        .pipe(Effect.mapError((error) => stateError(error.message, crewProposalNextStep(error))));
+      return projectCrewProposal(outcome);
+    }).pipe(Effect.mapError(failure)),
+  list_personas: () =>
+    Effect.gen(function* () {
+      const library = yield* makeAgentPersonaLibrary;
+      const current = yield* library
+        .catalog()
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              `The persona library cannot be read: ${error.message}`,
+              "Ask the user to fix the persona library in Settings → Personas, then retry list_personas.",
+            ),
+          ),
+        );
+      const providers = yield* (yield* ProviderRegistry).getProviders;
+      const disabled = new Set(current.disabledIds);
+      const catalog = buildAgentPersonaCatalog(providers, current.definitions);
+      return {
+        personas: catalog.personas.map((persona) => {
+          const isDisabled = disabled.has(persona.personaId);
+          const available = !isDisabled && persona.availability.status === "available";
+          return {
+            id: persona.personaId,
+            display_name: persona.displayName,
+            description: persona.description,
+            runtime_policy: persona.defaultAuthorityPolicy,
+            availability: isDisabled
+              ? ("disabled" as const)
+              : available
+                ? ("available" as const)
+                : ("blocked" as const),
+            route:
+              persona.availability.status === "available" && !isDisabled
+                ? `${persona.availability.resolvedDriver} · ${persona.availability.resolvedModelSelection.model}${
+                    persona.availability.resolvedModelSelection.options?.[0]?.value === undefined
+                      ? ""
+                      : ` · ${persona.availability.resolvedModelSelection.options[0].value}`
+                  }`
+                : null,
+          };
+        }),
+      };
+    }).pipe(Effect.mapError(failure)),
   stop_agent: (input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
@@ -675,6 +920,86 @@ const handlers = {
         ? ("interrupt_requested" as const)
         : ("already_idle" as const);
     }).pipe(Effect.mapError(failure)),
+  stop_crew: (input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
+      const crypto = yield* Crypto.Crypto;
+      const caller = yield* requireCallerSquadron(scope, input.squadron_id, "stop_crew");
+      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
+      const outcome = yield* (yield* CrewStopService)
+        .stop({
+          callerParticipantId: caller.participantId,
+          squadronId: input.squadron_id,
+          crewInstanceId: input.crew_instance_id,
+          commandIds: (seatName) => ({
+            interruptCommandId: lifecycleCommandId({
+              providerSessionId: scope.providerSessionId,
+              requestKey: crewSeatRequestKey(requestKey, seatName),
+              operation: "stop-crew-interrupt",
+            }),
+          }),
+        })
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              error.message,
+              error._tag === "CrewStopNotFoundError"
+                ? "Check crew_instance_id against the <j5_crew_gate> roster notice and retry."
+                : error._tag === "CrewStopRequestError"
+                  ? error.nextStep
+                  : "Retry stop_crew with the same client_request_id; seats already interrupted stay interrupted.",
+            ),
+          ),
+        );
+      return {
+        crew_instance_id: outcome.crewInstanceId,
+        members: outcome.members.map((member) => ({
+          seat: member.seatName,
+          participant_id: member.participantId,
+          result: member.result,
+        })),
+      };
+    }).pipe(Effect.mapError(failure)),
+  archive_crew: (input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
+      const crypto = yield* Crypto.Crypto;
+      const caller = yield* requireCallerSquadron(scope, input.squadron_id, "archive_crew");
+      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
+      const archivedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+      const outcome = yield* (yield* ArchiveCrewService).archive({
+        providerSessionId: scope.providerSessionId,
+        callerParticipantId: caller.participantId,
+        squadronId: input.squadron_id,
+        crewInstanceId: input.crew_instance_id,
+        clientRequestKey: requestKey,
+        ...(input.confirmation_token === undefined
+          ? {}
+          : { confirmationToken: input.confirmation_token }),
+        archivedAt,
+        commandIds: (seatName) => ({
+          interruptCommandId: lifecycleCommandId({
+            providerSessionId: scope.providerSessionId,
+            requestKey: crewSeatRequestKey(requestKey, seatName),
+            operation: "archive-crew-interrupt",
+          }),
+          archiveCommandId: lifecycleCommandId({
+            providerSessionId: scope.providerSessionId,
+            requestKey: crewSeatRequestKey(requestKey, seatName),
+            operation: "archive-crew-thread",
+          }),
+        }),
+      });
+      return {
+        status: outcome.status,
+        crew_instance_id: input.crew_instance_id,
+        members: outcome.members.map((member) => ({
+          seat: member.seatName,
+          participant_id: member.participantId,
+          result: member.result,
+        })),
+      };
+    }).pipe(Effect.mapError(archiveCrewFailure)),
 } satisfies Parameters<typeof J5Toolkit.toLayer>[0];
 
 export const J5ToolkitHandlersLive = J5Toolkit.toLayer(handlers);
