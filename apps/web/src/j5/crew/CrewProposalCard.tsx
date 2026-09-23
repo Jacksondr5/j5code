@@ -101,25 +101,58 @@ export function CrewProposalCard(props: {
           </Button>
         )}
       </div>
-      <p className="mt-3 max-w-[72ch] whitespace-pre-wrap break-words text-sm text-foreground/90">
-        {proposal.brief}
-      </p>
-      <ul className="mt-4 space-y-3">
+      {/* The brief is context, not the decision: a clamped excerpt sits in the summary so the
+          seats and Approve stay in view, and the full text opens in place before approving. */}
+      <details className="group/brief mt-3 max-w-[72ch] text-sm">
+        <summary className="cursor-pointer text-xs text-muted-foreground">
+          Brief
+          <span
+            aria-hidden="true"
+            className="mt-0.5 line-clamp-2 break-words text-sm text-foreground/90 group-open/brief:hidden"
+          >
+            {proposal.brief}
+          </span>
+        </summary>
+        <p className="mt-1 whitespace-pre-wrap break-words text-foreground/90">{proposal.brief}</p>
+      </details>
+      <ul className="mt-3 space-y-2">
         {seats.map((seat) => {
           const runtime = preview.runtimeSeats?.find((row) => row.seat === seat.seat);
           return (
-            <li key={seat.seat} className="rounded-lg border border-border/70 bg-muted/30 p-3">
+            <li
+              key={seat.seat}
+              className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2"
+            >
               <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="break-words text-sm font-medium">{seat.seat}</h3>
-                    <span className="text-xs text-muted-foreground">
+                <div className="min-w-0 space-y-0.5 text-xs text-muted-foreground">
+                  <div className="flex flex-wrap items-baseline gap-x-2">
+                    <h3 className="break-words text-sm font-medium text-foreground">{seat.seat}</h3>
+                    <span>
                       {seat.agentId === null
                         ? "Custom crew member"
                         : describeSeatAgent(rows, seat.agentId)}
                     </span>
                   </div>
-                  <p className="mt-1 break-words text-xs text-muted-foreground">{seat.reason}</p>
+                  {runtime ? (
+                    <p className="break-words">
+                      {[runtime.provider, runtime.model, runtime.reasoning, runtime.access].join(
+                        " · ",
+                      )}
+                      <span className="ml-2">Harness: {runtime.harness}</span>
+                    </p>
+                  ) : (
+                    <p role="status">
+                      {preview.loading ? "Checking runtime…" : "Runtime unavailable"}
+                    </p>
+                  )}
+                  {seat.instructions ? (
+                    <details>
+                      <summary className="cursor-pointer">Instructions</summary>
+                      <p className="mt-1 whitespace-pre-wrap break-words text-foreground/90">
+                        {seat.instructions}
+                      </p>
+                    </details>
+                  ) : null}
                 </div>
                 <div className="flex items-center justify-self-end gap-1">
                   <Button
@@ -146,24 +179,6 @@ export function CrewProposalCard(props: {
                   </Button>
                 </div>
               </div>
-              {runtime ? (
-                <p className="mt-3 text-xs text-muted-foreground">
-                  {[runtime.provider, runtime.model, runtime.reasoning, runtime.access].join(" · ")}
-                  <span className="ml-2">Harness: {runtime.harness}</span>
-                </p>
-              ) : (
-                <p className="mt-3 text-xs text-muted-foreground" role="status">
-                  {preview.loading ? "Checking runtime…" : "Runtime unavailable"}
-                </p>
-              )}
-              {seat.instructions ? (
-                <details className="mt-2 text-xs">
-                  <summary className="cursor-pointer text-muted-foreground">Instructions</summary>
-                  <p className="mt-1 whitespace-pre-wrap break-words text-foreground/90">
-                    {seat.instructions}
-                  </p>
-                </details>
-              ) : null}
             </li>
           );
         })}
