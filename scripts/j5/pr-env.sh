@@ -149,7 +149,7 @@ retry() { # <attempts> <pause seconds> <what> <command...>
     sleep "$pause"; n=$((n + 1))
   done
 }
-pairing_url() { grep -o "http://127.0.0.1:$2[^ \"']*" "$1" | grep -i 'pair\|token' | tail -1 || true; }
+pairing_url() { grep -o "http://127.0.0.1:$2[^ \"']*" "$1" | grep -iE 'pair|token' | tail -1 || true; }
 
 echo ""
 echo "== serving PR #$PR ($HEAD_SHA) twice: Local on $LOCAL_ORIGIN, Remote on $REMOTE_ORIGIN =="
