@@ -232,6 +232,29 @@ describe("skill catalog tool", () => {
       assert.equal(attempts, 2);
     }));
 
+  test("rejects URL credentials and redacts them from Git diagnostics", (f) =>
+    Effect.gen(function* () {
+      for (const source of [
+        "https://user:token@example.com/repo.git",
+        "ssh://git:token@example.com/repo.git",
+      ]) {
+        const failure = yield* Effect.flip(f.tool().status({ source }));
+        assert.notInclude(failure.message, "token");
+      }
+      assert.equal(f.calls.length, 0);
+
+      const tool = f.tool(
+        f.runner(() =>
+          Effect.succeed(
+            output("", 128, "fatal: failed for https://user:token@example.com/repo.git"),
+          ),
+        ),
+      );
+      const failure = yield* Effect.flip(tool.status({ source: "https://example.com/repo.git" }));
+      assert.notInclude(failure.message, "token");
+      assert.include(failure.message, "https://example.com/repo.git");
+    }));
+
   test("retains Git spawn and timeout diagnostics", (f) =>
     Effect.gen(function* () {
       for (const cause of [

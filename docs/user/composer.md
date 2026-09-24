@@ -150,6 +150,7 @@ Cursor, Grok, OpenCode and Antigravity keep their existing composer discovery;
 this settings inventory does not add management controls for those providers.
 
 Choose a trusted Git repository or an absolute catalog folder on that environment.
+For a private Git source, use SSH or the host's credential helper; URLs with embedded credentials are rejected.
 No source is configured by default. A catalog contains `catalog.yaml` with named
 groups and `skills/<name>/SKILL.md`. Apply your group selection to install it;
 apply an empty selection to remove the catalog links. Update pulls the configured
