@@ -103,7 +103,7 @@ it.effect("adds playbooks after an environment has applied the Crew migrations",
       [{ name: "j5_playbook_request" }, { name: "j5_playbook_run" }],
     );
     yield* runJ5A2AMigrations();
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("creates the exact namespaced ledger schema and receiver correlation constraint", () =>
@@ -1364,5 +1364,5 @@ it.effect(
         2,
       );
       yield* runJ5A2AMigrations();
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );

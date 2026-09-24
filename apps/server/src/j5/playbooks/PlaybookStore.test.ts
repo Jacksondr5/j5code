@@ -28,7 +28,10 @@ import { makePlaybookRpcHandlers, PLAYBOOK_RPC_SCOPES } from "./playbookRpc.ts";
 
 const owner = ThreadId.make("thread:playbook:owner");
 const otherOwner = ThreadId.make("thread:playbook:other");
-const MemoryLayer = Layer.mergeAll(NodeSqliteClient.layerMemory(), NodeServices.layer);
+const MemoryLayer = Layer.mergeAll(
+  NodeSqliteClient.layer({ filename: ":memory:" }),
+  NodeServices.layer,
+);
 const definition = (ids = ["research", "implement", "review"]): PlaybookDefinition => ({
   title: "Test playbook",
   description: "Verify that an agent receives live ordered prompts.",
