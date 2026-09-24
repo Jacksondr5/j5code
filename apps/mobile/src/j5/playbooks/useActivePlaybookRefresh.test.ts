@@ -74,10 +74,10 @@ it("keeps the active-run timer stable through reads and pauses in the background
   await render({ activeRun: true });
   input.refresh.mockClear();
   await render({ activeRun: true, isPending: true });
-  vi.advanceTimersByTime(7_500);
+  vi.advanceTimersByTime(30_000);
   expect(input.refresh).not.toHaveBeenCalled();
   await render({ activeRun: true });
-  vi.advanceTimersByTime(7_500);
+  vi.advanceTimersByTime(30_000);
   expect(input.refresh).toHaveBeenCalledTimes(1);
   expect(schedule).toHaveBeenCalledTimes(1);
 

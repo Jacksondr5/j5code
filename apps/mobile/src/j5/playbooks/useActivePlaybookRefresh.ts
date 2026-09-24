@@ -28,7 +28,7 @@ export function useActivePlaybookRefresh(input: {
     const sync = () => {
       clearInterval(timer);
       if (input.activeRun && AppState.currentState === "active")
-        timer = setInterval(refresh, 7_500);
+        timer = setInterval(refresh, 30_000);
     };
     const onAppState = () => {
       sync();
