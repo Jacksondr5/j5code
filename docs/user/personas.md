@@ -55,12 +55,11 @@ A crew is a group of agents that one agent, the Captain, runs as a unit for one 
 
 The agent uses the conversation to propose a roster above the composer. Each member has a responsibility, a reason for joining, and instructions. Members may use saved personas or be custom agents created for this task. You can remove members, add a saved persona, or add a custom seat with a name and instructions, then approve or decline. Custom members start with the Captain's runtime settings. Before approval, you can change their harness, model, reasoning level, and access, whether the agent proposed the member or you added it manually. Selecting a saved persona uses that persona's configured runtime policy. No special Captain persona is needed, and one Captain can coordinate several crews in the same conversation. Before you approve, each member shows its resolved harness, model, reasoning level, and access. Changing the roster refreshes these details. If the configuration changes before launch, review the refreshed settings and approve again.
 
-A conversation on any harness can propose a crew, and approving the roster is meant to be the only confirmation you give. Codex, Claude, and OpenCode never add a step. Some harnesses still ask first or refuse:
+A conversation on any harness can propose a crew, and approving the roster is meant to be the only confirmation you give. Codex, Claude, OpenCode, and Pi never add a step. Some harnesses still ask first or refuse:
 
-- **Pi** shows its own approval prompt before the roster in every mode except **Full access**.
 - **Grok** and **Antigravity** show their own approval prompt in **Supervised**, and so can other ACP registry harnesses.
 - **Cursor** proposes a crew only when the conversation runs in **Full access**. In other modes, a Cursor team admin can add the t3-code tools to the team's MCP tool allowlist.
-- A conversation running as a saved persona with read-only access cannot propose a crew on Cursor, Grok, Antigravity, or ACP registry harnesses, and asks first on Pi.
+- A conversation running as a saved persona with read-only access cannot propose a crew on Cursor, Grok, Antigravity, or ACP registry harnesses.
 - An OpenCode conversation on an external server cannot propose a crew.
 
 Members can talk directly to each other and their Captain, and Captains can coordinate with other Captains. They share findings, questions, blockers, and results as messages while work continues; creating a report is not a prerequisite for communication. Active Astra runs can receive peer messages during work; other providers receive queued messages at the next safe turn boundary.
