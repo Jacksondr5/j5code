@@ -37,6 +37,10 @@ Treat these upstream areas as off-limits except for those explicit appended case
 - existing provider adapters and shared runtime modules
 - vendored references under `.repos`
 
+### Replaced wholesale
+
+`apps/marketing` is the one directory where the rule above is deliberately broken. Upstream's T3 Code marketing site carries nothing the fork wants, so J5 replaced its contents with the j5.codes site (Astro, same package name and root scripts, upstream's fonts and harness marks kept). On a pin advance take ours for the whole directory; do not merge upstream's marketing changes in. The site reads the current pin and the inventory count from this file at build time (`apps/marketing/src/lib/forkFacts.ts`), so keep the `Current pin:` line and the "the inventory has N cases" sentence in their present shape or update that parser with them.
+
 ### Sanctioned appended integration cases
 
 Against upstream pin `b9fa1399cfbacf23f35ba9201af8aebe3f41e807`, the inventory has 38 cases: 1–37 plus 15b. Existing numbers remain stable. Line coordinates and landing SHAs below describe the original integration and are historical; use the named symbols and tests after upstream movement. Cases 1, 26 and 31 record the September 2026 policy and persistence changes. Branding has its own inventory in `BRANDING.md`; temporary defect patches are listed separately below.

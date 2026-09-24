@@ -1,12 +1,27 @@
-export const GITHUB_REPOSITORY_URL = "https://github.com/pingdotgg/t3code";
+export const GITHUB_REPOSITORY_URL = "https://github.com/Jacksondr5/j5code";
+export const GITHUB_RELEASES_URL = `${GITHUB_REPOSITORY_URL}/releases`;
+export const LICENSE_URL = `${GITHUB_REPOSITORY_URL}/blob/j5/main/LICENSE`;
+export const PRODUCT_DOCS_URL = `${GITHUB_REPOSITORY_URL}/tree/j5/main/docs/j5/product`;
+export const FORK_DISCIPLINE_URL = `${GITHUB_REPOSITORY_URL}/blob/j5/main/FORK.md`;
 
-export const IOS_APP_STORE_URL =
-  "https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824";
+export const UPSTREAM_REPOSITORY_URL = "https://github.com/pingdotgg/t3code";
+export const T3_SITE_URL = "https://t3.codes";
 
-export const ANDROID_PLAY_STORE_URL =
-  "https://play.google.com/store/apps/details?id=com.t3tools.t3code";
+export const NPM_PACKAGE = "@jacksondr5/j5code";
+export const NPX_COMMAND = `npx ${NPM_PACKAGE}@latest`;
+export const NPM_PACKAGE_URL = `https://www.npmjs.com/package/${NPM_PACKAGE}`;
 
-export const MARKETING_STATS = {
-  githubStars: "21k+",
-  users: "200,000",
-} as const;
+/** Status words used on every card. Copy must not claim more than the word allows. */
+export type ShipStatus = "underway" | "charted" | "horizon";
+
+export const STATUS_LABEL: Record<ShipStatus, string> = {
+  underway: "Underway",
+  charted: "Charted",
+  horizon: "Horizon",
+};
+
+export const STATUS_HELP: Record<ShipStatus, string> = {
+  underway: "Shipped and in daily use.",
+  charted: "Defined in the product docs and being built.",
+  horizon: "Direction, not a promise.",
+};
