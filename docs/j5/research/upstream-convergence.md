@@ -46,6 +46,18 @@ Two different things share the word "handoff". J5 docs call upstream's history t
 - **Upstream:** Limited state for usage limits, snoozing until the reset, opt-in auto-resume, scheduled tasks across environments on a shared Scheduler, and startup failures that retry and then fail visibly.
 - **J5:** committed Stop also beats usage-limit auto-resume; scheduled creation needs a Squadron (#273); a queued-run watchdog. Retire the watchdog if upstream's visible startup failures leave it with nothing to report.
 
+## Skills
+
+- **Upstream:** each provider snapshot reports the skills its CLI already has installed (`ServerProviderSkill`), and the composer's slash menu lists them. There is no catalog, install, or cross-provider linking.
+- **J5:** Settings → Skills installs catalog groups from a configured Git or folder source into Codex and Claude homes, inspects each provider's skills, and links standalone skills across providers.
+- **Watch for:** upstream installing or managing skills itself. That would make J5's catalog a source feeding upstream's mechanism rather than a parallel one.
+
+## Playbooks and automations
+
+- **Upstream:** scheduled tasks (Settings → Automations) start or continue threads on an interval or at a fixed time, through the shared Scheduler.
+- **J5:** Playbooks are step tracking for agent-led work: a workspace library of definitions, persisted runs that agents advance through MCP tools, progress and run history on web and mobile. They carry no scheduling, git, or worktree behavior of their own.
+- **Watch for:** upstream workflows or multi-step automations with durable progress, which would overlap Playbooks; and scheduled tasks that bind to a Squadron (#273).
+
 ## Give-back
 
 Fixes J5 carries that belong upstream are tracked in #276. Offer them once V2 merges upstream.

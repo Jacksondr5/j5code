@@ -623,7 +623,6 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/web/src/routes/_chat.index.tsx`                                                                      | R       | 9, 19, 34                                 |
 | `apps/web/src/routes/_chat.tsx`                                                                            | R       | 19, 34                                    |
 | `apps/web/tsconfig.json`                                                                                   | R       | B                                         |
-| `docs/user/composer.md`                                                                                    | N       | 26, 27                                    |
 | `packages/client-runtime/package.json`                                                                     | R       | 34, 45                                    |
 | `packages/client-runtime/src/operations/commands.test.ts`                                                  | R       | 10, 11                                    |
 | `packages/client-runtime/src/operations/commands.ts`                                                       | R       | 10, 11                                    |
