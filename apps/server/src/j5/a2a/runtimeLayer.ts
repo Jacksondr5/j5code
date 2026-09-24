@@ -76,19 +76,21 @@ const serverIdentityLayer = ServerEnvironment.identityLayer.pipe(
   Layer.provide(ServerSecretStore.layer),
   Layer.provide(NodeServices.layer),
 );
+// One HTTP client serves every layer that reaches a peer.
+const peerHttpClient = FetchHttpClient.layer;
 const peerRegistryProvided = peerRegistryLayer.pipe(
-  Layer.provide(FetchHttpClient.layer),
   Layer.provide(serverIdentityLayer),
+  Layer.provide(peerHttpClient),
 );
 const peerDirectoryProvided = peerDirectoryLayer.pipe(
-  Layer.provide(FetchHttpClient.layer),
   Layer.provide(peerRegistryProvided),
+  Layer.provide(peerHttpClient),
 );
 
 /** The production transport with its peer side satisfied; tests substitute a transport layer of their own. */
 const deliveryTransportWithPeers = deliveryTransportLayer.pipe(
-  Layer.provide(FetchHttpClient.layer),
   Layer.provide(peerRegistryProvided),
+  Layer.provide(peerHttpClient),
 );
 
 export const makeJ5A2AAuxiliaryLayer = (

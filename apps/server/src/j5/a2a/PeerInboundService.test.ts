@@ -207,18 +207,18 @@ it.effect("lets the local agent reply to a peer's ask as an ordinary same-Squadr
           acceptedAt: timestamp,
         })
         .pipe(Effect.result);
-      // Resolving the remote asker as a receiver is the next PR's work, so this
-      // send fails on the receiver, and only on the receiver: the Exchange guard
-      // has already accepted the reply's Squadron.
-      assert.equal(reply._tag, "Failure");
-      assert.equal(
-        reply._tag === "Failure" ? reply.failure._tag : "",
-        "A2AParticipantNotFoundError",
-      );
-      const open = yield* sql<{ readonly status: string }>`
+      // The remote asker resolves through the route its ask recorded, so the
+      // reply is an ordinary same-Squadron reply headed back to that peer.
+      assert.equal(reply._tag, "Success");
+      const exchange = yield* sql<{ readonly status: string }>`
         SELECT status FROM j5_a2a_exchange WHERE exchange_id = ${ask.exchangeId}
       `;
-      assert.equal(open[0]?.status, "open", "an unresolved receiver leaves the debt standing");
+      assert.equal(exchange[0]?.status, "closed", "the reply settles the debt the ask opened here");
+      const outbound = yield* sql<{ readonly receiver_environment_id: string | null }>`
+        SELECT receiver_environment_id FROM j5_a2a_delivery
+        WHERE sender_id = ${triage.id} AND receiver_id = ${remoteAsker}
+      `;
+      assert.deepStrictEqual(outbound, [{ receiver_environment_id: homeEnvironment }]);
     }).pipe(Effect.provide(makeTestLayer(delivered)));
   }),
 );

@@ -43,6 +43,8 @@ const homePeer: PeerConnection = {
   label: "Home",
   origin: "https://home.example:3773",
   credential: "home-token",
+  credentialExpiresAt: null,
+  inboundSession: "active",
   createdAt: timestamp,
 };
 const supportOnHome: RemoteAgent = {
@@ -260,7 +262,11 @@ const makeTransportLayer = (
     Layer.provide(database),
     Layer.provide(http),
     Layer.provide(
-      Layer.mock(PeerRegistryService)({ connections: () => Effect.succeed([homePeer]) }),
+      Layer.mock(PeerRegistryService)({
+        connections: () => Effect.succeed([homePeer]),
+        connection: (environmentId) =>
+          Effect.succeed(environmentId === homePeer.environmentId ? homePeer : null),
+      }),
     ),
     Layer.provide(Layer.mock(ThreadManagementService)({})),
     Layer.provide(Layer.mock(OrchestratorV2)({})),
@@ -282,12 +288,17 @@ const crossingAsk = Effect.fn("test.j5.a2a.peer.outbound.crossing")(function* ()
     acceptedAt: timestamp,
   });
   const transport = yield* A2ADeliveryTransport;
+  const sql = yield* SqlClient.SqlClient;
+  const [row] = yield* sql<{ readonly correlation_id: string }>`
+    SELECT correlation_id FROM j5_a2a_delivery WHERE message_id = ${sent.messageId}
+  `;
   return {
     sent,
     deliver: transport.deliverPeer({
       originSquadronId: localSquadron,
       receiverSquadronId: supportOnHome.squadronId,
       receiverEnvironmentId: homePeer.environmentId,
+      correlationId: row!.correlation_id,
       messageId: sent.messageId,
       senderId: billing.id,
       receiverId: remoteSupport,

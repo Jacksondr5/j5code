@@ -1,5 +1,5 @@
 import { ThreadId } from "@t3tools/contracts";
-import { J5_MACHINE_API_PATHS, type A2ARosterResponse } from "@t3tools/contracts/j5";
+import { J5_PEER_API_PATHS, type PeerRosterResponse } from "@t3tools/contracts/j5";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -17,6 +17,8 @@ const homePeer: PeerConnection = {
   label: "Home",
   origin: "https://home.example:3773",
   credential: "home-token",
+  credentialExpiresAt: null,
+  inboundSession: "active",
   createdAt: "2026-09-16T00:00:00.000Z",
 };
 const macPeer: PeerConnection = {
@@ -24,58 +26,30 @@ const macPeer: PeerConnection = {
   label: "Mac",
   origin: "https://mac.example:3773",
   credential: "mac-token",
+  credentialExpiresAt: null,
+  inboundSession: "active",
   createdAt: "2026-09-16T00:00:00.000Z",
 };
 
-const homeRoster: A2ARosterResponse = {
-  participants: [
+const homeRoster: PeerRosterResponse = {
+  agents: [
     {
       participantId: "agent:j5:a2a:thread:support-triage",
-      kind: "agent",
       squadronId: "squadron:home-support",
       squadronName: "L2 Support Rotation",
       displayName: "Support triage",
       threadId: ThreadId.make("thread:support-triage"),
       archived: false,
       canReceiveMessage: true,
-      acceptsUrgency: false,
-      liveness: null,
     },
     {
       participantId: "agent:j5:a2a:thread:retired",
-      kind: "agent",
       squadronId: "squadron:home-support",
       squadronName: "L2 Support Rotation",
       displayName: "Retired",
       threadId: ThreadId.make("thread:retired"),
       archived: true,
       canReceiveMessage: false,
-      acceptsUrgency: false,
-      liveness: null,
-    },
-    {
-      participantId: "human:home-person",
-      kind: "human",
-      squadronId: null,
-      squadronName: null,
-      displayName: null,
-      threadId: null,
-      archived: false,
-      canReceiveMessage: false,
-      acceptsUrgency: true,
-      liveness: null,
-    },
-    {
-      participantId: "machine:watchdog",
-      kind: "machine",
-      squadronId: "squadron:home-support",
-      squadronName: "L2 Support Rotation",
-      displayName: "watchdog",
-      threadId: null,
-      archived: false,
-      canReceiveMessage: false,
-      acceptsUrgency: false,
-      liveness: null,
     },
   ],
 };
@@ -122,7 +96,7 @@ it.effect(
           ["agent:j5:a2a:thread:support-triage", "L2 Support Rotation", false],
           ["agent:j5:a2a:thread:retired", "L2 Support Rotation", true],
         ],
-        "people and machines on a peer are never listed",
+        "the peer route lists agents only, so nothing else can appear",
       );
       assert.equal(reading.agents[0]!.environmentId, "environment-home");
       assert.equal(reading.agents[0]!.displayName, "Support triage");
@@ -131,8 +105,8 @@ it.effect(
       assert.equal(reading.unreadPeers[0]!.label, "Mac");
       assert.include(reading.unreadPeers[0]!.reason, "ECONNREFUSED");
       assert.deepStrictEqual(seen.map((request) => request.url).sort(), [
-        `${homePeer.origin}${J5_MACHINE_API_PATHS.roster}`,
-        `${macPeer.origin}${J5_MACHINE_API_PATHS.roster}`,
+        `${homePeer.origin}${J5_PEER_API_PATHS.roster}`,
+        `${macPeer.origin}${J5_PEER_API_PATHS.roster}`,
       ]);
       assert.equal(
         seen.find((request) => request.url.startsWith(homePeer.origin))?.authorization,
@@ -153,4 +127,19 @@ it.effect("resolves one participant id to the agents that carry it and nothing e
     assert.deepStrictEqual(missing.agents, []);
     assert.deepStrictEqual(missing.unreadPeers, []);
   }).pipe(Effect.provide(makeTestLayer([homePeer], []))),
+);
+
+it.effect("reports a peer whose session here is gone as unread, without reading it", () =>
+  Effect.gen(function* () {
+    const seen: Array<{ url: string; authorization: string | undefined }> = [];
+    const revokedHome: PeerConnection = { ...homePeer, inboundSession: "missing" };
+    const reading = yield* Effect.flatMap(PeerDirectory, (directory) =>
+      directory.listAgents(),
+    ).pipe(Effect.provide(makeTestLayer([revokedHome], seen)));
+    assert.deepStrictEqual(reading.agents, []);
+    assert.equal(reading.unreadPeers.length, 1);
+    assert.equal(reading.unreadPeers[0]!.environmentId, homePeer.environmentId);
+    assert.include(reading.unreadPeers[0]!.reason, "revoked or has expired");
+    assert.deepStrictEqual(seen, [], "no roster request goes to a peer that cannot answer us back");
+  }),
 );

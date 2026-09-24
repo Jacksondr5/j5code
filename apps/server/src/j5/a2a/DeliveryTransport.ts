@@ -75,10 +75,12 @@ export interface HumanDeliveryInput extends AgentDeliveryInput {
 /** A receiver homed on a peer server: the peer writes its own received row and delivers from there. */
 export interface PeerDeliveryInput extends AgentDeliveryInput {
   readonly receiverEnvironmentId: string;
+  /** The delivery row's correlation id; the worker already holds it, so the transport never re-reads it. */
+  readonly correlationId: string;
   readonly createdAt: string;
 }
 
-export const PEER_DELIVERY_TIMEOUT = Duration.seconds(15);
+const PEER_DELIVERY_TIMEOUT = Duration.seconds(15);
 
 export interface A2ADeliveryTransportShape {
   /** Withdraw an accepted queue entry, or prove that delivery already reached its run/provider. */
@@ -231,22 +233,6 @@ export const live: Layer.Layer<
       }
     });
     const sql = yield* SqlClient.SqlClient;
-    const correlationIdFor = Effect.fn("j5.a2a.delivery.correlationId")(function* (
-      input: PeerDeliveryInput,
-    ) {
-      const rows = yield* sql<{ readonly correlation_id: string }>`
-        SELECT correlation_id FROM j5_a2a_delivery
-        WHERE squadron_id = ${input.originSquadronId} AND message_id = ${input.messageId}
-        LIMIT 1
-      `;
-      if (rows[0] === undefined) {
-        return yield* new A2ADeliveryTargetError({
-          participantId: input.receiverId,
-          state: "delivery row disappeared before the peer transport read it",
-        });
-      }
-      return rows[0].correlation_id;
-    });
 
     return A2ADeliveryTransport.of({
       cancelAgent: (input) =>
@@ -407,10 +393,8 @@ export const live: Layer.Layer<
         ),
       deliverPeer: (input) =>
         Effect.gen(function* () {
-          const peer = (yield* peers.connections()).find(
-            (connection) => connection.environmentId === input.receiverEnvironmentId,
-          );
-          if (peer === undefined) {
+          const peer = yield* peers.connection(input.receiverEnvironmentId);
+          if (peer === null) {
             return yield* new A2ADeliveryTargetError({
               participantId: input.receiverId,
               state: `peer ${input.receiverEnvironmentId} is no longer recorded on this server`,
@@ -430,7 +414,7 @@ export const live: Layer.Layer<
             senderId: input.senderId,
             receiverId: input.receiverId,
             exchangeId: input.exchangeId,
-            correlationId: yield* correlationIdFor(input),
+            correlationId: input.correlationId,
             exchangeRole: input.exchangeRole,
             envelopeChannel: input.envelopeChannel,
             text: input.message,

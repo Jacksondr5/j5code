@@ -1,5 +1,5 @@
-import { ThreadId } from "@t3tools/contracts";
-import { A2ARosterResponse, J5_MACHINE_API_PATHS } from "@t3tools/contracts/j5";
+import type { ThreadId } from "@t3tools/contracts";
+import { J5_PEER_API_PATHS, PeerRosterResponse } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -22,7 +22,7 @@ import { ParticipantId, SquadronId } from "./contracts.ts";
  * their Squadron; which server a Squadron lives on stays here.
  */
 
-export const PEER_ROSTER_TIMEOUT = Duration.seconds(5);
+const PEER_ROSTER_TIMEOUT = Duration.seconds(5);
 
 export interface RemoteAgent {
   readonly environmentId: string;
@@ -70,7 +70,7 @@ export const noneLayer = Layer.succeed(
   }),
 );
 
-const decodeRoster = Schema.decodeUnknownEffect(A2ARosterResponse);
+const decodeRoster = Schema.decodeUnknownEffect(PeerRosterResponse);
 
 class PeerRosterStatusError extends Schema.TaggedError<PeerRosterStatusError>()(
   "PeerRosterStatusError",
@@ -81,11 +81,20 @@ class PeerRosterStatusError extends Schema.TaggedError<PeerRosterStatusError>()(
   }
 }
 
+class PeerSessionMissingError extends Schema.TaggedError<PeerSessionMissingError>()(
+  "PeerSessionMissingError",
+  { environmentId: Schema.String },
+) {
+  override get message(): string {
+    return `the session peer ${this.environmentId} held on this server was revoked or has expired; issue it a new credential or remove the peer`;
+  }
+}
+
 const reasonOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
 const readPeerRoster = Effect.fn("j5.a2a.peer.directory.roster")(function* (peer: PeerConnection) {
   const client = yield* HttpClient.HttpClient;
-  const request = HttpClientRequest.get(`${peer.origin}${J5_MACHINE_API_PATHS.roster}`).pipe(
+  const request = HttpClientRequest.get(`${peer.origin}${J5_PEER_API_PATHS.roster}`).pipe(
     HttpClientRequest.bearerToken(peer.credential),
     HttpClientRequest.acceptJson,
   );
@@ -94,26 +103,27 @@ const readPeerRoster = Effect.fn("j5.a2a.peer.directory.roster")(function* (peer
     return yield* new PeerRosterStatusError({ status: response.status });
   }
   const roster = yield* response.json.pipe(Effect.flatMap(decodeRoster));
-  return roster.participants.flatMap((entry): ReadonlyArray<RemoteAgent> =>
-    entry.kind === "agent" &&
-    entry.squadronId !== null &&
-    entry.squadronName !== null &&
-    entry.threadId !== null
-      ? [
-          {
-            environmentId: peer.environmentId,
-            environmentLabel: peer.label,
-            squadronId: SquadronId.make(entry.squadronId),
-            squadronName: entry.squadronName,
-            participantId: ParticipantId.make(entry.participantId),
-            threadId: ThreadId.make(entry.threadId),
-            displayName: entry.displayName,
-            archived: entry.archived,
-            canReceiveMessage: entry.canReceiveMessage,
-          },
-        ]
-      : [],
-  );
+  return roster.agents.map((entry): RemoteAgent => ({
+    environmentId: peer.environmentId,
+    environmentLabel: peer.label,
+    squadronId: SquadronId.make(entry.squadronId),
+    squadronName: entry.squadronName,
+    participantId: ParticipantId.make(entry.participantId),
+    threadId: entry.threadId,
+    displayName: entry.displayName,
+    archived: entry.archived,
+    canReceiveMessage: entry.canReceiveMessage,
+  }));
+});
+
+/** A peer that no longer holds a session here cannot complete an Exchange with us; it is reported, never read as if healthy. */
+const readPeerRosterIfAuthorized = Effect.fn("j5.a2a.peer.directory.rosterIfAuthorized")(function* (
+  peer: PeerConnection,
+) {
+  if (peer.inboundSession === "missing") {
+    return yield* new PeerSessionMissingError({ environmentId: peer.environmentId });
+  }
+  return yield* readPeerRoster(peer);
 });
 
 export const layer: Layer.Layer<PeerDirectory, never, PeerRegistryService | HttpClient.HttpClient> =
@@ -129,7 +139,7 @@ export const layer: Layer.Layer<PeerDirectory, never, PeerRegistryService | Http
           const readings = yield* Effect.forEach(
             connections,
             (peer) =>
-              readPeerRoster(peer).pipe(
+              readPeerRosterIfAuthorized(peer).pipe(
                 // One bound for the whole read: connect, body, and decode.
                 Effect.timeout(PEER_ROSTER_TIMEOUT),
                 Effect.provideService(HttpClient.HttpClient, httpClient),

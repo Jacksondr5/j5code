@@ -222,6 +222,7 @@ const makeLayer = (daemon: boolean) =>
             originSquadronId,
             receiverSquadronId,
             receiverEnvironmentId: row.receiver_environment_id,
+            correlationId: row.correlation_id,
             messageId,
             senderId,
             receiverId,

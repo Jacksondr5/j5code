@@ -564,6 +564,11 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
         | A2APeersUnreadError
         | A2AParticipantArchivedError
       > {
+        // A participant this server has already exchanged messages with keeps
+        // its recorded route; only an unknown id fans out to every peer's roster,
+        // so one dead peer never taxes a send to a known one.
+        const known = yield* recordedRoute(id);
+        if (known !== null) return known;
         const reading = yield* peers.resolveAgent(id);
         const active = reading.agents.filter((agent) => !agent.archived);
         if (active.length > 1)
@@ -572,13 +577,6 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
         if (agent === undefined) {
           if (reading.unreadPeers.length === 0) {
             return yield* new A2AParticipantNotFoundError({ participantId: id });
-          }
-          const recorded = yield* recordedRoute(id);
-          if (
-            recorded !== null &&
-            reading.unreadPeers.some((peer) => peer.environmentId === recorded.environmentId)
-          ) {
-            return recorded;
           }
           return yield* new A2APeersUnreadError({
             participantId: id,
@@ -990,8 +988,11 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
           // are reached before the writer permit and the transaction: holding
           // either across the network would block every other send, including
           // the peer's own send back to us. The transaction re-checks both.
-          yield* senderMembership(input.senderThreadId);
-          const remote = yield* preResolveRemote(input.to);
+          const sender = yield* senderMembership(input.senderThreadId);
+          // A retry of a committed send replays whatever has happened to the
+          // receiver since; it never pays for, or fails on, a peer lookup.
+          const replayed = yield* replayedSend(messageIdFor(input.commandId), sender.participantId);
+          const remote = replayed === null ? yield* preResolveRemote(input.to) : null;
           const result = yield* writer.withPermit(
             sql.withTransaction(
               Effect.gen(function* () {
