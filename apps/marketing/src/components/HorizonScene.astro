@@ -1,0 +1,93 @@
+---
+/**
+ * Two servers on one horizon. A Captain and its seats sit on the work server,
+ * two seats on the home server, and an Exchange crosses between them: blue
+ * out, brass back. Sits on the horizon line that closes the section.
+ */
+---
+
+<svg class="hz" viewBox="0 0 1200 130" preserveAspectRatio="xMidYMax meet" role="img" aria-label="Agents on two servers exchanging a message across the horizon" data-motion>
+  <path class="hz-arc" d="M372 60 Q 640 -30 908 62" />
+
+  <g transform="translate(240 66) scale(0.95)"><g class="bob hz-c"><use class="boat boat--dark" href="#j5-captain" /></g></g>
+  <g transform="translate(316 74) scale(0.75)"><g class="bob hz-s1"><use class="boat boat--dark" href="#j5-boat" /></g></g>
+  <g transform="translate(176 74) scale(0.75)"><g class="bob hz-s2"><use class="boat boat--dark boat--settled" href="#j5-boat" /></g></g>
+
+  <g transform="translate(860 74) scale(0.75)"><g class="bob hz-s3"><use class="boat boat--dark" href="#j5-boat" /></g></g>
+  <g transform="translate(930 74) scale(0.75)"><g class="bob hz-s4"><use class="boat boat--dark boat--waiting" href="#j5-boat" /></g></g>
+
+  <text class="hz-label" x="270" y="124" text-anchor="middle">work server</text>
+  <text class="hz-label" x="920" y="124" text-anchor="middle">home server</text>
+
+  <circle class="hz-dot hz-dot--ask" r="4" />
+  <circle class="hz-dot hz-dot--reply" r="4" />
+</svg>
+
+<style>
+  .hz {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+
+  .hz-arc {
+    fill: none;
+    stroke: var(--foam-dim, rgba(223, 233, 238, 0.48));
+    stroke-opacity: 0.6;
+    stroke-width: 1;
+    stroke-dasharray: 3 7;
+  }
+
+  .hz-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    fill: var(--foam-dim, rgba(223, 233, 238, 0.48));
+  }
+
+  .hz-c { --bob-dur: 6s; }
+  .hz-s1 { --bob-dur: 5.1s; --bob-delay: -2s; }
+  .hz-s2 { --bob-dur: 5.6s; --bob-delay: -1s; }
+  .hz-s3 { --bob-dur: 5.3s; --bob-delay: -3s; }
+  .hz-s4 { --bob-dur: 4.9s; --bob-delay: -0.5s; }
+
+  .hz-dot {
+    opacity: 0;
+    offset-rotate: 0deg;
+    animation-duration: 16s;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-play-state: var(--motion-state, paused);
+  }
+
+  .hz-dot--ask {
+    fill: var(--sea, #3b8fae);
+    offset-path: path("M372 60 Q 640 -30 908 62");
+    animation-name: hz-out;
+  }
+
+  .hz-dot--reply {
+    fill: var(--brass, #c9a24d);
+    offset-path: path("M908 62 Q 640 -30 372 60");
+    animation-name: hz-back;
+  }
+
+  @keyframes hz-out {
+    0% { offset-distance: 0%; opacity: 0; }
+    3% { opacity: 1; }
+    22% { opacity: 1; }
+    25%, 100% { offset-distance: 100%; opacity: 0; }
+  }
+  @keyframes hz-back {
+    0%, 45% { offset-distance: 0%; opacity: 0; }
+    48% { opacity: 1; }
+    67% { opacity: 1; }
+    70%, 100% { offset-distance: 100%; opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hz-dot { animation: none; opacity: 0; }
+  }
+</style>

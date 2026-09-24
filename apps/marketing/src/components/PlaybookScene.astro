@@ -1,0 +1,86 @@
+---
+/**
+ * A Captain leads three seats along a channel past numbered buoys. The four
+ * boats share one 24s clock with the step marker in the Playbooks card, so
+ * passing a buoy and the marker advancing read as one event.
+ */
+---
+
+<svg class="pb" viewBox="0 0 520 170" role="img" aria-label="A Captain leading three agents along a route of numbered buoys" data-motion>
+  <path class="pb-channel" d="M-40 120 C 80 60, 160 150, 260 105 S 440 40, 560 96" />
+
+  <g class="pb-buoy" style="offset-distance: 20%"><circle r="7" /><text y="2.6">1</text></g>
+  <g class="pb-buoy" style="offset-distance: 40%"><circle r="7" /><text y="2.6">2</text></g>
+  <g class="pb-buoy" style="offset-distance: 60%"><circle r="7" /><text y="2.6">3</text></g>
+  <g class="pb-buoy" style="offset-distance: 80%"><circle r="7" /><text y="2.6">4</text></g>
+
+  <g class="pb-boat pb-boat--captain"><g transform="translate(-35 -44) scale(1.1)"><use class="boat" href="#j5-captain" /></g></g>
+  <g class="pb-boat pb-boat--s1"><g transform="translate(-27 -34) scale(0.85)"><use class="boat" href="#j5-boat" /></g></g>
+  <g class="pb-boat pb-boat--s2"><g transform="translate(-27 -34) scale(0.85)"><use class="boat" href="#j5-boat" /></g></g>
+  <g class="pb-boat pb-boat--s3"><g transform="translate(-27 -34) scale(0.85)"><use class="boat boat--waiting" href="#j5-boat" /></g></g>
+</svg>
+
+<style>
+  .pb {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+
+  .pb-channel {
+    fill: none;
+    stroke: var(--sea, #3b8fae);
+    stroke-opacity: 0.6;
+    stroke-width: 1.2;
+    stroke-dasharray: 3 7;
+  }
+
+  .pb-buoy {
+    offset-path: path("M-40 120 C 80 60, 160 150, 260 105 S 440 40, 560 96");
+    offset-rotate: 0deg;
+  }
+
+  .pb-buoy circle {
+    fill: var(--brass, #c9a24d);
+    stroke: var(--ink, #12202f);
+    stroke-width: 1;
+  }
+
+  .pb-buoy text {
+    font-family: var(--font-mono);
+    font-size: 8px;
+    font-weight: 600;
+    text-anchor: middle;
+    fill: #12202f;
+  }
+
+  .pb-boat {
+    offset-path: path("M-40 120 C 80 60, 160 150, 260 105 S 440 40, 560 96");
+    offset-rotate: 0deg;
+    opacity: 0;
+    animation: pb-sail 24s linear infinite;
+    animation-play-state: var(--motion-state, paused);
+  }
+
+  /* Negative delays put the Captain furthest along, the last seat trailing. */
+  .pb-boat--captain { animation-delay: -3.6s; }
+  .pb-boat--s1 { animation-delay: -2.4s; }
+  .pb-boat--s2 { animation-delay: -1.2s; }
+  .pb-boat--s3 { animation-delay: 0s; }
+
+  @keyframes pb-sail {
+    0% { offset-distance: 0%; opacity: 0; }
+    5% { opacity: 1; }
+    94% { opacity: 1; }
+    100% { offset-distance: 100%; opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pb-boat { animation: none; opacity: 1; }
+    .pb-boat--captain { offset-distance: 62%; }
+    .pb-boat--s1 { offset-distance: 54%; }
+    .pb-boat--s2 { offset-distance: 47%; }
+    .pb-boat--s3 { offset-distance: 40%; }
+  }
+</style>

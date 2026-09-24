@@ -2,6 +2,10 @@
 import Layout from "../layouts/Layout.astro";
 import Pennant from "../components/Pennant.astro";
 import CopyCommand from "../components/CopyCommand.astro";
+import Boat from "../components/Boat.astro";
+import A2AScene from "../components/A2AScene.astro";
+import PlaybookScene from "../components/PlaybookScene.astro";
+import HorizonScene from "../components/HorizonScene.astro";
 import { readForkFacts } from "../lib/forkFacts";
 import {
   FORK_DISCIPLINE_URL,
@@ -28,7 +32,7 @@ const harnesses = [
 
 <Layout>
   <!-- ── Hero ─────────────────────────────────────────────────── -->
-  <section class="hero">
+  <section class="hero" id="hero">
     <svg class="hero-chart" viewBox="0 0 1440 720" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
       <g fill="none" stroke="currentColor" stroke-width="1">
         <path d="M-40 520C180 470 300 560 520 500S900 380 1120 440s260 40 380 0" />
@@ -48,6 +52,16 @@ const harnesses = [
         <path d="M0-72 14 0H-14Z" fill="currentColor" opacity="0.4" stroke="none" />
       </g>
     </svg>
+
+    <!-- The fleet at a glance: six boats, five states, on their own phase. Leans toward a fine pointer. -->
+    <div class="hero-fleet" aria-hidden="true" data-motion>
+      <span class="hero-boat hb-captain"><Boat captain tone="dark" size={92} class="bob" style="--bob-dur:6.2s" /></span>
+      <span class="hero-boat hb-1"><Boat tone="dark" size={60} class="bob" style="--bob-dur:5.1s;--bob-delay:-2s" /></span>
+      <span class="hero-boat hb-2 hero-boat--waiting"><Boat tone="dark" status="waiting" size={64} class="bob" style="--bob-dur:5.7s;--bob-delay:-1s" /></span>
+      <span class="hero-boat hb-3"><Boat tone="dark" status="settled" size={56} class="bob" style="--bob-dur:6.5s;--bob-delay:-3s" /></span>
+      <span class="hero-boat hb-4"><Boat tone="dark" size={58} class="bob" style="--bob-dur:4.9s;--bob-delay:-0.5s" /></span>
+      <span class="hero-boat hb-5 hero-boat--alarm"><Boat tone="dark" status="alarm" size={54} class="bob" style="--bob-dur:5.4s;--bob-delay:-2.6s" /></span>
+    </div>
 
     <div class="container hero-inner">
       <p class="eyebrow hero-eyebrow" data-rise>T3 Code with a fleet layer</p>
@@ -145,9 +159,12 @@ const harnesses = [
             <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>Commit, push, and open a PR from one button.</li>
             <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>MIT licensed, both of us.</li>
           </ul>
-          <div class="harness-row" aria-label="Supported agent harnesses">
-            {harnesses.map((h) => (
-              <span class="harness" title={h.name}><img src={h.icon} alt={h.name} loading="lazy" decoding="async" /></span>
+          <!-- T3's own hero motion: marks enter once, drift while visible, lean toward the pointer. -->
+          <div class="harness-float" aria-label="Supported agent harnesses" data-motion>
+            {harnesses.map((h, i) => (
+              <span class:list={["hf-mark", `hf-${i}`, h.name === "Antigravity" && "hf-antigravity"]} title={h.name}>
+                <span class="hf-card"><img src={h.icon} alt={h.name} loading="lazy" decoding="async" /></span>
+              </span>
             ))}
           </div>
           <p class="foundation-t3">
@@ -202,6 +219,12 @@ const harnesses = [
 
   <!-- ── The fleet layer ──────────────────────────────────────── -->
   <section id="fleet" class="sec-fleet">
+    <!-- Just launched: three boats straddle the seam between the T3 hull and J5's water. -->
+    <div class="launch" aria-hidden="true" data-motion>
+      <Boat size={44} class="bob" style="--bob-dur:5.3s" />
+      <Boat size={40} status="waiting" class="bob" style="--bob-dur:6.1s;--bob-delay:-2s" />
+      <Boat size={46} class="bob" style="--bob-dur:5.6s;--bob-delay:-4s" />
+    </div>
     <div class="container">
       <div class="section-head">
         <div class="eyebrow">The fleet layer</div>
@@ -210,6 +233,11 @@ const harnesses = [
           T3 Code is built around one agent at a time. J5 is built for the moment you have twelve,
           most of them not talking to you, and you still need to know who is waiting on whom.
         </p>
+      </div>
+
+      <div class="scene scene--a2a">
+        <A2AScene />
+        <p class="scene-caption">An ask travels mast to mast. The receiver owes a reply, and the platform knows it until the brass one comes back.</p>
       </div>
 
       <div class="legend" aria-label="Status legend">
@@ -312,13 +340,17 @@ const harnesses = [
               decaying into the back pages of context. Linear first, no platform-owned branching.
             </p>
           </div>
-          <ol class="steps" aria-label="Example Playbook">
-            <li class="step is-done"><span class="step-n">1</span><span>Build and test</span><span class="step-who">Builder</span></li>
-            <li class="step is-done"><span class="step-n">2</span><span>Independent review</span><span class="step-who">Critic</span></li>
-            <li class="step is-current"><span class="step-n">3</span><span>Sit on CI, triage failures</span><span class="step-who">Sitter</span></li>
-            <li class="step"><span class="step-n">4</span><span>Decide whether the migration is safe</span><span class="step-who">Captain</span></li>
-            <li class="step"><span class="step-n">5</span><span>Merge and report</span><span class="step-who">Sitter</span></li>
-          </ol>
+          <div class="pb-side" data-motion>
+            <PlaybookScene />
+            <ol class="steps" aria-label="Example Playbook">
+              <span class="steps-marker" aria-hidden="true"></span>
+              <li class="step"><span class="step-n">1</span><span>Build and test</span><span class="step-who">Builder</span></li>
+              <li class="step"><span class="step-n">2</span><span>Independent review</span><span class="step-who">Critic</span></li>
+              <li class="step"><span class="step-n">3</span><span>Sit on CI, triage failures</span><span class="step-who">Sitter</span></li>
+              <li class="step"><span class="step-n">4</span><span>Is the migration safe to run?</span><span class="step-who">Captain</span></li>
+              <li class="step"><span class="step-n">5</span><span>Merge and report</span><span class="step-who">Sitter</span></li>
+            </ol>
+          </div>
         </article>
       </div>
 
@@ -330,8 +362,9 @@ const harnesses = [
   </section>
 
   <!-- ── Standing orders ──────────────────────────────────────── -->
-  <section class="sec-orders" aria-labelledby="orders-title">
-    <div class="container">
+  <section class="sec-orders" aria-labelledby="orders-title" data-motion>
+    <div class="container orders-inner">
+      <span class="orders-boat" aria-hidden="true"><Boat tone="dark" size={52} class="bob" style="--bob-dur:6s" /></span>
       <h2 id="orders-title" class="eyebrow orders-eyebrow">Standing orders</h2>
       <ul class="orders">
         <li><span class="order-n">I</span><span>The platform delivers facts, never judgment.</span></li>
@@ -389,11 +422,18 @@ const harnesses = [
         </article>
       </div>
     </div>
+    <div class="horizon-scene" aria-hidden="true">
+      <HorizonScene />
+    </div>
   </section>
 
   <!-- ── CTA ──────────────────────────────────────────────────── -->
-  <section id="download" class="sec-cta">
+  <section id="download" class="sec-cta" data-motion>
     <div class="container cta-inner">
+      <span class="cta-boat" aria-hidden="true">
+        <Boat captain tone="dark" size={112} class="bob" style="--bob-dur:6.4s" />
+        <svg class="cta-wake" viewBox="0 0 160 12" aria-hidden="true"><path d="M0 6 Q 20 0 40 6 T 80 6 T 120 6 T 160 6" /></svg>
+      </span>
       <h2 class="display cta-title">Take the helm.</h2>
       <p class="cta-sub">
         Free, MIT licensed, and a tracking fork of T3 Code. Bring the subscriptions you already have.
@@ -415,6 +455,20 @@ const harnesses = [
 
 <script>
   import { detectPlatform, fetchLatestRelease, pickMacAsset, RELEASES_URL } from "../lib/releases";
+  import { startMotion } from "../lib/motion";
+
+  const scenes = Array.from(document.querySelectorAll<HTMLElement>("[data-motion]"));
+  const hero = document.getElementById("hero");
+  const heroFleet = document.querySelector<HTMLElement>(".hero-fleet");
+  startMotion({
+    scenes,
+    parallax: hero && heroFleet ? { area: hero, field: heroFleet } : undefined,
+  });
+  const foundation = document.getElementById("foundation");
+  const harnessField = document.querySelector<HTMLElement>(".harness-float");
+  if (foundation && harnessField) {
+    startMotion({ scenes: [], parallax: { area: foundation, field: harnessField } });
+  }
 
   const platform = detectPlatform();
   if (platform) document.documentElement.dataset.platform = platform;
@@ -497,6 +551,77 @@ const harnesses = [
     color: var(--foam);
     opacity: 0.16;
     pointer-events: none;
+  }
+
+  /* Boats enter once, then bob on their own phase and lean toward the pointer. */
+  .hero-fleet {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    --px: 0px;
+    --py: 0px;
+  }
+
+  .hero-boat {
+    position: absolute;
+    left: calc(50% + var(--x));
+    top: var(--y);
+    width: var(--s);
+    margin-left: calc(var(--s) / -2);
+    translate: calc(var(--px) * var(--depth)) calc(var(--py) * var(--depth));
+    transition: translate var(--parallax-duration, 0s) cubic-bezier(0.2, 0.7, 0.2, 1);
+    animation: boat-in 1s cubic-bezier(0.2, 0.7, 0.2, 1) var(--d) both;
+  }
+
+  .hero-boat .boat {
+    width: 100%;
+    height: auto;
+    filter: drop-shadow(0 12px 18px rgba(0, 0, 0, 0.45));
+  }
+
+  @keyframes boat-in {
+    from { opacity: 0; transform: translateX(var(--fx)) translateY(24px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  /* The seat waiting on you carries a slow brass ripple. */
+  .hero-boat--waiting::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: 22px;
+    height: 22px;
+    margin-left: -11px;
+    margin-top: -8px;
+    border-radius: 50%;
+    border: 1.5px solid var(--brass);
+    opacity: 0;
+    animation: ripple 3.2s ease-out infinite;
+    animation-play-state: var(--motion-state, paused);
+  }
+
+  @keyframes ripple {
+    0% { transform: scale(0.4); opacity: 0.9; }
+    100% { transform: scale(2.4); opacity: 0; }
+  }
+
+  /* The alarm seat lists. */
+  .hero-boat--alarm .boat {
+    transform: rotate(-7deg);
+  }
+
+  .hb-captain { --x: min(500px, 34vw); --y: 120px; --s: 92px; --depth: 1.2; --d: 420ms; --fx: 60px; }
+  .hb-1       { --x: max(-520px, -36vw); --y: 130px; --s: 60px; --depth: 1.1; --d: 360ms; --fx: -60px; }
+  .hb-2       { --x: max(-380px, -26vw); --y: 300px; --s: 64px; --depth: 0.8; --d: 520ms; --fx: -40px; }
+  .hb-3       { --x: max(-600px, -42vw); --y: 420px; --s: 56px; --depth: 0.6; --d: 640ms; --fx: -30px; }
+  .hb-4       { --x: min(380px, 26vw); --y: 320px; --s: 58px; --depth: 0.9; --d: 560ms; --fx: 40px; }
+  .hb-5       { --x: min(600px, 42vw); --y: 440px; --s: 54px; --depth: 0.6; --d: 700ms; --fx: 30px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-boat { animation: none; translate: none; transition: none; }
+    .hero-boat--waiting::after { animation: none; }
   }
 
   .hero-rose {
@@ -771,27 +896,70 @@ const harnesses = [
     flex-shrink: 0;
   }
 
-  .harness-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-top: 28px;
+  /* T3's floating marks, as on t3.codes: enter once, drift while visible, lean toward the pointer. */
+  .harness-float {
+    position: relative;
+    height: 150px;
+    margin-top: 24px;
+    --px: 0px;
+    --py: 0px;
   }
 
-  .harness {
+  .hf-mark {
+    position: absolute;
+    left: var(--x);
+    top: var(--y);
+    width: var(--s);
+    height: var(--s);
+    translate: calc(var(--px) * var(--depth)) calc(var(--py) * var(--depth));
+    transition: translate var(--parallax-duration, 0s) cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+
+  .hf-card {
     display: grid;
     place-items: center;
-    width: 44px;
-    height: 44px;
-    border-radius: 11px;
+    width: 100%;
+    height: 100%;
+    border-radius: 25%;
+    background: radial-gradient(circle at 30% 25%, var(--tint, rgba(255, 255, 255, 0.08)), rgba(20, 20, 24, 0.92) 65%);
     border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.02);
+    box-shadow:
+      0 20px 48px -16px rgba(0, 0, 0, 0.65),
+      0 2px 0 0 rgba(255, 255, 255, 0.04) inset;
+    animation:
+      mark-in 1s cubic-bezier(0.2, 0.7, 0.2, 1) var(--d) both,
+      mark-drift var(--dur) ease-in-out calc(var(--d) + 1s) infinite;
+    animation-play-state: running, var(--motion-state, paused);
   }
 
-  .harness img {
-    width: 22px;
-    height: 22px;
+  .hf-card img {
+    width: 56%;
+    height: 56%;
     object-fit: contain;
+  }
+
+  .hf-antigravity .hf-card { background: #0d0d10; border-color: rgba(255, 255, 255, 0.1); }
+  .hf-antigravity .hf-card img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
+
+  @keyframes mark-in {
+    from { opacity: 0; transform: translateY(18px) rotate(calc(var(--rot) + 20deg)) scale(0.6); }
+    to { opacity: 1; transform: translateY(0) rotate(var(--rot)) scale(1); }
+  }
+  @keyframes mark-drift {
+    0%, 100% { transform: translate(0, 0) rotate(var(--rot)); }
+    50% { transform: translate(var(--dx), var(--dy)) rotate(calc(var(--rot) + var(--wob))); }
+  }
+
+  .hf-0 { --x: 2%;  --y: 40px; --s: 64px; --rot: -8deg; --depth: 1.1; --d: 200ms; --dur: 10.5s; --dx: 4px; --dy: -10px; --wob: -2deg; --tint: rgba(217, 119, 87, 0.22); }
+  .hf-1 { --x: 20%; --y: 8px;  --s: 58px; --rot: 6deg;  --depth: 0.8; --d: 300ms; --dur: 9.2s;  --dx: -3px; --dy: -8px; --wob: 2deg; }
+  .hf-2 { --x: 37%; --y: 62px; --s: 54px; --rot: -5deg; --depth: 0.9; --d: 380ms; --dur: 7.8s;  --dx: -3px; --dy: -11px; --wob: 3deg; }
+  .hf-3 { --x: 54%; --y: 14px; --s: 56px; --rot: 4deg;  --depth: 0.7; --d: 460ms; --dur: 11.5s; --dx: 3px; --dy: -9px; --wob: -3deg; }
+  .hf-4 { --x: 70%; --y: 70px; --s: 52px; --rot: 6deg;  --depth: 1.0; --d: 540ms; --dur: 8.5s;  --dx: 2px; --dy: -8px; --wob: 3deg; }
+  .hf-5 { --x: 86%; --y: 24px; --s: 60px; --rot: -5deg; --depth: 0.8; --d: 620ms; --dur: 9.8s;  --dx: -2px; --dy: -9px; --wob: -3deg; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hf-card { animation: none; transform: rotate(var(--rot)); }
+    .hf-mark { translate: none; transition: none; }
   }
 
   .foundation-t3 {
@@ -898,6 +1066,7 @@ const harnesses = [
 
   /* ── Fleet layer (chart paper) ────────────────────────────── */
   .sec-fleet {
+    z-index: 1;
     --bg: var(--canvas);
     --fg: var(--ink);
     --fg-muted: var(--ink-muted);
@@ -909,6 +1078,27 @@ const harnesses = [
       linear-gradient(to right, rgba(18, 32, 47, 0.05) 1px, transparent 1px),
       linear-gradient(to bottom, rgba(18, 32, 47, 0.05) 1px, transparent 1px);
     background-size: 56px 56px;
+  }
+
+  /* Straddles the seam with the T3 section above. */
+  .launch {
+    position: absolute;
+    top: -26px;
+    right: max(32px, calc((100% - 1200px) / 2 + 32px));
+    display: flex;
+    align-items: flex-end;
+    gap: 22px;
+  }
+
+  .scene {
+    margin: -8px 0 40px;
+  }
+
+  .scene-caption {
+    margin-top: 6px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--fg-dim);
   }
 
   .legend {
@@ -982,25 +1172,64 @@ const harnesses = [
     align-items: center;
   }
 
+  .pb-side {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
   .steps {
+    position: relative;
     list-style: none;
     display: flex;
     flex-direction: column;
     gap: 6px;
-    counter-reset: step;
+  }
+
+  /* The current-step marker shares the 24s clock with the boats passing the buoys. */
+  .steps-marker {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 40px;
+    border-radius: 8px;
+    border: 1px solid var(--brass-deep);
+    background: rgba(201, 162, 77, 0.14);
+    pointer-events: none;
+    animation: steps-advance 24s steps(5, jump-none) infinite;
+    animation-play-state: var(--motion-state, paused);
+  }
+
+  @keyframes steps-advance {
+    from { transform: translateY(0); }
+    to { transform: translateY(184px); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .steps-marker { animation: none; transform: translateY(92px); }
   }
 
   .step {
+    position: relative;
     display: grid;
     grid-template-columns: 26px minmax(0, 1fr) auto;
     align-items: center;
     gap: 12px;
-    padding: 9px 12px;
+    height: 40px;
+    padding: 0 12px;
     border-radius: 8px;
     border: 1px solid var(--border);
     background: rgba(255, 255, 255, 0.5);
     font-size: 13.5px;
     color: var(--fg-muted);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .step > span:nth-child(2) {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .step-n {
@@ -1022,28 +1251,6 @@ const harnesses = [
     color: var(--fg-dim);
   }
 
-  .step.is-done {
-    color: var(--fg-dim);
-  }
-
-  .step.is-done .step-n {
-    background: var(--navy-700);
-    border-color: var(--navy-700);
-    color: var(--canvas);
-  }
-
-  .step.is-current {
-    border-color: var(--brass-deep);
-    background: rgba(201, 162, 77, 0.12);
-    color: var(--fg);
-  }
-
-  .step.is-current .step-n {
-    background: var(--brass);
-    border-color: var(--brass);
-    color: var(--navy-950);
-    font-weight: 600;
-  }
 
   .fleet-docs {
     margin-top: 32px;
@@ -1062,6 +1269,16 @@ const harnesses = [
   .sec-orders {
     padding: 56px 0;
     background: var(--navy-800);
+  }
+
+  .orders-inner {
+    position: relative;
+  }
+
+  .orders-boat {
+    position: absolute;
+    right: 32px;
+    top: -14px;
   }
 
   .orders-eyebrow {
@@ -1111,6 +1328,12 @@ const harnesses = [
     height: 1px;
     background: linear-gradient(90deg, transparent, var(--brass), transparent);
     opacity: 0.6;
+  }
+
+  .horizon-scene {
+    margin: 40px auto -96px;
+    max-width: 1200px;
+    padding: 0 32px;
   }
 
   .horizon-grid {
@@ -1192,6 +1415,27 @@ const harnesses = [
     display: flex;
     flex-direction: column;
     align-items: center;
+  }
+
+  .cta-boat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+
+  .cta-boat .boat {
+    filter: drop-shadow(0 16px 24px rgba(0, 0, 0, 0.45));
+  }
+
+  .cta-wake {
+    width: 160px;
+    height: 12px;
+    margin-top: -6px;
+    fill: none;
+    stroke: var(--sea);
+    stroke-opacity: 0.6;
+    stroke-width: 1.2;
   }
 
   .cta-title {
@@ -1278,6 +1522,40 @@ const harnesses = [
 
     .legend {
       margin-top: -12px;
+    }
+
+    /* Four boats above the headline, two beside the CTA. Keeps the copy clear. */
+    .hb-1       { --x: -38vw; --y: 54px; --s: 44px; }
+    .hb-2       { --x: -14vw; --y: 40px; --s: 48px; }
+    .hb-captain { --x: 14vw;  --y: 28px; --s: 66px; }
+    .hb-4       { --x: 38vw;  --y: 54px; --s: 44px; }
+    .hb-3       { --x: -36vw; --y: 520px; --s: 44px; }
+    .hb-5       { --x: 36vw;  --y: 520px; --s: 44px; }
+
+    .hero {
+      padding-top: 60px;
+    }
+
+    .hero-eyebrow {
+      margin-top: 110px;
+    }
+
+    .launch {
+      right: 20px;
+      gap: 12px;
+    }
+
+    .orders-boat {
+      right: 20px;
+      top: -22px;
+    }
+
+    .harness-float {
+      height: 130px;
+    }
+
+    .horizon-scene {
+      margin-bottom: -72px;
     }
   }
 </style>

@@ -1,0 +1,44 @@
+---
+/**
+ * The paper-boat sprite. Rendered once per page; every Boat renders a <use>
+ * against these ids. Colors come from CSS custom properties on the using <svg>
+ * (--ink, --hull, --sail-l, --sail-r, --pennant, --pennant-fill), which inherit
+ * into the use shadow tree, so one sprite serves every tone and status.
+ */
+---
+
+<svg class="j5-sprite" aria-hidden="true" focusable="false" width="0" height="0">
+  <defs>
+    <g id="j5-boat">
+      <polygon points="14,30 32,8 32,30" fill="var(--sail-l)" stroke="var(--ink)" stroke-width="1.6" stroke-linejoin="round" />
+      <polygon points="32,8 32,30 50,30" fill="var(--sail-r)" stroke="var(--ink)" stroke-width="1.6" stroke-linejoin="round" />
+      <polygon points="4,30 60,30 50,44 14,44" fill="var(--hull)" stroke="var(--ink)" stroke-width="1.6" stroke-linejoin="round" />
+      <path d="M8 35h48" stroke="var(--ink)" stroke-opacity="0.25" stroke-width="1" />
+      <circle cx="24" cy="37" r="1.4" fill="#12202f" />
+      <circle cx="40" cy="37" r="1.4" fill="#12202f" />
+      <path d="M32 8v-7" stroke="var(--ink)" stroke-width="1.4" />
+      <polygon points="32,0 45,3.5 32,7" fill="var(--pennant-fill)" stroke="var(--pennant)" stroke-width="1.4" stroke-linejoin="round" />
+    </g>
+    <g id="j5-captain">
+      <polygon points="14,30 32,4 32,30" fill="var(--sail-l)" stroke="var(--ink)" stroke-width="1.6" stroke-linejoin="round" />
+      <polygon points="32,4 32,30 50,30" fill="var(--sail-r)" stroke="var(--ink)" stroke-width="1.6" stroke-linejoin="round" />
+      <polygon points="2,30 62,30 51,46 13,46" fill="var(--hull)" stroke="var(--ink)" stroke-width="1.6" stroke-linejoin="round" />
+      <polygon points="4,33 60,33 58.6,35.5 5.4,35.5" fill="#c9a24d" />
+      <path d="M9 40h46" stroke="var(--ink)" stroke-opacity="0.25" stroke-width="1" />
+      <circle cx="24" cy="40.5" r="1.5" fill="#12202f" />
+      <circle cx="40" cy="40.5" r="1.5" fill="#12202f" />
+      <path d="M32 19l1.6 3.3 3.6.5-2.6 2.5.6 3.6-3.2-1.7-3.2 1.7.6-3.6-2.6-2.5 3.6-.5z" fill="#c9a24d" />
+      <path d="M32 4v-7" stroke="var(--ink)" stroke-width="1.4" />
+      <polygon points="32,-4 46,-1.5 41,1 46,3.5 32,3" fill="#c9a24d" />
+    </g>
+  </defs>
+</svg>
+
+<style>
+  .j5-sprite {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+  }
+</style>

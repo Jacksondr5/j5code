@@ -1,0 +1,124 @@
+---
+/**
+ * Three boats talking. A blue ask travels the arc from one mast to another,
+ * the receiver nods, and a brass reply comes back. The second pair shows the
+ * conversation is any-to-any, not a hub. One 12s loop, transform and offset
+ * only, gated by the motion controller through --motion-state.
+ */
+---
+
+<svg class="a2a" viewBox="0 0 720 170" role="img" aria-label="Three agents exchanging asks and replies" data-motion>
+  <path class="a2a-water" d="M0 150 Q 60 142 120 150 T 240 150 T 360 150 T 480 150 T 600 150 T 720 150" />
+  <path class="a2a-arc" d="M98 86 Q 228 14 358 86" />
+  <path class="a2a-arc" d="M618 86 Q 488 14 358 86" />
+
+  <g transform="translate(60 88) scale(1.2)"><g class="bob a2a-b1"><use class="boat" href="#j5-boat" /></g></g>
+  <g transform="translate(320 88) scale(1.2)"><g class="bob a2a-b2"><use class="boat boat--waiting" href="#j5-boat" /></g></g>
+  <g transform="translate(580 88) scale(1.2)"><g class="bob a2a-b3"><use class="boat" href="#j5-boat" /></g></g>
+
+  <circle class="a2a-dot a2a-dot--ask a2a-d1" r="4.5" />
+  <circle class="a2a-dot a2a-dot--reply a2a-d2" r="4.5" />
+  <circle class="a2a-dot a2a-dot--ask a2a-d3" r="4.5" />
+  <circle class="a2a-dot a2a-dot--reply a2a-d4" r="4.5" />
+
+  <text class="a2a-label" x="60" y="20">ask</text>
+  <text class="a2a-label" x="660" y="20" text-anchor="end">reply</text>
+</svg>
+
+<style>
+  .a2a {
+    display: block;
+    width: 100%;
+    max-width: 760px;
+    height: auto;
+    margin: 0 auto;
+    overflow: visible;
+  }
+
+  .a2a-water {
+    fill: none;
+    stroke: var(--sea, #3b8fae);
+    stroke-opacity: 0.45;
+    stroke-width: 1.2;
+  }
+
+  .a2a-arc {
+    fill: none;
+    stroke: var(--ink-dim, #77838f);
+    stroke-opacity: 0.45;
+    stroke-width: 1.2;
+    stroke-dasharray: 3 6;
+  }
+
+  .a2a-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    fill: var(--ink-dim, #77838f);
+  }
+
+  .a2a-b1 { --bob-dur: 5.2s; --bob-delay: -1s; }
+  .a2a-b3 { --bob-dur: 5.8s; --bob-delay: -3s; }
+
+  /* The middle boat nods when an ask lands. Same 12s clock as the dots. */
+  .a2a-b2 {
+    animation: a2a-nod 12s ease-in-out infinite;
+    animation-play-state: var(--motion-state, paused);
+    transform-box: fill-box;
+    transform-origin: 50% 85%;
+  }
+
+  @keyframes a2a-nod {
+    0%, 12%, 20%, 62%, 70%, 100% { transform: translateY(0) rotate(0deg); }
+    14%, 64% { transform: translateY(-2px) rotate(-5deg); }
+    17%, 67% { transform: translateY(0) rotate(3deg); }
+  }
+
+  .a2a-dot {
+    opacity: 0;
+    offset-rotate: 0deg;
+    animation-duration: 12s;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-play-state: var(--motion-state, paused);
+  }
+
+  .a2a-dot--ask { fill: var(--sea, #3b8fae); }
+  .a2a-dot--reply { fill: var(--brass, #c9a24d); }
+
+  .a2a-d1 { offset-path: path("M98 86 Q 228 14 358 86"); animation-name: a2a-travel-1; }
+  .a2a-d2 { offset-path: path("M358 86 Q 228 14 98 86"); animation-name: a2a-travel-2; }
+  .a2a-d3 { offset-path: path("M618 86 Q 488 14 358 86"); animation-name: a2a-travel-3; }
+  .a2a-d4 { offset-path: path("M358 86 Q 488 14 618 86"); animation-name: a2a-travel-4; }
+
+  @keyframes a2a-travel-1 {
+    0% { offset-distance: 0%; opacity: 0; }
+    2% { opacity: 1; }
+    12% { opacity: 1; }
+    14%, 100% { offset-distance: 100%; opacity: 0; }
+  }
+  @keyframes a2a-travel-2 {
+    0%, 22% { offset-distance: 0%; opacity: 0; }
+    24% { opacity: 1; }
+    34% { opacity: 1; }
+    36%, 100% { offset-distance: 100%; opacity: 0; }
+  }
+  @keyframes a2a-travel-3 {
+    0%, 50% { offset-distance: 0%; opacity: 0; }
+    52% { opacity: 1; }
+    62% { opacity: 1; }
+    64%, 100% { offset-distance: 100%; opacity: 0; }
+  }
+  @keyframes a2a-travel-4 {
+    0%, 72% { offset-distance: 0%; opacity: 0; }
+    74% { opacity: 1; }
+    84% { opacity: 1; }
+    86%, 100% { offset-distance: 100%; opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .a2a-b2 { animation: none; }
+    .a2a-dot { animation: none; opacity: 0; }
+  }
+</style>

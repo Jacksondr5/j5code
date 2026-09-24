@@ -1,6 +1,7 @@
 ---
 import dmSansLatinUrl from "../assets/fonts/dm-sans-latin.woff2?url";
 import "../styles/fonts.css";
+import BoatSprite from "../components/BoatSprite.astro";
 import { GITHUB_REPOSITORY_URL, LICENSE_URL, T3_SITE_URL, NPM_PACKAGE_URL, GITHUB_RELEASES_URL } from "../lib/site";
 
 interface Props {
@@ -13,6 +14,11 @@ const {
   description =
     "J5 Code is T3 Code with a fleet layer: Squadrons, Crews, and agent-to-agent messaging with a ledger, so one person can run many long-lived coding agents.",
 } = Astro.props;
+
+// Link unfurlers want a 1200x630 image at an absolute URL. The card is a
+// pre-rendered PNG in public/ so the build needs no fonts.
+const canonicalUrl = new URL(Astro.url.pathname, Astro.site);
+const socialImageUrl = new URL("/og.png", Astro.site);
 ---
 
 <html lang="en">
@@ -20,10 +26,20 @@ const {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content={description} />
+    <link rel="canonical" href={canonicalUrl} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="J5 Code" />
+    <meta property="og:url" content={canonicalUrl} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <meta property="og:type" content="website" />
-    <meta property="og:image" content="/j5-app-icon.svg" />
+    <meta property="og:image" content={socialImageUrl} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="J5 Code: run a fleet, not a chat. Paper boats with status pennants on a navy chart." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={socialImageUrl} />
     <link rel="preload" href={dmSansLatinUrl} as="font" type="font/woff2" crossorigin="anonymous" />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32" />
@@ -32,6 +48,7 @@ const {
     <title>{title}</title>
   </head>
   <body>
+    <BoatSprite />
     <div class="page">
       <nav class="nav">
         <div class="nav-inner">
@@ -298,6 +315,32 @@ const {
   }
   @media (prefers-reduced-motion: reduce) {
     [data-rise] {
+      animation: none;
+    }
+  }
+
+  /*
+   * Boats bob on their own phase. Continuous, so every .bob sits inside a
+   * [data-motion] scene whose --motion-state the controller in lib/motion.ts
+   * flips to running only while the scene is on screen.
+   */
+  @keyframes bob {
+    0%,
+    100% {
+      transform: translateY(0) rotate(-1.5deg);
+    }
+    50% {
+      transform: translateY(-3px) rotate(1.5deg);
+    }
+  }
+  .bob {
+    animation: bob var(--bob-dur, 5s) ease-in-out var(--bob-delay, 0s) infinite;
+    animation-play-state: var(--motion-state, paused);
+    transform-box: fill-box;
+    transform-origin: 50% 85%;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bob {
       animation: none;
     }
   }

@@ -1,12 +1,14 @@
 ---
 import Layout from "../layouts/Layout.astro";
 import CopyCommand from "../components/CopyCommand.astro";
+import Boat from "../components/Boat.astro";
 import { RELEASES_URL } from "../lib/releases";
 import { NPX_COMMAND, NPM_PACKAGE_URL } from "../lib/site";
 ---
 
 <Layout title="Download — J5 Code" description="Download J5 Code for Apple Silicon Macs, or run the server anywhere with npx.">
-  <div class="download-page">
+  <div class="download-page" data-motion>
+    <div class="heading-boat"><Boat tone="dark" size={64} class="bob" /></div>
     <h1 class="heading display">Download J5 Code</h1>
     <p class="subheading">
       <span id="version-label">Loading latest release&hellip;</span>
@@ -55,6 +57,9 @@ import { NPX_COMMAND, NPM_PACKAGE_URL } from "../lib/site";
 
 <script>
   import { fetchLatestRelease, pickMacAsset, RELEASES_URL } from "../lib/releases";
+  import { startMotion } from "../lib/motion";
+
+  startMotion({ scenes: Array.from(document.querySelectorAll<HTMLElement>("[data-motion]")) });
 
   async function init() {
     const versionLabel = document.getElementById("version-label");
@@ -98,6 +103,10 @@ import { NPX_COMMAND, NPM_PACKAGE_URL } from "../lib/site";
     background:
       radial-gradient(ellipse 70% 50% at 50% 0%, rgba(59, 143, 174, 0.14), transparent 70%),
       var(--navy-950);
+  }
+
+  .heading-boat {
+    margin-bottom: 0.5rem;
   }
 
   .heading {
