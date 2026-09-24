@@ -565,7 +565,7 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/web/src/components/Sidebar.logic.test.ts`                                                            | R       | 16, 19, 21                            |
 | `apps/web/src/components/Sidebar.logic.ts`                                                                 | R       | 16, 19, 21, 34                        |
 | `apps/web/src/components/Sidebar.tsx`                                                                      | A       | 9, 16, 19, 21–23, 34                  |
-| `apps/web/src/components/chat/ChatComposer.tsx`                                                            | A       | 9                                     |
+| `apps/web/src/components/chat/ChatComposer.tsx`                                                            | A       | 9, Saved-agent mentions, Role library |
 | `apps/web/src/components/chat/ChatHeader.tsx`                                                              | A       | 19                                    |
 | `apps/web/src/components/chat/DraftHeroHeadline.tsx`                                                       | A       | 9                                     |
 | `apps/web/src/components/chat/MessagesTimeline.test.tsx`                                                   | N       | 7, 14, 24                             |
