@@ -1,0 +1,41 @@
+# J5 live QA pass: upstream-build-final (PR #262), 2026-09-24
+
+## Environment
+- Build: `/home/j5dev/.j5code/worktrees/j5code/upstream-build-final` (branch `j5/upstream-sync-20260924`). State: `<worktree>/.j5code/userdata` (copied data; active DB is `statev2.sqlite`).
+- Dev server: `[dev-runner] serverPort=15081 webPort=7041`. Paired from the log's `pairingUrl`. Restarted once for test H (stopped by the PIDs that owned the ports, after checking each `/proc/<pid>/cwd`). At the end it was stopped the same way, and ports 7041, 15081 and 9333 were confirmed free.
+- Driver: `/tmp/pw-clientpass/pserver.mjs` is a persistent Playwright HTTP driver on 127.0.0.1:9333. It supports multiple pages (`p`, `newPage`), modifier-clicks, `keyDown`/`keyUp` and `fill`. Helper: `/tmp/pw-clientpass/d.sh`. The original driver is backed up as `driver.orig.mjs`.
+- Scratch repo: `/tmp/j5-livepass/project` (git init plus a README commit). All agent runs happened in the "Live Pass" Squadron (renamed to "Live Pass 2" in test I). Models used: GPT-6-Luna/Low and Claude Haiku 4.5 only, each verified in a screenshot (d13, d28, d49/d69).
+- Side artifacts: worktree `<worktree>/.j5code/worktrees/project/t3code-01470d41` (branch `t3code/reply-ok`, from test E) and clone `/tmp/j5-livepass/Hello-World` (from test G).
+- The "Update Available: Claude" toast never appeared.
+
+## Results
+| Test | Result | Screenshots | Observation |
+|---|---|---|---|
+| A Queue and steer | PASS | d14, d15, d16, d17, d18 | Send tooltip: "Click to queue, Ctrl/⌘-click or Ctrl+Enter to steer". Enter put the message in the Queued row. Ctrl+Enter showed a "Steer" badge and landed in the running turn: the reply was "done steered". The queued message then ran on its own ("queued"). |
+| B Stop beats steer | **FAIL** | d19–d21 (sequential), d22–d25 (race) | Sequential: Stop, then a steer ~0.9 s later after the UI had gone idle. It was sent as a plain new turn with no Steer badge, which is acceptable. **Race:** page 1 pressed Stop while page 2 (still showing the turn as running) pressed Ctrl+Enter to steer. Server order: `run.interrupt` 21:21:03.496, then the steer `message.dispatch` 21:21:03.747. The steer started a NEW run (ordinal 6, running → completed) that replied "zombie2". The committed-Stop guard was bypassed. |
+| C A2A | PASS | d28, d29, d30, d31 | Haiku parent called spawn_agent. The peer runs codex gpt-6-luna low (checked in the DB). It shows under the parent's "1 agent" sidebar expander and on Fleet ("Agent-spawned"). "Hello!" arrived as a J5 "From …" card, not raw XML. The peer's display name is its whole brief text. |
+| D Saved agent | PARTIAL: subagent run BLOCKED; multi-model refusal PASS | d32, d33, d34, d35, d36, d41–d44 | `@scout` autocompletes to `@persona:scout` (Persona badge). The run was not sent: every built-in persona pins non-cheap models (Scout: gpt-5.6-terra high / claude-opus-5 high), and there is no user override, so running it would break the Luna/Haiku rule. No persona subagent exists in the copied data, so the Lineage chip could not be checked. Draft-as-agent picker works: choosing Scout replaces the model picker with "Codex · gpt-5.6-terra · high". Multi-model: Shift-clicking a second model (Haiku + Luna), then choosing Scout, then Send gave the warning toast "Clear the saved agent to use multiple models" and nothing was sent. |
+| E Header menu doors | PASS | d45, d50, d51, d52, d55, d58, d59, d60 | "New thread on <branch>" only appears when the thread has a branch, so it was tested on a worktree thread. It opened a draft that kept the Live Pass Squadron. The archive warning dialog appears for a thread with a peer ("1 agent placed under … keeps running …"). After archiving, the sidebar shows "Archived 1 thread, Ctrl+Z to undo". Clicking it restored the thread (archived_at cleared). The undo window is only 5 s. |
+| F Undo hidden for Crews | BLOCKED | none | The copied data has 0 rows in `j5_agent_crew_instance`, `j5_agent_crew_member` and `j5_agent_crew_proposal`. "Bryant Crew Review" is not a Crew Captain. Creating a Crew would launch seats on persona-pinned, non-cheap models. |
+| G Background clone | PASS | d61, d62, d63, d64, d65 | Create Squadron → Choose folder → Git URL → `https://github.com/octocat/Hello-World`. The destination defaulted to `~/Hello-World` (real home) and was changed to `/tmp/j5-livepass/Hello-World`. After the clone, the form showed "Hello-World — /tmp/j5-livepass/Hello-World". The Squadron was not created. |
+| H Held queue after restart | PASS (with notes) | d69, d70, d71, d72 | Luna `sleep 60` plus one queued message, then a server restart. After the restart: "Queue held after restart · Messages stay saved until you resume · Resume queue". Resume ran it ("resumed"). The running turn was **cancelled** (run status `cancelled`) with no visible restart-interruption marker, and the timeline shows "Worked for 479ms" for a turn that ran about 24 s. The sidebar card showed "Working" while the queue was held and nothing was running. (First attempt with Haiku backgrounded the sleep, so the queued message ran at once; retried on Luna.) |
+| I Squadron rename | PASS | d73, d74, d75, d76, d77 | "Rename Squadron…" appears in the scope menu only after the Squadron is selected. After renaming to "Live Pass 2", the scope button, thread cards, header breadcrumb, composer chip and Fleet all show the new name. |
+
+## Bugs
+
+1. **Stop can be beaten by a racing steer (B, FAIL).** Repro: run `sleep 40` on Luna. Open the same thread in a second tab and type a message. Press Stop in tab 1, then immediately press Ctrl+Enter in tab 2. Result: the steer starts a new turn after the committed Stop. Cause: `packages/client-runtime/src/operations/commands.ts:771` sends `deliveryIntent: "steer"`. `resolveMessageDispatchIntent` (`apps/server/src/orchestration-v2/CommandPolicy.ts:119`) finds no active run once the interrupt has landed and returns `start_immediately`. That skips the `hasCommittedStop` guard in `Orchestrator.ts:~4195`, which only runs for `steer_active`. The same path exists for a single client if the steer is in flight when the interrupt commits. Evidence: `orchestration_command_receipts` run.interrupt 21:21:03.496, then message.dispatch 21:21:03.747, which created run ordinal 6.
+2. **Restart cancels the running turn silently, and its duration is wrong (H, minor).** After the restart the cancelled turn shows "Worked for 479ms" (actual ~24 s) and no interruption row. The sidebar card said "Working" while the only remaining run was queued and held.
+3. **"New thread on <branch>" draft shows the wrong branch (E, minor).** From a worktree thread on `t3code/reply-ok`, the new draft's footer shows `t3code/01470d41` (the worktree directory's temporary name). No branch with that name exists in the repo.
+4. **Clone destination defaults to the user's home (G, minor, risky).** Git URL clone suggests `~/Hello-World` and "Create & Clone" is one Enter away. For a scratch clone, that writes into a real directory by default.
+5. **Header breadcrumb and state on drafts (minor).** On a new draft the header breadcrumb says "Choose Squadron · project" even when the composer chip shows Live Pass (d10, d13). After reloading the draft URL, the draft's Squadron was lost ("Choose Squadron", d42).
+6. **Base-branch label invents a remote (minor).** Switching a draft to "New worktree" shows "From origin/master" in a repo with no remotes (d47).
+7. **Personas can't be test-run cheaply (process note).** All 11 built-in personas pin high-effort frontier models with no override, so the saved-agent paths can't be exercised live under a cheap-model budget.
+8. **Other small notes.**
+   - Assistant messages are labeled "T3 Code" and worktree branches use the `t3code/` prefix (branding).
+   - Bare `@` right after opening a draft said "No matching files or folders". Personas appeared once text was typed.
+   - Slash-command list in a Scout (codex) draft shows Claude commands.
+   - The archive dialog text has a double period ("…then stop..").
+   - Console: React warning about a spread `key` prop in ChatView, and one `Maximum update depth exceeded` pageerror during the two-tab race in B.
+
+## Agent usage
+- About 9 short runs, all Luna/Low or Haiku 4.5: A 2 turns, B 4, C 1 plus 1 Luna peer, E 1, H 4.
