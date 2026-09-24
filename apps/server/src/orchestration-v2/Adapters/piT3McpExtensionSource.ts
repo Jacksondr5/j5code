@@ -9,6 +9,7 @@
  * `@earendil-works/pi-coding-agent` and `typebox` from the user's pi install.
  */
 import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../provider/T3OrchestrationInstructions.ts";
+import { J5_PI_PREAPPROVAL_SOURCE } from "../../j5/a2a/mcp/piToolApproval.ts";
 
 export const PI_T3_MCP_EXTENSION_FILENAME = "pi-t3-mcp-extension.ts";
 
@@ -207,6 +208,7 @@ function createMcpClient(endpoint: string, token: string) {
 }
 
 export default async function t3McpExtension(pi: ExtensionAPI) {
+${J5_PI_PREAPPROVAL_SOURCE}
   // Workaround for an upstream Pi context-budgeting bug: pi-ai reuses the
   // previous response's usage even when a fork's instructions/tools differ,
   // then reserves almost all remaining context for output. OpenRouter can
@@ -233,7 +235,12 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
   // keep their normal meaning without replacing or shadowing Pi's runtime.
   pi.on("tool_call", async (event, ctx) => {
     const mode = runtimeMode();
-    if (mode === "full-access" || READ_ONLY_TOOLS.has(event.toolName)) return;
+    if (
+      mode === "full-access" ||
+      READ_ONLY_TOOLS.has(event.toolName) ||
+      j5Preapproved(event.toolName)
+    )
+      return;
     if (mode === "auto-accept-edits" && FILE_CHANGE_TOOLS.has(event.toolName)) {
       return;
     }

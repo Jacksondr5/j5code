@@ -116,6 +116,7 @@ import {
   resolvePiLaunchArgs,
 } from "./piT3McpInjection.ts";
 import { PI_FILE_CHANGE_TOOLS } from "./piT3McpExtensionSource.ts";
+import { j5PiPreapprovalEnv } from "../../j5/a2a/mcp/piToolApproval.ts";
 
 export const PI_PROVIDER = ProviderDriverKind.make("pi");
 const PI_DRIVER_KIND = PI_PROVIDER;
@@ -426,7 +427,10 @@ export function makePiAdapterV2(options: PiAdapterV2Options): ProviderAdapterV2S
       }
       const launch = buildPiRpcLaunch({
         launchArgs: resolvedLaunchArgs.args,
-        environment: options.environment,
+        environment: {
+          ...options.environment,
+          ...j5PiPreapprovalEnv(input.runtimePolicy, mcpSession !== undefined, extensionPath),
+        },
         mcpSession,
         extensionPath,
         runtimeMode: input.runtimePolicy.runtimeMode,

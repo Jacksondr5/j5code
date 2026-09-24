@@ -33,6 +33,8 @@ import * as TestClock from "effect/testing/TestClock";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { ServerConfig } from "../../config.ts";
+import { J5_PREAPPROVED_TOOLS, j5T3McpToolName } from "../../j5/a2a/mcp/j5ToolPreapproval.ts";
+import { J5_PI_PREAPPROVED_TOOLS_ENV } from "../../j5/a2a/mcp/piToolApproval.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { IdAllocatorV2, layer as idAllocatorLayer } from "../IdAllocator.ts";
 import {
@@ -467,6 +469,10 @@ describe("PiAdapterV2", () => {
       assert.equal(spawn.env.T3_MCP_URL, "http://127.0.0.1:43123/mcp");
       assert.equal(spawn.env.T3_MCP_BEARER_TOKEN, "secret-pi-token");
       assert.equal(spawn.env.T3_PI_RUNTIME_MODE, "full-access");
+      assert.sameMembers(
+        spawn.env[J5_PI_PREAPPROVED_TOOLS_ENV]?.split(",") ?? [],
+        J5_PREAPPROVED_TOOLS.map(j5T3McpToolName),
+      );
     }).pipe(
       Effect.ensuring(Effect.sync(() => McpProviderSession.clearMcpProviderSession(THREAD_ID))),
       Effect.scoped,
