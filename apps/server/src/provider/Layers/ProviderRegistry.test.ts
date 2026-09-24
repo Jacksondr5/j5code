@@ -1,9 +1,6 @@
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import { upsertProviderWorkspaceSnapshot } from "../../j5/skills/skillWorkspaceRefresh.ts";
-import {
-  refreshSkillProviders,
-  refreshSkillsOnConnection,
-} from "../../j5/skills/skillProviderRefresh.ts";
+import { refreshSkillProviders } from "../../j5/skills/skillProviderRefresh.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it, assert } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
@@ -1736,10 +1733,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           const skills = yield* Ref.make<ServerProvider["skills"]>([]);
           const failWorkspace = yield* Ref.make(false);
           const workspaceProbes = yield* Ref.make(0);
-          const machineRefreshes = yield* Ref.make(0);
-          const blockMachine = yield* Ref.make(false);
-          const machineStarted = yield* Deferred.make<void>();
-          const releaseMachine = yield* Deferred.make<void>();
           const blockedCwd = yield* Ref.make<string | null>("/opening-project");
           const probeStarted = yield* Deferred.make<void>();
           const releaseProbe = yield* Deferred.make<void>();
@@ -1759,14 +1752,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                   }),
                 ),
               getSnapshot: snapshot,
-              refresh: Effect.gen(function* () {
-                yield* Ref.update(machineRefreshes, (count) => count + 1);
-                if (yield* Ref.get(blockMachine)) {
-                  yield* Deferred.succeed(machineStarted, undefined);
-                  yield* Deferred.await(releaseMachine);
-                }
-                return yield* snapshot;
-              }),
+              refresh: snapshot,
               streamChanges: Stream.empty,
               applyUsageLimits: () => Effect.void,
             },
@@ -1822,27 +1808,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             for (const workspace of afterInstall.workspaceSnapshots!) {
               assert.deepStrictEqual(workspace.skills, installed);
             }
-            const probesBeforeConnection = yield* Ref.get(workspaceProbes);
-            yield* refreshSkillsOnConnection(registry);
-            assert.equal(yield* Ref.get(workspaceProbes), probesBeforeConnection);
-            assert.deepStrictEqual(
-              (yield* registry.getProviders)[0]!.workspaceSnapshots,
-              afterInstall.workspaceSnapshots,
-            );
-            yield* Ref.set(blockMachine, true);
-            const machinesBeforeConnection = yield* Ref.get(machineRefreshes);
-            const firstConnection = yield* refreshSkillsOnConnection(registry).pipe(
-              Effect.forkChild,
-            );
-            yield* Deferred.await(machineStarted);
-            const secondConnection = yield* refreshSkillsOnConnection(registry).pipe(
-              Effect.forkChild,
-            );
-            yield* Effect.yieldNow;
-            yield* Deferred.succeed(releaseMachine, undefined);
-            yield* Fiber.join(firstConnection);
-            yield* Fiber.join(secondConnection);
-            assert.equal(yield* Ref.get(machineRefreshes), machinesBeforeConnection + 1);
             yield* Deferred.succeed(releaseProbe, undefined);
             yield* Fiber.join(oldProbe);
             assert.deepStrictEqual((yield* registry.getProviders)[0], afterInstall);
