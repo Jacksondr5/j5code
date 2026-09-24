@@ -1,6 +1,7 @@
 import type { ProviderInteractionMode } from "@t3tools/contracts";
 
 import { AGENT_INVOCATION_INSTRUCTIONS } from "../j5/agents/agentInvocationInstructions.ts";
+import { PLAYBOOK_INSTRUCTIONS } from "../j5/playbooks/instructions.ts";
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
 
 ## T3 Code orchestration
@@ -16,6 +17,8 @@ ${AGENT_INVOCATION_INSTRUCTIONS}
 - \`schedule_task\` creates persistent recurring work in the app scheduler. Pass \`schedule\` as a structured object, never as JSON text: \`{"type":"interval","everyMs":3600000}\` for an interval, or \`{"type":"fixed_time","timeOfDay":"09:00","weekdays":[1,2,3,4,5]}\` for a wall-clock schedule. Runs return to the current thread; \`bindToCurrentThread=false\` is unavailable until scheduling supports explicit Squadron selection. After scheduling, report the returned cadence and next run time.
 - Use \`write_artifact\` for durable, user-consumable planning outputs that should remain available across threads and agents in the project, such as plans, specifications, diagrams, and research notes. Use \`list_artifacts\` and \`read_artifact\` to access existing artifacts. Do not use artifacts for source code, build output, logs, temporary scratch files, or ordinary repository documentation. Refer to a saved artifact in chat by the logical path returned by \`write_artifact\` (for example \`artifacts/plan.md\`) so J5 opens it in the Artifacts panel. J5 stores artifacts in application data, outside the repository. Artifacts under \`handoffs/\` are versioned: rewriting one adds your content as a new version at the top of the same file rather than replacing it, and reading it back returns a versions header followed by every kept version, newest first.
 
+Playbooks guide work in this thread:
+${PLAYBOOK_INSTRUCTIONS}
 Tool names may include a harness-normalized MCP prefix, such as \`mcp__t3_code__send_message\`; the semantics are the same. Some harnesses attach optional MCP servers lazily: if an initial tool-catalog scan does not show T3 tools, do not conclude that the platform tools are unavailable. Make one bounded direct attempt using the known T3 tool name on the next tool step. In Codex code mode, for example, call \`tools.mcp__t3_code__orchestrator_capabilities({})\` before reporting that the capability is absent. Keep polling/wait loops bounded, do not duplicate active work, and reuse each mutation tool's idempotency key when retrying.
 
 ACP fallback: some ACP agents accept the injected MCP server but fail to expose its tools. When the T3 tools are absent and \`T3_ACP_MCP_NODE\` is present, call the same tools through the terminal: \`ELECTRON_RUN_AS_NODE=1 "$T3_ACP_MCP_NODE" \${T3_ACP_MCP_ENTRYPOINT:+"$T3_ACP_MCP_ENTRYPOINT"} acp-mcp-call orchestrator_capabilities '{}'\` (\`T3_ACP_MCP_ENTRYPOINT\` is unset when T3 runs as a standalone executable). Use the same platform tools and their documented arguments through this transport; the Peer Agent and Exchange rules above still apply.
