@@ -278,8 +278,6 @@ export const FleetAgent = Schema.Struct({
   ),
   /** Open Exchanges this agent owes a reply on. */
   openAsks: Schema.Number,
-  /** A retired agent kept only as a placeholder above an active descendant; never a live row. */
-  archived: Schema.Boolean,
 });
 export type FleetAgent = typeof FleetAgent.Type;
 export const FleetSquadron = Schema.Struct({

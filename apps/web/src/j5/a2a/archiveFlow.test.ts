@@ -87,7 +87,7 @@ describe("archive flow", () => {
     expect(needsArchiveWarning(preflight)).toBe(true);
     expect(warning.message).toBe("Archive Release agent?");
     expect(warning.confirmLabel).toBe("Archive anyway");
-    expect(markup).toContain("Also archives 1 agent placed under Release agent:");
+    expect(markup).toContain("1 agent placed under Release agent keeps running:");
     expect(markup).toContain("Child");
     expect(markup).toContain("2 open asks will be terminated — counterparties are notified");
     expect(markup).toContain("Blocking");
@@ -123,6 +123,20 @@ describe("archive flow", () => {
       }),
     ).resolves.toBe("archived");
     expect(archive).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the agents beneath that keep running, leaving the Crew's seats to the Crew", () => {
+    const preflight = registered({
+      liveCrews: [reviewPair],
+      placementSubtree: { state: "known", participantIds: ["agent:child", "agent:critic"] },
+    });
+    const markup = renderToStaticMarkup(
+      formatArchiveWarning({ threadTitle: "Captain", preflight }).content,
+    );
+    const keptRunning = markup.slice(markup.indexOf("keeps running:"));
+    expect(markup).toContain("1 agent placed under Captain keeps running:");
+    expect(keptRunning).toContain("Child");
+    expect(keptRunning).not.toContain("Critic");
   });
 
   it("refuses to archive a Crew seat on its own, as archive_agent does for agents", async () => {
