@@ -1,10 +1,12 @@
 import { spansMultipleEnvironments } from "@t3tools/client-runtime/j5/readSources";
 import { scopedSquadronKey } from "@t3tools/contracts/j5";
-import { PlusIcon, RadioIcon } from "lucide-react";
+import { PencilIcon, PlusIcon, RadioIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 
 import {
   Menu,
+  MenuGroup,
+  MenuGroupLabel,
   MenuItem,
   MenuPopup,
   MenuRadioGroup,
@@ -14,9 +16,12 @@ import {
 } from "../../components/ui/menu";
 import { SidebarMenuButton } from "../../components/ui/sidebar";
 import { SidebarHeaderIconButton } from "../../components/sidebar/SidebarThreadHeader";
+import { resolveSquadronActionsState } from "./SquadronActions.logic";
 import { useSquadronDirectory } from "./SquadronDirectory";
 import { setAmbientSquadronScope, useSquadronAmbientScope } from "./SquadronDraftState";
 import { SquadronCreateDialog } from "./SquadronCreateDialog";
+import { SquadronDeleteDialog } from "./SquadronDeleteDialog";
+import { SquadronRenameDialog, type SquadronActionTarget } from "./SquadronRenameDialog";
 import { resolveSquadronScope } from "./SquadronScope.logic";
 
 /**
@@ -47,16 +52,32 @@ export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
   const setCreateOpen = hasControlledCreateState(props)
     ? props.onCreateOpenChange
     : setUncontrolledCreateOpen;
+  // The dialogs keep their own target so a scope change mid-dialog cannot swap the Squadron.
+  const [action, setAction] = useState<{
+    readonly kind: "rename" | "delete";
+    readonly target: SquadronActionTarget;
+  } | null>(null);
+  const [actionOpen, setActionOpen] = useState(false);
   const { status, squadrons, sources } = useSquadronDirectory();
   const selectedId = useSquadronAmbientScope();
-  const choices = squadrons.map(({ squadron, environmentId, environmentLabel }) => ({
+  const choices = squadrons.map(({ squadron, environmentId, environmentLabel, available }) => ({
     environmentId,
     environmentLabel,
     id: squadron.id,
     name: squadron.name,
+    available,
   }));
   const showEnvironment = spansMultipleEnvironments(choices);
   const selected = resolveSquadronScope(choices, selectedId);
+  const actionsState = resolveSquadronActionsState(selected);
+  const openAction = (kind: "rename" | "delete") => {
+    if (selected === null) return;
+    setAction({
+      kind,
+      target: { environmentId: selected.environmentId, id: selected.id, name: selected.name },
+    });
+    setActionOpen(true);
+  };
 
   return (
     <>
@@ -167,6 +188,32 @@ export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
                       : "Could not refresh Squadrons"}
               </p>
             ))}
+          {selected !== null && actionsState.kind !== "hidden" ? (
+            <>
+              <MenuSeparator />
+              <MenuGroup>
+                <MenuGroupLabel className="truncate">{selected.name}</MenuGroupLabel>
+                <MenuItem
+                  disabled={actionsState.kind === "disabled"}
+                  onClick={() => openAction("rename")}
+                >
+                  <PencilIcon />
+                  Rename Squadron…
+                </MenuItem>
+                <MenuItem
+                  disabled={actionsState.kind === "disabled"}
+                  variant="destructive"
+                  onClick={() => openAction("delete")}
+                >
+                  <Trash2Icon />
+                  Delete Squadron…
+                </MenuItem>
+                {actionsState.kind === "disabled" ? (
+                  <p className="px-2 py-1 text-xs text-muted-foreground">{actionsState.reason}</p>
+                ) : null}
+              </MenuGroup>
+            </>
+          ) : null}
           <MenuSeparator />
           <MenuItem onClick={() => setCreateOpen(true)}>
             <PlusIcon />
@@ -175,6 +222,20 @@ export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
         </MenuPopup>
       </Menu>
       <SquadronCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
+      {action?.kind === "rename" ? (
+        <SquadronRenameDialog
+          open={actionOpen}
+          onOpenChange={setActionOpen}
+          target={action.target}
+        />
+      ) : null}
+      {action?.kind === "delete" ? (
+        <SquadronDeleteDialog
+          open={actionOpen}
+          onOpenChange={setActionOpen}
+          target={action.target}
+        />
+      ) : null}
     </>
   );
 }

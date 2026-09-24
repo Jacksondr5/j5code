@@ -22,6 +22,12 @@ export type ManagedSquadron = typeof ManagedSquadron.Type;
 export const SquadronListResponse = Schema.Struct({ squadrons: Schema.Array(ManagedSquadron) });
 export const CreateSquadronRequest = Schema.Struct({ name: Schema.String, projectId: ProjectId });
 export const CreateSquadronResponse = Schema.Struct({ squadron: ManagedSquadron });
+export const RenameSquadronRequest = Schema.Struct({ name: Schema.String });
+export const RenameSquadronResponse = Schema.Struct({ squadron: ManagedSquadron });
+export const DeleteSquadronResponse = Schema.Struct({
+  deleted: Schema.Literal(true),
+  squadronId: Schema.String,
+});
 
 export const AssignImportedThreadsRequest = Schema.Struct({
   squadronId: Schema.String.check(Schema.isNonEmpty()),
@@ -361,6 +367,13 @@ export const J5_API_PATHS = {
   crewMemberships: "/api/j5/a2a/client-reads/crew-memberships",
   spawnedChildren: "/api/j5/a2a/client-reads/spawned-children",
 } as const;
+
+/**
+ * Action path for one Squadron; ids carry a colon so they are encoded. Both
+ * actions are POST so cross-origin browser clients pass the CORS allowlist.
+ */
+export const j5SquadronActionPath = (squadronId: string, action: "rename" | "delete"): string =>
+  `${J5_API_PATHS.squadrons}/${encodeURIComponent(squadronId)}/${action}`;
 
 /**
  * Machine participants: registered non-agent senders (cron jobs, watchdogs,
