@@ -356,6 +356,51 @@ describe("skill link RPCs", () => {
         }),
       ),
   );
+  it.effect("keeps healthy roots usable and rejects destinations under a broken root", () =>
+    run(
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        const brokenRoot = f.path.join(f.root, "custom-codex", "skills");
+        const healthyRoot = f.path.join(f.claudeHome, "skills");
+        const healthyLink = f.path.join(healthyRoot, "alias");
+        yield* f.fs.makeDirectory(f.path.dirname(brokenRoot), { recursive: true });
+        yield* f.fs.symlink(f.path.join(f.root, "missing"), brokenRoot);
+        yield* f.fs.makeDirectory(healthyRoot, { recursive: true });
+        yield* f.fs.symlink(f.path.dirname(f.source), healthyLink);
+
+        const links = yield* f.handlers["j5.skills.links.inspect"]({ source: f.request.source });
+        assert.equal(links.length, 1);
+        assert.equal(links[0]!.request.expectedDestinationPath, healthyLink);
+        const result = yield* f.handlers["j5.skills.links.unlink"]({
+          links: [
+            { ...links[0]!.request, expectedDestinationPath: f.path.join(brokenRoot, "alias") },
+            links[0]!.request,
+          ],
+        });
+        assert.deepEqual(result.removedPaths, [healthyLink]);
+        assert.equal(result.failed.length, 1);
+        assert.match(result.failed[0]!.message, /Destination changed/);
+
+        const folder = f.path.join(healthyRoot, "example");
+        yield* f.fs.rename(f.path.dirname(f.source), folder);
+        const request = {
+          source: { instanceId: targetId, path: f.path.join(folder, "SKILL.md"), name: "example" },
+        };
+        yield* Ref.update(f.snapshots, (all) =>
+          all.map((entry) =>
+            entry.instanceId === targetId
+              ? { ...entry, skills: [{ ...f.base.skills[0]!, path: request.source.path }] }
+              : entry,
+          ),
+        );
+        const preview = yield* f.handlers["j5.skills.links.deletePreview"](request);
+        assert.equal(preview.expectedPath, folder);
+        const deleted = yield* f.handlers["j5.skills.links.delete"]({ ...request, ...preview });
+        assert.equal(deleted.action, "removed");
+        assert.isFalse(yield* f.fs.exists(folder));
+      }),
+    ),
+  );
   it.effect(
     "unlinks one provider, preserves changed links and directories, and reports partial failure",
     () =>

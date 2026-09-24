@@ -334,13 +334,19 @@ export const makeSkillLinkRpcHandlers = Effect.fn("j5.makeSkillLinkRpcHandlers")
       }
     }
     const canonical = new Map(
-      yield* Effect.forEach(
+      (yield* Effect.forEach(
         [...new Set(roots.map((entry) => entry.root))],
-        (root) => attempt(async () => [root, await canonicalSkillRoot(root)] as const),
+        (root) =>
+          attempt(async () => [[root, await canonicalSkillRoot(root)] as const]).pipe(
+            Effect.orElseSucceed(() => []),
+          ),
         { concurrency: 4 },
-      ),
+      )).flat(),
     );
-    return roots.map((entry) => ({ ...entry, root: canonical.get(entry.root)! }));
+    return roots.flatMap((entry) => {
+      const root = canonical.get(entry.root);
+      return root === undefined ? [] : [{ ...entry, root }];
+    });
   });
   const sourceFor = Effect.fn("j5.skills.linkSource")(function* (request: SkillLinkInspect) {
     const snapshots = yield* providers.getProviders;
