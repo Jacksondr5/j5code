@@ -135,39 +135,41 @@ it.effect("an existing statev2.sqlite wins and state.sqlite is never recopied", 
   ),
 );
 
-it.effect("a failed first boot leaves the published copy unmigrated and the retry upgrades it", () =>
-  withBaseDir(({ baseDir, sourcePath, destinationPath }) =>
-    Effect.gen(function* () {
-      const j5Rows = yield* Effect.gen(function* () {
-        const rows = yield* seedPinWithJ5State;
-        const sql = yield* SqlClient.SqlClient;
-        yield* sql`CREATE TRIGGER inject BEFORE INSERT ON effect_sql_migrations
+it.effect(
+  "a failed first boot leaves the published copy unmigrated and the retry upgrades it",
+  () =>
+    withBaseDir(({ baseDir, sourcePath, destinationPath }) =>
+      Effect.gen(function* () {
+        const j5Rows = yield* Effect.gen(function* () {
+          const rows = yield* seedPinWithJ5State;
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`CREATE TRIGGER inject BEFORE INSERT ON effect_sql_migrations
           WHEN NEW.migration_id = 55 BEGIN SELECT RAISE(ABORT, 'injected first-boot failure'); END`;
-        return rows;
-      }).pipe(Effect.provide(atFile(sourcePath)));
+          return rows;
+        }).pipe(Effect.provide(atFile(sourcePath)));
 
-      const first = yield* Effect.exit(boot(baseDir, Effect.void));
-      assert.isTrue(Exit.isFailure(first));
-      assert.isTrue(NodeFS.existsSync(destinationPath));
-      yield* Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        assert.deepStrictEqual((yield* readHistory()).at(-1), [51, "OrchestrationV2"]);
-        assert.deepStrictEqual(
-          yield* sql`SELECT name FROM pragma_table_info('projection_threads')
+        const first = yield* Effect.exit(boot(baseDir, Effect.void));
+        assert.isTrue(Exit.isFailure(first));
+        assert.isTrue(NodeFS.existsSync(destinationPath));
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          assert.deepStrictEqual((yield* readHistory()).at(-1), [51, "OrchestrationV2"]);
+          assert.deepStrictEqual(
+            yield* sql`SELECT name FROM pragma_table_info('projection_threads')
             WHERE name = 'title_state_json'`,
-          [],
-        );
-        // Stand-in for the fixed binary; the V1 file keeps the trigger, so a recopy would fail.
-        yield* sql`DROP TRIGGER inject`;
-      }).pipe(Effect.provide(atFile(destinationPath)));
+            [],
+          );
+          // Stand-in for the fixed binary; the V1 file keeps the trigger, so a recopy would fail.
+          yield* sql`DROP TRIGGER inject`;
+        }).pipe(Effect.provide(atFile(destinationPath)));
 
-      yield* boot(
-        baseDir,
-        Effect.gen(function* () {
-          assert.deepStrictEqual(yield* readHistory(), migrationManifest);
-          assert.deepStrictEqual(yield* readJ5Rows(), j5Rows);
-        }),
-      );
-    }),
-  ),
+        yield* boot(
+          baseDir,
+          Effect.gen(function* () {
+            assert.deepStrictEqual(yield* readHistory(), migrationManifest);
+            assert.deepStrictEqual(yield* readJ5Rows(), j5Rows);
+          }),
+        );
+      }),
+    ),
 );

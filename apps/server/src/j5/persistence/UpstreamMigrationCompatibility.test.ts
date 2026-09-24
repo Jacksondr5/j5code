@@ -560,10 +560,7 @@ it.effect("upgrades a pin database to upstream 051–055 without replaying V2", 
       ],
     );
     assert.deepStrictEqual(yield* snapshotRows(), rows);
-    assert.deepStrictEqual(
-      upstreamOnly(yield* readSchema()),
-      upstreamOnly(yield* freshSchema()),
-    );
+    assert.deepStrictEqual(upstreamOnly(yield* readSchema()), upstreamOnly(yield* freshSchema()));
     assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);
     assert.deepStrictEqual(yield* sql`PRAGMA integrity_check`, [{ integrity_check: "ok" }]);
 

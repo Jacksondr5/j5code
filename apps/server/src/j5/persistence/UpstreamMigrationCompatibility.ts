@@ -104,7 +104,7 @@ const failed = (id: number, name: string) => (cause: unknown) =>
 // Keep the many-to-one source history as durable upgrade provenance.
 const archiveHistory = Effect.fn("J5.archiveUpstreamMigrationHistory")(function* (
   sourceRef: string,
-  rows: ReadonlyArray<typeof History.Type[number]>,
+  rows: ReadonlyArray<(typeof History.Type)[number]>,
 ) {
   const sql = yield* SqlClient.SqlClient;
   yield* sql`CREATE TABLE IF NOT EXISTS j5_upstream_migration_history (
@@ -150,7 +150,8 @@ export const runJ5CompatibleUpstreamMigrations = Effect.fn("J5.runCompatibleUpst
         if (
           migrationManifest.length !== reviewedTarget.length ||
           !migrationManifest.every(
-            ([id, name], index) => reviewedTarget[index]?.[0] === id && reviewedTarget[index]?.[1] === name,
+            ([id, name], index) =>
+              reviewedTarget[index]?.[0] === id && reviewedTarget[index]?.[1] === name,
           )
         ) {
           return yield* badState("the candidate no longer matches the reviewed composition");

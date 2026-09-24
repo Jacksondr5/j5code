@@ -19,7 +19,7 @@
 // Missing keys are appended; nothing else in a line is changed.
 //
 // Usage: node migrate-codex-fixtures.mjs <file.ndjson>...   (rewrites in place)
-import fs from "node:fs";
+import * as NodeFS from "node:fs";
 
 const VERSION = "0.152.1";
 const FIXED_MS = 1756771200000;
@@ -77,7 +77,7 @@ export const migrateLine = (line) => {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   for (const file of process.argv.slice(2)) {
-    const text = fs.readFileSync(file, "utf8");
-    fs.writeFileSync(file, text.split("\n").map(migrateLine).join("\n"));
+    const text = NodeFS.readFileSync(file, "utf8");
+    NodeFS.writeFileSync(file, text.split("\n").map(migrateLine).join("\n"));
   }
 }
