@@ -45,9 +45,13 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
+import { FetchHttpClient } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { EnvironmentAuth } from "../../auth/EnvironmentAuth.ts";
+import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
+import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { ServerConfig } from "../../config.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../../mcp/McpSessionRegistry.testkit.ts";
 import {
@@ -91,10 +95,11 @@ import {
   astraPeerSteeringRun,
   deliveryMessageId,
   formatAgentDeliveryEnvelope,
-  live as deliveryTransportLayer,
+  live as deliveryTransportLive,
 } from "./DeliveryTransport.ts";
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts";
+import { layer as peerRegistryLayer } from "./PeerRegistryService.ts";
 import {
   A2AHomeRegistrar,
   participantIdForThread,
@@ -117,6 +122,7 @@ import {
 } from "../run-observability/QueuedRunWatchdog.ts";
 import { formatClosedHumanEnvelope, formatPeerEnvelope } from "./EnvelopeFormatter.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { A2ALifecycleService, manualLayer as lifecycleServiceLayer } from "./LifecycleService.ts";
 import { A2ASenderRetiredError, A2ASendService, layer as sendServiceLayer } from "./SendService.ts";
 import {
@@ -142,6 +148,24 @@ const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
 const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-j5-a2a-delivery-transport-",
 });
+
+// The live transport carries the peer side too; this test never crosses servers,
+// so the registry is real but empty and the HTTP client is never called.
+const peerRegistryTestLayer = peerRegistryLayer.pipe(
+  Layer.provide(FetchHttpClient.layer),
+  Layer.provide(Layer.mock(EnvironmentAuth)({ listSessions: () => Effect.succeed([]) })),
+  Layer.provide(
+    ServerEnvironment.identityLayer.pipe(
+      Layer.provide(ServerSecretStore.layer),
+      Layer.provide(serverConfigLayer),
+      Layer.provide(NodeServices.layer),
+    ),
+  ),
+);
+const deliveryTransportLayer = deliveryTransportLive.pipe(
+  Layer.provide(FetchHttpClient.layer),
+  Layer.provide(peerRegistryTestLayer),
+);
 
 const modelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
@@ -375,7 +399,7 @@ const makeTestLayer = (
 
 const makeLifecycleTestLayer = (harness: DeliveryHarness) => {
   const base = makeTestLayer(harness);
-  const send = sendServiceLayer.pipe(Layer.provide(base));
+  const send = sendServiceLayer.pipe(Layer.provide(peerDirectoryNoneLayer), Layer.provide(base));
   const worker = deliveryWorkerLayer.pipe(Layer.provide(base));
   const lifecycle = lifecycleServiceLayer.pipe(Layer.provide(worker), Layer.provide(base));
   const threadLifecycle = threadLifecycleServiceLayer.pipe(Layer.provide(base));
@@ -1417,7 +1441,7 @@ it.effect(
       const harness = yield* makeHarness;
       const base = makeTestLayer(harness);
       const joined = Layer.mergeAll(
-        sendServiceLayer,
+        sendServiceLayer.pipe(Layer.provide(peerDirectoryNoneLayer)),
         deliveryWorkerLayer,
         humanInboxLayer,
         homeRegistrarLayer,
@@ -1575,7 +1599,7 @@ for (const crossSquadron of [false, true]) {
         const harness = yield* makeHarness;
         const base = makeTestLayer(harness);
         const joined = Layer.mergeAll(
-          sendServiceLayer,
+          sendServiceLayer.pipe(Layer.provide(peerDirectoryNoneLayer)),
           deliveryWorkerLayer,
           homeRegistrarLayer,
         ).pipe(Layer.provideMerge(base));
@@ -1744,7 +1768,7 @@ const makeMessageLifecycleLayer = (
 ) => {
   const base = makeTestLayer(harness, settings);
   const messages = Layer.mergeAll(
-    sendServiceLayer,
+    sendServiceLayer.pipe(Layer.provide(peerDirectoryNoneLayer)),
     deliveryWorkerLayer,
     humanInboxLayer,
     homeRegistrarLayer,

@@ -14,6 +14,7 @@ import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
+import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 
 /**
@@ -69,6 +70,15 @@ export class PeerIsSelfError extends Schema.TaggedError<PeerIsSelfError>()("Peer
   }
 }
 
+export class PeerSessionReadError extends Schema.TaggedError<PeerSessionReadError>()(
+  "PeerSessionReadError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Could not read this server's sessions to confirm which peers are still authorized.";
+  }
+}
+
 export type AddPeerError =
   | SqlError
   | PeerUnreachableError
@@ -76,7 +86,23 @@ export type AddPeerError =
   | PeerCredentialMismatchError
   | PeerIsSelfError;
 
+/** A peer record plus the credential this server presents to it; never leaves the process. */
+export interface PeerConnection extends PeerRecord {
+  readonly credential: string;
+}
+
 export interface PeerRegistryServiceShape {
+  /** This server's environment id, the identity a peer's credential must name. */
+  readonly selfEnvironmentId: Effect.Effect<EnvironmentId>;
+  /**
+   * Every peer still authorized in both directions: recorded here and still
+   * holding a live session on this server. Revoking a peer's session in
+   * Settings → Connections therefore ends outbound delivery too.
+   */
+  readonly connections: () => Effect.Effect<
+    ReadonlyArray<PeerConnection>,
+    SqlError | PeerSessionReadError
+  >;
   /** Proves the credential at the origin, then upserts; re-adding the same peer rotates its origin and credential. */
   readonly add: (
     input: AddPeerInput,
@@ -97,6 +123,10 @@ interface PeerRow {
   readonly label: string;
   readonly origin: string;
   readonly created_at: string;
+}
+
+interface PeerConnectionRow extends PeerRow {
+  readonly credential: string;
 }
 
 const recordFromRow = (row: PeerRow): PeerRecord => ({
@@ -154,13 +184,17 @@ export const helloAtOrigin = Effect.fn("j5.a2a.peer.hello")(function* (input: {
 export const layer: Layer.Layer<
   PeerRegistryService,
   never,
-  SqlClient.SqlClient | HttpClient.HttpClient | ServerEnvironment.ServerEnvironmentIdentity
+  | SqlClient.SqlClient
+  | HttpClient.HttpClient
+  | ServerEnvironment.ServerEnvironmentIdentity
+  | EnvironmentAuth.EnvironmentAuth
 > = Layer.effect(
   PeerRegistryService,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const httpClient = yield* HttpClient.HttpClient;
     const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
+    const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
 
     const readRow = Effect.fn("j5.a2a.peer.readRow")(function* (environmentId: string) {
       const rows = yield* sql<PeerRow>`
@@ -219,6 +253,22 @@ export const layer: Layer.Layer<
         };
       });
 
+    const connections: PeerRegistryServiceShape["connections"] = () =>
+      Effect.gen(function* () {
+        const rows = yield* sql<PeerConnectionRow>`
+          SELECT environment_id, label, origin, credential, created_at
+          FROM j5_a2a_peer
+          ORDER BY label, environment_id
+        `;
+        const sessions = yield* serverAuth
+          .listSessions()
+          .pipe(Effect.mapError((cause) => new PeerSessionReadError({ cause })));
+        const authorized = new Set(sessions.map((session) => session.subject));
+        return rows
+          .filter((row) => authorized.has(peerSubjectForEnvironment(row.environment_id)))
+          .map((row) => ({ ...recordFromRow(row), credential: row.credential }));
+      });
+
     const list: PeerRegistryServiceShape["list"] = () =>
       sql<PeerRow>`
         SELECT environment_id, label, origin, created_at
@@ -234,6 +284,12 @@ export const layer: Layer.Layer<
         return { removed: true };
       });
 
-    return PeerRegistryService.of({ add, list, remove });
+    return PeerRegistryService.of({
+      selfEnvironmentId: identity.getEnvironmentId,
+      connections,
+      add,
+      list,
+      remove,
+    });
   }),
 );

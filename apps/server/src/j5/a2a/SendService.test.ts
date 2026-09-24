@@ -7,6 +7,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
@@ -21,7 +22,11 @@ const timestamp = "2026-08-16T12:00:00.000Z";
 
 const database = NodeSqliteClient.layerMemory();
 const ledger = ledgerLayer.pipe(Layer.provide(database));
-const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+const send = sendLayer.pipe(
+  Layer.provide(peerDirectoryNoneLayer),
+  Layer.provide(ledger),
+  Layer.provide(database),
+);
 const testLayer = Layer.mergeAll(database, ledger, send);
 const encodeAgentParticipantPayload = Schema.encodeEffect(
   Schema.fromJsonString(Schema.Struct({ participant: AgentParticipant })),

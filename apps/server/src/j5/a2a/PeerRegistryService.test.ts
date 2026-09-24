@@ -1,12 +1,14 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { AuthA2APeerScope, AuthSessionId, EnvironmentId } from "@t3tools/contracts";
 import { J5_PEER_API_PATHS, type PeerHelloResponse } from "@t3tools/contracts/j5";
 import { assert, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import { EnvironmentAuth } from "../../auth/EnvironmentAuth.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { PeerRegistryService, layer as peerRegistryLayer } from "./PeerRegistryService.ts";
@@ -29,6 +31,9 @@ type HelloReply =
   | { readonly unreachable: string };
 
 /** A stub of the peer side: every origin answers its hello route by the table, everything else is unreachable. */
+/** The peer sessions this server still holds; a revoked one is simply absent. */
+const liveSubjects: Array<string> = [];
+
 const makeTestLayer = (
   replies: Record<string, HelloReply>,
   seen: Array<SeenRequest> = [],
@@ -63,10 +68,28 @@ const makeTestLayer = (
   const identity = Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
     getEnvironmentId: Effect.succeed(ourEnvironmentId),
   });
+  const auth = Layer.mock(EnvironmentAuth)({
+    listSessions: () =>
+      Effect.succeed(
+        liveSubjects.map((subject, index) => ({
+          sessionId: AuthSessionId.make(`auth-session:${String(index)}`),
+          subject,
+          scopes: [AuthA2APeerScope],
+          method: "bearer-access-token" as const,
+          client: { deviceType: "bot" as const },
+          issuedAt: DateTime.makeUnsafe("2026-09-01T00:00:00.000Z"),
+          expiresAt: DateTime.makeUnsafe("2027-01-01T00:00:00.000Z"),
+          lastConnectedAt: null,
+          connected: false,
+          current: false,
+        })),
+      ),
+  });
   const registry = peerRegistryLayer.pipe(
     Layer.provide(database),
     Layer.provide(http),
     Layer.provide(identity),
+    Layer.provide(auth),
   );
   return Layer.mergeAll(database, registry);
 };
@@ -155,4 +178,25 @@ it.effect(
         }),
       ),
     ),
+);
+
+it.effect("hands a peer to the transport only while the session it holds here is still live", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const registry = yield* PeerRegistryService;
+    yield* registry.add({
+      origin: homeOrigin,
+      credential: "home-issued-token",
+      label: "Home",
+      acceptedAt: timestamp,
+    });
+    liveSubjects.length = 0;
+    assert.deepStrictEqual(yield* registry.connections(), [], "revoked in Settings: no delivery");
+    assert.equal((yield* registry.list()).length, 1, "the record itself stays visible");
+    liveSubjects.push(`peer:${home}`);
+    const live = yield* registry.connections();
+    assert.equal(live.length, 1);
+    assert.equal(live[0]!.credential, "home-issued-token");
+    liveSubjects.length = 0;
+  }).pipe(Effect.provide(makeTestLayer({ [homeOrigin]: homeHello(`peer:${work}`) }))),
 );

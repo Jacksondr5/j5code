@@ -1,7 +1,11 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Layer from "effect/Layer";
+import { FetchHttpClient } from "effect/unstable/http";
 
 import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.ts";
 import { layer as agentCrewInstanceLayer } from "./AgentCrewInstanceService.ts";
+import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
+import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { layer as archiveFactsLayer, placementFactsLayer } from "./ArchiveFactsService.ts";
 import { layer as archiveAgentLayer } from "./ArchiveAgentService.ts";
 import { layer as archiveCrewLayer } from "./ArchiveCrewService.ts";
@@ -26,6 +30,9 @@ import { layer as ledgerLayer } from "./LedgerService.ts";
 import { layer as participantPlacementLayer } from "./PlacementService.ts";
 import { layer as lifecycleServiceLayer } from "./LifecycleService.ts";
 import { layer as machineParticipantLayer } from "./MachineParticipantService.ts";
+import { layer as peerDirectoryLayer } from "./PeerDirectory.ts";
+import { layer as peerInboundLayer } from "./PeerInboundService.ts";
+import { layer as peerRegistryLayer } from "./PeerRegistryService.ts";
 import { layer as rosterLayer } from "./RosterService.ts";
 import { layer as sendServiceLayer } from "./SendService.ts";
 import { layer as silenceDetectorLayer } from "./SilenceDetector.ts";
@@ -60,10 +67,35 @@ export const makeJ5SquadronCreationLayer = (
 
 export const J5SquadronCreationLayer = makeJ5SquadronCreationLayer();
 
+// Peering reaches other servers, so its layers carry their own HTTP client and
+// this server's identity (the environment-id file the server publishes at
+// startup). The registry is built once here and shared by the outbound
+// transport, the peer directory the send service resolves through, and the
+// peer routes.
+const serverIdentityLayer = ServerEnvironment.identityLayer.pipe(
+  Layer.provide(ServerSecretStore.layer),
+  Layer.provide(NodeServices.layer),
+);
+const peerRegistryProvided = peerRegistryLayer.pipe(
+  Layer.provide(FetchHttpClient.layer),
+  Layer.provide(serverIdentityLayer),
+);
+const peerDirectoryProvided = peerDirectoryLayer.pipe(
+  Layer.provide(FetchHttpClient.layer),
+  Layer.provide(peerRegistryProvided),
+);
+
+/** The production transport with its peer side satisfied; tests substitute a transport layer of their own. */
+const deliveryTransportWithPeers = deliveryTransportLayer.pipe(
+  Layer.provide(FetchHttpClient.layer),
+  Layer.provide(peerRegistryProvided),
+);
+
 export const makeJ5A2AAuxiliaryLayer = (
-  options: { readonly deliveryTransport?: typeof deliveryTransportLayer } = {},
+  options: { readonly deliveryTransport?: typeof deliveryTransportWithPeers } = {},
 ) => {
-  const deliveryTransportProvided = options.deliveryTransport ?? deliveryTransportLayer;
+  const deliveryTransportProvided = options.deliveryTransport ?? deliveryTransportWithPeers;
+  const sendServiceProvided = sendServiceLayer.pipe(Layer.provide(peerDirectoryProvided));
   const deliveryWorkerProvided = deliveryWorkerLayer.pipe(
     Layer.provideMerge(deliveryTransportProvided),
   );
@@ -127,8 +159,10 @@ export const makeJ5A2AAuxiliaryLayer = (
     agentHandoffRefreshesLayer,
     humanPersonRegistryLayer,
     machineParticipantLayer,
+    peerDirectoryProvided,
+    peerInboundLayer,
     rosterLayer,
-    sendServiceLayer,
+    sendServiceProvided,
     deliveryWorkerProvided,
     silenceDetectorProvided,
     humanInboxLayer,
@@ -142,14 +176,14 @@ export const makeJ5A2AAuxiliaryLayer = (
     crewProposalBootSweepProvided,
     crewStopProvided,
     crewSeatFinishNotifierProvided,
-  );
+  ).pipe(Layer.provideMerge(peerRegistryProvided));
   return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };
 
 export const makeJ5A2ARuntimeLayer = (
   options: {
     readonly ledger?: typeof ledgerLayer;
-    readonly deliveryTransport?: typeof deliveryTransportLayer;
+    readonly deliveryTransport?: typeof deliveryTransportWithPeers;
   } = {},
 ) => {
   const squadronCreationProvided = makeJ5SquadronCreationLayer(

@@ -16,6 +16,7 @@ import * as GitWorkflowService from "../../../git/GitWorkflowService.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { A2ASendService } from "../../../j5/a2a/SendService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "../../../j5/a2a/PeerDirectory.ts";
 import { ParticipantPlacementService } from "../../../j5/a2a/PlacementService.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../../../project/ProjectSetupScriptRunner.ts";
@@ -46,6 +47,7 @@ const StubServicesLive = Layer.mergeAll(
   }),
   Layer.mock(A2ASendService)({ listParticipants: () => Effect.succeed([]) }),
   Layer.mock(ParticipantPlacementService)({ listParticipants: () => Effect.succeed([]) }),
+  peerDirectoryNoneLayer,
   Layer.mock(ProviderRegistry)({}),
   Layer.mock(ScheduledTaskService)({}),
   Layer.mock(ProjectService.ProjectService)({}),
@@ -378,7 +380,10 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(deniedPreview.result.content[0]?.text).toContain("preview");
       const allowedDirectory = yield* callRestricted(4, "list_participants");
       expect(allowedDirectory.result.isError).not.toBe(true);
-      expect(decodeJson(allowedDirectory.result.content[0]!.text)).toEqual({ participants: [] });
+      expect(decodeJson(allowedDirectory.result.content[0]!.text)).toEqual({
+        participants: [],
+        unread_peer_count: 0,
+      });
 
       // The handoff tool mutates thread state, reaches the network (origin
       // fetch), and runs project setup scripts, so its MCP hints must not

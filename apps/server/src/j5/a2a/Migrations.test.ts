@@ -60,6 +60,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 17, name: "EnsureCustomCrewSeats" },
       { migration_id: 18, name: "Peers" },
       { migration_id: 19, name: "PeerDeliveryOrigin" },
+      { migration_id: 20, name: "PeerDeliveryReceiver" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -83,6 +84,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [17, "EnsureCustomCrewSeats"],
         [18, "Peers"],
         [19, "PeerDeliveryOrigin"],
+        [20, "PeerDeliveryReceiver"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
@@ -1190,7 +1192,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
     `;
     assert.deepStrictEqual(
       applied.map((row) => row.migration_id),
-      [13, 14, 15, 16, 17, 18, 19],
+      [13, 14, 15, 16, 17, 18, 19, 20],
     );
     const memberColumns = yield* sql<{ readonly name: string }>`
       SELECT name FROM pragma_table_info('j5_agent_crew_member') ORDER BY cid

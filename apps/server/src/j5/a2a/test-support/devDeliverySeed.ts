@@ -29,10 +29,14 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import { FetchHttpClient } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as NodeOS from "node:os";
 
+import { EnvironmentAuth } from "../../../auth/EnvironmentAuth.ts";
+import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import * as CheckpointStore from "../../../checkpointing/CheckpointStore.ts";
+import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import { ServerConfig } from "../../../config.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../../../mcp/McpSessionRegistry.testkit.ts";
 import {
@@ -59,13 +63,15 @@ import * as VcsProcess from "../../../vcs/VcsProcess.ts";
 import {
   deliveryCommandId,
   deliveryMessageId,
-  live as deliveryTransportLayer,
+  live as deliveryTransportLive,
 } from "../DeliveryTransport.ts";
 import { manualLayer as deliveryWorkerLayer, A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { formatClosedHumanEnvelope } from "../EnvelopeFormatter.ts";
 import { A2AHumanInbox, layer as humanInboxLayer } from "../HumanInboxService.ts";
+import { layer as peerRegistryLayer } from "../PeerRegistryService.ts";
 import { ensureLocalOperatorHumanPerson } from "../HumanPersonRegistry.ts";
 import { A2ALedger, layer as ledgerLayer } from "../LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "../PeerDirectory.ts";
 import { A2ASendService, layer as sendServiceLayer } from "../SendService.ts";
 import { layer as agentCrewInstanceLayer } from "../AgentCrewInstanceService.ts";
 import { A2ASilenceDetector, manualLayer as silenceDetectorLayer } from "../SilenceDetector.ts";
@@ -276,6 +282,22 @@ const unavailableAdapter: ProviderAdapterV2Shape = {
 const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
   const database = makeSqlitePersistenceLive(databasePath).pipe(Layer.provide(NodeServices.layer));
   const config = ServerConfig.layerTest(process.cwd(), baseDir);
+  // The seed never crosses servers: the peer registry is real but empty.
+  const peerRegistry = peerRegistryLayer.pipe(
+    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(Layer.mock(EnvironmentAuth)({ listSessions: () => Effect.succeed([]) })),
+    Layer.provide(
+      ServerEnvironment.identityLayer.pipe(
+        Layer.provide(ServerSecretStore.layer),
+        Layer.provide(config),
+        Layer.provide(NodeServices.layer),
+      ),
+    ),
+  );
+  const deliveryTransportLayer = deliveryTransportLive.pipe(
+    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(peerRegistry),
+  );
   const vcs = VcsDriverRegistry.layer.pipe(
     Layer.provide(VcsProcess.layer),
     Layer.provide(config),
@@ -329,7 +351,7 @@ const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
     Layer.provideMerge(agentCrewInstanceLayer),
   );
   const a2a = Layer.mergeAll(
-    sendServiceLayer,
+    sendServiceLayer.pipe(Layer.provide(peerDirectoryNoneLayer)),
     deliveryWorker,
     silenceDetector,
     humanInboxLayer,

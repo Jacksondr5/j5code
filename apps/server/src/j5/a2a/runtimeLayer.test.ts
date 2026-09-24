@@ -5,6 +5,7 @@ import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { assert, it } from "@effect/vitest";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import { FetchHttpClient } from "effect/unstable/http";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -43,6 +44,7 @@ import { ParticipantPlacementService } from "./PlacementService.ts";
 import { A2ASilenceDetector } from "./SilenceDetector.ts";
 import { ThreadHomesService } from "./ThreadHomesService.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
+import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { makeJ5A2ARuntimeLayer } from "./runtimeLayer.ts";
 
 const archiveDependencies = Layer.mergeAll(
@@ -88,6 +90,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
           Layer.provide(Layer.mock(OrchestratorV2)({})),
           Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
           Layer.provide(archiveDependencies),
+          Layer.provide(Layer.mock(EnvironmentAuth)({})),
           Layer.provide(
             ServerConfig.layerTest(process.cwd(), { prefix: "j5-a2a-runtime-layer-" }).pipe(
               Layer.provide(NodeServices.layer),
@@ -140,6 +143,8 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
       const runtime = makeJ5A2ARuntimeLayer({
         ledger: countedLedger,
         deliveryTransport: deliveryTransportLayer.pipe(
+          Layer.provide(FetchHttpClient.layer),
+          Layer.provide(Layer.mock(PeerRegistryService)({})),
           Layer.tap((context) =>
             Effect.sync(() => transports.add(Context.get(context, A2ADeliveryTransport))),
           ),

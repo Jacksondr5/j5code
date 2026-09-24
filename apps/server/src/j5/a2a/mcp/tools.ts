@@ -37,6 +37,7 @@ import {
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
 import { A2ALedger } from "../LedgerService.ts";
+import { PeerDirectory } from "../PeerDirectory.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
@@ -125,6 +126,8 @@ export type J5ParticipantDirectoryRow = typeof J5ParticipantDirectoryRow.Type;
 
 export const J5ListParticipantsResult = Schema.Struct({
   participants: Schema.Array(J5ParticipantDirectoryRow),
+  /** Peer servers whose address books could not be read: their agents are absent, not gone. No server is named. */
+  unread_peer_count: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
 const NonEmptyString = Schema.String.check(Schema.isNonEmpty());
@@ -400,6 +403,7 @@ const placementDependencies = [
   A2ASendService,
   ParticipantPlacementService,
   OrchestratorV2,
+  PeerDirectory,
 ];
 
 const spawnDependencies = [
