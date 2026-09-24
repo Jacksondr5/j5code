@@ -48,9 +48,15 @@ export interface ProviderRegistryShape {
     instanceId: ProviderInstanceId,
   ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
+  /** Pending discovery must be superseded after a skill mutation. */
+  readonly getPendingWorkspaceCwds: (
+    instanceId: ProviderInstanceId,
+  ) => Effect.Effect<ReadonlyArray<string>>;
+
   readonly refreshWorkspaceSnapshot: (input: {
     readonly instanceId: ProviderInstanceId;
     readonly cwd: string;
+    readonly force?: boolean;
   }) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
   /**

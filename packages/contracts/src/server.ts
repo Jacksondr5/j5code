@@ -124,6 +124,8 @@ export const ServerProviderWorkspaceSnapshot = Schema.Struct({
   checkedAt: IsoDateTime,
   slashCommands: Schema.Array(ServerProviderSlashCommand),
   skills: Schema.Array(ServerProviderSkill),
+  /** A failed refresh keeps the last successful inventory and checkedAt. */
+  refreshError: Schema.optional(TrimmedNonEmptyString),
 });
 export type ServerProviderWorkspaceSnapshot = typeof ServerProviderWorkspaceSnapshot.Type;
 
@@ -190,6 +192,8 @@ export const ServerProviderUpdateState = Schema.Struct({
 export type ServerProviderUpdateState = typeof ServerProviderUpdateState.Type;
 
 export const ServerProvider = Schema.Struct({
+  /** Discovery failures retain provider health and the last known skill inventory. */
+  skillDiscoveryError: Schema.optional(TrimmedNonEmptyString),
   // Routing key for the configured instance this snapshot represents. This
   // is the only stable identity consumers may use for provider routing.
   instanceId: ProviderInstanceId,

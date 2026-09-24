@@ -815,3 +815,37 @@ it("validates remote device hosts and rejects ambiguous host ids", () => {
   ).toThrow();
   expect(() => decodeDeviceHostSettings({ deviceHosts: [{ ...host, port: 0 }] })).toThrow();
 });
+
+describe("ServerSettings skill catalog source", () => {
+  it("defaults to an unconfigured catalog", () => {
+    expect(decodeServerSettings({}).skillCatalogSource).toBe("");
+  });
+
+  it("round-trips a custom source and trims patches", () => {
+    const settings = decodeServerSettings({ skillCatalogSource: "  /opt/skills  " });
+    expect(settings.skillCatalogSource).toBe("/opt/skills");
+    const patch = decodeServerSettingsPatch({ skillCatalogSource: "  /opt/skills  " });
+    expect(patch.skillCatalogSource).toBe("/opt/skills");
+  });
+
+  it("allows clearing the source at the settings and patch boundaries", () => {
+    for (const skillCatalogSource of ["", "   "]) {
+      expect(decodeServerSettings({ skillCatalogSource }).skillCatalogSource).toBe("");
+      expect(decodeServerSettingsPatch({ skillCatalogSource }).skillCatalogSource).toBe("");
+    }
+  });
+
+  it("rejects credential-bearing Git URLs in patches without breaking SSH usernames", () => {
+    for (const skillCatalogSource of [
+      "https://user:token@example.com/repo.git",
+      "https://token@example.com/repo.git",
+      "ssh://git:token@example.com/repo.git",
+    ]) {
+      expect(() => decodeServerSettingsPatch({ skillCatalogSource })).toThrow();
+    }
+    expect(
+      decodeServerSettingsPatch({ skillCatalogSource: "ssh://git@example.com/repo.git" })
+        .skillCatalogSource,
+    ).toBe("ssh://git@example.com/repo.git");
+  });
+});

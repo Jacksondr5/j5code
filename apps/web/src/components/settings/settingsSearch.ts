@@ -15,6 +15,7 @@ export type SettingsPath =
   | "/settings/keybindings"
   | "/settings/snap-shot"
   | "/settings/personas"
+  | "/settings/skills"
   | "/settings/providers"
   | "/settings/integrations"
   | "/settings/scheduled-tasks"
@@ -78,6 +79,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/keybindings": "Keybindings",
   "/settings/snap-shot": "SnapShots",
   "/settings/personas": "Personas",
+  "/settings/skills": "Skills",
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
   "/settings/scheduled-tasks": "Schedule Tasks",
@@ -433,6 +435,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["agents saved agent library yaml definitions instructions runtime policy"],
   },
   {
+    id: "skills",
+    title: "Skills",
+    to: "/settings/skills",
+    searchTerms: ["catalog groups install update source git local skills"],
+  },
+  {
     id: "providers",
     title: "Providers",
     to: "/settings/providers",
@@ -696,6 +704,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/appearance": null,
   "/settings/snap-shot": null,
   "/settings/personas": null,
+  "/settings/skills": null,
   // Keybindings fan out to the selection; Providers shows the representative
   // environment at any selection. Neither needs a particular scope to render.
   "/settings/keybindings": null,
