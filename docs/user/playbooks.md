@@ -5,6 +5,18 @@ in its existing thread and decides when to advance. The thread's phase board
 shows the current step and whether the run is active, completed, or cancelled.
 Earlier steps describe position, not a guarantee that their work passed validation.
 
+Open **Settings → Personas → Playbooks** and select a project or thread worktree to see
+its definitions and steps. Playbook Author runs on Codex in the selected workspace.
+Choose an authoring Squadron if the project has more than one. It helps shape the
+steps, writes the YAML, and checks the definition without starting a run. You can
+customize the persona in Settings → Personas. Invalid definitions remain visible
+with their errors.
+
+You can import `.yaml` or `.yml` definitions into the selected workspace. Importing
+a file with an existing name asks before replacing it. Changes also apply to runs
+using that definition. An active run must be completed or cancelled before its
+definition can be deleted; completed run history remains.
+
 Open **Fleet** and use its **Playbook runs** section to follow runs across your
 connected environments. The overview shows
 each run's owner thread, agent activity, and current step. Select a run to open
