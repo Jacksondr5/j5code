@@ -172,6 +172,8 @@ import {
   refreshSkillProviders,
   refreshSkillsOnConnection,
 } from "./j5/skills/skillProviderRefresh.ts";
+import { makePlaybookRpcHandlers } from "./j5/playbooks/playbookRpc.ts";
+import { PlaybookStore } from "./j5/playbooks/PlaybookStore.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
@@ -1722,6 +1724,7 @@ const makeWsRpcLayer = (
             Effect.mapError((cause) => new SkillLinkError({ message: String(cause) })),
           ),
       });
+      const playbookRpcHandlers = makePlaybookRpcHandlers(yield* PlaybookStore, observeRpcStream);
       const handlers = ServerWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
@@ -1772,6 +1775,7 @@ const makeWsRpcLayer = (
         ...agentPersonaRpcHandlers,
         ...skillCatalogRpcHandlers,
         ...skillLinkRpcHandlers,
+        ...playbookRpcHandlers,
         [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.getWorkflowScript,
@@ -3375,6 +3379,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
     const sql = yield* SqlClient.SqlClient;
     // J5: the revision counter the saved-agent handoff observer bumps; one instance per server.
     const agentHandoffRefreshes = yield* AgentHandoffRefreshes;
+    const playbooks = yield* PlaybookStore;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -3430,6 +3435,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
               Layer.provide(Layer.succeed(AgentHandoffRefreshes, agentHandoffRefreshes)),
+              Layer.provide(Layer.succeed(PlaybookStore, playbooks)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

@@ -18,6 +18,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { parseDocument } from "yaml";
 
@@ -68,6 +69,9 @@ export const makePlaybookStore = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
+  const revision = yield* SubscriptionRef.make(0);
+  const notifyChange = (result: PlaybookStepResponse) =>
+    result.replayed ? Effect.void : SubscriptionRef.update(revision, (value) => value + 1);
   // Serialize definition edits and run mutations within this environment.
   const permit = yield* Semaphore.make(1);
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
@@ -358,7 +362,7 @@ export const makePlaybookStore = Effect.gen(function* () {
         }),
       );
       return result.replayed ? yield* view(result.run, true) : present(result.run, definition);
-    }).pipe(permit.withPermits(1));
+    }).pipe(Effect.tap(notifyChange), permit.withPermits(1));
   }, Effect.mapError(storageError));
 
   const mutate = Effect.fn("PlaybookStore.mutate")(function* (
@@ -434,7 +438,7 @@ export const makePlaybookStore = Effect.gen(function* () {
       return definition && !result.replayed
         ? present(result.run, definition)
         : yield* view(result.run, result.replayed);
-    }).pipe(permit.withPermits(1));
+    }).pipe(Effect.tap(notifyChange), permit.withPermits(1));
   }, Effect.mapError(storageError));
 
   const current = Effect.fn("PlaybookStore.current")(function* (owner: ThreadId, runId?: string) {
@@ -488,6 +492,8 @@ export const makePlaybookStore = Effect.gen(function* () {
     return { runs, total: counts[0]?.total ?? 0 };
   }, Effect.mapError(storageError));
   return {
+    // Include the current revision so subscribing after a mutation still refreshes the view.
+    changes: SubscriptionRef.changes(revision),
     discover,
     removeDefinition,
     renameDefinition,

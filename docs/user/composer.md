@@ -121,6 +121,10 @@ composer when it is empty, and is discarded otherwise.
 
 ## Commands and skills
 
+Use `/playbook <name>` to ask the agent to follow a playbook from your workspace.
+The thread shows its current phase and progress. See [Playbooks](playbooks.md) for
+creating a sequence and changing it while work is underway.
+
 Type `/` for commands or `$` to add a skill from the selected environment and
 provider. On mobile, both are also available before starting a thread on
 **New task**.

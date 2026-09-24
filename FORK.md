@@ -257,7 +257,7 @@ migrations after upstream migrations.
 41. Skills inventory extends case 40's single Settings page with Catalog and Installed sections sharing an environment picker. `server.ts` adds optional skill provenance fields. `ClaudeSkills.ts` appends plugin discovery from `j5/skills/claudePluginSkills.ts` and exports its existing settings-path/repository-root helpers; keep its upstream directory-name explanation intact. `ClaudeDriver.ts` passes the instance environment, `ClaudeProvider.ts` appends the bounded bundled-skill reload probe, and `CodexProvider.ts` carries optional provenance. The registry appends J5's cached path resolver at snapshot ingestion and invalidates it on explicit refresh; workspace resolution stays in the J5 refresher. On rebase, preserve plugin enablement/precedence, built-in composer visibility, status-only cache reuse, and environment/project selection. Origin and discovery-state helpers live in `packages/shared/src/j5/skillInventory.ts`; contracts remain wire-only.
 
 42. Skills linking extends the J5 contract/RPC exports and the authorization/handler spreads from case 40 with `j5.skills.links.*`. The Settings inventory mounts J5's link preview, inspected unlink batch, confirmed original-folder deletion, and managed-record panel; search continues to use the single Skills route. The shared J5 inventory helpers classify linkable origins and discovery state; catalog and standalone linking reuse J5 root resolution, filesystem operations, and affected-provider refresh. On rebase, preserve fresh preview validation, canonical project containment, the Git exposure warning, ownership identity and forget-only recovery, stale unlink/deletion preview rejection, and release the mutation permit before refreshing providers. Catalog remains user-scoped; standalone links can target an explicitly selected project.
-43. Agent-led playbooks: `apps/server/src/provider/T3OrchestrationInstructions.ts` appends J5-owned retrieval and advancement guidance. All state, YAML reading, MCP operations, and authenticated reads remain under J5-owned modules; advancement never creates turns or controls provider lifecycle.
+43. Agent-led playbooks: `apps/server/src/provider/T3OrchestrationInstructions.ts` appends J5-owned retrieval and advancement guidance. All state, YAML reading, MCP operations, and authenticated reads remain under J5-owned modules; advancement never creates turns or controls provider lifecycle. Web `ChatView.tsx` mounts the J5 phase board and expands submitted `/playbook` text; `ChatComposer.tsx` and `composer-logic.ts` append an ordinary built-in command. `packages/client-runtime/package.json` exports the shared J5 presentation and expansion helper. `docs/user/composer.md` describes that text expansion. The runs overview is a section of the existing J5-owned Fleet page. A J5-owned read-scoped revision stream notifies visible clients of committed playbook mutations. The RPC group, authorization scope map, handlers, and subscription tag are appended through existing J5 integration seams; the WebSocket handlers share the server-lifetime PlaybookStore.
 
 ## Pin and upstream advance runbook
 
@@ -551,14 +551,18 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/server/src/serviceLauncher.ts`                                                                       | R       | H                                     |
 | `apps/server/src/telemetry/Identify.ts`                                                                    | R       | H                                     |
 | `apps/server/src/textGeneration/CodexTextGeneration.test.ts`                                               | N       | T                                     |
-| `apps/server/src/ws.ts`                                                                                    | A       | 10, 11, 37                            |
+| `apps/server/src/ws.ts`                                                                                    | A       | 10, 11, 37, 43                        |
 | `apps/web/index.html`                                                                                      | R       | B                                     |
 | `apps/web/src/branding.test.ts`                                                                            | R       | B                                     |
 | `apps/web/src/branding.ts`                                                                                 | R       | B                                     |
 | `apps/web/src/commandPaletteBus.ts`                                                                        | R       | 13                                    |
 | `apps/web/src/components/ChatView.logic.test.ts`                                                           | R       | 9, 19                                 |
 | `apps/web/src/components/ChatView.logic.ts`                                                                | A       | 9, 19                                 |
-| `apps/web/src/components/ChatView.tsx`                                                                     | A       | 9–11, 19, 24, 34                      |
+| `packages/contracts/src/rpc.ts`                                                                            | A       | 43                                    |
+| `packages/client-runtime/src/rpc/client.ts`                                                                | A       | 43                                    |
+| `apps/web/src/composer-logic.ts`                                                                           | A       | 43                                    |
+| `apps/server/src/auth/RpcAuthorization.ts`                                                                 | A       | 43                                    |
+| `apps/web/src/components/ChatView.tsx`                                                                     | A       | 9–11, 19, 24, 34, 43                  |
 | `apps/web/src/components/CommandPalette.logic.test.ts`                                                     | R       | 15b, 34                               |
 | `apps/web/src/components/CommandPalette.logic.ts`                                                          | R       | 15b, 34                               |
 | `apps/web/src/components/CommandPalette.tsx`                                                               | A       | 13, 15b, 19, 20, 34                   |
@@ -568,7 +572,7 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/web/src/components/Sidebar.logic.test.ts`                                                            | R       | 16, 19, 21                            |
 | `apps/web/src/components/Sidebar.logic.ts`                                                                 | R       | 16, 19, 21, 34                        |
 | `apps/web/src/components/Sidebar.tsx`                                                                      | A       | 9, 16, 19, 21–23, 34                  |
-| `apps/web/src/components/chat/ChatComposer.tsx`                                                            | A       | 27, 29                                |
+| `apps/web/src/components/chat/ChatComposer.tsx`                                                            | A       | 27, 29, 43                            |
 | `apps/web/src/components/chat/ChatHeader.tsx`                                                              | A       | 19                                    |
 | `apps/web/src/components/chat/ComposerPrimaryActions.tsx`                                                  | A       | 27                                    |
 | `apps/web/src/components/chat/DraftHeroHeadline.tsx`                                                       | A       | 9                                     |
@@ -588,8 +592,8 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/web/src/routes/_chat.index.tsx`                                                                      | R       | 9, 19, 34                             |
 | `apps/web/src/routes/_chat.tsx`                                                                            | R       | 19, 34                                |
 | `apps/web/tsconfig.json`                                                                                   | R       | B                                     |
-| `docs/user/composer.md`                                                                                    | N       | 26, 27                                |
-| `packages/client-runtime/package.json`                                                                     | R       | 27, 34                                |
+| `docs/user/composer.md`                                                                                    | N       | 26, 27, 43                            |
+| `packages/client-runtime/package.json`                                                                     | R       | 27, 34, 43                            |
 | `packages/client-runtime/src/operations/commands.test.ts`                                                  | R       | 10, 11                                |
 | `packages/client-runtime/src/operations/commands.ts`                                                       | R       | 10, 11                                |
 | `packages/contracts/package.json`                                                                          | N       | 34                                    |

@@ -299,6 +299,10 @@
       "types": "./src/work-log/scrollAnchor.ts",
       "default": "./src/work-log/scrollAnchor.ts"
     },
+    "./j5/playbooks": {
+      "types": "./src/j5/playbooks.ts",
+      "default": "./src/j5/playbooks.ts"
+    },
     "./j5/http": {
       "types": "./src/j5/http.ts",
       "default": "./src/j5/http.ts"
