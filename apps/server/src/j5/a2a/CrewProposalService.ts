@@ -247,9 +247,13 @@ export const layer = Layer.effect(
       proposal: CrewProposal,
     ) {
       const stable = { providerSessionId: PROPOSAL_SESSION, requestKey: proposal.id };
-      const captain = yield* threadManagement
-        .getThreadProjection(proposal.captainThreadId)
-        .pipe(Effect.mapError(operationError("reading the Captain thread")));
+      const captain = yield* getThreadProjectionIfPresent(
+        threadManagement,
+        proposal.captainThreadId,
+      ).pipe(Effect.mapError(operationError("reading the Captain thread")));
+      // A deleted Captain takes no messages; the decline still has to go through, or the gate
+      // it was refused at could never close.
+      if (captain === null || captain.thread.deletedAt != null) return;
       yield* threadManagement
         .dispatch({
           type: "message.dispatch",
@@ -271,9 +275,22 @@ export const layer = Layer.effect(
     const captainFor = Effect.fn("j5.a2a.crewProposal.captainFor")(function* (
       proposal: CrewProposal,
     ) {
-      const projection = yield* threadManagement
-        .getThreadProjection(proposal.captainThreadId)
-        .pipe(Effect.mapError(operationError("reading the Captain thread")));
+      const projection = yield* getThreadProjectionIfPresent(
+        threadManagement,
+        proposal.captainThreadId,
+      ).pipe(Effect.mapError(operationError("reading the Captain thread")));
+      // A roster or addition left open while its Captain was archived or deleted would seat agents
+      // under no one; the Captain cascade already ran when there was nothing to retire.
+      if (projection === null || projection.thread.deletedAt != null)
+        return yield* new CrewProposalRequestError({
+          detail: `Captain ${projection?.thread.title ?? proposal.captainParticipantId} has been deleted, so this crew has no one to command it.`,
+          nextStep: "Decline this proposal.",
+        });
+      if (projection.thread.archivedAt !== null)
+        return yield* new CrewProposalRequestError({
+          detail: `Captain ${projection.thread.title} is archived, so this crew has no one to command it.`,
+          nextStep: "Unarchive the Captain to approve it, or decline this proposal.",
+        });
       const squadron = yield* ledger
         .readSquadron(proposal.squadronId)
         .pipe(Effect.mapError(operationError("reading the Squadron")));
