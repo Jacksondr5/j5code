@@ -1,21 +1,14 @@
 # Personas
 
-Open **Agents** from a task's right panel to see the runtime agents connected to that task:
+Agents a task has launched appear in the **Lineage** section of the thread details panel and as subagent cards in the conversation. A child launched as a persona shows its persona chip beside its row and beside its card.
 
-- **Direct spawns** are provider-native child agents launched by the task.
-- **Workflows** group agents launched together and show their current phase.
-
-The panel reports live status, activity, elapsed time, and token usage. It remains empty until the task launches an agent or workflow.
-
-Persona definitions are separate from runtime activity, so only agents and workflows that have actually launched appear in a task's Agents panel.
-
-The right-panel view is available in the web and desktop clients.
+Persona definitions are separate from runtime activity, so only agents that have actually launched appear there.
 
 ## Starting a task as a persona
 
 In a new task, the composer offers a **Persona** control beside the model picker whenever the selected environment has launchable personas. Choose one and the model and reasoning controls are replaced by the persona's name and its fixed route; use the **×** control to go back to a regular task before sending. On send, the server resolves the persona's route and pins it to the thread, so the thread shows the same persona chip afterwards. If the persona's definition changes later, the chip shows **Changed**; the running task keeps the definition it started with, and a new task uses the current one.
 
-Threads launched as a persona show the persona beside their home in the thread list, and delegated children in the Agents panel show which persona ran them.
+Threads launched as a persona show the persona beside their home in the thread list, and delegated children show which persona ran them in the Lineage section and on their subagent cards.
 
 ## Persona library
 
@@ -81,8 +74,8 @@ When a folder lives in a git checkout, the row notes uncommitted changes in that
 
 A persona whose definition declares an output artifact (for example the bundled Critic's `ReviewHandoff`) writes it as a shared project artifact instead of leaving it in the transcript. The persona's instructions name the exact file, `handoffs/<persona>/<Artifact>-<task>.md` under the project's artifacts, and the required contents. When a run ends without that file, the agent is asked once to write it. The reminder runs as a follow-up in the agent's own task; the task that delegated the work is told the agent finished as usual and is not held back. If the follow-up also ends without the file, the handoff is recorded as **missing**, no further reminder is sent, and the task should be treated as incomplete. Rewriting a handoff does not replace it: each rewrite adds a version to the top of the same file, so you can compare a revised review with the earlier one on the Artifacts page.
 
-The task's persona control (web, desktop, and mobile) and its row in the Agents right panel show the handoff status: the artifact name when written, **pending** after the reminder, or **missing**. On web and desktop the chip opens the file in the Artifacts page. Declared input artifacts are read the same way, so a Builder started after a Navigator finds the `PlanHandoff` under `handoffs/`.
+The task's persona control (web, desktop, and mobile) and, on web and desktop, the persona chip beside a delegated child's Lineage row and subagent card show the handoff status: the artifact name when written, **pending** after the reminder, or **missing**. On web and desktop the chip opens the file in the Artifacts page. Declared input artifacts are read the same way, so a Builder started after a Navigator finds the `PlanHandoff` under `handoffs/`.
 
-The persona library is separate from the task's Agents right panel, which shows runtime activity.
+The persona library is separate from the Lineage section and subagent cards, which show runtime activity.
 
 For environment setup, see [Configure a persona library](../operations/persona-library.md).
