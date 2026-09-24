@@ -50,6 +50,11 @@ it("stops a crew for operators only and reports each seat", async () => {
                 participantId: ParticipantId.make("agent:j5:a2a:thread:critic"),
                 result: "already_idle" as const,
               },
+              {
+                seatName: "ghost",
+                participantId: ParticipantId.make("agent:j5:a2a:thread:ghost"),
+                result: "never_created" as const,
+              },
             ],
           })
         : Effect.fail(new CrewStopNotFoundError({ crewInstanceId: input.crewInstanceId }));
@@ -85,6 +90,9 @@ it("stops a crew for operators only and reports each seat", async () => {
         ["critic", "already_idle"],
       ],
     );
+    // A never-created seat rides its own optional field, so a client that predates it still
+    // decodes every member it knows.
+    assert.deepStrictEqual((body as { neverCreatedSeats?: unknown }).neverCreatedSeats, ["ghost"]);
     // A person is not a participant: no Captain check, and per-seat ids differ per seat.
     assert.isNull(calls[0]?.callerParticipantId);
     assert.notEqual(calls[0]?.ids[0], calls[0]?.ids[1]);

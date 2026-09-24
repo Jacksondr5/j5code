@@ -67,7 +67,8 @@ const openExchange = {
 };
 
 const fixture = Effect.gen(function* () {
-  const facts = yield* Ref.make<Record<string, ArchiveAgentTargetFacts>>({
+  // A null entry is a seat whose thread never came to exist.
+  const facts = yield* Ref.make<Record<string, ArchiveAgentTargetFacts | null>>({
     [builder]: {
       facts: { openExchanges: [openExchange], runningTurn: null },
       threadArchived: false,
@@ -81,6 +82,8 @@ const fixture = Effect.gen(function* () {
   });
   const archived = yield* Ref.make<ReadonlyArray<ArchiveAgentInput>>([]);
   const failSeat = yield* Ref.make<ParticipantId | null>(null);
+  // A seat whose facts the store cannot read at all.
+  const unreadableSeat = yield* Ref.make<ParticipantId | null>(null);
   const marked = yield* Ref.make<ReadonlyArray<string>>([]);
   const crewArchivedAt = yield* Ref.make<string | null>(null);
   const layer = archiveCrewLayer.pipe(
@@ -88,7 +91,15 @@ const fixture = Effect.gen(function* () {
       Layer.mergeAll(
         Layer.mock(ArchiveAgentService)({
           readFacts: (target) =>
-            Ref.get(facts).pipe(Effect.map((current) => current[target.participantId]!)),
+            Effect.gen(function* () {
+              if ((yield* Ref.get(unreadableSeat)) === target.participantId)
+                return yield* new ArchiveAgentOperationError({
+                  phase: "reading the target thread projection",
+                  cause: new Error("database is locked"),
+                });
+              const current = (yield* Ref.get(facts))[target.participantId];
+              return current === undefined ? yield* Effect.die("unknown seat") : current;
+            }),
           archive: (input) =>
             Effect.gen(function* () {
               // Mirrors the real service: a retired member replays as already archived.
@@ -148,7 +159,7 @@ const fixture = Effect.gen(function* () {
     }),
     ...overrides,
   });
-  return { layer, input, archived, failSeat, marked, facts };
+  return { layer, input, archived, failSeat, unreadableSeat, marked, facts };
 });
 
 it.effect("refuses until the captain confirms every member's facts, then retires the unit", () =>
@@ -336,4 +347,61 @@ it.effect("retires the unit for a person whose dialog already listed every seat'
       );
     }).pipe(Effect.provide(layer));
   }),
+);
+
+it.effect("retires the unit past a seat whose thread was never created, and says so", () =>
+  Effect.gen(function* () {
+    const { layer, input, archived, marked, facts } = yield* fixture;
+    yield* Ref.update(facts, (current) => ({ ...current, [critic]: null }));
+    yield* Effect.gen(function* () {
+      const service = yield* ArchiveCrewService;
+      const outcome = yield* service.archive(
+        input({ callerParticipantId: null, confirmationSatisfied: true }),
+      );
+      assert.deepStrictEqual(outcome, {
+        status: "archived",
+        members: [
+          { seatName: "builder", participantId: builder, result: "archived" },
+          { seatName: "critic", participantId: critic, result: "never_created" },
+        ],
+      });
+      assert.deepStrictEqual(
+        (yield* Ref.get(archived)).map((call) => call.target.participantId),
+        [builder],
+      );
+      assert.deepStrictEqual(yield* Ref.get(marked), [instance.id]);
+
+      const replay = yield* service.archive(
+        input({ callerParticipantId: null, confirmationSatisfied: true }),
+      );
+      assert.equal(replay.status, "already_archived");
+      assert.deepStrictEqual(
+        replay.members.map((member) => [member.seatName, member.result]),
+        [
+          ["builder", "already_archived"],
+          ["critic", "never_created"],
+        ],
+      );
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect(
+  "a seat whose facts cannot be read fails the unit instead of passing as never created",
+  () =>
+    Effect.gen(function* () {
+      const { layer, input, archived, marked, unreadableSeat } = yield* fixture;
+      yield* Ref.set(unreadableSeat, critic);
+      yield* Effect.gen(function* () {
+        const service = yield* ArchiveCrewService;
+        const failure = yield* service
+          .archive(input({ callerParticipantId: null, confirmationSatisfied: true }))
+          .pipe(Effect.flip);
+        assert.instanceOf(failure, ArchiveCrewPartialFailureError);
+        if (!(failure instanceof ArchiveCrewPartialFailureError)) return;
+        assert.equal(failure.failedSeat, "critic");
+        assert.lengthOf(yield* Ref.get(archived), 0);
+        assert.lengthOf(yield* Ref.get(marked), 0);
+      }).pipe(Effect.provide(layer));
+    }),
 );

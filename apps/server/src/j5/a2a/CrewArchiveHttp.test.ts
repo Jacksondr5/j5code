@@ -56,6 +56,11 @@ it("archives a crew for operators only, with the person's confirmation already s
                 participantId: ParticipantId.make("agent:j5:a2a:thread:critic"),
                 result: "already_archived" as const,
               },
+              {
+                seatName: "ghost",
+                participantId: ParticipantId.make("agent:j5:a2a:thread:ghost"),
+                result: "never_created" as const,
+              },
             ],
           })
         : Effect.fail(new ArchiveCrewNotFoundError({ crewInstanceId: input.crewInstanceId }));
@@ -95,6 +100,9 @@ it("archives a crew for operators only, with the person's confirmation already s
         ["critic", "already_archived"],
       ],
     );
+    // A never-created seat rides its own optional field, so a client that predates it still
+    // decodes every member it knows.
+    assert.deepStrictEqual((body as { neverCreatedSeats?: unknown }).neverCreatedSeats, ["ghost"]);
     // A person is not a participant and confirmed the dialog: no Captain check, no token dance.
     assert.isNull(calls[0]?.callerParticipantId);
     assert.isNull(calls[0]?.squadronId);

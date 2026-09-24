@@ -72,6 +72,7 @@ import {
 import { shellStreamItemFromThreadShell } from "./ShellStream.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import { AgentCrewInstanceService } from "../j5/a2a/AgentCrewInstanceService.ts";
+import { A2AArchiveFacts } from "../j5/a2a/ArchiveFactsService.ts";
 import { CrewStopService, layer as crewStopLayer } from "../j5/a2a/CrewStopService.ts";
 import { ParticipantId, SquadronId } from "../j5/a2a/contracts.ts";
 import { ThreadManagementService } from "./ThreadManagementService.ts";
@@ -2609,7 +2610,9 @@ it.layer(SharedApplicationDataPlaneTestLayer)("pending provider interruption", (
         Layer.provide(
           Layer.mergeAll(
             Layer.succeed(ThreadManagementService, threadManagement),
+            Layer.mock(A2AArchiveFacts)({}),
             Layer.mock(AgentCrewInstanceService)({
+              serialize: (_id, effect) => effect,
               read: () =>
                 Effect.succeed({
                   id: "crew:stop",

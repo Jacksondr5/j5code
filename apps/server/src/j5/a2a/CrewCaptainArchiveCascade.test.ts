@@ -8,9 +8,15 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 
+import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
-import { ArchiveCrewService, type ArchiveCrewInput } from "./ArchiveCrewService.ts";
+import { ArchiveAgentService } from "./ArchiveAgentService.ts";
+import {
+  ArchiveCrewService,
+  layer as archiveCrewLayer,
+  type ArchiveCrewInput,
+} from "./ArchiveCrewService.ts";
 import { CrewCaptainArchiveCascade, layer as cascadeLayer } from "./CrewCaptainArchiveCascade.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
@@ -195,5 +201,76 @@ it.effect("retries a transient event cascade in-session with the same commands",
       assert.lengthOf(calls, 2);
       assert.deepStrictEqual(calls[0]!.commandIds("builder"), calls[1]!.commandIds("builder"));
     }).pipe(Effect.provide(testLayer));
+  }),
+);
+
+it.effect("a Captain's delete retires its Crew past a seat whose thread was never created", () =>
+  Effect.gen(function* () {
+    const ghostThread = ThreadId.make("thread:ghost");
+    const live = crew("crew:partial", null);
+    const partial: AgentCrewInstance = {
+      ...live,
+      members: [
+        ...live.members,
+        {
+          seatName: "critic",
+          agentId: "critic",
+          participantId: participantIdForThread(ghostThread),
+          threadId: ghostThread,
+          addedVersion: 1,
+          reason: null,
+        },
+      ],
+    };
+    const archivedAt = yield* Ref.make<string | null>(null);
+    const archivedSeats = yield* Ref.make<ReadonlyArray<ThreadId>>([]);
+    const crews = Layer.mock(AgentCrewInstanceService)({
+      serialize: (_id, effect) => effect,
+      listInvolving: (input) =>
+        Ref.get(archivedAt).pipe(
+          Effect.map((at) =>
+            input.threadIds.includes(captainThread) ? [{ ...partial, archivedAt: at }] : [],
+          ),
+        ),
+      read: () => Ref.get(archivedAt).pipe(Effect.map((at) => ({ ...partial, archivedAt: at }))),
+      markArchived: (_id, at) => Ref.set(archivedAt, at),
+    });
+    // The real unit archive, over seat facts where the critic's thread never came to exist.
+    const archive = archiveCrewLayer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          crews,
+          Layer.mock(ArchiveAgentService)({
+            readFacts: (target) =>
+              Effect.succeed(
+                target.threadId === ghostThread
+                  ? null
+                  : {
+                      facts: { openExchanges: [], runningTurn: null },
+                      threadArchived: false,
+                      retired: false,
+                    },
+              ),
+            archive: (input) =>
+              Ref.update(archivedSeats, (items) => [...items, input.target.threadId]).pipe(
+                Effect.as("archived" as const),
+              ),
+          }),
+          Layer.mock(ServerSecretStore)({
+            getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(3)),
+          }),
+        ),
+      ),
+    );
+    const layer = cascadeLayer.pipe(Layer.provide(Layer.mergeAll(crews, archive, noThreads)));
+    yield* Effect.gen(function* () {
+      const cascade = yield* CrewCaptainArchiveCascade;
+      assert.deepStrictEqual(
+        yield* cascade.handleStoredEvent(archivedEvent(captainThread, "thread.deleted")),
+        ["crew:partial"],
+      );
+      assert.deepStrictEqual(yield* Ref.get(archivedSeats), [seatThread]);
+      assert.isNotNull(yield* Ref.get(archivedAt));
+    }).pipe(Effect.provide(layer));
   }),
 );

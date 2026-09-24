@@ -41,7 +41,7 @@ import {
   layer as crewInstanceLayer,
   type AgentCrewInstance,
 } from "./AgentCrewInstanceService.ts";
-import { ArchiveAgentOperationError, ArchiveAgentService } from "./ArchiveAgentService.ts";
+import { ArchiveAgentService } from "./ArchiveAgentService.ts";
 import { ArchiveCrewService, layer as archiveCrewLayer } from "./ArchiveCrewService.ts";
 import { describeCrewSeatRuntime } from "./crewRuntimePreview.ts";
 import { CrewLaunchService, layer as crewLaunchLayer } from "./CrewLaunchService.ts";
@@ -142,7 +142,9 @@ const dependencies = (
   realThreads = false,
   failBriefOnce: Set<string> = new Set(),
   /** Runs before each command lands, so a test can hold a spawn open. */
-  beforeDispatch: (command: OrchestrationV2Command) => Effect.Effect<void> = () => Effect.void,
+  beforeDispatch: (
+    command: OrchestrationV2Command,
+  ) => Effect.Effect<void, OrchestratorDispatchError> = () => Effect.void,
 ) =>
   Layer.mergeAll(
     Layer.mock(ThreadManagementService)({
@@ -1278,7 +1280,7 @@ it.effect("a retry that drops the failed seat keeps the briefs the other seats a
  * archive can be interleaved step by step. Every unit step announces its Crew on `entered` as it
  * asks for the Crew's lock; a member archive can be held open with `holdArchive`, a spawn with
  * `beforeDispatch`. Seat facts come from the commands that landed: a seat with no thread.create
- * fails its read, as the real archive does for a thread that does not exist.
+ * reads as never created, as the real archive reads a thread with neither home nor projection.
  */
 const unitFixture = Effect.gen(function* () {
   const { context, commands, captain } = yield* fixture;
@@ -1290,9 +1292,9 @@ const unitFixture = Effect.gen(function* () {
   const archivedSeats = yield* Ref.make<ReadonlyArray<ThreadId>>([]);
   const factsRead = yield* Ref.make<ReadonlyArray<ThreadId>>([]);
   const holdArchive = yield* Ref.make<Effect.Effect<void>>(Effect.void);
-  const holdDispatch = yield* Ref.make<(command: OrchestrationV2Command) => Effect.Effect<void>>(
-    () => Effect.void,
-  );
+  const holdDispatch = yield* Ref.make<
+    (command: OrchestrationV2Command) => Effect.Effect<void, OrchestratorDispatchError>
+  >(() => Effect.void);
   const real = Context.get(context, AgentCrewInstanceService);
   const crews = Layer.succeed(AgentCrewInstanceService, {
     ...real,
@@ -1309,11 +1311,7 @@ const unitFixture = Effect.gen(function* () {
     readFacts: (target) =>
       Effect.gen(function* () {
         yield* Ref.update(factsRead, (items) => [...items, target.threadId]);
-        if (!(yield* created(target.threadId)))
-          return yield* new ArchiveAgentOperationError({
-            phase: "reading the target thread projection",
-            cause: new Error(`thread ${target.threadId} does not exist`),
-          });
+        if (!(yield* created(target.threadId))) return null;
         const archived = (yield* Ref.get(archivedSeats)).includes(target.threadId);
         return {
           facts: { openExchanges: [], runningTurn: null },
@@ -1516,6 +1514,54 @@ it.effect(
         );
         assert.include(yield* Ref.get(unit.archivedSeats), sentry);
         assert.isNotNull((yield* crews.read(instance.id))!.archivedAt);
+      }).pipe(Effect.provide(unit.layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a unit archive finishes over an addition that reserved its seat but never spawned it",
+  () =>
+    Effect.gen(function* () {
+      const unit = yield* unitFixture;
+      yield* Effect.gen(function* () {
+        const archive = yield* ArchiveCrewService;
+        const crews = yield* AgentCrewInstanceService;
+        const instance = yield* unit.launchPair;
+        const sentry = unit.seatThread("add-sentry", "sentry");
+        yield* Ref.set(unit.holdDispatch, (command) =>
+          command.type === "thread.create" && command.threadId === sentry
+            ? Effect.fail(
+                new OrchestratorDispatchError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                }),
+              )
+            : Effect.void,
+        );
+        const failed = yield* unit.addSentry(instance).pipe(Effect.flip);
+        assert.equal(failed._tag, "CrewLaunchOperationError");
+        assert.deepStrictEqual(
+          (yield* crews.read(instance.id))!.members.map((member) => member.seatName),
+          ["builder", "sentry"],
+        );
+
+        const archived = yield* archive.archive(unit.archiveInput(instance.id));
+        assert.equal(archived.status, "archived");
+        assert.deepStrictEqual(
+          archived.members.map((member) => [member.seatName, member.result]),
+          [
+            ["builder", "archived"],
+            ["sentry", "never_created"],
+          ],
+        );
+        assert.notInclude(yield* Ref.get(unit.archivedSeats), sentry);
+        const retired = (yield* crews.read(instance.id))!;
+        assert.isNotNull(retired.archivedAt);
+        // The reserved row stays on the retired roster; the result says it never ran.
+        assert.deepStrictEqual(
+          retired.members.map((member) => member.seatName),
+          ["builder", "sentry"],
+        );
       }).pipe(Effect.provide(unit.layer));
     }).pipe(Effect.scoped),
 );

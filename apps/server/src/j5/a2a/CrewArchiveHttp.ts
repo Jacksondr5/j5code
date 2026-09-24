@@ -72,11 +72,20 @@ export const makeCrewArchiveHttpRouteLayer = (path: HttpRouter.PathInput) =>
                   encodeArchive({
                     crewInstanceId,
                     status: result.status,
-                    members: result.members.map((member) => ({
-                      seat: member.seatName,
-                      participantId: member.participantId,
-                      result: member.result,
-                    })),
+                    members: result.members.flatMap((member) =>
+                      member.result === "never_created"
+                        ? []
+                        : [
+                            {
+                              seat: member.seatName,
+                              participantId: member.participantId,
+                              result: member.result,
+                            },
+                          ],
+                    ),
+                    neverCreatedSeats: result.members
+                      .filter((member) => member.result === "never_created")
+                      .map((member) => member.seatName),
                   }),
                 ),
               ),
