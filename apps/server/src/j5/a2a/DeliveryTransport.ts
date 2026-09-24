@@ -4,6 +4,7 @@ import {
   MessageId,
   type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
+  ThreadId,
 } from "@t3tools/contracts";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import * as Context from "effect/Context";
@@ -229,16 +230,16 @@ export const live: Layer.Layer<
       }
     });
     const sql = yield* SqlClient.SqlClient;
+    // An agent sender is homed in the delivery's origin Squadron, so its thread
+    // is one primary-key read on the (agent-only) membership projection.
     const agentThreadId = Effect.fn("j5.a2a.delivery.agentThreadId")(function* (
+      squadronId: SquadronId,
       participantId: ParticipantId,
     ) {
-      const rows =
-        yield* sql<MembershipRow>`SELECT json_extract(payload, '$.participant') AS payload
-          FROM j5_a2a_comm_event WHERE kind = 'participant.joined'
-            AND json_extract(payload, '$.participant.id') = ${participantId} LIMIT 1`;
-      if (rows[0] === undefined) return undefined;
-      const participant = yield* decodeParticipant(rows[0].payload);
-      return participant.kind === "agent" ? participant.threadId : undefined;
+      const rows = yield* sql<{ readonly thread_id: string }>`SELECT thread_id
+        FROM j5_a2a_squadron_membership
+        WHERE squadron_id = ${squadronId} AND participant_id = ${participantId}`;
+      return rows[0] === undefined ? undefined : ThreadId.make(rows[0].thread_id);
     });
 
     return A2ADeliveryTransport.of({
@@ -349,7 +350,7 @@ export const live: Layer.Layer<
             input.envelopeChannel === "peer" &&
             !isHumanParticipantId(input.senderId) &&
             !isMachineParticipantId(input.senderId)
-              ? yield* agentThreadId(input.senderId)
+              ? yield* agentThreadId(input.originSquadronId, input.senderId)
               : undefined;
           const sendInput = {
             projectId: target.thread.projectId,

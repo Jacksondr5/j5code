@@ -770,7 +770,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           "checkpointScopes",
           "contextTransfers",
         ],
-        { turnItemTypes: ["user_message", "error"], messageRoles: ["user"] },
+        {
+          // J5 (committed Stop wins): message admission reads Stop items here.
+          turnItemTypes: ["user_message", "error", "run_interrupt_request"],
+          messageRoles: ["user"],
+        },
       )
       .pipe(
         Effect.map((records): OrchestrationV2ThreadProjection => ({
@@ -4007,6 +4011,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   ) =>
     Effect.gen(function* () {
       let projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+      // Stop wins under the same thread lock as message admission, including
+      // providers that acknowledge the interrupt by completing normally.
+      const hasCommittedStop = (runId: RunId) =>
+        projection.turnItems.some(
+          (item) => item.runId === runId && item.type === "run_interrupt_request",
+        );
       if (command.usageLimitContinuationOfRunId !== undefined) {
         const run = projection.runs.at(-1) ?? null;
         const failure = latestRootProviderFailure(run, projection.turnItems);
@@ -4014,6 +4024,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const now = yield* DateTime.now;
         if (
           run?.id !== command.usageLimitContinuationOfRunId ||
+          // J5: a Stop that landed before the usage-limit failure also cancels
+          // the automatic continuation of that run.
+          hasCommittedStop(run.id) ||
           failure?.class !== "usage_limit" ||
           threadShellFromProjection(projection).lastErrorClass !== "usage_limit" ||
           !recovery?.autoResume ||
@@ -4051,14 +4064,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
       }
 
-      // Stop wins under the same thread lock as message admission, including
-      // providers that acknowledge the interrupt by completing normally. The
-      // command projection omits interrupt items, so read them for the run.
-      const hasCommittedStop = (runId: RunId) =>
-        loadProjectionForCommand(command, ["turnItems"], {
-          turnItemTypes: ["run_interrupt_request"],
-          turnItemRunId: runId,
-        }).pipe(Effect.map(({ turnItems }) => turnItems.length > 0));
       const reusedMessage = projection.messages.find((message) => message.id === command.messageId);
       const reusedRun = projection.runs.find((run) => run.id === reusedMessage?.runId);
       if (
@@ -4066,7 +4071,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         reusedMessage !== undefined &&
         reusedRun !== undefined &&
         reusedRun.userMessageId !== reusedMessage.id &&
-        (yield* hasCommittedStop(reusedRun.id))
+        hasCommittedStop(reusedRun.id)
       ) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
@@ -4189,7 +4194,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       );
       if (dispatchMode.type === "steer_active") {
         const targetRunId = dispatchMode.targetRunId;
-        if (yield* hasCommittedStop(targetRunId)) {
+        if (hasCommittedStop(targetRunId)) {
           return yield* new OrchestratorDispatchError({
             commandId: command.commandId,
             commandType: command.type,

@@ -24,6 +24,7 @@ import {
   A2ADeliveryHookError,
   A2ADeliveryHooks,
   A2ADeliveryWorker,
+  heldQueueRecheckMs,
   layerWithHooks as deliveryWorkerLayerWithHooks,
 } from "./DeliveryWorker.ts";
 import {
@@ -555,8 +556,9 @@ it.effect("keeps a message queued behind a held receiver queue undelivered until
         const milestone = yield* worker.runOnce;
         assert.equal(milestone?.state, "retry_scheduled");
         assert.equal(milestone?.attempt, attempt);
+        yield* TestClock.adjust(heldQueueRecheckMs(attempt) - 1);
         assert.isNull(yield* worker.runOnce, "a held delivery is not retried in a tight loop");
-        yield* TestClock.adjust("60 seconds");
+        yield* TestClock.adjust(1);
       }
       assert.equal((yield* deliveredEvents)[0]?.count, 0);
       assert.lengthOf(yield* worker.listAlarms, 0);

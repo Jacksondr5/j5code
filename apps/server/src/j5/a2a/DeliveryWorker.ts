@@ -122,8 +122,13 @@ const errorText = (cause: Cause.Cause<A2ADeliveryAttemptError>) =>
 const workerError = (operation: string) => (cause: unknown) =>
   new A2ADeliveryWorkerError({ operation, cause });
 
-/** A held receiver queue waits for a person; recheck it slowly and never alarm on it. */
-export const HELD_QUEUE_RECHECK_MS = 60_000;
+/**
+ * A held receiver queue waits for a person; recheck it slowly and never alarm on it.
+ * Each recheck appends a ledger event, so the interval doubles from one minute to a
+ * fifteen-minute cap: a long hold costs about four events an hour, not sixty.
+ */
+export const heldQueueRecheckMs = (attempt: number) =>
+  Math.min(60_000 * 2 ** Math.max(0, attempt - 1), 15 * 60_000);
 
 const heldError = (cause: Cause.Cause<A2ADeliveryAttemptError>) => {
   const error = Cause.findErrorOption(cause);
@@ -322,7 +327,7 @@ const makeLayer = (daemon: boolean) =>
           ? null
           : DateTime.formatIso(
               DateTime.add(failedAtDate, {
-                milliseconds: held !== undefined ? HELD_QUEUE_RECHECK_MS : backoffMs(attempt),
+                milliseconds: held !== undefined ? heldQueueRecheckMs(attempt) : backoffMs(attempt),
               }),
             );
         const messageId = LedgerMessageId.make(row.message_id);
