@@ -8,7 +8,7 @@ export const isMissing = (error: unknown) =>
 
 export async function skillLinkIdentity(path: string) {
   const stat = await NodeFSP.lstat(path);
-  return `${stat.dev}:${stat.ino}:${stat.birthtimeMs}:${stat.ctimeMs}`;
+  return `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`;
 }
 
 export async function linkDestination(linkPath: string) {

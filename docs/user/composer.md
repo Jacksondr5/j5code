@@ -162,6 +162,17 @@ shared by several environments on one machine. Existing files and links owned
 elsewhere are preserved. Remove owned links before deleting the environment's
 state or its catalog folder.
 
+Use **Use in…** on a standalone skill to link its whole folder to another Codex or
+Claude instance in the same environment. Choose user scope or an existing project,
+then review the destination and compatibility warnings. Catalog installation stays
+user-scoped; project scope is available only for individual links. Project links
+use absolute paths: heed the Git warning and exclude the destination before
+committing. The link does not copy files or install a plugin's other components.
+
+**Managed links** lists links created by this environment. Unlink leaves the
+source untouched. If the destination was changed elsewhere, **Forget record**
+removes only its ownership record and leaves all files in place.
+
 ## Images and videos in messages
 
 Select an image or video attachment or link to preview it. Playback support depends

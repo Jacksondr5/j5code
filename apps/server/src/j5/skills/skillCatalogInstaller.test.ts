@@ -2,6 +2,7 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import { ProviderInstanceId } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { stringify } from "yaml";
@@ -22,6 +23,7 @@ import {
   type Catalog,
 } from "./skillCatalogInstaller.ts";
 import { canonicalSkillRoot } from "./skillFileSystem.ts";
+import { createManagedSkillLink, listManagedSkillLinks, previewSkillLink } from "./skillLinks.ts";
 
 vi.mock("node:fs/promises", async (original) => ({ ...(await original<typeof NodeFSP>()) }));
 const windows = HostProcessPlatform.defaultValue() === "win32";
@@ -297,6 +299,24 @@ describe("link ownership", () => {
     expect((await loadState(stateDir)).links.map((link) => link.path)).not.toContain(foreign);
     expect(await apply([])).toMatchObject({ removed: 1 });
     expect(await NodeFSP.realpath(foreign)).toBe(await NodeFSP.realpath(skill));
+  });
+
+  it("leaves managed links owned by the linker untouched", async () => {
+    const skill = NodePath.join(catalogDir, "skills", "explain");
+    const stateDir = NodePath.join(root, "link-state");
+    const preview = {
+      ...(await previewSkillLink(skill, dirs()[0]!, "claudeAgent")),
+      sharedWith: [],
+    };
+    const request = {
+      source: { instanceId: ProviderInstanceId.make("claude"), path: skill, name: "explain" },
+      targetInstanceId: ProviderInstanceId.make("codex"),
+      scope: "user" as const,
+    };
+    await createManagedSkillLink(stateDir, preview, request, windows);
+    await apply(["core"]);
+    await apply([]);
+    expect((await listManagedSkillLinks(stateDir))[0]?.status).toBe("linked");
   });
 
   it("counts a shared physical skills root once and migrates equivalent saved paths", async () => {

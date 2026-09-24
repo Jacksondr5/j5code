@@ -35,6 +35,7 @@ export * from "./orchestrationV2.ts";
 export * from "./j5/agentPersona.ts";
 export * from "./j5/artifacts.ts";
 export * from "./j5/skillCatalog.ts";
+export * from "./j5/skillLinks.ts";
 export * from "./applicationEvent.ts";
 export * from "./orchestratorMcp.ts";
 export * from "./threadMetadataMcp.ts";

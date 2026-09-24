@@ -165,6 +165,8 @@ import {
 } from "./j5/a2a/crewSeatArchiveGuard.ts";
 import { makeAgentPersonaRpcHandlers } from "./j5/agents/agentPersonaRpc.ts";
 import { makeArtifactRpcHandlers } from "./j5/artifacts/artifactRpc.ts";
+import { SkillLinkError } from "@t3tools/contracts";
+import { makeSkillLinkRpcHandlers } from "./j5/skills/skillLinkRpc.ts";
 import { makeSkillCatalogRpcHandlers } from "./j5/skills/skillCatalogRpc.ts";
 import {
   refreshSkillProviders,
@@ -1710,6 +1712,16 @@ const makeWsRpcLayer = (
       const skillCatalogRpcHandlers = yield* makeSkillCatalogRpcHandlers({
         observe: observeRpcEffect,
       });
+      const skillLinkRpcHandlers = yield* makeSkillLinkRpcHandlers({
+        observe: observeRpcEffect,
+        getProjectRoot: (projectId) =>
+          projectionSnapshotQuery.getProjectShellById(projectId).pipe(
+            Effect.map((project) =>
+              Option.isSome(project) ? project.value.workspaceRoot : undefined,
+            ),
+            Effect.mapError((cause) => new SkillLinkError({ message: String(cause) })),
+          ),
+      });
       const handlers = ServerWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
@@ -1759,6 +1771,7 @@ const makeWsRpcLayer = (
           ),
         ...agentPersonaRpcHandlers,
         ...skillCatalogRpcHandlers,
+        ...skillLinkRpcHandlers,
         [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.getWorkflowScript,

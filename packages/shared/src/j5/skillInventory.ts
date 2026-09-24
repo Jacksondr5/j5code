@@ -93,3 +93,16 @@ export function skillDiscoveryState(
     return "not-checked";
   return "checked";
 }
+
+export function skillLinkUnavailableReason(origin: SkillOrigin): string | undefined {
+  switch (origin) {
+    case "Plugin":
+      return "Install the whole plugin separately; its skills may depend on hooks, MCP servers, or provider behavior.";
+    case "Built-in":
+      return "Built-in and administrator-managed skills cannot be linked.";
+    case "Other":
+      return "The source is unclassified. Only standalone Personal, Project, and Catalog skills can be linked.";
+    default:
+      return undefined;
+  }
+}

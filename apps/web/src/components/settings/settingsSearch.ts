@@ -439,7 +439,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Skills",
     to: "/settings/skills",
     searchTerms: [
-      "catalog groups install update source git local skills management inventory discovery installed",
+      "catalog groups install update source git local skills management inventory discovery installed link unlink use in shared destination",
     ],
   },
   {
