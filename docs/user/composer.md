@@ -121,44 +121,6 @@ composer when it is empty, and is discarded otherwise.
 
 ## Commands and skills
 
-To manage shared skill groups, open **Settings → Skills** and pick the
-environment whose machine should install them. Set the catalog source once per
-environment, then choose **Save source**: a Git URL is cloned into that
-environment's state directory on first use, while an absolute path uses a
-checkout already on that machine. Installed skills are links into that folder,
-so it must stay in place. The selection and link ownership are remembered per
-machine user, not per J5 instance, so pointing another J5 instance at the same
-catalog and applying again re-points every link.
-Deleting an instance's state without doing that leaves broken links. Check the boxes for the groups you want and choose **Apply selected
-groups**; the page reports installed, removed, and unchanged link counts plus
-any conflicts or failures. Applying with no groups checked removes only links
-owned by the catalog. Matching links created elsewhere remain yours to manage. **Update catalog** pulls a Git-backed catalog without
-changing your selection, then choose **Apply selected groups** afterward to
-reconcile links with the updated checkout. After changing the source, Apply
-and Update stay unavailable until the new source's status has loaded.
-
-The catalog uses `catalog.yaml` and `skills/<name>/SKILL.md` in its folder.
-Applying resolves group dependencies and installs links into the environment
-user's skill directories with no agent approvals. Existing project skills and
-provider disable settings remain in effect. Apply again to change the selection
-or remove installed groups. Keep the catalog folder in place while its skills
-are installed. Chat skill lists refresh
-automatically after Apply and Update. Start a new session if a running provider
-retains its previous skills.
-
-The catalog lists groups, their skills, and optional dependencies:
-
-```yaml
-groups:
-  core:
-    description: General guidance
-    skills: [explain]
-  review:
-    description: Code review
-    skills: [review]
-    depends: [core]
-```
-
 Type `/` for commands or `$` to add a skill from the selected environment and
 provider. On mobile, both are also available before starting a thread on
 **New task**.
@@ -171,6 +133,26 @@ Provider commands must start the message to run. T3 Code commands such as
 
 Send `/compact` in an existing conversation to reduce context usage when the
 provider supports it. Web and desktop also offer compaction from the context meter.
+
+## Manage skills
+
+On web and desktop, open **Settings → Skills** and select the environment
+that should install the skills. Catalog installation supports enabled Codex and
+Claude instances and their configured homes. Mobile can use installed skills in
+chat but does not have this settings page.
+
+Choose a trusted Git repository or an absolute catalog folder on that environment.
+No source is configured by default. A catalog contains `catalog.yaml` with named
+groups and `skills/<name>/SKILL.md`. Apply your group selection to install it;
+apply an empty selection to remove the catalog links. Update pulls the configured
+Git source, then Apply reconciles any changed groups. Running provider sessions
+may need restarting to discover changes.
+
+Installed skills are links, so keep the catalog folder in place. Ownership belongs
+to the environment that created each link, while provider skill folders can be
+shared by several environments on one machine. Existing files and links owned
+elsewhere are preserved. Remove owned links before deleting the environment's
+state or its catalog folder.
 
 ## Images and videos in messages
 

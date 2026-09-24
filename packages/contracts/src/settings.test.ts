@@ -817,10 +817,8 @@ it("validates remote device hosts and rejects ambiguous host ids", () => {
 });
 
 describe("ServerSettings skill catalog source", () => {
-  it("defaults to the shared agent-skills repository", () => {
-    expect(decodeServerSettings({}).skillCatalogSource).toBe(
-      "https://github.com/First-horizon/agent-skills.git",
-    );
+  it("defaults to an unconfigured catalog", () => {
+    expect(decodeServerSettings({}).skillCatalogSource).toBe("");
   });
 
   it("round-trips a custom source and trims patches", () => {
@@ -830,10 +828,10 @@ describe("ServerSettings skill catalog source", () => {
     expect(patch.skillCatalogSource).toBe("/opt/skills");
   });
 
-  it("rejects blank sources at the settings and patch boundaries", () => {
+  it("allows clearing the source at the settings and patch boundaries", () => {
     for (const skillCatalogSource of ["", "   "]) {
-      expect(() => decodeServerSettings({ skillCatalogSource })).toThrow();
-      expect(() => decodeServerSettingsPatch({ skillCatalogSource })).toThrow();
+      expect(decodeServerSettings({ skillCatalogSource }).skillCatalogSource).toBe("");
+      expect(decodeServerSettingsPatch({ skillCatalogSource }).skillCatalogSource).toBe("");
     }
   });
 });

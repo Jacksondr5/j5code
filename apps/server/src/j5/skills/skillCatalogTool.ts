@@ -20,14 +20,13 @@ import {
   loadState,
   runApply,
   skillDescription,
-  targetDirs,
 } from "./skillCatalogInstaller.ts";
 import { readSkillsConcurrently } from "./skillFileSystem.ts";
 
 /** J5 owns catalog validation, installation, state, and Git updates; catalogs are content only. */
 
 // Serialize complete operations across connections in this process.
-// ponytail: shared permit; use a filesystem lock if cross-process coordination is needed.
+// ponytail: process-local permit; use a filesystem lock if cross-process coordination is needed.
 export const skillCatalogPermit = Semaphore.makeUnsafe(1);
 
 const TOOL_TIMEOUT = "5 minutes" as const;
@@ -35,7 +34,7 @@ const MAX_DIAGNOSTIC_CHARS = 2000;
 
 export interface SkillCatalogToolDeps {
   readonly stateDir: string;
-  readonly homeDir: string;
+  readonly targets: ReadonlyArray<string>;
   readonly fs: FileSystem.FileSystem;
   readonly path: Path.Path;
   readonly processRunner: ProcessRunner["Service"];
@@ -46,7 +45,8 @@ type ResolvedSource =
   | { readonly kind: "managed"; readonly catalogDir: string; readonly recordDir: string };
 
 const isGitUrl = (source: string): boolean =>
-  /^(https?|ssh|git):\/\//.test(source) || /^[^@\s]+@[^:\s]+:[^ ]+$/.test(source);
+  !source.startsWith("-") &&
+  (/^(https?|ssh|git):\/\//.test(source) || /^[^@\s]+@[^:\s]+:[^ ]+$/.test(source));
 
 const boundDiagnostic = (value: string): string => {
   const trimmed = value.trim();
@@ -68,7 +68,7 @@ const installerEffect = <A>(run: () => Promise<A>) =>
   });
 
 export const createSkillCatalogTool = (deps: SkillCatalogToolDeps) => {
-  const { stateDir, homeDir, fs, path, processRunner } = deps;
+  const { stateDir, targets, fs, path, processRunner } = deps;
 
   const resolveSource = Effect.fn("j5.skillCatalog.resolveSource")(function* (
     source: string,
@@ -113,7 +113,13 @@ export const createSkillCatalogTool = (deps: SkillCatalogToolDeps) => {
     SkillCatalogError
   > {
     const output = yield* processRunner
-      .run({ command, args: [...args], cwd, timeout: TOOL_TIMEOUT })
+      .run({
+        command,
+        args: [...args],
+        cwd,
+        timeout: TOOL_TIMEOUT,
+        env: { GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" },
+      })
       .pipe(
         Effect.mapError(
           (cause) =>
@@ -138,7 +144,7 @@ export const createSkillCatalogTool = (deps: SkillCatalogToolDeps) => {
       ),
     );
     yield* Effect.flatMap(
-      runCommand("Skill catalog clone", "git", ["clone", source, staging], recordDir),
+      runCommand("Skill catalog clone", "git", ["clone", "--", source, staging], recordDir),
       (result) =>
         result.code === 0
           ? Effect.succeed(result)
@@ -189,7 +195,7 @@ export const createSkillCatalogTool = (deps: SkillCatalogToolDeps) => {
   });
 
   const readState = () =>
-    installerEffect(() => loadState(homeDir)).pipe(
+    installerEffect(() => loadState(stateDir)).pipe(
       Effect.mapError(
         (cause) => new SkillCatalogError({ message: `Cannot read state: ${cause.message}` }),
       ),
@@ -286,7 +292,7 @@ export const createSkillCatalogTool = (deps: SkillCatalogToolDeps) => {
       catalogDir,
       groups,
       selectedGroups: state.groups,
-      targets: targetDirs(homeDir, process.env, catalogDir),
+      targets,
       git,
       warnings,
     };
@@ -309,7 +315,8 @@ export const createSkillCatalogTool = (deps: SkillCatalogToolDeps) => {
       runApply({
         catalog,
         catalogDir,
-        homeDir,
+        stateDir,
+        targets,
         state,
         selected: input.groups,
         windows: platform === "win32",

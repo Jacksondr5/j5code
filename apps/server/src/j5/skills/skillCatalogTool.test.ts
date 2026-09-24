@@ -64,10 +64,12 @@ const fixture = Effect.gen(function* () {
       run: (input) =>
         Effect.gen(function* () {
           assert.equal(input.command, "git");
+          assert.equal(input.env?.GIT_TERMINAL_PROMPT, "0");
           calls.push(input);
           if (handler) return yield* handler(input);
           if (input.args[0] === "clone") {
-            yield* writeCatalog(input.args[2]!).pipe(Effect.orDie);
+            assert.equal(input.args[1], "--");
+            yield* writeCatalog(input.args[3]!).pipe(Effect.orDie);
             return output();
           }
           return output(
@@ -78,7 +80,13 @@ const fixture = Effect.gen(function* () {
         }),
     });
   const tool = (processRunner = runner()) =>
-    createSkillCatalogTool({ stateDir, homeDir, fs, path, processRunner });
+    createSkillCatalogTool({
+      stateDir,
+      targets: [path.join(homeDir, ".agents", "skills"), path.join(homeDir, ".claude", "skills")],
+      fs,
+      path,
+      processRunner,
+    });
   return { fs, path, root, catalogDir, homeDir, stateDir, calls, writeCatalog, runner, tool };
 });
 
@@ -148,7 +156,7 @@ describe("skill catalog tool", () => {
   test("overlaps Git status and upstream reads but suppresses upstream warnings after status failure", (f) =>
     Effect.gen(function* () {
       yield* Effect.promise(() =>
-        Installer.saveState(f.homeDir, { folder: f.catalogDir, groups: ["missing"], links: [] }),
+        Installer.saveState(f.stateDir, { folder: f.catalogDir, groups: ["missing"], links: [] }),
       );
       for (const failStatus of [false, true]) {
         const upstreamStarted = yield* Deferred.make<void>();
@@ -207,7 +215,7 @@ describe("skill catalog tool", () => {
         f.runner((input) =>
           Effect.gen(function* () {
             if (input.args[0] !== "clone") return output("", 128, "not a git repository");
-            yield* f.writeCatalog(input.args[2]!).pipe(Effect.orDie);
+            yield* f.writeCatalog(input.args[3]!).pipe(Effect.orDie);
             return ++attempts === 1 ? output("", 128, "clone failed") : output();
           }),
         ),
@@ -253,7 +261,14 @@ describe("skill catalog tool", () => {
   test("rejects blank/relative sources and missing catalogs", (f) =>
     Effect.gen(function* () {
       const tool = f.tool();
-      for (const source of ["", "  ", "relative/path", "owner/repo"]) {
+      for (const source of [
+        "",
+        "  ",
+        "relative/path",
+        "owner/repo",
+        "--upload-pack=x@h:p",
+        "--config=core.sshCommand=x@h:p",
+      ]) {
         const failure = yield* Effect.flip(tool.status({ source }));
         assert.equal(failure._tag, "SkillCatalogError");
       }
@@ -268,7 +283,7 @@ describe("skill catalog tool", () => {
   test("reports metadata, saved-group warnings, and a genuine non-repository", (f) =>
     Effect.gen(function* () {
       yield* Effect.promise(() =>
-        Installer.saveState(f.homeDir, { folder: f.catalogDir, groups: ["gone"], links: [] }),
+        Installer.saveState(f.stateDir, { folder: f.catalogDir, groups: ["gone"], links: [] }),
       );
       const result = yield* f.tool().status({ source: f.catalogDir });
       assert.deepEqual(result.groups, [
@@ -349,7 +364,7 @@ describe("skill catalog tool", () => {
     Effect.gen(function* () {
       const tool = f.tool();
       yield* tool.apply({ source: f.catalogDir, groups: ["core"] });
-      const stateFile = Installer.stateFilePath(f.homeDir);
+      const stateFile = Installer.stateFilePath(f.stateDir);
       yield* f.fs.writeFileString(stateFile, "{broken");
       const failure = yield* Effect.flip(tool.apply({ source: f.catalogDir, groups: [] }));
       assert.match(failure.message, /Cannot read state:/);

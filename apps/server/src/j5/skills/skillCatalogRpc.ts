@@ -1,9 +1,8 @@
-import * as NodeOS from "node:os";
-
 import {
   AuthOrchestrationOperateScope,
   J5_SKILL_CATALOG_WS_METHODS,
   SkillCatalogError,
+  resolveProviderInstanceEnabled,
   type J5SkillCatalogRpcSchemas,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -16,6 +15,10 @@ import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import type { ObserveRpcEffect } from "../agents/agentPersonaRpc.ts";
 import { createSkillCatalogTool } from "./skillCatalogTool.ts";
+import { deriveProviderInstanceConfigMap } from "../../provider/Layers/ProviderInstanceRegistryHydration.ts";
+import { affectedSkillProviderIds, resolveSkillRoot } from "./skillRoots.ts";
+import { canonicalSkillRoot } from "./skillFileSystem.ts";
+import { refreshSkillProviders } from "./skillProviderRefresh.ts";
 
 const METHODS = J5_SKILL_CATALOG_WS_METHODS;
 
@@ -33,7 +36,7 @@ const TRACE = { "rpc.aggregate": "j5SkillCatalog" } as const;
 
 /** Handlers for `J5SkillCatalogRpcGroup`; spread once into the upstream handler object. */
 export const makeSkillCatalogRpcHandlers = Effect.fn("j5.makeSkillCatalogRpcHandlers")(
-  function* (deps: { readonly observe: ObserveRpcEffect; readonly homeDir?: string }) {
+  function* (deps: { readonly observe: ObserveRpcEffect }) {
     const config = yield* ServerConfig;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
     const providers = yield* ProviderRegistry;
@@ -44,24 +47,48 @@ export const makeSkillCatalogRpcHandlers = Effect.fn("j5.makeSkillCatalogRpcHand
     const processRunner = yield* ProcessRunner.ProcessRunner.pipe(
       Effect.provide(ProcessRunner.layer),
     );
-    const tool = createSkillCatalogTool({
-      stateDir: config.stateDir,
-      homeDir: deps.homeDir ?? NodeOS.homedir(),
-      fs,
-      path,
-      processRunner,
-    });
     const { observe } = deps;
-    const refreshSkills = providers.getProviders.pipe(
-      Effect.flatMap((snapshots) =>
-        Effect.forEach(
-          snapshots.filter((provider) => provider.enabled),
-          (provider) => providers.refreshInstance(provider.instanceId),
-          { concurrency: 2, discard: true },
-        ),
-      ),
-      Effect.ignoreCause({ log: true }),
-    );
+    const catalogContext = Effect.fn("j5.skills.catalogContext")(function* () {
+      const settings = yield* serverSettings.getSettings.pipe(
+        Effect.mapError((cause) => new SkillCatalogError({ message: String(cause) })),
+      );
+      const configurations = deriveProviderInstanceConfigMap(settings);
+      const instances = Object.entries(configurations).filter(
+        ([, instance]) =>
+          resolveProviderInstanceEnabled(instance) &&
+          (instance.driver === "codex" || instance.driver === "claudeAgent"),
+      );
+      const roots = yield* Effect.forEach(
+        instances,
+        ([, instance]) =>
+          resolveSkillRoot(instance, "user").pipe(
+            Effect.provideService(Path.Path, path),
+            Effect.flatMap((root) =>
+              Effect.tryPromise({
+                try: () => canonicalSkillRoot(root),
+                catch: (cause) => new SkillCatalogError({ message: String(cause) }),
+              }),
+            ),
+          ),
+        { concurrency: 4 },
+      );
+      const targets = [...new Set(roots)];
+      const affected = yield* affectedSkillProviderIds(
+        yield* providers.getProviders,
+        configurations,
+        targets,
+      ).pipe(Effect.provideService(Path.Path, path));
+      return {
+        tool: createSkillCatalogTool({
+          stateDir: config.stateDir,
+          targets,
+          fs,
+          path,
+          processRunner,
+        }),
+        refresh: refreshSkillProviders(providers, affected).pipe(Effect.ignoreCause({ log: true })),
+      };
+    });
 
     // Transport context, not a skill-management concept: reject a stale page's
     // request before invoking the tool, then run against the captured source
@@ -77,6 +104,7 @@ export const makeSkillCatalogRpcHandlers = Effect.fn("j5.makeSkillCatalogRpcHand
       );
       if (expectedSource !== configured.skillCatalogSource) {
         return yield* new SkillCatalogError({
+          reason: "source-changed",
           message: "Skill catalog source changed. Reload Settings → Skills and retry.",
         });
       }
@@ -89,6 +117,7 @@ export const makeSkillCatalogRpcHandlers = Effect.fn("j5.makeSkillCatalogRpcHand
           METHODS.getSkillCatalogStatus,
           Effect.gen(function* () {
             const source = yield* matchingSource(input.expectedSource);
+            const { tool } = yield* catalogContext();
             return yield* tool.status({ source });
           }),
           TRACE,
@@ -98,11 +127,12 @@ export const makeSkillCatalogRpcHandlers = Effect.fn("j5.makeSkillCatalogRpcHand
           METHODS.applySkillCatalogGroups,
           Effect.gen(function* () {
             const source = yield* matchingSource(input.expectedSource);
+            const { tool, refresh } = yield* catalogContext();
             // Partial failures can still change links. Preserve the apply result
             // while publishing fresh discovery to every connected client.
             return yield* tool
               .apply({ source, groups: [...input.groups] })
-              .pipe(Effect.ensuring(refreshSkills));
+              .pipe(Effect.ensuring(refresh));
           }),
           TRACE,
         ),
@@ -111,7 +141,8 @@ export const makeSkillCatalogRpcHandlers = Effect.fn("j5.makeSkillCatalogRpcHand
           METHODS.updateSkillCatalog,
           Effect.gen(function* () {
             const source = yield* matchingSource(input.expectedSource);
-            return yield* tool.update({ source }).pipe(Effect.ensuring(refreshSkills));
+            const { tool, refresh } = yield* catalogContext();
+            return yield* tool.update({ source }).pipe(Effect.ensuring(refresh));
           }),
           TRACE,
         ),

@@ -73,6 +73,7 @@ export class SkillCatalogError extends Schema.TaggedError<SkillCatalogError>()(
   "SkillCatalogError",
   {
     message: Schema.String,
+    reason: Schema.optional(Schema.Literal("source-changed")),
     result: Schema.optional(SkillCatalogApplyResult),
   },
 ) {}

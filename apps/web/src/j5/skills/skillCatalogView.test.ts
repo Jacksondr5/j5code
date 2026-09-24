@@ -11,17 +11,30 @@ import {
 } from "./skillCatalogView";
 
 describe("skill catalog view helpers", () => {
-  it("gates source saves on blank or unchanged drafts", () => {
-    expect(isSourceSaveable("", "/opt/skills")).toBe(false);
-    expect(isSourceSaveable("   ", "/opt/skills")).toBe(false);
+  it("allows clearing a source and rejects unchanged drafts", () => {
+    expect(isSourceSaveable("", "/opt/skills")).toBe(true);
+    expect(isSourceSaveable("   ", "/opt/skills")).toBe(true);
     expect(isSourceSaveable("/opt/skills", "/opt/skills")).toBe(false);
     expect(isSourceSaveable("  /opt/skills  ", "/opt/skills")).toBe(false);
     expect(isSourceSaveable("https://example.com/skills.git", "/opt/skills")).toBe(true);
   });
 
   it("summarizes apply counts", () => {
-    expect(summarizeApplyResult({ installed: 3, removed: 1, unchanged: 5 })).toBe(
+    expect(summarizeApplyResult({ installed: 3, removed: 1, unchanged: 5, conflicts: [] })).toBe(
       "Installed 3 links, removed 1, 5 unchanged.",
+    );
+  });
+
+  it.each([0, 2])("highlights blocked links with %i successful installations", (installed) => {
+    expect(
+      summarizeApplyResult({
+        installed,
+        removed: 0,
+        unchanged: 1,
+        conflicts: [{ skill: "explain", linkPath: "/skills/explain", detail: "Existing link" }],
+      }),
+    ).toBe(
+      `1 skill link was blocked by existing files or links. Installed ${installed} links, removed 0, 1 unchanged.`,
     );
   });
 
@@ -61,7 +74,13 @@ describe("skill catalog view helpers", () => {
   });
 
   it("detects stale-page source errors", () => {
-    expect(isSourceChangedError("Skill catalog source changed. Reload and retry.")).toBe(true);
+    expect(
+      isSourceChangedError({
+        _tag: "SkillCatalogError",
+        reason: "source-changed",
+        message: "Wording can change",
+      }),
+    ).toBe(true);
     expect(isSourceChangedError("boom")).toBe(false);
     expect(isSourceChangedError(null)).toBe(false);
   });

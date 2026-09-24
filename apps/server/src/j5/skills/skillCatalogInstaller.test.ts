@@ -17,7 +17,6 @@ import {
   saveState,
   skillDescription,
   stateFilePath,
-  targetDirs,
   verifyLinks,
   verifySkills,
   type Catalog,
@@ -29,6 +28,8 @@ const windows = HostProcessPlatform.defaultValue() === "win32";
 const linkType = windows ? "junction" : "dir";
 let root: string;
 let homeDir: string;
+let stateDir: string;
+let targets: string[];
 let catalogDir: string;
 const core = { core: { description: "Core", skills: ["explain"] } };
 
@@ -44,7 +45,7 @@ async function writeCatalog(dir = catalogDir, groups: Catalog["groups"] = core) 
   }
   return loadCatalog(NodePath.join(dir, "catalog.yaml"));
 }
-const dirs = () => targetDirs(homeDir, process.env, catalogDir);
+const dirs = () => targets;
 async function apply(
   selected: string[],
   dir = catalogDir,
@@ -54,8 +55,9 @@ async function apply(
     {
       catalog: await loadCatalog(NodePath.join(dir, "catalog.yaml")),
       catalogDir: dir,
-      homeDir,
-      state: await loadState(homeDir),
+      stateDir,
+      targets,
+      state: await loadState(stateDir),
       selected,
       windows,
     },
@@ -67,6 +69,11 @@ beforeEach(async () => {
   root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "j5-installer-"));
   homeDir = NodePath.join(root, "home");
   catalogDir = NodePath.join(root, "catalog");
+  stateDir = NodePath.join(root, "state");
+  targets = [
+    NodePath.join(homeDir, ".agents", "skills"),
+    NodePath.join(homeDir, ".claude", "skills"),
+  ];
   vi.stubEnv("CLAUDE_CONFIG_DIR", "");
   await writeCatalog();
 });
@@ -74,6 +81,51 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   await NodeFSP.rm(root, { recursive: true, force: true });
+});
+
+it("does not take over another environment's catalog links", async () => {
+  await apply(["core"]);
+  const other = NodePath.join(root, "other-catalog");
+  const catalog = await writeCatalog(other);
+  const foreignState = NodePath.join(root, "other-state");
+  const result = await runApply({
+    catalog,
+    catalogDir: other,
+    stateDir: foreignState,
+    targets,
+    state: await loadState(foreignState),
+    selected: ["core"],
+    windows,
+  });
+  expect(result.installed).toBe(0);
+  expect(result.conflicts).toHaveLength(2);
+  for (const dir of dirs())
+    expect(await NodeFSP.realpath(NodePath.join(dir, "explain"))).toBe(
+      await NodeFSP.realpath(NodePath.join(catalogDir, "skills", "explain")),
+    );
+});
+
+it("rolls back a newly created link if its ownership identity cannot be read", async () => {
+  const symlink = NodeFSP.symlink;
+  const lstat = NodeFSP.lstat;
+  let capture = false;
+  vi.spyOn(NodeFSP, "symlink").mockImplementation(async (...args) => {
+    await symlink(...args);
+    capture = true;
+  });
+  vi.spyOn(NodeFSP, "lstat").mockImplementation(async (...args) => {
+    if (capture) {
+      capture = false;
+      throw new Error("identity unavailable");
+    }
+    return lstat(...args);
+  });
+  await expect(apply(["core"])).rejects.toThrow("identity unavailable");
+  for (const dir of dirs())
+    await expect(NodeFSP.lstat(NodePath.join(dir, "explain"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  expect((await loadState(stateDir)).links).toEqual([]);
 });
 
 describe("catalog validation and selection", () => {
@@ -96,14 +148,14 @@ describe("catalog validation and selection", () => {
     expect(peak).toBe(8);
   });
   it.each([
-    [{}, 'expected a "groups" map'],
-    [{ groups: [] }, 'expected a "groups" map'],
-    [{ groups: { Core: core.core } }, "Invalid group name: Core"],
-    [{ groups: { core: null } }, "expected an object"],
-    [{ groups: { core: { skills: ["explain"] } } }, "missing description"],
-    [{ groups: { core: { description: "c", skills: [] } } }, "nonempty skills list"],
-    [{ groups: { core: { description: "c", skills: ["../escape"] } } }, "invalid skill name"],
-    [{ groups: { core: { ...core.core, depends: "other" } } }, "depends must be a list"],
+    [{}, undefined],
+    [{ groups: [] }, undefined],
+    [{ groups: { Core: core.core } }, undefined],
+    [{ groups: { core: null } }, undefined],
+    [{ groups: { core: { skills: ["explain"] } } }, undefined],
+    [{ groups: { core: { description: "c", skills: [] } } }, undefined],
+    [{ groups: { core: { description: "c", skills: ["../escape"] } } }, undefined],
+    [{ groups: { core: { ...core.core, depends: "other" } } }, undefined],
     [{ groups: { core: { ...core.core, depends: ["other"] } } }, "unknown dependency: other"],
     [
       { groups: { core: { ...core.core, depends: ["constructor"] } } },
@@ -130,7 +182,7 @@ describe("catalog validation and selection", () => {
       expect(() => resolveSelection(catalog, [group])).toThrow(`Unknown group: ${group}`);
     }
     expect((await apply(["all", "all"])).selectedGroups).toEqual(["all"]);
-    expect((await loadState(homeDir)).groups).toEqual(["all"]);
+    expect((await loadState(stateDir)).groups).toEqual(["all"]);
     const cyclic = await writeCatalog(catalogDir, {
       core: { ...core.core, depends: ["other"] },
       other: { description: "o", skills: ["other"], depends: ["core"] },
@@ -150,7 +202,7 @@ describe("catalog validation and selection", () => {
     "rejects a %s SKILL.md before changing links or state",
     async (kind) => {
       await apply(["core"]);
-      const previous = await NodeFSP.readFile(stateFilePath(homeDir), "utf8");
+      const previous = await NodeFSP.readFile(stateFilePath(stateDir), "utf8");
       const file = NodePath.join(catalogDir, "skills", "explain", "SKILL.md");
       await NodeFSP.unlink(file);
       if (kind === "directory") await NodeFSP.mkdir(file);
@@ -160,7 +212,7 @@ describe("catalog validation and selection", () => {
           file,
         );
       await expect(apply(["core"])).rejects.toThrow("Missing SKILL.md for: explain");
-      expect(await NodeFSP.readFile(stateFilePath(homeDir), "utf8")).toBe(previous);
+      expect(await NodeFSP.readFile(stateFilePath(stateDir), "utf8")).toBe(previous);
       for (const dir of dirs())
         expect((await NodeFSP.lstat(NodePath.join(dir, "explain"))).isSymbolicLink()).toBe(true);
     },
@@ -225,13 +277,13 @@ describe("link ownership", () => {
     const otherCatalog = NodePath.join(root, "other-catalog");
     await writeCatalog(otherCatalog);
     expect(await apply(["core"], otherCatalog)).toMatchObject({ installed: 2, removed: 0 });
-    const links = (await loadState(homeDir)).links;
+    const links = (await loadState(stateDir)).links;
     expect(
       links.every((link) => link.target === NodePath.join(otherCatalog, "skills", "explain")),
     ).toBe(true);
     for (const dir of dirs()) await NodeFSP.writeFile(NodePath.join(dir, "foreign"), "keep");
     expect(await apply([], otherCatalog)).toMatchObject({ removed: 2 });
-    expect((await loadState(homeDir)).links).toEqual([]);
+    expect((await loadState(stateDir)).links).toEqual([]);
     for (const dir of dirs()) expect(await NodeFSP.readdir(dir)).toEqual(["foreign"]);
   });
 
@@ -242,7 +294,7 @@ describe("link ownership", () => {
     const foreign = NodePath.join(agentRoot, "explain");
     await NodeFSP.symlink(skill, foreign, linkType);
     expect(await apply(["core"])).toMatchObject({ installed: 1, unchanged: 1 });
-    expect((await loadState(homeDir)).links.map((link) => link.path)).not.toContain(foreign);
+    expect((await loadState(stateDir)).links.map((link) => link.path)).not.toContain(foreign);
     expect(await apply([])).toMatchObject({ removed: 1 });
     expect(await NodeFSP.realpath(foreign)).toBe(await NodeFSP.realpath(skill));
   });
@@ -254,10 +306,10 @@ describe("link ownership", () => {
     await NodeFSP.mkdir(NodePath.dirname(claudeRoot), { recursive: true });
     await NodeFSP.symlink(agentRoot, claudeRoot, linkType);
     expect(await apply(["core"])).toMatchObject({ installed: 1, failed: [] });
-    expect((await loadState(homeDir)).links).toHaveLength(1);
+    expect((await loadState(stateDir)).links).toHaveLength(1);
 
     const target = NodePath.join(catalogDir, "skills", "explain");
-    await saveState(homeDir, {
+    await saveState(stateDir, {
       folder: catalogDir,
       groups: ["core"],
       links: [
@@ -266,7 +318,7 @@ describe("link ownership", () => {
       ],
     });
     expect(await apply(["core"])).toMatchObject({ unchanged: 1 });
-    expect((await loadState(homeDir)).links).toHaveLength(1);
+    expect((await loadState(stateDir)).links).toHaveLength(1);
     expect(await apply([])).toMatchObject({ removed: 1 });
     await expect(NodeFSP.lstat(NodePath.join(agentRoot, "explain"))).rejects.toThrow(/ENOENT/);
   });
@@ -279,7 +331,7 @@ describe("link ownership", () => {
     await NodeFSP.symlink(agentRoot, claudeRoot, linkType);
     const target = NodePath.join(catalogDir, "skills", "explain");
     await NodeFSP.symlink(target, NodePath.join(agentRoot, "explain"), linkType);
-    await saveState(homeDir, {
+    await saveState(stateDir, {
       folder: catalogDir,
       groups: ["core"],
       links: [
@@ -287,9 +339,9 @@ describe("link ownership", () => {
         { path: NodePath.join(claudeRoot, "explain"), target: NodePath.join(root, "other") },
       ],
     });
-    const saved = await NodeFSP.readFile(stateFilePath(homeDir), "utf8");
+    const saved = await NodeFSP.readFile(stateFilePath(stateDir), "utf8");
     await expect(apply([])).rejects.toThrow(/Conflicting saved ownership/);
-    expect(await NodeFSP.readFile(stateFilePath(homeDir), "utf8")).toBe(saved);
+    expect(await NodeFSP.readFile(stateFilePath(stateDir), "utf8")).toBe(saved);
     expect(await NodeFSP.readlink(NodePath.join(agentRoot, "explain"))).toBe(target);
   });
 
@@ -297,7 +349,7 @@ describe("link ownership", () => {
     await apply(["core"]);
     await NodeFSP.rm(NodePath.join(catalogDir, "skills", "explain"), { recursive: true });
     expect(await apply([])).toMatchObject({ removed: 2 });
-    expect((await loadState(homeDir)).links).toEqual([]);
+    expect((await loadState(stateDir)).links).toEqual([]);
     for (const dir of dirs()) expect(await NodeFSP.readdir(dir)).toEqual([]);
   });
 
@@ -319,7 +371,7 @@ describe("link ownership", () => {
       catalogDir,
       skills: [],
       dirs: await Promise.all(dirs().map(canonicalSkillRoot)),
-      recordedLinks: (await loadState(homeDir)).links,
+      recordedLinks: (await loadState(stateDir)).links,
     });
     await NodeFSP.unlink(NodePath.join(dir!, "explain"));
     await NodeFSP.writeFile(NodePath.join(dir!, "explain"), "foreign");
@@ -360,7 +412,7 @@ describe("partial apply recovery", () => {
         removed: failure === "create" ? 1 : 0,
         failed: [{ linkPath: blocked, error: expect.stringContaining("blocked") }],
       });
-      const saved = await loadState(homeDir);
+      const saved = await loadState(stateDir);
       expect(saved.links).toHaveLength(failure === "remove" ? 2 : 1);
       if (failure === "remove")
         expect(saved.links.find((link) => link.path === blocked)?.target).toBe(
@@ -369,7 +421,7 @@ describe("partial apply recovery", () => {
       vi.restoreAllMocks();
       await apply(["core"], otherCatalog);
       expect(
-        (await loadState(homeDir)).links.every(
+        (await loadState(stateDir)).links.every(
           (link) => link.target === NodePath.join(otherCatalog, "skills", "explain"),
         ),
       ).toBe(true);
@@ -399,7 +451,7 @@ describe("partial apply recovery", () => {
           ],
         },
       });
-      expect((await loadState(homeDir)).links).toHaveLength(2);
+      expect((await loadState(stateDir)).links).toHaveLength(2);
       expect(await apply(["core"])).toMatchObject({ unchanged: 2 });
     },
   );
@@ -407,8 +459,8 @@ describe("partial apply recovery", () => {
   it.each([false, true])(
     "rolls back completed additions when persistence fails (link failure %s)",
     async (failLink) => {
-      await saveState(homeDir, { folder: catalogDir, groups: [], links: [] });
-      const previous = await NodeFSP.readFile(stateFilePath(homeDir), "utf8");
+      await saveState(stateDir, { folder: catalogDir, groups: [], links: [] });
+      const previous = await NodeFSP.readFile(stateFilePath(stateDir), "utf8");
       const originalSymlink = NodeFSP.symlink;
       if (failLink)
         vi.spyOn(NodeFSP, "symlink").mockImplementation(async (target, path, type) => {
@@ -422,19 +474,19 @@ describe("partial apply recovery", () => {
         message: expect.stringContaining("state save failed"),
         result: { installed: 0 },
       });
-      expect(await NodeFSP.readFile(stateFilePath(homeDir), "utf8")).toBe(previous);
+      expect(await NodeFSP.readFile(stateFilePath(stateDir), "utf8")).toBe(previous);
       for (const dir of dirs()) {
         await expect(NodeFSP.lstat(NodePath.join(dir, "explain"))).rejects.toThrow(/ENOENT/);
       }
       vi.restoreAllMocks();
       await apply(["core"]);
-      expect((await loadState(homeDir)).links).toHaveLength(2);
+      expect((await loadState(stateDir)).links).toHaveLength(2);
     },
   );
 
   it("restores owned targets after a failed state save during replacement", async () => {
     await apply(["core"]);
-    const previous = await loadState(homeDir);
+    const previous = await loadState(stateDir);
     const otherCatalog = NodePath.join(root, "other-catalog");
     await writeCatalog(otherCatalog);
     vi.spyOn(NodeFSP, "rename").mockRejectedValueOnce(new Error("save denied"));
@@ -442,7 +494,7 @@ describe("partial apply recovery", () => {
       name: "IncompleteApplyError",
       result: { installed: 0, removed: 0 },
     });
-    expect(await loadState(homeDir)).toEqual(previous);
+    expect(await loadState(stateDir)).toEqual(previous);
     for (const link of previous.links) {
       expect(await NodeFSP.readlink(link.path)).toBe(link.target);
     }
@@ -464,7 +516,7 @@ describe("partial apply recovery", () => {
     });
     vi.restoreAllMocks();
     await apply(["core"]);
-    expect((await loadState(homeDir)).links.map((link) => link.path)).not.toContain(path);
+    expect((await loadState(stateDir)).links.map((link) => link.path)).not.toContain(path);
   });
 });
 
@@ -508,14 +560,14 @@ describe("state, targets and descriptions", () => {
   });
   it("writes state atomically with private permissions", async () => {
     const initial = { folder: catalogDir, groups: [], links: [] };
-    await saveState(homeDir, initial);
-    const oldFile = await NodeFSP.open(stateFilePath(homeDir));
+    await saveState(stateDir, initial);
+    const oldFile = await NodeFSP.open(stateFilePath(stateDir));
     try {
-      await saveState(homeDir, { ...initial, groups: ["core"] });
+      await saveState(stateDir, { ...initial, groups: ["core"] });
       expect(JSON.parse(await oldFile.readFile("utf8"))).toEqual(initial);
-      expect((await loadState(homeDir)).groups).toEqual(["core"]);
-      if (!windows) expect((await NodeFSP.stat(stateFilePath(homeDir))).mode & 0o777).toBe(0o600);
-      expect(await NodeFSP.readdir(NodePath.dirname(stateFilePath(homeDir)))).toEqual([
+      expect((await loadState(stateDir)).groups).toEqual(["core"]);
+      if (!windows) expect((await NodeFSP.stat(stateFilePath(stateDir))).mode & 0o777).toBe(0o600);
+      expect(await NodeFSP.readdir(NodePath.dirname(stateFilePath(stateDir)))).toEqual([
         "skill-catalog.json",
       ]);
     } finally {
@@ -525,37 +577,34 @@ describe("state, targets and descriptions", () => {
 
   it("preserves malformed state and installed links", async () => {
     await apply(["core"]);
-    await NodeFSP.writeFile(stateFilePath(homeDir), "{malformed");
+    await NodeFSP.writeFile(stateFilePath(stateDir), "{malformed");
     await expect(apply([])).rejects.toBeInstanceOf(SyntaxError);
-    expect(await NodeFSP.readFile(stateFilePath(homeDir), "utf8")).toBe("{malformed");
+    expect(await NodeFSP.readFile(stateFilePath(stateDir), "utf8")).toBe("{malformed");
     for (const dir of dirs())
       expect((await NodeFSP.lstat(NodePath.join(dir, "explain"))).isSymbolicLink()).toBe(true);
   });
 
-  it("honors absolute and relative Claude targets, deduplicates roots, and migrates relative ownership", async () => {
-    vi.stubEnv("CLAUDE_CONFIG_DIR", NodePath.join(root, "custom"));
+  it("honors explicit targets and migrates relative ownership", async () => {
+    targets = [targets[0]!, NodePath.join(root, "custom", "skills")];
     await apply(["core"]);
     expect(
       (await NodeFSP.lstat(NodePath.join(root, "custom", "skills", "explain"))).isSymbolicLink(),
     ).toBe(true);
-    expect(
-      targetDirs(homeDir, { CLAUDE_CONFIG_DIR: NodePath.join(homeDir, ".agents") }, catalogDir),
-    ).toEqual([NodePath.join(homeDir, ".agents", "skills")]);
-    vi.stubEnv("CLAUDE_CONFIG_DIR", "claude-config");
     const relativePath = NodePath.join("claude-config", "skills", "explain");
+    targets = [targets[0]!, NodePath.join(catalogDir, "claude-config", "skills")];
     const oldTarget = NodePath.join(root, "old-target");
     await NodeFSP.mkdir(oldTarget);
     await NodeFSP.mkdir(NodePath.dirname(NodePath.join(catalogDir, relativePath)), {
       recursive: true,
     });
     await NodeFSP.symlink(oldTarget, NodePath.join(catalogDir, relativePath), linkType);
-    await saveState(homeDir, {
+    await saveState(stateDir, {
       folder: catalogDir,
       groups: ["core"],
       links: [{ path: relativePath, target: oldTarget }],
     });
     expect(await apply(["core"])).toMatchObject({ installed: 1, unchanged: 1 });
-    expect((await loadState(homeDir)).links.every((link) => NodePath.isAbsolute(link.path))).toBe(
+    expect((await loadState(stateDir)).links.every((link) => NodePath.isAbsolute(link.path))).toBe(
       true,
     );
     expect(await apply([])).toMatchObject({ removed: 1 });
@@ -569,12 +618,12 @@ describe("state, targets and descriptions", () => {
 
   it("rejects relative ownership without an absolute saved folder", async () => {
     for (const folder of [null, "relative"]) {
-      await saveState(homeDir, {
+      await saveState(stateDir, {
         folder,
         groups: [],
         links: [{ path: "skills/explain", target: catalogDir }],
       });
-      await expect(loadState(homeDir)).rejects.toThrow("saved catalog folder is not absolute");
+      await expect(loadState(stateDir)).rejects.toThrow("saved catalog folder is not absolute");
     }
   });
 

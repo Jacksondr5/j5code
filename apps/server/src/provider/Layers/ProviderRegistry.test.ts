@@ -1,3 +1,8 @@
+import { upsertProviderWorkspaceSnapshot } from "../../j5/skills/skillWorkspaceRefresh.ts";
+import {
+  refreshSkillProviders,
+  refreshSkillsOnConnection,
+} from "../../j5/skills/skillProviderRefresh.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it, assert } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
@@ -45,7 +50,6 @@ import { ProviderInstanceRegistryHydrationLive } from "./ProviderInstanceRegistr
 import {
   mergeProviderSnapshot,
   mergeProviderSnapshots,
-  upsertProviderWorkspaceSnapshot,
   ProviderRegistryLive,
   selectProvidersByKind,
 } from "./ProviderRegistry.ts";
@@ -1780,7 +1784,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               { name: "explain", path: "/skills/explain/SKILL.md", enabled: true },
             ];
             yield* Ref.set(skills, installed);
-            yield* registry.refreshInstance(instanceId);
+            yield* refreshSkillProviders(registry, [instanceId]);
             const afterInstall = (yield* registry.getProviders)[0]!;
             assert.deepStrictEqual(afterInstall.skills, installed);
             assert.deepStrictEqual(afterInstall.workspaceSnapshots?.map((s) => s.cwd).toSorted(), [
@@ -1791,7 +1795,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               assert.deepStrictEqual(workspace.skills, installed);
             }
             const probesBeforeConnection = yield* Ref.get(workspaceProbes);
-            yield* registry.refresh(undefined, { refreshWorkspaces: false });
+            yield* refreshSkillsOnConnection(registry);
             assert.equal(yield* Ref.get(workspaceProbes), probesBeforeConnection);
             assert.deepStrictEqual(
               (yield* registry.getProviders)[0]!.workspaceSnapshots,
@@ -1799,13 +1803,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             );
             yield* Ref.set(blockMachine, true);
             const machinesBeforeConnection = yield* Ref.get(machineRefreshes);
-            const firstConnection = yield* registry
-              .refresh(undefined, { refreshWorkspaces: false })
-              .pipe(Effect.forkChild);
+            const firstConnection = yield* refreshSkillsOnConnection(registry).pipe(
+              Effect.forkChild,
+            );
             yield* Deferred.await(machineStarted);
-            const secondConnection = yield* registry
-              .refresh(undefined, { refreshWorkspaces: false })
-              .pipe(Effect.forkChild);
+            const secondConnection = yield* refreshSkillsOnConnection(registry).pipe(
+              Effect.forkChild,
+            );
             yield* Effect.yieldNow;
             yield* Deferred.succeed(releaseMachine, undefined);
             yield* Fiber.join(firstConnection);
@@ -1816,7 +1820,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             assert.deepStrictEqual((yield* registry.getProviders)[0], afterInstall);
 
             yield* Ref.set(failWorkspace, true);
-            yield* registry.refreshInstance(instanceId);
+            yield* refreshSkillProviders(registry, [instanceId]);
             const afterFailure = (yield* registry.getProviders)[0]!;
             for (const workspace of afterFailure.workspaceSnapshots!) {
               assert.deepStrictEqual(workspace.skills, installed);
@@ -1834,7 +1838,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               Effect.forkChild,
             );
             yield* Effect.yieldNow;
-            yield* registry.refreshInstance(instanceId);
+            yield* refreshSkillProviders(registry, [instanceId]);
             const afterRemoval = yield* Fiber.join(removed);
             assert.strictEqual(afterRemoval._tag, "Some");
             for (const workspace of (yield* registry.getProviders)[0]!.workspaceSnapshots!) {
@@ -2416,8 +2420,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             assert.deepStrictEqual(yield* registry.getProviders, [cachedProvider]);
             const staleProvider = {
               ...cachedProvider,
-              status: "error",
-              message: "Provider discovery failed.",
+              skillDiscoveryError: "Provider discovery failed.",
             } satisfies ServerProvider;
             assert.deepStrictEqual(yield* registry.refresh(codexDriver), [staleProvider]);
             assert.deepStrictEqual(yield* registry.refreshInstance(codexInstanceId), [

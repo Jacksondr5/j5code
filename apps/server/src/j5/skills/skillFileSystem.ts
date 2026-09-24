@@ -2,7 +2,6 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import * as Effect from "effect/Effect";
 
 export const isMissing = (error: unknown) =>
   error instanceof Error && "code" in error && error.code === "ENOENT";
@@ -43,14 +42,23 @@ export async function readSkillsConcurrently<A, B>(
   inputs: ReadonlyArray<A>,
   read: (input: A) => Promise<B>,
 ): Promise<B[]> {
-  const results = await Effect.runPromise(
-    Effect.forEach(inputs, (input) => Effect.tryPromise(() => read(input)).pipe(Effect.result), {
-      concurrency: 8,
+  const results: PromiseSettledResult<B>[] = [];
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(8, inputs.length) }, async () => {
+      while (next < inputs.length) {
+        const index = next++;
+        try {
+          results[index] = { status: "fulfilled", value: await read(inputs[index]!) };
+        } catch (reason) {
+          results[index] = { status: "rejected", reason };
+        }
+      }
     }),
   );
   return results.map((result) => {
-    if (result._tag === "Failure") throw result.failure.cause;
-    return result.success;
+    if (result.status === "rejected") throw result.reason;
+    return result.value;
   });
 }
 

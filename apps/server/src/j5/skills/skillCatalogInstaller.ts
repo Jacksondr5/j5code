@@ -8,6 +8,7 @@ import type {
   SkillCatalogFailedLink,
 } from "@t3tools/contracts";
 import { parse } from "yaml";
+import * as Schema from "effect/Schema";
 
 import { parseSkillFrontmatter } from "../../provider/Drivers/ClaudeSkills.ts";
 import {
@@ -23,22 +24,29 @@ import {
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-type CatalogGroup = {
-  readonly description: string;
-  readonly skills: ReadonlyArray<string>;
-  readonly depends?: ReadonlyArray<string>;
-};
+const CatalogName = Schema.String.check(Schema.isPattern(NAME_PATTERN));
+const CatalogGroup = Schema.Struct({
+  description: Schema.String,
+  skills: Schema.Array(CatalogName).check(Schema.isMinLength(1)),
+  depends: Schema.optional(Schema.Array(CatalogName)),
+});
+const CatalogDocument = Schema.Struct({ groups: Schema.Record(Schema.String, CatalogGroup) });
 export type Catalog = {
   readonly path: string;
   readonly dir: string;
-  readonly groups: Readonly<Record<string, CatalogGroup>>;
+  readonly groups: (typeof CatalogDocument.Type)["groups"];
 };
-type RecordedLink = { readonly path: string; readonly target: string };
-export type CatalogState = {
-  readonly folder: string | null;
-  readonly groups: ReadonlyArray<string>;
-  readonly links: ReadonlyArray<RecordedLink>;
-};
+const RecordedLink = Schema.Struct({ path: Schema.String, target: Schema.String });
+type RecordedLink = typeof RecordedLink.Type;
+const CatalogState = Schema.Struct({
+  folder: Schema.NullOr(Schema.String),
+  groups: Schema.Array(Schema.String),
+  links: Schema.Array(RecordedLink),
+});
+export type CatalogState = typeof CatalogState.Type;
+const decodeCatalog = Schema.decodeUnknownSync(CatalogDocument, { onExcessProperty: "error" });
+const decodeName = Schema.decodeUnknownSync(CatalogName);
+const decodeState = Schema.decodeUnknownSync(CatalogState);
 type Link = { readonly skill: string; readonly linkPath: string; readonly target: string };
 type Addition = Link & { readonly replace?: boolean; readonly previousTarget?: string };
 export type Plan = {
@@ -58,19 +66,8 @@ type ApplyPlanResult = {
   readonly failed: ReadonlyArray<SkillCatalogFailedLink>;
 };
 
-export function stateFilePath(homeDir: string) {
-  return NodePath.join(homeDir, ".agents", "skill-catalog.json");
-}
-
-export function targetDirs(homeDir: string, env: NodeJS.ProcessEnv, catalogDir: string) {
-  // The former CLI ran in the catalog directory, including for relative Claude config paths.
-  const claudeBase = env.CLAUDE_CONFIG_DIR?.trim() || NodePath.join(homeDir, ".claude");
-  return [
-    ...new Set([
-      NodePath.resolve(homeDir, ".agents", "skills"),
-      NodePath.resolve(catalogDir, claudeBase, "skills"),
-    ]),
-  ];
+export function stateFilePath(stateDir: string) {
+  return NodePath.join(stateDir, "skill-catalog.json");
 }
 
 export async function loadCatalog(catalogPath: string): Promise<Catalog> {
@@ -78,40 +75,17 @@ export async function loadCatalog(catalogPath: string): Promise<Catalog> {
     if (isMissing(error)) throw new Error(`No catalog.yaml in ${NodePath.dirname(catalogPath)}.`);
     throw error;
   });
-  const data: unknown = parse(text);
-  const groups = data && typeof data === "object" && "groups" in data ? data.groups : undefined;
-  if (!groups || typeof groups !== "object" || Array.isArray(groups)) {
-    throw new Error(`${catalogPath}: expected a "groups" map`);
-  }
+  const { groups } = decodeCatalog(parse(text));
   const dir = NodePath.dirname(NodePath.resolve(catalogPath));
-  for (const [name, value] of Object.entries(groups)) {
-    const group = value as Record<string, unknown>;
-    if (!NAME_PATTERN.test(name)) throw new Error(`Invalid group name: ${name}`);
-    if (!group || typeof group !== "object" || Array.isArray(group))
-      throw new Error(`Group ${name}: expected an object`);
-    if (typeof group.description !== "string")
-      throw new Error(`Group ${name}: missing description`);
-    if (!Array.isArray(group.skills) || group.skills.length === 0) {
-      throw new Error(`Group ${name}: expected a nonempty skills list`);
-    }
-    for (const skill of group.skills as unknown[]) {
-      if (typeof skill !== "string" || !NAME_PATTERN.test(skill)) {
-        throw new Error(`Group ${name}: invalid skill name: ${skill}`);
-      }
-    }
-    if (group.depends !== undefined) {
-      if (!Array.isArray(group.depends)) throw new Error(`Group ${name}: depends must be a list`);
-      for (const dep of group.depends as unknown[]) {
-        if (typeof dep !== "string" || !Object.hasOwn(groups, dep)) {
-          throw new Error(`Group ${name}: unknown dependency: ${dep}`);
-        }
-      }
+  for (const [name, group] of Object.entries(groups)) {
+    decodeName(name);
+    for (const dep of group.depends ?? []) {
+      if (!Object.hasOwn(groups, dep)) throw new Error(`Group ${name}: unknown dependency: ${dep}`);
     }
   }
   // Every skill belongs to exactly one group.
-  const validated = groups as Record<string, CatalogGroup>;
   const owner = new Map<string, string>();
-  for (const [name, group] of Object.entries(validated)) {
+  for (const [name, group] of Object.entries(groups)) {
     for (const skill of group.skills) {
       if (owner.has(skill)) {
         throw new Error(`Skill ${skill} is in groups ${owner.get(skill)} and ${name}`);
@@ -119,7 +93,7 @@ export async function loadCatalog(catalogPath: string): Promise<Catalog> {
       owner.set(skill, name);
     }
   }
-  return { path: NodePath.resolve(catalogPath), dir, groups: validated };
+  return { path: NodePath.resolve(catalogPath), dir, groups };
 }
 
 export function resolveSelection(catalog: Catalog, selected: ReadonlyArray<string>) {
@@ -162,8 +136,6 @@ export async function verifySkills(catalog: Catalog, skills: ReadonlyArray<strin
   }
 }
 
-export { linkDestination } from "./skillFileSystem.ts";
-
 export async function planInstall({
   catalogDir,
   skills,
@@ -183,7 +155,7 @@ export async function planInstall({
   const removals: Link[] = [];
   const unchanged: Link[] = [];
   const conflicts: SkillCatalogConflict[] = [];
-  const removalsByPath = new Set();
+  const removalsByPath = new Set<string>();
 
   const paths = [
     ...new Set(
@@ -213,7 +185,10 @@ export async function planInstall({
         conflicts.push({
           skill,
           linkPath,
-          detail: seen.kind === "link" ? `points at ${seen.raw}` : `existing ${seen.kind}`,
+          detail:
+            seen.kind === "link"
+              ? `Already linked to ${seen.raw}. This environment cannot safely replace that link, so it was left unchanged.`
+              : `An existing ${seen.kind} occupies this path and was left unchanged.`,
         });
       }
     }
@@ -275,8 +250,15 @@ export async function applyPlan(
       await NodeFSP.mkdir(NodePath.dirname(entry.linkPath), { recursive: true });
       await NodeFSP.symlink(entry.target, entry.linkPath, type);
       const added: Link & { action: "added"; identity?: string } = { ...entry, action: "added" };
+      try {
+        added.identity = await skillLinkIdentity(entry.linkPath);
+      } catch (error) {
+        const created = await linkDestination(entry.linkPath);
+        if (created.kind === "link" && created.target === entry.target)
+          await NodeFSP.unlink(entry.linkPath);
+        throw error;
+      }
       applied.push(added);
-      added.identity = await skillLinkIdentity(entry.linkPath);
     } catch (error) {
       failed.push({ linkPath: entry.linkPath, error: errorMessage(error) });
       return { applied, failed };
@@ -324,54 +306,35 @@ export async function verifyLinks(entries: ReadonlyArray<Link>) {
   );
 }
 
-export async function loadState(homeDir: string): Promise<CatalogState> {
+export async function loadState(stateDir: string): Promise<CatalogState> {
   let text: string;
   try {
-    text = await NodeFSP.readFile(stateFilePath(homeDir), "utf8");
+    text = await NodeFSP.readFile(stateFilePath(stateDir), "utf8");
   } catch (error) {
     if (isMissing(error)) return { folder: null, groups: [], links: [] };
     throw error;
   }
   // Syntax errors must leave the ownership file intact, rather than resetting it on Apply.
-  const parsed: unknown = JSON.parse(text);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { folder: null, groups: [], links: [] };
-  }
-  const data = parsed as Record<string, unknown>;
-  const folder = typeof data.folder === "string" ? data.folder : null;
-  const links: RecordedLink[] = [];
-  for (const link of (Array.isArray(data.links) ? data.links : []) as unknown[]) {
-    if (
-      !link ||
-      typeof link !== "object" ||
-      !("path" in link) ||
-      !("target" in link) ||
-      typeof link.path !== "string" ||
-      typeof link.target !== "string"
-    )
-      continue;
-    let path = link.path;
-    if (!NodePath.isAbsolute(path)) {
-      if (!folder || !NodePath.isAbsolute(folder)) {
-        throw new Error(
-          `Cannot resolve relative owned link ${path}: saved catalog folder is not absolute.`,
-        );
-      }
-      path = NodePath.resolve(folder, path);
+  const data = decodeState(JSON.parse(text));
+  const { folder } = data;
+  const links = data.links.map((link) => {
+    if (NodePath.isAbsolute(link.path)) return link;
+    if (!folder || !NodePath.isAbsolute(folder)) {
+      throw new Error(
+        `Cannot resolve relative owned link ${link.path}: saved catalog folder is not absolute.`,
+      );
     }
-    links.push({ path, target: link.target });
-  }
+    return { ...link, path: NodePath.resolve(folder, link.path) };
+  });
   return {
     folder,
-    groups: Array.isArray(data.groups)
-      ? (data.groups as unknown[]).filter((g): g is string => typeof g === "string")
-      : [],
+    groups: data.groups,
     links,
   };
 }
 
-export async function saveState(homeDir: string, state: CatalogState) {
-  await writeSkillStateAtomically(stateFilePath(homeDir), `${JSON.stringify(state, null, 2)}\n`);
+export async function saveState(stateDir: string, state: CatalogState) {
+  await writeSkillStateAtomically(stateFilePath(stateDir), `${JSON.stringify(state, null, 2)}\n`);
 }
 
 export function reconcileLinks({
@@ -423,11 +386,7 @@ export function toApplyResult({
     removed: result.applied.filter((e) => e.action === "removed" && !addedByPath.has(e.linkPath))
       .length,
     unchanged: plan.unchanged.length,
-    conflicts: plan.conflicts.map((c) => ({
-      skill: c.skill,
-      linkPath: c.linkPath,
-      detail: c.detail,
-    })),
+    conflicts: plan.conflicts,
     failed,
   };
 }
@@ -440,14 +399,16 @@ export async function runApply(
   {
     catalog,
     catalogDir,
-    homeDir,
+    stateDir,
+    targets,
     state,
     selected,
     windows,
   }: {
     readonly catalog: Catalog;
     readonly catalogDir: string;
-    readonly homeDir: string;
+    readonly stateDir: string;
+    readonly targets: ReadonlyArray<string>;
     readonly state: CatalogState;
     readonly selected: ReadonlyArray<string>;
     readonly windows: boolean;
@@ -457,14 +418,7 @@ export async function runApply(
   const explicitGroups = [...new Set(selected)];
   const resolved = resolveSelection(catalog, explicitGroups);
   await verifySkills(catalog, resolved.skills);
-  const dirs = [
-    ...new Set(
-      await readSkillsConcurrently(
-        targetDirs(homeDir, process.env, catalogDir),
-        canonicalSkillRoot,
-      ),
-    ),
-  ];
+  const dirs = [...new Set(await readSkillsConcurrently(targets, canonicalSkillRoot))];
   const savedPaths = await readSkillsConcurrently(state.links, async (link) =>
     NodePath.join(
       await canonicalSkillRoot(NodePath.dirname(link.path)),
@@ -490,7 +444,7 @@ export async function runApply(
     recordedLinks: canonicalState.links,
   });
   const result = await applyPlan(plan, { windows });
-  const failed = result.failed.map((f) => ({ linkPath: f.linkPath, error: f.error }));
+  const failed = [...result.failed];
   // A throwing verifier must not discard the operation result: record it as a
   // failure entry so counts are preserved and ownership is saved below.
   const ownedBefore = new Map(canonicalState.links.map((link) => [link.path, link.target]));
@@ -518,7 +472,7 @@ export async function runApply(
   const output = toApplyResult({ explicitGroups, plan, result, failed });
   // Save ownership before reporting failures so retry can recover.
   try {
-    await saveState(homeDir, { folder: catalogDir, groups: explicitGroups, links });
+    await saveState(stateDir, { folder: catalogDir, groups: explicitGroups, links });
   } catch (error) {
     const rollback = await rollbackApply(result, windows);
     const recovered = toApplyResult({

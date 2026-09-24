@@ -129,7 +129,12 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
   // The query atom is keyed by environment and source, so its cached status
   // always belongs to the acknowledged settings used by Apply and Update.
   const status = useEnvironmentQuery(
-    skillCatalogEnvironment.status({ environmentId, input: { expectedSource: configuredSource } }),
+    configuredSource
+      ? skillCatalogEnvironment.status({
+          environmentId,
+          input: { expectedSource: configuredSource },
+        })
+      : null,
   );
 
   const [draft, setDraft] = useState<string | null>(null);
@@ -187,7 +192,7 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
     reportFailure: false,
   });
 
-  const sourceMismatch = isSourceChangedError(status.error);
+  const sourceMismatch = isSourceChangedError(status.failure);
 
   async function saveSource() {
     if (busy) return;
@@ -302,7 +307,7 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
         <Input
           value={displayedSource}
           disabled={busy}
-          placeholder={DEFAULT_SERVER_SETTINGS.skillCatalogSource}
+          placeholder="https://github.com/your-team/skills.git or /path/to/catalog"
           autoComplete="off"
           spellCheck={false}
           className="font-mono"
@@ -346,13 +351,13 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
         <Button
           variant="outline"
           disabled={busy || displayedSource === DEFAULT_SERVER_SETTINGS.skillCatalogSource}
-          title="Fill in the default catalog source, then save."
+          title="Clear the catalog source, then save."
           onClick={() => {
             setDraft(DEFAULT_SERVER_SETTINGS.skillCatalogSource);
             setNotice(null);
           }}
         >
-          Reset to default
+          Clear source
         </Button>
         <Button
           variant="outline"
@@ -384,7 +389,12 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
           </div>
         </div>
       ) : null}
-      {status.data === null && !status.error ? (
+      {!configuredSource ? (
+        <p className="text-sm text-muted-foreground">
+          Choose and save a catalog source to get started.
+        </p>
+      ) : null}
+      {configuredSource && status.data === null && !status.error ? (
         <p className="text-sm text-muted-foreground">
           {status.isPending ? "Loading catalog status…" : "No catalog status yet."}
         </p>

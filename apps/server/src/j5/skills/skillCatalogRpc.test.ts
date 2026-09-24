@@ -10,7 +10,7 @@ import { afterEach, beforeEach, vi } from "vite-plus/test";
 
 import { layerTest as configLayerTest } from "../../config.ts";
 import * as ProcessRunner from "../../processRunner.ts";
-import { layerTest as settingsLayerTest } from "../../serverSettings.ts";
+import { layerTest as settingsLayerTest, ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { makeProviderRegistryMock } from "../../provider/testUtils/providerRegistryMock.ts";
 import * as Installer from "./skillCatalogInstaller.ts";
@@ -60,7 +60,24 @@ const fixture = Effect.gen(function* () {
   ]);
   const layer = Layer.mergeAll(
     configLayerTest(root, stateDir),
-    settingsLayerTest({ skillCatalogSource: catalogDir }),
+    settingsLayerTest({
+      skillCatalogSource: catalogDir,
+      providerInstances: {
+        [ProviderInstanceId.make("codex")]: {
+          driver: ProviderDriverKind.make("codex"),
+          enabled: true,
+          environment: [
+            { name: "HOME", value: homeDir },
+            { name: "USERPROFILE", value: homeDir },
+          ],
+        },
+        [ProviderInstanceId.make("claudeAgent")]: {
+          driver: ProviderDriverKind.make("claudeAgent"),
+          enabled: true,
+          config: { homePath: path.join(homeDir, ".claude") },
+        },
+      },
+    }),
     Layer.succeed(ProviderRegistry, {
       ...providers,
       refreshInstance: (id) =>
@@ -77,9 +94,11 @@ const fixture = Effect.gen(function* () {
         }).pipe(Effect.orDie),
     }),
   ).pipe(Layer.provideMerge(NodeServices.layer));
-  const handlers = yield* makeSkillCatalogRpcHandlers({
-    observe: (_, effect) => effect,
-    homeDir,
+  const { handlers, settings } = yield* Effect.gen(function* () {
+    return {
+      handlers: yield* makeSkillCatalogRpcHandlers({ observe: (_, effect) => effect }),
+      settings: yield* ServerSettingsService,
+    };
   }).pipe(Effect.provide(layer));
   return {
     fs,
@@ -92,10 +111,41 @@ const fixture = Effect.gen(function* () {
     discovered,
     refreshes,
     handlers,
+    settings,
   };
 });
 
 describe("skill catalog RPC handlers", () => {
+  it.effect("honors default enablement and legacy disabled flags for catalog destinations", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      yield* f.settings.updateSettings({
+        providerInstances: {
+          [ProviderInstanceId.make("codex")]: {
+            driver: ProviderDriverKind.make("codex"),
+            environment: [
+              { name: "HOME", value: f.homeDir, sensitive: false },
+              { name: "USERPROFILE", value: f.homeDir, sensitive: false },
+            ],
+          },
+          [ProviderInstanceId.make("claudeAgent")]: {
+            driver: ProviderDriverKind.make("claudeAgent"),
+            enabled: true,
+            config: { enabled: false, homePath: f.path.join(f.homeDir, ".claude") },
+          },
+        },
+      });
+      const result = yield* f.handlers["j5.skills.apply"]({
+        expectedSource: f.catalogDir,
+        groups: ["core"],
+      });
+      assert.equal(result.installed, 1);
+      assert.isTrue(
+        yield* f.fs.exists(f.path.join(f.homeDir, ".agents", "skills", "explain", "SKILL.md")),
+      );
+      assert.isFalse(yield* f.fs.exists(f.path.join(f.homeDir, ".claude", "skills", "explain")));
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
   it.effect("rejects mismatched sources for status, apply and update", () =>
     Effect.gen(function* () {
       const { handlers, homeDir, fs } = yield* fixture;
@@ -109,6 +159,7 @@ describe("skill catalog RPC handlers", () => {
         const failure = yield* Effect.flip(operation);
         assert.equal(failure._tag, "SkillCatalogError");
         assert.match(failure.message, /source changed/i);
+        if (failure._tag === "SkillCatalogError") assert.equal(failure.reason, "source-changed");
       }
       assert.isFalse(yield* fs.exists(homeDir));
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),

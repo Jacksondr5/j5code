@@ -1,21 +1,28 @@
-import type { SkillCatalogApplyResult } from "@t3tools/contracts";
+import { SkillCatalogError, type SkillCatalogApplyResult } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+
+const isSkillCatalogError = Schema.is(Schema.Struct(SkillCatalogError.fields));
 
 /**
  * Pure presentation helpers for Settings → Skills. The component owns
  * environment selection and RPC wiring; everything testable lives here.
  */
 
-/** A source edit is saveable only when non-blank and different from configured. */
+/** A source edit is saveable when different from configured; blank disables the catalog. */
 export function isSourceSaveable(draft: string, configured: string): boolean {
   const trimmed = draft.trim();
-  return trimmed.length > 0 && trimmed !== configured;
+  return trimmed !== configured;
 }
 
-/** Human summary of an apply result: "Installed 3 links, removed 1, 5 unchanged." */
+/** Surface blocked installations before the counts, including partial success. */
 export function summarizeApplyResult(
-  result: Pick<SkillCatalogApplyResult, "installed" | "removed" | "unchanged">,
+  result: Pick<SkillCatalogApplyResult, "installed" | "removed" | "unchanged" | "conflicts">,
 ): string {
-  return `Installed ${result.installed} links, removed ${result.removed}, ${result.unchanged} unchanged.`;
+  const counts = `Installed ${result.installed} links, removed ${result.removed}, ${result.unchanged} unchanged.`;
+  const blocked = result.conflicts.length;
+  return blocked > 0
+    ? `${blocked} skill ${blocked === 1 ? "link was" : "links were"} blocked by existing files or links. ${counts}`
+    : counts;
 }
 
 /**
@@ -23,20 +30,7 @@ export function summarizeApplyResult(
  * tag instead of instanceof so a foreign bundle copy still matches.
  */
 export function extractPartialApplyResult(cause: unknown): SkillCatalogApplyResult | undefined {
-  if (typeof cause !== "object" || cause === null) return undefined;
-  const tagged = cause as { readonly _tag?: unknown; readonly result?: unknown };
-  if (tagged._tag !== "SkillCatalogError") return undefined;
-  const result = tagged.result as Partial<SkillCatalogApplyResult> | undefined;
-  if (typeof result !== "object" || result === null) return undefined;
-  if (
-    typeof result.installed !== "number" ||
-    typeof result.removed !== "number" ||
-    typeof result.unchanged !== "number" ||
-    !Array.isArray(result.selectedGroups)
-  ) {
-    return undefined;
-  }
-  return result as SkillCatalogApplyResult;
+  return isSkillCatalogError(cause) ? cause.result : undefined;
 }
 
 /**
@@ -53,8 +47,8 @@ export function pruneSelectedGroups(
 }
 
 /** Whether a status error is the stale-page guard asking for a source reload. */
-export function isSourceChangedError(error: string | null): boolean {
-  return /source changed/i.test(error ?? "");
+export function isSourceChangedError(error: unknown): boolean {
+  return isSkillCatalogError(error) && error.reason === "source-changed";
 }
 
 /** Scope key for per-catalog UI state: selections and results belong to it. */
