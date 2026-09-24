@@ -59,7 +59,9 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   release history URL (`Jacksondr5/j5code/releases`), the pre-React boot shell in
   `apps/web/index.html`, and the fork-owned `apps/web/src/j5/branding/J5Wordmark.tsx` connected at
   the sidebar's small `SidebarChrome.tsx` seam (it takes an optional `className`, so the brand uses
-  upstream's `h-[1cap]` sizing).
+  upstream's `h-[1cap]` sizing), and the assistant author heading in
+  `components/chat/MessagesTimeline.tsx` `AssistantTimelineRow`, which reads `APP_BASE_NAME` from
+  `branding.ts` instead of upstream's literal "T3 Code".
 - New upstream files: the list above names only known sites. On every advance, also grep the files
   upstream added since the old pin for `t3code`, `T3 Code`, `.t3`, `T3CODE_HOME`, `pingdotgg`,
   `t3.codes/install`, and `npx t3`, then rebrand identity sites and leave deliberate internals and

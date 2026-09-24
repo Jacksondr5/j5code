@@ -406,6 +406,7 @@ import { clearDraftAgent, draftAgentPersonaLaunch } from "../j5/agents/agentDraf
 import {
   buildSquadronPickerEntries,
   resolveCurrentThreadNewThreadDestination,
+  resolveHeaderSquadronRef,
   squadronDraftScopeKey,
   startSquadronDraft,
 } from "../j5/squadron/SquadronPicker.logic";
@@ -2367,11 +2368,21 @@ export default function ChatView(props: ChatViewProps) {
   const newThreadDestination = useMemo(
     () =>
       resolveCurrentThreadNewThreadDestination(
-        durableSquadronHome === null ? null : { environmentId, squadronId: durableSquadronHome.id },
+        resolveHeaderSquadronRef({
+          environmentId,
+          durableHomeId: durableSquadronHome?.id ?? null,
+          draftSquadronId: draftSquadron.squadronId,
+        }),
         squadronDirectoryStatus,
         squadronPickerEntries,
       ),
-    [environmentId, durableSquadronHome?.id, squadronDirectoryStatus, squadronPickerEntries],
+    [
+      environmentId,
+      durableSquadronHome?.id,
+      draftSquadron.squadronId,
+      squadronDirectoryStatus,
+      squadronPickerEntries,
+    ],
   );
   // Environment settings with the active project's overrides applied.
   const activeProjectSettings = useMemo(
