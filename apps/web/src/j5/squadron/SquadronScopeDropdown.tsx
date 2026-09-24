@@ -192,7 +192,9 @@ export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
             <>
               <MenuSeparator />
               <MenuGroup>
-                <MenuGroupLabel className="truncate">{selected.name}</MenuGroupLabel>
+                <MenuGroupLabel>
+                  <span className="block truncate">{selected.name}</span>
+                </MenuGroupLabel>
                 <MenuItem
                   disabled={actionsState.kind === "disabled"}
                   onClick={() => openAction("rename")}
