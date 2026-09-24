@@ -443,41 +443,31 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
                                   <SkillRecordDetails skill={first} />
                                 </TooltipPopup>
                               </Tooltip>
-                              {skillLinkUnavailableReason(row.origin) ? (
-                                <Tooltip>
-                                  <TooltipTrigger
-                                    render={
-                                      <span
-                                        tabIndex={0}
-                                        className="text-xs text-muted-foreground"
-                                      />
-                                    }
-                                  >
-                                    Link unavailable
-                                  </TooltipTrigger>
-                                  <TooltipPopup className="max-w-md">
-                                    {skillLinkUnavailableReason(row.origin)}
-                                  </TooltipPopup>
-                                </Tooltip>
-                              ) : (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  disabled={!connected}
-                                  onClick={() =>
-                                    setLinkSelection({
-                                      source: {
-                                        instanceId: selectedRecords[0]!.provider.instanceId,
-                                        path: first.path,
-                                        name: first.name,
-                                      },
-                                      origin: row.origin,
-                                    })
-                                  }
-                                >
-                                  Use in…
-                                </Button>
-                              )}
+                              {!skillLinkUnavailableReason(row.origin) ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {(["link", "unlink"] as const).map((action) => (
+                                    <Button
+                                      key={action}
+                                      variant="ghost"
+                                      size="sm"
+                                      disabled={!connected}
+                                      onClick={() =>
+                                        setLinkSelection({
+                                          action,
+                                          source: {
+                                            instanceId: selectedRecords[0]!.provider.instanceId,
+                                            path: first.path,
+                                            name: first.name,
+                                          },
+                                          origin: row.origin,
+                                        })
+                                      }
+                                    >
+                                      {action === "link" ? "Link…" : "Unlink…"}
+                                    </Button>
+                                  ))}
+                                </div>
+                              ) : null}
                             </TableCell>
                             {displayedProviders.map((provider) => {
                               const records = row.records.get(provider.instanceId);

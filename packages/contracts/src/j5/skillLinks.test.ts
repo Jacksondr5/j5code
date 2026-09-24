@@ -2,9 +2,11 @@ import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 import {
   ManagedSkillLink,
+  SkillDelete,
   SkillLinkCreate,
   SkillLinkMutationResult,
   SkillLinkRequest,
+  SkillLinkUnlinkBatch,
 } from "./skillLinks.ts";
 
 const decodeRequest = Schema.decodeUnknownSync(SkillLinkRequest);
@@ -18,6 +20,31 @@ const request = {
   projectId: "project-1",
 };
 describe("skill link wire contracts", () => {
+  it("requires the source and inspected folder identity for permanent deletion", () => {
+    const decode = Schema.decodeUnknownSync(SkillDelete);
+    const deletion = {
+      source: request.source,
+      expectedPath: "C:\\skills\\review",
+      expectedIdentity: "1:2:3:4",
+    };
+    expect(decode(deletion)).toEqual(deletion);
+    expect(() => decode({ source: request.source })).toThrow();
+    expect(() => decode({ ...deletion, expectedIdentity: "" })).toThrow();
+  });
+  it("requires inspected link identity and bounds unlink batches", () => {
+    const decode = Schema.decodeUnknownSync(SkillLinkUnlinkBatch);
+    const link = {
+      targetInstanceId: "claude-work",
+      scope: "user",
+      expectedSourcePath: "C:\\shared\\review",
+      expectedDestinationPath: "C:\\skills\\review",
+      expectedIdentity: "1:2:3:4",
+    };
+    expect(decode({ links: [link] })).toEqual({ links: [link] });
+    expect(() => decode({ links: [] })).toThrow();
+    expect(() => decode({ links: Array.from({ length: 101 }, () => ({ ...link })) })).toThrow();
+    expect(() => decode({ links: [{ ...link, expectedIdentity: "" }] })).toThrow();
+  });
   it("requires a source record and provider instance and preserves remote Windows paths", () => {
     expect(decodeRequest(request)).toEqual(request);
     expect(() => decodeRequest({ ...request, scope: "environment" })).toThrow();

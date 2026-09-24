@@ -2,7 +2,13 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import { ManagedSkillLink, type SkillLinkPreview, type SkillLinkRequest } from "@t3tools/contracts";
+import {
+  ManagedSkillLink,
+  type SkillDeletePreview,
+  type SkillLinkPreview,
+  type SkillLinkRequest,
+  type SkillLinkUnlink,
+} from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { parseSkillFrontmatter } from "../../provider/Drivers/ClaudeSkills.ts";
 import { applyPlan } from "./skillCatalogInstaller.ts";
@@ -158,6 +164,64 @@ export async function previewSkillLink(
   };
 }
 
+export async function canonicalSkillFolder(source: string) {
+  const info = await NodeFSP.stat(source);
+  return NodeFSP.realpath(info.isDirectory() ? source : NodePath.dirname(source));
+}
+
+/** Preserve the final path component so a symlink can never authorize deleting its source. */
+export async function previewSkillDeletion(source: string): Promise<SkillDeletePreview> {
+  const folder = NodePath.basename(source) === "SKILL.md" ? NodePath.dirname(source) : source;
+  const expectedPath = NodePath.join(
+    await NodeFSP.realpath(NodePath.dirname(folder)),
+    NodePath.basename(folder),
+  );
+  const info = await NodeFSP.lstat(expectedPath);
+  if (!info.isDirectory() || info.isSymbolicLink())
+    throw new Error("Only an original skill folder can be deleted. Use Unlink for links.");
+  if (!(await NodeFSP.stat(NodePath.join(expectedPath, "SKILL.md"))).isFile())
+    throw new Error("The folder no longer contains a skill.");
+  return { expectedPath, expectedIdentity: await skillLinkIdentity(expectedPath) };
+}
+
+export async function deleteSkillDirectory(expected: SkillDeletePreview) {
+  const checked = await previewSkillDeletion(expected.expectedPath);
+  if (
+    checked.expectedPath !== expected.expectedPath ||
+    checked.expectedIdentity !== expected.expectedIdentity
+  )
+    throw new Error("The skill folder changed. Review the deletion again.");
+  await NodeFSP.rm(checked.expectedPath, { recursive: true });
+}
+
+/** Read each unique provider root once; only resolve directory links, never parse skill contents. */
+export async function inspectSkillLinks(root: string, sourcePath: string) {
+  const entries = await NodeFSP.readdir(root, { withFileTypes: true }).catch((error: unknown) => {
+    if (isMissing(error)) return [];
+    throw error;
+  });
+  const found = await readSkillsConcurrently(
+    entries.filter((entry) => entry.isSymbolicLink()),
+    async (entry) => {
+      const destination = NodePath.join(root, entry.name);
+      const target = await NodeFSP.realpath(destination).catch((error: unknown) => {
+        if (isMissing(error)) return undefined;
+        throw error;
+      });
+      return target === sourcePath
+        ? [
+            {
+              expectedSourcePath: sourcePath,
+              expectedDestinationPath: destination,
+              expectedIdentity: await skillLinkIdentity(destination),
+            },
+          ]
+        : [];
+    },
+  );
+  return found.flat();
+}
+
 async function linkStatus(link: RecordedLink): Promise<ManagedSkillLink["status"]> {
   const seen = await linkDestination(link.destinationPath);
   if (seen.kind === "absent") return "missing";
@@ -290,4 +354,42 @@ export async function removeManagedSkillLink(
     links.filter((entry) => entry.id !== id),
   );
   return link;
+}
+
+/** Remove only the exact directory link inspected by the user, including untracked links. */
+export async function unlinkSkill(stateDir: string, request: SkillLinkUnlink, windows: boolean) {
+  const destination = request.expectedDestinationPath;
+  const links = await loadManagedSkillLinks(stateDir);
+  const managed = links.find((link) => link.destinationPath === destination);
+  if (managed) {
+    if (
+      managed.sourcePath !== request.expectedSourcePath ||
+      managed.identity.split(":").slice(0, 3).join(":") !== request.expectedIdentity
+    )
+      throw new Error("The recorded link was replaced or changed. It will not be removed.");
+    return removeManagedSkillLink(stateDir, managed.id, windows);
+  }
+  if ((await canonicalSkillRoot(NodePath.dirname(destination))) !== NodePath.dirname(destination))
+    throw new Error("Destination changed. Preview again.");
+  const seen = await linkDestination(destination);
+  if (
+    seen.kind !== "link" ||
+    (await skillLinkIdentity(destination)) !== request.expectedIdentity ||
+    (await NodeFSP.realpath(destination)) !== request.expectedSourcePath
+  )
+    throw new Error("The link changed since preview. Preview again.");
+  const result = await applyPlan(
+    {
+      additions: [],
+      removals: [
+        {
+          skill: NodePath.basename(destination),
+          linkPath: destination,
+          target: seen.target,
+        },
+      ],
+    },
+    { windows },
+  );
+  if (result.failed.length) throw new Error(result.failed[0]!.error);
 }

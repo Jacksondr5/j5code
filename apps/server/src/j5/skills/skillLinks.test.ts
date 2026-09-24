@@ -10,7 +10,11 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import * as Yaml from "yaml";
 import {
+  previewSkillDeletion,
+  deleteSkillDirectory,
   canonicalSkillRoot,
+  inspectSkillLinks,
+  unlinkSkill,
   createManagedSkillLink,
   listManagedSkillLinks,
   previewSkillLink,
@@ -54,6 +58,32 @@ async function create(windows = false) {
 }
 
 describe("managed skill links", () => {
+  it("deletes the original folder and assets without following nested links or deleting siblings", async () => {
+    const outside = NodePath.join(root, "keep.txt");
+    await NodeFSP.writeFile(outside, "keep");
+    await NodeFSP.mkdir(NodePath.join(source, "assets"));
+    await NodeFSP.writeFile(NodePath.join(source, "assets", "data.txt"), "delete");
+    await NodeFSP.symlink(outside, NodePath.join(source, "external.txt"));
+    const checked = await previewSkillDeletion(NodePath.join(source, "SKILL.md"));
+    expect(checked.expectedPath).toBe(source);
+    expect(await NodeFSP.readFile(outside, "utf8")).toBe("keep");
+    await deleteSkillDirectory(checked);
+    await expect(NodeFSP.lstat(source)).rejects.toThrow(/ENOENT/);
+    expect(await NodeFSP.readFile(outside, "utf8")).toBe("keep");
+  });
+  it("rejects links and replaced directories after a deletion preview", async () => {
+    const checked = await previewSkillDeletion(source);
+    const saved = `${source}-saved`;
+    await NodeFSP.rename(source, saved);
+    await NodeFSP.symlink(saved, source, "dir");
+    await expect(deleteSkillDirectory(checked)).rejects.toThrow(/Use Unlink/);
+    await NodeFSP.unlink(source);
+    await NodeFSP.mkdir(source);
+    await NodeFSP.writeFile(NodePath.join(source, "SKILL.md"), contents);
+    await expect(deleteSkillDirectory(checked)).rejects.toThrow(/changed/);
+    expect(await NodeFSP.readFile(NodePath.join(source, "SKILL.md"), "utf8")).toBe(contents);
+    expect(await NodeFSP.readFile(NodePath.join(saved, "SKILL.md"), "utf8")).toBe(contents);
+  });
   it("parses frontmatter once while retaining raw compatibility fields and validation", async () => {
     await NodeFSP.writeFile(
       NodePath.join(source, "SKILL.md"),
@@ -72,6 +102,31 @@ describe("managed skill links", () => {
     );
     await expect(previewSkillLink(source, destination, "codex")).rejects.toThrow(
       "Codex requires nonempty name and description",
+    );
+  });
+  it("inspects only matching links without reading skill contents and unlinks a relative external link", async () => {
+    await NodeFSP.mkdir(destination, { recursive: true });
+    const link = NodePath.join(destination, "alias");
+    await NodeFSP.symlink(NodePath.relative(destination, source), link, "dir");
+    await NodeFSP.mkdir(NodePath.join(destination, "original"));
+    await NodeFSP.symlink(root, NodePath.join(destination, "unrelated"), "dir");
+    const reads = vi.spyOn(NodeFSP, "readFile");
+    const listings = vi.spyOn(NodeFSP, "readdir");
+    const found = await inspectSkillLinks(destination, source);
+    expect(listings).toHaveBeenCalledOnce();
+    expect(reads).not.toHaveBeenCalled();
+    expect(found).toHaveLength(1);
+    expect(found[0]!.expectedDestinationPath).toBe(link);
+    await unlinkSkill(
+      state,
+      { ...found[0]!, targetInstanceId: request.targetInstanceId, scope: "user" },
+      false,
+    );
+    await expect(NodeFSP.lstat(link)).rejects.toThrow(/ENOENT/);
+    expect(await NodeFSP.readFile(NodePath.join(source, "SKILL.md"), "utf8")).toBe(contents);
+    expect((await NodeFSP.lstat(NodePath.join(destination, "original"))).isDirectory()).toBe(true);
+    expect((await NodeFSP.lstat(NodePath.join(destination, "unrelated"))).isSymbolicLink()).toBe(
+      true,
     );
   });
   it("preserves a provider-discovered folder name and explains Claude's command name", async () => {
@@ -204,6 +259,21 @@ describe("managed skill links", () => {
     expect((await listManagedSkillLinks(state))[0]!.status).toBe("linked");
     await removeManagedSkillLink(state, record.id, false);
     expect(await listManagedSkillLinks(state)).toEqual([]);
+  });
+  it("unlinks an inspected managed link saved with the previous identity format", async () => {
+    const { record } = await create();
+    const file = NodePath.join(state, "skill-links.json");
+    const records = JSON.parse(await NodeFSP.readFile(file, "utf8"));
+    records[0].identity += ":old-ctime";
+    await NodeFSP.writeFile(file, JSON.stringify(records));
+    const [inspected] = await inspectSkillLinks(destination, source);
+    await unlinkSkill(
+      state,
+      { ...inspected!, targetInstanceId: record.targetInstanceId, scope: record.scope },
+      false,
+    );
+    expect(await listManagedSkillLinks(state)).toEqual([]);
+    expect(await NodeFSP.readFile(NodePath.join(source, "SKILL.md"), "utf8")).toBe(contents);
   });
   it("rejects a project root redirected outside the project but allows an internal alias", async () => {
     const project = NodePath.join(root, "project");

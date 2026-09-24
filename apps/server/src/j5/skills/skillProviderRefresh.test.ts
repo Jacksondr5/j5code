@@ -21,7 +21,12 @@ it.effect("refreshes only selected instances including pending workspace discove
       skills: [],
       slashCommands: [],
     });
-    const selected = snapshot("selected");
+    const selected = {
+      ...snapshot("selected"),
+      workspaceSnapshots: [
+        { cwd: "/cached", checkedAt: "2026-09-24T00:00:00Z", skills: [], slashCommands: [] },
+      ],
+    };
     const calls: string[] = [];
     const registry = {
       ...makeProviderRegistryMock([selected, snapshot("unrelated")]),
@@ -42,8 +47,13 @@ it.effect("refreshes only selected instances including pending workspace discove
           return [];
         }),
     };
-    yield* refreshSkillProviders(registry, [selected.instanceId]);
-    assert.deepStrictEqual(calls, ["selected", "selected:/pending"]);
+    yield* refreshSkillProviders(registry, [selected.instanceId], ["/pending", "/selected"]);
+    assert.deepStrictEqual(calls, [
+      "selected",
+      "selected:/pending",
+      "selected:/cached",
+      "selected:/selected",
+    ]);
   }),
 );
 

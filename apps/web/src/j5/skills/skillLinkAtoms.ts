@@ -6,6 +6,18 @@ import {
 import { connectionAtomRuntime } from "../../connection/runtime";
 
 export const skillLinkEnvironment = {
+  deletePreview: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "environment-data:j5-skill-links:delete-preview",
+    tag: J5_SKILL_LINK_WS_METHODS.deletePreview,
+  }),
+  delete: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "environment-data:j5-skill-links:delete",
+    tag: J5_SKILL_LINK_WS_METHODS.delete,
+  }),
+  inspect: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "environment-data:j5-skill-links:inspect",
+    tag: J5_SKILL_LINK_WS_METHODS.inspect,
+  }),
   list: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "environment-data:j5-skill-links:list",
     tag: J5_SKILL_LINK_WS_METHODS.list,
@@ -22,5 +34,9 @@ export const skillLinkEnvironment = {
   remove: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "environment-data:j5-skill-links:remove",
     tag: J5_SKILL_LINK_WS_METHODS.remove,
+  }),
+  unlink: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "environment-data:j5-skill-links:unlink",
+    tag: J5_SKILL_LINK_WS_METHODS.unlink,
   }),
 };

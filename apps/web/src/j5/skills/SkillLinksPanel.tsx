@@ -3,8 +3,11 @@ import type {
   EnvironmentId,
   ProjectId,
   ServerProvider,
+  SkillDeletePreview,
   SkillLinkPreview,
   SkillLinkRequest,
+  ExistingSkillLink,
+  SkillLinkInspect,
 } from "@t3tools/contracts";
 import type { SkillOrigin } from "@t3tools/shared/j5/skillInventory";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -38,6 +41,7 @@ function messageOf(error: unknown) {
 export type SkillLinkSelection = {
   readonly source: SkillLinkRequest["source"];
   readonly origin: SkillOrigin;
+  readonly action: "link" | "unlink";
 };
 type Props = {
   readonly environmentId: EnvironmentId;
@@ -81,7 +85,17 @@ export function SkillLinksPanel(props: Props) {
   }
   return (
     <>
-      {props.selection ? (
+      {props.selection?.action === "unlink" ? (
+        <UnlinkSkillDialog
+          key={JSON.stringify([props.selection, props.projectId])}
+          {...props}
+          selection={props.selection}
+          onUnlinked={(message) => {
+            setMessage(message);
+            links.refresh();
+          }}
+        />
+      ) : props.selection ? (
         <LinkSkillDialog
           key={JSON.stringify([props.selection, props.projectId])}
           {...props}
@@ -106,8 +120,9 @@ export function SkillLinksPanel(props: Props) {
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Links created here in this environment. Unlink removes only the recorded link; shared
-          source files stay in place.
+          Links created here remain available after restarting. Use Unlink on a skill in the
+          inventory to remove existing links from either provider or both. Source files stay in
+          place.
         </p>
         {message ? (
           <p role="status" className="text-sm">
@@ -255,10 +270,10 @@ export function LinkSkillDialog(
     >
       <DialogPopup className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Use in…</DialogTitle>
+          <DialogTitle>Link skill</DialogTitle>
           <DialogDescription>
-            Link {props.selection.source.name} to a provider in this environment. The entire skill
-            folder stays shared.
+            Link {props.selection.source.name} with a provider in this environment by sharing the
+            entire skill folder. Edits are shared.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="grid gap-3">
@@ -360,6 +375,256 @@ export function LinkSkillDialog(
           >
             {busy ? "Linking…" : "Link skill"}
           </Button>
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+function UnlinkSkillDialog(
+  props: Props & {
+    readonly selection: SkillLinkSelection;
+    readonly onUnlinked: (message: string) => void;
+  },
+) {
+  const inspect = useAtomCommand(skillLinkEnvironment.inspect, { reportFailure: false });
+  const unlink = useAtomCommand(skillLinkEnvironment.unlink, { reportFailure: false });
+  const previewDeletion = useAtomCommand(skillLinkEnvironment.deletePreview, {
+    reportFailure: false,
+  });
+  const deleteSkill = useAtomCommand(skillLinkEnvironment.delete, { reportFailure: false });
+  const [deletion, setDeletion] = useState<{
+    request: SkillLinkInspect;
+    preview: SkillDeletePreview;
+  } | null>(null);
+  const request = useMemo(
+    () =>
+      props.connected
+        ? {
+            source: props.selection.source,
+            ...(props.projectId ? { projectId: props.projectId } : {}),
+          }
+        : null,
+    [props.connected, props.selection.source, props.projectId],
+  );
+  const [inspection, setInspection] = useState<{
+    request: SkillLinkInspect;
+    options: ReadonlyArray<ExistingSkillLink> | null;
+    errors: string[];
+  } | null>(null);
+  const checkedDeletion = deletion?.request === request ? deletion.preview : null;
+  const options = inspection?.request === request ? inspection.options : null;
+  const errors = inspection?.request === request ? inspection.errors : [];
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const running = useRef(false);
+  useEffect(() => {
+    let active = true;
+    if (request)
+      void inspect({ environmentId: props.environmentId, input: request }).then((result) => {
+        if (!active) return;
+        setInspection({
+          request,
+          options: result._tag === "Success" ? result.value : null,
+          errors: result._tag === "Success" ? [] : [messageOf(squashAtomCommandFailure(result))],
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, [inspect, props.environmentId, request]);
+
+  async function remove(selected: ReadonlyArray<ExistingSkillLink>) {
+    if (running.current || !request) return;
+    running.current = true;
+    setBusy(true);
+    setInspection((previous) => (previous ? { ...previous, errors: [] } : previous));
+    try {
+      const result = await unlink({
+        environmentId: props.environmentId,
+        input: { links: selected.map((option) => option.request) },
+      });
+      if (result._tag !== "Success") {
+        setInspection((previous) =>
+          previous
+            ? { ...previous, errors: [messageOf(squashAtomCommandFailure(result))] }
+            : previous,
+        );
+        return;
+      }
+      const removed = new Set(result.value.removedPaths);
+      setInspection((previous) =>
+        previous
+          ? {
+              ...previous,
+              options:
+                previous.options?.filter(
+                  (entry) => !removed.has(entry.request.expectedDestinationPath),
+                ) ?? null,
+              errors: result.value.failed.map((failure) => `${failure.path}: ${failure.message}`),
+            }
+          : previous,
+      );
+      const summary = `${removed.size} ${removed.size === 1 ? "link" : "links"} removed. Source files stay in place.${result.value.refreshFailed ? " Discovery refresh failed; retry Refresh." : " Running sessions may need refreshing or restarting."}`;
+      setMessage(summary);
+      props.onUnlinked(summary);
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function prepareDeletion() {
+    if (running.current || !request) return;
+    running.current = true;
+    setBusy(true);
+    setInspection((previous) => (previous ? { ...previous, errors: [] } : previous));
+    try {
+      const result = await previewDeletion({ environmentId: props.environmentId, input: request });
+      if (result._tag === "Success") setDeletion({ request, preview: result.value });
+      else
+        setInspection((previous) =>
+          previous
+            ? { ...previous, errors: [messageOf(squashAtomCommandFailure(result))] }
+            : previous,
+        );
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function permanentlyDelete() {
+    if (running.current || !request || !checkedDeletion) return;
+    running.current = true;
+    setBusy(true);
+    try {
+      const result = await deleteSkill({
+        environmentId: props.environmentId,
+        input: { ...request, ...checkedDeletion },
+      });
+      if (result._tag === "Success") {
+        props.onUnlinked(result.value.message);
+        props.onClose();
+      } else {
+        setDeletion(null);
+        setInspection((previous) =>
+          previous
+            ? { ...previous, errors: [messageOf(squashAtomCommandFailure(result))] }
+            : previous,
+        );
+      }
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !busy) props.onClose();
+      }}
+    >
+      <DialogPopup className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>
+            {checkedDeletion ? "Delete" : "Unlink"} {props.selection.source.name}
+          </DialogTitle>
+          <DialogDescription>
+            {checkedDeletion
+              ? "Permanently delete the original skill and its files."
+              : "Remove a provider link or all links shown here, including links created elsewhere. Source files stay in place. Providers sharing a destination are unlinked together."}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogPanel className="grid gap-3">
+          {checkedDeletion ? (
+            <>
+              <p role="alert" className="text-sm text-destructive-foreground">
+                This permanently deletes this skill folder and every file inside it from this
+                environment’s machine. This cannot be undone. Other providers linking to this folder
+                will lose access.
+              </p>
+              <p className="break-all font-mono text-xs">{checkedDeletion.expectedPath}</p>
+            </>
+          ) : (
+            <>
+              {options?.map((option) => (
+                <div
+                  key={option.request.expectedDestinationPath}
+                  className="flex items-start justify-between gap-3 text-sm"
+                >
+                  <div className="min-w-0 break-words">
+                    <p className="font-medium">{option.label}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {option.request.expectedDestinationPath}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy || !props.connected}
+                    aria-label={`Unlink ${option.label}`}
+                    onClick={() => void remove([option])}
+                  >
+                    Unlink
+                  </Button>
+                </div>
+              ))}
+              {!props.connected ? (
+                <p>Environment disconnected.</p>
+              ) : options === null && errors.length === 0 ? (
+                <p>Checking existing links…</p>
+              ) : options?.length === 0 ? (
+                <div className="grid gap-2">
+                  <p>No removable links found.</p>
+                  {props.selection.origin === "Personal" || props.selection.origin === "Project" ? (
+                    <>
+                      <p className="text-sm text-muted-foreground">
+                        An original skill folder must be deleted to remove it from the provider.
+                      </p>
+                      <Button
+                        variant="destructive"
+                        disabled={busy || !props.connected}
+                        onClick={() => void prepareDeletion()}
+                      >
+                        {busy ? "Checking…" : "Delete skill…"}
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+              {message ? <p role="status">{message}</p> : null}
+            </>
+          )}
+          {errors.map((error) => (
+            <p key={error} role="alert" className="text-sm text-destructive-foreground">
+              {error}
+            </p>
+          ))}
+        </DialogPanel>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={checkedDeletion ? () => setDeletion(null) : props.onClose}
+          >
+            {checkedDeletion ? "Cancel" : "Close"}
+          </Button>
+          {checkedDeletion ? (
+            <Button
+              variant="destructive"
+              disabled={busy || !props.connected}
+              onClick={() => void permanentlyDelete()}
+            >
+              {busy ? "Deleting…" : "Permanently delete"}
+            </Button>
+          ) : options && options.length > 1 ? (
+            <Button disabled={busy || !props.connected} onClick={() => void remove(options)}>
+              {busy ? "Unlinking…" : "Unlink all"}
+            </Button>
+          ) : null}
         </DialogFooter>
       </DialogPopup>
     </Dialog>

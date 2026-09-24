@@ -96,6 +96,7 @@ const fixture = Effect.gen(function* () {
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(Path.Path, path),
     );
+  const homeVar = (yield* HostProcessPlatform) === "win32" ? "USERPROFILE" : "HOME";
   const layer = Layer.mergeAll(
     configLayer(root, stateDir),
     settingsLayer({
@@ -103,6 +104,7 @@ const fixture = Effect.gen(function* () {
         [sourceId]: {
           driver: ProviderDriverKind.make("codex"),
           config: { homePath: path.join(root, "custom-codex") },
+          environment: [{ name: homeVar, value: root, sensitive: false }],
         },
         [targetId]: {
           driver: ProviderDriverKind.make("claudeAgent"),
@@ -161,6 +163,10 @@ const fixture = Effect.gen(function* () {
     beforeRefresh,
     settings,
     handlers,
+    reopen: makeSkillLinkRpcHandlers({
+      observe: (_, effect) => effect,
+      getProjectRoot: (id) => Effect.succeed(id === projectId ? cwd : undefined),
+    }).pipe(Effect.provide(layer)),
     request,
     prepare,
   };
@@ -177,6 +183,243 @@ const run = <A, E>(
 ) => effect.pipe(Effect.provide(NodeServices.layer), Effect.scoped);
 
 describe("skill link RPCs", () => {
+  it.effect(
+    "deletes a confirmed original skill, refreshes only affected providers outside the permit, and reports refresh failure",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const f = yield* fixture;
+          const folder = f.path.join(f.claudeHome, "skills", "example");
+          yield* f.fs.makeDirectory(f.path.dirname(folder), { recursive: true });
+          yield* f.fs.rename(f.path.dirname(f.source), folder);
+          const request = {
+            source: {
+              instanceId: targetId,
+              path: f.path.join(folder, "SKILL.md"),
+              name: "example",
+            },
+          };
+          yield* Ref.update(f.snapshots, (all) =>
+            all.map((entry) =>
+              entry.instanceId === targetId
+                ? { ...entry, skills: [{ ...f.base.skills[0]!, path: request.source.path }] }
+                : entry,
+            ),
+          );
+          const handlers = yield* f.reopen;
+          const preview = yield* handlers["j5.skills.links.deletePreview"](request);
+          assert.equal(preview.expectedPath, folder);
+          assert.isTrue(yield* f.fs.exists(request.source.path));
+          const changed = yield* Effect.flip(
+            handlers["j5.skills.links.delete"]({
+              ...request,
+              ...preview,
+              expectedIdentity: "changed",
+            }),
+          );
+          assert.match(changed.message, /changed/);
+          assert.isTrue(yield* f.fs.exists(request.source.path));
+          const started = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          yield* Ref.set(
+            f.beforeRefresh,
+            Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release))),
+          );
+          yield* Ref.set(f.failRefresh, true);
+          const pending = yield* handlers["j5.skills.links.delete"]({
+            ...request,
+            ...preview,
+          }).pipe(Effect.forkChild);
+          yield* Effect.gen(function* () {
+            yield* Deferred.await(started);
+            assert.isFalse(yield* f.fs.exists(folder));
+            const available = yield* skillCatalogPermit.withPermitsIfAvailable(1)(Effect.void);
+            assert.equal(available._tag, "Some");
+          }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+          const result = yield* Fiber.join(pending);
+          assert.equal(result.action, "removed");
+          assert.equal(result.discovery, "failed");
+          assert.match(result.message, /permanently deleted.*refresh failed/);
+          assert.deepEqual(yield* Ref.get(f.refreshes), [`${targetId}:user`]);
+        }),
+      ),
+  );
+  it.effect("rejects deletion outside provider roots, forged sources, and read-only origins", () =>
+    run(
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        const request = { source: f.request.source };
+        const outside = yield* Effect.flip(f.handlers["j5.skills.links.deletePreview"](request));
+        assert.match(outside.message, /outside/);
+        const forged = yield* Effect.flip(
+          f.handlers["j5.skills.links.deletePreview"]({
+            source: { ...request.source, path: f.root },
+          }),
+        );
+        assert.match(forged.message, /no longer in provider discovery/);
+        for (const scope of ["plugin", "system", "unknown"]) {
+          yield* Ref.update(f.snapshots, (all) =>
+            all.map((entry) =>
+              entry.instanceId === sourceId
+                ? { ...entry, skills: [{ ...f.base.skills[0]!, scope }] }
+                : entry,
+            ),
+          );
+          const blocked = yield* Effect.flip(
+            f.handlers["j5.skills.links.delete"]({
+              ...request,
+              expectedPath: f.path.dirname(f.source),
+              expectedIdentity: "forged",
+            }),
+          );
+          assert.match(blocked.message, /plugin|cannot be linked|unclassified/);
+        }
+        yield* Ref.update(f.snapshots, (all) =>
+          all.map((entry) => (entry.instanceId === sourceId ? f.base : entry)),
+        );
+        yield* Ref.update(f.snapshots, (all) =>
+          all.map((entry) =>
+            entry.instanceId === sourceId
+              ? {
+                  ...entry,
+                  skills: [
+                    {
+                      ...f.base.skills[0]!,
+                      linkTarget: f.path.join(f.root, ".codex", "plugins", "example", "SKILL.md"),
+                    },
+                  ],
+                }
+              : entry,
+          ),
+        );
+        const pluginTarget = yield* Effect.flip(
+          f.handlers["j5.skills.links.deletePreview"](request),
+        );
+        assert.match(pluginTarget.message, /plugin/);
+        yield* Ref.update(f.snapshots, (all) =>
+          all.map((entry) => (entry.instanceId === sourceId ? f.base : entry)),
+        );
+        yield* f.settings.updateSettings({ skillCatalogSource: f.path.dirname(f.source) });
+        const catalog = yield* Effect.flip(f.handlers["j5.skills.links.deletePreview"](request));
+        assert.match(catalog.message, /Only original personal or project/);
+        assert.isTrue(yield* f.fs.exists(f.source));
+        assert.deepEqual(yield* Ref.get(f.refreshes), []);
+      }),
+    ),
+  );
+
+  it.effect(
+    "finds unmanaged aliases after restarting and unlinks both providers with one refresh each",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const f = yield* fixture;
+          const codexRoot = f.path.join(f.root, "custom-codex", "skills");
+          const claudeRoot = f.path.join(f.claudeHome, "skills");
+          const sourceFolder = f.path.dirname(f.source);
+          yield* f.fs.writeFileString(f.path.join(sourceFolder, "asset.txt"), "keep me");
+          for (const root of [codexRoot, claudeRoot]) {
+            yield* f.fs.makeDirectory(root, { recursive: true });
+            yield* f.fs.symlink(sourceFolder, f.path.join(root, "different-name"));
+          }
+          yield* Ref.update(f.snapshots, (all) => [
+            ...all,
+            { ...all[1]!, instanceId: ProviderInstanceId.make("claude-shared") },
+          ]);
+          const handlers = yield* f.reopen;
+          assert.deepEqual(yield* handlers["j5.skills.links.list"](), []);
+          const links = yield* handlers["j5.skills.links.inspect"]({
+            source: f.request.source,
+            projectId,
+          });
+          assert.equal(links.length, 2);
+          assert.include(
+            links.find((link) => link.request.targetInstanceId === targetId)!.label,
+            "claude-shared",
+          );
+          const result = yield* handlers["j5.skills.links.unlink"]({
+            links: links.map((link) => link.request),
+          });
+          assert.equal(result.removedPaths.length, 2);
+          assert.deepEqual(result.failed, []);
+          assert.isFalse(result.refreshFailed);
+          for (const root of [codexRoot, claudeRoot])
+            assert.isFalse(yield* f.fs.exists(f.path.join(root, "different-name")));
+          assert.equal(
+            yield* f.fs.readFileString(f.path.join(sourceFolder, "asset.txt")),
+            "keep me",
+          );
+          assert.isTrue(yield* f.fs.exists(f.source));
+          const refreshes = yield* Ref.get(f.refreshes);
+          for (const id of [sourceId, targetId, "claude-shared"])
+            assert.equal(refreshes.filter((entry) => entry === `${id}:user`).length, 1);
+        }),
+      ),
+  );
+  it.effect(
+    "unlinks one provider, preserves changed links and directories, and reports partial failure",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const f = yield* fixture;
+          const root = f.path.join(f.claudeHome, "skills");
+          yield* f.fs.makeDirectory(root, { recursive: true });
+          const sourceFolder = f.path.dirname(f.source);
+          for (const name of ["first", "second"])
+            yield* f.fs.symlink(sourceFolder, f.path.join(root, name));
+          const links = yield* f.handlers["j5.skills.links.inspect"]({ source: f.request.source });
+          const first = links.find((entry) =>
+            entry.request.expectedDestinationPath.endsWith("first"),
+          )!;
+          const second = links.find((entry) =>
+            entry.request.expectedDestinationPath.endsWith("second"),
+          )!;
+          yield* f.fs.rename(
+            first.request.expectedDestinationPath,
+            `${first.request.expectedDestinationPath}-old`,
+          );
+          yield* f.fs.symlink(sourceFolder, first.request.expectedDestinationPath);
+          const original = f.path.join(root, "original");
+          yield* f.fs.makeDirectory(original);
+          yield* Ref.set(f.failRefresh, true);
+          const result = yield* f.handlers["j5.skills.links.unlink"]({
+            links: [
+              first.request,
+              second.request,
+              { ...second.request, expectedDestinationPath: original },
+            ],
+          });
+          assert.deepEqual(result.removedPaths, [second.request.expectedDestinationPath]);
+          assert.equal(result.failed.length, 2);
+          assert.isTrue(result.refreshFailed);
+          assert.isTrue(yield* f.fs.exists(first.request.expectedDestinationPath));
+          assert.isTrue(yield* f.fs.exists(original));
+          assert.isTrue(yield* f.fs.exists(f.source));
+        }),
+      ),
+  );
+  it.effect(
+    "recovers saved managed links after restarting and rejects paths outside skill roots",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const f = yield* fixture;
+          yield* f.handlers["j5.skills.links.create"](yield* f.prepare());
+          const handlers = yield* f.reopen;
+          const [link] = yield* handlers["j5.skills.links.inspect"]({ source: f.request.source });
+          assert.isDefined(link);
+          const rejected = yield* handlers["j5.skills.links.unlink"]({
+            links: [{ ...link!.request, expectedDestinationPath: f.path.dirname(f.source) }],
+          });
+          assert.equal(rejected.failed.length, 1);
+          assert.deepEqual(rejected.removedPaths, []);
+          const result = yield* handlers["j5.skills.links.unlink"]({ links: [link!.request] });
+          assert.equal(result.removedPaths.length, 1);
+          assert.deepEqual(yield* handlers["j5.skills.links.list"](), []);
+          assert.isTrue(yield* f.fs.exists(f.source));
+        }),
+      ),
+  );
   it.effect(
     "links default providers from legacy settings and honors explicit instance overrides",
     () =>
@@ -262,11 +505,17 @@ describe("skill link RPCs", () => {
             providerInstances: {
               [targetId]: {
                 driver: ProviderDriverKind.make("claudeAgent"),
-                config: { homePath: "../claude-home" },
+                config: { homePath: "" },
+                environment: [
+                  { name: "CLAUDE_CONFIG_DIR", value: "../claude-home", sensitive: false },
+                ],
               },
               [shared]: {
                 driver: ProviderDriverKind.make("claudeAgent"),
-                config: { homePath: "../claude-home" },
+                config: { homePath: "" },
+                environment: [
+                  { name: "CLAUDE_CONFIG_DIR", value: "../claude-home", sensitive: false },
+                ],
               },
             },
           });
@@ -450,15 +699,19 @@ describe("skill link RPCs", () => {
         }),
       ),
   );
-  it.effect.each(["create", "remove"] as const)(
+  it.effect.each(["create", "remove", "unlink"] as const)(
     "allows another mutation while %s waits for discovery",
     (operation) =>
       run(
         Effect.gen(function* () {
           const f = yield* fixture;
           const create = yield* f.prepare();
-          if (operation === "remove") yield* f.handlers["j5.skills.links.create"](create);
+          if (operation !== "create") yield* f.handlers["j5.skills.links.create"](create);
           const existing = yield* f.handlers["j5.skills.links.list"]();
+          const inspected =
+            operation === "unlink"
+              ? yield* f.handlers["j5.skills.links.inspect"]({ source: f.request.source })
+              : [];
           const started = yield* Deferred.make<void>();
           const release = yield* Deferred.make<void>();
           yield* Ref.set(
@@ -468,7 +721,11 @@ describe("skill link RPCs", () => {
           const pending = yield* (
             operation === "create"
               ? f.handlers["j5.skills.links.create"](create)
-              : f.handlers["j5.skills.links.remove"]({ id: existing[0]!.id })
+              : operation === "remove"
+                ? f.handlers["j5.skills.links.remove"]({ id: existing[0]!.id })
+                : f.handlers["j5.skills.links.unlink"]({
+                    links: inspected.map((link) => link.request),
+                  })
           ).pipe(Effect.forkChild);
           yield* Effect.gen(function* () {
             yield* Deferred.await(started);
