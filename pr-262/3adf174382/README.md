@@ -13,3 +13,5 @@ This pass covers the 11 `j5/main` PRs carried onto the V2 candidate (Squadron re
 | 07 | The Rename Squadron dialog (not confirmed) |
 
 Nit: with a Squadron selected, the scope button shows the Squadron's name and squeezes the search field to "Sea…" (visible in 06).
+| 08 | Thread details → Lineage, expanded, on a thread with 15 Claude subagent children: title, model icon, running dot, duration, and "Show 9 more" paging |
+| 09 | Lineage hover card on a subagent row: model, status, duration, last output |
