@@ -100,6 +100,9 @@ export const ServerProviderSkill = Schema.Struct({
   name: TrimmedNonEmptyString,
   description: Schema.optional(TrimmedNonEmptyString),
   path: TrimmedNonEmptyString,
+  /** Canonical SKILL.md location, when the server could resolve it. */
+  linkTarget: Schema.optional(TrimmedNonEmptyString),
+  pluginId: Schema.optional(TrimmedNonEmptyString),
   scope: Schema.optional(TrimmedNonEmptyString),
   enabled: Schema.Boolean,
   displayName: Schema.optional(TrimmedNonEmptyString),

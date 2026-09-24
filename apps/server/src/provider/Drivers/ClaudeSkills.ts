@@ -24,6 +24,7 @@ import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import { parse as parseYamlDocument } from "yaml";
 
+import { discoverClaudePluginSkills } from "../../j5/skills/claudePluginSkills.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 
 type ClaudeSkillScope = "user" | "project";
@@ -104,7 +105,7 @@ export function parseSkillFrontmatter(contents: string): SkillFrontmatter {
  * user and project one. Absent on almost every machine, which is why a missing
  * file is the normal case rather than an error.
  */
-function claudeManagedSettingsPath(
+export function claudeManagedSettingsPath(
   path: Path.Path,
   platform: NodeJS.Platform,
   environment: NodeJS.ProcessEnv,
@@ -159,7 +160,7 @@ export function skillOverrideSettingsPaths(
  * boundary Claude Code walks up to for project settings. `undefined` outside
  * a repository.
  */
-const findRepositoryRoot = Effect.fn("findRepositoryRoot")(function* (
+export const findRepositoryRoot = Effect.fn("findRepositoryRoot")(function* (
   cwd: string,
 ): Effect.fn.Return<string | undefined, never, FileSystem.FileSystem | Path.Path> {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -383,5 +384,12 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
     }
   }
 
-  return [...skillsByName.values()].sort((left, right) => left.name.localeCompare(right.name));
+  const pluginSkills = yield* discoverClaudePluginSkills(
+    configDirPath,
+    cwd,
+    environment ?? process.env,
+  );
+  return [...skillsByName.values(), ...pluginSkills].sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
 });

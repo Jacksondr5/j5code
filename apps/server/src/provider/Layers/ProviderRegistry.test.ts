@@ -9,6 +9,7 @@ import { describe, it, assert } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -29,6 +30,7 @@ import {
   ProviderInstanceId,
   ServerSettings,
   type ServerProvider,
+  type ServerProviderSkill,
   type ServerProviderSlashCommand,
   type ServerSettings as ContractServerSettings,
 } from "@t3tools/contracts";
@@ -158,6 +160,7 @@ type TestClaudeCapabilities = {
   readonly tokenSource: string | undefined;
   readonly apiProvider: string | undefined;
   readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
+  readonly bundledSkills: ReadonlyArray<ServerProviderSkill>;
 };
 
 function claudeCapabilities(overrides: Partial<TestClaudeCapabilities> = {}) {
@@ -168,6 +171,7 @@ function claudeCapabilities(overrides: Partial<TestClaudeCapabilities> = {}) {
       tokenSource: undefined,
       apiProvider: undefined,
       slashCommands: [],
+      bundledSkills: [],
       ...overrides,
     });
 }
@@ -1869,6 +1873,29 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               assert.deepStrictEqual(workspace.skills, []);
               assert.isUndefined(workspace.refreshError);
             }
+            // Providers can return the same array after a link is retargeted on disk.
+            const fs = yield* FileSystem.FileSystem;
+            const path = yield* Path.Path;
+            const root = yield* fs.makeTempDirectoryScoped();
+            const first = path.join(root, "first.md");
+            const second = path.join(root, "second.md");
+            const linked = path.join(root, "SKILL.md");
+            yield* fs.writeFileString(first, "# First");
+            yield* fs.writeFileString(second, "# Second");
+            yield* fs.symlink(first, linked);
+            yield* Ref.set(skills, [{ name: "linked", path: linked, enabled: true }]);
+            for (const target of [first, second, undefined]) {
+              if (target !== first) {
+                yield* fs.remove(linked);
+                yield* fs.symlink(target ?? path.join(root, "missing.md"), linked);
+              }
+              yield* refreshSkillProviders(registry, [instanceId]);
+              const current = (yield* registry.getProviders)[0]!;
+              const expected = target ? yield* fs.realPath(target) : undefined;
+              assert.equal(current.skills[0]!.linkTarget, expected);
+              for (const workspace of current.workspaceSnapshots!)
+                assert.equal(workspace.skills[0]!.linkTarget, expected);
+            }
           }).pipe(Effect.provide(testLayer));
         }),
       );
@@ -3023,6 +3050,49 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
     // ── checkClaudeProviderStatus tests ──────────────────────────
 
     describe("checkClaudeProviderStatus", () => {
+      it.effect("merges reported bundled skills with filesystem discovery", () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const homePath = yield* fs.makeTempDirectoryScoped();
+          const skillPath = path.join(homePath, "skills", "review", "SKILL.md");
+          yield* fs.makeDirectory(path.dirname(skillPath), { recursive: true });
+          yield* fs.writeFileString(
+            skillPath,
+            "---\nname: review\ndescription: Review changes\n---\n",
+          );
+          const status = yield* checkClaudeProviderStatus(
+            { ...defaultClaudeSettings, homePath },
+            claudeCapabilities({
+              slashCommands: [{ name: "simplify" }, { name: "review" }],
+              bundledSkills: ["simplify", "loop"].map((name) => ({
+                name,
+                path: "/usr/bin/claude",
+                scope: "builtin",
+                enabled: true,
+              })),
+            }),
+          );
+          assert.deepStrictEqual(
+            status.skills?.map((skill) => ({
+              name: skill.name,
+              path: skill.path,
+              scope: skill.scope,
+            })),
+            [
+              { name: "loop", path: "/usr/bin/claude", scope: "builtin" },
+              { name: "review", path: skillPath, scope: "user" },
+              { name: "simplify", path: "/usr/bin/claude", scope: "builtin" },
+            ],
+          );
+          assert.deepStrictEqual(
+            status.slashCommands?.map((command) => command.name),
+            ["compact", "simplify", "review"],
+          );
+        }).pipe(
+          Effect.provide(mockSpawnerLayer(() => ({ stdout: "1.0.0\n", stderr: "", code: 0 }))),
+        ),
+      );
       it.effect("returns ready when claude is installed and authenticated", () =>
         Effect.gen(function* () {
           const status = yield* checkClaudeProviderStatus(

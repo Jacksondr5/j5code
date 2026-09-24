@@ -1,9 +1,17 @@
 # Skills
 
 On web and desktop, open **Settings → Skills** and select the environment
-that should install the skills. Catalog installation supports enabled Codex and
+that should install the skills. Catalog installation and the Installed inventory support Codex and
 Claude instances and their configured homes. Mobile can use installed skills in
 chat but does not have this settings page.
+
+The Installed section shows each provider instance's discovered skills and their
+sources. Choose a project to inspect its workspace discovery, or the environment
+view for user skills. Refresh after editing skill files outside the app. A missing
+or failed discovery result does not prove that a skill is unavailable.
+
+Cursor, Grok, OpenCode and Antigravity keep their existing composer discovery;
+this settings inventory does not add management controls for those providers.
 
 Choose a trusted Git repository or an absolute catalog folder on that environment.
 For a private Git source, use SSH or the host's credential helper; URLs with embedded credentials are rejected.
@@ -18,4 +26,3 @@ to the environment that created each link, while provider skill folders can be
 shared by several environments on one machine. Existing files and links owned
 elsewhere are preserved. Remove owned links before deleting the environment's
 state or its catalog folder.
-
