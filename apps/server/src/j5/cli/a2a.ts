@@ -1,6 +1,7 @@
 /**
  * `j5 a2a` - the machine-sender CLI: send, list, whoami, participant create,
- * token issue. Scripts and watchdogs use it in place of an agent session.
+ * token issue. Scripts and watchdogs use it in place of an agent session. The
+ * `peer` group is the operator's side of peering: credential, add, list, remove.
  *
  * Stable exit codes, kept in `A2A_EXIT_CODES`: 0 ok, 2 usage, 3 unauthenticated,
  * 4 recipient not found or ambiguous, 5 refused by policy, 6 server unreachable,
@@ -8,6 +9,12 @@
  */
 import { AuthA2ASendScope, AuthAdministrativeScopes } from "@t3tools/contracts";
 import {
+  AddPeerResponse,
+  IssuePeerCredentialResponse,
+  J5_PEER_API_PATHS,
+  PeerListResponse,
+  RemovePeerResponse,
+  type PeerRecord,
   A2ARosterResponse,
   J5_MACHINE_API_PATHS,
   MACHINE_PARTICIPANT_ID_PREFIX,
@@ -252,19 +259,21 @@ const failureFromReply = (
       ? body.message
       : `The server answered HTTP ${String(reply.status)}.`;
   const exitCode =
-    reply.status === 401
-      ? A2A_EXIT_CODES.unauthenticated
-      : reply.status === 403
-        ? error === "policy_refused"
-          ? A2A_EXIT_CODES.refused
-          : A2A_EXIT_CODES.unauthenticated
-        : reply.status === 404
-          ? A2A_EXIT_CODES.recipientNotFound
-          : reply.status === 409
-            ? (options.conflictExitCode ?? A2A_EXIT_CODES.recipientNotFound)
-            : reply.status === 400
-              ? A2A_EXIT_CODES.usage
-              : A2A_EXIT_CODES.failure;
+    reply.status === 502
+      ? A2A_EXIT_CODES.unreachable
+      : reply.status === 401
+        ? A2A_EXIT_CODES.unauthenticated
+        : reply.status === 403
+          ? error === "policy_refused"
+            ? A2A_EXIT_CODES.refused
+            : A2A_EXIT_CODES.unauthenticated
+          : reply.status === 404
+            ? A2A_EXIT_CODES.recipientNotFound
+            : reply.status === 409
+              ? (options.conflictExitCode ?? A2A_EXIT_CODES.recipientNotFound)
+              : reply.status === 400
+                ? A2A_EXIT_CODES.usage
+                : A2A_EXIT_CODES.failure;
   const { error: _error, message: _message, ...extra } = body;
   return new A2ACliFailure({ exitCode, error, message, extra });
 };
@@ -449,6 +458,30 @@ const withLocalEnvironmentAuth = <A, E, R>(
     );
   });
 
+/**
+ * Runs `use` with an explicit token when one was given; otherwise, on the server
+ * host, with a temporary local admin session that is revoked afterwards.
+ */
+const withAdminToken = <A, E, R>(
+  flags: ConnectionFlags,
+  label: string,
+  use: (token: string) => Effect.Effect<A, E, R>,
+) =>
+  Effect.gen(function* () {
+    const explicitToken = yield* tryResolveToken(flags);
+    if (Option.isSome(explicitToken) && explicitToken.value.length > 0) {
+      return yield* use(explicitToken.value);
+    }
+    return yield* withLocalEnvironmentAuth(flags, (environmentAuth) =>
+      Effect.acquireUseRelease(
+        environmentAuth.issueSession({ scopes: AuthAdministrativeScopes, label }),
+        (issued) => use(issued.token),
+        (issued) =>
+          environmentAuth.revokeSession(issued.sessionId).pipe(Effect.ignore({ log: true })),
+      ),
+    );
+  });
+
 const participantCreateCommand = Command.make("create", {
   ...connectionFlags,
   squadron: Flag.string("squadron").pipe(
@@ -491,21 +524,7 @@ const participantCreateCommand = Command.make("create", {
               text: `${registered.created ? "Registered" : "Already registered"} ${registered.participant.participantId} in Squadron ${registered.participant.squadronName}. Next: j5 a2a token issue --participant ${registered.participant.name}`,
             } satisfies Outcome;
           });
-        const explicitToken = yield* tryResolveToken(flags);
-        if (Option.isSome(explicitToken) && explicitToken.value.length > 0) {
-          return yield* register(explicitToken.value);
-        }
-        return yield* withLocalEnvironmentAuth(flags, (environmentAuth) =>
-          Effect.acquireUseRelease(
-            environmentAuth.issueSession({
-              scopes: AuthAdministrativeScopes,
-              label: "j5 a2a participant create",
-            }),
-            (issued) => register(issued.token),
-            (issued) =>
-              environmentAuth.revokeSession(issued.sessionId).pipe(Effect.ignore({ log: true })),
-          ),
-        );
+        return yield* withAdminToken(flags, "j5 a2a participant create", register);
       }),
     ),
   ),
@@ -577,6 +596,231 @@ const tokenCommand = Command.make("token").pipe(
   Command.withSubcommands([tokenIssueCommand]),
 );
 
+const formatPeerLine = (peer: PeerRecord) =>
+  [peer.environmentId, peer.label, peer.origin, peer.createdAt].join("\t");
+
+const peerCredentialCommand = Command.make("credential", {
+  ...connectionFlags,
+  for: Flag.string("for").pipe(
+    Flag.withDescription("The environment id of the server that will hold this credential."),
+    Flag.optional,
+  ),
+  label: Flag.string("label").pipe(
+    Flag.withDescription(
+      "Shown in Settings → Connections as `Peer: <label>`. Default: the environment id.",
+    ),
+    Flag.optional,
+  ),
+  credentialOnly: Flag.boolean("credential-only").pipe(
+    Flag.withDescription("Print only the credential."),
+    Flag.withDefault(false),
+  ),
+}).pipe(
+  Command.withDescription(
+    "Issue the credential another server presents when it delivers here: subject peer:<its environment id>, scope a2a:peer only. Issuing again for the same environment revokes the earlier credential. Needs an access:write token, or runs on the server host with a temporary local admin session.",
+  ),
+  Command.withHandler((flags) =>
+    runOutcome(
+      flags.json,
+      Effect.gen(function* () {
+        const environmentId = yield* requireFlag(flags.for, "--for");
+        const origin = yield* resolveOrigin(flags);
+        return yield* withAdminToken(flags, "j5 a2a peer credential", (token) =>
+          Effect.gen(function* () {
+            const reply = yield* callServer({
+              origin,
+              token,
+              method: "POST",
+              path: J5_PEER_API_PATHS.credentials,
+              body: {
+                environmentId,
+                ...(Option.isSome(flags.label) ? { label: flags.label.value } : {}),
+              },
+              timeoutMs: flags.timeoutMs,
+            });
+            if (reply.status !== 201) return yield* failureFromReply(reply);
+            const issued = yield* decodeReply(IssuePeerCredentialResponse, reply.body);
+            return {
+              json: { ...issued },
+              text: flags.credentialOnly
+                ? issued.credential
+                : [
+                    `Issued peer credential ${issued.sessionId} for ${issued.subject}; this server is environment ${issued.environmentId}.`,
+                    `Credential: ${issued.credential}`,
+                    `Expires at: ${issued.expiresAt}`,
+                    `Next, on the other server: j5 a2a peer add --peer-origin ${origin} --credential <the credential above>`,
+                  ].join("\n"),
+            } satisfies Outcome;
+          }),
+        );
+      }),
+    ),
+  ),
+);
+
+const peerAddCommand = Command.make("add", {
+  ...connectionFlags,
+  peerOrigin: Flag.string("peer-origin").pipe(
+    Flag.withDescription(
+      "The origin this server reaches the peer at, such as https://home.example:3773. It may differ from the one your client uses.",
+    ),
+    Flag.optional,
+  ),
+  credential: Flag.string("credential").pipe(
+    Flag.withDescription(
+      "The credential the peer issued for this environment (`j5 a2a peer credential` there).",
+    ),
+    Flag.optional,
+  ),
+  credentialFile: Flag.string("credential-file").pipe(
+    Flag.withDescription("File holding that credential."),
+    Flag.optional,
+  ),
+  label: Flag.string("label").pipe(
+    Flag.withDescription("A name for the peer. Default: its environment id."),
+    Flag.optional,
+  ),
+}).pipe(
+  Command.withDescription(
+    "Record a peer after proving the credential at its origin. Re-adding a known peer rotates its origin and credential. Needs an access:write token, or runs on the server host with a temporary local admin session.",
+  ),
+  Command.withHandler((flags) =>
+    runOutcome(
+      flags.json,
+      Effect.gen(function* () {
+        const peerOrigin = (yield* requireFlag(flags.peerOrigin, "--peer-origin")).replace(
+          /\/+$/,
+          "",
+        );
+        const credential = yield* resolvePeerCredential(flags.credential, flags.credentialFile);
+        const origin = yield* resolveOrigin(flags);
+        return yield* withAdminToken(flags, "j5 a2a peer add", (token) =>
+          Effect.gen(function* () {
+            const reply = yield* callServer({
+              origin,
+              token,
+              method: "POST",
+              path: J5_PEER_API_PATHS.peers,
+              body: {
+                origin: peerOrigin,
+                credential,
+                ...(Option.isSome(flags.label) ? { label: flags.label.value } : {}),
+              },
+              timeoutMs: Math.max(flags.timeoutMs, 10_000),
+            });
+            if (reply.status !== 200 && reply.status !== 201) {
+              return yield* failureFromReply(reply, { conflictExitCode: A2A_EXIT_CODES.refused });
+            }
+            const added = yield* decodeReply(AddPeerResponse, reply.body);
+            return {
+              json: { ...added },
+              text: `${added.created ? "Recorded" : "Updated"} peer ${added.peer.label} (${added.peer.environmentId}) at ${added.peer.origin}. Peering is mutual: run the matching \`peer credential\` and \`peer add\` on that server too.`,
+            } satisfies Outcome;
+          }),
+        );
+      }),
+    ),
+  ),
+);
+
+const resolvePeerCredential = Effect.fn("j5.a2a.cli.resolvePeerCredential")(function* (
+  direct: Option.Option<string>,
+  file: Option.Option<string>,
+) {
+  if (Option.isSome(direct)) return direct.value.trim();
+  if (Option.isNone(file)) return yield* usage("--credential or --credential-file is required.");
+  const fs = yield* FileSystem.FileSystem;
+  const contents = yield* fs
+    .readFileString(file.value)
+    .pipe(Effect.mapError(() => usage(`Could not read the credential file ${file.value}.`)));
+  return contents.trim();
+});
+
+const peerListCommand = Command.make("list", connectionFlags).pipe(
+  Command.withDescription(
+    "List recorded peers: environment id, label, origin, recorded at. Needs an access:read token, or runs on the server host with a temporary local admin session.",
+  ),
+  Command.withHandler((flags) =>
+    runOutcome(
+      flags.json,
+      Effect.gen(function* () {
+        const origin = yield* resolveOrigin(flags);
+        return yield* withAdminToken(flags, "j5 a2a peer list", (token) =>
+          Effect.gen(function* () {
+            const reply = yield* callServer({
+              origin,
+              token,
+              method: "GET",
+              path: J5_PEER_API_PATHS.peers,
+              timeoutMs: flags.timeoutMs,
+            });
+            if (reply.status !== 200) return yield* failureFromReply(reply);
+            const listed = yield* decodeReply(PeerListResponse, reply.body);
+            return {
+              json: { peers: listed.peers },
+              text:
+                listed.peers.length === 0
+                  ? "No peers recorded."
+                  : listed.peers.map(formatPeerLine).join("\n"),
+            } satisfies Outcome;
+          }),
+        );
+      }),
+    ),
+  ),
+);
+
+const peerRemoveCommand = Command.make("remove", {
+  ...connectionFlags,
+  environment: Flag.string("environment").pipe(
+    Flag.withDescription("The peer's environment id, from `j5 a2a peer list`."),
+    Flag.optional,
+  ),
+}).pipe(
+  Command.withDescription(
+    "Remove a peer and revoke the credential it held for this server; delivery ends in both directions. Needs an access:write token, or runs on the server host with a temporary local admin session.",
+  ),
+  Command.withHandler((flags) =>
+    runOutcome(
+      flags.json,
+      Effect.gen(function* () {
+        const environmentId = yield* requireFlag(flags.environment, "--environment");
+        const origin = yield* resolveOrigin(flags);
+        return yield* withAdminToken(flags, "j5 a2a peer remove", (token) =>
+          Effect.gen(function* () {
+            const reply = yield* callServer({
+              origin,
+              token,
+              method: "POST",
+              path: J5_PEER_API_PATHS.remove,
+              body: { environmentId },
+              timeoutMs: flags.timeoutMs,
+            });
+            if (reply.status !== 200) return yield* failureFromReply(reply);
+            const removed = yield* decodeReply(RemovePeerResponse, reply.body);
+            return {
+              json: { ...removed },
+              text: removed.removed
+                ? `Removed peer ${environmentId} and revoked ${String(removed.revokedSessions)} session(s) it held.`
+                : `No peer ${environmentId} was recorded; revoked ${String(removed.revokedSessions)} session(s) it held.`,
+            } satisfies Outcome;
+          }),
+        );
+      }),
+    ),
+  ),
+);
+
+const peerCommand = Command.make("peer").pipe(
+  Command.withDescription("Peer this server with another so their agents can exchange messages."),
+  Command.withSubcommands([
+    peerCredentialCommand,
+    peerAddCommand,
+    peerListCommand,
+    peerRemoveCommand,
+  ]),
+);
+
 export const a2aCommand = Command.make("a2a").pipe(
   Command.withDescription(
     "Send and inspect agent-to-agent messages from scripts, as a registered machine participant.",
@@ -587,5 +831,6 @@ export const a2aCommand = Command.make("a2a").pipe(
     whoamiCommand,
     participantCommand,
     tokenCommand,
+    peerCommand,
   ]),
 );

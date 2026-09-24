@@ -21,7 +21,7 @@ Every document here is one of five kinds, and the kind tells you how far to trus
 - **`plans/`** — the [dogfood v0 plan](plans/dogfood-v0.md) and the [A2A plan](plans/a2a.md). Build status against a definition's criteria lives only here. The backlog beyond these is the repository's GitHub milestones, in outcome order.
 - **`research/`** — the studies behind the decisions: T3 Code, Traycer, the prior-art fleets, remote hosting. Each carries an `as_of` date; none is a source of truth about the product.
 - **`worklog/`** — records, named date-first: design sessions and rulings, the tickets and reviews of the A2A build and the dogfood queue, how the fork was set up, the phase-3 friction list.
-- **`runbooks/`** — operating the software: the [dogfood runtime](runbooks/dogfood-runtime.md), [agent migration](runbooks/agent-migration.md), [macOS packaging](runbooks/macos-packaging.md), [machine senders](runbooks/machine-senders.md).
+- **`runbooks/`** — operating the software: the [dogfood runtime](runbooks/dogfood-runtime.md), [agent migration](runbooks/agent-migration.md), [macOS packaging](runbooks/macos-packaging.md), [machine senders](runbooks/machine-senders.md), [peering](runbooks/peering.md).
 - **`process/`** — rules for working in this repository: [how the docs are organized](process/docs.md) and [working in the repo](process/working-in-the-repo.md). How the fleet is run day to day is the operator's own practice and lives outside the repository.
 
 Cross-references are relative paths and survive within this tree.

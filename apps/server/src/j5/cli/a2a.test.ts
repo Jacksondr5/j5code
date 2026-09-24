@@ -320,3 +320,152 @@ it.live("lists the roster as one line per participant and answers whoami", () =>
       }),
   );
 });
+
+const homePeer = {
+  environmentId: "environment-home",
+  label: "Home",
+  origin: "https://home.example:3773",
+  createdAt: "2026-09-16T00:00:00.000Z",
+};
+
+it.live("issues a peer credential, adds, lists, and removes a peer through the admin routes", () =>
+  withStub(
+    (request) =>
+      request.url === "/api/j5/a2a/peers/credentials"
+        ? {
+            status: 201,
+            body: {
+              environmentId: "environment-work",
+              credential: "home-will-present-this",
+              sessionId: "auth-session:peer",
+              subject: "peer:environment-home",
+              expiresAt: "2027-01-01T00:00:00.000Z",
+            },
+          }
+        : request.url === "/api/j5/a2a/peers" && request.method === "POST"
+          ? { status: 201, body: { peer: homePeer, created: true } }
+          : request.url === "/api/j5/a2a/peers"
+            ? { status: 200, body: { peers: [homePeer] } }
+            : request.url === "/api/j5/a2a/peers/remove"
+              ? { status: 200, body: { removed: true, revokedSessions: 1 } }
+              : { status: 404, body: { error: "not_found", message: "no" } },
+    (stub) =>
+      Effect.gen(function* () {
+        const common = ["--origin", stub.origin, "--token", "admin", "--json"];
+        yield* runCli([
+          "a2a",
+          "peer",
+          "credential",
+          "--for",
+          "environment-home",
+          "--label",
+          "Home",
+          ...common,
+        ]);
+        assert.equal(process.exitCode, undefined);
+        assert.deepStrictEqual(stub.requests[0]!.body, {
+          environmentId: "environment-home",
+          label: "Home",
+        });
+        assert.equal(stub.requests[0]!.authorization, "Bearer admin");
+        assert.equal(lastJson().credential, "home-will-present-this");
+        assert.equal(lastJson().environmentId, "environment-work");
+
+        yield* runCli([
+          "a2a",
+          "peer",
+          "add",
+          "--peer-origin",
+          "https://home.example:3773/",
+          "--credential",
+          "issued-by-home",
+          "--label",
+          "Home",
+          ...common,
+        ]);
+        assert.equal(process.exitCode, undefined);
+        assert.deepStrictEqual(stub.requests[1]!.body, {
+          origin: "https://home.example:3773",
+          credential: "issued-by-home",
+          label: "Home",
+        });
+        assert.deepStrictEqual(lastJson().peer, homePeer);
+
+        yield* runCli(["a2a", "peer", "list", ...common]);
+        assert.equal(stub.requests[2]!.method, "GET");
+        assert.deepStrictEqual(lastJson().peers, [homePeer]);
+
+        yield* runCli(["a2a", "peer", "remove", "--environment", "environment-home", ...common]);
+        assert.deepStrictEqual(stub.requests[3]!.body, { environmentId: "environment-home" });
+        assert.deepStrictEqual(lastJson(), {
+          ok: true,
+          exit_code: 0,
+          removed: true,
+          revokedSessions: 1,
+        });
+      }),
+  ),
+);
+
+it.live("maps peer-add refusals: unreachable origin exits 6, a foreign credential exits 5", () =>
+  Effect.gen(function* () {
+    const cases: ReadonlyArray<{ readonly reply: StubReply; readonly exitCode: number }> = [
+      {
+        reply: { status: 502, body: { error: "peer_unreachable", message: "ECONNREFUSED" } },
+        exitCode: A2A_EXIT_CODES.unreachable,
+      },
+      {
+        reply: {
+          status: 409,
+          body: { error: "peer_credential_mismatch", message: "issued for another server" },
+        },
+        exitCode: A2A_EXIT_CODES.refused,
+      },
+      {
+        reply: { status: 400, body: { error: "peer_is_self", message: "that is you" } },
+        exitCode: A2A_EXIT_CODES.usage,
+      },
+    ];
+    for (const testCase of cases) {
+      yield* withStub(
+        () => testCase.reply,
+        (stub) =>
+          Effect.gen(function* () {
+            process.exitCode = undefined;
+            yield* runCli([
+              "a2a",
+              "peer",
+              "add",
+              "--peer-origin",
+              "https://home.example:3773",
+              "--credential",
+              "t",
+              "--origin",
+              stub.origin,
+              "--token",
+              "admin",
+              "--json",
+            ]);
+            assert.equal(process.exitCode, testCase.exitCode, String(testCase.reply.status));
+            assert.equal(lastJson().error, (testCase.reply.body as { error: string }).error);
+          }),
+      );
+    }
+
+    process.exitCode = undefined;
+    yield* runCli([
+      "a2a",
+      "peer",
+      "add",
+      "--peer-origin",
+      "https://x.example",
+      "--token",
+      "t",
+      "--origin",
+      "http://127.0.0.1:1",
+      "--json",
+    ]);
+    assert.equal(process.exitCode, A2A_EXIT_CODES.usage, "a missing credential is a usage error");
+    assert.equal(lastJson().error, "usage");
+  }),
+);
