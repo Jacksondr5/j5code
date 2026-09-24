@@ -1,3 +1,4 @@
+import { expandPlaybookPrompt } from "@t3tools/client-runtime/j5/playbooks";
 import { useAtomValue } from "@effect/atom-react";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
@@ -1196,7 +1197,7 @@ export function NewTaskDraftScreen(props: {
       ) ?? flow.selectedModel;
     const workspaceMode = draft.workspaceSelection?.mode ?? flow.workspaceMode;
     const selectedBranchName = draft.workspaceSelection?.branch ?? flow.selectedBranchName;
-    const initialMessageText = draft.text.trim();
+    const initialMessageText = expandPlaybookPrompt(draft.text.trim());
 
     if (
       attachmentBlockReason !== null ||
