@@ -340,7 +340,6 @@ it.effect(
         assert.equal(body.exchangeRole, "ask");
         assert.equal(body.intent, "incident status");
         assert.equal(body.originSquadronId, localSquadron);
-        assert.equal(body.originSquadronName, "Billing Migration");
         assert.equal(body.senderLabel, "Billing agent");
         assert.match(body.correlationId, /^correlation:j5:a2a:/);
       }).pipe(

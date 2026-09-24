@@ -353,7 +353,8 @@ it.effect("names a sender homed on a peer by the label its server sent, after an
         },
       ],
     });
-    // Two deliveries from the same remote sender; the latest label wins.
+    // Two deliveries from the same remote sender; the latest by this ledger's
+    // sequence wins, whatever clock the origin stamped on it.
     const received = (seq: number, label: string, at: string) => sql`
       INSERT INTO j5_a2a_comm_event (
         seq, squadron_id, kind, sender, receiver, exchange_id, correlation_id,
@@ -370,7 +371,7 @@ it.effect("names a sender homed on a peer by the label its server sent, after an
         ${at}, ${"command:client-reads:peer:" + String(seq)}
       )
     `;
-    yield* received(2, "Old title", "2026-09-21T00:01:00.000Z");
+    yield* received(2, "Old title", "2099-01-01T00:00:00.000Z");
     yield* received(3, "Incident asker", "2026-09-21T00:02:00.000Z");
 
     const identities = yield* reads.participantIdentities({
@@ -387,9 +388,9 @@ it.effect("names a sender homed on a peer by the label its server sent, after an
       plan.every(
         (row) =>
           !row.detail.includes("j5_a2a_comm_event") ||
-          row.detail.includes("j5_a2a_comm_event_received_sender_label_idx"),
+          row.detail.includes("j5_a2a_comm_event_received_sender_idx"),
       ),
-      `every touch of the ledger should go through the sender-label index: ${plan.map((row) => row.detail).join(" | ")}`,
+      `every touch of the ledger should go through the peer route index: ${plan.map((row) => row.detail).join(" | ")}`,
     );
   }).pipe(Effect.provide(makeTestLayer())),
 );
