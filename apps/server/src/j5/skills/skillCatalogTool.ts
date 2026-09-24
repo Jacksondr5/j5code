@@ -4,6 +4,7 @@ import {
   type SkillCatalogApplyResult,
   type SkillCatalogReplacement,
   SkillCatalogError,
+  SkillCatalogSource,
   type SkillCatalogStatus,
   type SkillCatalogUpdateResult,
 } from "@t3tools/contracts";
@@ -13,6 +14,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Semaphore from "effect/Semaphore";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 
 import type { ProcessRunner } from "../../processRunner.ts";
 import {
@@ -32,6 +34,9 @@ export const skillCatalogPermit = Semaphore.makeUnsafe(1);
 
 const TOOL_TIMEOUT = "5 minutes" as const;
 const MAX_DIAGNOSTIC_CHARS = 2000;
+const isSafeSource = Schema.is(SkillCatalogSource);
+const redactGitUrlUserInfo = (value: string) =>
+  value.replace(/((?:https?|ssh|git):\/\/)[^\s/?#]*@/gi, "$1");
 
 export interface SkillCatalogToolDeps {
   readonly stateDir: string;
@@ -50,7 +55,7 @@ const isGitUrl = (source: string): boolean =>
   (/^(https?|ssh|git):\/\//.test(source) || /^[^@\s]+@[^:\s]+:[^ ]+$/.test(source));
 
 const boundDiagnostic = (value: string): string => {
-  const trimmed = value.trim();
+  const trimmed = redactGitUrlUserInfo(value).trim();
   if (trimmed === "") return "(no output)";
   return trimmed.length > MAX_DIAGNOSTIC_CHARS
     ? `${trimmed.slice(0, MAX_DIAGNOSTIC_CHARS)}…`
@@ -80,6 +85,11 @@ export const createSkillCatalogTool = (deps: SkillCatalogToolDeps) => {
         message: "Skill catalog source is not configured. Set it in Settings → Skills first.",
       });
     }
+    if (!isSafeSource(trimmed)) {
+      return yield* new SkillCatalogError({
+        message: "Skill catalog source must not contain Git URL credentials.",
+      });
+    }
     if (path.isAbsolute(trimmed)) {
       return { kind: "local", catalogDir: path.normalize(trimmed) };
     }
@@ -99,9 +109,9 @@ export const createSkillCatalogTool = (deps: SkillCatalogToolDeps) => {
       return `${operation} timed out after five minutes. Filesystem changes may have occurred; retry to recover.`;
     }
     if (tag === "ProcessSpawnError") {
-      return `${operation} could not start ${command} (is Git installed?): ${String(cause)}`;
+      return `${operation} could not start ${command} (is Git installed?): ${redactGitUrlUserInfo(String(cause))}`;
     }
-    return `${operation} failed: ${String(cause)}`;
+    return `${operation} failed: ${redactGitUrlUserInfo(String(cause))}`;
   };
 
   const runCommand = Effect.fn("j5.skillCatalog.runCommand")(function* (
@@ -152,7 +162,7 @@ export const createSkillCatalogTool = (deps: SkillCatalogToolDeps) => {
           : Effect.fail(
               new SkillCatalogError({
                 message:
-                  `Skill catalog clone failed for ${source} (exit ${result.code ?? "unknown"}). ` +
+                  `Skill catalog clone failed for ${redactGitUrlUserInfo(source)} (exit ${result.code ?? "unknown"}). ` +
                   `Stderr: ${boundDiagnostic(result.stderr)}`,
               }),
             ),

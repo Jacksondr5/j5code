@@ -834,4 +834,18 @@ describe("ServerSettings skill catalog source", () => {
       expect(decodeServerSettingsPatch({ skillCatalogSource }).skillCatalogSource).toBe("");
     }
   });
+
+  it("rejects credential-bearing Git URLs in patches without breaking SSH usernames", () => {
+    for (const skillCatalogSource of [
+      "https://user:token@example.com/repo.git",
+      "https://token@example.com/repo.git",
+      "ssh://git:token@example.com/repo.git",
+    ]) {
+      expect(() => decodeServerSettingsPatch({ skillCatalogSource })).toThrow();
+    }
+    expect(
+      decodeServerSettingsPatch({ skillCatalogSource: "ssh://git@example.com/repo.git" })
+        .skillCatalogSource,
+    ).toBe("ssh://git@example.com/repo.git");
+  });
 });

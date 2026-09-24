@@ -968,6 +968,13 @@ export const DEFAULT_BACKGROUND_ACTIVITY_PROFILE: BackgroundActivityProfile = "b
 
 /** Catalog access is opt-in for each environment. */
 export const DEFAULT_SKILL_CATALOG_SOURCE = "";
+export const SkillCatalogSource = TrimmedString.check(
+  Schema.makeFilter((source) =>
+    /^(?:https?:\/\/[^/?#]*@|(?:ssh|git):\/\/[^/?#@]*:[^/?#@]*@)/i.test(source)
+      ? "Git URLs with embedded credentials are not allowed."
+      : undefined,
+  ),
+);
 
 export const BackgroundActivityProfileSelection = Schema.Literals([
   "balanced",
@@ -1451,7 +1458,7 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
-  skillCatalogSource: Schema.optionalKey(TrimmedString),
+  skillCatalogSource: Schema.optionalKey(SkillCatalogSource),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   sourceControlWritingStyle: Schema.optionalKey(
     Schema.Struct({
