@@ -15,10 +15,10 @@ export interface SquadronDraftState<TContent = unknown> {
 }
 
 /** The sidebar can set ambient context, but it must never manufacture a choice. */
-export const resolveSquadronScope = (
-  choices: ReadonlyArray<SquadronChoice>,
+export const resolveSquadronScope = <T extends SquadronChoice>(
+  choices: ReadonlyArray<T>,
   selected: ScopedSquadronRef | null,
-) =>
+): T | null =>
   choices.find(
     (choice) =>
       choice.id === selected?.squadronId && choice.environmentId === selected.environmentId,

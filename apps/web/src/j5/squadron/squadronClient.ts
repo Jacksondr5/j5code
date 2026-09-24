@@ -31,6 +31,16 @@ export async function createSquadron(
   return result.value;
 }
 
+/** The id stays stable, so every home, membership, Crew, and thread label follows the new name. */
+export async function renameSquadron(
+  environmentId: EnvironmentId,
+  input: { readonly squadronId: string; readonly name: string },
+) {
+  const result = await j5Environment.renameSquadron.run(appAtomRegistry, { environmentId, input });
+  if (result._tag === "Failure") throw Cause.squash(result.cause);
+  return result.value;
+}
+
 /** Homes a folder's imported, still-unhomed conversations in one Squadron on the owning server. */
 export async function assignImportedThreads(
   environmentId: EnvironmentId,
@@ -40,6 +50,16 @@ export async function assignImportedThreads(
     environmentId,
     input,
   });
+  if (result._tag === "Failure") throw Cause.squash(result.cause);
+  return result.value;
+}
+
+/** Hard delete; the server answers 409 while live members, Crews, or other rows still depend on it. */
+export async function deleteSquadron(
+  environmentId: EnvironmentId,
+  input: { readonly squadronId: string },
+) {
+  const result = await j5Environment.deleteSquadron.run(appAtomRegistry, { environmentId, input });
   if (result._tag === "Failure") throw Cause.squash(result.cause);
   return result.value;
 }
