@@ -66,6 +66,7 @@ export function PeerIntroductionDialog({
   const other = candidates.find((environment) => environment.environmentId === otherId) ?? null;
   const primaryBaseUrl = useEnvironmentHttpBaseUrl(primaryEnvironmentId);
   const otherBaseUrl = useEnvironmentHttpBaseUrl(otherId);
+  // The hook needs an id; until a remote is chosen, readiness stops before reading this.
   const otherSession = useEnvironmentSessionState(otherId ?? primaryEnvironmentId);
 
   // What the person typed, if anything; the defaults below follow the chosen
@@ -98,18 +99,24 @@ export function PeerIntroductionDialog({
     remoteOrigin: otherOrigin,
   });
 
+  // The two sides as the request will send them; the step titles read from the same values.
+  const local: PeeringSide = {
+    environmentId: primaryEnvironmentId,
+    label: primaryLabel.trim() || (primary?.label ?? primaryEnvironmentId),
+    origin: primaryOrigin.trim(),
+  };
+  const remote: PeeringSide | null =
+    otherId === null || other === null
+      ? null
+      : {
+          environmentId: otherId,
+          label: otherLabel.trim() || other.label,
+          origin: otherOrigin.trim(),
+        };
+  const remoteLabel = remote?.label ?? "the other server";
+
   const peer = async () => {
-    if (readiness.kind !== "ready" || otherId === null || other === null) return;
-    const local: PeeringSide = {
-      environmentId: primaryEnvironmentId,
-      label: primaryLabel.trim() || (primary?.label ?? primaryEnvironmentId),
-      origin: primaryOrigin.trim(),
-    };
-    const remote: PeeringSide = {
-      environmentId: otherId,
-      label: otherLabel.trim() || other.label,
-      origin: otherOrigin.trim(),
-    };
+    if (readiness.kind !== "ready" || remote === null) return;
     setBusy(true);
     setOutcome(null);
     try {
@@ -117,12 +124,12 @@ export function PeerIntroductionDialog({
         local,
         remote,
         issue: (issuer, holder) =>
-          issuePeerCredential(issuer.environmentId as EnvironmentId, {
+          issuePeerCredential(issuer.environmentId, {
             environmentId: holder.environmentId,
             label: holder.label,
           }),
         record: (recorder, target, credential) =>
-          addPeer(recorder.environmentId as EnvironmentId, {
+          addPeer(recorder.environmentId, {
             origin: target.origin,
             credential,
             label: target.label,
@@ -130,23 +137,12 @@ export function PeerIntroductionDialog({
       });
       setOutcome(result);
       if (result.ok) {
-        onPeered(otherId);
+        onPeered(remote.environmentId);
         onOpenChange(false);
       }
     } finally {
       setBusy(false);
     }
-  };
-
-  const local: PeeringSide = {
-    environmentId: primaryEnvironmentId,
-    label: primaryLabel || (primary?.label ?? "this server"),
-    origin: primaryOrigin,
-  };
-  const remote: PeeringSide = {
-    environmentId: otherId ?? "",
-    label: otherLabel || (other?.label ?? "the other server"),
-    origin: otherOrigin,
   };
 
   return (
@@ -201,10 +197,10 @@ export function PeerIntroductionDialog({
             <div className="grid gap-4 sm:grid-cols-2">
               <PeerSideFields
                 heading={`This server · ${primary?.label ?? primaryEnvironmentId}`}
-                originTitle={`Reaches ${remote.label} at`}
+                originTitle={`Reaches ${remoteLabel} at`}
                 originValue={otherOrigin}
                 onOriginChange={setOtherOrigin}
-                labelTitle={`Known on ${remote.label} as`}
+                labelTitle={`Known on ${remoteLabel} as`}
                 labelValue={primaryLabel}
                 onLabelChange={setPrimaryLabel}
                 disabled={busy || otherId === null}
@@ -225,7 +221,7 @@ export function PeerIntroductionDialog({
               <p className="text-xs text-muted-foreground">{readiness.message}</p>
             ) : null}
 
-            {outcome !== null ? (
+            {outcome !== null && remote !== null ? (
               <ol className="space-y-1 text-xs">
                 {outcome.steps.map((step) => (
                   <li key={step.step} className="flex flex-col">
@@ -251,6 +247,16 @@ export function PeerIntroductionDialog({
                     ) : null}
                   </li>
                 ))}
+                {!outcome.ok &&
+                outcome.steps.some(
+                  (step) => step.status === "done" && step.step.startsWith("issue-"),
+                ) ? (
+                  <li className="text-muted-foreground">
+                    Nothing was undone. The existing peering, if any, still works. Credentials
+                    issued in this attempt stay listed under Connections on the server that issued
+                    them until a later peering replaces them, or you revoke them there.
+                  </li>
+                ) : null}
               </ol>
             ) : null}
           </div>
