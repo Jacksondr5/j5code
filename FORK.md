@@ -488,7 +488,7 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/server/src/environment/ServerEnvironment.ts`                                                         | N       | 34                                    |
 | `apps/server/src/http.ts`                                                                                  | R       | B                                     |
 | `apps/server/src/mcp/McpHttpServer.ts`                                                                     | R       | 2                                     |
-| `apps/server/src/mcp/toolkits/worktree/registration.test.ts`                                               | A       | 4, 40                                 |
+| `apps/server/src/mcp/toolkits/worktree/registration.test.ts`                                               | A       | 4, 43                                 |
 | `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts`                                        | A       | 8, Saved-agent mentions               |
 | `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts`                                             | N       | Saved-agent mentions                  |
 | `apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.test.ts`                                         | A       | 8, 28, G, Saved-agent mentions        |
@@ -543,7 +543,7 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/server/src/provider/Layers/EventNdjsonLogger.ts`                                                     | N       | 36                                    |
 | `apps/server/src/provider/Layers/CodexSessionRuntime.ts`                                                   | N       | G                                     |
 | `apps/server/src/provider/T3OrchestrationInstructions.test.ts`                                             | R       | 8                                     |
-| `apps/server/src/provider/T3OrchestrationInstructions.ts`                                                  | R       | 8, 40                                 |
+| `apps/server/src/provider/T3OrchestrationInstructions.ts`                                                  | R       | 8, 43                                 |
 | `apps/server/src/provider/testFixtures/codexCollabMockPeer.mjs`                                            | R       | G                                     |
 | `apps/server/src/provider/testFixtures/codexMultiAgentWire.json`                                           | R       | G                                     |
 | `apps/server/src/scheduledTasks/ScheduledTaskService.ts`                                                   | R       | 12                                    |
