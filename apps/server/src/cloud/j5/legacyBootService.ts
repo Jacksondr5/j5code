@@ -1,6 +1,7 @@
 import type * as Path from "effect/Path";
 import * as Duration from "effect/Duration";
 
+import type { ProcessRunOutput } from "../../processRunner.ts";
 import type { BootServiceStep } from "../bootService.ts";
 
 /**
@@ -34,9 +35,36 @@ export function isRenderedJ5BootServiceUnit(contents: string): boolean {
   );
 }
 
+/**
+ * Whether a failed legacy stop only means the service was not running.
+ * systemd: exit 5 or "not loaded" / "does not exist" / "not found".
+ * launchd: exit 3 (ESRCH "No such process") or 113 ("Could not find service").
+ * Anything else (permission denied, bus unreachable, a timeout) is a real
+ * failure: the old server may still be running, so the handover must stop
+ * before a second writer starts on the same home.
+ */
+export function legacyStopMeansNotRunning(
+  kind: "systemd" | "launchd",
+  result: ProcessRunOutput,
+): boolean {
+  if (result.timedOut) return false;
+  const output = `${result.stdout}\n${result.stderr}`;
+  if (kind === "systemd") {
+    return result.code === 5 || /not loaded|does not exist|not found/i.test(output);
+  }
+  return (
+    result.code === 3 ||
+    result.code === 113 ||
+    /No such process|Could not find (specified )?service/i.test(output)
+  );
+}
+
 export interface LegacyJ5BootService {
   readonly unitPath: string;
-  /** Stops the legacy service and keeps it from starting again. */
+  /**
+   * Stops the legacy service and keeps it from starting again. Strict: only
+   * a failure that means "was not running" passes (legacyStopMeansNotRunning).
+   */
   readonly deactivate: ReadonlyArray<BootServiceStep>;
   /** Best-effort: brings the legacy service back when the new one failed to start. */
   readonly restore: ReadonlyArray<BootServiceStep>;
@@ -68,6 +96,7 @@ export function legacyJ5BootService(input: {
           command: "systemctl",
           args: ["--user", "disable", "--now", LEGACY_J5_SYSTEMD_UNIT_FILE],
           timeout: LEGACY_STOP_TIMEOUT,
+          acceptFailure: (result) => legacyStopMeansNotRunning("systemd", result),
         },
       ],
       restore: [
@@ -101,8 +130,8 @@ export function legacyJ5BootService(input: {
         command: "launchctl",
         args: ["bootout", "--wait", `${domainTarget}/${LEGACY_J5_LAUNCHD_LABEL}`],
         // Not loaded is fine: removing the plist is what keeps it from loading again.
-        optional: true,
         timeout: LEGACY_STOP_TIMEOUT,
+        acceptFailure: (result) => legacyStopMeansNotRunning("launchd", result),
       },
     ],
     restore: [

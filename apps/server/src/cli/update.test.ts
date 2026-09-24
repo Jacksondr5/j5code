@@ -11,7 +11,44 @@ import {
   HostProcessWorkingDirectory,
 } from "@t3tools/shared/hostProcess";
 
-import { repointLauncher, resolveLauncherPath } from "./update.ts";
+import {
+  isBootServiceCgroup,
+  isBootServiceLauncherCommand,
+  repointLauncher,
+  resolveLauncherPath,
+} from "./update.ts";
+
+// J5: `j5 update` must recognise the server its service supervises, under the
+// current unit name and the pre-0.0.43 J5 one, and never a hand-started server.
+it("recognises the J5 service's own server by cgroup or launcher", () => {
+  assert.isTrue(
+    isBootServiceCgroup(
+      "0::/user.slice/user-1000.slice/user@1000.service/app.slice/j5code.service\n",
+    ),
+  );
+  assert.isTrue(
+    isBootServiceCgroup(
+      "0::/user.slice/user-1000.slice/user@1000.service/app.slice/t3code.service\n",
+    ),
+  );
+  assert.isFalse(
+    isBootServiceCgroup(
+      "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-tmux-1.scope\n",
+    ),
+  );
+  assert.isFalse(isBootServiceCgroup("0::/user.slice/user-1000.slice/session-3.scope\n"));
+  assert.isTrue(
+    isBootServiceLauncherCommand(
+      "/Users/theo/.j5code/runtime/versions/0.0.43/t3 __service-launcher",
+    ),
+  );
+  assert.isTrue(
+    isBootServiceLauncherCommand(
+      "/usr/local/bin/node /Users/theo/.j5code/runtime/service-launcher.mjs",
+    ),
+  );
+  assert.isFalse(isBootServiceLauncherCommand("-zsh"));
+});
 
 it.layer(NodeServices.layer)("t3 update launcher", (it) => {
   it.effect("repoints a symlink that lives in a runtime versions tree", () =>

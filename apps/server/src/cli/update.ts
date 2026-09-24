@@ -301,6 +301,20 @@ const findForegroundServer = Effect.fn("cli.update.find_foreground_server")(func
   return state.value;
 });
 
+/**
+ * J5: whether a process's `/proc/<pid>/cgroup` places it in J5's service unit,
+ * or in the pre-0.0.43 J5 unit (`t3code.service`). Only called for the pid
+ * recorded in the J5 home, so the old name cannot be an installed T3 Code.
+ */
+export function isBootServiceCgroup(cgroup: string): boolean {
+  return /\/(j5code|t3code)\.service(\/|$)/m.test(cgroup);
+}
+
+/** J5: the archive launcher's hidden subcommand, or the npm-era launcher script. */
+export function isBootServiceLauncherCommand(command: string): boolean {
+  return /__service-launcher|service-launcher\.mjs/.test(command);
+}
+
 const belongsToBootService = Effect.fn("cli.update.belongs_to_boot_service")(function* (
   pid: number,
 ) {
@@ -309,7 +323,7 @@ const belongsToBootService = Effect.fn("cli.update.belongs_to_boot_service")(fun
   const runner = yield* ProcessRunner.ProcessRunner;
   if (platform === "linux") {
     const cgroup = yield* fs.readFileString(`/proc/${pid}/cgroup`).pipe(Effect.option);
-    return Option.isSome(cgroup) && cgroup.value.includes("/j5code.service");
+    return Option.isSome(cgroup) && isBootServiceCgroup(cgroup.value);
   }
   if (platform === "darwin") {
     // The service server's parent is the launcher process.
@@ -328,7 +342,7 @@ const belongsToBootService = Effect.fn("cli.update.belongs_to_boot_service")(fun
         Effect.map((result) => (result.code === 0 ? result.stdout : "")),
         Effect.orElseSucceed(() => ""),
       );
-    return /__service-launcher/.test(command);
+    return isBootServiceLauncherCommand(command);
   }
   return false;
 });
@@ -406,9 +420,11 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     status.installedBaseDir !== undefined &&
     path.resolve(status.installedBaseDir) === path.resolve(input.baseDir);
   const serviceInstalled = status.supported && status.installed && servesThisHome;
+  // J5: the pre-0.0.43 J5 unit supervises its server too; it is not "started by hand".
+  const legacyServicePresent = status.problems?.includes("legacy-service-present") === true;
   const foreground = yield* findForegroundServer({
     serverRuntimeStatePath: input.serverRuntimeStatePath,
-    serviceInstalled,
+    serviceInstalled: serviceInstalled || legacyServicePresent,
   });
   // What this machine runs is the executable behind the launcher and, when a
   // service is installed for this home, the version that service runs. Either
@@ -599,6 +615,11 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   if (foreground !== undefined) {
     yield* Console.log(
       `  A server started by hand is still running at ${foreground.origin} (pid ${foreground.pid}). Stop it and start it again to pick up ${targetVersion}.`,
+    );
+  }
+  if (legacyServicePresent) {
+    yield* Console.log(
+      "  The previous J5 service (t3code.service / com.t3tools.t3code.service) was left unchanged. Run `j5 service install` to replace it.",
     );
   }
 });

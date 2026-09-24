@@ -19,9 +19,12 @@ step. Stop and ask the owner wherever it says to.
 - **Data:** it stays in `~/.j5code/userdata`. On first start the new version
   copies `state.sqlite` to `statev2.sqlite` and uses the copy from then on. Work
   done after the upgrade exists only in `statev2.sqlite`.
-- **Updating from the app:** **Update server** cannot do this migration (no newer
-  npm version exists, so it reports a failure). After this migration, **Update
-  server** and `j5 update` work again.
+- **Updating from the app:** the app shows **Update server** when its version is
+  newer than the server's. That button cannot move an npm-installed 0.0.42
+  server to a release archive: the old server only knows how to update itself
+  from npm, and 0.0.43 is not published there, so it reports a failure. Run the
+  steps below on the server machine once instead. After this migration,
+  **Update server** and `j5 update` work again.
 
 ## Who needs this
 
@@ -60,7 +63,17 @@ step. Stop and ask the owner wherever it says to.
    unit), report it and let the owner decide whether it may be removed.
    `j5 service install` refuses with `foreign-service-present` and leaves such
    a unit untouched until it is gone.
-7. Check which `j5` your shell runs: `command -v j5`. An npm global install puts
+7. **Linux:** check for drop-ins that already exist under the new name:
+   `ls ~/.config/systemd/user/j5code.service.d/` and
+   `grep -HE '^\s*(Condition|Assert)' ~/.config/systemd/user/j5code.service.d/*.conf`.
+   A drop-in with a `Condition…=` or `Assert…=` line (for example
+   `ConditionPathExists=!…/service-state.json` left over from an earlier manual
+   migration) makes systemd skip starting the new service. Do not delete it
+   yourself: report the file and its contents and stop for the owner.
+   `j5 service install` refuses with `service-dropin-conditions` while one
+   exists. Note every file already in that directory; the rollback below must
+   keep them.
+8. Check which `j5` your shell runs: `command -v j5`. An npm global install puts
    its own `j5` on `PATH`; note where it is.
 
 ## 2. Prepare
@@ -89,13 +102,13 @@ step. Stop and ask the owner wherever it says to.
 
 ```sh
 curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh | sh
-~/.local/bin/j5 --version    # prints "t3 v0.0.43" or later
+~/.local/bin/j5 --version    # prints "j5 v0.0.43" or later
 ```
 
 The installer unpacks the release into `~/.j5code/runtime/versions/<version>/`
 and links `~/.local/bin/j5` to it. It never reads `T3CODE_HOME`.
 
-If `command -v j5` (step 1.7) pointed somewhere other than `~/.local/bin/j5`,
+If `command -v j5` (step 1.8) pointed somewhere other than `~/.local/bin/j5`,
 remove the npm copy so the new one wins: `npm uninstall -g @jacksondr5/j5code`.
 Then `command -v j5` must print `~/.local/bin/j5`. If `~/.local/bin` is not on
 `PATH`, add it (the installer prints the line) or use `~/.local/bin/j5` below.
@@ -107,8 +120,13 @@ Then `command -v j5` must print `~/.local/bin/j5`. If `~/.local/bin` is not on
 
    ```sh
    mkdir -p ~/.config/systemd/user/j5code.service.d
-   cp ~/.config/systemd/user/t3code.service.d/*.conf ~/.config/systemd/user/j5code.service.d/
+   cp -n ~/.config/systemd/user/t3code.service.d/*.conf ~/.config/systemd/user/j5code.service.d/
+   (cd ~/.config/systemd/user/t3code.service.d && ls *.conf) > ~/j5-migration-backup/copied-drop-ins.txt
    ```
+
+   `cp -n` never overwrites a file that step 1.7 found; if a name collides,
+   stop and ask the owner. The list records which files this guide copied so a
+   rollback removes only those.
 
    Open each copied file. Delete any `ExecStart=` override: it points at the old
    npm launcher and would break the new service. Keep settings such as
@@ -122,14 +140,20 @@ Then `command -v j5` must print `~/.local/bin/j5`. If `~/.local/bin` is not on
    j5 service install
    ```
 
-   It downloads nothing new (the installer already did), then stops and disables
-   the old J5 `t3code.service` (macOS: boots out `com.t3tools.t3code.service`),
-   writes and starts `j5code.service` / `codes.jackson.j5code.service`, and
-   removes the old unit file once the new service started. If the new service
-   cannot start, it restores the old service and its state file and exits with an
-   error; read the error and the log it names, then stop and ask the owner.
+   It downloads nothing new (the installer already did), writes
+   `j5code.service` / `codes.jackson.j5code.service`, then stops and disables
+   the old J5 `t3code.service` (macOS: boots out `com.t3tools.t3code.service`).
+   An old service that is not running is fine; any other stop failure (for
+   example permission denied or a timeout) ends the install before the new
+   service starts, with the old service left running and its state file
+   restored. Otherwise it starts the new service and checks that it is actually
+   running (`systemctl --user is-active`, or `launchctl print` showing
+   `state = running`), waiting a few seconds at most. Only then does it remove
+   the old unit file. If the new service does not run, it stops it, restores the
+   old service and its state file, and exits with an error. In every failure
+   case, read the error and the log it names, then stop and ask the owner.
 
-3. **Linux:** remove the leftover drop-ins directory:
+3. **Linux:** remove the leftover old drop-ins directory (it is in the backup):
    `rm -r ~/.config/systemd/user/t3code.service.d`.
 4. **Tooling that writes units:** if Ansible or other configuration management
    creates these files, update it too. Otherwise it restores the old unit.
@@ -175,7 +199,8 @@ see it. Never run the old and new services at the same time.
 ```sh
 systemctl --user disable --now j5code.service
 rm -f ~/.config/systemd/user/j5code.service
-rm -rf ~/.config/systemd/user/j5code.service.d
+# Only the drop-ins step 4.1 copied; anything that was already there stays.
+[ -f ~/j5-migration-backup/copied-drop-ins.txt ] && while read -r f; do rm -f ~/.config/systemd/user/j5code.service.d/"$f"; done < ~/j5-migration-backup/copied-drop-ins.txt
 cp ~/j5-migration-backup/t3code.service ~/.config/systemd/user/
 [ -d ~/j5-migration-backup/t3code.service.d ] && cp -R ~/j5-migration-backup/t3code.service.d ~/.config/systemd/user/
 cp ~/j5-migration-backup/service-state.json ~/.j5code/runtime/service-state.json

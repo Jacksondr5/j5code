@@ -72,6 +72,10 @@ Start with `j5 service status` on the host. It prints the log path and, on Linux
 checks whether the installed service is running, enabled, and allowed to survive
 logout.
 
+`j5 service install` and `j5 service restart` check that the service is running
+after they start it. If it is not, they report an error instead of success.
+Read the log they name.
+
 If it stops when your SSH session closes, check for `linger-disabled`. An
 administrator can enable lingering with:
 
@@ -90,14 +94,15 @@ with sudo; running T3 Code as root creates a separate installation and Connect
 identity. Without administrator access, run `j5 serve` in a terminal and keep
 that session open.
 
-| Status problem                          | Next step                                                                                                                                     |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `linger-unavailable`                    | Run `loginctl show-user "$(id -un)" --property=Linger` and check that systemd-logind is available.                                            |
-| `user-manager-unavailable`              | Run `systemctl --user status` in a login session for the service user; check your distribution's systemd user-session support.                |
-| `service-disabled` or `service-stopped` | Read the log and `systemctl --user status j5code.service`, then use the repair command printed by T3 Code.                                    |
-| `restart-pending`                       | A newer version is installed but the service still runs the previous one. Run `j5 service restart`.                                           |
-| `legacy-service-present`                | The pre-0.0.43 J5 service (`t3code.service` / `com.t3tools.t3code.service`) is still installed. Run `j5 service install`.                     |
-| `foreign-service-present`               | A `j5code.service` / `codes.jackson.j5code.service` that J5 did not write already exists. Remove or rename it, then run `j5 service install`. |
+| Status problem                          | Next step                                                                                                                                                                                 |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `linger-unavailable`                    | Run `loginctl show-user "$(id -un)" --property=Linger` and check that systemd-logind is available.                                                                                        |
+| `user-manager-unavailable`              | Run `systemctl --user status` in a login session for the service user; check your distribution's systemd user-session support.                                                            |
+| `service-disabled` or `service-stopped` | Read the log and `systemctl --user status j5code.service`, then use the repair command printed by T3 Code.                                                                                |
+| `restart-pending`                       | A newer version is installed but the service still runs the previous one. Run `j5 service restart`.                                                                                       |
+| `legacy-service-present`                | The pre-0.0.43 J5 service (`t3code.service` / `com.t3tools.t3code.service`) is still installed. Run `j5 service install`.                                                                 |
+| `foreign-service-present`               | A `j5code.service` / `codes.jackson.j5code.service` that J5 did not write already exists. Remove or rename it, then run `j5 service install`.                                             |
+| `service-dropin-conditions`             | A drop-in in `~/.config/systemd/user/j5code.service.d/` has a `Condition…=` or `Assert…=` line that can make systemd skip the start. Review and remove it, then run `j5 service install`. |
 
 On macOS, check **System Settings → General → Login Items** if the service no
 longer starts at login. If agent work cannot access Desktop, Documents, or
