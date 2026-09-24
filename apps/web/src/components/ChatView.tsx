@@ -378,6 +378,7 @@ import { expandedImageKey, type ExpandedImagePreview } from "./chat/ExpandedImag
 import { ThreadDetailsPanel, type ThreadDetailsPanelProps } from "./chat/ThreadDetailsPanel";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { AgentsPanel } from "./AgentsPanel";
+import { AgentVisualizationPanel } from "../j5/office/AgentVisualizationPanel";
 import {
   deriveAgentPanelModel,
   projectedSubagentsToRuntime,
@@ -4663,6 +4664,10 @@ export default function ChatView(props: ChatViewProps) {
   const addAgentsSurface = useCallback(() => {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "agents");
+  }, [activeThreadRef]);
+  const addVisualizationSurface = useCallback(() => {
+    if (!activeThreadRef) return;
+    useRightPanelStore.getState().open(activeThreadRef, "visualization");
   }, [activeThreadRef]);
   const addDiffSurface = useCallback(() => {
     if (!activeThreadRef || !isServerThread || !isGitRepo) return;
@@ -8984,6 +8989,11 @@ export default function ChatView(props: ChatViewProps) {
         environmentId={activeThreadRef?.environmentId ?? null}
         threadId={activeThreadRef?.threadId ?? null}
       />
+    ) : renderedRightPanelSurface?.kind === "visualization" ? (
+      <AgentVisualizationPanel
+        key={`${activeThreadRef?.environmentId ?? ""}:${activeThreadRef?.threadId ?? ""}`}
+        model={agentPanelModel}
+      />
     ) : renderedRightPanelSurface?.kind === "artifacts" && activeProject ? (
       <ArtifactsPage
         key={`${activeProject.environmentId}:${activeProject.id}:${renderedRightPanelSurface.selectionRequestId}`}
@@ -9807,6 +9817,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequests={addPullRequestsSurface}
           onAddAgents={addAgentsSurface}
           onAddDevice={addDeviceSurface}
+          onAddVisualization={addVisualizationSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           terminalAvailable={activeProject !== null}
           diffAvailable={isServerThread && isGitRepo}
@@ -9816,6 +9827,7 @@ export default function ChatView(props: ChatViewProps) {
           pullRequestsAvailable={isServerThread && supportsThreadPullRequests}
           agentsAvailable
           deviceAvailable={activeThreadRef !== null}
+          visualizationAvailable={activeThreadRef !== null}
           liveAgentCount={agentPanelModel.liveCount}
         >
           {rightPanelContent}
@@ -9867,6 +9879,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddPullRequests={addPullRequestsSurface}
             onAddAgents={addAgentsSurface}
             onAddDevice={addDeviceSurface}
+            onAddVisualization={addVisualizationSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={activeProject !== null}
             diffAvailable={isServerThread && isGitRepo}
@@ -9876,6 +9889,7 @@ export default function ChatView(props: ChatViewProps) {
             pullRequestsAvailable={isServerThread && supportsThreadPullRequests}
             agentsAvailable
             deviceAvailable={activeThreadRef !== null}
+            visualizationAvailable={activeThreadRef !== null}
             liveAgentCount={agentPanelModel.liveCount}
           >
             {rightPanelContent}
