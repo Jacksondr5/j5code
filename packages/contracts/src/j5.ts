@@ -561,6 +561,25 @@ export const PeerDeliveryRequest = Schema.Struct({
   originSquadronId: Schema.String.check(Schema.isNonEmpty()),
   /** Required when `exchangeRole` is `ask`: the Exchange the receiver now owes a reply to. */
   intent: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  /**
+   * Present on a `terminal_notice`: the closing fact the origin recorded, so the
+   * peer ends its own copy of the Exchange the same way. A dropped Exchange
+   * carries the retirement; a withdrawn ask carries only that the asker cleared it.
+   */
+  terminal: Schema.optional(
+    Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literal("dropped"),
+        disposition: Schema.Literals(["receiver-retired", "sender-retired"]),
+        cause: Schema.Struct({
+          kind: Schema.Literals(["participant-archived", "participant-deleted"]),
+          participantId: Schema.String,
+          squadronId: Schema.String,
+        }),
+      }),
+      Schema.Struct({ kind: Schema.Literal("sender-cleared") }),
+    ]),
+  ),
   createdAt: Schema.String,
 });
 export type PeerDeliveryRequest = typeof PeerDeliveryRequest.Type;

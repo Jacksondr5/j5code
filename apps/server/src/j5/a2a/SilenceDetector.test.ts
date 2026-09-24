@@ -49,6 +49,7 @@ import {
   CorrelationId,
   ExchangeId,
   LedgerMessageId,
+  MessageSentPayload,
   SquadronId,
   ParticipantId,
   SILENCE_DETECTOR_PARTICIPANT_ID,
@@ -90,6 +91,9 @@ const failureDetail = {
 
 const iso = (second: number) => `2026-08-19T12:00:${String(second).padStart(2, "0")}.000Z`;
 const decodeSilenceNotice = Schema.decodeUnknownEffect(SilenceNoticePayload);
+const decodeMessageSentPayload = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(MessageSentPayload),
+);
 
 const makeTestLayer = () => {
   const database = NodeSqliteClient.layerMemory();
@@ -909,5 +913,76 @@ it.effect("emits nothing when the human is the quiet recipient", () =>
     const appended = yield* (yield* A2ASilenceDetector).handleDeliveryEvent(delivered);
     assert.deepStrictEqual(appended, []);
     assert.deepStrictEqual(yield* readNotices(), []);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("addresses a silence notice to a waiter on a peer server through the peer path", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const ledger = yield* A2ALedger;
+    const sql = yield* SqlClient.SqlClient;
+    const remoteAsker = ParticipantId.make("agent:j5:a2a:thread:remote-asker");
+    const exchangeId = ExchangeId.make("exchange:j5:a2a:remote-ask");
+    const correlationId = CorrelationId.make("correlation:j5:a2a:remote-ask");
+    const messageId = LedgerMessageId.make("message:j5:a2a:remote-ask");
+    // The ask came in from a peer: the inbound service's two facts, as it records them.
+    yield* ledger.appendEvents({
+      commandId: CommCommandId.make("command:silence:remote-ask"),
+      squadronId,
+      acceptedAt: iso(0),
+      events: [
+        {
+          kind: "exchange.opened",
+          sender: remoteAsker,
+          receiver: subject.id,
+          exchangeId,
+          correlationId,
+          payload: { intent: "incident status", urgency: null },
+          createdAt: iso(0),
+        },
+        {
+          kind: "message.received",
+          sender: remoteAsker,
+          receiver: subject.id,
+          exchangeId,
+          correlationId,
+          payload: {
+            originSquadronId: SquadronId.make("squadron:home-support"),
+            originEnvironmentId: "environment-home",
+            message: {
+              messageId,
+              text: "What is the incident status?",
+              originSquadronId: "squadron:home-support",
+              receiverSquadronId: squadronId,
+              exchangeRole: "ask",
+              envelopeChannel: "peer",
+            },
+          },
+          createdAt: iso(0),
+        },
+      ],
+    });
+    assert.equal((yield* (yield* A2ADeliveryWorker).runOnce)?.state, "delivered");
+
+    const appended = yield* (yield* A2ASilenceDetector).handleStoredEvent(
+      terminalEvent("completed"),
+    );
+    assert.equal(appended.length, 1);
+    const notices = yield* readNotices();
+    assert.equal(notices[0]?.state, "turn-ended-no-reply");
+
+    const sent = yield* sql<{ readonly receiver: string; readonly payload: string }>`
+      SELECT receiver, payload FROM j5_a2a_comm_event
+      WHERE kind = 'message.sent' AND json_extract(payload, '$.envelopeChannel') = 'silence_notice'
+    `;
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]!.receiver, remoteAsker);
+    const payload = yield* decodeMessageSentPayload(sent[0]!.payload);
+    assert.equal(payload.receiverEnvironmentId, "environment-home");
+    assert.equal(payload.receiverSquadronId, "squadron:home-support");
+    const row = yield* sql<{ readonly receiver_environment_id: string | null }>`
+      SELECT receiver_environment_id FROM j5_a2a_delivery WHERE message_id = ${payload.messageId}
+    `;
+    assert.deepStrictEqual(row, [{ receiver_environment_id: "environment-home" }]);
   }).pipe(Effect.provide(makeTestLayer())),
 );

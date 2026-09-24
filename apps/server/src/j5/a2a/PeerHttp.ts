@@ -116,6 +116,7 @@ const deliveryFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpS
     case "A2APeerReceiverNotFoundError":
       return Effect.succeed(jsonError(404, "recipient_not_found", message));
     case "A2APeerReceiverNotDeliverableError":
+    case "A2APeerSenderNotOwnedError":
       return Effect.succeed(jsonError(403, "policy_refused", message, { reason: tag }));
     case "A2APeerAskIntentRequiredError":
       return Effect.succeed(requestFailure(message));
