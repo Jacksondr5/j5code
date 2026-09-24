@@ -3,7 +3,7 @@ import * as NodeUtil from "node:util";
 
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it } from "@effect/vitest";
-import { ScheduledTaskError } from "@t3tools/contracts";
+import { CommandId, ProjectId, ProviderInstanceId, ScheduledTaskError } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -15,10 +15,13 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 
-import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import { layer as scheduledTaskServiceLayer, listDueTasks } from "./ScheduledTaskService.ts";
+import {
+  layer as scheduledTaskServiceLayer,
+  listDueTasks,
+  ScheduledTaskService,
+} from "./ScheduledTaskService.ts";
 
 const isScheduledTaskError = Schema.is(ScheduledTaskError);
 
@@ -41,7 +44,8 @@ const insertRow = (
     enabled: row.enabled,
     schedule_json: row.scheduleJson ?? '{"type":"interval","everyMs":60000}',
     project_id: "project:test",
-    thread_id: null,
+    // J5 (case 12) refuses unbound scheduled new-thread runs, so dispatch tests use bound tasks.
+    thread_id: "thread:scheduled-test",
     workspace_strategy_json: '{"type":"root"}',
     model_selection_json: '{"instanceId":"codex","model":"gpt-5"}',
     runtime_mode: "full-access",
@@ -197,8 +201,8 @@ it.effect(
             Layer.provideMerge(
               scheduledTaskServiceLayer,
               Layer.mergeAll(
-                Layer.mock(ThreadLaunchService.ThreadLaunchService)({
-                  launch: () =>
+                Layer.mock(ThreadManagementService.ThreadManagementService)({
+                  sendToThread: () =>
                     Ref.updateAndGet(dispatched, (n) => n + 1).pipe(
                       Effect.andThen((n) =>
                         n === 4
@@ -210,7 +214,6 @@ it.effect(
                       Effect.andThen(Effect.die(new Error("test launch failure"))),
                     ),
                 }),
-                Layer.mock(ThreadManagementService.ThreadManagementService)({}),
                 NodeCrypto.layer,
                 Scheduler.layer,
               ),
@@ -294,8 +297,8 @@ it.effect(
             Layer.provideMerge(
               scheduledTaskServiceLayer,
               Layer.mergeAll(
-                Layer.mock(ThreadLaunchService.ThreadLaunchService)({
-                  launch: () =>
+                Layer.mock(ThreadManagementService.ThreadManagementService)({
+                  sendToThread: () =>
                     Ref.updateAndGet(dispatched, (n) => n + 1).pipe(
                       // A concurrent writer (the CLI shares the SQLite file)
                       // corrupts the next row between the poll read and its
@@ -315,7 +318,6 @@ it.effect(
                       Effect.andThen(Effect.die(new Error("test launch failure"))),
                     ),
                 }),
-                Layer.mock(ThreadManagementService.ThreadManagementService)({}),
                 NodeCrypto.layer,
                 Scheduler.layer,
               ),
@@ -347,4 +349,56 @@ it.effect(
         }),
       );
     }).pipe(Effect.provide(SqlitePersistenceMemory)),
+);
+
+const visibleErrorProjectId = ProjectId.make("project:scheduled-task-visible-error");
+const visibleErrorModelSelection = {
+  instanceId: ProviderInstanceId.make("codex"),
+  model: "gpt-5.1-codex",
+} as const;
+
+it.effect(
+  "persists an unbound scheduled-new-thread Squadron refusal as a visible task error",
+  () => {
+    const threadManagement = Layer.mock(ThreadManagementService.ThreadManagementService)({
+      sendToThread: () => Effect.die("bound task dispatch is unused by this measurement"),
+    });
+    const scheduledTasks = scheduledTaskServiceLayer.pipe(
+      Layer.provideMerge(threadManagement),
+      Layer.provideMerge(NodeCrypto.layer),
+      Layer.provideMerge(Scheduler.layer),
+      Layer.provideMerge(SqlitePersistenceMemory),
+    );
+
+    return Effect.gen(function* () {
+      const service = yield* ScheduledTaskService;
+      for (const [label, storedCreation] of [
+        ["user-default", {}],
+        ["mcp-agent", { createdBy: "agent" as const, creationSource: "mcp" as const }],
+      ] as const) {
+        const { task } = yield* service.upsert({
+          commandId: CommandId.make(`command:scheduled-task:${label}`),
+          title: `Scheduled ${label}`,
+          prompt: "Run this scheduled task.",
+          enabled: true,
+          schedule: { type: "interval", everyMs: 60_000 },
+          projectId: visibleErrorProjectId,
+          threadId: null,
+          workspaceStrategy: { type: "root" },
+          modelSelection: visibleErrorModelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          ...storedCreation,
+        });
+        const result = yield* service.runNow({ id: task.id });
+        const expected = label === "user-default" ? ["user", "web"] : ["agent", "mcp"];
+        assert.deepStrictEqual([result.task.createdBy, result.task.creationSource], expected);
+        assert.equal(result.task.lastRunStatus, "failed");
+        assert.match(
+          result.task.lastRunError ?? "",
+          /Scheduled new-thread execution is unsupported/i,
+        );
+      }
+    }).pipe(Effect.provide(scheduledTasks));
+  },
 );

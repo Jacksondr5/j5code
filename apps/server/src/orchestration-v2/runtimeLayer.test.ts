@@ -1,5 +1,6 @@
 import { limitRecoveryCommand } from "./UsageLimitRecoveryWorker.ts";
 import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
+import { J5SquadronCreationLayer } from "../j5/a2a/runtimeLayer.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
@@ -68,11 +69,14 @@ import type { ProviderAdapterV2SessionRuntime, ProviderAdapterV2Shape } from "./
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import {
   OrchestrationV2EventSinkLayerLive,
-  OrchestrationV2LayerLive,
+  OrchestrationV2LayerLive as UpstreamOrchestrationV2LayerLive,
   ProjectServiceLayerLive,
 } from "./runtimeLayer.ts";
 import { shellStreamItemFromThreadShell } from "./ShellStream.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
+import { AgentCrewInstanceService } from "../j5/a2a/AgentCrewInstanceService.ts";
+import { CrewStopService, layer as crewStopLayer } from "../j5/a2a/CrewStopService.ts";
+import { ParticipantId, SquadronId } from "../j5/a2a/contracts.ts";
 import { ThreadManagementService } from "./ThreadManagementService.ts";
 import {
   ThreadCommandExecutor,
@@ -82,6 +86,10 @@ import {
 const PlatformTestLayer = Layer.merge(
   NodeServices.layer,
   Layer.mock(SourceControlProviderRegistry)({ resolveLink: () => Effect.die("unused title link") }),
+);
+
+const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
+  Layer.provideMerge(J5SquadronCreationLayer),
 );
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
@@ -390,6 +398,54 @@ it.layer(TestLayer)("OrchestrationV2LayerLive", (it) => {
       assert.equal(projection.thread.projectId, projectId);
       assert.equal(projection.thread.providerInstanceId, "codex");
       assert.deepEqual(projection.runs, []);
+    }),
+  );
+
+  it.effect("replays an internal thread send without injecting a second message", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* OrchestratorV2;
+      const threadManagement = yield* ThreadManagementService;
+      const threadId = ThreadId.make("runtime-layer-idempotent-thread-send");
+      const projectId = ProjectId.make("runtime-layer-idempotent-thread-send-project");
+      const commandId = CommandId.make("runtime-layer-idempotent-thread-send-command");
+      const messageId = MessageId.make("runtime-layer-idempotent-thread-send-message");
+
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-layer-idempotent-thread-send-create"),
+        threadId,
+        projectId,
+        title: "Idempotent internal send",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: "/tmp/runtime-layer-idempotent-thread-send",
+      });
+
+      const input = {
+        projectId,
+        commandId,
+        threadId,
+        messageId,
+        text: "Deliver exactly once",
+        attachments: [],
+        mode: "auto" as const,
+        createdBy: "agent" as const,
+        creationSource: "mcp" as const,
+      };
+      const first = yield* threadManagement.sendToThread(input);
+      const replay = yield* threadManagement.sendToThread(input);
+      const projection = yield* threadManagement.getThreadProjection(threadId);
+
+      assert.equal(replay.dispatch.sequence, first.dispatch.sequence);
+      assert.deepEqual(replay.dispatch.storedEvents, first.dispatch.storedEvents);
+      assert.equal(replay.message.id, first.message.id);
+      assert.equal(replay.run.id, first.run.id);
+      assert.equal(projection.messages.filter((message) => message.id === messageId).length, 1);
+      assert.equal(projection.runs.filter((run) => run.userMessageId === messageId).length, 1);
     }),
   );
 
@@ -2866,6 +2922,113 @@ it.layer(SharedApplicationDataPlaneTestLayer)("pending provider interruption", (
       );
       assert.deepEqual(interrupted.providerTurns, []);
       assert.isFalse(yield* effectWorker.runOnce);
+    }),
+  );
+  it.effect("replaying a Crew stop does not dispatch a second real interrupt", () =>
+    Effect.gen(function* () {
+      const applicationEngine = yield* OrchestrationEngineService;
+      const orchestrator = yield* OrchestratorV2;
+      const threadManagement = yield* ThreadManagementService;
+      const effectWorker = yield* OrchestrationEffectWorkerV2;
+      const projectId = ProjectId.make("runtime-layer-crew-stop-project");
+      const threadId = ThreadId.make("runtime-layer-crew-stop-thread");
+
+      yield* applicationEngine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("runtime-layer-crew-stop-project-create"),
+        projectId,
+        title: "Pending interrupt project",
+        workspaceRoot: "/tmp/runtime-layer-crew-stop-project",
+        defaultModelSelection: modelSelection,
+        scripts: [],
+        createdAt: "2026-06-22T00:00:00.000Z",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-layer-crew-stop-create"),
+        threadId,
+        projectId,
+        title: "Pending interrupt",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-layer-crew-stop-message"),
+        threadId,
+        messageId: MessageId.make("runtime-layer-crew-stop-message"),
+        text: "Do not reach the provider.",
+        attachments: [],
+        modelSelection,
+        dispatchMode: { type: "start_immediately" },
+      });
+
+      const starting = yield* orchestrator.getThreadProjection(threadId);
+      const run = starting.runs[0];
+      assert.isDefined(run);
+      assert.equal(run.status, "starting");
+
+      const commandId = CommandId.make("crew-stop:builder");
+      const input = {
+        callerParticipantId: null,
+        squadronId: null,
+        crewInstanceId: "crew:stop",
+        commandIds: () => ({ interruptCommandId: commandId }),
+      };
+      const stopLayer = crewStopLayer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.succeed(ThreadManagementService, threadManagement),
+            Layer.mock(AgentCrewInstanceService)({
+              read: () =>
+                Effect.succeed({
+                  id: "crew:stop",
+                  squadronId: SquadronId.make("squadron:stop"),
+                  captainParticipantId: ParticipantId.make("captain"),
+                  captainThreadId: threadId,
+                  displayName: "Stop",
+                  brief: "Stop safely",
+                  version: 1,
+                  createdAt: "2026-06-22T00:00:00.000Z",
+                  archivedAt: null,
+                  members: [
+                    {
+                      seatName: "builder",
+                      agentId: "builder",
+                      participantId: ParticipantId.make("builder"),
+                      threadId,
+                      addedVersion: 1,
+                      reason: null,
+                    },
+                  ],
+                }),
+            }),
+          ),
+        ),
+      );
+      yield* Effect.gen(function* () {
+        const stop = yield* CrewStopService;
+        assert.equal((yield* stop.stop(input)).members[0]?.result, "interrupt_requested");
+        const sequence = yield* orchestrator.getThreadEventSequence(threadId);
+        assert.equal((yield* stop.stop(input)).members[0]?.result, "already_idle");
+        // Exercise the persisted command receipt too, after the run has become terminal.
+        yield* orchestrator.dispatch({ type: "run.interrupt", commandId, threadId, runId: run.id });
+        assert.equal(yield* orchestrator.getThreadEventSequence(threadId), sequence);
+        const interrupted = yield* orchestrator.getThreadProjection(threadId);
+        assert.equal(interrupted.runs[0]?.status, "interrupted");
+        assert.lengthOf(
+          interrupted.turnItems.filter((item) => item.type === "run_interrupt_request"),
+          1,
+        );
+        assert.isFalse(yield* effectWorker.runOnce);
+      }).pipe(Effect.provide(stopLayer));
     }),
   );
 });

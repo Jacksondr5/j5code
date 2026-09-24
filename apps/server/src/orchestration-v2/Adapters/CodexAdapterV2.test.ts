@@ -44,8 +44,10 @@ import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+import { findCodexCliVersionUnsupportedError } from "../../j5/codex/CodexCliVersionGate.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import type { EventNdjsonLogger } from "../../provider/Layers/EventNdjsonLogger.ts";
+import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../provider/T3OrchestrationInstructions.ts";
 import { layer as idAllocatorLayer, IdAllocatorV2 } from "../IdAllocator.ts";
 import { OrchestrationEffectWorkerV2 } from "../EffectWorker.ts";
 import { OrchestratorV2 } from "../Orchestrator.ts";
@@ -60,6 +62,7 @@ import {
 } from "../ProviderAdapter.ts";
 import type { ProviderContinuationRequest } from "../ProviderContinuationRequests.ts";
 import {
+  approvalDecisionToLegacyReviewDecision,
   buildCodexTurnStartParams,
   canReuseCodexContextUsage,
   CODEX_DEFAULT_INSTANCE_ID,
@@ -80,6 +83,10 @@ import {
   makeReplayServerConfig,
   makeCodexProviderAdapterRegistryReplayLayer,
 } from "./CodexAdapterV2.testkit.ts";
+import {
+  J5_CODEX_T3_MCP_SERVER_CONFIG,
+  J5_CODEX_COORDINATION_MCP_SERVER_CONFIG,
+} from "../../j5/a2a/mcp/codexToolApproval.ts";
 
 const encodeUnknownJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 const replayTranscriptJson = Schema.fromJsonString(CodexReplay.CodexAppServerReplayTranscript);
@@ -485,7 +492,7 @@ describe("CodexAdapterV2 runtime policy", () => {
       assert.equal(params.collaborationMode?.mode, "default");
       assert.include(
         params.collaborationMode?.settings.developer_instructions ?? "",
-        "Use `delegate_task`",
+        T3_CODE_ORCHESTRATION_INSTRUCTIONS,
       );
       assert.include(
         params.collaborationMode?.settings.developer_instructions ?? "",
@@ -631,11 +638,33 @@ describe("CodexAdapterV2 process spawning", () => {
                 http_headers: {
                   Authorization: "Bearer secret-codex-token",
                 },
+                ...J5_CODEX_T3_MCP_SERVER_CONFIG,
               },
             },
           },
         },
       );
+      // Supervised custom seats still communicate and file roster requests without a second
+      // provider approval. Other mutations retain the runtime's ordinary approval policy.
+      for (const runtimeMode of ["approval-required", "auto-accept-edits", "auto"] as const) {
+        assert.deepEqual(
+          codexThreadRuntimeParams({
+            threadId,
+            runtimePolicy: { runtimeMode, interactionMode: "default", cwd: null },
+          }),
+          {
+            config: {
+              mcp_servers: {
+                "t3-code": {
+                  url: "http://127.0.0.1:43123/mcp",
+                  http_headers: { Authorization: "Bearer secret-codex-token" },
+                  ...J5_CODEX_COORDINATION_MCP_SERVER_CONFIG,
+                },
+              },
+            },
+          },
+        );
+      }
     } finally {
       McpProviderSession.clearMcpProviderSession(threadId);
     }
@@ -1369,7 +1398,7 @@ function codexReplayPreamble(input: {
       frame: {
         id: 1,
         result: {
-          userAgent: "t3code_desktop/0.144.0",
+          userAgent: "t3code_desktop/0.152.1",
           codexHome: "/tmp/codex-home",
           platformFamily: "unix",
           platformOs: "macos",
@@ -1392,6 +1421,7 @@ function codexReplayPreamble(input: {
             id: input.nativeThreadId,
             sessionId: input.nativeThreadId,
             forkedFromId: null,
+            projectId: null,
             preview: "",
             ephemeral: false,
             modelProvider: "openai",
@@ -1400,7 +1430,7 @@ function codexReplayPreamble(input: {
             status: { type: "idle" },
             path: `/tmp/${input.nativeThreadId}.jsonl`,
             cwd: "/workspace",
-            cliVersion: "0.144.0",
+            cliVersion: "0.152.1",
             source: "vscode",
             threadSource: null,
             agentNickname: null,
@@ -1468,7 +1498,7 @@ function makeCodexReplayTranscript(input: {
   return {
     provider: "codex",
     protocol: "codex.app-server",
-    version: "0.144.0",
+    version: "0.152.1",
     scenario: input.scenario,
     entries: input.entries,
   };
@@ -1940,6 +1970,43 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         event.type === "message.updated" && event.message.role === "assistant",
     );
 
+  for (const userAgent of ["t3code_desktop/0.150.0", "codex-app-server"]) {
+    it.effect(`refuses ${userAgent} during initialize before any thread request`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const initialize = codexReplayPreamble({
+            nativeThreadId: "unsupported-cli-thread",
+            nativeTurnId: "unsupported-cli-turn",
+            prompt: "Must not reach a thread request",
+          })[0]!;
+          const transcript = makeCodexReplayTranscript({
+            scenario: "unsupported-codex-initialize",
+            entries: [
+              initialize,
+              {
+                type: "emit_inbound",
+                label: "initialize",
+                frame: {
+                  id: 1,
+                  result: {
+                    userAgent,
+                    codexHome: "/tmp/codex-home",
+                    platformFamily: "unix",
+                    platformOs: "macos",
+                  },
+                },
+              },
+            ],
+          });
+          const error = yield* makeCodexReplayHarness(transcript).pipe(Effect.flip);
+          const versionError = findCodexCliVersionUnsupportedError(error);
+          assert.isDefined(versionError);
+          assert.include(versionError!.message, "J5 requires Codex CLI ≥ 0.151.0");
+        }),
+      ).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, idAllocatorLayer))),
+    );
+  }
+
   it.effect("keeps an asynchronous Codex question actionable after the turn completes", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -2196,6 +2263,61 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       }).pipe(Effect.provide(Layer.merge(idAllocatorLayer, NodeServices.layer))),
     ),
   );
+
+  for (const { message, missing } of [
+    { message: "no rollout found for thread id native-codex-resume-missing-thread", missing: true },
+    { message: "thread not found: native-codex-resume-missing-thread", missing: true },
+    { message: "thread is busy with another client", missing: false },
+    { message: "failed to open rollout: permission denied", missing: false },
+  ]) {
+    it.effect(`reports whether Codex says the resumed thread is gone: ${message}`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const scenario = "codex-resume-missing";
+          const nativeThreadId = `native-${scenario}-thread`;
+          const preamble = codexReplayPreamble({
+            nativeThreadId,
+            nativeTurnId: "unused-turn",
+            prompt: "unused-prompt",
+          }).slice(0, 5);
+          const transcript = makeCodexReplayTranscript({
+            scenario,
+            entries: [
+              ...preamble,
+              {
+                type: "expect_outbound",
+                label: "thread/resume",
+                frame: {
+                  id: 3,
+                  method: "thread/resume",
+                  params: { threadId: nativeThreadId, excludeTurns: true },
+                },
+              },
+              {
+                type: "emit_inbound",
+                label: "thread/resume",
+                frame: { id: 3, error: { code: -32600, message } },
+              },
+            ],
+          });
+          const harness = yield* makeCodexReplayHarness(transcript);
+          const error = yield* harness.runtime
+            .resumeThread({
+              providerThread: harness.providerThread,
+              modelSelection: CODEX_TEST_MODEL_SELECTION,
+              runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+            })
+            .pipe(Effect.flip);
+
+          assert.equal(error._tag, "ProviderAdapterResumeThreadError");
+          assert.equal(
+            error._tag === "ProviderAdapterResumeThreadError" && error.nativeThreadMissing,
+            missing,
+          );
+        }).pipe(Effect.provide(Layer.merge(idAllocatorLayer, NodeServices.layer))),
+      ),
+    );
+  }
 
   it.effect("continues an interrupted native thread with empty input and reasoning summaries", () =>
     Effect.scoped(
@@ -5934,6 +6056,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       id: input.nativeThreadId,
       sessionId: input.nativeThreadId,
       forkedFromId: input.forkedFromId,
+      projectId: null,
       preview: "",
       ephemeral: false,
       modelProvider: "openai",
@@ -5942,7 +6065,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       status: { type: "idle" },
       path: `/tmp/${input.nativeThreadId}.jsonl`,
       cwd: "/workspace",
-      cliVersion: "0.144.0",
+      cliVersion: "0.152.1",
       source: "vscode",
       threadSource: null,
       agentNickname: null,
@@ -6327,4 +6450,20 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       assert.include(errorCauseChainText(error), "fork exploded");
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(idAllocatorLayer, NodeServices.layer))),
   );
+});
+
+describe("CodexAdapterV2 approval decisions", () => {
+  it("maps a decline to Codex's structured denial with truthful J5 wording", () => {
+    // J5 cannot tell a human decline from a policy one at this seam, so the
+    // rejection never claims the user did it.
+    assert.deepEqual(approvalDecisionToLegacyReviewDecision("decline"), {
+      denied: { rejection: "J5 did not approve this request." },
+    });
+    assert.strictEqual(approvalDecisionToLegacyReviewDecision("accept"), "approved");
+    assert.strictEqual(
+      approvalDecisionToLegacyReviewDecision("acceptForSession"),
+      "approved_for_session",
+    );
+    assert.strictEqual(approvalDecisionToLegacyReviewDecision("cancel"), "abort");
+  });
 });

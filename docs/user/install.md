@@ -10,47 +10,45 @@ launch T3 Code and configure providers afterwards.
 
 ## Command line
 
+J5 Code publishes a self-contained server for macOS (Apple silicon) and Linux
+x64. It needs no Node.js or npm:
+
 ```bash
-curl -fsSL https://t3.codes/install.sh | sh
+curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh | sh
 ```
 
-On Windows, in PowerShell:
+This puts `j5` in `~/.local/bin` and keeps downloaded versions and your data in
+`~/.j5code` (set `J5CODE_HOME` to use another directory). If your shell reports
+`command not found` afterwards, that directory is not on your `PATH` yet; the
+installer prints the line to add. Set `T3CODE_VERSION` to pin an exact version.
 
-```powershell
-irm https://t3.codes/install.ps1 | iex
-```
-
-This puts `t3` in `~/.local/bin`. If your shell reports `command not found`
-afterwards, that directory is not on your `PATH` yet; the installer prints the
-line to add. Set `T3CODE_CHANNEL=nightly` to install the nightly train, or
-`T3CODE_VERSION` to pin an exact version.
+Upgrading a server that was installed from npm (`@jacksondr5/j5code` 0.0.42 or
+earlier)? Follow [Migrating to release archives](./migrating-to-release-archives.md)
+once; later updates use `j5 update`.
 
 | Task                                             | Command                                                   |
 | ------------------------------------------------ | --------------------------------------------------------- |
-| Start the server and open the web app            | `t3`                                                      |
-| Start the server without a browser               | `t3 serve`                                                |
-| Keep it running in the background (macOS, Linux) | `t3 service install` ([details](./background-service.md)) |
-| Move to the newest release                       | `t3 update`                                               |
-| Remove it again                                  | `t3 uninstall`                                            |
+| Start the server and open the web app            | `j5`                                                      |
+| Start the server without a browser               | `j5 serve`                                                |
+| Keep it running in the background (macOS, Linux) | `j5 service install` ([details](./background-service.md)) |
+| Move to the newest release                       | `j5 update`                                               |
+| Remove it again                                  | `j5 uninstall`                                            |
 
-Run `t3 --help` for the full reference.
+Run `j5 --help` for the full reference.
 
-To try T3 Code once without installing it, run `npx t3@latest` instead (needs
-Node.js for `npx`).
+### Other platforms
 
-### Intel Macs
-
-There is no `t3` executable for Intel Macs (the desktop app is available). To
-run a server there, build it from source with Node.js 24 and `vp`
+There is no `j5` executable for Intel Macs, Linux on ARM, or Windows. To run a
+server there, build it from source with Node.js 24 and `vp`
 ([Install vp](https://github.com/pingdotgg/t3code#install-vp)):
 
 ```bash
-git clone https://github.com/pingdotgg/t3code
-cd t3code && vp i && vp run build:desktop
+git clone https://github.com/Jacksondr5/j5code
+cd j5code && vp i && vp run build:desktop
 node apps/server/dist/bin.mjs
 ```
 
-`t3 update` and the background service do not apply to a server run this way;
+`j5 update` and the background service do not apply to a server run this way;
 update it with `git pull` and a rebuild.
 
 ## Desktop app
@@ -77,11 +75,11 @@ take longer.
 With the desktop app already running on the same machine:
 
 ```bash
-t3 app
+j5 app
 ```
 
 This opens a new thread for the current directory, adding the project if needed.
-Pass a path, such as `t3 app ../my-project`, to open another directory. It requires
+Pass a path, such as `j5 app ../my-project`, to open another directory. It requires
 the desktop app, so a standalone server or an SSH session is not enough. If the
 command cannot reach the app, start or update the desktop app and try again.
 

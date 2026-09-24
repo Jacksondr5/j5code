@@ -1,4 +1,3 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
 import {
   type AtomCommandResult,
@@ -37,9 +36,11 @@ import {
 import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
 import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
 import { useCopyToClipboard } from "./useCopyToClipboard";
-import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
 import { useThreadActions } from "./useThreadActions";
+import { requestConfirmDialog } from "../confirmDialog";
+import { archiveWithPreflight } from "../j5/a2a/archiveFlow";
+import { useSquadronNewThreadOnBranch } from "../j5/squadron/useSquadronNewThreadOnBranch";
 
 function failureToast(title: string, error: unknown) {
   toastManager.add(
@@ -95,7 +96,8 @@ export function useThreadActionMenu(input: {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
-  const handleNewThread = useNewThreadHandler();
+  // J5 (case 19): header new-thread-on-branch launches through the source's Squadron home.
+  const newThreadOnBranch = useSquadronNewThreadOnBranch(threadRef);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
@@ -191,22 +193,9 @@ export function useThreadActionMenu(input: {
             });
             return;
           }
-          case "new-thread-on-branch": {
-            // Explicit branch carry-over: reuse the thread's worktree when it
-            // has one, otherwise its branch on the local checkout.
-            const result = await settlePromise(() =>
-              handleNewThread(scopeProjectRef(threadRef.environmentId, thread.projectId), {
-                branch: thread.branch,
-                worktreePath: thread.worktreePath,
-                envMode: thread.worktreePath ? "worktree" : "local",
-                startFromOrigin: false,
-              }),
-            );
-            if (result._tag === "Failure") {
-              failureToast("Could not create thread", squashAtomCommandFailure(result));
-            }
+          case "new-thread-on-branch":
+            await newThreadOnBranch(thread);
             return;
-          }
           case "settle":
             await reportFailure("Failed to settle thread", () => settleThread(threadRef));
             return;
@@ -262,18 +251,41 @@ export function useThreadActionMenu(input: {
             copyThreadIdToClipboard(thread.id, { threadId: thread.id });
             return;
           case "archive": {
-            if (confirmThreadArchive) {
-              const confirmed = await settlePromise(() =>
-                api.dialogs.confirm(`Archive thread "${thread.title}"?`),
-              );
-              if (confirmed._tag === "Failure" || !confirmed.value) return;
-            }
+            // J5 (case 21): the header archive door runs the same per-thread preflight.
             let didArchive = false;
-            const result = await archiveThread(threadRef, {
-              onArchived: () => {
-                didArchive = true;
+            const result = await archiveWithPreflight({
+              threadRef,
+              threadTitle: thread.title,
+              confirm: async ({ message, content, confirmLabel }) => {
+                const confirmed = await settlePromise(
+                  () =>
+                    requestConfirmDialog(
+                      message,
+                      { variant: "destructive" },
+                      { content, confirmLabel },
+                    ) ?? Promise.resolve(false),
+                );
+                return confirmed._tag === "Success" && confirmed.value;
               },
+              ...(confirmThreadArchive
+                ? {
+                    confirmCleanArchive: async () => {
+                      const confirmed = await settlePromise(() =>
+                        api.dialogs.confirm(`Archive thread "${thread.title}"?`),
+                      );
+                      return confirmed._tag === "Success" && confirmed.value;
+                    },
+                  }
+                : {}),
+              archive: ({ undoable }) =>
+                archiveThread(threadRef, {
+                  undoable,
+                  onArchived: () => {
+                    didArchive = true;
+                  },
+                }),
             });
+            if (result === undefined) return;
             if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
               failureToast(
                 didArchive ? "Thread archived, but navigation failed" : "Failed to archive thread",
@@ -322,9 +334,9 @@ export function useThreadActionMenu(input: {
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
-      handleNewThread,
       logicalProjectKeyByPhysicalKey,
       markThreadUnread,
+      newThreadOnBranch,
       onStartRename,
       pinThread,
       projectCwd,

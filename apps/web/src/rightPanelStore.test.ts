@@ -309,6 +309,69 @@ describe("rightPanelStore", () => {
     });
   });
 
+  it("upgrades saved artifact surfaces with neutral selection state", () => {
+    expect(
+      migratePersistedRightPanelState({
+        byThreadKey: {
+          "env-1:thread-A": {
+            isOpen: true,
+            activeSurfaceId: "artifacts",
+            surfaces: [{ id: "artifacts", kind: "artifacts" }],
+          },
+        },
+      }),
+    ).toEqual({
+      byThreadKey: {
+        "env-1:thread-A": {
+          isOpen: true,
+          activeSurfaceId: "artifacts",
+          surfaces: [
+            {
+              id: "artifacts",
+              kind: "artifacts",
+              selectedPath: null,
+              selectionRequestId: 0,
+            },
+          ],
+        },
+      },
+      threadPanelVisibilityByThreadKey: {},
+    });
+  });
+
+  it("keeps J5 v13 artifact surfaces while dropping the removed agents surface", () => {
+    expect(
+      migratePersistedRightPanelState({
+        byThreadKey: {
+          "env-1:thread-A": {
+            isOpen: true,
+            activeSurfaceId: "agents",
+            surfaces: [
+              { id: "agents", kind: "agents" },
+              { id: "artifacts", kind: "artifacts", selectedPath: "plan.md" },
+            ],
+          },
+        },
+      }),
+    ).toEqual({
+      byThreadKey: {
+        "env-1:thread-A": {
+          isOpen: true,
+          activeSurfaceId: "artifacts",
+          surfaces: [
+            {
+              id: "artifacts",
+              kind: "artifacts",
+              selectedPath: "plan.md",
+              selectionRequestId: 0,
+            },
+          ],
+        },
+      },
+      threadPanelVisibilityByThreadKey: {},
+    });
+  });
+
   it("upgrades the legacy singleton pull request surface to a reference-keyed tab", () => {
     const id = pullRequestSurfaceId({
       projectId: "project-a",
@@ -532,6 +595,34 @@ describe("rightPanelStore", () => {
       isOpen: true,
       activeSurfaceId: "files",
       surfaces: [{ id: "files", kind: "files" }],
+    });
+  });
+
+  it("keeps artifacts as a workspace singleton surface", () => {
+    useRightPanelStore.getState().open(refA, "artifacts");
+    useRightPanelStore.getState().open(refA, "artifacts");
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "artifacts",
+      surfaces: [{ id: "artifacts", kind: "artifacts", selectedPath: null, selectionRequestId: 0 }],
+    });
+  });
+
+  it("opens a referenced artifact in the singleton surface", () => {
+    useRightPanelStore.getState().openArtifact(refA, "plan.md");
+    useRightPanelStore.getState().openArtifact(refA, "diagrams/system.html");
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "artifacts",
+      surfaces: [
+        {
+          id: "artifacts",
+          kind: "artifacts",
+          selectedPath: "diagrams/system.html",
+          selectionRequestId: 2,
+        },
+      ],
     });
   });
 

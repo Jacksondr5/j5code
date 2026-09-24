@@ -29,13 +29,16 @@ const linuxPlan = {
   program: [linuxRuntime, "__service-launcher"],
   baseDir: "/home/theo/.t3",
   logPath: "/home/theo/.t3/userdata/logs/boot-service.log",
-  unitPath: "/home/theo/.config/systemd/user/t3code.service",
+  unitPath: "/home/theo/.config/systemd/user/j5code.service",
 };
 
 it("runs the pinned runtime's own executable as the systemd launcher", () => {
   const unit = BootService.renderBootServiceUnit(linuxPlan);
 
   expect(unit).toContain(`ExecStart=${linuxRuntime} __service-launcher`);
+  expect(unit).toContain("Environment=J5CODE_HOME=/home/theo/.t3");
+  expect(unit).toContain("Environment=T3_BOOT_SERVICE_UNIT=j5code.service");
+  expect(unit).not.toContain("T3CODE_HOME");
   expect(unit).toContain("KillMode=mixed");
   expect(unit).not.toContain("node");
 });
@@ -45,7 +48,7 @@ it("reads the served T3 home back out of a rendered unit or plist", () => {
     program: [`${baseDir}/runtime/versions/1.2.3/t3`, "__service-launcher"],
     baseDir,
     logPath: `${baseDir}/userdata/logs/boot-service.log`,
-    unitPath: "/home/theo/.config/systemd/user/t3code.service",
+    unitPath: "/home/theo/.config/systemd/user/j5code.service",
   });
 
   expect(
@@ -66,6 +69,10 @@ it("reads the served T3 home back out of a rendered unit or plist", () => {
     ),
   ).toBe("/Users/theo/a&b");
   expect(BootService.bootServiceBaseDirOf("[Service]\nExecStart=/x\n")).toBeUndefined();
+  // An upstream T3 Code unit never reads as serving a J5 home.
+  expect(
+    BootService.bootServiceBaseDirOf("[Service]\nEnvironment=T3CODE_HOME=/home/theo/.t3\n"),
+  ).toBeUndefined();
 });
 
 it("survives the kernel OOM-killing a greedy agent child", () => {
@@ -79,7 +86,7 @@ const macPlan = {
   program: [macRuntime, "__service-launcher"],
   baseDir: "/Users/theo/.t3",
   logPath: "/Users/theo/.t3/userdata/logs/boot-service.log",
-  unitPath: "/Users/theo/Library/LaunchAgents/com.t3tools.t3code.service.plist",
+  unitPath: "/Users/theo/Library/LaunchAgents/codes.jackson.j5code.service.plist",
 };
 const macInstallerPath =
   "/opt/homebrew/bin:/Users/theo/.npm-global/bin:/Users/theo/.nvm/versions/node/v22.16.0/bin:/usr/bin:/bin";
@@ -92,6 +99,9 @@ it("runs the pinned runtime's own executable as the launch agent", () => {
     `  <array>\n    <string>${macRuntime}</string>\n    <string>__service-launcher</string>\n  </array>`,
   );
   expect(plist).not.toContain("node</string>");
+  expect(plist).toContain("<key>J5CODE_HOME</key>");
+  expect(plist).toContain("<string>codes.jackson.j5code.service</string>");
+  expect(plist).not.toContain("T3CODE_HOME");
 });
 
 it("preserves the installer's provider search path in the launch agent", () => {
@@ -170,11 +180,11 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
       const failed = command === control.failCommand;
       if (!failed && command === "loginctl enable-linger --no-ask-password 501")
         control.linger = "yes";
-      if (!failed && command === "systemctl --user enable t3code.service") control.enabled = true;
-      if (!failed && command === "systemctl --user restart t3code.service") control.active = true;
+      if (!failed && command === "systemctl --user enable j5code.service") control.enabled = true;
+      if (!failed && command === "systemctl --user restart j5code.service") control.active = true;
       if (
         control.stateAfterStop !== undefined &&
-        (command === "systemctl --user stop t3code.service" ||
+        (command === "systemctl --user stop j5code.service" ||
           command.startsWith("launchctl bootout --wait "))
       ) {
         yield* fs.writeFileString(statePath, control.stateAfterStop).pipe(Effect.orDie);
@@ -302,7 +312,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
         );
         expect(yield* fs.readFileString(statePath)).toBe(before);
         expect(yield* fs.readFileString(plan.unitPath)).toBe(unit);
-        expect(commands).not.toContain("systemctl --user stop t3code.service");
+        expect(commands).not.toContain("systemctl --user stop j5code.service");
       }),
   );
 
@@ -377,7 +387,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       expect((yield* service.status).installed).toBe(false);
       // The stop can block up to systemd's 90s TimeoutStopSec; the runner's
       // 60s default would cancel it mid-shutdown.
-      expect(timeouts.get("systemctl --user disable --now t3code.service")).toEqual(
+      expect(timeouts.get("systemctl --user disable --now j5code.service")).toEqual(
         Duration.seconds(120),
       );
     }),
@@ -449,9 +459,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
           ),
         ).toEqual(
           platform === "linux"
-            ? ["systemctl --user stop t3code.service", "systemctl --user restart t3code.service"]
+            ? ["systemctl --user stop j5code.service", "systemctl --user restart j5code.service"]
             : [
-                "launchctl bootout --wait gui/501/com.t3tools.t3code.service",
+                "launchctl bootout --wait gui/501/codes.jackson.j5code.service",
                 `launchctl bootstrap gui/501 ${plan.unitPath}`,
               ],
         );
@@ -579,10 +589,10 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
           (command) => command.startsWith("systemctl ") && !command.includes("show-environment"),
         ),
       ).toEqual([
-        "systemctl --user stop t3code.service",
+        "systemctl --user stop j5code.service",
         "systemctl --user daemon-reload",
-        "systemctl --user enable t3code.service",
-        "systemctl --user restart t3code.service",
+        "systemctl --user enable j5code.service",
+        "systemctl --user restart j5code.service",
       ]);
     }),
   );
@@ -615,9 +625,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
           (command) => command.startsWith("systemctl ") && !command.includes("show-environment"),
         ),
       ).toEqual([
-        "systemctl --user stop t3code.service",
+        "systemctl --user stop j5code.service",
         "systemctl --user daemon-reload",
-        "systemctl --user restart t3code.service",
+        "systemctl --user restart j5code.service",
       ]);
     }),
   );
@@ -636,9 +646,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
           (command) => command.startsWith("systemctl ") && !command.includes("show-environment"),
         ),
       ).toEqual([
-        "systemctl --user stop t3code.service",
+        "systemctl --user stop j5code.service",
         "systemctl --user daemon-reload",
-        "systemctl --user restart t3code.service",
+        "systemctl --user restart j5code.service",
       ]);
     }),
   );
@@ -671,8 +681,8 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
             (command) => command.startsWith("systemctl ") && !command.includes("show-environment"),
           ),
         ).toEqual([
-          "systemctl --user stop t3code.service",
-          "systemctl --user restart t3code.service",
+          "systemctl --user stop j5code.service",
+          "systemctl --user restart j5code.service",
         ]);
       }
     }),
@@ -694,7 +704,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
 
       expect(
         plan.unitPath.endsWith(
-          path.join("Library", "LaunchAgents", "com.t3tools.t3code.service.plist"),
+          path.join("Library", "LaunchAgents", "codes.jackson.j5code.service.plist"),
         ),
       ).toBe(true);
       expect(yield* fs.readFileString(plan.unitPath)).toContain(
@@ -716,7 +726,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       expect(commands.some((command) => command.startsWith("systemctl "))).toBe(false);
       // A bootout can block up to the plist's 90s ExitTimeOut; the runner's
       // 60s default would cancel it and let bootstrap race a loaded job.
-      expect(timeouts.get("launchctl bootout --wait gui/501/com.t3tools.t3code.service")).toEqual(
+      expect(timeouts.get("launchctl bootout --wait gui/501/codes.jackson.j5code.service")).toEqual(
         Duration.seconds(120),
       );
     }),
@@ -733,8 +743,8 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       const error = yield* service.install().pipe(Effect.flip);
       expect(error._tag).toBe("BootServiceCommandError");
       expect(commands.filter((command) => command.startsWith("launchctl "))).toEqual([
-        "launchctl bootout --wait gui/501/com.t3tools.t3code.service",
-        "launchctl enable gui/501/com.t3tools.t3code.service",
+        "launchctl bootout --wait gui/501/codes.jackson.j5code.service",
+        "launchctl enable gui/501/codes.jackson.j5code.service",
         `launchctl bootstrap gui/501 ${plistPath}`,
         `launchctl bootstrap gui/501 ${plistPath}`,
       ]);
@@ -796,7 +806,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
     Effect.gen(function* () {
       const { service, control } = yield* makeHarness("darwin");
       yield* service.install();
-      control.failCommand = "launchctl bootout --wait gui/501/com.t3tools.t3code.service";
+      control.failCommand = "launchctl bootout --wait gui/501/codes.jackson.j5code.service";
 
       yield* service.install();
       expect((yield* service.status).current).toBe(true);
@@ -828,10 +838,226 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
         );
         expect(serviceStateHasPendingUpdate(yield* fs.readFileString(statePath))).toBe(true);
         expect(commands.filter((command) => command.startsWith("launchctl "))).toEqual([
-          "launchctl bootout --wait gui/501/com.t3tools.t3code.service",
+          "launchctl bootout --wait gui/501/codes.jackson.j5code.service",
           `launchctl bootstrap gui/501 ${plistPath}`,
         ]);
       }
+    }),
+  );
+});
+
+// J5: the pre-0.0.43 J5 unit used upstream's names. It is retired only when it
+// names J5CODE_HOME; an upstream T3 Code unit at the same path is never touched.
+it.layer(NodeServices.layer)("legacy J5 service handover", (it) => {
+  const legacySystemdUnit = (home: string) =>
+    [
+      "[Service]",
+      `Environment=J5CODE_HOME=${home}/.t3`,
+      `ExecStart=/usr/bin/node ${home}/.t3/runtime/service-launcher.mjs`,
+      "",
+    ].join("\n");
+  const upstreamSystemdUnit = (home: string) =>
+    [
+      "[Service]",
+      `Environment=T3CODE_HOME=${home}/.t3`,
+      `ExecStart=/usr/bin/node ${home}/.t3/runtime/service-launcher.mjs`,
+      "",
+    ].join("\n");
+  const legacyPaths = Effect.fn("test.legacy_paths")(function* (statePath: string) {
+    const path = yield* Path.Path;
+    const home = path.dirname(path.dirname(path.dirname(statePath)));
+    return {
+      home,
+      systemd: path.join(home, ".config", "systemd", "user", "t3code.service"),
+      launchd: path.join(home, "Library", "LaunchAgents", "com.t3tools.t3code.service.plist"),
+    };
+  });
+  const oldState = `${JSON.stringify({ protocol: 2, activeVersion: "0.0.42" })}\n`;
+
+  it.effect("replaces a J5-owned t3code.service and removes it once j5code.service runs", () =>
+    Effect.gen(function* () {
+      const { service, fs, statePath, commands } = yield* makeHarness();
+      const legacy = yield* legacyPaths(statePath);
+      yield* fs.makeDirectory(yield* Effect.map(Path.Path, (p) => p.dirname(legacy.systemd)), {
+        recursive: true,
+      });
+      yield* fs.writeFileString(legacy.systemd, legacySystemdUnit(legacy.home));
+      yield* fs.makeDirectory(yield* Effect.map(Path.Path, (p) => p.dirname(statePath)), {
+        recursive: true,
+      });
+      yield* fs.writeFileString(statePath, oldState);
+
+      expect(yield* service.status).toMatchObject({
+        installed: false,
+        problems: ["legacy-service-present"],
+      });
+
+      const plan = yield* service.install();
+
+      const systemctl = commands.filter(
+        (command) =>
+          command.startsWith("systemctl ") &&
+          !command.includes("show-environment") &&
+          !command.includes(" is-"),
+      );
+      expect(systemctl).toEqual([
+        "systemctl --user disable --now t3code.service",
+        "systemctl --user daemon-reload",
+        "systemctl --user enable j5code.service",
+        "systemctl --user restart j5code.service",
+        "systemctl --user daemon-reload",
+      ]);
+      expect(yield* fs.exists(legacy.systemd)).toBe(false);
+      expect(yield* fs.readFileString(plan.unitPath)).toContain("Environment=J5CODE_HOME=");
+      expect(parseServiceState(yield* fs.readFileString(statePath))?.activeVersion).toBe("1.2.3");
+      const status = yield* service.status;
+      expect(status.problems ?? []).not.toContain("legacy-service-present");
+      expect(status.current).toBe(true);
+    }),
+  );
+
+  it.effect("never touches an upstream T3 Code unit at the old name", () =>
+    Effect.gen(function* () {
+      const { service, fs, statePath, commands } = yield* makeHarness();
+      const legacy = yield* legacyPaths(statePath);
+      yield* fs.makeDirectory(yield* Effect.map(Path.Path, (p) => p.dirname(legacy.systemd)), {
+        recursive: true,
+      });
+      const upstream = upstreamSystemdUnit(legacy.home);
+      yield* fs.writeFileString(legacy.systemd, upstream);
+
+      expect((yield* service.status).problems).toBeUndefined();
+      yield* service.install();
+      expect(yield* service.uninstall).toBe(true);
+
+      expect(commands.some((command) => command.includes("t3code.service"))).toBe(false);
+      expect(yield* fs.readFileString(legacy.systemd)).toBe(upstream);
+    }),
+  );
+
+  it.effect("refuses to take over a j5code.service that J5 did not write", () =>
+    Effect.gen(function* () {
+      const { service, fs, statePath, commands } = yield* makeHarness();
+      const legacy = yield* legacyPaths(statePath);
+      const path = yield* Path.Path;
+      const foreignPath = path.join(path.dirname(legacy.systemd), "j5code.service");
+      yield* fs.makeDirectory(path.dirname(foreignPath), { recursive: true });
+      const foreign = [
+        "[Unit]",
+        "Description=J5 Code dogfood server (source checkout)",
+        "[Service]",
+        "Environment=J5CODE_HOME=%h/.j5code",
+        "ExecStart=/usr/bin/env bash -lc 'exec node apps/server/dist/bin.mjs serve'",
+        "",
+      ].join("\n");
+      yield* fs.writeFileString(foreignPath, foreign);
+
+      const error = yield* service.install().pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "BootServicePrerequisiteError",
+        problem: "foreign-service-present",
+      });
+      expect(yield* fs.readFileString(foreignPath)).toBe(foreign);
+      expect(
+        commands.some(
+          (command) =>
+            command.startsWith("systemctl ") &&
+            !command.includes("show-environment") &&
+            !command.includes(" is-"),
+        ),
+      ).toBe(false);
+    }),
+  );
+
+  it.effect("brings the J5 legacy service back when the new unit fails to start", () =>
+    Effect.gen(function* () {
+      const { service, fs, statePath, commands, control } = yield* makeHarness();
+      const legacy = yield* legacyPaths(statePath);
+      yield* fs.makeDirectory(yield* Effect.map(Path.Path, (p) => p.dirname(legacy.systemd)), {
+        recursive: true,
+      });
+      yield* fs.writeFileString(legacy.systemd, legacySystemdUnit(legacy.home));
+      yield* fs.makeDirectory(yield* Effect.map(Path.Path, (p) => p.dirname(statePath)), {
+        recursive: true,
+      });
+      yield* fs.writeFileString(statePath, oldState);
+      control.failCommand = "systemctl --user restart j5code.service";
+
+      expect((yield* service.install().pipe(Effect.flip))._tag).toBe("BootServiceCommandError");
+
+      expect(
+        commands.filter(
+          (command) =>
+            command.includes("t3code.service") || command.includes("disable --now j5code"),
+        ),
+      ).toEqual([
+        "systemctl --user disable --now t3code.service",
+        "systemctl --user disable --now j5code.service",
+        "systemctl --user enable --now t3code.service",
+      ]);
+      expect(yield* fs.exists(legacy.systemd)).toBe(true);
+      // The legacy launcher gets back the state file it understands.
+      expect(yield* fs.readFileString(statePath)).toBe(oldState);
+    }),
+  );
+
+  it.effect("refuses a deferred-start install while the legacy J5 service runs", () =>
+    Effect.gen(function* () {
+      const { service, fs, statePath, commands } = yield* makeHarness();
+      const legacy = yield* legacyPaths(statePath);
+      yield* fs.makeDirectory(yield* Effect.map(Path.Path, (p) => p.dirname(legacy.systemd)), {
+        recursive: true,
+      });
+      yield* fs.writeFileString(legacy.systemd, legacySystemdUnit(legacy.home));
+
+      const error = yield* service.install({ start: false }).pipe(Effect.flip);
+      expect(error).toMatchObject({
+        _tag: "BootServicePrerequisiteError",
+        problem: "legacy-service-present",
+      });
+      expect(commands.some((command) => command.includes("t3code.service"))).toBe(false);
+      expect(yield* fs.exists(legacy.systemd)).toBe(true);
+    }),
+  );
+
+  it.effect("uninstall also removes a J5-owned legacy unit", () =>
+    Effect.gen(function* () {
+      const { service, fs, statePath, commands } = yield* makeHarness();
+      const legacy = yield* legacyPaths(statePath);
+      yield* fs.makeDirectory(yield* Effect.map(Path.Path, (p) => p.dirname(legacy.systemd)), {
+        recursive: true,
+      });
+      yield* fs.writeFileString(legacy.systemd, legacySystemdUnit(legacy.home));
+
+      expect(yield* service.uninstall).toBe(true);
+      expect(commands).toContain("systemctl --user disable --now t3code.service");
+      expect(yield* fs.exists(legacy.systemd)).toBe(false);
+      expect((yield* service.status).problems).toBeUndefined();
+    }),
+  );
+
+  it.effect("replaces a J5-owned com.t3tools.t3code.service launch agent on macOS", () =>
+    Effect.gen(function* () {
+      const { service, fs, statePath, commands } = yield* makeHarness("darwin");
+      const legacy = yield* legacyPaths(statePath);
+      yield* fs.makeDirectory(yield* Effect.map(Path.Path, (p) => p.dirname(legacy.launchd)), {
+        recursive: true,
+      });
+      yield* fs.writeFileString(
+        legacy.launchd,
+        `<plist><dict><key>EnvironmentVariables</key><dict><key>J5CODE_HOME</key><string>${legacy.home}/.t3</string></dict></dict></plist>\n`,
+      );
+
+      const plan = yield* service.install();
+
+      expect(commands.filter((command) => command.startsWith("launchctl "))).toEqual([
+        "launchctl bootout --wait gui/501/com.t3tools.t3code.service",
+        "launchctl enable gui/501/codes.jackson.j5code.service",
+        `launchctl bootstrap gui/501 ${plan.unitPath}`,
+      ]);
+      expect(yield* fs.exists(legacy.launchd)).toBe(false);
+      expect((yield* service.status).current).toBe(true);
     }),
   );
 });

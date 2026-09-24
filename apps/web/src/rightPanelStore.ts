@@ -5,7 +5,7 @@
  * surface descriptors and the active surface, while each feature continues to
  * own its durable resource state. Browser surfaces point at preview tab ids,
  * terminal surfaces point at terminal session ids, file surfaces point at
- * workspace paths, and diff/files remain singleton surfaces.
+ * workspace paths, and diff/files/artifacts remain singleton surfaces.
  */
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
@@ -20,7 +20,8 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { resolveStorage } from "./lib/storage";
 import type { ThreadPanelPresentation } from "./rightPanelLayout";
 
-const RIGHT_PANEL_KINDS = [
+export const RIGHT_PANEL_KINDS = [
+  "artifacts",
   "diff",
   "files",
   "file",
@@ -52,6 +53,12 @@ export type RightPanelSurface =
       splitDirection?: "horizontal" | "vertical";
     }
   | { id: "diff"; kind: "diff" }
+  | {
+      id: "artifacts";
+      kind: "artifacts";
+      selectedPath: string | null;
+      selectionRequestId: number;
+    }
   | { id: "files"; kind: "files" }
   | {
       id: `file:${string}` | `attachment:${string}`;
@@ -90,9 +97,11 @@ const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 // v9 removed the "plan" surface kind (plans render inline in the transcript).
 // v10 keys pull-request surfaces by reference instead of a singleton tab.
 // v11 stops persisting the pull-request list's shared panel, so a restart opens the page fresh.
-// v12 adds the device surface.
-// v14 removes the agents surface; lineage lives in the thread title bar.
-const RIGHT_PANEL_STORAGE_VERSION = 14;
+// v12 adds device/artifact surfaces; v13 adds pull-request panels (J5).
+// v14 removes the agents surface upstream; lineage lives in the thread title bar.
+// v15 reconciles J5 v13 and upstream v14: the version-agnostic migration below
+// keeps artifact surfaces and drops agents surfaces from either lineage.
+const RIGHT_PANEL_STORAGE_VERSION = 15;
 
 /** A fixed workspace-level ref: each PR surface carries its own real environment. */
 export const PULL_REQUESTS_PANEL_REF = scopeThreadRef(
@@ -140,6 +149,7 @@ interface RightPanelStoreState {
   openDevice: (ref: ScopedThreadRef, target: DeviceTabTarget, automatic?: boolean) => void;
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
+  openArtifact: (ref: ScopedThreadRef, relativePath: string) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
   openAttachment: (ref: ScopedThreadRef, attachment: ChatFileAttachment) => void;
   openPullRequest: (
@@ -200,6 +210,8 @@ const singletonSurface = (
   kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "pull-request">,
 ): RightPanelSurface => {
   switch (kind) {
+    case "artifacts":
+      return { id: "artifacts", kind, selectedPath: null, selectionRequestId: 0 };
     case "diff":
       return { id: "diff", kind };
     case "files":
@@ -439,6 +451,17 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                     // Removed surfaces: plans render inline, agents in thread lineage.
                     const kind = (surface as { kind?: string }).kind;
                     if (kind === "plan" || kind === "agents") return [];
+                    if (surface.kind === "artifacts") {
+                      const selectedPath =
+                        typeof surface.selectedPath === "string" ? surface.selectedPath : null;
+                      const selectionRequestId =
+                        typeof surface.selectionRequestId === "number" &&
+                        Number.isSafeInteger(surface.selectionRequestId) &&
+                        surface.selectionRequestId >= 0
+                          ? surface.selectionRequestId
+                          : 0;
+                      return [{ ...surface, selectedPath, selectionRequestId }];
+                    }
                     if (surface.kind === "file") {
                       const revealLine =
                         typeof surface.revealLine === "number" &&
@@ -648,6 +671,28 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               ? current.surfaces.filter((entry) => entry.id !== "browser:new")
               : current.surfaces;
             return upsertSurface({ ...current, surfaces: withoutPlaceholder }, surface);
+          }),
+        ),
+      openArtifact: (ref, relativePath) =>
+        set((state) =>
+          userAction(state, scopedThreadKey(ref), (current) => {
+            const existing = current.surfaces.find(
+              (surface): surface is Extract<RightPanelSurface, { kind: "artifacts" }> =>
+                surface.kind === "artifacts",
+            );
+            const surface: Extract<RightPanelSurface, { kind: "artifacts" }> = {
+              id: "artifacts",
+              kind: "artifacts",
+              selectedPath: relativePath,
+              selectionRequestId: (existing?.selectionRequestId ?? 0) + 1,
+            };
+            return {
+              isOpen: true,
+              activeSurfaceId: surface.id,
+              surfaces: existing
+                ? current.surfaces.map((entry) => (entry.id === surface.id ? surface : entry))
+                : [...current.surfaces, surface],
+            };
           }),
         ),
       openPullRequest: (ref, target) =>
@@ -886,6 +931,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             if (workspaceAvailable) return current;
             const surfaces = current.surfaces.filter(
               (surface) =>
+                surface.kind !== "artifacts" &&
                 surface.kind !== "files" &&
                 (surface.kind !== "file" || surface.attachment !== undefined),
             );

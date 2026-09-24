@@ -109,6 +109,19 @@ import type { Root, RootContent } from "mdast";
 import { T3Wordmark } from "../T3Wordmark";
 import { ThreadContextChip } from "../ThreadContextChip";
 import {
+  participantIdsForThreadA2ADelivery,
+  renderThreadA2ADelivery,
+  renderThreadA2AOutboundTool,
+} from "../../j5/a2a/ThreadA2ARenderer";
+import { useParticipantLabels } from "../../j5/a2a/ParticipantIdentitiesClient";
+import {
+  resolvedSpawnBriefContext,
+  participantIdsForSpawnBrief,
+  presentSpawnBrief,
+  SpawnBriefAttribution,
+  SpawnerIdentity,
+} from "../../j5/a2a/SpawnBrief";
+import {
   BotIcon,
   BrainIcon,
   CheckIcon,
@@ -293,6 +306,7 @@ interface TimelineRowSharedState {
   /** Projection runs, for recovering handoff models on legacy items. */
   runs: ReadonlyArray<HandoffTimelineRun>;
   activeThreadEnvironmentId: EnvironmentId;
+  participantLabels: ReadonlyMap<string, string>;
   onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
@@ -586,6 +600,32 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
+  const participantIds = useMemo(
+    () =>
+      timelineEntries.flatMap((entry) =>
+        entry.kind === "message"
+          ? [
+              ...participantIdsForThreadA2ADelivery(entry.message),
+              ...participantIdsForSpawnBrief(entry.message),
+            ]
+          : [],
+      ),
+    [timelineEntries],
+  );
+  const participantLabels = useParticipantLabels(activeThreadEnvironmentId, participantIds);
+  // A Peer Agent's thread opens with its spawner's brief. Spawned threads carry
+  // no parentThreadId (J5 keeps them top-level), so the brief itself is the
+  // lineage fact the header shows. Only the first user message can be one.
+  // Known gap: with paged history the divider appears once that first turn is
+  // loaded; a thread-level spawner fact would remove the dependency.
+  const spawnBrief = useMemo(() => {
+    const firstUserMessage = timelineEntries.find(
+      (entry) => entry.kind === "message" && entry.message.role === "user",
+    );
+    return firstUserMessage?.kind === "message"
+      ? presentSpawnBrief(firstUserMessage.message)
+      : null;
+  }, [timelineEntries]);
   const disclosureAnchorKeyRef = useRef<string | null>(null);
   const disclosureSettleFrameRef = useRef<number | null>(null);
   const disclosureSettleSecondFrameRef = useRef<number | null>(null);
@@ -1121,6 +1161,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       providerStatuses,
       runs,
       activeThreadEnvironmentId,
+      participantLabels,
       onRevertToTurnCount,
       onImageExpand,
       onFileOpen,
@@ -1153,6 +1194,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       providerStatuses,
       runs,
       activeThreadEnvironmentId,
+      participantLabels,
       onRevertToTurnCount,
       onImageExpand,
       onFileOpen,
@@ -1203,8 +1245,36 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const listHeader = useMemo(() => {
+    const spawnerThreadId = spawnBrief?.spawnerThreadId ?? null;
+    const lineageDivider =
+      parentThreadLink !== null ? (
+        <TimelineSystemDivider
+          label="Subagent of"
+          detail={parentThreadLink.title}
+          icon={BotIcon}
+          actionLabel="Open parent thread"
+          onAction={() => onOpenThread(parentThreadLink.threadId)}
+        />
+      ) : spawnBrief !== null ? (
+        <TimelineSystemDivider
+          label="Spawned by"
+          detail={
+            <SpawnerIdentity
+              spawnedBy={spawnBrief.spawnedBy}
+              participantLabels={participantLabels}
+            />
+          }
+          icon={BotIcon}
+          {...(spawnerThreadId === null
+            ? {}
+            : {
+                actionLabel: "Open spawner thread",
+                onAction: () => onOpenThread(spawnerThreadId),
+              })}
+        />
+      ) : null;
     const leadingContent =
-      parentThreadLink === null ? (
+      lineageDivider === null ? (
         topFadeEnabled ? (
           TIMELINE_LIST_FADE_HEADER
         ) : (
@@ -1212,25 +1282,24 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         )
       ) : (
         <div className="messages-timeline-row-frame">
-          <div className="chat-content-lane pt-1 sm:pt-2">
-            <TimelineSystemDivider
-              label="Subagent of"
-              detail={parentThreadLink.title}
-              icon={BotIcon}
-              actionLabel="Open parent thread"
-              onAction={() => onOpenThread(parentThreadLink.threadId)}
-            />
-          </div>
+          <div className="chat-content-lane pt-1 sm:pt-2">{lineageDivider}</div>
         </div>
       );
     return (
       <>
-        {parentThreadLink === null ? leadingContent : null}
+        {lineageDivider === null ? leadingContent : null}
         {historyControls ? <TimelineHistoryControl {...historyControls} /> : null}
-        {parentThreadLink !== null ? leadingContent : null}
+        {lineageDivider !== null ? leadingContent : null}
       </>
     );
-  }, [historyControls, onOpenThread, parentThreadLink, topFadeEnabled]);
+  }, [
+    historyControls,
+    onOpenThread,
+    parentThreadLink,
+    participantLabels,
+    spawnBrief,
+    topFadeEnabled,
+  ]);
 
   const canvas = useChatCanvas();
   const registerTimeline = canvas?.registerTimeline;
@@ -1710,6 +1779,17 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
     row.kind === "thinking";
   const isExpandedToolGroupHeader =
     (row.kind === "work-toggle" && row.expanded) || (row.kind === "work-live" && row.expanded);
+  const ctx = use(TimelineRowCtx);
+  const a2aDelivery =
+    row.kind === "message" && row.message.role === "user"
+      ? renderThreadA2ADelivery({
+          message: row.message,
+          timestampLabel: formatDayAwareTimestamp(row.message.createdAt, ctx.timestampFormat),
+          participantLabels: ctx.participantLabels,
+          threadRef: ctx.threadRef,
+          markdownCwd: ctx.markdownCwd,
+        })
+      : null;
 
   return (
     <div
@@ -1759,7 +1839,9 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
               displayLabel={row.displayLabel}
             />
           ) : null}
-          {row.kind === "work-live" ? <LiveWorkEntryTimelineRow row={row} /> : null}
+          {row.kind === "work-live"
+            ? (renderThreadA2AOutboundTool(row.entry) ?? <LiveWorkEntryTimelineRow row={row} />)
+            : null}
           {row.kind === "work-toggle" ? <WorkGroupToggleTimelineRow row={row} /> : null}
           {row.kind === "thinking" ? <ThinkingTimelineRow /> : null}
         </WorkLogBlock>
@@ -1767,7 +1849,10 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
       {row.kind === "attempt-fold" ? <AttemptFoldTimelineRow row={row} /> : null}
       {row.kind === "context-compaction" ? <ContextCompactionTimelineRow row={row} /> : null}
-      {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
+      {a2aDelivery}
+      {row.kind === "message" && row.message.role === "user" && a2aDelivery === null ? (
+        <UserTimelineRow row={row} />
+      ) : null}
       {row.kind === "message" && row.message.role === "assistant" ? (
         <AssistantTimelineRow row={row} />
       ) : null}
@@ -1927,7 +2012,16 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
     (attachment) => !isImageAttachment(attachment) && !isFileAttachment(attachment),
   );
   const userMessage = resolveUserMessagePresentation(row.message);
-  const resolvedContext = useMemo(() => resolveUserMessageContext(row.message), [row.message]);
+  // A spawn brief shows only the spawner's words; the platform identity block
+  // is already reflected in the thread header and the "Spawned by" divider.
+  // It is literal text, so legacy composer-context upgrades skip it (J5).
+  const spawnBrief = presentSpawnBrief(row.message);
+  const resolvedContext = useMemo(() => {
+    const brief = presentSpawnBrief(row.message);
+    return brief === null
+      ? resolveUserMessageContext(row.message)
+      : resolvedSpawnBriefContext(brief.brief);
+  }, [row.message]);
   const previewImages = useMemo(
     () => userImages.filter((image) => image.name.startsWith("preview-annotation-")),
     [userImages],
@@ -2052,7 +2146,12 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      {userMessage.isAutomation ? (
+      {spawnBrief !== null ? (
+        <SpawnBriefAttribution
+          spawnedBy={spawnBrief.spawnedBy}
+          participantLabels={ctx.participantLabels}
+        />
+      ) : userMessage.isAutomation ? (
         <p
           className="me-1 text-[11px] text-muted-foreground/70"
           data-user-message-attribution="automation"
@@ -5050,6 +5149,9 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
         },
       }
     : {};
+
+  const a2aOutbound = renderThreadA2AOutboundTool(workEntry);
+  if (a2aOutbound !== null) return a2aOutbound;
 
   return (
     <WorkLogRow

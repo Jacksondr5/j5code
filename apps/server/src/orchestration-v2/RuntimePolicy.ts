@@ -11,6 +11,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as ProjectionProjects from "../persistence/Services/ProjectionProjects.ts";
+import { makeAgentPersonaRuntimePolicyResolver } from "../j5/agents/agentPersonaRuntime.ts";
 import {
   ProviderAdapterV2RuntimePolicy,
   type ProviderAdapterV2RuntimePolicy as ProviderAdapterV2RuntimePolicyType,
@@ -57,17 +58,27 @@ export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePol
   "t3/orchestration-v2/RuntimePolicy/RuntimePolicyV2",
 ) {}
 
+const resolveThreadPolicy = makeAgentPersonaRuntimePolicyResolver(
+  (input, cause) =>
+    new RuntimePolicyResolveError({
+      projectId: input.thread.projectId,
+      providerInstanceId: input.thread.providerInstanceId,
+      cause,
+    }),
+);
+
 /**
  * IMPLEMENTATIONS
  */
-export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2, {
-  resolve: (input) =>
-    Effect.succeed({
-      runtimeMode: input.thread.runtimeMode,
-      interactionMode: input.thread.interactionMode,
-      cwd: input.thread.worktreePath,
-    }),
-});
+export const layer: Layer.Layer<RuntimePolicyV2> = Layer.effect(
+  RuntimePolicyV2,
+  Effect.gen(function* () {
+    const resolve = yield* resolveThreadPolicy;
+    return RuntimePolicyV2.of({
+      resolve: (input) => resolve({ thread: input.thread, cwd: input.thread.worktreePath }),
+    });
+  }),
+);
 
 export const layerFromProjectRepository: Layer.Layer<
   RuntimePolicyV2,
@@ -77,6 +88,7 @@ export const layerFromProjectRepository: Layer.Layer<
   RuntimePolicyV2,
   Effect.gen(function* () {
     const projects = yield* ProjectionProjects.ProjectionProjectRepository;
+    const resolve = yield* resolveThreadPolicy;
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
         const cwd =
@@ -104,11 +116,7 @@ export const layerFromProjectRepository: Layer.Layer<
               }),
             ),
           ));
-        return ProviderAdapterV2RuntimePolicy.make({
-          runtimeMode: input.thread.runtimeMode,
-          interactionMode: input.thread.interactionMode,
-          cwd,
-        });
+        return yield* resolve({ thread: input.thread, cwd });
       }),
     });
   }),

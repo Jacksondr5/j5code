@@ -1,3 +1,6 @@
+import { useAgentMentionPicker } from "../../j5/agents/useAgentMentionPicker";
+import { applyAgentMentionSelection } from "@t3tools/client-runtime/j5/agent-mentions";
+import type { SteerState } from "@t3tools/client-runtime/j5/steer-state";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { runtimeModeConfig, runtimeModeOptions as runtimeModes } from "./runtimeModeConfig";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
@@ -25,6 +28,7 @@ import type {
   ModelSelection,
   ProjectId,
   PullRequestListInput,
+  OrchestrationV2AgentPersonaAssignment,
   PreviewAnnotationPayload,
   ProviderApprovalDecision,
   ThreadContextRecord,
@@ -1065,6 +1069,10 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { AgentPersonaAssignmentControl } from "../../j5/agents/AgentPersonaAssignmentControl";
+import { AgentDraftPicker } from "../../j5/agents/AgentDraftPicker";
+import { composerModelSelectionForThread } from "../../j5/agents/personaComposerSelection";
+import { useDraftAgentAssignment } from "../../j5/agents/useDraftAgentAssignment";
 import { toastManager } from "../ui/toast";
 import {
   FileIcon,
@@ -1110,6 +1118,9 @@ import {
   resolveComposerDispatchMode,
   type ComposerDispatchMode,
 } from "@t3tools/client-runtime/state/composer-dispatch";
+import { SteerUnavailableNotice } from "../../j5/composer/SteerUnavailableNotice";
+import { useJ5SteerState } from "../../j5/composer/useJ5SteerState";
+import { shouldRefuseComposerSteer } from "../../j5/composer/submitGuard";
 import type { ContextWindowSnapshot } from "../../lib/contextWindow";
 import {
   formatProviderSkillDisplayName,
@@ -1339,6 +1350,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 });
 
 const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(props: {
+  steerState: SteerState;
   compact: boolean;
   activeContextWindow: ContextWindowSnapshot | null;
   reserveContextWindowMeter: boolean;
@@ -1385,6 +1397,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         <ContextWindowMeterPlaceholder />
       ) : null}
       <ComposerPrimaryActions
+        steerState={props.steerState}
         compact={props.compact}
         pendingAction={props.pendingAction}
         isRunning={props.isRunning}
@@ -1557,6 +1570,7 @@ export interface ChatComposerProps {
   // Mode
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
+  agentPersonaAssignment?: OrchestrationV2AgentPersonaAssignment;
 
   // Provider / model
   lockedProvider: ProviderDriverKind | null;
@@ -1680,7 +1694,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadEnvironmentId: _activeThreadEnvironmentId,
     activeThread,
     promptHistoryMessages,
-    isServerThread: _isServerThread,
+    isServerThread,
     isLocalDraftThread: _isLocalDraftThread,
     forceExpandedOnMobile,
     projectSelectionRequired,
@@ -1704,6 +1718,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProposedPlan,
     runtimeMode,
     interactionMode: requestedInteractionMode,
+    agentPersonaAssignment,
     lockedProvider,
     providerStatuses,
     providerCatalogKnown,
@@ -1760,6 +1775,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     editingQueuedAttachments,
     onRemoveEditingQueuedAttachment,
   } = props;
+  const j5SteerState = useJ5SteerState(environmentId, isServerThread ? activeThreadId : null);
+  const [j5SteerNoticeRequested, setJ5SteerNoticeRequested] = useState(false);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const activeTasksProgress = props.threadSyncPhase === null ? props.activeTasksProgress : null;
   const activeTaskSteps = props.threadSyncPhase === null ? props.activeTaskSteps : null;
@@ -2241,9 +2258,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     provider: selectedProviderStatus,
     interactionMode: requestedInteractionMode,
   });
+  // J5: a saved-agent thread always sends its immutable launch route (see personaComposerSelection).
   const selectedModelSelection = useMemo<ModelSelection>(
-    () => createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
-    [selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
+    () =>
+      composerModelSelectionForThread(
+        agentPersonaAssignment,
+        createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
+      ),
+    [agentPersonaAssignment, selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
   );
   const selectedModelForPicker = selectedModel;
   // Instance-keyed option list so the picker can show each configured
@@ -2540,12 +2562,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }),
   );
 
+  const agentPicker = useAgentMentionPicker(environmentId, selectedProvider, composerTrigger);
+  const draftAgent = useDraftAgentAssignment(
+    props.routeThreadRef,
+    environmentId,
+    props.isLocalDraftThread,
+  );
+  const effectiveAgentAssignment = agentPersonaAssignment ?? draftAgent.assignment ?? undefined;
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
+    if (composerTrigger.kind === "agent") return agentPicker.items;
     if (composerTrigger.kind === "path") {
-      // Threads only surface for a typed query so `@` alone stays a file picker. A title match
-      // is far more specific than a fuzzy path hit, so the few threads lead the list.
+      // Order (J5 decision): saved agents, then threads, then files. Personas whose id or name
+      // starts with the typed text lead; threads only surface for a typed query so `@` alone
+      // stays a file/agent picker, and a title match outranks a fuzzy path hit.
       return [
+        ...agentPicker.items,
         ...matchComposerThreadItems({
           shells: environmentThreadShells,
           environmentId,
@@ -2693,6 +2725,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return [];
   }, [
     activeThreadId,
+    agentPicker.items,
     compactSlashCommandAvailable,
     composerTrigger,
     environmentId,
@@ -2779,6 +2812,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ]);
 
   const isComposerMenuLoading =
+    (composerTriggerKind === "agent" && agentPicker.isPending) ||
     (composerTriggerKind === "path" && pathTriggerQuery.length > 0 && workspaceEntries.isPending) ||
     (composerTriggerKind === "pull-request" &&
       pullRequestProjectId !== null &&
@@ -2788,6 +2822,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         pullRequestTriggerNumber !== debouncedPullRequestNumber ||
         exactPullRequestLookup.isPending));
   const composerMenuEmptyState = useMemo(() => {
+    if (composerTriggerKind === "agent") return agentPicker.error ?? "No available personas found.";
     if (composerTriggerKind === "skill") {
       return "No skills found. Try / to browse provider commands.";
     }
@@ -2809,6 +2844,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ? "No matching files or folders."
       : "No matching command.";
   }, [
+    agentPicker.error,
     composerTrigger,
     composerTriggerKind,
     pullRequestLookup.data?.errors,
@@ -3838,6 +3874,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       });
       const { snapshot, trigger } = resolveActiveComposerTrigger();
       if (!trigger) return;
+      if (item.type === "agent") {
+        if (applyAgentMentionSelection(item, trigger, snapshot.value, applyPromptReplacement))
+          setComposerHighlightedItemId(null);
+        return;
+      }
       if (item.type === "path") {
         const replacement = `${serializeComposerFileLink(item.path)} `;
         const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
@@ -4071,6 +4112,25 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         event?.preventDefault();
         return;
       }
+      const resolvedDispatchMode =
+        dispatchMode ??
+        resolveComposerDispatchMode({
+          running: phase === "running",
+          alternateModifier: false,
+          activeTurnDefault: settings.followUpBehavior,
+        });
+      if (
+        shouldRefuseComposerSteer({
+          dispatchMode: resolvedDispatchMode,
+          steerState: j5SteerState,
+          isEditingQueuedMessage,
+          isAnsweringQuestion: activePendingProgress !== null,
+        })
+      ) {
+        event?.preventDefault();
+        setJ5SteerNoticeRequested(true);
+        return;
+      }
       // A send while a pasted image is still compressing would strand that
       // image: the turn snapshot wouldn't include it, and it would surface
       // in the *next* draft instead. Only oversized images hit this — small
@@ -4106,16 +4166,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           // ChatView reports its final composed-input preflight through the
           // composer handle before its first asynchronous send step.
           providerInputRejectedRef.current = false;
-          onSend(
-            sendEvent,
-            dispatchMode ??
-              resolveComposerDispatchMode({
-                running: phase === "running",
-                alternateModifier: false,
-                activeTurnDefault: settings.followUpBehavior,
-              }),
-            submissionIntent,
-          );
+          onSend(sendEvent, resolvedDispatchMode, submissionIntent);
           return !providerInputRejectedRef.current;
         },
       });
@@ -4130,6 +4181,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       activePendingProgress,
       attachmentTargetKey,
       blurMobileComposerAfterSend,
+      isEditingQueuedMessage,
+      j5SteerState,
       isSendDisabled,
       noProviderAvailable,
       onSend,
@@ -5300,7 +5353,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const hiddenRestingBlockIds = restingBlockDefs
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
     .map((def) => def.id);
-  const composerControls = showProviderUnavailable ? (
+  const composerControls = effectiveAgentAssignment ? (
+    <AgentPersonaAssignmentControl
+      assignment={effectiveAgentAssignment}
+      environmentId={environmentId}
+      {...(agentPersonaAssignment
+        ? { threadId: props.routeThreadRef.threadId }
+        : { onClear: draftAgent.clear })}
+    />
+  ) : showProviderUnavailable ? (
     <ComposerControl
       type="button"
       disabled={!providerSetupInstanceId}
@@ -5324,6 +5385,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           size="xs"
           className="@max-[400px]/composer-surface:hidden"
           data-resting-controls-separator="true"
+        />
+      ) : null}
+      {draftAgent.enabled ? (
+        <AgentDraftPicker
+          environmentId={environmentId}
+          draftKey={draftAgent.draftKey}
+          size={composerControlsCollapsed ? "xs" : "sm"}
         />
       ) : null}
       <ProviderModelPicker
@@ -6646,6 +6714,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           ) : null}
                           {activePendingProgress?.activeQuestion?.multiSelect ? (
                             <ComposerPrimaryActions
+                              steerState={j5SteerState}
                               compact
                               pendingAction={pendingPrimaryAction}
                               isRunning={false}
@@ -7282,7 +7351,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           : showPlanFollowUpPrompt && activeProposedPlan
                             ? "Add feedback to refine the plan, or leave this blank to implement it"
                             : projectSelectionRequired
-                              ? "Choose a project above to start a thread"
+                              ? "Choose a Squadron above to start a thread"
                               : showProviderUnavailable
                                 ? "Enable a provider in Settings to send a message"
                                 : phase === "disconnected"
@@ -7305,6 +7374,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     className="absolute bottom-0 right-0 flex items-center justify-end gap-1"
                   >
                     <ComposerPrimaryActions
+                      steerState={j5SteerState}
                       compact
                       pendingAction={pendingPrimaryAction}
                       isRunning={false}
@@ -7332,6 +7402,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
             <ComposerPromptLengthValidation
               message={providerInputSubmissionError ?? composerSubmissionError}
+            />
+
+            <SteerUnavailableNotice
+              requested={j5SteerNoticeRequested}
+              state={j5SteerState}
+              onInterrupt={handleInterruptPrimaryAction}
+              onQueueInstead={() => submitComposer(undefined, "queue")}
+              onDismiss={() => setJ5SteerNoticeRequested(false)}
             />
 
             {/* Bottom toolbar */}
@@ -7409,6 +7487,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     </>
                   ) : null}
                   <ComposerFooterPrimaryActions
+                    steerState={j5SteerState}
                     compact={isComposerResting || isComposerPrimaryActionsCompact}
                     activeContextWindow={
                       settings.contextWindowMeterEnabled ? activeContextWindow : null

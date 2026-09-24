@@ -33,6 +33,7 @@ import {
   httpCompressionLayer,
 } from "./http.ts";
 import { guardHttpResponseWriteErrors } from "./httpResponseErrorGuard.ts";
+import { configureMcpHttpConnections } from "./mcpHttpConnections.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
@@ -110,6 +111,13 @@ import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import { j5AuthenticatedRoutesLayer } from "./j5/a2a/J5AuthenticatedRoutes.ts";
+import { J5A2AAuxiliaryLayer, J5SquadronCreationLayer } from "./j5/a2a/runtimeLayer.ts";
+import { layer as J5ArtifactRunFinalizationObserverLive } from "./j5/artifacts/ArtifactRunFinalizationObserver.ts";
+import { layer as J5ArtifactWorkspaceLive } from "./j5/artifacts/ArtifactWorkspace.ts";
+import { layer as J5AgentHandoffNudgeQueueLive } from "./j5/agents/agentHandoffNudgeQueue.ts";
+import { layer as J5AgentHandoffObserverLive } from "./j5/agents/agentHandoffObserver.ts";
+import { layer as J5AgentHandoffRefreshesLive } from "./j5/agents/agentHandoffRefreshes.ts";
 import {
   connectHttpApiLayer,
   pendingServiceUpdateExists,
@@ -225,18 +233,22 @@ const RelayClientLive = Layer.unwrap(
 const HttpServerLive = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
-    return NodeHttpServer.layer(() => guardHttpResponseWriteErrors(NodeHttp.createServer()), {
-      host: config.host ?? "127.0.0.1",
-      port: config.port,
-      gracefulShutdownTimeout: HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS,
-      // Negotiate permessage-deflate with clients that offer it; clients
-      // that don't still get uncompressed frames on their connection.
-      // Context takeover stays enabled (ws default) so the compression
-      // window is shared across frames — that also makes small frames cheap
-      // to compress, so no size threshold is set (ws only honors
-      // `threshold` when context takeover is disabled).
-      websocket: { perMessageDeflate: true },
-    });
+    // J5 temporary patch (MCP idle HTTP connection race): disable keep-alive for /mcp responses.
+    return NodeHttpServer.layer(
+      () => configureMcpHttpConnections(guardHttpResponseWriteErrors(NodeHttp.createServer())),
+      {
+        host: config.host ?? "127.0.0.1",
+        port: config.port,
+        gracefulShutdownTimeout: HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS,
+        // Negotiate permessage-deflate with clients that offer it; clients
+        // that don't still get uncompressed frames on their connection.
+        // Context takeover stays enabled (ws default) so the compression
+        // window is shared across frames — that also makes small frames cheap
+        // to compress, so no size threshold is set (ws only honors
+        // `threshold` when context takeover is disabled).
+        websocket: { perMessageDeflate: true },
+      },
+    );
   }),
 );
 
@@ -425,14 +437,30 @@ const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
 
 const OrchestrationV2RuntimeLayerLive = OrchestrationV2ProductionLayerLive.pipe(
   Layer.provide(ProviderEventIngestor.analyticsLive),
+  Layer.provideMerge(J5SquadronCreationLayer),
   Layer.provide(CheckpointStoreLayerLive),
   Layer.provide(GitWorkflowLayerLive),
   Layer.provide(ResourceCleanupService.live),
   Layer.provide(
-    RunFinalizationService.observerLive.pipe(
+    // J5: the saved-agent handoff gate wraps the artifact observer, which wraps upstream's.
+    J5AgentHandoffObserverLive.pipe(
+      Layer.provide(J5AgentHandoffNudgeQueueLive),
+      Layer.provide(J5AgentHandoffRefreshesLive),
+      Layer.provide(J5ArtifactWorkspaceLive),
       Layer.provide(ProjectionStoreV2.layer),
-      Layer.provide(PullRequestServiceLive),
-      Layer.provide(OrchestrationInfrastructureLayerLive),
+      Layer.provide(
+        J5ArtifactRunFinalizationObserverLive.pipe(
+          Layer.provide(J5ArtifactWorkspaceLive),
+          Layer.provide(ProjectionStoreV2.layer),
+          Layer.provide(
+            RunFinalizationService.observerLive.pipe(
+              Layer.provide(ProjectionStoreV2.layer),
+              Layer.provide(PullRequestServiceLive),
+              Layer.provide(OrchestrationInfrastructureLayerLive),
+            ),
+          ),
+        ),
+      ),
     ),
   ),
 );
@@ -607,6 +635,7 @@ const makeRoutesLayer = Layer.mergeAll(
     deviceHubProxyRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
+    j5AuthenticatedRoutesLayer,
   ),
   // The MCP session registry is provided globally (shared with V2 provider
   // sessions) rather than inline here. The orchestrator toolkit resolves
@@ -615,6 +644,7 @@ const makeRoutesLayer = Layer.mergeAll(
   // what dispatch can actually serve.
   McpHttpServer.layer.pipe(Layer.provide(providerAdapterRegistryLayerFromProviderInstances)),
 ).pipe(
+  Layer.provide(J5A2AAuxiliaryLayer),
   // Both transports consume the same service instance, so caches single-flight across clients
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.
   Layer.provide(PullRequestServiceLive),

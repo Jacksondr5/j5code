@@ -386,7 +386,7 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
         [codex!.snapshot.refresh, claude!.snapshot.refresh],
         { concurrency: "unbounded" },
       );
-      expect(codexSnapshot).toMatchObject({ status: "ready", installed: true, version: "0.0.0" });
+      expect(codexSnapshot).toMatchObject({ status: "ready", installed: true, version: "0.152.1" });
       expect(claudeSnapshot).toMatchObject({
         status: "ready",
         installed: true,

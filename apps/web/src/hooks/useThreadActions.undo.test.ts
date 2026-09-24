@@ -155,6 +155,12 @@ describe("archive Undo", () => {
     expect(router.navigate).not.toHaveBeenCalled();
   });
 
+  it("shows no Undo when the archive may have retired a Captain's Crews (J5)", async () => {
+    await useThreadActions().archiveThread(target, { undoable: false });
+    expect(commands.archive).toHaveBeenCalledOnce();
+    expect(useThreadUndoNotice.getState().notice).toBeNull();
+  });
+
   it("shows no Undo when the archive failed", async () => {
     commands.archive.mockResolvedValue({ _tag: "Failure", cause: new Error("nope") });
     const add = vi.spyOn(toastManager, "add").mockReturnValue("toast");

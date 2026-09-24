@@ -16,7 +16,10 @@ import { SymbolView, type AppSymbolName } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
 import { GlassSurface } from "../../components/GlassSurface";
 import { PierreEntryIcon } from "../../components/PierreEntryIcon";
+import type { agentPersonaMentionItems } from "@t3tools/client-runtime/j5/agent-mentions";
+
 export type ComposerCommandItem =
+  | ReturnType<typeof agentPersonaMentionItems>[number]
   | {
       readonly id: string;
       readonly type: "pull-request";
@@ -100,6 +103,8 @@ function itemIcon(item: ComposerCommandItem): AppSymbolName | null {
   switch (item.type) {
     case "pull-request":
       return { ios: "arrow.triangle.pull", android: "merge" };
+    case "agent":
+      return "person.crop.circle";
     case "slash-command":
     case "provider-slash-command":
       return "terminal";
@@ -116,6 +121,8 @@ function groupLabel(triggerKind: ComposerTriggerKind | null): string | null {
   switch (triggerKind) {
     case "pull-request":
       return "Pull requests";
+    case "agent":
+      return "Personas";
     case "slash-command":
       return "Commands";
     case "skill":
@@ -134,6 +141,8 @@ function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean):
   switch (triggerKind) {
     case "pull-request":
       return "No matching pull requests.";
+    case "agent":
+      return "No available personas found.";
     case "path":
       return "No matching files or folders.";
     case "skill":

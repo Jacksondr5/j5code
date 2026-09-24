@@ -24,19 +24,15 @@ We wanted something performant, remote-ready, and truly open. If we ever go the 
 
 ### Command line
 
+J5 Code publishes a self-contained command-line server for macOS (Apple silicon) and Linux x64. No Node.js or npm is needed:
+
 ```bash
-curl -fsSL https://t3.codes/install.sh | sh
+curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh | sh
 ```
 
-On Windows, in PowerShell:
+Then run `j5` to start the server and open the local web app. `j5 service install` keeps it running in the background, `j5 update` moves to a newer release, and `j5 --help` has the full reference. Data lives in `~/.j5code` (override with `J5CODE_HOME`).
 
-```powershell
-irm https://t3.codes/install.ps1 | iex
-```
-
-Then run `t3` to start the server and open the local web app. `t3 service install` keeps it running in the background, `t3 update` moves to a newer release, and `t3 --help` has the full reference.
-
-To try it once without installing, run `npx t3@latest` instead.
+Upgrading a server installed from npm (`@jacksondr5/j5code` 0.0.42 or earlier)? Follow [Migrating to release archives](./docs/user/migrating-to-release-archives.md) once.
 
 ### Desktop app
 

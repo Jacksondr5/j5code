@@ -49,6 +49,7 @@ import {
   reorderActiveThread,
   reorderQueuedRun,
   revertThreadCheckpoint,
+  SquadronLaunchRequiresBootstrapError,
   settleThread,
   startThreadTurn,
   unsettleThread,
@@ -317,6 +318,40 @@ describe("V2 environment commands", () => {
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );
 
+  it.effect("loudly refuses an explicit Squadron retry without a durable launch bootstrap", () =>
+    Effect.gen(function* () {
+      const commands: OrchestrationV2Command[] = [];
+      const launches: OrchestrationV2ThreadLaunchInput[] = [];
+      const supervisor = yield* makeSupervisor({ commands, projects: [], launches });
+
+      const error = yield* startThreadTurn({
+        commandId: CommandId.make("retry-empty-thread-with-home"),
+        threadId: v2ThreadId,
+        squadronId: "squadron:explicit-home",
+        message: {
+          messageId: MessageId.make("message-retry-empty-thread"),
+          role: "user",
+          text: "Retry the first message",
+          attachments: [],
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+      }).pipe(
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.flip,
+      );
+
+      expect(error).toBeInstanceOf(SquadronLaunchRequiresBootstrapError);
+      expect(error).toMatchObject({
+        _tag: "SquadronLaunchRequiresBootstrapError",
+        threadId: v2ThreadId,
+      });
+      expect(error.message).toContain("Start a new thread");
+      expect(commands).toEqual([]);
+      expect(launches).toEqual([]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
   it.effect("preserves an existing worktree and branch during first-message launch", () =>
     Effect.gen(function* () {
       const launches: OrchestrationV2ThreadLaunchInput[] = [];
@@ -325,6 +360,7 @@ describe("V2 environment commands", () => {
       yield* startThreadTurn({
         commandId: CommandId.make("launch-existing-worktree"),
         threadId: v2ThreadId,
+        squadronId: "squadron:explicit-home",
         message: {
           messageId: MessageId.make("message-existing-worktree"),
           role: "user",
@@ -334,6 +370,10 @@ describe("V2 environment commands", () => {
         runtimeMode: "full-access",
         interactionMode: "default",
         titleSeed: "Continue here",
+        sourceProposedPlan: {
+          threadId: ThreadId.make("thread-parent-home"),
+          planId: PlanId.make("plan-parent-home"),
+        },
         bootstrap: {
           createThread: {
             projectId: ProjectId.make("project-1"),
@@ -344,14 +384,21 @@ describe("V2 environment commands", () => {
             branch: "feature",
             worktreePath: "/workspace/project-worktrees/feature",
             createdAt: "2026-06-20T00:00:00.000Z",
+            agentPersona: { personaId: "critic", authorityPolicy: "critic-fix" },
           },
         },
       }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
 
       expect(launches[0]).toMatchObject({
         threadId: v2ThreadId,
+        squadronId: "squadron:explicit-home",
+        sourcePlanRef: {
+          threadId: "thread-parent-home",
+          planId: "plan-parent-home",
+        },
         title: "Continue here",
         generateTitle: true,
+        agentPersona: { personaId: "critic", authorityPolicy: "critic-fix" },
         workspaceStrategy: {
           type: "existing_worktree",
           worktreePath: "/workspace/project-worktrees/feature",

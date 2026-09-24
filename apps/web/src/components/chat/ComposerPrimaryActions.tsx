@@ -1,3 +1,8 @@
+import {
+  notSteerableStateText,
+  steerActLabel,
+  type SteerState,
+} from "@t3tools/client-runtime/j5/steer-state";
 import { memo, type MouseEventHandler, type PointerEventHandler } from "react";
 import {
   CheckIcon,
@@ -34,6 +39,7 @@ interface ComposerPrimaryActionsProps {
   isRunning: boolean;
   followUpBehavior?: "queue" | "steer";
   alternateShortcutLabel?: string | null;
+  steerState?: SteerState;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
   isSendBusy: boolean;
@@ -73,6 +79,12 @@ const formatPendingPrimaryActionLabel = (input: {
 const messageActionPillClassName =
   "inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-message-action font-medium text-base text-message-action-foreground shadow-xs shadow-message-action/24 outline-none hover:bg-message-action-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none sm:text-sm";
 
+// J5 (case 27): name the provider's actual steer act instead of claiming a plain steer.
+const describeDispatchAction = (action: string, steerState: SteerState | undefined) =>
+  action === "steer" && steerState?.kind === "steerable" && steerState.act === "interrupt-restart"
+    ? "interrupt and restart with this message"
+    : action;
+
 const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
   event.preventDefault();
 };
@@ -83,6 +95,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isRunning,
   followUpBehavior = "steer",
   alternateShortcutLabel = null,
+  steerState,
   showPlanFollowUpPrompt,
   promptHasText,
   isSendBusy,
@@ -252,7 +265,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     : isQueuing
       ? "Queue message"
       : isRunning
-        ? "Steer message"
+        ? steerState?.kind === "steerable"
+          ? steerActLabel(steerState.act)
+          : steerState?.kind === "not-steerable"
+            ? "Show steer options"
+            : "Steer message"
         : "Submit message";
   const submitStatus = isEnvironmentUnavailable
     ? "Environment disconnected"
@@ -269,7 +286,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const submitTooltip =
     submitStatus ??
     (isRunning && !isEditingQueuedMessage
-      ? `Click to ${followUpBehavior}, Ctrl/⌘-click${alternateShortcutLabel ? ` or ${alternateShortcutLabel}` : ""} to ${alternateAction}`
+      ? `${steerState?.kind === "not-steerable" ? `${notSteerableStateText(steerState.phase)}. ` : ""}Click to ${describeDispatchAction(followUpBehavior, steerState)}, Ctrl/⌘-click${alternateShortcutLabel ? ` or ${alternateShortcutLabel}` : ""} to ${describeDispatchAction(alternateAction, steerState)}`
       : submitLabel);
 
   const sendButton = (

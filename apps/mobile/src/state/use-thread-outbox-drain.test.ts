@@ -140,6 +140,7 @@ import {
 import type { QueuedThreadMessage } from "./thread-outbox-model";
 import * as composerDrafts from "./use-composer-drafts";
 import { recoverFailedThreadDraft } from "./recover-failed-thread-draft";
+import { clearDraftAgent, readDraftAgentPersonaId } from "../j5/agents/agentDraftState";
 import { editingQueuedMessageIdsAtom } from "./use-thread-outbox";
 import {
   completeQueuedMessageDelivery,
@@ -704,6 +705,30 @@ describe("thread outbox recovery rollback", () => {
         `${message.environmentId}:${message.threadId}`
       ],
     ).toEqual({ kind: "failed", message, reason: "rejected by server" });
+  });
+
+  it("reselects a rejected task's saved agent on its restored draft", async () => {
+    const message: QueuedThreadMessage = {
+      ...queuedMessage({ messageId: "message-creation-agent", text: "review this" }),
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
+      creation: {
+        projectId: ProjectId.make("project-1"),
+        workspaceMode: "local",
+        branch: null,
+        worktreePath: null,
+        agentPersonaId: "critic",
+      },
+    };
+    const draftKey = `new-task:restored-${message.messageId}`;
+    await harness.manager.enqueue(message);
+    try {
+      await expect(restoreRejectedQueuedMessage(message, "rejected by server")).resolves.toBe(
+        "restored",
+      );
+      expect(readDraftAgentPersonaId(draftKey)).toBe("critic");
+    } finally {
+      clearDraftAgent(draftKey);
+    }
   });
 
   it("keeps a failed outcome until its thread screen consumes it", async () => {

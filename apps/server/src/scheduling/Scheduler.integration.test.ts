@@ -94,6 +94,12 @@ it.effect.each(["on time", "after restart"])(
             ),
         }),
         Layer.mock(ThreadManagementService)({
+          // J5 (FORK.md case 12): unbound schedules are refused before ThreadLaunch,
+          // so the scheduled task here is bound and fires through sendToThread.
+          sendToThread: () =>
+            Queue.offer(receipts, "task").pipe(
+              Effect.andThen(Effect.die("fixture dispatch failure")),
+            ),
           dispatch: (command) =>
             Ref.update(commands, (all) => [...all, command]).pipe(
               Effect.andThen(
@@ -123,6 +129,7 @@ it.effect.each(["on time", "after restart"])(
           enabled: true,
           schedule: { type: "interval", everyMs: 60_000 },
           projectId: thread.projectId,
+          threadId: ThreadId.make("thread:scheduled"),
           workspaceStrategy: { type: "root" },
           modelSelection: thread.modelSelection,
           runtimeMode: thread.runtimeMode,

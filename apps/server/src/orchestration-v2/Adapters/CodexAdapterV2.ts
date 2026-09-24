@@ -75,10 +75,12 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+import { assertSupportedCodexCliVersion } from "../../j5/codex/CodexCliVersionGate.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import {
   describeMcpElicitation,
+  isRecoverableThreadResumeError,
   toMcpElicitationResponse,
 } from "../../provider/Layers/CodexSessionRuntime.ts";
 import { ServerConfig } from "../../config.ts";
@@ -142,6 +144,8 @@ import {
   makeSubagentConversationArtifacts,
   subagentThreadTitle,
 } from "../SubagentProjection.ts";
+import { withAgentPersonaInstructions } from "../../j5/agents/agentPersonaPrompts.ts";
+import { j5CodexT3McpServerConfig } from "../../j5/a2a/mcp/codexToolApproval.ts";
 
 const CODEX_PROVIDER = ProviderDriverKind.make("codex");
 export const CODEX_DRIVER_KIND = CODEX_PROVIDER;
@@ -331,6 +335,17 @@ function normalizeCodexCause(error: unknown): unknown {
   return error;
 }
 
+const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
+
+/** Codex answered `thread/resume` saying the native thread no longer exists. */
+function isCodexResumeThreadMissing(error: unknown): boolean {
+  return (
+    isCodexAppServerRequestError(error) &&
+    error.operation === "receive-response" &&
+    isRecoverableThreadResumeError(error)
+  );
+}
+
 function codexTimestamp(seconds: number | null | undefined): DateTime.Utc {
   return seconds === null || seconds === undefined
     ? DateTime.nowUnsafe()
@@ -512,7 +527,7 @@ function codexPlanStepStatus(
   }
 }
 
-function approvalDecisionToLegacyReviewDecision(
+export function approvalDecisionToLegacyReviewDecision(
   decision: ProviderApprovalDecision,
 ): CodexSchema.ExecCommandApprovalResponse__ReviewDecision {
   switch (decision) {
@@ -522,7 +537,7 @@ function approvalDecisionToLegacyReviewDecision(
     case "acceptAlways":
       return "approved_for_session";
     case "decline":
-      return "denied";
+      return { denied: { rejection: "J5 did not approve this request." } };
     case "cancel":
       return "abort";
   }
@@ -698,7 +713,7 @@ export function buildCodexTurnStartParams(input: {
     const effort =
       selectedEffort === undefined ? undefined : yield* decodeTurnReasoningEffort(selectedEffort);
     const serviceTier = getCodexServiceTierOptionValue(input.modelSelection);
-    const developerInstructions =
+    const developerInstructions = withAgentPersonaInstructions(
       input.hasT3Mcp !== true
         ? undefined
         : buildCodexDeveloperInstructions(
@@ -711,7 +726,9 @@ export function buildCodexTurnStartParams(input: {
               browser: input.browserToolsAvailable ?? true,
               device: input.deviceToolsAvailable ?? false,
             },
-          );
+          ),
+      input.runtimePolicy.agentPersonaInstructions,
+    );
     const collaborationMode: CodexSchema.ClientRequest__CollaborationMode | undefined =
       input.runtimePolicy.interactionMode !== "plan" && developerInstructions === undefined
         ? undefined
@@ -1133,7 +1150,7 @@ export function codexThreadRuntimeParams(input: {
 }): {
   readonly cwd?: string;
   readonly model?: string;
-  readonly config?: Readonly<Record<string, unknown>>;
+  readonly config?: Readonly<Record<string, Schema.Json>>;
 } {
   const mcpSession =
     input.threadId === null ? undefined : McpProviderSession.readMcpProviderSession(input.threadId);
@@ -1150,6 +1167,9 @@ export function codexThreadRuntimeParams(input: {
                 http_headers: {
                   Authorization: mcpSession.authorizationHeader,
                 },
+                // J5 fork extension: Codex would otherwise reject non-read-only platform tools
+                // under approval policy `never` (see codexToolApproval.ts).
+                ...j5CodexT3McpServerConfig(input.runtimePolicy),
               },
             },
           },
@@ -1484,10 +1504,13 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
             return;
           }
 
-          yield* client.request("initialize", {
+          const initializeResponse = yield* client.request("initialize", {
             clientInfo: CODEX_CLIENT_INFO,
             capabilities: CODEX_CLIENT_CAPABILITIES,
           });
+          // J5: fail closed before any thread request reaches an app-server older
+          // than the generated protocol schema (see j5/codex/CodexCliVersionGate.ts).
+          yield* assertSupportedCodexCliVersion(initializeResponse.userAgent);
           yield* client.notify("initialized", undefined);
           yield* Ref.set(initialized, true);
         });
@@ -5239,6 +5262,7 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                     providerSessionId: input.providerSessionId,
                     providerThreadId: threadInput.providerThread.id,
                     cause: normalizeCodexCause(cause),
+                    nativeThreadMissing: isCodexResumeThreadMissing(cause),
                   }),
               ),
             ),

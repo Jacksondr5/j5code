@@ -43,6 +43,9 @@ const QueuedThreadCreationSchema = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
   startFromOrigin: Schema.optional(Schema.Boolean),
+  // Saved agent the task launches as; the server resolves and pins its route
+  // on delivery. Optional so records queued before this field still decode.
+  agentPersonaId: Schema.optional(Schema.String),
 });
 
 export const QueuedThreadMessageSchema = Schema.Struct({
@@ -75,6 +78,7 @@ export interface QueuedThreadCreation {
   readonly branch: string | null;
   readonly worktreePath: string | null;
   readonly startFromOrigin?: boolean;
+  readonly agentPersonaId?: string;
 }
 
 export interface QueuedThreadMessage {

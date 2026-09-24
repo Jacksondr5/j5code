@@ -82,6 +82,8 @@ export interface RuntimeSubagent {
   readonly phases: ReadonlyArray<SubagentWorkflowPhase>;
   readonly runHandles: SubagentRunHandles | null;
   readonly recentActivity: ReadonlyArray<SubagentActivityEntry>;
+  /** The child thread a delegated subagent runs in, when the projection knows it. */
+  readonly childThreadId: string | null;
   /** First retained observation, used as the roster's stable display order. */
   readonly firstSeenAt: string;
   readonly startedAt: string | null;
@@ -250,6 +252,7 @@ interface MutableAgent {
   workflowName: string | null;
   phases: ReadonlyArray<SubagentWorkflowPhase>;
   runHandles: SubagentRunHandles | null;
+  childThreadId: string | null;
   recentActivity: ReadonlyArray<SubagentActivityEntry>;
   firstSeenAt: string;
   startedAt: string | null;
@@ -308,6 +311,7 @@ function getOrCreate(
     phases: [],
     runHandles: null,
     recentActivity: [],
+    childThreadId: null,
     firstSeenAt: at,
     startedAt: null,
     completedAt: null,
@@ -738,6 +742,7 @@ export function projectedSubagentsToRuntime(
     readonly startedAt: DateTime.Utc | null;
     readonly completedAt: DateTime.Utc | null;
     readonly updatedAt: DateTime.Utc;
+    readonly childThreadId?: string | null;
   }>,
 ): ReadonlyArray<RuntimeSubagent> {
   return subagents.map((subagent) => {
@@ -769,6 +774,7 @@ export function projectedSubagentsToRuntime(
       phases: [],
       runHandles: null,
       recentActivity: [],
+      childThreadId: subagent.childThreadId ?? null,
       firstSeenAt: startedAt ?? updatedAt,
       startedAt,
       completedAt: subagent.completedAt === null ? null : DateTime.formatIso(subagent.completedAt),

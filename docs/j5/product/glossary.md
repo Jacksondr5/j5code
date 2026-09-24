@@ -1,0 +1,98 @@
+---
+title: "Glossary"
+kind: definition
+---
+
+# Glossary
+
+The J5 vocabulary, in one place, so that a name used anywhere in these docs resolves to exactly one meaning.
+
+**Two kinds of entry.** Most terms name something a product definition owns; for those the entry is an index — the term, a one-line gloss that only identifies the thing, and the definition that owns it. The gloss never states a rule or a property; if a sentence here could be argued with, it belongs in the owning definition instead. A few terms are distinctions everyone must share but that no feature builds and for those the glossary is the owner and the entry is the full definition.
+
+**Casing.** A named product concept is written in Title Case — Squadron, Crew, Captain, Role, etc. — so a reader knows it is our concept and not the ordinary word. Everything else is lowercase, including fleet, agent, participant, inbox, ledger and dashboard. A surface's proper name is Title Case (Fleet page). Code identifiers keep their own spelling.
+
+**Upstream's words.** T3 Code's own vocabulary is defined in [upstream's glossary](../../internals/glossary.md) and is not restated here. Upstream words that upstream does not define are used in J5 docs with upstream's meaning; where J5 defines behavior around one of them, the entry below points at the definition that does. J5 does not write its own definition of an upstream word unless a measured confusion requires one.
+
+## Organization
+
+| Term                | Gloss                                                                                              | Owner                                                        |
+| ------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| fleet               | All of a user's agents across every connected server — the totality, never a sub-grouping          | [cross-device.md](cross-device.md)                           |
+| **Squadron**        | The user-created grouping of agents and their work that everything else is organized under         | [features/squadron.md](features/squadron.md)                 |
+| **Squadron home**   | The one Squadron an agent belongs to, recorded when it is created                                  | [features/squadron.md](features/squadron.md)                 |
+| **Registrar**       | The part of the platform that records an agent's Squadron home when the agent is created           | [features/squadron.md](features/squadron.md)                 |
+| **Crew**            | A group of agents that work one task as a unit                                                     | [features/crews.md](features/crews.md)                       |
+| **Captain**         | Any agent with Crews placed under it                                                               | [features/crews.md](features/crews.md)                       |
+| **Role**            | A reusable, user-authored definition of a kind of agent                                            | [features/roles.md](features/roles.md)                       |
+| **Manifest**        | The approved roster snapshot of a Crew — implementation vocabulary, not a separate concept         | [features/crews.md](features/crews.md)                       |
+| **Playbook**        | User-authored step content that a Role or Crew follows                                             | [features/playbooks.md](features/playbooks.md)               |
+| placement           | Where an agent sits in the display tree                                                            | [features/squadron.md](features/squadron.md)                 |
+| provenance          | The recorded fact of how an agent came to exist — spawned by whom, forked from what, or unrecorded | [features/squadron.md](features/squadron.md)                 |
+| **Shared Squadron** | Several people sharing one Squadron on one server                                                  | [features/shared-squadrons.md](features/shared-squadrons.md) |
+
+## Agents
+
+These entries are the distinctions the whole team must share; the glossary owns them.
+
+| Term                   | Definition                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| agent                  | An LLM-driven participant running in a provider session. The ordinary word, lowercase. Never the library entry: that is a persona (2026-09-17).                                                                                                                                                                                                                                                                                                                                    |
+| **persona**            | A saved definition in the library (Settings → Personas): instructions, model routes, runtime policy, declared handoff. An agent may run as a persona; a persona is not itself running. "Saved agent" is retired vocabulary.                                                                                                                                                                                                                                                        |
+| participant            | Anything that takes part over the communication ledger: agents registered in a Squadron, people, and machine participants. Provider-native Subagents are not participants.                                                                                                                                                                                                                                                                                                         |
+| **Peer Agent**         | An agent spawned by another agent as a full citizen: it has its own top-level thread, the user can read and talk to it like any other agent, it has an independent lifecycle, and it may run on any provider. The user cannot tell it from a human-created agent without checking its provenance. All platform law about spawning, membership, placement and messaging applies to Peer Agents and only to Peer Agents.                                                             |
+| **Subagent**           | Upstream's word, adopted: a worker an agent runs inside its own provider session (Claude Task workers, Codex collab children, Cursor task subagents). The user cannot talk to it, it cannot be moved out of its parent's tree, and it ends with its parent's session. What the user _sees_ of it varies by provider; what never varies is that it is not addressable. The platform cannot control Subagent creation and does not try; it only observes what the provider surfaces. |
+| spawn                  | The verb for creating either kind, always qualified — "spawn a Subagent," "spawn a Peer Agent." Unqualified "spawn" in J5 docs means a Peer Agent.                                                                                                                                                                                                                                                                                                                                 |
+| Foreground, Background | The two ends of the human-contact spectrum: a Foreground agent talks with the person through chat often; a Background agent reaches the person only through the inbox or its Captain. Agents can sit in between. Owner: [principles.md](principles.md), the human-contact spectrum lens.                                                                                                                                                                                           |
+| **Spawning Guide**     | The user-authored guide consulted when spawning: which provider, model and reasoning for which work, and how to write a brief. Owner: [features/spawning-guide.md](features/spawning-guide.md).                                                                                                                                                                                                                                                                                    |
+
+## Communication
+
+| Term                         | Gloss                                                                                                                                                         | Owner                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| message                      | One durable send from a participant to a participant                                                                                                          | [a2a/index.md](a2a/index.md)                                                     |
+| ask                          | A message that opens an Exchange — the receiver owes a reply                                                                                                  | [a2a/index.md](a2a/index.md)                                                     |
+| reply                        | The message that closes an Exchange; from a person, the inbox answer is the only reply and the only message they send                                         | [a2a/index.md](a2a/index.md)                                                     |
+| plain message                | A message that opens no Exchange; agents may send one to agents, never to a person                                                                            | [a2a/agent-tools.md](a2a/agent-tools.md), [features/inbox.md](features/inbox.md) |
+| machine participant          | A registered non-agent sender — a scheduled script or watchdog — with a Squadron home and no thread; it sends plain messages and never receives               | [a2a/index.md](a2a/index.md)                                                     |
+| **Exchange**                 | The reply obligation an ask creates between one sender and one receiver. Never called a "thread"                                                              | [a2a/index.md](a2a/index.md)                                                     |
+| intent                       | The one-line summary an ask carries, shown wherever the Exchange is listed                                                                                    | [a2a/index.md](a2a/index.md)                                                     |
+| urgency                      | How soon a person's answer is needed, set only on asks to a person                                                                                            | [features/inbox.md](features/inbox.md)                                           |
+| obligation                   | What an open Exchange is to its receiver: a reply owed                                                                                                        | [features/inbox.md](features/inbox.md)                                           |
+| envelope                     | The platform's wrapper around a delivered message that tells the receiving agent who sent it and what it owes                                                 | [a2a/index.md](a2a/index.md)                                                     |
+| communication ledger, ledger | The per-Squadron append-only record of every message, delivery, Exchange and notice — the source of truth for all A2A state                                   | [a2a/index.md](a2a/index.md)                                                     |
+| delivery receipt             | The recorded fact that a message reached its receiver's thread                                                                                                | [a2a/index.md](a2a/index.md)                                                     |
+| delivery alarm               | The recorded fact that a delivery failed                                                                                                                      | [a2a/index.md](a2a/index.md)                                                     |
+| silence notice               | A platform-authored fact appended when an agent's turn ends without a reply it owed                                                                           | [a2a/index.md](a2a/index.md)                                                     |
+| queue, steer                 | The two ways a message reaches an agent mid-turn: queued behind the active turn, or steered into it. Agent deliveries queue; only a person steers, explicitly | [a2a/index.md](a2a/index.md)                                                     |
+| human node                   | A person as a participant in the communication graph, keyed by person id                                                                                      | [features/inbox.md](features/inbox.md)                                           |
+
+## Humans and attention
+
+| Term                       | Gloss                                                                                     | Owner                                                                |
+| -------------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| person id                  | The durable local identity of one person; nothing may assume there is exactly one person  | [features/shared-squadrons.md](features/shared-squadrons.md)         |
+| inbox                      | The person's queue of open asks addressed to them                                         | [features/inbox.md](features/inbox.md)                               |
+| **Fleet page**             | The page that shows every agent in a Squadron with its measured status                    | [features/fleet-page.md](features/fleet-page.md)                     |
+| Squadron scope             | The sidebar's selection of one Squadron, or all                                           | [features/fleet-page.md](features/fleet-page.md)                     |
+| **Memo**                   | A small self-addressed note an agent keeps through the platform, visible to the person    | [features/memos.md](features/memos.md)                               |
+| backlog pane               | The person's view of all agents' Memos                                                    | [features/memos.md](features/memos.md)                               |
+| "Expects reply", "Replied" | The two words reader-facing cards use for an open and a closed Exchange, on every surface | [features/thread-a2a-rendering.md](features/thread-a2a-rendering.md) |
+| observability dashboard    | Retired name: what it described is the Fleet page                                         | [features/fleet-page.md](features/fleet-page.md)                     |
+
+## Lifecycle
+
+| Term    | Gloss                                                                                                                                     | Owner                                                                                                                                  |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| archive | Setting an agent aside: hidden and unmessageable, its open Exchanges ended loudly, its record readable; a person can unarchive it         | [features/archive-flow.md](features/archive-flow.md)                                                                                   |
+| retired | A participant that is archived or deleted, and so not addressable                                                                         | [features/archive-flow.md](features/archive-flow.md)                                                                                   |
+| orphan  | A working agent whose placement parent has been archived                                                                                  | [features/fleet-page.md](features/fleet-page.md)                                                                                       |
+| settled | Upstream's thread-triage state ("I'm done looking at this") and nothing else. J5 docs no longer use "settled" to mean a decision was made | upstream mechanics; see [worklog](../worklog/2026-08-29-upstream-settled-vs-archived-research.md) for the confusion this line resolves |
+
+## Retired names
+
+| Name                             | Now                                                                                                                         |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| epic                             | Squadron. Pre-2026-08-17 records use "epic"; read it as Squadron                                                            |
+| team                             | Not a concept. Crew is the group that works as a unit; there is no other grouping                                           |
+| thread (as the reply obligation) | Exchange. "Thread" means only upstream's conversation                                                                       |
+| delegate_task                    | Not on the J5 agent surface; a Peer Agent spawn carries its task in the brief, and an Exchange carries any later obligation |

@@ -26,6 +26,8 @@ export interface ProjectThreadStartTurnSpec {
   /** New uploads or server-owned attachments from a cancelled setup. */
   readonly uploadedAttachments: ReadonlyArray<UploadedMobileAttachment | ChatAttachment>;
   readonly modelSelection: ModelSelection;
+  /** Launch as a persona; the server resolves and pins its route. */
+  readonly agentPersonaId?: string;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly workspaceMode: "local" | "worktree";
@@ -63,6 +65,9 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
       createThread: {
         projectId: spec.projectId,
         title,
+        ...(spec.agentPersonaId === undefined
+          ? {}
+          : { agentPersona: { personaId: spec.agentPersonaId } }),
         modelSelection: spec.modelSelection,
         runtimeMode: spec.runtimeMode,
         interactionMode: spec.interactionMode,

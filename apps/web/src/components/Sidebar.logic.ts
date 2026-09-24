@@ -110,6 +110,35 @@ export function useRetainedValue<T>(key: string | null, value: T | null): T | nu
 export const animateSidebarLayoutChanges: AnimateLayoutChanges = (args) =>
   args.isSorting ? defaultAnimateLayoutChanges(args) : false;
 
+export type SidebarEmptyState =
+  | { readonly kind: "loading"; readonly message: "Loading Squadrons…" }
+  | { readonly kind: "no-squadrons"; readonly message: "No Squadrons yet" }
+  | { readonly kind: "scope-read-failed"; readonly message: "Couldn’t read thread homes" }
+  | { readonly kind: "scoped"; readonly message: string }
+  | { readonly kind: "empty"; readonly message: "No threads yet" };
+
+/** The first-run action is unavailable until the Registrar directory is authoritative. */
+export function resolveSidebarEmptyState(input: {
+  readonly directoryStatus: "loading" | "ready" | "partial" | "error";
+  readonly squadronCount: number;
+  readonly squadronScopeName: string | null;
+  readonly scopeReadFailed?: boolean;
+}): SidebarEmptyState {
+  if (input.directoryStatus === "loading") {
+    return { kind: "loading", message: "Loading Squadrons…" };
+  }
+  if (input.directoryStatus === "ready" && input.squadronCount === 0) {
+    return { kind: "no-squadrons", message: "No Squadrons yet" };
+  }
+  if (input.squadronScopeName !== null && input.scopeReadFailed === true) {
+    return { kind: "scope-read-failed", message: "Couldn’t read thread homes" };
+  }
+  if (input.squadronScopeName !== null) {
+    return { kind: "scoped", message: `No threads in ${input.squadronScopeName} yet` };
+  }
+  return { kind: "empty", message: "No threads yet" };
+}
+
 // Rows and section markers share one sortable list. The separators resolve
 // the lifecycle action; Sidebar.drag previews the resulting layout. Pinned
 // and active threads keep the dragged position; settled threads use time
@@ -448,7 +477,7 @@ export async function archiveSelectedThreadEntries<
   TResult extends { readonly _tag: "Success" | "Failure" },
 >(input: {
   entries: readonly TEntry[];
-  archive: (entry: TEntry, onArchived: () => void) => Promise<TResult>;
+  archive: (entry: TEntry, onArchived: () => void) => Promise<TResult | undefined>;
 }): Promise<{
   archivedThreadKeys: readonly string[];
   mutationFailure: Extract<TResult, { readonly _tag: "Failure" }> | null;
@@ -462,6 +491,7 @@ export async function archiveSelectedThreadEntries<
     const result = await input.archive(entry, () => {
       didArchive = true;
     });
+    if (result === undefined) continue;
     if (didArchive || result._tag === "Success") archivedThreadKeys.push(entry.threadKey);
     if (result._tag === "Success") continue;
     const failure = result as Extract<TResult, { readonly _tag: "Failure" }>;
@@ -473,6 +503,35 @@ export async function archiveSelectedThreadEntries<
   }
 
   return { archivedThreadKeys, mutationFailure: null, followupFailures };
+}
+
+/** A thread that disappeared before the action is no longer selectable; a cancelled read remains selected. */
+export function selectionKeysToRemoveAfterArchive<
+  TEntry extends { readonly threadKey: string },
+>(input: {
+  readonly selectedThreadKeys: ReadonlyArray<string>;
+  readonly entries: ReadonlyArray<TEntry>;
+  readonly archivedThreadKeys: ReadonlyArray<string>;
+}): readonly string[] {
+  const resolvedThreadKeys = new Set(input.entries.map((entry) => entry.threadKey));
+  return Array.from(
+    new Set([
+      ...input.selectedThreadKeys.filter((threadKey) => !resolvedThreadKeys.has(threadKey)),
+      ...input.archivedThreadKeys,
+    ]),
+  );
+}
+
+/** A batch asks once about clean rows whether the answer is to archive or cancel. */
+export function createCleanBatchArchiveConfirmation(input: {
+  readonly confirm: () => Promise<boolean>;
+}): () => Promise<boolean> {
+  let answer: boolean | undefined;
+  return async () => {
+    if (answer !== undefined) return answer;
+    answer = await input.confirm();
+    return answer;
+  };
 }
 
 export function buildMultiSelectThreadContextMenuItems(input: {
@@ -738,17 +797,6 @@ export function isSidebarNestedLinkClick(target: EventTarget | null): boolean {
       ? target.parentElement
       : null;
   return nodeClosest(parent, "a[href]") !== null;
-}
-
-// Shift+click on the new thread button creates directly in the current
-// project, skipping the command palette's project picker. With a single
-// project there is nothing to pick, so a plain click already creates
-// immediately and the modifier changes nothing.
-export function shouldCreateNewThreadInCurrentProject(
-  shiftKey: boolean,
-  projectGroupCount: number,
-): boolean {
-  return shiftKey || projectGroupCount <= 1;
 }
 
 export function orderItemsByPreferredIds<TItem, TId>(input: {

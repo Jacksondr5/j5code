@@ -1,12 +1,21 @@
-import { ArrowLeftIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ChartNoAxesColumnIcon,
+  FolderArchiveIcon,
+  SettingsIcon,
+} from "lucide-react";
+import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
 import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
+import { HumanInboxBell } from "../../j5/a2a/HumanInboxBell";
+import { J5Wordmark } from "../../j5/branding/J5Wordmark";
+import { FleetRailEntry } from "../../j5/fleet/FleetRailEntry";
 import { cn } from "../../lib/utils";
 import { usePullRequestsSupported } from "../../state/environments";
-import { T3Wordmark } from "../T3Wordmark";
+import { useThreadShells } from "../../state/entities";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
@@ -74,6 +83,10 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           {pillLabel}
         </Badge>
       ) : null}
+      <div className="relative z-10 -me-1 ms-auto flex h-8 shrink-0 items-center justify-center md:me-[var(--sidebar-content-inset)]">
+        <FleetRailEntry onBackdrop={backdropVariant !== null} />
+        <HumanInboxBell onBackdrop={backdropVariant !== null} />
+      </div>
     </div>
   );
 });
@@ -90,7 +103,7 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
     >
       {/* Center the visible capitals, without the font's ascender/descender space. */}
       <span className="inline-flex min-w-0 items-baseline gap-1 text-sm font-medium tracking-tight">
-        <T3Wordmark aria-label="T3" className="h-[1cap] w-auto shrink-0" />
+        <J5Wordmark className="h-[1cap] w-auto shrink-0" />
         <span
           className={cn(
             "truncate [text-box:trim-both_cap_alphabetic]",
@@ -133,19 +146,27 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   const { isMobile, setOpenMobile } = useSidebar();
+  const pathname = useLocation({ select: (location) => location.pathname });
   const currentFooterPage = useLocation({
     select: (location) =>
       /^\/settings(?:\/|$)/.test(location.pathname)
         ? "settings"
         : /^\/projects\/[^/]+\/?$/.test(location.pathname)
           ? "project-settings"
-          : location.pathname === "/usage"
-            ? "usage"
-            : location.pathname === "/pull-requests"
-              ? "pull-requests"
-              : null,
+          : location.pathname === "/inbox"
+            ? "inbox"
+            : location.pathname === "/fleet"
+              ? "fleet"
+              : location.pathname === "/usage"
+                ? "usage"
+                : location.pathname === "/artifacts"
+                  ? "artifacts"
+                  : location.pathname === "/pull-requests"
+                    ? "pull-requests"
+                    : null,
   });
   const pullRequestsSupported = usePullRequestsSupported();
+  const threads = useThreadShells();
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) {
       setOpenMobile(false);
@@ -169,6 +190,30 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     }
     void navigate({ to: "/usage" });
   }, [isMobile, navigate, setOpenMobile]);
+
+  const handleArtifactsClick = useCallback(() => {
+    closeMobileSidebar();
+    const segments = pathname.split("/").filter(Boolean);
+    const environmentId =
+      segments.length === 2 && segments[0] !== "settings"
+        ? (decodeURIComponent(segments[0]!) as EnvironmentId)
+        : null;
+    const threadId =
+      segments.length === 2 && segments[0] !== "settings"
+        ? (decodeURIComponent(segments[1]!) as ThreadId)
+        : null;
+    const currentThread =
+      environmentId === null || threadId === null
+        ? undefined
+        : threads.find(
+            (thread) => thread.environmentId === environmentId && thread.id === threadId,
+          );
+    const search =
+      currentThread === undefined
+        ? {}
+        : { environmentId: currentThread.environmentId, projectId: currentThread.projectId };
+    void navigate({ to: "/artifacts", search });
+  }, [closeMobileSidebar, navigate, pathname, threads]);
 
   const handleBackClick = useCallback(() => {
     closeMobileSidebar();
@@ -202,6 +247,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
               onClick={handlePullRequestsClick}
             />
           ) : null}
+          <SidebarUtilityItem
+            icon={<FolderArchiveIcon />}
+            label="Artifacts"
+            onClick={handleArtifactsClick}
+          />
           <SidebarUtilityItem
             icon={<ChartNoAxesColumnIcon />}
             label="Usage"

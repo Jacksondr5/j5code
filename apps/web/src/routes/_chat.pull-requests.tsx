@@ -2113,6 +2113,7 @@ function PullRequestsRouteView() {
             onAddTerminal={() => undefined}
             onAddDiff={() => undefined}
             onAddFiles={() => undefined}
+            onAddArtifacts={() => undefined}
             onAddPullRequest={() => undefined}
             onAddPullRequests={() => undefined}
             onAddDevice={() => undefined}
@@ -2120,6 +2121,7 @@ function PullRequestsRouteView() {
             terminalAvailable={false}
             diffAvailable={false}
             filesAvailable={false}
+            artifactsAvailable={false}
             pullRequestAvailable={false}
             pullRequestsAvailable={false}
             deviceAvailable={false}

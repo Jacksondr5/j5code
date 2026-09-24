@@ -49,18 +49,19 @@ The offered action depends on how the server runs:
 On the host, run:
 
 ```sh
-t3 update <client-version>
+j5 update <client-version>
 ```
 
 Replace `<client-version>` with the version shown in the notice. The command
 asks before restarting the background service; if you decline, run
-`t3 service restart` when you are ready. For a server you started by hand,
+`j5 service restart` when you are ready. For a server you started by hand,
 stop it and start it again afterwards with your usual options such as `--host`
 or `--tailscale-serve`.
 
-If you run the server with `npx` rather than an installed `t3`, there is
-nothing to update on the host: stop the server and relaunch it as
-`npx t3@<client-version>` with the same subcommand and options.
+A server installed from npm (`@jacksondr5/j5code` 0.0.42 or earlier) cannot
+update itself to a release archive: **Update server** fails because no newer npm
+version exists. Follow [Migrating to release archives](./migrating-to-release-archives.md)
+on that machine once; later updates work from the app and with `j5 update` again.
 
 ## If an update fails
 

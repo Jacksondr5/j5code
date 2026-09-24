@@ -35,12 +35,19 @@ import {
   serviceStateHasPendingUpdate,
   type ServiceState,
 } from "./serviceProtocol.ts";
+import {
+  isLegacyJ5BootServiceUnit,
+  isRenderedJ5BootServiceUnit,
+  legacyJ5BootService,
+} from "./j5/legacyBootService.ts";
 
-const BOOT_SERVICE_NAME = "t3code";
+// J5 names (FORK.md): never upstream's `t3code.service` / `com.t3tools.t3code.service`,
+// which an installed T3 Code owns. See ./j5/legacyBootService.ts for the retired J5 unit.
+const BOOT_SERVICE_NAME = "j5code";
 const BOOT_SERVICE_UNIT_FILE = `${BOOT_SERVICE_NAME}.service`;
 // `.service` suffix keeps the label distinct from the desktop app's bundle id
-// (com.t3tools.t3code), so launchd and TCC records never collide.
-const BOOT_SERVICE_LAUNCHD_LABEL = "com.t3tools.t3code.service";
+// (codes.jackson.j5code), so launchd and TCC records never collide.
+const BOOT_SERVICE_LAUNCHD_LABEL = "codes.jackson.j5code.service";
 const BOOT_SERVICE_PLIST_FILE = `${BOOT_SERVICE_LAUNCHD_LABEL}.plist`;
 const BOOT_SERVICE_UNIT_ENV = "T3_BOOT_SERVICE_UNIT";
 
@@ -57,12 +64,12 @@ function quoteSystemdValue(value: string): string {
 }
 
 /**
- * Reads `T3CODE_HOME` back out of a rendered unit or plist. Only values this
+ * Reads `J5CODE_HOME` back out of a rendered unit or plist. Only values this
  * file writes are expected, so a quoted systemd value is unquoted and
  * unescaped the same way `quoteSystemdValue` produced it.
  */
 export function bootServiceBaseDirOf(contents: string): string | undefined {
-  const systemd = /^Environment=T3CODE_HOME=(.*)$/m.exec(contents)?.[1];
+  const systemd = /^Environment=J5CODE_HOME=(.*)$/m.exec(contents)?.[1];
   if (systemd !== undefined) {
     const raw = systemd.trim();
     const unquoted =
@@ -71,7 +78,7 @@ export function bootServiceBaseDirOf(contents: string): string | undefined {
         : raw;
     return unquoted.replaceAll("%%", "%");
   }
-  const plist = /<key>T3CODE_HOME<\/key>\s*<string>([^<]*)<\/string>/.exec(contents)?.[1];
+  const plist = /<key>J5CODE_HOME<\/key>\s*<string>([^<]*)<\/string>/.exec(contents)?.[1];
   if (plist !== undefined) {
     return plist.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
   }
@@ -103,7 +110,7 @@ export function renderBootServiceUnit(plan: BootServicePlan): string {
     "[Service]",
     "Type=simple",
     "WorkingDirectory=%h",
-    `Environment=T3CODE_HOME=${quoteSystemdValue(plan.baseDir)}`,
+    `Environment=J5CODE_HOME=${quoteSystemdValue(plan.baseDir)}`,
     `Environment=${BOOT_SERVICE_UNIT_ENV}=${BOOT_SERVICE_UNIT_FILE}`,
     `ExecStart=${plan.program.map(quoteSystemdValue).join(" ")}`,
     // Let the launcher mark an explicit stop before it signals the server.
@@ -162,7 +169,7 @@ export function renderBootServicePlist(
     `  <dict>`,
     `    <key>PATH</key>`,
     `    <string>${escapeXmlText(options.environmentPath)}</string>`,
-    `    <key>T3CODE_HOME</key>`,
+    `    <key>J5CODE_HOME</key>`,
     `    <string>${escapeXmlText(plan.baseDir)}</string>`,
     `    <key>${BOOT_SERVICE_UNIT_ENV}</key>`,
     `    <string>${BOOT_SERVICE_PLIST_FILE}</string>`,
@@ -446,6 +453,8 @@ const BootServiceProblem = Schema.Literals([
   "service-disabled",
   "service-stopped",
   "restart-pending",
+  "legacy-service-present",
+  "foreign-service-present",
 ]);
 type BootServiceProblem = typeof BootServiceProblem.Type;
 
@@ -459,11 +468,15 @@ export function formatBootServiceProblem(problem: BootServiceProblem): string {
     case "linger-disabled":
       return 'Lingering is disabled. T3 Code will stop when your last login session ends and will not start at boot. Run `sudo loginctl enable-linger "$(id -un)"` on this machine, then retry the service command as your normal user.';
     case "service-disabled":
-      return "The service is not enabled to start automatically. Run `t3 service install` to repair it.";
+      return "The service is not enabled to start automatically. Run `j5 service install` to repair it.";
     case "service-stopped":
-      return "The service is not running. Check the service log and `systemctl --user status t3code.service`, then run `t3 service install`.";
+      return "The service is not running. Check the service log and `systemctl --user status j5code.service`, then run `j5 service install`.";
     case "restart-pending":
-      return "A newer version is installed but the service is still running the previous one. Run `t3 service restart` to switch.";
+      return "A newer version is installed but the service is still running the previous one. Run `j5 service restart` to switch.";
+    case "legacy-service-present":
+      return "The previous J5 service (t3code.service / com.t3tools.t3code.service) is still installed. Run `j5 service install` to replace it with j5code.service / codes.jackson.j5code.service.";
+    case "foreign-service-present":
+      return "A j5code.service / codes.jackson.j5code.service unit that J5 did not write already exists. It was left untouched; remove or rename it yourself, then run `j5 service install` again.";
   }
 }
 
@@ -493,7 +506,7 @@ export class BootServiceDowngradeRefusedError extends Schema.TaggedError<BootSer
   },
 ) {
   override get message(): string {
-    return `Refusing to replace t3@${this.installedVersion} with older t3@${this.targetVersion}. Run the command again with --allow-downgrade to continue.`;
+    return `Refusing to replace j5@${this.installedVersion} with older j5@${this.targetVersion}. Run the command again with --allow-downgrade to continue.`;
   }
 }
 
@@ -684,6 +697,46 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       { discard: true },
     );
 
+  // J5: the pre-0.0.43 J5 unit this machine may still run (./j5/legacyBootService.ts).
+  const legacyService =
+    detectedManager === undefined
+      ? undefined
+      : legacyJ5BootService({ kind: detectedManager.kind, path, homeDir, uid });
+  const legacyUnitPresent = Effect.gen(function* () {
+    if (legacyService === undefined) return false;
+    const contents = yield* fs.readFileString(legacyService.unitPath).pipe(Effect.option);
+    return Option.isSome(contents) && isLegacyJ5BootServiceUnit(contents.value);
+  });
+  /**
+   * Starts the new unit in place of the legacy J5 one. Both would serve the
+   * same home and port, so the legacy service stops first; it is removed only
+   * once the new unit started, and brought back (with the state file it
+   * understands) if the new unit could not start.
+   */
+  const activateReplacingLegacy = Effect.fn("cloud.boot_service.activate_replacing_legacy")(
+    function* (manager: BootServiceManager, previousStateText: Option.Option<string>) {
+      if (legacyService === undefined) return yield* runSteps(manager.activate);
+      yield* Effect.gen(function* () {
+        yield* runSteps(legacyService.deactivate);
+        yield* runSteps(manager.activate);
+      }).pipe(
+        Effect.tapError(() =>
+          Effect.gen(function* () {
+            yield* runSteps(manager.deactivate).pipe(Effect.ignore);
+            if (Option.isSome(previousStateText)) {
+              yield* writeDurably(statePath, previousStateText.value);
+            }
+            yield* runSteps(legacyService.restore);
+          }).pipe(Effect.ignore),
+        ),
+      );
+      yield* fs
+        .remove(legacyService.unitPath, { force: true })
+        .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
+      yield* runSteps(legacyService.finalize);
+    },
+  );
+
   const probe = (command: string, args: ReadonlyArray<string>) =>
     runner.run({ command, args, timeout: Duration.seconds(5) }).pipe(Effect.option);
   const succeeded = (result: Option.Option<ProcessRunner.ProcessRunOutput>) =>
@@ -752,6 +805,16 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     yield* fs
       .makeDirectory(input.logsDir, { recursive: true })
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
+    const existingUnit = yield* fs.readFileString(manager.unitPath).pipe(Effect.option);
+    if (Option.isSome(existingUnit) && !isRenderedJ5BootServiceUnit(existingUnit.value)) {
+      return yield* new BootServicePrerequisiteError({ problem: "foreign-service-present" });
+    }
+    const replacesLegacy = yield* legacyUnitPresent;
+    if (replacesLegacy && options?.start === false) {
+      // Rewriting the shared state file under a running legacy launcher would
+      // break its next restart; the handover has to start the new unit.
+      return yield* new BootServicePrerequisiteError({ problem: "legacy-service-present" });
+    }
 
     // A permissions failure must not leave a partial install or stop a working server.
     if (manager.kind === "systemd") {
@@ -827,8 +890,11 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     }
 
     yield* Effect.gen(function* () {
-      if (installed) {
-        const previousStateText = yield* fs.readFileString(statePath).pipe(Effect.option);
+      const previousStateText =
+        installed || replacesLegacy
+          ? yield* fs.readFileString(statePath).pipe(Effect.option)
+          : Option.none<string>();
+      if (installed || replacesLegacy) {
         if (Option.isSome(previousStateText)) {
           if (serviceStateHasPendingUpdate(previousStateText.value)) {
             return yield* new BootServiceUpdatePendingError();
@@ -885,7 +951,9 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       yield* writeDurably(unitPath, manager.render(plan));
 
       if (start) {
-        yield* runSteps(manager.activate);
+        yield* replacesLegacy
+          ? activateReplacingLegacy(manager, previousStateText)
+          : runSteps(manager.activate);
         yield* fs.remove(restartPendingPath, { force: true });
       }
     }).pipe(
@@ -911,7 +979,11 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       return false;
     }
     yield* runSteps(manager.stop);
-    yield* runSteps(manager.activate).pipe(
+    yield* (
+      (yield* legacyUnitPresent)
+        ? activateReplacingLegacy(manager, Option.none())
+        : runSteps(manager.activate)
+    ).pipe(
       // Same recovery as a failed repair: a service that was running should
       // not be left stopped because daemon-reload or enable failed.
       Effect.tapError(() => runSteps(manager.restart).pipe(Effect.ignore)),
@@ -927,12 +999,22 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
 
   const uninstall: BootService["Service"]["uninstall"] = Effect.gen(function* () {
     const manager = yield* requireManager;
+    // J5: a leftover pre-0.0.43 J5 unit goes too; a T3 Code unit never matches.
+    const removedLegacy = yield* Effect.gen(function* () {
+      if (legacyService === undefined || !(yield* legacyUnitPresent)) return false;
+      yield* runSteps(legacyService.deactivate);
+      yield* fs
+        .remove(legacyService.unitPath, { force: true })
+        .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
+      yield* runSteps(legacyService.finalize);
+      return true;
+    });
     if (
       !(yield* fs
         .exists(unitPath)
         .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause }))))
     )
-      return false;
+      return removedLegacy;
     yield* runSteps(manager.deactivate);
     yield* fs
       .remove(unitPath)
@@ -945,8 +1027,16 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     if (detectedManager === undefined) {
       return { supported: false, installed: false, current: false, unitPath, logPath };
     }
+    const legacyPresent = yield* legacyUnitPresent;
     if (!(yield* fs.exists(unitPath))) {
-      return { supported: true, installed: false, current: false, unitPath, logPath };
+      return {
+        supported: true,
+        installed: false,
+        current: false,
+        ...(legacyPresent ? { problems: ["legacy-service-present" as const] } : {}),
+        unitPath,
+        logPath,
+      };
     }
     const [unit, runtimeEntryExists, runtimeSentinel, stateText] = yield* Effect.all([
       fs.readFileString(unitPath),
@@ -966,6 +1056,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     const problems: BootServiceProblem[] =
       detectedManager.kind === "systemd" ? [...(yield* readSystemdProblems(true))] : [];
     if (yield* fs.exists(restartPendingPath)) problems.push("restart-pending");
+    if (legacyPresent) problems.push("legacy-service-present");
     return {
       supported: true,
       installed: true,

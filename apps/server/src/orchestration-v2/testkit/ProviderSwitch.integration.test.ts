@@ -60,6 +60,7 @@ import {
   type ProviderAdapterV2Event,
   type ProviderAdapterV2HistoricalContext,
   ProviderAdapterProtocolError,
+  ProviderAdapterResumeThreadError,
   type ProviderAdapterV2Shape,
   type ProviderAdapterV2SessionRuntime,
 } from "../ProviderAdapter.ts";
@@ -200,7 +201,14 @@ function makeTestAdapter(input: {
                 (input.failResumeOnce !== undefined &&
                   (yield* Ref.getAndSet(input.failResumeOnce, false)))
               )
-                return yield* unimplemented(input.driver, "simulated native resume failure");
+                // Only a provider-reported missing conversation may replace native history.
+                return yield* new ProviderAdapterResumeThreadError({
+                  driver: input.driver,
+                  providerSessionId: sessionInput.providerSessionId,
+                  providerThreadId: providerThread.id,
+                  cause: "simulated missing native conversation",
+                  nativeThreadMissing: true,
+                });
               return providerThread;
             }),
           ...(input.injectedHistory === undefined

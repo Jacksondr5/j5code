@@ -10,6 +10,7 @@ import {
   CopyIcon,
   FileSpreadsheetIcon,
   FileTextIcon,
+  FolderArchiveIcon,
   GlobeIcon,
   ImageIcon,
   InfoIcon,
@@ -196,6 +197,7 @@ import {
 } from "../browser/openFileInPreview";
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
+import { artifactPathFromWorkspaceRelativePath } from "../j5/artifacts/artifactPath";
 
 interface ChatMarkdownProps {
   text: string;
@@ -1153,6 +1155,8 @@ interface MarkdownFileLinkProps {
   /** Platform-specific menu label ("Reveal in Finder", ...); required for the
       reveal item to show. */
   revealLabel?: string | undefined;
+  className?: string | undefined;
+  artifact?: boolean | undefined;
 }
 
 const MARKDOWN_FILE_LINK_CLASS_NAME = "chat-markdown-file-link";
@@ -1890,6 +1894,8 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   onOpenMedia,
   onReveal,
   revealLabel,
+  className,
+  artifact = false,
 }: MarkdownFileLinkProps) {
   const handleOpenInEditor = useCallback(() => {
     if (!onOpen) {
@@ -2153,6 +2159,14 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     canOpenInBrowser,
     canOpenInPanel,
   });
+  const chipContent = artifact ? (
+    <>
+      <FolderArchiveIcon aria-hidden className="size-[1.17em] shrink-0 opacity-85" />
+      <span className="truncate leading-tight">Artifact · {label}</span>
+    </>
+  ) : (
+    <FileTagChipContent path={iconPath} label={label} theme={theme} />
+  );
 
   return (
     <Tooltip>
@@ -2162,7 +2176,8 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             <ContextChip
               kind="mention"
               render={<a href={href} />}
-              className={MARKDOWN_FILE_LINK_CLASS_NAME}
+              className={cn(MARKDOWN_FILE_LINK_CLASS_NAME, className)}
+              data-artifact={artifact ? "" : undefined}
               data-markdown-copy={copyMarkdown}
               onClick={(event) => {
                 event.preventDefault();
@@ -2179,7 +2194,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
               }}
               onContextMenu={handleContextMenu}
             >
-              <FileTagChipContent path={iconPath} label={label} theme={theme} />
+              {chipContent}
             </ContextChip>
           ) : (
             <ContextChip
@@ -2187,12 +2202,13 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
               render={<button type="button" />}
               aria-label={`File options for ${label}`}
               aria-haspopup="menu"
-              className={cn(MARKDOWN_FILE_LINK_CLASS_NAME, "select-text")}
+              className={cn(MARKDOWN_FILE_LINK_CLASS_NAME, "select-text", className)}
+              data-artifact={artifact ? "" : undefined}
               data-markdown-copy={copyMarkdown}
               onClick={handleContextMenu}
               onContextMenu={handleContextMenu}
             >
-              <FileTagChipContent path={iconPath} label={label} theme={theme} />
+              {chipContent}
             </ContextChip>
           )
         }
@@ -2229,7 +2245,9 @@ function areMarkdownFileLinkPropsEqual(
     previous.onOpenInBrowser === next.onOpenInBrowser &&
     previous.onOpenMedia === next.onOpenMedia &&
     previous.onReveal === next.onReveal &&
-    previous.revealLabel === next.revealLabel
+    previous.revealLabel === next.revealLabel &&
+    previous.className === next.className &&
+    previous.artifact === next.artifact
   );
 }
 
@@ -2545,6 +2563,13 @@ function useChatMarkdownState({
     },
     [cwd, findWorkspaceBasenameMatch, threadRef],
   );
+  const openArtifactInPanel = useCallback(
+    (artifactPath: string) => {
+      if (!threadRef) return;
+      useRightPanelStore.getState().openArtifact(threadRef, artifactPath);
+    },
+    [threadRef],
+  );
   const revealMarkdownFileInFileManager = useCallback(
     async (fileLinkMeta: MarkdownFileLinkMeta) => {
       const workspaceRelativePath = fileLinkMeta.workspaceRelativePath;
@@ -2571,6 +2596,10 @@ function useChatMarkdownState({
         );
       }
       const mediaPath = mediaSource ?? fileLinkMeta.filePath;
+      const artifactPath = artifactPathFromWorkspaceRelativePath(
+        fileLinkMeta.workspaceRelativePath,
+      );
+      const logicalArtifactPath = artifactPath === null ? null : `artifacts/${artifactPath}`;
       const canPreviewMedia =
         mediaMimeTypeFromExtension(
           fileLinkMeta.basename.slice(fileLinkMeta.basename.lastIndexOf(".")),
@@ -2578,42 +2607,52 @@ function useChatMarkdownState({
       // Media outside the workspace keeps the expanded preview; other host
       // files (a report in a temp dir) open read-only in the files panel.
       const panelPath =
+        artifactPath ??
         fileLinkMeta.workspaceRelativePath ??
         (!canPreviewMedia && isAbsolutePath(fileLinkMeta.filePath) ? fileLinkMeta.filePath : null);
 
       return (
         <MarkdownFileLink
           href={fileLinkMeta.targetPath}
-          targetPath={fileLinkMeta.targetPath}
-          iconPath={fileLinkMeta.filePath}
-          displayPath={fileLinkMeta.displayPath}
+          targetPath={logicalArtifactPath ?? fileLinkMeta.targetPath}
+          iconPath={logicalArtifactPath ?? fileLinkMeta.filePath}
+          displayPath={logicalArtifactPath ?? fileLinkMeta.displayPath}
           panelPath={panelPath}
           line={fileLinkMeta.line}
           label={labelParts.join(" · ")}
           copyMarkdown={copyMarkdown}
           theme={resolvedTheme}
           threadRef={threadRef}
-          {...(canUseShellActions ? { onOpen: openInPreferredEditor } : {})}
-          onOpenInPanel={openFileInPanel}
+          {...(artifactPath === null && canUseShellActions
+            ? { onOpen: openInPreferredEditor }
+            : {})}
+          onOpenInPanel={artifactPath === null ? openFileInPanel : openArtifactInPanel}
           onOpenMedia={
-            threadRef && canPreviewMedia
+            artifactPath === null && threadRef && canPreviewMedia
               ? () => openMarkdownMedia(mediaPath, fileLinkMeta.filePath)
               : undefined
           }
           openInEditorMenuLabel={preferredEditorMenuLabel}
           onReveal={
-            canUseShellActions && revealInFileManagerLabel !== undefined
+            artifactPath === null && canUseShellActions && revealInFileManagerLabel !== undefined
               ? () => revealMarkdownFileInFileManager(fileLinkMeta)
               : undefined
           }
           revealLabel={revealInFileManagerLabel}
           onOpenInBrowser={
+            artifactPath === null &&
             threadRef &&
             isPreviewSupportedInRuntime() &&
             isBrowserPreviewFile(fileLinkMeta.filePath)
               ? () => openMarkdownFileInPreview(fileLinkMeta.filePath)
               : undefined
           }
+          className={
+            artifactPath !== null
+              ? "border-violet-500/35 bg-violet-500/10 text-violet-700 hover:bg-violet-500/18 dark:text-violet-300"
+              : undefined
+          }
+          artifact={artifactPath !== null}
         />
       );
     },
@@ -2621,6 +2660,7 @@ function useChatMarkdownState({
       canUseShellActions,
       fileLinkParentSuffixByPath,
       openFileInPanel,
+      openArtifactInPanel,
       openInPreferredEditor,
       openMarkdownFileInPreview,
       openMarkdownMedia,

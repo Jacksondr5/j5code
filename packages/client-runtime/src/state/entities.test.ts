@@ -4,6 +4,7 @@ import {
   NodeId,
   ProviderInstanceId,
   ProviderSessionId,
+  ProviderDriverKind,
   RunId,
   RuntimeRequestId,
   TurnItemId,
@@ -92,6 +93,23 @@ describe("V2 client presentation", () => {
     expect(shell.activeOrderKey).toBe("m");
     expect(shell.linkedPullRequest).toEqual(linkedPullRequest);
     expect(shell.branchPullRequest).toEqual(branchPullRequest);
+  });
+
+  it("presents an immutable agent persona assignment", () => {
+    const assignment = {
+      personaId: "critic" as const,
+      definitionVersion: 1,
+      authorityPolicy: "critic-review" as const,
+      resolvedRoute: "primary" as const,
+      resolvedDriver: ProviderDriverKind.make("codex"),
+      resolvedModelSelection: v2ThreadShell.modelSelection,
+    };
+    const shell = presentThreadShell(environmentId, {
+      ...v2ThreadShell,
+      agentPersonaAssignment: assignment,
+    });
+
+    expect(shell.agentPersonaAssignment).toEqual(assignment);
   });
 
   it("presents provider errors carried by failed thread shells", () => {

@@ -1,3 +1,5 @@
+import { useAgentMentionPicker } from "../../j5/agents/useAgentMentionPicker";
+import { agentMentionReplacement } from "@t3tools/shared/j5/agentMention";
 import type {
   EnvironmentId,
   ProjectId,
@@ -149,7 +151,9 @@ export function resolveComposerCommandSelection(input: {
   }
 
   let replacement = "";
-  if (item.type === "path") {
+  if (item.type === "agent") {
+    replacement = agentMentionReplacement(item.personaId);
+  } else if (item.type === "path") {
     replacement = `${serializeComposerFileLink(item.path)} `;
   } else if (item.type === "skill") {
     replacement = `$${item.skill.name} `;
@@ -319,8 +323,10 @@ export function useComposerCommandMenu({
     query: trigger?.kind === "pull-request" ? trigger.query : null,
   });
 
+  const agentPicker = useAgentMentionPicker(environmentId, selectedProviderStatus?.driver, trigger);
   const items = useMemo<ComposerCommandItem[]>(() => {
     if (!trigger) return [];
+    if (trigger.kind === "agent") return agentPicker.items;
 
     if (trigger.kind === "pull-request") {
       return pullRequestSearch.entries.map((entry) => ({
@@ -467,6 +473,8 @@ export function useComposerCommandMenu({
           })
         : [];
       return [
+        // J5: saved agents lead, then upstream thread references, then files.
+        ...agentPicker.items,
         ...threadItems,
         ...pathSearch.entries.map((entry) => {
           const parts = entry.path.split("/");
@@ -484,6 +492,7 @@ export function useComposerCommandMenu({
 
     return [];
   }, [
+    agentPicker.items,
     currentThreadId,
     environmentId,
     threadShells,
@@ -617,7 +626,9 @@ export function useComposerCommandMenu({
     items,
     skills,
     isLoading:
-      trigger?.kind === "pull-request" ? pullRequestSearch.isPending : pathSearch.isPending,
+      trigger?.kind === "pull-request"
+        ? pullRequestSearch.isPending
+        : pathSearch.isPending || (trigger?.kind === "agent" && agentPicker.isPending),
     error:
       trigger?.kind === "pull-request"
         ? pullRequestProjectId === null || pullRequestRepository === null

@@ -55,6 +55,7 @@ import {
   isCheckpointRestoreIsolated,
   SHARED_WORKSPACE_RESTORE_MESSAGE,
 } from "./CheckpointRestoreSafety.ts";
+import { makeAgentPersonaGuards } from "../j5/agents/agentPersonaOrchestration.ts";
 import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import { CommandPolicyV2, resolveMessageDispatchIntent } from "./CommandPolicy.ts";
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
@@ -640,6 +641,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
   const fileSystem = yield* FileSystem.FileSystem;
   const providerAdapters = yield* ProviderAdapterRegistryV2;
+  const personaGuards = yield* makeAgentPersonaGuards({
+    getDriver: (providerInstanceId) =>
+      providerAdapters.get(providerInstanceId).pipe(Effect.map((adapter) => adapter.driver)),
+    adapterError: (command, providerInstanceId, cause) =>
+      new OrchestratorProviderAdapterError({
+        commandId: command.commandId,
+        providerInstanceId,
+        cause,
+      }),
+    dispatchError: (command, cause) =>
+      new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause,
+      }),
+  });
   const continuationRequests = yield* ProviderContinuationRequests;
   const providerSessions = yield* ProviderSessionManagerV2;
   const providerSwitchService = yield* ProviderSwitchServiceV2;
@@ -1956,6 +1973,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     command: Extract<OrchestrationV2Command, { readonly type: "thread.create" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
   ) {
+    yield* personaGuards.threadCreate(command);
+
     yield* Effect.annotateCurrentSpan({
       "orchestration_v2.command_id": command.commandId,
       "orchestration_v2.command_type": command.type,
@@ -1975,6 +1994,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       modelSelection: command.modelSelection,
       runtimeMode: command.runtimeMode,
       interactionMode: command.interactionMode,
+      ...(command.agentPersonaAssignment === undefined
+        ? {}
+        : { agentPersonaAssignment: command.agentPersonaAssignment }),
       branch: command.branch,
       worktreePath: command.worktreePath,
       activeProviderThreadId: null,
@@ -2193,6 +2215,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Thread ${command.threadId} is not pinned and cannot be reordered.`,
       });
     }
+    yield* personaGuards.routeLocked(thread, command);
     if (
       command.type === "thread.active.reorder" &&
       (thread.pinnedAt != null || thread.settledOverride === "settled")
@@ -4028,6 +4051,29 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
       }
 
+      // Stop wins under the same thread lock as message admission, including
+      // providers that acknowledge the interrupt by completing normally. The
+      // command projection omits interrupt items, so read them for the run.
+      const hasCommittedStop = (runId: RunId) =>
+        loadProjectionForCommand(command, ["turnItems"], {
+          turnItemTypes: ["run_interrupt_request"],
+          turnItemRunId: runId,
+        }).pipe(Effect.map(({ turnItems }) => turnItems.length > 0));
+      const reusedMessage = projection.messages.find((message) => message.id === command.messageId);
+      const reusedRun = projection.runs.find((run) => run.id === reusedMessage?.runId);
+      if (
+        command.delegatedCompletion === undefined &&
+        reusedMessage !== undefined &&
+        reusedRun !== undefined &&
+        reusedRun.userMessageId !== reusedMessage.id &&
+        (yield* hasCommittedStop(reusedRun.id))
+      ) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "A committed Stop prevents this steering message from starting a follow-up turn.",
+        });
+      }
       if (command.restartContinuationOfRunId !== undefined) {
         const source = projection.runs.find((run) => run.id === command.restartContinuationOfRunId);
         if (
@@ -4053,6 +4099,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
       }
 
+      yield* personaGuards.modelMismatch(projection.thread, command);
       if (projection.thread.settledOverride !== null) {
         const now = yield* DateTime.now;
         const thread: OrchestrationV2AppThread = {
@@ -4142,6 +4189,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       );
       if (dispatchMode.type === "steer_active") {
         const targetRunId = dispatchMode.targetRunId;
+        if (yield* hasCommittedStop(targetRunId)) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: "A committed Stop prevents steering this run. Submit a new turn explicitly.",
+          });
+        }
         const target = projection.runs.find((run) => run.id === targetRunId);
         const turn = projection.providerTurns.find(
           (candidate) =>
@@ -6013,6 +6067,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ),
       );
 
+      yield* personaGuards.subagent(command, targetAdapter.driver);
+
       const now = command.createdAt ?? (yield* DateTime.now);
       const taskNodeId = idAllocator.derive.delegatedTaskNode({
         commandId: command.commandId,
@@ -6047,6 +6103,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }),
         runtimeMode: command.runtimeMode,
         interactionMode: command.interactionMode,
+        ...(command.agentPersonaAssignment === undefined
+          ? {}
+          : { agentPersonaAssignment: command.agentPersonaAssignment }),
       };
       const task: OrchestrationV2Subagent = {
         id: taskNodeId,

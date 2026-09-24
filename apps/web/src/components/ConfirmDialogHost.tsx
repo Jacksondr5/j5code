@@ -1,4 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
+import type { ReactNode } from "react";
 
 import {
   completeConfirmDialogClose,
@@ -23,7 +24,9 @@ type ConfirmationCopy = {
   readonly description: string | null;
 };
 
-function resolveConfirmDialogCopy(message: string): ConfirmationCopy {
+export const resolveConfirmDialogActionLabel = (confirmLabel?: string) => confirmLabel ?? "Confirm";
+
+export function resolveConfirmDialogCopy(message: string): ConfirmationCopy {
   const normalizedMessage = message.trim();
   const lines = normalizedMessage.split("\n");
   const questionLineIndex = lines.findIndex((line) => line.trim().endsWith("?"));
@@ -51,6 +54,19 @@ function resolveConfirmDialogCopy(message: string): ConfirmationCopy {
   };
 }
 
+export function ConfirmationDescription({
+  message,
+  content,
+}: {
+  readonly message: string;
+  readonly content?: ReactNode;
+}) {
+  if (content !== undefined) {
+    return content;
+  }
+  return resolveConfirmDialogCopy(message).description;
+}
+
 export function ConfirmDialogHost() {
   const state = useSyncExternalStore(
     subscribeConfirmDialog,
@@ -60,8 +76,13 @@ export function ConfirmDialogHost() {
 
   useEffect(() => registerConfirmDialogHost(), []);
 
-  const copy = resolveConfirmDialogCopy(state.status === "idle" ? "" : state.message);
+  const message = state.status === "idle" ? "" : state.message;
+  const copy = resolveConfirmDialogCopy(message);
+  const content = state.status === "idle" ? undefined : state.content;
+  const description = <ConfirmationDescription content={content} message={message} />;
   const confirmVariant = state.status === "idle" ? "default" : state.variant;
+  const confirmLabel =
+    state.status === "idle" ? "Confirm" : resolveConfirmDialogActionLabel(state.confirmLabel);
   const onCancel = () => respondToConfirmDialog(false);
   const onConfirm = () => respondToConfirmDialog(true);
 
@@ -78,16 +99,20 @@ export function ConfirmDialogHost() {
       <AlertDialogPopup>
         <AlertDialogHeader>
           <AlertDialogTitle>{copy.title}</AlertDialogTitle>
-          {copy.description ? (
+          {content !== undefined ? (
+            <AlertDialogDescription render={<div className="text-muted-foreground text-sm" />}>
+              {description}
+            </AlertDialogDescription>
+          ) : copy.description ? (
             <AlertDialogDescription className="whitespace-pre-line">
-              {copy.description}
+              {description}
             </AlertDialogDescription>
           ) : null}
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
           <Button variant={confirmVariant} onClick={onConfirm}>
-            Confirm
+            {confirmLabel}
           </Button>
         </AlertDialogFooter>
       </AlertDialogPopup>

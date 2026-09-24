@@ -1,5 +1,6 @@
 import { findRecordedWorktreeSetup, resolveVisibleWorktreeSetup } from "./ChatView.logic";
 import {
+  canSelectDraftEnvironment,
   recallCheckoutIsRepo,
   rememberCheckoutIsRepo,
   threadShellHasStarted,
@@ -75,9 +76,9 @@ import {
   reconcileMountedTerminalThreadIds,
   resolveDraftPromotionNavigationTarget,
   resolveEffectiveInteractionMode,
+  resolveFirstSendSquadronCarrier,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
-  startNewThreadForProject,
   shouldShowBranchMismatchBanner,
   shouldShowPlanFollowUpPrompt,
   shouldWriteThreadErrorToCurrentServerThread,
@@ -233,6 +234,38 @@ describe("resolveEffectiveInteractionMode", () => {
         threadInteractionMode: "plan",
       }),
     ).toBe("plan");
+  });
+});
+
+describe("resolveFirstSendSquadronCarrier", () => {
+  it("refuses an ambient-only unselected draft without creating a launch carrier", () => {
+    expect(
+      resolveFirstSendSquadronCarrier({
+        durableSquadronId: null,
+        draftSquadronId: null,
+        ambientSquadronId: "squadron:alpha",
+      }),
+    ).toEqual({ kind: "missing-explicit-squadron" });
+  });
+
+  it("uses a durable Registrar home without persisting ambient scope into the draft", () => {
+    expect(
+      resolveFirstSendSquadronCarrier({
+        durableSquadronId: "squadron:alpha",
+        draftSquadronId: null,
+        ambientSquadronId: "squadron:bravo",
+      }),
+    ).toEqual({ kind: "durable-home", squadronId: "squadron:alpha" });
+  });
+
+  it("uses the local draft carrier before ambient context", () => {
+    expect(
+      resolveFirstSendSquadronCarrier({
+        durableSquadronId: null,
+        draftSquadronId: "squadron:bravo",
+        ambientSquadronId: "squadron:alpha",
+      }),
+    ).toEqual({ kind: "draft", squadronId: "squadron:bravo" });
   });
 });
 
@@ -551,33 +584,6 @@ describe("shouldWriteThreadErrorToCurrentServerThread", () => {
         targetThreadId: threadId,
       }),
     ).toBe(false);
-  });
-});
-
-describe("startNewThreadForProject", () => {
-  it("starts a thread through the supplied shared handler for the active project", () => {
-    const calls: Array<{ environmentId: EnvironmentId; projectId: ProjectId }> = [];
-    const projectRef = { environmentId, projectId };
-
-    expect(
-      startNewThreadForProject(projectRef, (nextProjectRef) => {
-        calls.push(nextProjectRef);
-        return Promise.resolve();
-      }),
-    ).toBe(true);
-    expect(calls).toEqual([projectRef]);
-  });
-
-  it("does nothing when the active project is unavailable", () => {
-    let called = false;
-
-    expect(
-      startNewThreadForProject(null, () => {
-        called = true;
-        return Promise.resolve();
-      }),
-    ).toBe(false);
-    expect(called).toBe(false);
   });
 });
 
@@ -2064,5 +2070,19 @@ describe("worktree setup visibility", () => {
       ...settledDone,
       sequence: 9,
     });
+  });
+});
+
+describe("Squadron draft environment ownership", () => {
+  const owner = EnvironmentId.make("owner");
+  const other = EnvironmentId.make("other");
+  it("refuses automatic and cross-server manual routing of a selected Squadron", () => {
+    expect(canSelectDraftEnvironment("squadron:same-id", owner, "auto")).toBe(false);
+    expect(canSelectDraftEnvironment("squadron:same-id", owner, other)).toBe(false);
+    expect(canSelectDraftEnvironment("squadron:same-id", owner, owner)).toBe(true);
+  });
+  it("retains upstream automatic and manual choices before any Squadron is selected", () => {
+    expect(canSelectDraftEnvironment(null, owner, "auto")).toBe(true);
+    expect(canSelectDraftEnvironment(null, owner, other)).toBe(true);
   });
 });

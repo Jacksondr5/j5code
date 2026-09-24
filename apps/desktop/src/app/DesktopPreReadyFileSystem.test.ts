@@ -17,7 +17,7 @@ const resolveWindowsUserData = (appDataDirectory: string) =>
   }).pipe(Effect.provide(DesktopPreReadyFileSystem.layer));
 
 it.layer(NodeServices.layer)("DesktopPreReadyFileSystem", (it) => {
-  it.effect("migrates the legacy Windows profile state", () =>
+  it.effect("keeps an existing J5 profile and ignores T3 Code's", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -25,10 +25,10 @@ it.layer(NodeServices.layer)("DesktopPreReadyFileSystem", (it) => {
       yield* fileSystem.makeDirectory(path.join(root, "T3 Code (Alpha)"));
       yield* fileSystem.writeFileString(path.join(root, "T3 Code (Alpha)", "Local State"), "keys");
 
-      const userData = yield* resolveWindowsUserData(root);
-
-      assert.equal(userData, path.join(root, "t3code-v2"));
-      assert.equal(yield* fileSystem.readFileString(path.join(userData, "Local State")), "keys");
+      assert.equal(yield* resolveWindowsUserData(root), path.join(root, "j5code"));
+      yield* fileSystem.makeDirectory(path.join(root, "J5 Code"));
+      assert.equal(yield* resolveWindowsUserData(root), path.join(root, "J5 Code"));
+      assert.isFalse(yield* fileSystem.exists(path.join(root, "j5code", "Local State")));
     }),
   );
 

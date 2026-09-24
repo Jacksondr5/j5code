@@ -1414,6 +1414,18 @@ describe("thread outbox", () => {
       creationMessage,
     );
     expect(isQueuedThreadCreationSendable(creationMessage)).toBe(true);
+    // A pending task keeps its saved-agent choice across restarts and retries,
+    // and a record queued before the field existed still loads without one.
+    const agentCreationMessage = {
+      ...creationMessage,
+      creation: { ...creationMessage.creation, agentPersonaId: "critic" },
+    } satisfies QueuedThreadMessage;
+    expect(decodeQueuedThreadMessage(encodeQueuedThreadMessage(agentCreationMessage))).toEqual(
+      agentCreationMessage,
+    );
+    expect(
+      decodeQueuedThreadMessage(encodeQueuedThreadMessage(creationMessage)).creation,
+    ).not.toHaveProperty("agentPersonaId");
     expect(
       isQueuedThreadCreationSendable({
         ...creationMessage,

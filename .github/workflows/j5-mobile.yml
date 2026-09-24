@@ -1,0 +1,72 @@
+name: J5 iOS Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      submit:
+        description: Upload the successful build to App Store Connect for TestFlight
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: j5-ios-build
+  cancel-in-progress: false
+
+jobs:
+  ios:
+    if: github.repository == 'Jacksondr5/j5code'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      EXPO_TOKEN: ${{ secrets.J5_EXPO_TOKEN }}
+      SUBMIT_TO_TESTFLIGHT: ${{ inputs.submit }}
+    steps:
+      - name: Check J5 Expo credential
+        run: test -n "$EXPO_TOKEN"
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.10.0
+          run_install: false
+
+      - name: Install Node from .nvmrc
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: 23.2.0
+          token: ${{ secrets.J5_EXPO_TOKEN }}
+          packager: npm
+
+      - name: Build signed iOS app
+        working-directory: apps/mobile
+        shell: bash
+        run: |
+          set -euo pipefail
+          submit_args=()
+          if [[ "$SUBMIT_TO_TESTFLIGHT" == "true" ]]; then
+            submit_args+=(--auto-submit-with-profile j5-testflight)
+          fi
+          eas build --platform ios --profile j5-testflight --non-interactive --wait "${submit_args[@]}"
+
+      # See the matching cleanup in j5-ci.yml: this gitlink's manifest belongs
+      # to the vendored tree, not the repository root.
+      - name: Exclude vendored gitlink from checkout cleanup
+        if: always()
+        run: git update-index --force-remove -- .repos/alchemy-effect/.vendor/alchemy

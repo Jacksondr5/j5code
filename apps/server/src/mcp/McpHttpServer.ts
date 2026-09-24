@@ -1,3 +1,8 @@
+import { J5AdaptedThreadToolkit, J5AdaptedThreadHandlersLive } from "../j5/a2a/mcp/threadTools.ts";
+import {
+  J5AttachmentSendToolkit,
+  J5AttachmentSendHandlersLive,
+} from "../j5/a2a/mcp/attachments.ts";
 import * as NodeCrypto from "node:crypto";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -14,24 +19,32 @@ import type * as Types from "effect/Types";
 import { McpProtocol, McpSchema, McpServer, Tool } from "effect/unstable/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
+import {
+  J5EnvironmentToolkit,
+  J5ProjectToolkit,
+  J5AttachmentUploadToolkit,
+  J5ThreadToolkit,
+  J5ThreadMetadataToolkit,
+} from "../j5/a2a/mcp/upstreamCatalog.ts";
+
 import packageJson from "../../package.json" with { type: "json" };
+import { layer as ArtifactWorkspaceLive } from "../j5/artifacts/ArtifactWorkspace.ts";
+import * as ArtifactMcpService from "./ArtifactMcpService.ts";
 import * as ServerConfig from "../config.ts";
 import * as DeviceService from "../device/DeviceService.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import { PreviewControlsToolkit } from "./toolkits/previewControls/tools.ts";
 import { PreviewControlsHandlersLive } from "./toolkits/previewControls/handlers.ts";
-import { EnvironmentToolkit } from "./toolkits/environment/tools.ts";
 import { EnvironmentHandlersLive } from "./toolkits/environment/handlers.ts";
-import { ProjectToolkit } from "./toolkits/project/tools.ts";
 import { ProjectHandlersLive } from "./toolkits/project/handlers.ts";
-import { AttachmentToolkit } from "./toolkits/attachment/tools.ts";
 import { AttachmentHandlersLive } from "./toolkits/attachment/handlers.ts";
-import { ThreadToolkit } from "./toolkits/thread/tools.ts";
 import { ThreadToolkitHandlersLive } from "./toolkits/thread/handlers.ts";
 import * as ThreadMetadataMcpService from "./ThreadMetadataMcpService.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
+import { ArtifactToolkitHandlersLive } from "./toolkits/artifacts/handlers.ts";
+import { ArtifactToolkit } from "./toolkits/artifacts/tools.ts";
 import { OrchestratorToolkitHandlersLive } from "./toolkits/orchestrator/handlers.ts";
 import { OrchestratorToolkit } from "./toolkits/orchestrator/tools.ts";
 import {
@@ -46,6 +59,10 @@ import {
 import { WorktreeToolkitHandlersLive } from "./toolkits/worktree/handlers.ts";
 import { WorktreeToolkit } from "./toolkits/worktree/tools.ts";
 import * as WorktreeMcpService from "./WorktreeMcpService.ts";
+import {
+  J5McpIntegrationLive,
+  J5OrchestratorSurfaceRegistrationLive,
+} from "../j5/a2a/mcp/registration.ts";
 import { PullRequestsToolkitHandlersLive } from "./toolkits/pullRequests/handlers.ts";
 import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
 import {
@@ -627,8 +644,14 @@ export const OrchestratorToolkitRegistrationLive = McpServer.toolkit(Orchestrato
   Layer.provide(ThreadMetadataMcpService.layer),
 );
 
-export const ThreadToolkitRegistrationLive = McpServer.toolkit(ThreadToolkit).pipe(
-  Layer.provide(ThreadToolkitHandlersLive),
+const J5ThreadMetadataRegistrationLive = McpServer.toolkit(J5ThreadMetadataToolkit).pipe(
+  Layer.provide(OrchestratorToolkitHandlersLive),
+  Layer.provide(ThreadMetadataMcpService.layer),
+);
+
+export const ThreadToolkitRegistrationLive = Layer.merge(
+  McpServer.toolkit(J5ThreadToolkit).pipe(Layer.provide(ThreadToolkitHandlersLive)),
+  McpServer.toolkit(J5AdaptedThreadToolkit).pipe(Layer.provide(J5AdaptedThreadHandlersLive)),
 );
 
 const WorktreeToolkitRegistrationLive = McpServer.toolkit(WorktreeToolkit).pipe(
@@ -636,20 +659,26 @@ const WorktreeToolkitRegistrationLive = McpServer.toolkit(WorktreeToolkit).pipe(
   Layer.provide(WorktreeMcpService.layer),
 );
 
+export const ArtifactToolkitRegistrationLive = McpServer.toolkit(ArtifactToolkit).pipe(
+  Layer.provide(ArtifactToolkitHandlersLive),
+  Layer.provide(ArtifactMcpService.layer.pipe(Layer.provide(ArtifactWorkspaceLive))),
+);
+
 const PreviewControlsRegistrationLive = McpServer.toolkit(PreviewControlsToolkit).pipe(
   Layer.provide(PreviewControlsHandlersLive),
 );
 
-const EnvironmentRegistrationLive = McpServer.toolkit(EnvironmentToolkit).pipe(
+const EnvironmentRegistrationLive = McpServer.toolkit(J5EnvironmentToolkit).pipe(
   Layer.provide(EnvironmentHandlersLive),
 );
 
-const ProjectRegistrationLive = McpServer.toolkit(ProjectToolkit).pipe(
+const ProjectRegistrationLive = McpServer.toolkit(J5ProjectToolkit).pipe(
   Layer.provide(ProjectHandlersLive),
 );
 
-const AttachmentRegistrationLive = McpServer.toolkit(AttachmentToolkit).pipe(
-  Layer.provide(AttachmentHandlersLive),
+const AttachmentRegistrationLive = Layer.mergeAll(
+  McpServer.toolkit(J5AttachmentUploadToolkit).pipe(Layer.provide(AttachmentHandlersLive)),
+  McpServer.toolkit(J5AttachmentSendToolkit).pipe(Layer.provide(J5AttachmentSendHandlersLive)),
 );
 
 export const PullRequestsToolkitRegistrationLive = McpServer.toolkit(PullRequestsToolkit).pipe(
@@ -678,7 +707,10 @@ const McpTransportLive = McpServer.layerHttp({
 
 export const layer = Layer.mergeAll(
   PreviewToolkitRegistrationLive,
-  OrchestratorToolkitRegistrationLive,
+  ArtifactToolkitRegistrationLive,
+  J5OrchestratorSurfaceRegistrationLive,
+  J5ThreadMetadataRegistrationLive,
+  J5McpIntegrationLive,
   ThreadToolkitRegistrationLive,
   AttachmentRegistrationLive,
   ProjectRegistrationLive,

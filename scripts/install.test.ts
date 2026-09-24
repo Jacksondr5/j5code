@@ -9,7 +9,11 @@ import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
 // util-linux's script gives the real installer a terminal without a browser or extra packages.
-describe.skipIf(HostProcessPlatform.defaultValue() !== "linux")("installer terminal", () => {
+// J5 publishes Linux archives for x64 only; the installer refuses other architectures.
+describe.skipIf(
+  HostProcessPlatform.defaultValue() !== "linux" ||
+    HostProcessArchitecture.defaultValue() !== "x64",
+)("installer terminal", () => {
   it.each([false, true])(
     "preserves download and install behavior (HTTP failure: %s)",
     async (fail) => {
@@ -61,7 +65,9 @@ describe.skipIf(HostProcessPlatform.defaultValue() !== "linux")("installer termi
           TERM: "xterm",
           NO_COLOR: "1",
           T3CODE_VERSION: version,
-          T3CODE_HOME: NodePath.join(root, "home"),
+          J5CODE_HOME: NodePath.join(root, "home"),
+          // T3 Code's home variable must never steer a J5 install (FORK.md case 25).
+          T3CODE_HOME: NodePath.join(root, "t3-home"),
           T3CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
           T3CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
         },
@@ -86,24 +92,26 @@ describe.skipIf(HostProcessPlatform.defaultValue() !== "linux")("installer termi
           expect(code).not.toBe(0);
           expect(output).toContain("500");
           expect(output).not.toContain("100%");
-          expect(output).not.toContain("Installed T3 Code");
+          expect(output).not.toContain("Installed J5 Code");
           expect(await NodeFSP.readdir(versions)).toEqual([]);
         } else {
           expect(code).toBe(0);
           expect(sawPartialProgress).toBe(true);
           expect(output).toContain("100%");
           expect(output).toContain("0.1 / 0.1 MB");
-          expect(output).toContain("Installed T3 Code 1.2.3");
+          expect(output).toContain("Installed J5 Code 1.2.3");
           expect(
             await NodeFSP.readFile(NodePath.join(versions, version, ".install-complete"), "utf8"),
           ).toBe("1.2.3\n");
           expect(
-            NodeChildProcess.execFileSync(NodePath.join(root, "bin/t3"), ["--version"], {
+            NodeChildProcess.execFileSync(NodePath.join(root, "bin/j5"), ["--version"], {
               encoding: "utf8",
             }).trim(),
           ).toBe("t3 v1.2.3");
           expect(await NodeFSP.readdir(versions)).toEqual([version]);
+          expect(await NodeFSP.readdir(NodePath.join(root, "bin"))).toEqual(["j5"]);
         }
+        await expect(NodeFSP.access(NodePath.join(root, "t3-home"))).rejects.toThrow();
       } finally {
         if (child.exitCode === null) child.kill();
         server.closeAllConnections();

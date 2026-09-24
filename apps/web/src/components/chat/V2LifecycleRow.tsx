@@ -3,6 +3,7 @@ import { AgentElapsed } from "./AgentElapsed";
 import { projectedSubagentsToRuntime } from "@t3tools/client-runtime/state/subagentRuntime";
 import type { ReactNode } from "react";
 import { useThreadShell, useProject } from "../../state/entities";
+import { AgentLineageIdentity } from "../../j5/agents/AgentIdentityChip";
 import { SubagentTooltipContent } from "./SubagentTooltipContent";
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef, scopeProjectRef } from "@t3tools/client-runtime/environment";
@@ -367,6 +368,10 @@ function SubagentTimelineLink(props: {
           <span className="min-w-0 truncate text-xs font-medium text-foreground">
             {props.title}
           </span>
+          <AgentLineageIdentity
+            environmentId={props.parentRef.environmentId}
+            childThreadId={threadId}
+          />
           {detail !== null && status !== "completed" ? (
             <span
               className={cn(

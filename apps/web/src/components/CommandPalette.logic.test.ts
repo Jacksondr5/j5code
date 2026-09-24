@@ -1,3 +1,4 @@
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import type { Project, Thread } from "../types";
@@ -13,6 +14,7 @@ import {
   filterCommandPaletteGroups,
   reduceCommandPaletteUiState,
   type CommandPaletteActionItem,
+  resolveSquadronPickerDestination,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
 
@@ -300,6 +302,98 @@ describe("enumerateCommandPaletteItems", () => {
   });
 });
 
+describe("resolveSquadronPickerDestination", () => {
+  it("never navigates Bravo to Alpha's sibling thread over their shared folder", () => {
+    const alpha = makeThreadFixture({
+      id: ThreadId.make("thread-alpha"),
+      projectId: ProjectId.make("project-shared"),
+      updatedAt: "2026-08-31T10:00:00.000Z",
+    });
+    const destination = resolveSquadronPickerDestination({
+      squadron: { environmentId: alpha.environmentId, squadronId: "squadron:bravo" },
+      threads: [alpha],
+      homesByThreadId: new Map([
+        [
+          scopedThreadKey(scopeThreadRef(alpha.environmentId, alpha.id)),
+          { kind: "known" as const, squadron: { id: "squadron:alpha" } },
+        ],
+      ]),
+      sortOrder: "updated_at",
+    });
+
+    expect(destination).toEqual({ kind: "create-draft" });
+  });
+
+  it("navigates only to Bravo's Registrar-home thread when it exists", () => {
+    const alpha = makeThreadFixture({
+      id: ThreadId.make("thread-alpha"),
+      projectId: ProjectId.make("project-shared"),
+      updatedAt: "2026-08-31T11:00:00.000Z",
+    });
+    const bravo = makeThreadFixture({
+      id: ThreadId.make("thread-bravo"),
+      projectId: ProjectId.make("project-shared"),
+      updatedAt: "2026-08-31T09:00:00.000Z",
+    });
+    const destination = resolveSquadronPickerDestination({
+      squadron: { environmentId: alpha.environmentId, squadronId: "squadron:bravo" },
+      threads: [alpha, bravo],
+      homesByThreadId: new Map([
+        [
+          scopedThreadKey(scopeThreadRef(alpha.environmentId, alpha.id)),
+          { kind: "known" as const, squadron: { id: "squadron:alpha" } },
+        ],
+        [
+          scopedThreadKey(scopeThreadRef(bravo.environmentId, bravo.id)),
+          { kind: "known" as const, squadron: { id: "squadron:bravo" } },
+        ],
+      ]),
+      sortOrder: "updated_at",
+    });
+
+    expect(destination).toEqual({ kind: "navigate", thread: bravo });
+  });
+});
+
+describe("filterCommandPaletteGroups context search", () => {
+  const projectItem = {
+    kind: "action" as const,
+    value: "project:folder",
+    searchTerms: ["Folder"],
+    title: "Folder",
+    icon: null,
+    run: async () => undefined,
+  };
+  const squadronItem = {
+    kind: "action" as const,
+    value: "squadron:bravo",
+    searchTerms: ["Bravo", "Folder"],
+    title: "Bravo",
+    icon: null,
+    run: async () => undefined,
+  };
+
+  it("uses the supplied Squadron context search while retaining the default project group", () => {
+    const input = {
+      activeGroups: [],
+      query: "folder",
+      isInSubmenu: false,
+      threadSearchItems: [],
+    };
+
+    expect(
+      filterCommandPaletteGroups({ ...input, projectSearchItems: [projectItem] }),
+    ).toMatchObject([{ value: "projects-search", label: "Projects", items: [projectItem] }]);
+    expect(
+      filterCommandPaletteGroups({
+        ...input,
+        projectSearchItems: [],
+        contextSearch: { label: "Squadrons", items: [squadronItem] },
+      }),
+    ).toMatchObject([{ value: "squadrons-search", label: "Squadrons", items: [squadronItem] }]);
+  });
+});
+
 const LOCAL_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const PROJECT_ID = ProjectId.make("project-1");
 
@@ -365,6 +459,23 @@ describe("buildProjectActionItems", () => {
 });
 
 describe("buildThreadActionItems", () => {
+  it("keeps colliding thread ids separately selectable across environments", async () => {
+    const threads = [LOCAL_ENVIRONMENT_ID, EnvironmentId.make("environment-remote")].map(
+      (environmentId) => makeThread({ environmentId, id: ThreadId.make("shared-thread") }),
+    );
+    const runThread = vi.fn(async () => {});
+    const items = buildThreadActionItems({
+      threads,
+      projectTitleById: new Map(),
+      sortOrder: "updated_at",
+      icon: null,
+      runThread,
+    });
+    expect(new Set(items.map((item) => item.value)).size).toBe(2);
+    for (const item of items) await item.run();
+    expect(runThread.mock.calls).toEqual(threads.map((thread) => [thread]));
+  });
+
   it("orders threads by most recent activity and formats timestamps from updatedAt", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-25T12:00:00.000Z"));
@@ -391,8 +502,8 @@ describe("buildThreadActionItems", () => {
       });
 
       expect(items.map((item) => item.value)).toEqual([
-        "thread:thread-older",
-        "thread:thread-newer",
+        "thread:environment-local:thread-older",
+        "thread:environment-local:thread-newer",
       ]);
       expect(items[0]?.timestamp).toBe("1d ago");
       expect(items[1]?.timestamp).toBe("5d ago");
@@ -433,8 +544,8 @@ describe("buildThreadActionItems", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]?.value).toBe("threads-search");
     expect(groups[0]?.items.map((item) => item.value)).toEqual([
-      "thread:thread-title-match",
-      "thread:thread-context-match",
+      "thread:environment-local:thread-title-match",
+      "thread:environment-local:thread-context-match",
     ]);
   });
 
@@ -480,9 +591,9 @@ describe("buildThreadActionItems", () => {
     });
 
     expect(groups[0]?.items.map((item) => item.value)).toEqual([
-      "thread:recent-title",
-      "thread:old-prefix",
-      "thread:recent-content",
+      "thread:environment-local:recent-title",
+      "thread:environment-local:old-prefix",
+      "thread:environment-local:recent-content",
     ]);
   });
 
@@ -659,8 +770,8 @@ describe("buildThreadActionItems", () => {
     });
 
     expect(groups.flatMap((group) => group.items)).toEqual([
-      expect.objectContaining({ value: `thread:${titleThread.id}` }),
-      expect.objectContaining({ value: `thread:${idThread.id}` }),
+      expect.objectContaining({ value: `thread:${LOCAL_ENVIRONMENT_ID}:${titleThread.id}` }),
+      expect.objectContaining({ value: `thread:${LOCAL_ENVIRONMENT_ID}:${idThread.id}` }),
     ]);
   });
 
@@ -700,7 +811,7 @@ describe("buildThreadActionItems", () => {
       runThread: async (_thread) => undefined,
     });
 
-    expect(items.map((item) => item.value)).toEqual(["thread:thread-active"]);
+    expect(items.map((item) => item.value)).toEqual(["thread:environment-local:thread-active"]);
   });
 });
 

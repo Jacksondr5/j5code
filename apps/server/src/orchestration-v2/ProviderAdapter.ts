@@ -51,6 +51,7 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
   approvalPolicy: Schema.optional(Schema.Unknown),
   sandboxPolicy: Schema.optional(Schema.Unknown),
   reasoningEffort: Schema.optional(Schema.String),
+  agentPersonaInstructions: Schema.optional(Schema.String),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
 
@@ -199,10 +200,26 @@ export class ProviderAdapterResumeThreadError extends Schema.TaggedError<Provide
     providerSessionId: ProviderSessionId,
     providerThreadId: ProviderThreadId,
     cause: Schema.optional(Schema.Defect()),
+    /** The provider reported that the native conversation no longer exists. */
+    nativeThreadMissing: Schema.optional(Schema.Boolean),
   },
 ) {
   override get message(): string {
     return `Failed to resume ${this.driver} provider thread ${this.providerThreadId}.`;
+  }
+}
+
+/** Native provider history could not resume and must not be silently replaced. */
+export class ProviderResumeFailedError extends Schema.TaggedError<ProviderResumeFailedError>()(
+  "ProviderResumeFailedError",
+  {
+    driver: ProviderDriverKind,
+    providerThreadId: ProviderThreadId,
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Native ${this.driver} provider resume failed for ${this.providerThreadId}: ${this.detail}`;
   }
 }
 
@@ -359,6 +376,7 @@ export const ProviderAdapterV2Error = Schema.Union([
   ProviderAdapterOpenSessionError,
   ProviderAdapterCloseSessionError,
   ProviderAdapterResumeThreadError,
+  ProviderResumeFailedError,
   ProviderAdapterEnsureThreadError,
   ProviderAdapterReadThreadSnapshotError,
   ProviderAdapterRollbackThreadError,

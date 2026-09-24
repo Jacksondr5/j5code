@@ -19,6 +19,8 @@ vi.mock("../../state/entities", () => ({
   useThreadShells: () => state.shells,
   useProjects: () => state.projects,
   useServerConfigs: () => state.configs,
+  // J5 lineage persona label reads the child shell; these fixtures carry no persona.
+  useThreadShell: () => undefined,
 }));
 vi.mock("../../lib/archivedThreadsState", () => ({
   useArchivedThreadSnapshots: () => ({ snapshots: [] }),

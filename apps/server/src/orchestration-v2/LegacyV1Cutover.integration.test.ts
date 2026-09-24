@@ -650,7 +650,10 @@ const messageOrdinals = (projection: OrchestrationV2ThreadProjection) =>
     )
     .map((item) => [String(item.messageId), item.ordinal, item.status] as const);
 
-describe("orchestration v2 legacy v1 cutover", () => {
+// J5: skipped. This seeds an upstream V1 history (site-local slot 41), which J5 never
+// shipped; J5's case-31 migration wrapper deliberately refuses unrecognized upstream
+// histories because J5 and T3 Code never share databases (decisions 2026-09-24, #1).
+describe.skip("orchestration v2 legacy v1 cutover", () => {
   it.live(
     "migrates an untouched v1 database copy through shell import, lazy transcripts, continuation and restart",
     () =>

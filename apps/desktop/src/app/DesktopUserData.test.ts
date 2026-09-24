@@ -7,13 +7,13 @@ import * as PlatformError from "effect/PlatformError";
 
 import { resolveUserDataPath } from "./DesktopUserData.ts";
 
-it.effect("identifies a failed source read and preserves its cause", () => {
-  const sourceState = "/profiles/t3code/Local State";
+it.effect("identifies a failed profile inspection and preserves its cause", () => {
+  const legacyPath = "/profiles/J5 Code";
   const cause = PlatformError.systemError({
     _tag: "PermissionDenied",
     module: "FileSystem",
-    method: "readFileString",
-    pathOrDescriptor: sourceState,
+    method: "exists",
+    pathOrDescriptor: legacyPath,
   });
   return Effect.gen(function* () {
     const error = yield* resolveUserDataPath({
@@ -21,55 +21,42 @@ it.effect("identifies a failed source read and preserves its cause", () => {
       isDevelopment: false,
       platform: "win32",
     }).pipe(Effect.flip);
-    assert.equal(error.operation, "read");
-    assert.equal(error.resourcePath, sourceState);
+    assert.equal(error.operation, "inspect");
+    assert.equal(error.resourcePath, legacyPath);
     assert.equal(error.category, "PermissionDenied");
     assert.strictEqual(error.cause, cause);
   }).pipe(
     Effect.provideService(
       FileSystem.FileSystem,
-      FileSystem.makeNoop({
-        exists: (path) => Effect.succeed(path === sourceState),
-        readFileString: () => Effect.fail(cause),
-      }),
+      FileSystem.makeNoop({ exists: () => Effect.fail(cause) }),
     ),
     Effect.provide(NodeServices.layer),
   );
 });
 
-for (const sourceName of ["t3code", "T3 Code (Alpha)"]) {
-  it.effect(
-    `preserves Windows credential keys from ${sourceName} without copying browser databases`,
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-v2-profile-" });
-        const source = path.join(directory, sourceName);
-        const destination = path.join(directory, "t3code-v2");
-        const state = '{"os_crypt":{"encrypted_key":"test-encrypted-key"}}';
-        yield* fs.makeDirectory(path.join(directory, "T3 Code (Alpha)"), { recursive: true });
-        yield* fs.makeDirectory(path.join(source, "IndexedDB"), { recursive: true });
-        yield* fs.writeFileString(path.join(source, "Local State"), state);
-        yield* fs.writeFileString(path.join(source, "IndexedDB", "LOCK"), "V1 owns this database");
-        yield* resolveUserDataPath({
-          appDataDirectory: directory,
-          isDevelopment: false,
-          platform: "win32",
-        });
-        assert.equal(yield* fs.readFileString(path.join(destination, "Local State")), state);
-        assert.equal(yield* fs.readFileString(path.join(source, "Local State")), state);
-        assert.isFalse(yield* fs.exists(path.join(destination, "IndexedDB")));
-        yield* fs.writeFileString(path.join(destination, "Local State"), "existing V2 state");
-        yield* resolveUserDataPath({
-          appDataDirectory: directory,
-          isDevelopment: false,
-          platform: "win32",
-        });
-        assert.equal(
-          yield* fs.readFileString(path.join(destination, "Local State")),
-          "existing V2 state",
-        );
-      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+// J5 keeps one profile per channel on every platform (merge decision #4) and
+// never reads or seeds from an installed T3 Code's profiles.
+for (const platform of ["darwin", "linux", "win32"] as const) {
+  it.effect(`uses the J5 profiles on ${platform} and never a T3 Code profile`, () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "j5-profile-" });
+      for (const t3Profile of ["t3code", "t3code-v2", "T3 Code (Alpha)", "T3 Code (Dev)"]) {
+        yield* fs.makeDirectory(path.join(directory, t3Profile), { recursive: true });
+        yield* fs.writeFileString(path.join(directory, t3Profile, "Local State"), "t3 keys");
+      }
+      const resolve = (isDevelopment: boolean) =>
+        resolveUserDataPath({ appDataDirectory: directory, isDevelopment, platform });
+
+      assert.equal(yield* resolve(false), path.join(directory, "j5code"));
+      assert.equal(yield* resolve(true), path.join(directory, "j5code-dev"));
+      assert.isFalse(yield* fs.exists(path.join(directory, "j5code")));
+
+      yield* fs.makeDirectory(path.join(directory, "J5 Code"));
+      yield* fs.makeDirectory(path.join(directory, "J5 Code (Dev)"));
+      assert.equal(yield* resolve(false), path.join(directory, "J5 Code"));
+      assert.equal(yield* resolve(true), path.join(directory, "J5 Code (Dev)"));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 }

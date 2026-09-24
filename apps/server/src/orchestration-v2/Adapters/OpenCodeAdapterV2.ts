@@ -3177,6 +3177,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
                     providerSessionId: input.providerSessionId,
                     providerThreadId: threadInput.providerThread.id,
                     cause,
+                    nativeThreadMissing: isOpenCodeNotFound(cause),
                   }),
               ),
             ),

@@ -5,6 +5,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { make as makeJsonSchemaGenerator } from "@effect/openapi-generator/JsonSchemaGenerator";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import type * as JsonSchema from "effect/JsonSchema";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
@@ -17,7 +18,7 @@ import {
 } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-const UPSTREAM_REF = "678157acaa819d5510adfe359abb5d0392cfe461";
+const UPSTREAM_REF = "5adb68a49933ae446bf11935662c83dba55a0804";
 const USER_AGENT = "effect-codex-app-server-generator";
 const GITHUB_API_BASE =
   "https://api.github.com/repos/openai/codex/contents/codex-rs/app-server-protocol";
@@ -142,55 +143,6 @@ const ManualSchemas: Record<string, Schema.Json> = {
       },
     },
     required: ["authMethod", "authToken", "requiresOpenaiAuth"],
-  },
-};
-
-// Codex 0.150 added these multi-agent values before our next full protocol
-// refresh. Keep every generated response namespace compatible with them.
-const Codex0150DefinitionSchemas: Record<string, Schema.Json> = {
-  CollabAgentTool: {
-    type: "string",
-    enum: [
-      "spawnAgent",
-      "sendInput",
-      "resumeAgent",
-      "wait",
-      "closeAgent",
-      "sendMessage",
-      "followupTask",
-      "interruptAgent",
-      "listAgents",
-    ],
-  },
-  CollabAgentToolCallStatus: {
-    type: "string",
-    enum: ["inProgress", "completed", "failed", "interrupted"],
-  },
-  PlanType: {
-    type: "string",
-    enum: [
-      "free",
-      "go",
-      "plus",
-      "pro",
-      "prolite",
-      "team",
-      "self_serve_business_prolite",
-      "self_serve_business_usage_based",
-      "business",
-      "ent26",
-      "enterprise_cbp_automation",
-      "enterprise_cbp_usage_based",
-      "enterprise",
-      "edu",
-      "edu_plus",
-      "edu_pro",
-      "unknown",
-    ],
-  },
-  SubAgentActivityKind: {
-    type: "string",
-    enum: ["started", "interacted", "interrupted", "completed"],
   },
 };
 
@@ -369,6 +321,71 @@ function normalizeNullableTypes(value: Schema.Json): Schema.Json {
       },
       { type: "null" },
     ],
+  };
+}
+
+// Effect's rc.115 importer reads an object without `additionalProperties` as open and
+// emits `StructWithRest`, which the hand-written client cannot extend. Codex never
+// relies on extra keys, and a plain `Struct` still ignores unknown keys when decoding.
+// Schemas combining variants keep their shape so the variants stay decodable.
+function closeObjectProperties(schema: JsonSchema.JsonSchema): JsonSchema.JsonSchema {
+  const isPlainObject =
+    (schema.type === "object" || "properties" in schema) &&
+    !("oneOf" in schema || "anyOf" in schema || "allOf" in schema);
+  return isPlainObject && !("additionalProperties" in schema)
+    ? { ...schema, additionalProperties: false }
+    : schema;
+}
+
+// Effect's OpenAPI importer cannot intersect a common object with a oneOf.
+// Codex flattens elicitation variants this way. Distribute only disjoint
+// properties; schemas with other object constraints keep their original shape.
+function distributeObjectUnion(value: Schema.Json): Schema.Json {
+  if (Array.isArray(value)) return value.map(distributeObjectUnion);
+  if (value === null || typeof value !== "object") return value;
+  const normalized = Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [key, distributeObjectUnion(child)]),
+  );
+  const { type, properties, required, oneOf, ...rest } = normalized;
+  if (
+    type !== "object" ||
+    properties === null ||
+    typeof properties !== "object" ||
+    Array.isArray(properties) ||
+    !Array.isArray(oneOf) ||
+    (required !== undefined && !Array.isArray(required)) ||
+    Object.keys(rest).some((key) => !["$schema", "title", "description"].includes(key)) ||
+    !oneOf.every(
+      (branch) =>
+        branch !== null &&
+        typeof branch === "object" &&
+        !Array.isArray(branch) &&
+        branch.type === "object" &&
+        branch.properties !== null &&
+        typeof branch.properties === "object" &&
+        !Array.isArray(branch.properties) &&
+        (branch.required === undefined || Array.isArray(branch.required)) &&
+        !Object.keys(branch.properties).some((key) => key in properties) &&
+        !Object.keys(branch).some(
+          (key) => !["type", "properties", "required", "title", "description"].includes(key),
+        ),
+    )
+  )
+    return normalized;
+  return {
+    ...rest,
+    oneOf: oneOf.map((branch) => {
+      // The guard above limits this rewrite to plain object alternatives.
+      const alternative = branch as Record<string, Schema.Json>;
+      return {
+        ...alternative,
+        properties: { ...properties, ...(alternative.properties as Record<string, Schema.Json>) },
+        required: [
+          ...(required ?? []),
+          ...((alternative.required as Schema.Json[] | undefined) ?? []),
+        ],
+      };
+    }),
   };
 }
 
@@ -649,7 +666,7 @@ function rewriteExternalRefs(
         const definitionName = child.slice("#/definitions/".length);
         const localRewrite = localDefinitionNames.get(definitionName);
         if (localRewrite) {
-          return [key, `#/definitions/${localRewrite}`];
+          return [key, `#/components/schemas/${localRewrite}`];
         }
 
         const candidates = [
@@ -670,7 +687,7 @@ function rewriteExternalRefs(
           throw new Error(`Missing rewritten definition for ref: ${child}`);
         }
 
-        return [key, `#/definitions/${rewritten}`];
+        return [key, `#/components/schemas/${rewritten}`];
       }
 
       return [
@@ -717,9 +734,11 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
     );
 
     for (const [definitionName, definitionSchema] of Object.entries(parsed.definitions ?? {})) {
-      const compatibleDefinitionSchema =
-        Codex0150DefinitionSchemas[definitionName] ??
-        applyCodex0151DefinitionCompatibility(file.exportName, definitionName, definitionSchema);
+      const compatibleDefinitionSchema = applyCodex0151DefinitionCompatibility(
+        file.exportName,
+        definitionName,
+        definitionSchema,
+      );
       aggregateSchemas[localDefinitionNames.get(definitionName)!] = stripNullDefaults(
         normalizeNullableTypes(
           rewriteExternalRefs(
@@ -761,12 +780,16 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
   for (const [name, schema] of Object.entries(aggregateSchemas).toSorted(([left], [right]) =>
     left.localeCompare(right),
   )) {
-    aggregateSchemas[name] = addAsyncQuestionFields(schema);
-    generator.addSchema(name, aggregateSchemas[name] as never);
+    // Referenced definitions and registered roots must receive the same extension.
+    const compatibleSchema = distributeObjectUnion(addAsyncQuestionFields(schema));
+    aggregateSchemas[name] = compatibleSchema;
+    generator.addSchema(name, compatibleSchema as never);
   }
 
   const generatedEntries = new Map<string, string>();
-  const output = generator.generate("openapi-3.1", aggregateSchemas as never, false).trim();
+  const output = generator
+    .generate("openapi-3.1", aggregateSchemas as never, false, { onEnter: closeObjectProperties })
+    .trim();
   if (output.length > 0) {
     for (const entry of collectSchemaEntries(output)) {
       if (!generatedEntries.has(entry.name)) {

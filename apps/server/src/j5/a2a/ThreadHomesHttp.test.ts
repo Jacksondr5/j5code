@@ -1,0 +1,189 @@
+import { A2AHomeRegistrar } from "./HomeRegistrar.ts";
+import { SquadronJoinService } from "./SquadronJoinService.ts";
+import { AuthOrchestrationReadScope, AuthSessionId, ThreadId } from "@t3tools/contracts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { assert, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import { HttpRouter, HttpServer } from "effect/unstable/http";
+import { ConnectionError, SqlError } from "effect/unstable/sql/SqlError";
+
+import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
+import { AgentCrewProposalService } from "./AgentCrewProposalService.ts";
+import { CrewProposalService } from "./CrewProposalService.ts";
+import { ArchiveCrewService } from "./ArchiveCrewService.ts";
+import { CrewStopService } from "./CrewStopService.ts";
+import { ParticipantPlacementService } from "./PlacementService.ts";
+import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
+import * as ServerConfig from "../../config.ts";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import * as ProjectService from "../../project/ProjectService.ts";
+import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
+import * as VcsProcess from "../../vcs/VcsProcess.ts";
+import { layer as agentHandoffRefreshesLayer } from "../agents/agentHandoffRefreshes.ts";
+import { ClientReadsService } from "./ClientReadsService.ts";
+import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
+import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
+import { MachineParticipantService } from "./MachineParticipantService.ts";
+import { RosterService } from "./RosterService.ts";
+import { A2ASendService } from "./SendService.ts";
+import { A2AHumanInbox } from "./HumanInboxService.ts";
+import { j5AuthenticatedRoutesLayer } from "./J5AuthenticatedRoutes.ts";
+import { A2ALedger } from "./LedgerService.ts";
+import { SquadronProjectReferences } from "./SquadronProjectReferences.ts";
+import { THREAD_HOMES_PATH } from "./ThreadHomesHttp.ts";
+import { ThreadHomesService } from "./ThreadHomesService.ts";
+import { ParticipantId, SquadronId } from "./contracts.ts";
+
+it("wires the authenticated aggregate's thread-homes path without a parallel router", async () => {
+  const knownThread = ThreadId.make("thread:thread-homes-http:known");
+  const nativeThread = ThreadId.make("thread:thread-homes-http:native");
+  const received: Array<ReadonlyArray<ThreadId>> = [];
+  let authMode: "missing" | "missing-read-scope" | "read" = "missing";
+  let shouldFailRead = false;
+  const homes = Layer.mock(ThreadHomesService)({
+    threadHomes: (threadIds) => {
+      received.push(threadIds);
+      if (shouldFailRead) {
+        return Effect.fail(
+          new SqlError({
+            reason: new ConnectionError({
+              cause: new Error("SQLITE internal connection detail"),
+              message: "SQLITE internal connection detail",
+            }),
+          }),
+        );
+      }
+      return Effect.succeed({
+        entries: [
+          {
+            threadId: knownThread,
+            home: {
+              kind: "known" as const,
+              squadron: {
+                id: SquadronId.make("squadron:thread-homes-http"),
+                name: "Thread Homes",
+              },
+            },
+          },
+          { threadId: nativeThread, home: { kind: "unknown" as const } },
+        ],
+      });
+    },
+  });
+  const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+    authenticateHttpRequest: () => {
+      if (authMode === "missing") {
+        return Effect.fail(new EnvironmentAuth.ServerAuthMissingCredentialError({}));
+      }
+      return Effect.succeed({
+        sessionId: AuthSessionId.make("auth-session:thread-homes"),
+        subject: "thread-homes-test",
+        method: "bearer-access-token",
+        scopes: authMode === "read" ? [AuthOrchestrationReadScope] : [],
+      });
+    },
+  });
+  const routes = j5AuthenticatedRoutesLayer
+    .pipe(
+      Layer.provide(homes),
+      Layer.provide(
+        Layer.mock(A2AArchiveFacts)({
+          readForThread: (threadId) =>
+            Effect.succeed({
+              state: "not-an-a2a-participant" as const,
+              threadId,
+              openExchanges: [],
+              placementSubtree: { state: "not-applicable" as const },
+            }),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ClientReadsService)({
+          threadHomes: () => Effect.succeed([]),
+          participantIdentities: () => Effect.succeed({ entries: [] }),
+          openInboxCount: (personId) =>
+            Effect.succeed({
+              personId: personId ?? ParticipantId.make("human:thread-homes-http"),
+              count: 0,
+            }),
+        }),
+      ),
+      Layer.provide(Layer.mock(A2AHumanInbox)({})),
+      Layer.provide(Layer.mock(A2ADeliveryWorker)({})),
+      Layer.provide(Layer.mock(A2ASendService)({})),
+      Layer.provide(Layer.mock(MachineParticipantService)({})),
+      Layer.provide(Layer.mock(RosterService)({})),
+      Layer.provide(Layer.mock(A2ALedger)({})),
+      Layer.provide(Layer.mock(A2AHomeRegistrar)({})),
+      Layer.provide(Layer.mock(SquadronJoinService)({})),
+      Layer.provide(Layer.mock(SquadronProjectReferences)({})),
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(AgentCrewInstanceService)({}),
+          Layer.mock(AgentCrewProposalService)({}),
+          Layer.mock(CrewProposalService)({}),
+          Layer.mock(CrewStopService)({}),
+          Layer.mock(ArchiveCrewService)({}),
+          Layer.mock(ParticipantPlacementService)({}),
+        ),
+      ),
+      Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+      Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
+      Layer.provide(Layer.mock(VcsProcess.VcsProcess)({})),
+      Layer.provide(
+        ServerConfig.layerTest(process.cwd(), { prefix: "j5-thread-homes-http-" }).pipe(
+          Layer.provide(NodeServices.layer),
+        ),
+      ),
+      Layer.provide(NodeSqliteClient.layer({ filename: ":memory:" })),
+      Layer.provide(agentHandoffRefreshesLayer),
+      Layer.provideMerge(auth),
+    )
+    .pipe(Layer.provide(HttpServer.layerServices));
+  const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
+
+  try {
+    const request = () =>
+      handler(
+        new Request(`http://environment.test${THREAD_HOMES_PATH}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ threadIds: [knownThread, nativeThread, knownThread] }),
+        }),
+      );
+    const unauthenticated = await request();
+    assert.equal(unauthenticated.status, 401);
+
+    authMode = "missing-read-scope";
+    const missingReadScope = await request();
+    assert.equal(missingReadScope.status, 403);
+
+    authMode = "read";
+    const response = await request();
+    assert.equal(response.status, 200);
+    assert.deepStrictEqual(await response.json(), {
+      entries: [
+        {
+          threadId: knownThread,
+          home: {
+            kind: "known",
+            squadron: { id: "squadron:thread-homes-http", name: "Thread Homes" },
+          },
+        },
+        { threadId: nativeThread, home: { kind: "unknown" } },
+      ],
+    });
+    assert.deepStrictEqual(received, [[knownThread, nativeThread, knownThread]]);
+
+    shouldFailRead = true;
+    const failedRead = await request();
+    assert.equal(failedRead.status, 500);
+    assert.deepStrictEqual(await failedRead.json(), {
+      error: "SqlError",
+      message: "Thread-home lookup failed.",
+    });
+  } finally {
+    await dispose();
+  }
+});

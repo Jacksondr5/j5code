@@ -46,6 +46,10 @@ import {
   ThreadPullRequestStack,
 } from "./orchestration.ts";
 import {
+  OrchestrationV2AgentPersonaAssignment,
+  OrchestrationV2AgentPersonaRequest,
+} from "./j5/agentPersona.ts";
+import {
   ProviderApprovalDecision,
   ProviderApprovalOption,
   ProviderInteractionMode,
@@ -360,6 +364,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  agentPersonaAssignment: Schema.optional(OrchestrationV2AgentPersonaAssignment),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   /** Pull request the user linked to this thread (#8160); optional so
@@ -1502,6 +1507,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  agentPersonaAssignment: Schema.optional(OrchestrationV2AgentPersonaAssignment),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   /** Pull request the user linked to this thread (#8160). */
@@ -2244,6 +2250,7 @@ export const OrchestrationV2Command = Schema.Union([
     modelSelection: ModelSelection,
     runtimeMode: RuntimeMode,
     interactionMode: ProviderInteractionMode,
+    agentPersonaAssignment: Schema.optional(OrchestrationV2AgentPersonaAssignment),
     branch: Schema.NullOr(TrimmedNonEmptyString),
     worktreePath: Schema.NullOr(TrimmedNonEmptyString),
     importedNativeThread: Schema.optional(
@@ -2591,6 +2598,7 @@ export const OrchestrationV2Command = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("delegated_task.request"),
+    agentPersonaAssignment: Schema.optional(OrchestrationV2AgentPersonaAssignment),
     ...OrchestrationV2CreationFields,
     commandId: CommandId,
     parentThreadId: ThreadId,
@@ -2643,6 +2651,17 @@ export const OrchestrationV2Command = Schema.Union([
   }),
 ]);
 export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
+
+/** Public clients may request a persona launch, but only the server may resolve its assignment. */
+export const OrchestrationV2PublicCommand = OrchestrationV2Command.check(
+  Schema.makeFilter((command) =>
+    (command.type === "thread.create" || command.type === "delegated_task.request") &&
+    command.agentPersonaAssignment !== undefined
+      ? "Resolved agent persona assignments are server-owned."
+      : undefined,
+  ),
+);
+export type OrchestrationV2PublicCommand = typeof OrchestrationV2PublicCommand.Type;
 
 export const ORCHESTRATION_V2_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -2708,6 +2727,8 @@ export type OrchestrationV2ThreadLaunchWorkspaceStrategy =
 export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   commandId: CommandId,
   creationSource: Schema.optional(OrchestrationV2CreationSource),
+  squadronId: Schema.optional(Schema.String),
+  sourcePlanRef: Schema.optional(Schema.Struct({ threadId: ThreadId, planId: PlanId })),
   threadId: Schema.optional(ThreadId),
   reuseExistingThread: Schema.optional(Schema.Boolean),
   projectId: ProjectId,
@@ -2716,6 +2737,7 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  agentPersona: Schema.optional(OrchestrationV2AgentPersonaRequest),
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
   initialMessage: Schema.optional(
     Schema.Struct({
@@ -2949,7 +2971,7 @@ export class OrchestrationGetWorkflowScriptError extends Schema.TaggedError<Orch
 
 export const OrchestrationV2RpcSchemas = {
   dispatchCommand: {
-    input: OrchestrationV2Command,
+    input: OrchestrationV2PublicCommand,
     output: OrchestrationV2DispatchCommandResult,
   },
   getTurnDiff: {

@@ -38,6 +38,8 @@ interface ChatHeaderProps {
   activeThreadTitle: string;
   /** Drafts have no server thread yet, so the title carries no action menu. */
   isServerThread: boolean;
+  /** J5 (case 19): the Squadron a header new-thread launches into; the folder is subordinate. */
+  newThreadSquadronName: string | null;
   activeProject: EnvironmentProject | null;
   rightPanelOpen: boolean;
   onNewThreadInProject: () => void;
@@ -70,6 +72,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadId,
   activeThreadTitle,
   isServerThread,
+  newThreadSquadronName,
   activeProject,
   rightPanelOpen,
   onNewThreadInProject,
@@ -240,10 +243,9 @@ export const ChatHeader = memo(function ChatHeader({
         ariaLabel="Thread breadcrumb"
         className="flex-1 overflow-clip [overflow-clip-margin:2px]"
       >
-        {/* The project always leads the header: knowing which project a
-            thread lives in is priority zero, and the thread title alone
-            doesn't answer it. */}
-        {activeProject ? (
+        {/* The Squadron leads the header (J5 case 19); the folder is a
+            subordinate attribute of the new-thread action. */}
+        {activeProject || newThreadSquadronName ? (
           <>
             <WorkspaceBreadcrumbItem className="shrink">
               <Tooltip>
@@ -251,18 +253,33 @@ export const ChatHeader = memo(function ChatHeader({
                   render={
                     <button
                       type="button"
-                      aria-label={`New thread in ${activeProjectName}`}
+                      aria-label={
+                        newThreadSquadronName
+                          ? `New thread in ${newThreadSquadronName}`
+                          : "Choose Squadron for a new thread"
+                      }
                       onClick={onNewThreadInProject}
                       className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                     />
                   }
                 >
-                  <ProjectFavicon project={activeProject} className="size-3.5" />
+                  {activeProject ? (
+                    <ProjectFavicon project={activeProject} className="size-3.5" />
+                  ) : null}
                   <WorkspaceBreadcrumbText className="max-w-40">
-                    {activeProjectName}
+                    {newThreadSquadronName ?? "Choose Squadron"}
                   </WorkspaceBreadcrumbText>
+                  {activeProjectName ? (
+                    <span className="max-w-32 truncate text-xs text-muted-foreground/70">
+                      {activeProjectName}
+                    </span>
+                  ) : null}
                 </TooltipTrigger>
-                <TooltipPopup side="top">New thread in {activeProjectName}</TooltipPopup>
+                <TooltipPopup side="top">
+                  {newThreadSquadronName
+                    ? `New thread in ${newThreadSquadronName}`
+                    : "Choose Squadron for a new thread"}
+                </TooltipPopup>
               </Tooltip>
             </WorkspaceBreadcrumbItem>
             <WorkspaceBreadcrumbSeparator>

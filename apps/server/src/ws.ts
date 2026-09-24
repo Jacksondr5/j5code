@@ -167,6 +167,12 @@ import {
 import { AcpRegistryRuntimeCoordinator } from "./provider/acp/AcpRegistryRuntimeCoordinator.ts";
 import * as ModelManifest from "./provider/ModelManifest.ts";
 import * as ProviderMaintenance from "./provider/providerMaintenance.ts";
+import {
+  makeCrewSeatArchiveGuard,
+  type CrewSeatArchiveGuard,
+} from "./j5/a2a/crewSeatArchiveGuard.ts";
+import { makeAgentPersonaRpcHandlers } from "./j5/agents/agentPersonaRpc.ts";
+import { makeArtifactRpcHandlers } from "./j5/artifacts/artifactRpc.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
@@ -213,6 +219,8 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as ArtifactWorkspace from "./j5/artifacts/ArtifactWorkspace.ts";
+import { AgentHandoffRefreshes } from "./j5/agents/agentHandoffRefreshes.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
@@ -1069,6 +1077,9 @@ const makeWsRpcLayer = (
   clientOrigin: OrchestrationClientOrigin,
   clientAnalyticsProps: Readonly<Record<string, unknown>>,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
+  artifactWorkspace: ArtifactWorkspace.ArtifactWorkspace["Service"],
+  // J5: a Crew member is never archived or deleted alone, whichever client door asks.
+  j5CrewSeatArchiveGuard: CrewSeatArchiveGuard,
 ) =>
   ServerWsRpcGroup.toLayer(
     Effect.gen(function* () {
@@ -1725,33 +1736,45 @@ const makeWsRpcLayer = (
         return result;
       });
 
+      // J5 fork extension: the artifact change stream is a J5 RPC group (see artifactRpc.ts).
+      const artifactRpcHandlers = makeArtifactRpcHandlers({
+        projects: projectService,
+        artifacts: artifactWorkspace,
+        observeStream: observeRpcStreamEffect,
+      });
+      const agentPersonaRpcHandlers = yield* makeAgentPersonaRpcHandlers({
+        providers: providerRegistry.getProviders,
+        observe: observeRpcEffect,
+        observeStream: observeRpcStream,
+      });
       const handlers = ServerWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.dispatchCommand,
-            startup
-              .enqueueCommand(
-                ThreadMessageIntake.dispatchCommand(
-                  ThreadManagementService.withCreationProvenance(command, {
-                    createdBy: "user",
-                    creationSource: "creationSource" in command ? command.creationSource : "web",
-                  }),
-                ).pipe(Effect.provide(intakeContext)),
-              )
-              .pipe(
-                Effect.tap(() => recordClientCommandAnalytics(command)),
-                Effect.map((result) => ({ sequence: result.sequence })),
-                Effect.mapError((cause) => {
-                  const detail = userFacingDispatchErrorMessage(cause);
-                  return new OrchestrationV2DispatchCommandError({
-                    commandId: command.commandId,
-                    commandType: command.type,
-                    message: detail ?? "Failed to dispatch orchestration V2 command",
-                    ...(detail === undefined ? {} : { detail }),
-                    cause,
-                  });
-                }),
+            j5CrewSeatArchiveGuard(command).pipe(
+              Effect.andThen(() =>
+                startup.enqueueCommand(
+                  ThreadMessageIntake.dispatchCommand(
+                    ThreadManagementService.withCreationProvenance(command, {
+                      createdBy: "user",
+                      creationSource: "creationSource" in command ? command.creationSource : "web",
+                    }),
+                  ).pipe(Effect.provide(intakeContext)),
+                ),
               ),
+              Effect.tap(() => recordClientCommandAnalytics(command)),
+              Effect.map((result) => ({ sequence: result.sequence })),
+              Effect.mapError((cause) => {
+                const detail = userFacingDispatchErrorMessage(cause);
+                return new OrchestrationV2DispatchCommandError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                  message: detail ?? "Failed to dispatch orchestration V2 command",
+                  ...(detail === undefined ? {} : { detail }),
+                  cause,
+                });
+              }),
+            ),
             {
               "rpc.aggregate": "orchestrationV2",
               "orchestration_v2.command_id": command.commandId,
@@ -1771,6 +1794,7 @@ const makeWsRpcLayer = (
                 : {}),
             },
           ),
+        ...agentPersonaRpcHandlers,
         [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.getWorkflowScript,
@@ -1876,6 +1900,7 @@ const makeWsRpcLayer = (
                   modelSelection: input.modelSelection,
                   runtimeMode: input.runtimeMode,
                   interactionMode: input.interactionMode,
+                  ...(input.agentPersona === undefined ? {} : { agentPersona: input.agentPersona }),
                   workspaceStrategy: input.workspaceStrategy,
                   ...(input.initialMessage === undefined
                     ? {}
@@ -1892,6 +1917,10 @@ const makeWsRpcLayer = (
                         },
                       }),
                   createdBy: "user",
+                  ...(input.squadronId === undefined ? {} : { squadronId: input.squadronId }),
+                  ...(input.sourcePlanRef === undefined
+                    ? {}
+                    : { sourcePlanRef: input.sourcePlanRef }),
                   creationSource: input.creationSource ?? "web",
                 }).pipe(Effect.provide(intakeContext)),
               )
@@ -3433,6 +3462,7 @@ const makeWsRpcLayer = (
             DeviceService.stateStream(deviceService),
             { "rpc.aggregate": "device" },
           ),
+        ...artifactRpcHandlers,
         [WS_METHODS.subscribeDiscoveredLocalServers]: (input) =>
           observeRpcStream(
             WS_METHODS.subscribeDiscoveredLocalServers,
@@ -3651,9 +3681,13 @@ const makeWsRpcLayer = (
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+    const artifactWorkspace = yield* ArtifactWorkspace.ArtifactWorkspace;
+    const j5CrewSeatArchiveGuard = yield* makeCrewSeatArchiveGuard;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const sql = yield* SqlClient.SqlClient;
+    // J5: the revision counter the saved-agent handoff observer bumps; one instance per server.
+    const agentHandoffRefreshes = yield* AgentHandoffRefreshes;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -3703,6 +3737,8 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               clientOrigin,
               clientAnalyticsProps,
               previewAutomationBroker,
+              artifactWorkspace,
+              j5CrewSeatArchiveGuard,
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),
@@ -3712,6 +3748,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               // One server-lifetime service means clients share the same PR caches, and a WS
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
+              Layer.provide(Layer.succeed(AgentHandoffRefreshes, agentHandoffRefreshes)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(
@@ -3749,4 +3786,4 @@ export const websocketRpcRouteLayer = Layer.unwrap(
       ),
     );
   }),
-);
+).pipe(Layer.provide(ArtifactWorkspace.layer));

@@ -67,6 +67,10 @@ import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
 import { hasProviderUsageLimits, isUsageLimitsCommand } from "@t3tools/shared/usageLimits";
 import { COMPOSER_LAYOUT_TRANSITION, ComposerSurface } from "./ThreadComposer";
+import { AgentDraftPicker } from "../../j5/agents/AgentDraftPicker";
+import { AgentPersonaAssignmentControls } from "../../j5/agents/AgentPersonaAssignmentControls";
+import { clearDraftAgent } from "../../j5/agents/agentDraftState";
+import { useDraftAgentAssignment } from "../../j5/agents/useDraftAgentAssignment";
 import { ComposerCommandPopover } from "./ComposerCommandPopover";
 import { useComposerCommandMenu } from "./use-composer-command-menu";
 import {
@@ -388,6 +392,10 @@ export function NewTaskDraftScreen(props: {
     draftKey: null,
     names: new Set(),
   });
+  const draftAgent = useDraftAgentAssignment(
+    flow.draftKey,
+    flow.selectedProject?.environmentId ?? null,
+  );
   const latestDraftKeyRef = useRef(flow.draftKey);
   const latestIncomingShareIdRef = useRef(props.incomingShareId);
   latestDraftKeyRef.current = flow.draftKey;
@@ -1293,6 +1301,8 @@ export function NewTaskDraftScreen(props: {
     } finally {
       flow.setSubmitting(false);
     }
+    // The queued task now carries the agent choice; the draft no longer does.
+    clearDraftAgent(draftKey);
     const draftSnapshot = getComposerDraftSnapshot(draftKey);
     if (editingPendingTask) {
       flow.finishEditingPendingTask();
@@ -1680,23 +1690,40 @@ export function NewTaskDraftScreen(props: {
                     onPickFiles={handlePickFiles}
                   />
                   <View className="min-w-0 flex-1 flex-row items-center justify-end gap-2">
-                    <View className="min-w-0 shrink">
-                      <ComposerInlineControl
-                        accessibilityLabel="Model and reasoning settings"
-                        disabled={isComposerInteractionLocked}
-                        emphasized
-                        iconNode={
-                          <ProviderIcon
-                            iconUrl={flow.selectedModelOption?.providerIconUrl}
-                            provider={flow.selectedModelOption?.providerDriver}
-                            size={16}
-                          />
-                        }
-                        label={flow.selectedModelOption?.label ?? "Choose model"}
-                        maxWidth="100%"
-                        onPress={settingsSheetPresentation.open}
+                    {draftAgent.assignment && flow.selectedProject ? (
+                      <AgentPersonaAssignmentControls
+                        assignment={draftAgent.assignment}
+                        environmentId={flow.selectedProject.environmentId}
+                        onClear={draftAgent.clear}
                       />
-                    </View>
+                    ) : (
+                      <>
+                        {flow.draftKey && flow.selectedProject ? (
+                          <AgentDraftPicker
+                            environmentId={flow.selectedProject.environmentId}
+                            draftKey={flow.draftKey}
+                            disabled={isComposerInteractionLocked}
+                          />
+                        ) : null}
+                        <View className="min-w-0 shrink">
+                          <ComposerInlineControl
+                            accessibilityLabel="Model and reasoning settings"
+                            disabled={isComposerInteractionLocked}
+                            emphasized
+                            iconNode={
+                              <ProviderIcon
+                                iconUrl={flow.selectedModelOption?.providerIconUrl}
+                                provider={flow.selectedModelOption?.providerDriver}
+                                size={16}
+                              />
+                            }
+                            label={flow.selectedModelOption?.label ?? "Choose model"}
+                            maxWidth="100%"
+                            onPress={settingsSheetPresentation.open}
+                          />
+                        </View>
+                      </>
+                    )}
                     {flow.planModeEnabled ? (
                       <ComposerInlineControl
                         accessibilityHint={`Switches to ${flow.interactionMode === "plan" ? "Build" : "Plan"} mode`}

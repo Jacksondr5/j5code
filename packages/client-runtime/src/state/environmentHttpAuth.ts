@@ -99,32 +99,22 @@ const buildEnvironmentAuthHeaders = (
  * A rejected credential gets one refresh and retry, with a new request-bound
  * proof. Cookie and bearer requests keep their existing authentication behavior.
  */
-export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
-  "clientRuntime.state.executeAuthenticatedEnvironmentHttpRequest",
-)(function* <
-  Group extends Parameters<typeof makeEnvironmentHttpApiGroupClient>[1],
-  A,
-  E,
-  R,
->(input: {
+export const executeAuthenticatedEnvironmentRawHttpRequest = Effect.fn(
+  "clientRuntime.state.executeAuthenticatedEnvironmentRawHttpRequest",
+)(function* <A, E, R>(input: {
   readonly prepared: PreparedConnection;
   readonly signer: Option.Option<ManagedRelayDpopSigner["Service"]>;
   readonly remoteAuthorization?: Option.Option<RemoteEnvironmentAuthorization["Service"]>;
   readonly method: HttpMethod.HttpMethod;
   readonly url: (httpBaseUrl: string) => string;
   readonly timeoutMs: number;
-  readonly group: Group;
   readonly request: (input: {
-    readonly client: Effect.Success<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>>;
+    readonly httpBaseUrl: string;
     readonly headers: EnvironmentHttpAuthHeaders;
   }) => Effect.Effect<A, E, R>;
   /** Some endpoints report rejected credentials in a successful response. */
   readonly isUnauthorizedResponse?: (response: NoInfer<A>) => boolean;
-}): Effect.fn.Return<
-  A,
-  RemoteEnvironmentRequestError,
-  Effect.Services<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>> | R
-> {
+}): Effect.fn.Return<A, RemoteEnvironmentRequestError, R> {
   let httpBaseUrl = input.prepared.httpBaseUrl;
   return yield* Effect.gen(function* () {
     let rejectedAccessToken: string | undefined;
@@ -157,7 +147,6 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
       }
 
       const requestUrl = input.url(httpBaseUrl);
-      const client = yield* makeEnvironmentHttpApiGroupClient(httpBaseUrl, input.group);
       const headers = yield* buildEnvironmentAuthHeaders(
         authorization,
         input.method,
@@ -167,7 +156,7 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
       const result = yield* executeEnvironmentHttpRequest(
         requestUrl,
         input.timeoutMs,
-        withEnvironmentCredentials(authorization, input.request({ client, headers })),
+        withEnvironmentCredentials(authorization, input.request({ httpBaseUrl, headers })),
       ).pipe(Effect.result);
 
       if (Result.isFailure(result)) {
@@ -206,3 +195,41 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
     }),
   );
 });
+
+/** Typed API groups share the credential and retry flow used by raw J5 routes. */
+export const executeAuthenticatedEnvironmentHttpRequest = <
+  Group extends Parameters<typeof makeEnvironmentHttpApiGroupClient>[1],
+  A,
+  E,
+  R,
+>(input: {
+  readonly prepared: PreparedConnection;
+  readonly signer: Option.Option<ManagedRelayDpopSigner["Service"]>;
+  readonly remoteAuthorization?: Option.Option<RemoteEnvironmentAuthorization["Service"]>;
+  readonly method: HttpMethod.HttpMethod;
+  readonly url: (httpBaseUrl: string) => string;
+  readonly timeoutMs: number;
+  readonly group: Group;
+  readonly request: (input: {
+    readonly client: Effect.Success<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>>;
+    readonly headers: EnvironmentHttpAuthHeaders;
+  }) => Effect.Effect<A, E, R>;
+  /** Some endpoints report rejected credentials in a successful response. */
+  readonly isUnauthorizedResponse?: (response: NoInfer<A>) => boolean;
+}): Effect.Effect<
+  A,
+  RemoteEnvironmentRequestError,
+  Effect.Services<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>> | R
+> => {
+  return executeAuthenticatedEnvironmentRawHttpRequest<
+    A,
+    E,
+    Effect.Services<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>> | R
+  >({
+    ...input,
+    request: ({ httpBaseUrl, headers }) =>
+      Effect.flatMap(makeEnvironmentHttpApiGroupClient(httpBaseUrl, input.group), (client) =>
+        input.request({ client, headers }),
+      ),
+  });
+};

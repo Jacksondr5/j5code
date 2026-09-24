@@ -1,5 +1,6 @@
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
+import { layer as j5ThreadLineageLayer } from "../j5/a2a/ThreadLineage.ts";
 import * as Layer from "effect/Layer";
 import {
   OrchestrationEventInfrastructureLayerLive,
@@ -51,6 +52,10 @@ import { layer as threadLifecycleServiceLayer } from "./ThreadLifecycleService.t
 import { layer as threadForkServiceLayer } from "./ThreadForkService.ts";
 import { layer as turnItemPositionStoreLayer } from "./TurnItemPositionStore.ts";
 import { layer as scheduledTaskServiceLayer } from "../scheduledTasks/ScheduledTaskService.ts";
+import {
+  live as queuedRunWatchdogLayer,
+  workerLive as queuedRunWatchdogWorkerLive,
+} from "../j5/run-observability/QueuedRunWatchdog.ts";
 
 const runtimePolicyProvided = runtimePolicyLayerFromProjectRepository.pipe(
   Layer.provide(ProjectionProjectRepositoryLive),
@@ -74,6 +79,9 @@ const storesLayer = Layer.mergeAll(
 
 export const OrchestrationV2EventSinkLayerLive = eventSinkLayer.pipe(Layer.provide(storesLayer));
 const eventSinkProvided = OrchestrationV2EventSinkLayerLive;
+const queuedRunWatchdogProvided = queuedRunWatchdogLayer.pipe(
+  Layer.provide(Layer.mergeAll(eventSinkProvided, idAllocatorLayer, projectionStoreLayer)),
+);
 const projectionMaintenanceProvided = projectionMaintenanceLayer.pipe(Layer.provide(storesLayer));
 const legacyV1ThreadImporterProvided = legacyV1ThreadImporterLayer.pipe(
   Layer.provide(eventSinkProvided),
@@ -144,6 +152,7 @@ const providerTurnStartServiceProvided = providerTurnStartServiceLayer.pipe(
       providerAuthServiceProvided,
       runExecutionServiceProvided,
       runtimePolicyProvided,
+      queuedRunWatchdogProvided,
     ),
   ),
 );
@@ -177,7 +186,13 @@ const checkpointCaptureServiceProvided = checkpointCaptureServiceLayer.pipe(
   ),
 );
 const runFinalizationServiceProvided = runFinalizationServiceLayer.pipe(
-  Layer.provide(Layer.merge(checkpointCaptureServiceProvided, projectionStoreLayer)),
+  Layer.provide(
+    Layer.mergeAll(
+      checkpointCaptureServiceProvided,
+      projectionStoreLayer,
+      queuedRunWatchdogProvided,
+    ),
+  ),
 );
 
 const orchestratorProvided = orchestratorLayer.pipe(
@@ -218,8 +233,12 @@ const agentSessionImporterProvided = agentSessionImporterLayer.pipe(
   ),
 );
 
-const threadManagementProvided = threadManagementServiceLayer.pipe(
-  Layer.provide(Layer.merge(orchestratorProvided, legacyV1ThreadImporterProvided)),
+const threadManagementProvided = j5ThreadLineageLayer.pipe(
+  Layer.provide(
+    threadManagementServiceLayer.pipe(
+      Layer.provide(Layer.merge(orchestratorProvided, legacyV1ThreadImporterProvided)),
+    ),
+  ),
 );
 export const ProjectSetupScriptRunnerLayerLive = projectSetupScriptRunnerLayer.pipe(
   Layer.provide(ProjectServiceLayerLive),
@@ -245,6 +264,9 @@ const providerContinuationWorkerProvided = providerContinuationWorkerLive.pipe(
   Layer.provide(
     Layer.mergeAll(providerContinuationRequestsLayer, threadManagementProvided, idAllocatorLayer),
   ),
+);
+const queuedRunWatchdogWorkerProvided = queuedRunWatchdogWorkerLive.pipe(
+  Layer.provide(queuedRunWatchdogProvided),
 );
 const threadTitleRegenerationProvided = threadTitleRegenerationServiceLayer.pipe(
   Layer.provide(
@@ -281,6 +303,7 @@ const providerRuntimeRecoveryProvided = providerRuntimeRecoveryLayer.pipe(
 );
 
 export const OrchestrationV2LayerLive = Layer.mergeAll(
+  effectOutboxLayer,
   orchestratorProvided,
   threadManagementProvided,
   effectWorkerProvided,
@@ -301,5 +324,6 @@ export const OrchestrationV2ProductionLayerLive = Layer.mergeAll(
     Layer.provide(Layer.mergeAll(projectionStoreLayer, threadManagementProvided)),
   ),
   providerContinuationWorkerProvided,
+  queuedRunWatchdogWorkerProvided,
   agentSessionImporterProvided,
 ).pipe(Layer.provide(Scheduler.layer), Layer.provideMerge(OrchestrationLayerLive));

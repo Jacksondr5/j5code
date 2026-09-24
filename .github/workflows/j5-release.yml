@@ -1,0 +1,339 @@
+name: J5 Release
+
+# Publishes one J5 Code release to this repository's GitHub Releases:
+#   - the signed and notarized macOS desktop build from a successful
+#     "J5 Signed macOS Build" run (DMG, ZIP, blockmaps, updater metadata);
+#   - self-contained CLI archives for darwin-arm64 (Developer ID signed and
+#     notarized) and linux-x64, built here from the same source commit with
+#     upstream's scripts/build-cli-archive.ts;
+#   - SHA256SUMS over the CLI archives and scripts/install.sh, which
+#     `curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh | sh`
+#     fetches. packages/shared/src/cliRelease.ts, the installer, `j5 update`,
+#     the background service, and SSH remote launch all download from here.
+# J5 no longer publishes to npm (FORK.md release-archive case).
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful J5 Signed macOS Build run to publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: j5-release
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    outputs:
+      ref: ${{ steps.source.outputs.ref }}
+      version: ${{ steps.source.outputs.version }}
+      published: ${{ steps.source.outputs.published }}
+    steps:
+      - uses: actions/github-script@v8
+        id: source
+        env:
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        with:
+          script: |
+            if (!/^\d+$/.test(process.env.BUILD_RUN_ID)) throw new Error('A numeric build run ID is required.');
+            const { data: run } = await github.rest.actions.getWorkflowRun({
+              ...context.repo, run_id: Number(process.env.BUILD_RUN_ID),
+            });
+            if (run.conclusion !== 'success' || run.path !== '.github/workflows/j5-macos-build.yml') {
+              throw new Error('Select a successful J5 Signed macOS Build run.');
+            }
+            // Every package version the release scripts align upstream must agree.
+            const paths = [
+              'apps/server/package.json',
+              'apps/desktop/package.json',
+              'apps/web/package.json',
+              'packages/contracts/package.json',
+            ];
+            const versions = await Promise.all(paths.map(async path => {
+              const { data } = await github.rest.repos.getContent({ ...context.repo, path, ref: run.head_sha });
+              return JSON.parse(Buffer.from(data.content, 'base64').toString()).version;
+            }));
+            if (!/^\d+\.\d+\.\d+$/.test(versions[0]) || versions.some(version => version !== versions[0])) {
+              throw new Error(`This workflow requires one stable version across ${paths.join(', ')}; found ${versions.join(', ')}.`);
+            }
+            const version = versions[0];
+            // A published release that already carries SHA256SUMS is final:
+            // rebuilding would change archive bytes under existing checksums.
+            let published = false;
+            try {
+              const { data: release } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag: `v${version}` });
+              published = !release.draft && release.assets.some(asset => asset.name === 'SHA256SUMS');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            core.setOutput('ref', run.head_sha);
+            core.setOutput('version', version);
+            core.setOutput('published', String(published));
+            core.notice(published
+              ? `J5 Code ${version} is already published; nothing to do.`
+              : `Publishing J5 Code ${version} from ${run.head_sha}.`);
+
+  verify:
+    needs: resolve
+    if: needs.resolve.outputs.published != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.10.0
+          run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Test release, installer, update, service, and SSH behavior
+        run: >-
+          pnpm exec vp test run
+          packages/shared/src/cliRelease.test.ts
+          scripts/install.test.ts
+          apps/server/src/cloud/pinnedRuntime.test.ts
+          apps/server/src/cloud/selfUpdate.test.ts
+          apps/server/src/cloud/bootService.test.ts
+          apps/server/src/cli/service.test.ts
+          apps/server/src/serviceLauncher.test.ts
+          packages/ssh/src/command.test.ts
+          packages/ssh/src/tunnel.test.ts
+
+  monitors:
+    needs: resolve
+    if: needs.resolve.outputs.published != 'true'
+    uses: ./.github/workflows/j5-resource-monitors.yml
+    with:
+      ref: ${{ needs.resolve.outputs.ref }}
+
+  cli_archive:
+    needs: [resolve, verify, monitors]
+    if: needs.resolve.outputs.published != 'true'
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: mac
+            arch: arm64
+            key: darwin-arm64
+            runner: macos-14
+          - platform: linux
+            arch: x64
+            key: linux-x64
+            runner: ubuntu-24.04
+    name: CLI archive ${{ matrix.key }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.10.0
+          run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build server and web client
+        run: pnpm exec vp run --filter t3 build
+
+      # Node single-executables need a host Node with --build-sea (25.7+).
+      # Keep in step with SEA_NODE_VERSION in apps/server/vite.config.ts and
+      # VP_NODE_VERSION in upstream's release-desktop.yml.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 26.8.2
+
+      - name: Build CLI single-executable
+        env:
+          VP_NODE_VERSION: 26.8.2
+        run: pnpm exec node apps/server/scripts/cli.ts build-exe --verbose
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: j5-resource-monitor-${{ matrix.key }}
+          path: ${{ runner.temp }}/cli-resource-monitor/${{ matrix.key }}
+
+      - name: Stage resource monitor
+        run: chmod +x "$RUNNER_TEMP/cli-resource-monitor/${{ matrix.key }}/t3-resource-monitor"
+
+      - name: Prepare Apple signing credentials
+        if: matrix.platform == 'mac'
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        run: bash scripts/j5/prepare-macos-signing.sh
+
+      # prepare-macos-signing.sh leaves CSC_LINK pointing at a keychain-compatible
+      # re-export of the certificate; build-cli-archive.ts signs with the
+      # identity named here and notarizes with APPLE_API_KEY*.
+      - name: Import the Developer ID identity for the CLI
+        if: matrix.platform == 'mac'
+        env:
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$J5_SIGNING_DIR/j5-cli-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 16)"
+          echo "::add-mask::$keychain_password"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$CSC_LINK" -k "$keychain" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity="$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n 1)"
+          if [[ -z "$identity" ]]; then
+            echo "No Developer ID Application identity found in CSC_LINK." >&2
+            exit 1
+          fi
+          echo "T3CODE_CLI_MAC_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Build CLI archive
+        env:
+          APPLE_API_KEY_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ matrix.platform == 'mac' && secrets.APPLE_API_ISSUER || '' }}
+        run: >-
+          pnpm exec node scripts/build-cli-archive.ts
+          --platform ${{ matrix.platform }}
+          --arch ${{ matrix.arch }}
+          --version "$RELEASE_VERSION"
+          --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor"
+          --output-dir release-cli
+
+      - name: Verify macOS signature
+        if: matrix.platform == 'mac'
+        env:
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d "$RUNNER_TEMP/j5-cli.XXXXXX")"
+          tar -xzf "release-cli/t3-$RELEASE_VERSION-darwin-arm64.tar.gz" -C "$scratch" --strip-components=1
+          codesign --verify --strict --verbose=2 "$scratch/t3"
+          details="$(codesign -dv --verbose=4 "$scratch/t3" 2>&1)"
+          grep -Fx "TeamIdentifier=$APPLE_TEAM_ID" <<<"$details"
+          grep -E '^CodeDirectory .*flags=0x[0-9a-f]*\(runtime\)' <<<"$details"
+
+      - name: Smoke-test CLI archive
+        run: pnpm exec node scripts/smoke-cli-archive.ts --archive "release-cli/t3-$RELEASE_VERSION-${{ matrix.key }}.tar.gz" --expect-version "$RELEASE_VERSION"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: j5-cli-${{ matrix.key }}
+          path: release-cli/t3-*-${{ matrix.key }}.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove signing files
+        if: ${{ always() && matrix.platform == 'mac' }}
+        run: |
+          if [[ -n "${J5_SIGNING_DIR:-}" ]]; then
+            security delete-keychain "$J5_SIGNING_DIR/j5-cli-signing.keychain-db" 2>/dev/null || true
+            rm -rf -- "$J5_SIGNING_DIR"
+          fi
+
+  release:
+    needs: [resolve, cli_archive]
+    if: needs.resolve.outputs.published != 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+      RELEASE_SHA: ${{ needs.resolve.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+          sparse-checkout: scripts/install.sh
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: j5-code-signed-macos-arm64
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+          path: release-assets
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: j5-cli-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Assemble release assets
+        run: |
+          set -euo pipefail
+          test -f "release-assets/J5-Code-$RELEASE_VERSION-arm64.dmg"
+          test -f "release-assets/J5-Code-$RELEASE_VERSION-arm64.zip"
+          grep -Fx "version: $RELEASE_VERSION" release-assets/latest-mac.yml
+          archives=(
+            "t3-$RELEASE_VERSION-darwin-arm64.tar.gz"
+            "t3-$RELEASE_VERSION-linux-x64.tar.gz"
+          )
+          for archive in "${archives[@]}"; do
+            test -f "release-assets/$archive"
+          done
+          cp scripts/install.sh release-assets/install.sh
+          # Checksums come from the exact bytes being uploaded.
+          (cd release-assets && sha256sum "${archives[@]}" install.sh > SHA256SUMS)
+          cat release-assets/SHA256SUMS
+
+      - name: Publish GitHub release
+        run: |
+          set -euo pipefail
+          tag="v$RELEASE_VERSION"
+          if tag_sha="$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha 2>/dev/null)"; then
+            test "$tag_sha" = "$RELEASE_SHA"
+          fi
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          J5 Code $RELEASE_VERSION
+
+          - macOS Apple Silicon app, Developer ID signed and notarized by Apple.
+          - Command-line server for macOS (Apple silicon, signed and notarized) and Linux x64:
+            \`curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh | sh\`,
+            then \`j5\`. \`SHA256SUMS\` covers the archives and the installer.
+          - Upgrading a server installed from npm (0.0.42 or earlier)? See docs/user/migrating-to-release-archives.md.
+          - ZIP, blockmaps, and update metadata support desktop updates.
+
+          Built from $RELEASE_SHA.
+          EOF
+            gh release create "$tag" --target "$RELEASE_SHA" --title "J5 Code $RELEASE_VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" --draft
+          fi
+          gh release upload "$tag" release-assets/* --clobber
+          gh release edit "$tag" --draft=false --latest

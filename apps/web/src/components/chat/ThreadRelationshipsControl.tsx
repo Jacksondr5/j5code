@@ -47,6 +47,7 @@ import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { AgentElapsed } from "./AgentElapsed";
 import { ThreadRelationshipIcon } from "./ThreadRelationshipIcon";
+import { AgentLineageIdentity } from "../../j5/agents/AgentIdentityChip";
 
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -376,6 +377,10 @@ export function ThreadRelationshipsPanel(props: {
                     </span>
                     {agent ? <span className="sr-only">{agent.status}</span> : null}
                   </span>
+                  <AgentLineageIdentity
+                    environmentId={props.environmentId}
+                    childThreadId={isParent ? null : threadId}
+                  />
                   {agent ? (
                     agent.startedAt ? (
                       <span className="shrink-0 text-[11px] font-normal tabular-nums text-muted-foreground">

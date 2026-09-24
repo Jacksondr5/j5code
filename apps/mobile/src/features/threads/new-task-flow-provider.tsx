@@ -101,6 +101,11 @@ import {
 } from "./new-task-context-presentation";
 import { resolveEnvironmentProjectMatch } from "./new-task-project-selection";
 import { resolveProjectThreadCreationBranch } from "./projectThreadCreationValidation";
+import {
+  clearDraftAgent,
+  readDraftAgentPersonaId,
+  selectDraftAgent,
+} from "../../j5/agents/agentDraftState";
 
 type WorkspaceMode = "local" | "worktree";
 
@@ -948,6 +953,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
           startFromOrigin: message.creation.startFromOrigin ?? false,
         },
       });
+      selectDraftAgent(draftKey, message.creation.agentPersonaId ?? null);
     }
     setSelectedEnvironmentId(message.environmentId);
     setSelectedProjectKey(scopedProjectKey(message.environmentId, message.creation.projectId));
@@ -995,6 +1001,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       const projectCwd = usingPendingSnapshot
         ? editingPendingTask?.creation?.projectCwd
         : selectedProject.workspaceRoot;
+      const agentPersonaId = readDraftAgentPersonaId(selectedProjectDraftKey);
       return {
         environmentId: selectedProject.environmentId,
         threadId: ThreadId.make(metadata.threadId),
@@ -1035,6 +1042,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
           ...((workspaceSelection?.startFromOrigin ?? startFromOrigin)
             ? { startFromOrigin: true }
             : {}),
+          ...(agentPersonaId === null ? {} : { agentPersonaId }),
         },
         createdAt: metadata.createdAt,
       };
@@ -1062,6 +1070,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         activeEditingMessageId = null;
       }
       clearComposerDraft(pendingTaskDraftKey(editing.messageId));
+      clearDraftAgent(pendingTaskDraftKey(editing.messageId));
       releaseEditingQueuedMessage(editing.messageId);
       scheduleUnusedComposerAttachmentCleanup(editing.attachments);
     }
@@ -1136,6 +1145,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
             return;
           }
           clearComposerDraft(pendingTaskDraftKey(editing.messageId));
+          clearDraftAgent(pendingTaskDraftKey(editing.messageId));
           releaseEditingQueuedMessage(editing.messageId);
           scheduleUnusedComposerAttachmentCleanup(editing.attachments);
         })

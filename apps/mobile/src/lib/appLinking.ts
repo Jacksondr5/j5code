@@ -12,6 +12,7 @@ export function shouldHandleAppLink(url: string): boolean {
   return (
     !url.includes("expo-development-client") &&
     !url.includes("://expo-sharing") &&
-    !/^t3code(-dev|-preview)?:\/*$/.test(url)
+    // J5 schemes (BRANDING.md): j5code, j5code-dev, j5code-preview.
+    !/^j5code(-dev|-preview)?:\/*$/.test(url)
   );
 }

@@ -1,3 +1,9 @@
+import {
+  deriveSteerState,
+  queuedRowSteerTitle,
+  steerActLabel,
+} from "@t3tools/client-runtime/j5/steer-state";
+import { useThreadProjection } from "../../state/use-thread-detail";
 import { type StaticScreenProps, useNavigation } from "@react-navigation/native";
 import { useAtomValue } from "@effect/atom-react";
 import type { ChatAttachment, EnvironmentId, RunId, ThreadId } from "@t3tools/contracts";
@@ -57,6 +63,12 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
   const workflow = useThreadQueueWorkflow(target);
   const threadKey = scopedThreadKey(target.environmentId, target.threadId);
   const editing = useQueuedRunEdit(threadKey);
+  const scoped = useThreadProjection(target);
+  const steerState = useMemo(
+    () => (scoped ? deriveSteerState(scoped.projection) : ({ kind: "idle" } as const)),
+    [scoped],
+  );
+  const steerLabel = steerState.kind === "steerable" ? steerActLabel(steerState.act) : "Steer";
   const reorder = useAtomCommand(threadEnvironment.reorderQueuedRun, "reorder queued message");
   const promote = useAtomCommand(threadEnvironment.promoteQueuedRun, "promote queued message");
   const cancel = useAtomCommand(threadEnvironment.cancelQueuedRun, "remove queued message");
@@ -330,7 +342,7 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
                       ? [
                           {
                             id: "steer",
-                            title: "Steer now",
+                            title: steerLabel,
                             attributes: { disabled: !controls.canSteer },
                             image: Platform.OS === "ios" ? "arrow.turn.left.up" : "arrow_upward",
                           },
@@ -388,13 +400,14 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
                     {workflow?.canPromoteToSteer ? (
                       <Pressable
                         accessibilityRole="button"
-                        accessibilityLabel={`Steer with message ${index + 1} now`}
+                        accessibilityLabel={`${steerLabel}: queued message ${index + 1}`}
+                        accessibilityHint={queuedRowSteerTitle(steerState)}
                         disabled={!controls.canSteer}
                         onPress={() => void act(run.id, "steer")}
                         className="h-8 shrink-0 justify-center rounded-full bg-primary px-3 active:opacity-70 disabled:opacity-40"
                       >
                         <Text className="font-t3-medium text-xs text-primary-foreground">
-                          Steer
+                          {steerLabel}
                         </Text>
                       </Pressable>
                     ) : null}

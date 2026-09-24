@@ -54,6 +54,11 @@ function causeMessage(cause: unknown): string | undefined {
           message =
             "The provider conversation could not be resumed. Retry the turn; if it keeps failing, check the provider and server logs.";
           break;
+        // J5: terminal start failures whose text is already bounded, redacted, and
+        // written for the person who must act on it.
+        case "ProviderResumeFailedError":
+        case "CodexCliVersionUnsupportedError":
+          return stringField(cause, "message") ?? message;
       }
       cause = (cause as Record<string, unknown>).cause;
     } catch {

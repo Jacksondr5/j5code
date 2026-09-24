@@ -1,4 +1,6 @@
+import { detectAgentMention } from "./j5/agentMention.ts";
 export type ComposerTriggerKind =
+  | "agent"
   | "path"
   | "pull-request"
   | "slash-command"
@@ -117,6 +119,8 @@ export function detectComposerTrigger(
       rangeEnd: cursor,
     };
   }
+  const agentMention = detectAgentMention(token, tokenStart, cursor);
+  if (agentMention !== null) return agentMention;
   if (!token.startsWith("@")) {
     return null;
   }

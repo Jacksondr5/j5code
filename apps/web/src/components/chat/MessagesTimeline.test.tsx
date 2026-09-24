@@ -1,11 +1,15 @@
+import * as DateTime from "effect/DateTime";
+import { TurnItemId } from "@t3tools/contracts";
 import { CheckpointRef, EnvironmentId, MessageId, RunId, ThreadId } from "@t3tools/contracts";
 import {
   act,
+  createElement,
+  cloneElement,
+  type ReactElement,
   createRef,
   useLayoutEffect,
   type ReactNode,
   type Ref,
-  type ReactElement,
 } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { create, type ReactTestRenderer } from "react-test-renderer";
@@ -19,27 +23,42 @@ const activityTestState = vi.hoisted(() => ({
   expandedRuns: false,
   subagentTooltips: false,
 }));
+const peerInteractionHarness = vi.hoisted(() => ({ enabled: false }));
 
-// Expose tooltip contents in the renderer without requiring a browser portal.
+// Expose tooltip contents in the renderer without requiring a browser portal
+// (upstream subagent tooltips); the J5 peer-row probes replace positioning.
 vi.mock("../ui/tooltip", async (importOriginal) => {
   const original = await importOriginal<typeof import("../ui/tooltip")>();
   return {
     ...original,
-    Tooltip: (props: { children?: ReactNode }) =>
-      activityTestState.subagentTooltips ? props.children : <original.Tooltip {...props} />,
-    TooltipTrigger: (props: { children?: ReactNode; render?: ReactElement }) =>
+    Tooltip: (props: Parameters<typeof original.Tooltip>[0]) =>
+      activityTestState.subagentTooltips || peerInteractionHarness.enabled
+        ? props.children
+        : createElement(original.Tooltip, props),
+    TooltipTrigger: (props: Parameters<typeof original.TooltipTrigger>[0]) =>
       activityTestState.subagentTooltips ? (
         <>
-          {props.render}
+          {props.render as ReactElement}
           {props.children}
         </>
+      ) : peerInteractionHarness.enabled ? (
+        cloneElement(
+          props.render as ReactElement<{ children?: ReactNode }>,
+          {},
+          props.children ?? (props.render as ReactElement<{ children?: ReactNode }>).props.children,
+        )
       ) : (
-        <original.TooltipTrigger {...props} />
+        createElement(original.TooltipTrigger, props)
       ),
-    TooltipPopup: (props: { children?: ReactNode }) =>
-      activityTestState.subagentTooltips ? props.children : <original.TooltipPopup {...props} />,
+    TooltipPopup: (props: Parameters<typeof original.TooltipPopup>[0]) =>
+      activityTestState.subagentTooltips
+        ? props.children
+        : peerInteractionHarness.enabled
+          ? null
+          : createElement(original.TooltipPopup, props),
   };
 });
+vi.mock("../../hooks/useNowMinute", () => ({ useNowMinute: () => "2026-09-05T00:00" }));
 
 vi.mock("../DiffWorkerPoolProvider", () => ({
   DiffWorkerPoolProvider: ({ children }: { children?: ReactNode }) => children,
@@ -73,6 +92,7 @@ vi.mock("./MessagesTimeline.logic", async (importOriginal) => {
 beforeEach(() => {
   activityTestState.subagentTooltips = false;
   activityTestState.expanded = false;
+  peerInteractionHarness.enabled = false;
   activityTestState.expandedRuns = false;
 });
 
@@ -352,6 +372,94 @@ function buildSnapShotTimelineEntry(previewUrl?: string) {
 }
 
 describe("MessagesTimeline", () => {
+  it.each([true, false])(
+    "renders accepted peer sends through the upstream tool group while active: %s",
+    async (active) => {
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      vi.stubGlobal("requestAnimationFrame", () => 0);
+      vi.stubGlobal("cancelAnimationFrame", () => {});
+      peerInteractionHarness.enabled = true;
+      const runId = RunId.make(`peer-send-${active}`);
+      const props = buildProps();
+      props.listRef.current = {
+        getState: () => ({ isAtEnd: true }),
+        getScrollableNode: () => null,
+      } as unknown as LegendListRef;
+      let renderer: ReactTestRenderer | undefined;
+      try {
+        await act(() => {
+          renderer = create(
+            <MessagesTimeline
+              {...props}
+              isWorking={active}
+              runningRunId={active ? runId : null}
+              timelineEntries={[
+                {
+                  id: "peer-send",
+                  kind: "work",
+                  createdAt: MESSAGE_CREATED_AT,
+                  entry: {
+                    id: "peer-send",
+                    runId,
+                    createdAt: MESSAGE_CREATED_AT,
+                    label: "Send message",
+                    tone: "tool",
+                    toolLifecycleStatus: "completed",
+                    structuredPayload: {
+                      id: TurnItemId.make("peer-send"),
+                      threadId: ThreadId.make("thread-1"),
+                      runId,
+                      nodeId: null,
+                      providerThreadId: null,
+                      providerTurnId: null,
+                      nativeItemRef: null,
+                      parentItemId: null,
+                      ordinal: 0,
+                      status: "completed",
+                      title: null,
+                      startedAt: null,
+                      completedAt: null,
+                      updatedAt: DateTime.makeUnsafe(MESSAGE_CREATED_AT),
+                      type: "dynamic_tool",
+                      toolName: "t3-code.send_message",
+                      input: { to: "agent:peer", message: "Integrated peer send" },
+                      output: {
+                        messageId: "message:sent",
+                        exchangeId: "exchange:sent",
+                        exchangeState: "open",
+                      },
+                    },
+                  },
+                },
+              ]}
+            />,
+          );
+        });
+        const peerCards = () =>
+          renderer!.root.findAll(
+            (node) => node.type === "section" && node.props["data-j5-a2a-renderer"] === "sent",
+          );
+        if (active) expect(peerCards()).toHaveLength(1);
+        if (peerCards().length === 0) {
+          const group = renderer!.root
+            .findAllByType("button")
+            .find((button) => button.props["aria-expanded"] === false)!;
+          await act(() => group.props.onClick());
+        }
+        expect(peerCards()).toHaveLength(1);
+        expect(JSON.stringify(renderer!.toJSON())).toContain("Integrated peer send");
+        const group = renderer!.root
+          .findAllByType("button")
+          .find((button) => button.props["aria-expanded"] === true);
+        if (group) {
+          await act(() => group.props.onClick());
+          expect(peerCards()).toHaveLength(0);
+        }
+      } finally {
+        await act(() => renderer?.unmount());
+      }
+    },
+  );
   it("shows dynamic tool input without cached output when the row is expanded", async () => {
     activityTestState.expanded = true;
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

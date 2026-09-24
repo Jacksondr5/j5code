@@ -1,12 +1,12 @@
 /**
- * `t3 pair` - mint a pairing token for an already-running server and print it
+ * `j5 pair` - mint a pairing token for an already-running server and print it
  * as a QR code, without restarting anything.
  *
  * Discovery reads the `server-runtime.json` a live server persists next to its
  * database, then confirms the process is actually answering by fetching its
  * public environment descriptor. Inside a linked git worktree the worktree's
- * own `.t3` is checked first (matching dev-runner precedence); otherwise the
- * shared T3 home. `--tailscale` publishes the server over Tailscale Serve
+ * own `.j5code` is checked first (matching dev-runner precedence); otherwise the
+ * shared J5 home. `--tailscale` publishes the server over Tailscale Serve
  * HTTPS and pairs through the tailnet URL instead.
  */
 import {
@@ -24,6 +24,7 @@ import {
 } from "@t3tools/tailscale";
 import * as Config from "effect/Config";
 import * as Console from "effect/Console";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -59,12 +60,24 @@ import { baseDirFlag, DurationFromString } from "./config.ts";
 
 const WELL_KNOWN_ENVIRONMENT_PATH = "/.well-known/t3/environment";
 const PAIR_PROBE_TIMEOUT = Duration.millis(2_500);
+// The runtime file is deliberately written only once the server accepts
+// commands. A just-started server can therefore be listening before this file
+// exists; give activation a small, bounded chance to finish.
+const RUNTIME_FILE_RETRY_ATTEMPTS = 4;
+const RUNTIME_FILE_RETRY_DELAY = Duration.seconds(1);
 // Tailscale provisions an HTTPS certificate on the first request to a fresh
 // serve mapping, which can take a few seconds.
 const TAILSCALE_PROBE_ATTEMPTS = 5;
 const TAILSCALE_PROBE_RETRY_DELAY = Duration.seconds(1);
 
 export type PairStateVariant = "userdata" | "dev";
+
+/** The activation wait is overridable so callers can test it without wall-clock time. */
+export const RuntimeFileActivationDelay = Context.Reference<
+  (duration: Duration.Duration) => Effect.Effect<void>
+>("t3/cli/RuntimeFileActivationDelay", {
+  defaultValue: () => Effect.sleep,
+});
 
 // deriveServerPaths only checks devUrl for undefined-ness when picking the
 // dev-vs-userdata state directory; the value itself is not used.
@@ -80,8 +93,30 @@ export class NoRunningServerError extends Schema.TaggedError<NoRunningServerErro
     return [
       "No running T3 Code server found.",
       ...this.checkedStatePaths.map((statePath) => `  checked ${statePath}`),
-      "Start one with `npx t3 serve`, or connect this machine with T3 Connect: `npx t3 connect`.",
+      "Start one with `j5 serve`, or connect this machine with T3 Connect: `j5 connect`.",
     ].join("\n");
+  }
+}
+
+export class NoRuntimeFileUnderBaseError extends Schema.TaggedError<NoRuntimeFileUnderBaseError>()(
+  "NoRuntimeFileUnderBaseError",
+  {
+    baseDir: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `No runtime file under ${this.baseDir} — either no server is running, or one is still starting. The file appears at activation; wait for the printed pairing URL, then retry.`;
+  }
+}
+
+export class WorktreePairingRefusedError extends Schema.TaggedError<WorktreePairingRefusedError>()(
+  "WorktreePairingRefusedError",
+  {
+    worktreeHome: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `No running server found under worktree home ${this.worktreeHome}. Refusing to fall through to another home; start one here, or pass --base-dir <path> to target another server explicitly.`;
   }
 }
 
@@ -217,7 +252,7 @@ const probeEnvironmentDescriptor = (
     );
     // Bad-gateway family means a proxy (Tailscale Serve) answered for a
     // backend that is gone — a stale mapping, not a live occupant. Treating
-    // it as unreachable lets `t3 pair --tailscale` repair its own mapping
+    // it as unreachable lets `j5 pair --tailscale` repair its own mapping
     // after the server's port changed.
     if (response.status === 502 || response.status === 503 || response.status === 504) {
       return { _tag: "unreachable" } as const;
@@ -238,25 +273,15 @@ interface DiscoveredPairTarget {
   readonly descriptor: ExecutionEnvironmentDescriptor;
 }
 
-const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
-  explicitBaseDir: string | undefined,
-) {
-  const bases: Array<string> = [];
-  if (explicitBaseDir !== undefined && explicitBaseDir.trim().length > 0) {
-    bases.push(yield* resolveBaseDir(explicitBaseDir));
-  } else {
-    // Same precedence as dev-runner: inside a linked worktree its own `.t3`
-    // outranks the shared home, so `t3 pair` in a worktree pairs with the dev
-    // server under test rather than the daily-driver install.
-    const worktreeHome = yield* resolveWorktreeT3Home(process.cwd());
-    if (worktreeHome !== undefined) {
-      bases.push(worktreeHome);
-    }
-    const envHome = yield* Config.String("T3CODE_HOME").pipe(Config.option);
-    bases.push(yield* resolveBaseDir(Option.getOrUndefined(envHome)));
-  }
+interface PairTargetScan {
+  readonly checkedStatePaths: ReadonlyArray<string>;
+  readonly foundRuntimeFile: boolean;
+  readonly target: DiscoveredPairTarget | undefined;
+}
 
+const scanPairTargets = Effect.fn("pair.scanPairTargets")(function* (bases: ReadonlyArray<string>) {
   const checkedStatePaths: Array<string> = [];
+  let foundRuntimeFile = false;
   for (const baseDir of new Set(bases)) {
     for (const variant of ["userdata", "dev"] as const) {
       const derivedPaths = yield* ServerConfig.deriveServerPaths(
@@ -270,6 +295,7 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
       if (Option.isNone(state)) {
         continue;
       }
+      foundRuntimeFile = true;
       // The pid check guards against a dead server's state file whose port
       // was since reused by a different server: pairing would then mint a
       // token in the old database while the QR code points at the new server.
@@ -281,14 +307,61 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
         continue;
       }
       return {
-        baseDir,
-        variant,
-        state: state.value,
-        descriptor: probed.descriptor,
-      } satisfies DiscoveredPairTarget;
+        checkedStatePaths,
+        foundRuntimeFile,
+        target: {
+          baseDir,
+          variant,
+          state: state.value,
+          descriptor: probed.descriptor,
+        } satisfies DiscoveredPairTarget,
+      } satisfies PairTargetScan;
     }
   }
-  return yield* new NoRunningServerError({ checkedStatePaths });
+  return { checkedStatePaths, foundRuntimeFile, target: undefined } satisfies PairTargetScan;
+});
+
+const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
+  explicitBaseDir: string | undefined,
+) {
+  if (explicitBaseDir !== undefined && explicitBaseDir.trim().length > 0) {
+    const baseDir = yield* resolveBaseDir(explicitBaseDir);
+    const waitForActivation = yield* RuntimeFileActivationDelay;
+    let scan = yield* scanPairTargets([baseDir]);
+    for (
+      let attempt = 1;
+      scan.target === undefined && !scan.foundRuntimeFile && attempt < RUNTIME_FILE_RETRY_ATTEMPTS;
+      attempt += 1
+    ) {
+      yield* waitForActivation(RUNTIME_FILE_RETRY_DELAY);
+      scan = yield* scanPairTargets([baseDir]);
+    }
+    if (scan.target !== undefined) {
+      return scan.target;
+    }
+    if (!scan.foundRuntimeFile) {
+      return yield* new NoRuntimeFileUnderBaseError({ baseDir });
+    }
+    return yield* new NoRunningServerError({ checkedStatePaths: [...scan.checkedStatePaths] });
+  }
+
+  // A linked worktree is an isolation boundary. Its home must never silently
+  // fall through to an ambient or default shared home.
+  const worktreeHome = yield* resolveWorktreeT3Home(process.cwd());
+  if (worktreeHome !== undefined) {
+    const scan = yield* scanPairTargets([worktreeHome]);
+    if (scan.target !== undefined) {
+      return scan.target;
+    }
+    return yield* new WorktreePairingRefusedError({ worktreeHome });
+  }
+
+  const envHome = yield* Config.String("J5CODE_HOME").pipe(Config.option);
+  const scan = yield* scanPairTargets([yield* resolveBaseDir(Option.getOrUndefined(envHome))]);
+  if (scan.target !== undefined) {
+    return scan.target;
+  }
+  return yield* new NoRunningServerError({ checkedStatePaths: [...scan.checkedStatePaths] });
 });
 
 /**
@@ -436,7 +509,7 @@ const mintPairingLink = Effect.fn("pair.mintPairingLink")(function* (input: {
     return yield* environmentAuth.createPairingLink({
       scopes: AuthStandardClientScopes,
       subject: "one-time-token",
-      label: Option.getOrElse(input.label, () => "t3 pair"),
+      label: Option.getOrElse(input.label, () => "j5 pair"),
       ...(Option.isSome(input.ttl) ? { ttl: input.ttl.value } : {}),
     });
   }).pipe(
