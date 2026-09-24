@@ -103,6 +103,47 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
     }),
   );
 
+  it.effect("copies statev2.sqlite by default once the V2 cutover has run", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const sharedDir = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-default-" });
+      const destDir = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-default-dest-" });
+      const legacySource = yield* createFixtureSource(sharedDir);
+      const readTitle = Effect.gen(function* () {
+        const result = yield* runMigrateDevDb(
+          { baseDir: destDir, projects: 5, threadsPerProject: 10 },
+          { sharedHome: sharedDir },
+        );
+        return yield* withDatabase(
+          result.databasePath,
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            const [row] = yield* sql<{ title: string }>`
+              SELECT title FROM projection_threads WHERE thread_id = 'stopped-thread'`;
+            return row?.title;
+          }),
+        );
+      });
+
+      // Before the cutover only state.sqlite exists.
+      assert.equal(yield* readTitle, "stopped-thread");
+
+      // After it, state.sqlite is frozen and statev2.sqlite carries live data.
+      const v2Source = path.join(sharedDir, "userdata", "statev2.sqlite");
+      yield* fs.copyFile(legacySource, v2Source);
+      yield* withDatabase(
+        v2Source,
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`UPDATE projection_threads SET title = 'after-cutover'
+            WHERE thread_id = 'stopped-thread'`;
+        }),
+      );
+      assert.equal(yield* readTitle, "after-cutover");
+    }),
+  );
+
   it.effect("fails loudly on a migration slot collision", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

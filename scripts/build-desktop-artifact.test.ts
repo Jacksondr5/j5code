@@ -2326,7 +2326,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         verbose: Option.some(false),
         mockUpdates: Option.some(false),
         mockUpdateServerPort: Option.none(),
-        wslPrebuild: Option.none(),
+        wslRuntime: Option.none(),
       }).pipe(Effect.flip);
 
       assert.instanceOf(error, ConflictingDesktopSigningModesError);

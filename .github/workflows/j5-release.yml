@@ -46,7 +46,8 @@ jobs:
             const { data: run } = await github.rest.actions.getWorkflowRun({
               ...context.repo, run_id: Number(process.env.BUILD_RUN_ID),
             });
-            if (run.conclusion !== 'success' || run.path !== '.github/workflows/j5-macos-build.yml') {
+            // run.path can carry an `@ref` suffix; compare the workflow file alone.
+            if (run.conclusion !== 'success' || run.path?.split('@', 1)[0] !== '.github/workflows/j5-macos-build.yml') {
               throw new Error('Select a successful J5 Signed macOS Build run.');
             }
             // Every package version the release scripts align upstream must agree.
@@ -64,6 +65,13 @@ jobs:
               throw new Error(`This workflow requires one stable version across ${paths.join(', ')}; found ${versions.join(', ')}.`);
             }
             const version = versions[0];
+            // Release archives replace the npm package from 0.0.43 on; an older
+            // version number would be offered as a downgrade to every installed
+            // J5 and would collide with the npm-era tags.
+            const [major, minor, patch] = version.split('.').map(Number);
+            if (major === 0 && minor === 0 && patch < 43) {
+              throw new Error(`J5 release archives start at 0.0.43; ${version} belongs to the npm era.`);
+            }
             // A published release that already carries SHA256SUMS is final:
             // rebuilding would change archive bytes under existing checksums.
             let published = false;
@@ -161,6 +169,11 @@ jobs:
 
       - name: Build server and web client
         run: pnpm exec vp run --filter t3 build
+
+      # `cli.ts build` stamps the development icons into dist/client; the
+      # archive serves that directory, so swap in the production J5 icons.
+      - name: Apply production web brand assets to the bundled client
+        run: pnpm exec node scripts/apply-web-brand-assets.ts production apps/server/dist/client
 
       # Node single-executables need a host Node with --build-sea (25.7+).
       # Keep in step with SEA_NODE_VERSION in apps/server/vite.config.ts and

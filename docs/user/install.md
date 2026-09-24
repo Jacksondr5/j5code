@@ -40,7 +40,7 @@ Run `j5 --help` for the full reference.
 
 There is no `j5` executable for Intel Macs, Linux on ARM, or Windows. To run a
 server there, build it from source with Node.js 24 and `vp`
-([Install vp](https://github.com/pingdotgg/t3code#install-vp)):
+([Install vp](https://github.com/Jacksondr5/j5code#install-vp)):
 
 ```bash
 git clone https://github.com/Jacksondr5/j5code
@@ -53,15 +53,10 @@ update it with `git pull` and a rebuild.
 
 ## Desktop app
 
-Download a release from [GitHub Releases](https://github.com/pingdotgg/t3code/releases),
-or use a package manager:
-
-| Platform           | Install                         |
-| ------------------ | ------------------------------- |
-| Windows            | `winget install T3Tools.T3Code` |
-| macOS              | `brew install --cask t3-code`   |
-| Arch Linux         | `yay -S t3code-bin`             |
-| Arch Linux nightly | `yay -S t3code-nightly-bin`     |
+Download the macOS (Apple silicon) app from
+[GitHub Releases](https://github.com/Jacksondr5/j5code/releases). J5 Code
+publishes no desktop build for other platforms and no package-manager listing;
+`winget`, Homebrew, and AUR packages named T3 Code install upstream T3 Code.
 
 ### Windows Subsystem for Linux
 

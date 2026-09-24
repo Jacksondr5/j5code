@@ -143,7 +143,7 @@ export class MigrateDevDbPhaseError extends Schema.TaggedError<MigrateDevDbPhase
 export interface RunMigrateDevDbInput {
   /** Isolated .j5code directory. Defaults to `<worktree>/.j5code` of the cwd. */
   readonly baseDir?: string | undefined;
-  /** Source database. Defaults to `~/.t3/userdata/state.sqlite`. */
+  /** Source database. Defaults to `~/.t3/userdata/statev2.sqlite`, or `state.sqlite` before the V2 cutover. */
   readonly source?: string | undefined;
   readonly projects: number;
   readonly threadsPerProject: number;
@@ -368,8 +368,14 @@ export const runMigrateDevDb = Effect.fn("runMigrateDevDb")(function* (
     path.resolve(NodeOS.homedir(), ".t3"),
     path.resolve(NodeOS.homedir(), ".j5code"),
   ];
+  // A home that has run V2 keeps its live data in statev2.sqlite and leaves
+  // state.sqlite frozen at the cutover; a home that has not yet has only state.sqlite.
+  const sharedStateDir = path.join(configuredSharedHome, "userdata");
   const sourcePath = path.resolve(
-    input.source ?? path.join(configuredSharedHome, "userdata", "state.sqlite"),
+    input.source ??
+      ((yield* fs.exists(path.join(sharedStateDir, "statev2.sqlite")))
+        ? path.join(sharedStateDir, "statev2.sqlite")
+        : path.join(sharedStateDir, "state.sqlite")),
   );
 
   const baseDir =
@@ -531,7 +537,9 @@ export const migrateDevDbCommand = Command.make(
     ),
     source: Flag.String("source").pipe(
       Flag.optional,
-      Flag.withDescription("Source database. Defaults to ~/.t3/userdata/state.sqlite."),
+      Flag.withDescription(
+        "Source database. Defaults to ~/.t3/userdata/statev2.sqlite, or state.sqlite before the V2 cutover.",
+      ),
     ),
   },
   ({ projects, threadsPerProject, baseDir, source }) =>
