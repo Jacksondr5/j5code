@@ -1,5 +1,5 @@
 import { ChatAttachment, ThreadId } from "@t3tools/contracts";
-import { PeerTerminalFact } from "@t3tools/contracts/j5";
+import { PeerSenderLabel, PeerTerminalFact } from "@t3tools/contracts/j5";
 import * as Schema from "effect/Schema";
 
 const Identifier = Schema.String.check(Schema.isNonEmpty());
@@ -157,9 +157,8 @@ export const MessageReceivedPayload = Schema.Struct({
   originCreatedAt: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   /** "none": the row records a fact (a withdrawal) and injects nothing into the receiver's thread. */
   injection: Schema.optional(Schema.Literal("none")),
-  /** From a peer delivery: the names its server sent, read by the client identity lookup. */
-  originSquadronName: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
-  senderLabel: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  /** From a peer delivery: the sender's display name its server sent, read by the client identity lookup and nothing else. */
+  senderLabel: Schema.optional(PeerSenderLabel),
   message: Schema.Json,
 });
 export type MessageReceivedPayload = typeof MessageReceivedPayload.Type;
