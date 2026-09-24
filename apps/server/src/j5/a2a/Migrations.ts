@@ -27,8 +27,8 @@ import Migration0023 from "./migrations/023_Peers.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
-// Entries 1 through 13 are persisted migration history. Keep their file and manifest names unchanged;
-// applied migrations are skipped by id and never rerun.
+// Every entry already in this list is persisted migration history: keep its id, file, and
+// manifest name unchanged. Applied migrations are skipped by id and never rerun.
 export const migrationEntries = [
   [1, "EpicCommunicationLedger", Migration0001],
   [2, "SendDeliverReply", Migration0002],

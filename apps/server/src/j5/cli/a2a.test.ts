@@ -325,6 +325,8 @@ const homePeer = {
   environmentId: "environment-home",
   label: "Home",
   origin: "https://home.example:3773",
+  credentialExpiresAt: "2036-09-16T00:00:00.000Z",
+  inboundSession: "active",
   createdAt: "2026-09-16T00:00:00.000Z",
 };
 

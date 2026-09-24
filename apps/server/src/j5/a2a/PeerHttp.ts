@@ -1,9 +1,4 @@
-import {
-  AuthA2APeerScope,
-  AuthAccessReadScope,
-  AuthAccessWriteScope,
-  type AuthEnvironmentScope,
-} from "@t3tools/contracts";
+import { AuthA2APeerScope, AuthAccessReadScope, AuthAccessWriteScope } from "@t3tools/contracts";
 import {
   AddPeerRequest,
   IssuePeerCredentialRequest,
@@ -17,72 +12,49 @@ import {
   type RemovePeerResponse,
 } from "@t3tools/contracts/j5";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import {
-  HttpRouter,
-  HttpServerRequest,
-  HttpServerRespondable,
-  HttpServerResponse,
-} from "effect/unstable/http";
+import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 
 import packageJson from "../../../package.json" with { type: "json" };
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
-import {
-  annotateEnvironmentRequest,
-  failEnvironmentAuthInvalid,
-  failEnvironmentInternal,
-  failEnvironmentScopeRequired,
-} from "../../auth/http.ts";
+import { annotateEnvironmentRequest } from "../../auth/http.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
+import {
+  authenticate,
+  jsonError,
+  messageOf,
+  readJsonBody,
+  requestFailure,
+  requireScope,
+  respondableTags,
+  tagOf,
+} from "./httpSupport.ts";
 
 /**
  * The peering HTTP surface. Administrative routes (issue a credential, add,
  * list, remove) carry the same `access:*` scopes as Settings → Connections,
- * because a peer is one more authorized session there. The hello route is the
- * one thing a peer credential can reach in this PR: it proves reachability and
- * tells the caller who this server is and whom the credential names.
+ * because a peer is one more authorized session there. The hello route is what
+ * a peer credential reaches first: it proves reachability, tells the caller who
+ * this server is and whom the credential names, and completes a rotation.
  */
+
+/**
+ * A peer session outlives ordinary client sessions: nothing renews it, and a
+ * silent thirty-day expiry would end peering with no one told. Ten years is
+ * "until removed or rotated"; the expiry is recorded on the holder's peer
+ * record and shown in Settings, so it is never a surprise.
+ */
+export const PEER_SESSION_TTL = Duration.days(3650);
 
 const decodeIssueRequest = Schema.decodeUnknownEffect(IssuePeerCredentialRequest);
 const decodeAddRequest = Schema.decodeUnknownEffect(AddPeerRequest);
 const decodeRemoveRequest = Schema.decodeUnknownEffect(RemovePeerRequest);
-
-const authenticate = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
-  const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-  return yield* serverAuth.authenticateHttpRequest(request).pipe(
-    Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
-      failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
-    ),
-    Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
-      failEnvironmentInternal("internal_error", error),
-    ),
-  );
-});
-
-const requireScope = (
-  session: EnvironmentAuth.AuthenticatedSession,
-  scope: AuthEnvironmentScope,
-) => (session.scopes.includes(scope) ? Effect.void : failEnvironmentScopeRequired(scope));
-
-const jsonError = (
-  status: number,
-  error: string,
-  message: string,
-  extra: Record<string, unknown> = {},
-) => HttpServerResponse.jsonUnsafe({ error, message, ...extra }, { status });
-
-const requestFailure = (message: string) => jsonError(400, "invalid_request", message);
-
-const tagOf = (error: unknown) =>
-  typeof error === "object" && error !== null && "_tag" in error ? String(error._tag) : "Error";
-const messageOf = (error: unknown, fallback: string) =>
-  error instanceof Error ? error.message : fallback;
 
 const addFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServerResponse> => {
   const tag = tagOf(error);
@@ -94,6 +66,8 @@ const addFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServer
       return Effect.succeed(jsonError(502, "peer_credential_rejected", message));
     case "PeerCredentialMismatchError":
       return Effect.succeed(jsonError(409, "peer_credential_mismatch", message));
+    case "PeerOriginConflictError":
+      return Effect.succeed(jsonError(409, "peer_origin_conflict", message));
     case "PeerIsSelfError":
       return Effect.succeed(jsonError(400, "peer_is_self", message));
     default:
@@ -103,39 +77,36 @@ const addFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServer
   }
 };
 
-const respondableTags = {
-  EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
-  EnvironmentInternalError: HttpServerRespondable.toResponse,
-  EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
-} as const;
-
-const readJsonBody = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
-  return yield* Effect.result(request.json);
-});
-
 export const peerHttpRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const peers = yield* PeerRegistryService;
     const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
 
-    // Rotation is list-revoke-issue; two concurrent issues could both revoke and
-    // both issue, leaving two live credentials. One permit keeps rotation and
-    // removal serial so exactly one session per peer subject survives.
+    // Rotation and removal list sessions and then revoke; one permit keeps them
+    // serial so concurrent calls cannot leave two live credentials or revoke a
+    // credential that was just issued.
     const rotationPermit = yield* Semaphore.make(1);
 
-    /** One live session per peer subject: issuing again rotates the old one out. */
-    const revokeSessionsForSubject = (subject: string) =>
+    /**
+     * Revoke every other session this peer subject holds. Issuing a credential
+     * does not revoke the old one; the peer proving the new one at hello does,
+     * so a rotation that fails between issue and record leaves the old
+     * credential working instead of the peer locked out.
+     */
+    const revokeOtherSessionsForSubject = (subject: string, keep: string) =>
       Effect.gen(function* () {
         const sessions = yield* serverAuth.listSessions();
         let revoked = 0;
         for (const session of sessions) {
-          if (session.subject !== subject) continue;
+          if (session.subject !== subject || session.sessionId === keep) continue;
           if (yield* serverAuth.revokeSession(session.sessionId)) revoked += 1;
         }
         return revoked;
       });
+
+    const revokeAllSessionsForSubject = (subject: string) =>
+      revokeOtherSessionsForSubject(subject, "");
 
     const helloRoute = HttpRouter.add(
       "GET",
@@ -145,9 +116,19 @@ export const peerHttpRouteLayer = Layer.unwrap(
         const session = yield* authenticate;
         yield* requireScope(session, AuthA2APeerScope);
         const environmentId = yield* identity.getEnvironmentId;
+        // The peer holds this credential, so any earlier one for it is done.
+        yield* rotationPermit
+          .withPermit(revokeOtherSessionsForSubject(session.subject, session.sessionId))
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("J5 A2A peer hello could not rotate older sessions", { cause }),
+            ),
+          );
         return HttpServerResponse.jsonUnsafe({
           environmentId,
           subject: session.subject,
+          credentialExpiresAt:
+            session.expiresAt === undefined ? null : DateTime.formatIso(session.expiresAt),
           server: { version: packageJson.version },
         } satisfies PeerHelloResponse);
       }).pipe(Effect.catchTags(respondableTags)),
@@ -180,15 +161,12 @@ export const peerHttpRouteLayer = Layer.unwrap(
         const label = decoded.success.label?.trim() || decoded.success.environmentId;
         const issued = yield* Effect.result(
           rotationPermit.withPermit(
-            revokeSessionsForSubject(subject).pipe(
-              Effect.andThen(
-                serverAuth.issueSession({
-                  scopes: [AuthA2APeerScope],
-                  subject,
-                  label: `Peer: ${label}`,
-                }),
-              ),
-            ),
+            serverAuth.issueSession({
+              scopes: [AuthA2APeerScope],
+              subject,
+              label: `Peer: ${label}`,
+              ttl: PEER_SESSION_TTL,
+            }),
           ),
         );
         if (Result.isFailure(issued)) {
@@ -231,6 +209,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
             origin: decoded.success.origin,
             credential: decoded.success.credential,
             label: decoded.success.label,
+            replaceOrigin: decoded.success.replaceOrigin ?? false,
             acceptedAt,
           }),
         );
@@ -274,7 +253,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
           rotationPermit.withPermit(
             Effect.all({
               removed: peers.remove(decoded.success.environmentId),
-              revokedSessions: revokeSessionsForSubject(
+              revokedSessions: revokeAllSessionsForSubject(
                 peerSubjectForEnvironment(decoded.success.environmentId),
               ),
             }),

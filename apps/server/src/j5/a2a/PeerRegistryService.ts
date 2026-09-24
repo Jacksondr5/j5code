@@ -14,6 +14,7 @@ import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
+import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 
 /**
@@ -21,15 +22,18 @@ import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
  * with. A peer is recorded only after this server has reached it at the
  * stated origin with the credential it issued to us and that credential named
  * us. The credential the peer holds for this server is an ordinary session in
- * the auth database, revoked by the route that removes the peer.
+ * the auth database; a record reports whether that session is still live, so
+ * a revoked or expired peer shows as such instead of looking healthy.
  */
 
-export const PEER_HELLO_TIMEOUT = Duration.seconds(5);
+const PEER_HELLO_TIMEOUT = Duration.seconds(5);
 
 export interface AddPeerInput {
   readonly origin: string;
   readonly credential: string;
   readonly label: string | undefined;
+  /** Re-adding a known peer at a different origin is refused unless the caller says so. */
+  readonly replaceOrigin: boolean;
   readonly acceptedAt: string;
 }
 
@@ -69,19 +73,43 @@ export class PeerIsSelfError extends Schema.TaggedError<PeerIsSelfError>()("Peer
   }
 }
 
+/** Hello proves the origin is reachable, not that it is the same server; moving a peer is an explicit act. */
+export class PeerOriginConflictError extends Schema.TaggedError<PeerOriginConflictError>()(
+  "PeerOriginConflictError",
+  { environmentId: Schema.String, recordedOrigin: Schema.String, requestedOrigin: Schema.String },
+) {
+  override get message(): string {
+    return `Peer ${this.environmentId} is recorded at ${this.recordedOrigin}, not ${this.requestedOrigin}. Pass replaceOrigin (\`--replace-origin\`) to move it.`;
+  }
+}
+
+export class PeerSessionReadError extends Schema.TaggedError<PeerSessionReadError>()(
+  "PeerSessionReadError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Could not read the sessions peers hold on this server.";
+  }
+}
+
 export type AddPeerError =
   | SqlError
+  | PeerSessionReadError
   | PeerUnreachableError
   | PeerCredentialRejectedError
   | PeerCredentialMismatchError
-  | PeerIsSelfError;
+  | PeerIsSelfError
+  | PeerOriginConflictError;
 
 export interface PeerRegistryServiceShape {
-  /** Proves the credential at the origin, then upserts; re-adding the same peer rotates its origin and credential. */
+  /** Proves the credential at the origin, then upserts; re-adding the same peer rotates its credential. */
   readonly add: (
     input: AddPeerInput,
   ) => Effect.Effect<{ readonly peer: PeerRecord; readonly created: boolean }, AddPeerError>;
-  readonly list: () => Effect.Effect<ReadonlyArray<PeerRecord>, SqlError>;
+  readonly get: (
+    environmentId: string,
+  ) => Effect.Effect<PeerRecord | null, SqlError | PeerSessionReadError>;
+  readonly list: () => Effect.Effect<ReadonlyArray<PeerRecord>, SqlError | PeerSessionReadError>;
   readonly remove: (
     environmentId: string,
   ) => Effect.Effect<{ readonly removed: boolean }, SqlError>;
@@ -96,22 +124,17 @@ interface PeerRow {
   readonly environment_id: string;
   readonly label: string;
   readonly origin: string;
+  readonly credential_expires_at: string | null;
   readonly created_at: string;
+  readonly updated_at: string;
 }
-
-const recordFromRow = (row: PeerRow): PeerRecord => ({
-  environmentId: row.environment_id,
-  label: row.label,
-  origin: row.origin,
-  createdAt: row.created_at,
-});
 
 const decodeHello = Schema.decodeUnknownEffect(PeerHelloResponse);
 
 const reasonOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
 /** GET the peer's hello with the credential it issued; the answer names the peer and whom the credential is for. */
-export const helloAtOrigin = Effect.fn("j5.a2a.peer.hello")(function* (input: {
+const helloAtOrigin = Effect.fn("j5.a2a.peer.hello")(function* (input: {
   readonly origin: string;
   readonly credential: string;
 }) {
@@ -120,12 +143,13 @@ export const helloAtOrigin = Effect.fn("j5.a2a.peer.hello")(function* (input: {
     HttpClientRequest.bearerToken(input.credential),
     HttpClientRequest.acceptJson,
   );
-  const response = yield* client.execute(request).pipe(
-    Effect.timeout(PEER_HELLO_TIMEOUT),
-    Effect.mapError(
-      (cause) => new PeerUnreachableError({ origin: input.origin, reason: reasonOf(cause) }),
-    ),
-  );
+  const response = yield* client
+    .execute(request)
+    .pipe(
+      Effect.mapError(
+        (cause) => new PeerUnreachableError({ origin: input.origin, reason: reasonOf(cause) }),
+      ),
+    );
   if (response.status === 401 || response.status === 403) {
     return yield* new PeerCredentialRejectedError({
       origin: input.origin,
@@ -138,7 +162,7 @@ export const helloAtOrigin = Effect.fn("j5.a2a.peer.hello")(function* (input: {
       reason: `the hello route answered HTTP ${String(response.status)}`,
     });
   }
-  const body = yield* response.json.pipe(
+  return yield* response.json.pipe(
     Effect.flatMap(decodeHello),
     Effect.mapError(
       (cause) =>
@@ -148,34 +172,67 @@ export const helloAtOrigin = Effect.fn("j5.a2a.peer.hello")(function* (input: {
         }),
     ),
   );
-  return body;
 });
+
+/** The whole exchange is bounded: a peer that answers headers and then stalls the body cannot hold a request open. */
+const helloAtOriginBounded = (input: { readonly origin: string; readonly credential: string }) =>
+  helloAtOrigin(input).pipe(
+    Effect.timeoutOrElse({
+      duration: PEER_HELLO_TIMEOUT,
+      orElse: () =>
+        new PeerUnreachableError({
+          origin: input.origin,
+          reason: `no complete hello answer within ${Duration.format(PEER_HELLO_TIMEOUT)}`,
+        }),
+    }),
+  );
 
 export const layer: Layer.Layer<
   PeerRegistryService,
   never,
-  SqlClient.SqlClient | HttpClient.HttpClient | ServerEnvironment.ServerEnvironmentIdentity
+  | SqlClient.SqlClient
+  | HttpClient.HttpClient
+  | ServerEnvironment.ServerEnvironmentIdentity
+  | EnvironmentAuth.EnvironmentAuth
 > = Layer.effect(
   PeerRegistryService,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const httpClient = yield* HttpClient.HttpClient;
     const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
+    const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+
+    /** The subjects that currently hold a live session here; a peer without one cannot deliver to us. */
+    const liveSubjects = serverAuth.listSessions().pipe(
+      Effect.map((sessions) => new Set(sessions.map((session) => session.subject))),
+      Effect.mapError((cause) => new PeerSessionReadError({ cause })),
+    );
+
+    const recordFromRow = (row: PeerRow, live: ReadonlySet<string>): PeerRecord => ({
+      environmentId: row.environment_id,
+      label: row.label,
+      origin: row.origin,
+      credentialExpiresAt: row.credential_expires_at,
+      inboundSession: live.has(peerSubjectForEnvironment(row.environment_id))
+        ? "active"
+        : "missing",
+      createdAt: row.created_at,
+    });
 
     const readRow = Effect.fn("j5.a2a.peer.readRow")(function* (environmentId: string) {
       const rows = yield* sql<PeerRow>`
-        SELECT environment_id, label, origin, created_at
+        SELECT environment_id, label, origin, credential_expires_at, created_at, updated_at
         FROM j5_a2a_peer
         WHERE environment_id = ${environmentId}
         LIMIT 1
       `;
-      return rows[0] === undefined ? null : recordFromRow(rows[0]);
+      return rows[0] ?? null;
     });
 
     const add: PeerRegistryServiceShape["add"] = (input) =>
       Effect.gen(function* () {
         const ourEnvironmentId: EnvironmentId = yield* identity.getEnvironmentId;
-        const hello = yield* helloAtOrigin({
+        const hello = yield* helloAtOriginBounded({
           origin: input.origin,
           credential: input.credential,
         }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
@@ -193,47 +250,58 @@ export const layer: Layer.Layer<
             actualSubject: hello.subject,
           });
         }
-        const label = input.label?.trim() || hello.environmentId;
         const existing = yield* readRow(hello.environmentId);
-        if (existing === null) {
-          yield* sql`
-            INSERT INTO j5_a2a_peer (environment_id, label, origin, credential, created_at, updated_at)
-            VALUES (${hello.environmentId}, ${label}, ${input.origin}, ${input.credential}, ${input.acceptedAt}, ${input.acceptedAt})
-          `;
-        } else {
-          yield* sql`
-            UPDATE j5_a2a_peer
-            SET label = ${label}, origin = ${input.origin}, credential = ${input.credential}, updated_at = ${input.acceptedAt}
-            WHERE environment_id = ${hello.environmentId}
-          `;
-        }
-        const peer = yield* readRow(hello.environmentId);
-        return {
-          peer: peer ?? {
+        if (existing !== null && existing.origin !== input.origin && !input.replaceOrigin) {
+          return yield* new PeerOriginConflictError({
             environmentId: hello.environmentId,
-            label,
-            origin: input.origin,
-            createdAt: input.acceptedAt,
-          },
-          created: existing === null,
-        };
+            recordedOrigin: existing.origin,
+            requestedOrigin: input.origin,
+          });
+        }
+        const label = input.label?.trim() || hello.environmentId;
+        const expiresAt = hello.credentialExpiresAt ?? null;
+        // One statement records or rotates; created_at survives an update.
+        const rows = yield* sql<PeerRow>`
+          INSERT INTO j5_a2a_peer (environment_id, label, origin, credential, credential_expires_at, created_at, updated_at)
+          VALUES (${hello.environmentId}, ${label}, ${input.origin}, ${input.credential}, ${expiresAt}, ${input.acceptedAt}, ${input.acceptedAt})
+          ON CONFLICT(environment_id) DO UPDATE SET
+            label = excluded.label,
+            origin = excluded.origin,
+            credential = excluded.credential,
+            credential_expires_at = excluded.credential_expires_at,
+            updated_at = excluded.updated_at
+          RETURNING environment_id, label, origin, credential_expires_at, created_at, updated_at
+        `;
+        const row = rows[0]!;
+        const live = yield* liveSubjects;
+        return { peer: recordFromRow(row, live), created: existing === null };
+      });
+
+    const get: PeerRegistryServiceShape["get"] = (environmentId) =>
+      Effect.gen(function* () {
+        const row = yield* readRow(environmentId);
+        if (row === null) return null;
+        return recordFromRow(row, yield* liveSubjects);
       });
 
     const list: PeerRegistryServiceShape["list"] = () =>
-      sql<PeerRow>`
-        SELECT environment_id, label, origin, created_at
-        FROM j5_a2a_peer
-        ORDER BY label, environment_id
-      `.pipe(Effect.map((rows) => rows.map(recordFromRow)));
-
-    const remove: PeerRegistryServiceShape["remove"] = (environmentId) =>
       Effect.gen(function* () {
-        const existing = yield* readRow(environmentId);
-        if (existing === null) return { removed: false };
-        yield* sql`DELETE FROM j5_a2a_peer WHERE environment_id = ${environmentId}`;
-        return { removed: true };
+        const rows = yield* sql<PeerRow>`
+          SELECT environment_id, label, origin, credential_expires_at, created_at, updated_at
+          FROM j5_a2a_peer
+          ORDER BY label, environment_id
+        `;
+        if (rows.length === 0) return [];
+        const live = yield* liveSubjects;
+        return rows.map((row) => recordFromRow(row, live));
       });
 
-    return PeerRegistryService.of({ add, list, remove });
+    const remove: PeerRegistryServiceShape["remove"] = (environmentId) =>
+      sql<{ readonly environment_id: string }>`
+        DELETE FROM j5_a2a_peer WHERE environment_id = ${environmentId}
+        RETURNING environment_id
+      `.pipe(Effect.map((rows) => ({ removed: rows.length > 0 })));
+
+    return PeerRegistryService.of({ add, get, list, remove });
   }),
 );
