@@ -16,7 +16,6 @@ const agent = (participantId: string, overrides: Partial<FleetAgent> = {}): Flee
   threadId: `thread:${participantId}`,
   displayName: participantId,
   origin: "human",
-  archived: false,
   placementParentId: null,
   crew: null,
   openAsks: 0,

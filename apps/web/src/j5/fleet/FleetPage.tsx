@@ -533,23 +533,15 @@ function FleetRowItem(
       : props.threadsByKey.get(
           scopedThreadKey(scopeThreadRef(props.environmentId, ThreadId.make(agent.threadId))),
         );
-  const status =
-    thread === undefined || agent.archived ? null : resolveThreadStatusPill({ thread });
+  const status = thread === undefined ? null : resolveThreadStatusPill({ thread });
   const title = thread?.title ?? agent.displayName ?? agent.participantId;
-  // A retired placeholder (fleet-page AC11) has no facts to measure: its cells read "n/a", not "?".
-  const lastActivity = agent.archived
-    ? "n/a"
-    : thread === undefined
-      ? "?"
-      : formatElapsedDurationLabel(thread.updatedAt) || "just now";
+  const lastActivity =
+    thread === undefined ? "?" : formatElapsedDurationLabel(thread.updatedAt) || "just now";
   return (
     <li>
       <button
         type="button"
-        className={cn(
-          "grid w-full grid-cols-[minmax(0,1fr)_8rem_5rem_7rem] items-center gap-3 px-3 py-2 text-left text-sm outline-hidden hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default",
-          agent.archived && "opacity-60",
-        )}
+        className="grid w-full grid-cols-[minmax(0,1fr)_8rem_5rem_7rem] items-center gap-3 px-3 py-2 text-left text-sm outline-hidden hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
         style={{ paddingInlineStart: `${0.75 + props.row.depth * 1.25}rem` }}
         disabled={agent.threadId === null}
         onClick={() => {
@@ -574,9 +566,7 @@ function FleetRowItem(
         </span>
         <span className="flex items-center gap-1.5 text-xs">
           {status === null ? (
-            <span className="text-muted-foreground">
-              {agent.archived ? "Retired" : thread === undefined ? "?" : "Idle"}
-            </span>
+            <span className="text-muted-foreground">{thread === undefined ? "?" : "Idle"}</span>
           ) : (
             <>
               <span aria-hidden className={cn("size-1.5 rounded-full", status.dotClass)} />

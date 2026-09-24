@@ -94,14 +94,27 @@ export function formatArchiveWarning(input: {
     crews.state === "known" &&
     crews.crews.some((crew) => crew.seats.some((seat) => seat.runningTurn || seat.openAsks > 0));
 
+  // Seats of a commanded Crew retire with it and are listed there; every other agent placed
+  // beneath keeps running, since an archive touches one agent.
+  const crewSeatIds = new Set(
+    (liveCrews ?? []).flatMap((crew) => crew.seats.map((seat) => seat.participantId)),
+  );
+  const keptRunning =
+    facts.placementSubtree.state === "known"
+      ? facts.placementSubtree.participantIds.filter(
+          (participantId) => !crewSeatIds.has(participantId),
+        )
+      : [];
   const placement: ArchiveWarningPlacement =
     facts.placementSubtree.state === "known"
-      ? {
-          state: "known",
-          participants: facts.placementSubtree.participantIds.map((participantId) =>
-            displayParticipant(participantId, participantLabels),
-          ),
-        }
+      ? keptRunning.length === 0
+        ? { state: "none" }
+        : {
+            state: "known",
+            participants: keptRunning.map((participantId) =>
+              displayParticipant(participantId, participantLabels),
+            ),
+          }
       : facts.placementSubtree.state === "unknown"
         ? { state: "unknown" }
         : { state: "none" };
