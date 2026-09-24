@@ -2344,7 +2344,6 @@ export default function ChatView(props: ChatViewProps) {
   const effectiveSquadronId = resolveEffectiveSquadronId({
     durableHome: durableSquadronHome,
     draftSquadronId: draftSquadron.squadronId,
-    ambientSquadronId,
   });
   const effectiveSquadronName =
     squadrons.find(
@@ -10766,7 +10765,6 @@ export default function ChatView(props: ChatViewProps) {
                           {squadronDraftChip.visible ? (
                             <div className="flex px-3 pt-2">
                               <SquadronDraftChip
-                                ambientSquadronScope={ambientSquadronScope}
                                 environmentId={environmentId}
                                 draftKey={routeThreadKey}
                                 draftId={draftId}

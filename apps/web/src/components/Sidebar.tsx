@@ -2295,10 +2295,6 @@ export default function Sidebar() {
     },
   });
   const newThreadContext = useHandleNewThread();
-  const openAddProjectCommandPalette = useCallback(
-    () => openCommandPalette({ open: "add-project" }),
-    [],
-  );
   const environments = useEnvironmentIdentities();
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -4439,7 +4435,9 @@ export default function Sidebar() {
                   onCreateOpenChange={setSquadronCreateOpen}
                 />
               }
-              onNewProject={openAddProjectCommandPalette}
+              // J5 (case 16): the header's add-folder button creates a Squadron (name, then
+              // folder) instead of opening a Squadron-less draft in a bare folder.
+              onNewProject={() => setSquadronCreateOpen(true)}
               onNewThread={handleNewThreadClick}
               newThreadDisabled={projects.length === 0}
               newThreadShortcutLabel={newThreadShortcutLabel}

@@ -27,7 +27,7 @@ import { resolveSquadronScope } from "./SquadronScope.logic";
 /**
  * Sidebar-zone-only ambient context. It never selects a Squadron for a draft.
  * `header` renders the compact trigger for upstream's SidebarThreadHeader scope
- * slot: an icon while every Squadron is shown, plus the name once one is scoped.
+ * slot: an icon while every Squadron is shown, plus the capped name once one is scoped.
  */
 type SquadronScopeDropdownProps = { readonly variant?: "row" | "header" } & (
   | {
@@ -85,22 +85,21 @@ export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
         {props.variant === "header" ? (
           <MenuTrigger
             render={
-              <SidebarHeaderIconButton
-                label={
-                  selected === null
-                    ? "Squadron scope: All Squadrons"
-                    : `Squadron scope: ${selected.name}`
-                }
-                className={selected === null ? undefined : "w-auto max-w-32"}
-              />
+              selected === null ? (
+                <SidebarHeaderIconButton label="Squadron scope: All Squadrons" />
+              ) : (
+                // The sidebar's own 28px text size keeps the neighbours' height and hover; the
+                // width cap leaves Search its label, and the tooltip carries the full name.
+                <SidebarHeaderIconButton
+                  label={`Squadron scope: ${selected.name}`}
+                  size="sm"
+                  className="w-auto max-w-22"
+                />
+              )
             }
           >
-            <span className="flex min-w-0 items-center gap-1.5 px-1">
-              <RadioIcon className="size-4 shrink-0" />
-              {selected === null ? null : (
-                <span className="min-w-0 truncate text-xs font-medium">{selected.name}</span>
-              )}
-            </span>
+            <RadioIcon />
+            {selected === null ? null : <span className="min-w-0 truncate">{selected.name}</span>}
           </MenuTrigger>
         ) : (
           <MenuTrigger

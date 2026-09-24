@@ -127,7 +127,7 @@ export function SidebarThreadHeader({
         {hasProjects ? (
           <>
             {projectScope}
-            <SidebarHeaderIconButton label="New folder" onClick={onNewProject}>
+            <SidebarHeaderIconButton label="New Squadron" onClick={onNewProject}>
               <FolderPlusIcon />
             </SidebarHeaderIconButton>
           </>

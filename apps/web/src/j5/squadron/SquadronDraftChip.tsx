@@ -4,7 +4,6 @@ import { useClientSettings } from "../../hooks/useSettings";
 import { selectProjectGroupingSettings } from "../../logicalProject";
 import { retargetSquadronDraft } from "./retargetSquadronDraft";
 import type { EnvironmentId } from "@t3tools/contracts";
-import type { ScopedSquadronRef } from "@t3tools/contracts/j5";
 import { RadioIcon } from "lucide-react";
 
 import {
@@ -17,21 +16,19 @@ import {
 import { Button } from "../../components/ui/button";
 import { useSquadronDirectory } from "./SquadronDirectory";
 import { selectDraftSquadron, useSquadronDraftScope } from "./SquadronDraftState";
-import { type DurableSquadronHome } from "./SquadronScope.logic";
+import { type DurableSquadronHome, resolveEffectiveSquadronId } from "./SquadronScope.logic";
 
 /** The only draft-local mutable Squadron control; its owner freezes it at first send. */
 export function SquadronDraftChip({
   draftKey,
   draftId,
   environmentId,
-  ambientSquadronScope,
   durableHome,
   frozen,
 }: {
   readonly draftKey: string;
   readonly draftId: DraftId | null;
   readonly environmentId: EnvironmentId;
-  readonly ambientSquadronScope: ScopedSquadronRef | null;
   readonly durableHome: DurableSquadronHome | null;
   readonly frozen: boolean;
 }) {
@@ -50,11 +47,8 @@ export function SquadronDraftChip({
           (project) => project.environmentId === environmentId && project.id === projectIds[0],
         ) ?? null,
     }));
-  const selectedId =
-    draft.squadronId ??
-    (ambientSquadronScope?.environmentId === environmentId
-      ? ambientSquadronScope.squadronId
-      : null);
+  // Only what first send would carry; ambient sidebar scope stays "Choose Squadron".
+  const selectedId = resolveEffectiveSquadronId({ durableHome, draftSquadronId: draft.squadronId });
   const selected = durableHome ?? choices.find((choice) => choice.id === selectedId);
 
   return (
