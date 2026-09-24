@@ -92,7 +92,7 @@ The Fleet page is **not** the inbox: it never demands a reply. It is **not** a p
 ### Crews
 
 27. A Crew's header offers Stop crew while a seat is running and Archive crew always; Archive crew shows the seats with their running turns and open asks before retiring the Crew as a unit ([Crews](crews.md) AC17, AC21).
-28. A Squadron's retired Crews are listed, collapsed, beneath its agents with the brief, the roster snapshot (seat, agent, who approved it and why, the version it joined at), when it retired, and a way to the Captain's thread; nothing about a retired Crew is inferred ([Crews](crews.md) AC20).
+28. A Squadron's retired Crews are listed, collapsed, beneath its agents, one row each showing the Crew's version and when it retired; a row opens to its Captain, the brief, and the roster snapshot (seat, agent, who approved it and why, the version it joined at). The Captain is a link to its thread, which holds the Crew's ledger, while that thread is active; an archived Captain is named as such, with where to unarchive it. A retired Crew offers no other action, since it can never be reactivated, and nothing about it is inferred ([Crews](crews.md) AC20).
 
 ## Scenarios
 
