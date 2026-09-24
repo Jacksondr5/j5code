@@ -2,7 +2,7 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { ProviderInstanceId } from "@t3tools/contracts";
+import { ProviderInstanceId, type SkillCatalogReplacement } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { stringify } from "yaml";
@@ -128,6 +128,172 @@ it("rolls back a newly created link if its ownership identity cannot be read", a
       code: "ENOENT",
     });
   expect((await loadState(stateDir)).links).toEqual([]);
+});
+
+describe("confirmed catalog replacements", () => {
+  async function preview(broken = false) {
+    const old = NodePath.join(root, "old-catalog");
+    await writeCatalog(old);
+    for (const dir of dirs()) {
+      await NodeFSP.mkdir(dir, { recursive: true });
+      await NodeFSP.symlink(
+        NodePath.join(old, "skills", "explain"),
+        NodePath.join(dir, "explain"),
+        linkType,
+      );
+    }
+    if (broken) await NodeFSP.rm(old, { recursive: true });
+    const result = await apply(["core"]);
+    return result.conflicts.map((conflict) => {
+      expect(conflict.replacement).toBeDefined();
+      return conflict.replacement!;
+    });
+  }
+  async function replace(
+    replacements: ReadonlyArray<SkillCatalogReplacement>,
+    selected = ["core"],
+  ) {
+    return runApply({
+      catalog: await loadCatalog(NodePath.join(catalogDir, "catalog.yaml")),
+      catalogDir,
+      stateDir,
+      targets,
+      state: await loadState(stateDir),
+      selected,
+      windows,
+      replacements,
+    });
+  }
+
+  it.each([false, true])(
+    "replaces only confirmed external links, including broken links (%s)",
+    async (broken) => {
+      const [chosen, other] = await preview(broken);
+      const result = await replace([chosen!]);
+      expect(result).toMatchObject({ installed: 1, removed: 0, failed: [] });
+      expect(result.conflicts.map((conflict) => conflict.linkPath)).toEqual([other!.linkPath]);
+      expect(await NodeFSP.realpath(chosen!.linkPath)).toBe(await NodeFSP.realpath(chosen!.target));
+      expect(await NodeFSP.readlink(other!.linkPath)).toBe(other!.currentTarget);
+      expect((await loadState(stateDir)).links).toEqual([
+        { path: chosen!.linkPath, target: chosen!.target },
+      ]);
+      if (!broken)
+        expect(
+          (await NodeFSP.stat(NodePath.join(chosen!.currentTarget, "SKILL.md"))).isFile(),
+        ).toBe(true);
+      expect(await apply([])).toMatchObject({ removed: 1 });
+      expect(await NodeFSP.readlink(other!.linkPath)).toBe(other!.currentTarget);
+    },
+  );
+
+  it.each(["file", "directory", "target", "identity", "missing"])(
+    "rejects a link changed to %s before any mutation",
+    async (change) => {
+      const requests = await preview();
+      const chosen = requests[0]!;
+      const saved = await NodeFSP.readFile(stateFilePath(stateDir), "utf8");
+      await NodeFSP.rename(chosen.linkPath, chosen.linkPath + ".old");
+      if (change === "file") await NodeFSP.writeFile(chosen.linkPath, "keep");
+      if (change === "directory") await NodeFSP.mkdir(chosen.linkPath);
+      if (change === "target" || change === "identity") {
+        await NodeFSP.symlink(
+          change === "identity" ? chosen.currentTarget : catalogDir,
+          chosen.linkPath,
+          linkType,
+        );
+      }
+      await expect(replace(requests)).rejects.toThrow("changed since preview");
+      expect(await NodeFSP.readFile(stateFilePath(stateDir), "utf8")).toBe(saved);
+      expect(await NodeFSP.readlink(requests[1]!.linkPath)).toBe(requests[1]!.currentTarget);
+      if (change === "file") expect(await NodeFSP.readFile(chosen.linkPath, "utf8")).toBe("keep");
+      if (change === "directory")
+        expect((await NodeFSP.lstat(chosen.linkPath)).isDirectory()).toBe(true);
+    },
+  );
+
+  it("refuses non-link conflicts and forged or out-of-scope replacements", async () => {
+    const [chosen] = await preview();
+    const requests = [
+      [{ ...chosen!, linkPath: NodePath.join(root, "elsewhere") }],
+      [{ ...chosen!, target: NodePath.join(root, "other-source") }],
+      [{ ...chosen!, identity: "stale" }],
+      [chosen!, chosen!],
+    ];
+    for (const request of requests)
+      await expect(replace(request)).rejects.toThrow("changed since preview");
+    await expect(replace([chosen!], [])).rejects.toThrow("changed since preview");
+    await NodeFSP.unlink(chosen!.linkPath);
+    await NodeFSP.mkdir(chosen!.linkPath);
+    const result = await apply(["core"]);
+    expect(
+      result.conflicts.find((conflict) => conflict.linkPath === chosen!.linkPath)?.replacement,
+    ).toBeUndefined();
+    await expect(replace([chosen!])).rejects.toThrow("changed since preview");
+  });
+
+  it("does not apply unrelated additions or removals during link replacement", async () => {
+    const [chosen, other] = await preview();
+    const owned = NodePath.join(await canonicalSkillRoot(dirs()[0]!), "retired");
+    const oldTarget = NodePath.join(root, "retired-source");
+    await NodeFSP.symlink(oldTarget, owned, linkType);
+    const state = await loadState(stateDir);
+    await saveState(stateDir, {
+      ...state,
+      links: [...state.links, { path: owned, target: oldTarget }],
+    });
+    await NodeFSP.unlink(other!.linkPath);
+    expect(await replace([chosen!])).toMatchObject({ installed: 1, removed: 0 });
+    expect(await NodeFSP.readlink(owned)).toBe(oldTarget);
+    await expect(NodeFSP.lstat(other!.linkPath)).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await loadState(stateDir)).links).toContainEqual({ path: owned, target: oldTarget });
+  });
+
+  it("rejects a confirmation after another client changes the saved selection", async () => {
+    const requests = await preview();
+    await saveState(stateDir, { ...(await loadState(stateDir)), groups: [] });
+    await expect(replace(requests)).rejects.toThrow("selection changed since preview");
+    for (const request of requests)
+      expect(await NodeFSP.readlink(request.linkPath)).toBe(request.currentTarget);
+    expect((await loadState(stateDir)).groups).toEqual([]);
+  });
+
+  it("checks identity again immediately before replacing a same-target link", async () => {
+    const [chosen] = await preview();
+    await NodeFSP.rename(chosen!.linkPath, chosen!.linkPath + ".old");
+    await NodeFSP.symlink(chosen!.currentTarget, chosen!.linkPath, linkType);
+    const result = await applyPlan(
+      {
+        removals: [],
+        additions: [
+          {
+            skill: "explain",
+            linkPath: chosen!.linkPath,
+            target: chosen!.target,
+            replace: true,
+            previousTarget: chosen!.currentTarget,
+            previousIdentity: chosen!.identity,
+          },
+        ],
+      },
+      { windows },
+    );
+    expect(result.applied).toEqual([]);
+    expect(result.failed[0]?.error).toContain("changed since inspection");
+    expect(await NodeFSP.readlink(chosen!.linkPath)).toBe(chosen!.currentTarget);
+  });
+
+  it("restores external links and leaves ownership unchanged when state saving fails", async () => {
+    const requests = await preview(true);
+    const saved = await loadState(stateDir);
+    vi.spyOn(NodeFSP, "rename").mockRejectedValueOnce(new Error("save denied"));
+    await expect(replace(requests)).rejects.toMatchObject({
+      name: "IncompleteApplyError",
+      result: { installed: 0, removed: 0 },
+    });
+    expect(await loadState(stateDir)).toEqual(saved);
+    for (const request of requests)
+      expect(await NodeFSP.readlink(request.linkPath)).toBe(request.currentTarget);
+  });
 });
 
 describe("catalog validation and selection", () => {

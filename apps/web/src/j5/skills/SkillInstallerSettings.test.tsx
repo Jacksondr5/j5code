@@ -114,6 +114,17 @@ vi.mock("../../components/ui/input", () => ({
   Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
 }));
 
+vi.mock("../../components/ui/dialog", () => ({
+  Dialog: ({ children, open }: { children: React.ReactNode; open: boolean }) =>
+    open ? children : null,
+  DialogPopup: ({ children }: { children: React.ReactNode }) => <div role="dialog">{children}</div>,
+  DialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
+  DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogPanel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
+}));
+
 vi.mock("../../components/ui/select", () => ({
   Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SelectItem: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -207,6 +218,104 @@ describe("SkillCatalogPanel source identity", () => {
     state.applyCalls = [];
     state.updateCalls = [];
     vi.mocked(openCommandPalette).mockClear();
+  });
+
+  const conflicts = ["codex", "claude"].map((provider) => ({
+    skill: "explain",
+    linkPath: `/${provider}/explain`,
+    detail: "Existing link",
+    replacement: {
+      linkPath: `/${provider}/explain`,
+      currentTarget: "/deleted-catalog/skills/explain",
+      target: "/state/a/skills/explain",
+      identity: `identity-${provider}`,
+    },
+  }));
+  async function renderConflicts() {
+    setStatusLoaded("/catalog/A");
+    state.applyImpl = async () => ({
+      _tag: "Success",
+      value: {
+        selectedGroups: ["core"],
+        installed: 0,
+        removed: 0,
+        unchanged: 0,
+        conflicts,
+        failed: [],
+      },
+    });
+    const renderer = await renderPanel();
+    await act(async () => applyButton(renderer).props.onClick());
+    return renderer;
+  }
+  it("previews both targets and replaces only selected links after confirmation", async () => {
+    const renderer = await renderConflicts();
+    await act(async () => buttonByText(renderer, "Use this catalog…").props.onClick());
+    expect(state.applyCalls).toHaveLength(1);
+    expect(JSON.stringify(renderer.toJSON())).toContain("/deleted-catalog/skills/explain");
+    expect(JSON.stringify(renderer.toJSON())).toContain("/state/a/skills/explain");
+    const checkbox = renderer.root.findByProps({ "aria-label": "Replace /claude/explain" });
+    await act(async () => checkbox.props.onChange({ target: { checked: false } }));
+    state.applyImpl = async () => ({
+      _tag: "Success",
+      value: {
+        selectedGroups: ["core"],
+        installed: 1,
+        removed: 0,
+        unchanged: 0,
+        conflicts: [conflicts[1]],
+        failed: [],
+      },
+    });
+    await act(async () => buttonByText(renderer, "Replace selected links").props.onClick());
+    expect(state.applyCalls[1]).toEqual({
+      environmentId,
+      input: {
+        expectedSource: "/catalog/A",
+        groups: ["core"],
+        replacements: [conflicts[0]!.replacement],
+      },
+    });
+    expect(renderer.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+    expect(allParagraphText(renderer)).toContain("Installed 1 links");
+    expect(state.status.refresh).toHaveBeenCalledTimes(2);
+    await act(async () => renderer.unmount());
+  });
+  it("allows canceling and disables replacement when no links are selected", async () => {
+    const renderer = await renderConflicts();
+    await act(async () => buttonByText(renderer, "Use this catalog…").props.onClick());
+    for (const conflict of conflicts) {
+      await act(async () =>
+        renderer.root
+          .findByProps({ "aria-label": `Replace ${conflict.linkPath}` })
+          .props.onChange({ target: { checked: false } }),
+      );
+    }
+    expect(buttonByText(renderer, "Replace selected links").props.disabled).toBe(true);
+    await act(async () => buttonByText(renderer, "Cancel").props.onClick());
+    expect(renderer.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+    expect(state.applyCalls).toHaveLength(1);
+    await act(async () => renderer.unmount());
+  });
+  it("dismisses the replacement preview when the environment's source changes", async () => {
+    const renderer = await renderConflicts();
+    await act(async () => buttonByText(renderer, "Use this catalog…").props.onClick());
+    state.configuredSource = "/catalog/B";
+    setStatusLoaded("/catalog/B");
+    await rerender(renderer);
+    expect(renderer.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+    expect(JSON.stringify(renderer.toJSON())).not.toContain("/deleted-catalog/skills/explain");
+    expect(state.applyCalls).toHaveLength(1);
+    await act(async () => renderer.unmount());
+  });
+  it("requires a new Apply after the group selection changes", async () => {
+    const renderer = await renderConflicts();
+    await act(async () =>
+      renderer.root.findByProps({ "aria-label": "Install core group" }).props.onChange(),
+    );
+    expect(buttonByText(renderer, "Use this catalog…").props.disabled).toBe(true);
+    expect(state.applyCalls).toHaveLength(1);
+    await act(async () => renderer.unmount());
   });
 
   it.each(["/catalog/chosen", "https://github.com/example/skills.git"])(

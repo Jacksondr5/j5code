@@ -158,9 +158,12 @@ may need restarting to discover changes.
 
 Catalog skills are installed as links, so keep the catalog folder in place. Ownership belongs
 to the environment that created each link, while provider skill folders can be
-shared by several environments on one machine. Existing files and links owned
-elsewhere are preserved. Remove owned links before deleting the environment's
-state or its catalog folder.
+shared by several environments on one machine. When Apply reports a conflicting link,
+choose **Use this catalog…** to review its current and replacement targets. Confirm
+only the links you want to move, including links whose old folder is missing. This
+changes the shared provider link for every environment using it; source folders
+are kept. Existing files and directories cannot be replaced this way. Remove owned
+links before deleting the environment's state or its catalog folder.
 
 Use **Link…** on a standalone skill to link its whole folder to another Codex or
 Claude instance in the same environment. Choose user scope or an existing project,

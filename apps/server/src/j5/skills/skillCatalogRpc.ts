@@ -131,7 +131,11 @@ export const makeSkillCatalogRpcHandlers = Effect.fn("j5.makeSkillCatalogRpcHand
             // Partial failures can still change links. Preserve the apply result
             // while publishing fresh discovery to every connected client.
             return yield* tool
-              .apply({ source, groups: [...input.groups] })
+              .apply({
+                source,
+                groups: input.groups,
+                ...(input.replacements ? { replacements: input.replacements } : {}),
+              })
               .pipe(Effect.ensuring(refresh));
           }),
           TRACE,
