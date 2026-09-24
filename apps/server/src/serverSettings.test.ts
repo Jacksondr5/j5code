@@ -33,6 +33,15 @@ import { resolveProviderInstanceTerminalEnvironment } from "./terminal/Manager.t
 const decodeSettingsPatch = Schema.decodeUnknownEffect(ServerSettingsPatch);
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
 const decodeServerSettingsJson = Schema.decodeUnknownEffect(Schema.fromJsonString(ServerSettings));
+const decodeServerSettingsSync = Schema.decodeUnknownSync(ServerSettings);
+
+it("hides credential-bearing catalog URLs left in older settings", () => {
+  const settings = decodeServerSettingsSync({
+    skillCatalogSource: "https://user:token@example.com/repo.git",
+  });
+  assert.equal(ServerSettingsModule.redactServerSettingsForClient(settings).skillCatalogSource, "");
+  assert.equal(settings.skillCatalogSource, "https://user:token@example.com/repo.git");
+});
 
 const makeServerSettingsLayer = () =>
   ServerSettingsModule.layer.pipe(

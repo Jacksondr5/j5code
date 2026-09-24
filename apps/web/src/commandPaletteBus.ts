@@ -17,6 +17,11 @@ export interface CommandPaletteProjectSelection {
   readonly workspaceRoot: string;
 }
 
+export interface CommandPaletteSourcePicker {
+  readonly environmentId: EnvironmentId;
+  readonly onSelect: (source: string) => void;
+}
+
 export interface CommandPaletteOpenDetail {
   readonly open?: "add-project" | "new-thread-in";
   readonly query?: string;
@@ -26,6 +31,8 @@ export interface CommandPaletteOpenDetail {
    * Absent callers retain the normal Add Project navigation behavior.
    */
   readonly onProjectSelected?: (selection: CommandPaletteProjectSelection) => void;
+  /** Select an existing folder or repository URL without creating a project or cloning. */
+  readonly sourcePicker?: CommandPaletteSourcePicker;
 }
 
 /** Returns whether an opt-in caller consumed the selection. */

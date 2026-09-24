@@ -120,6 +120,7 @@ import {
   onOpenCommandPalette,
   returnCommandPaletteProjectSelection,
   type CommandPaletteProjectSelection,
+  type CommandPaletteSourcePicker,
 } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -457,14 +458,21 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   const [onProjectSelected, setOnProjectSelected] = useState<
     ((selection: CommandPaletteProjectSelection) => void) | undefined
   >(undefined);
+  const [sourcePicker, setSourcePicker] = useState<CommandPaletteSourcePicker | undefined>();
+  const sourcePickerRef = useRef<CommandPaletteSourcePicker | undefined>(undefined);
   const setOpen = useCallback((open: boolean) => {
-    if (!open) setOnProjectSelected(undefined);
+    if (!open) {
+      setOnProjectSelected(undefined);
+      setSourcePicker(undefined);
+      sourcePickerRef.current = undefined;
+    }
     dispatch({ _tag: "SetOpen", open });
   }, []);
-  const toggleMode = useCallback(
-    (mode: SearchOverlayMode) => dispatch({ _tag: "ToggleMode", mode }),
-    [],
-  );
+  const toggleMode = useCallback((mode: SearchOverlayMode) => {
+    setSourcePicker(undefined);
+    sourcePickerRef.current = undefined;
+    dispatch({ _tag: "ToggleMode", mode });
+  }, []);
   const openAddProject = useCallback(() => dispatch({ _tag: "OpenAddProject" }), []);
   const openNewThreadIn = useCallback(() => dispatch({ _tag: "OpenNewThreadIn" }), []);
   const clearOpenIntent = useCallback(() => dispatch({ _tag: "ClearOpenIntent" }), []);
@@ -572,6 +580,21 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       onOpenCommandPalette((detail) => {
+        const picker = detail.open === "add-project" ? detail.sourcePicker : undefined;
+        sourcePickerRef.current = picker;
+        setSourcePicker(
+          picker
+            ? {
+                ...picker,
+                onSelect: (source) => {
+                  // A cancelled lookup must not fill the field or close a newer picker.
+                  if (sourcePickerRef.current !== picker) return;
+                  picker.onSelect(source);
+                  setOpen(false);
+                },
+              }
+            : undefined,
+        );
         setOnProjectSelected(() =>
           detail.open === "add-project" ? detail.onProjectSelected : undefined,
         );
@@ -616,6 +639,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           openOverlayMode={toggleMode}
           clearOpenIntent={clearOpenIntent}
           onProjectSelected={onProjectSelected}
+          sourcePicker={sourcePicker}
         />
       </CommandDialog>
     </ComposerHandleContext>
@@ -629,6 +653,7 @@ function CommandPaletteDialog(props: {
   readonly openOverlayMode: (mode: SearchOverlayMode) => void;
   readonly clearOpenIntent: () => void;
   readonly onProjectSelected: ((selection: CommandPaletteProjectSelection) => void) | undefined;
+  readonly sourcePicker: CommandPaletteSourcePicker | undefined;
 }) {
   const composerHandleRef = useComposerHandleContext();
 
@@ -639,7 +664,9 @@ function CommandPaletteDialog(props: {
           ? "File picker"
           : props.mode === "content"
             ? "Search project contents"
-            : "Command palette"
+            : props.sourcePicker
+              ? "Choose source"
+              : "Command palette"
       }
       className={cn("overflow-hidden", props.mode === "content" && "h-105")}
       data-command-palette="true"
@@ -664,6 +691,7 @@ function CommandPaletteDialog(props: {
           openOverlayMode={props.openOverlayMode}
           clearOpenIntent={props.clearOpenIntent}
           onProjectSelected={props.onProjectSelected}
+          sourcePicker={props.sourcePicker}
         />
       )}
     </CommandDialogPopup>
@@ -676,10 +704,12 @@ function OpenCommandPaletteDialog(props: {
   readonly openOverlayMode: (mode: SearchOverlayMode) => void;
   readonly clearOpenIntent: () => void;
   readonly onProjectSelected: ((selection: CommandPaletteProjectSelection) => void) | undefined;
+  readonly sourcePicker: CommandPaletteSourcePicker | undefined;
 }) {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
-  const { clearOpenIntent, onProjectSelected, openIntent, openOverlayMode, setOpen } = props;
+  const { clearOpenIntent, onProjectSelected, openIntent, openOverlayMode, setOpen, sourcePicker } =
+    props;
   const [query, setQuery] = useState(openIntent?.kind === "search" ? openIntent.query : "");
   const [linkedThreadSearch, setLinkedThreadSearch] = useState(
     openIntent?.kind === "search" ? openIntent : null,
@@ -970,7 +1000,8 @@ function OpenCommandPaletteDialog(props: {
       }) ?? null,
     [addProjectEnvironmentOptions, environments],
   );
-  const browseEnvironmentId = addProjectEnvironmentId ?? defaultAddProjectEnvironmentId;
+  const browseEnvironmentId =
+    sourcePicker?.environmentId ?? addProjectEnvironmentId ?? defaultAddProjectEnvironmentId;
   const browseEnvironment =
     environments.find((environment) => environment.environmentId === browseEnvironmentId) ?? null;
   // A desktop-local secondary backend (today: the WSL backend). The picker is
@@ -1159,6 +1190,7 @@ function OpenCommandPaletteDialog(props: {
   useEffect(
     () => () => {
       browseNavigation.invalidate();
+      cloneLookupGeneration.current += 1;
     },
     [browseNavigation],
   );
@@ -1328,6 +1360,12 @@ function OpenCommandPaletteDialog(props: {
 
   function popView(): void {
     browseNavigation.invalidate();
+    cloneLookupGeneration.current += 1;
+    setIsRemoteProjectLookingUp(false);
+    if (sourcePicker && viewStack.length <= 1) {
+      setOpen(false);
+      return;
+    }
     setAddProjectCloneFlow(null);
     if (viewStack.length <= 1) {
       setAddProjectEnvironmentId(null);
@@ -1339,6 +1377,8 @@ function OpenCommandPaletteDialog(props: {
 
   function handleQueryChange(nextQuery: string): void {
     browseNavigation.invalidate();
+    cloneLookupGeneration.current += 1;
+    setIsRemoteProjectLookingUp(false);
     setHighlightedItemValue(null);
     setQuery(nextQuery);
     if (nextQuery === "" && currentView?.initialQuery) {
@@ -1426,8 +1466,10 @@ function OpenCommandPaletteDialog(props: {
         const title = source === "url" ? "Git URL" : `${label} repository`;
         const description =
           source === "url"
-            ? "Clone from a remote URL"
-            : `Clone ${label} ${remoteProjectSourcePathHint(source)}`;
+            ? sourcePicker
+              ? "Choose a remote URL"
+              : "Clone from a remote URL"
+            : `${sourcePicker ? "Choose" : "Clone"} ${label} ${remoteProjectSourcePathHint(source)}`;
         const readiness = readinessBySource[source];
         const disabledHint = readiness.hint;
 
@@ -1486,7 +1528,7 @@ function OpenCommandPaletteDialog(props: {
 
       return [{ value: `sources:${environmentId}`, label: "Sources", items: sourceItems }];
     },
-    [openSourceControlSettings, startAddProjectBrowse, startAddProjectClone],
+    [openSourceControlSettings, sourcePicker, startAddProjectBrowse, startAddProjectClone],
   );
 
   const startAddProjectSourceSelection = useCallback(
@@ -1601,8 +1643,15 @@ function OpenCommandPaletteDialog(props: {
       return;
     }
     clearOpenIntent();
-    openAddProjectFlow();
-  }, [clearOpenIntent, openAddProjectFlow, openIntent]);
+    if (sourcePicker) startAddProjectSourceSelection(sourcePicker.environmentId);
+    else openAddProjectFlow();
+  }, [
+    clearOpenIntent,
+    openAddProjectFlow,
+    openIntent,
+    sourcePicker,
+    startAddProjectSourceSelection,
+  ]);
 
   useLayoutEffect(() => {
     if (openIntent?.kind !== "new-thread-in" || squadronThreadItems.length === 0) {
@@ -2080,6 +2129,22 @@ function OpenCommandPaletteDialog(props: {
       const cwd = resolveProjectPathForDispatch(rawCwd, input.currentProjectCwd);
       if (cwd.length === 0) return;
 
+      if (sourcePicker) {
+        if (input.environmentId !== sourcePicker.environmentId) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Choose a folder in the selected environment",
+              description:
+                "Select the matching environment in Skills, then choose the folder again.",
+            }),
+          );
+          return;
+        }
+        sourcePicker.onSelect(cwd);
+        return;
+      }
+
       const existing = findProjectByPath(
         projects.filter((project) => project.environmentId === input.environmentId),
         cwd,
@@ -2194,6 +2259,7 @@ function OpenCommandPaletteDialog(props: {
       providers,
       setOpen,
       onProjectSelected,
+      sourcePicker,
       clientSettings.sidebarThreadSortOrder,
       buildSquadronItems,
       openSquadronFromSearch,
@@ -2247,6 +2313,10 @@ function OpenCommandPaletteDialog(props: {
 
       const provider = remoteProjectSourceProvider(addProjectCloneFlow.source);
       if (!provider) {
+        if (sourcePicker) {
+          sourcePicker.onSelect(normalizePastedCloneUrl(rawRepository));
+          return;
+        }
         const destinationPath = getCloneDestinationPath(
           getDefaultCloneParentPath(addProjectCloneFlow.environmentId),
           getCloneDirectoryName(rawRepository),
@@ -2289,6 +2359,10 @@ function OpenCommandPaletteDialog(props: {
         return;
       }
       const repository = lookupResult.value;
+      if (sourcePicker) {
+        sourcePicker.onSelect(getDefaultCloneUrl(repository));
+        return;
+      }
       const destinationPath = getCloneDestinationPath(
         getDefaultCloneParentPath(addProjectCloneFlow.environmentId),
         getCloneDirectoryName(repository.nameWithOwner),
@@ -2530,6 +2604,9 @@ function OpenCommandPaletteDialog(props: {
   const canSubmitBrowsePath =
     isBrowsing &&
     !relativePathNeedsActiveProject &&
+    (!sourcePicker ||
+      (!isBrowsePending &&
+        (hasTrailingPathSeparator(query) ? browseResult !== null : exactBrowseEntry !== null))) &&
     canCreateProjectInEnvironment(browseEnvironment?.connection.phase);
   const willCreateProjectPath =
     canSubmitBrowsePath &&
@@ -2540,17 +2617,21 @@ function OpenCommandPaletteDialog(props: {
   const useMetaForMod = isMacPlatform(navigator.platform);
   const submitModifierLabel = useMetaForMod ? "\u2318" : "Ctrl";
   const isCloneDestinationStep = addProjectCloneFlow?.step === "confirm";
-  const submitActionLabel = isCloneDestinationStep
-    ? willCreateProjectPath
-      ? "Create & Clone"
-      : "Clone"
-    : willCreateProjectPath
-      ? "Create & Add"
-      : "Add";
+  const submitActionLabel = sourcePicker
+    ? "Choose"
+    : isCloneDestinationStep
+      ? willCreateProjectPath
+        ? "Create & Clone"
+        : "Clone"
+      : willCreateProjectPath
+        ? "Create & Add"
+        : "Add";
   const addShortcutLabel = hasHighlightedBrowseItem ? `${submitModifierLabel} Enter` : "Enter";
   const remoteProjectButtonLabel = addProjectCloneFlow
     ? addProjectCloneFlow.source === "url"
-      ? "Continue"
+      ? sourcePicker
+        ? "Choose"
+        : "Continue"
       : "Lookup"
     : null;
   const isRemoteProjectPending = isRemoteProjectLookingUp || isRemoteProjectCloning;
@@ -2826,11 +2907,7 @@ function OpenCommandPaletteDialog(props: {
               tabIndex={-1}
               className="absolute inset-e-2.5 top-1/2 -translate-y-1/2"
               aria-label={`${submitActionLabel} (${addShortcutLabel})`}
-              disabled={
-                !canCreateProjectInEnvironment(browseEnvironment?.connection.phase) ||
-                relativePathNeedsActiveProject ||
-                (isCloneDestinationStep && isRemoteProjectPending)
-              }
+              disabled={!canSubmitBrowsePath || (isCloneDestinationStep && isRemoteProjectPending)}
               onMouseDown={(event) => {
                 event.preventDefault();
               }}

@@ -1014,6 +1014,16 @@ export const BackgroundActivityProfile = Schema.Literals([
 export type BackgroundActivityProfile = typeof BackgroundActivityProfile.Type;
 export const DEFAULT_BACKGROUND_ACTIVITY_PROFILE: BackgroundActivityProfile = "balanced";
 
+/** Catalog access is opt-in for each environment. */
+export const DEFAULT_SKILL_CATALOG_SOURCE = "";
+export const SkillCatalogSource = TrimmedString.check(
+  Schema.makeFilter((source) =>
+    /^(?:https?:\/\/[^/?#]*@|(?:ssh|git):\/\/[^/?#@]*:[^/?#@]*@)/i.test(source)
+      ? "Git URLs with embedded credentials are not allowed."
+      : undefined,
+  ),
+);
+
 export const BackgroundActivityProfileSelection = Schema.Literals([
   "balanced",
   "performance",
@@ -1307,6 +1317,15 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  /**
+   * Skill catalog source for Settings → Skills on this environment: a Git URL
+   * (cloned into managed state on first use) or an absolute path on that
+   * environment's machine. Environment-local like `addProjectBaseDirectory`;
+   * never synced across environments.
+   */
+  skillCatalogSource: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SKILL_CATALOG_SOURCE)),
+  ),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
       Effect.succeed({
@@ -1615,6 +1634,7 @@ export const ServerSettingsPatch = Schema.Struct({
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   worktreeSubmodules: Schema.optionalKey(Schema.NullOr(WorktreeSubmodules)),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
+  skillCatalogSource: Schema.optionalKey(SkillCatalogSource),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   branchNamingMode: Schema.optionalKey(BranchNamingMode),
   branchNamePrefix: Schema.optionalKey(TrimmedString),
