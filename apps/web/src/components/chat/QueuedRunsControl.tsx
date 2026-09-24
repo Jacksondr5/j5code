@@ -1,9 +1,4 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import {
-  deriveSteerState,
-  queuedRowSteerTitle,
-  steerActLabel,
-} from "@t3tools/client-runtime/j5/steer-state";
 import { deriveThreadQueueWorkflowState } from "@t3tools/client-runtime/state/thread-workflows";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import type {
@@ -29,7 +24,6 @@ import {
   participantIdsForThreadA2AEnvelope,
 } from "../../j5/a2a/ThreadA2ARenderer";
 import { useParticipantLabels } from "../../j5/a2a/ParticipantIdentitiesClient";
-import { QueueSteerState } from "../../j5/composer/QueueSteerState";
 import { threadEnvironment } from "../../state/threads";
 import { useThreadProjection } from "../../state/entities";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -183,10 +177,6 @@ export function QueuedRunsControl({
     items.flatMap((item) => participantIdsForThreadA2AEnvelope(item.text)),
   );
 
-  // J5 QS3/QS4: the steer control says what it does on this provider, or the
-  // run's actual phase when nothing is steerable.
-  const steerState = projection ? deriveSteerState(projection) : ({ kind: "idle" } as const);
-
   const move = async (runId: RunId, beforeRunId: RunId | null) => {
     setBusyRunId(runId);
     try {
@@ -212,13 +202,7 @@ export function QueuedRunsControl({
 
   const steerInFlightRef = useRef(false);
   const steer = async (queuedRunId: RunId) => {
-    if (
-      activeRun === null ||
-      !workflow?.canPromoteToSteer ||
-      steerState.kind !== "steerable" ||
-      steerInFlightRef.current
-    )
-      return;
+    if (activeRun === null || !workflow?.canPromoteToSteer || steerInFlightRef.current) return;
     steerInFlightRef.current = true;
     setBusyRunId(queuedRunId);
     try {
@@ -235,7 +219,7 @@ export function QueuedRunsControl({
   useImperativeHandle(ref, () => ({
     steerNext(repeat) {
       const next = queued[0];
-      if (!next || !workflow?.canPromoteToSteer || steerState.kind !== "steerable") return false;
+      if (!next || !workflow?.canPromoteToSteer) return false;
       if (!repeat && busyRunId === null) void steer(next.run.id);
       return true;
     },
@@ -323,15 +307,6 @@ export function QueuedRunsControl({
             </ComposerBanner.Actions>
           </ComposerBanner.Row>
         )}
-        {steerState.kind === "not-steerable" ? (
-          <ComposerBanner.Row>
-            <QueueSteerState
-              environmentId={props.environmentId}
-              threadId={props.threadId}
-              state={steerState}
-            />
-          </ComposerBanner.Row>
-        ) : null}
         <ComposerBanner.Scroll className={cn("max-h-32", !expanded && "hidden")}>
           <ComposerBanner.Children render={<ol />} id={queueListId}>
             {items.map((item) => {
@@ -516,8 +491,7 @@ export function QueuedRunsControl({
                               disabled={
                                 item.runId === null ||
                                 busyRunId !== null ||
-                                !workflow?.canPromoteToSteer ||
-                                steerState.kind !== "steerable"
+                                !workflow?.canPromoteToSteer
                               }
                               onClick={() => {
                                 if (item.runId !== null) {
@@ -526,13 +500,13 @@ export function QueuedRunsControl({
                               }}
                             >
                               <CornerUpRightIcon />
-                              {steerState.kind === "steerable"
-                                ? steerActLabel(steerState.act)
-                                : "Steer"}
+                              Steer
                             </Button>
                           </TooltipTrigger>
                           <TooltipPopup>
-                            {`${queuedRowSteerTitle(steerState)}${steerState.kind === "steerable" && item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}
+                            {activeRun === null
+                              ? "There is no active run to steer"
+                              : `Send as a steer instead${item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}
                           </TooltipPopup>
                         </Tooltip>
                         <Tooltip>

@@ -295,10 +295,6 @@
       "types": "./src/j5/agentMentions.ts",
       "default": "./src/j5/agentMentions.ts"
     },
-    "./j5/steer-state": {
-      "types": "./src/j5/steerState.ts",
-      "default": "./src/j5/steerState.ts"
-    },
     "./state/thread-settled": {
       "types": "./src/state/threadSettled.ts",
       "default": "./src/state/threadSettled.ts"
