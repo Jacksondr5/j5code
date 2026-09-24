@@ -31,8 +31,10 @@ Checked against `t3code/codex-turn-mapping` @ `67a2be0fdb` (V2, pingdotgg/t3code
 
 ## Handoffs and history transfer
 
-- **Upstream:** portable handoffs move a budgeted slice of history (`ContextHandoffBudget`) into a new provider conversation on a model or provider switch.
-- **J5:** saved-agent (persona) handoff artifacts under `handoffs/` in project artifacts, with a nudge worker and a composer chip. The native-resume patch refuses a silent history replacement except when the conversation is gone.
+Two different things share the word "handoff". J5 docs call upstream's history transfer a **context handoff** and J5's persona document a **handoff artifact**.
+
+- **Upstream:** context handoffs (upstream's "portable handoffs") move a budgeted slice of history (`ContextHandoffBudget`) into a new provider conversation when a thread switches model or provider, is forked, or restarts portably.
+- **J5:** persona handoff artifacts under `handoffs/` in project artifacts, with a nudge worker and a composer chip. The native-resume patch refuses a silent context handoff except when the conversation is gone. The future of handoff artifacts is tracked in [#284](https://github.com/Jacksondr5/j5code/issues/284).
 
 ## Steering and queues
 
