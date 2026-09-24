@@ -10,11 +10,18 @@ import {
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { CommandId } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
-import { RefreshCwIcon } from "lucide-react";
+import { PencilIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { SettingsRow, SettingsSection } from "../../components/settings/settingsLayout";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "../../components/ui/select";
 import { toastManager } from "../../components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
@@ -61,8 +68,22 @@ export function PlaybookLibrarySettings() {
   const workspaces = useAtomValue(playbookWorkspacesAtom);
   const [workspaceKey, setWorkspaceKey] = useState("");
   const workspace = workspaces.find((entry) => entry.key === workspaceKey) ?? workspaces[0];
+  const workspaceItems = workspaces.map((entry) => ({
+    value: entry.key,
+    label:
+      entry.title +
+      (environments.length > 1
+        ? ` · ${environments.find((env) => env.environmentId === entry.environmentId)?.label ?? entry.environmentId}`
+        : ""),
+  }));
   const { squadrons, status: squadronStatus } = useSquadronDirectory();
   const authorSquadrons = workspace ? playbookAuthorSquadrons(workspace, squadrons) : [];
+  const authorSquadronPlaceholder =
+    squadronStatus === "loading"
+      ? "Loading Squadrons…"
+      : authorSquadrons.length === 0
+        ? "No Squadron available for this workspace"
+        : "Choose a Squadron";
   const [authorScope, setAuthorScope] = useState<{
     workspaceKey: string;
     squadronId: string;
@@ -293,24 +314,22 @@ export function PlaybookLibrarySettings() {
           void importFiles(files);
         }}
       />
-      <SettingsSection title="Playbooks" id="playbooks">
-        <div className="flex flex-col gap-3 px-3 pb-3 sm:flex-row sm:items-start sm:justify-between sm:px-4">
-          <p className="min-w-0 text-sm text-muted-foreground">
-            Reusable prompts that guide an agent through ordered steps. Create and refine them in a
-            conversation.
-          </p>
-          <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+      <SettingsSection
+        title="Playbooks"
+        id="playbooks"
+        headerAction={
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
-              size="xs"
+              variant="outline"
               disabled={
                 !workspace || !authorSquadron?.available || busy || !query.data || !!query.error
               }
               onClick={() => void createPlaybook()}
             >
+              <PlusIcon aria-hidden="true" className="size-4" />
               Create playbook
             </Button>
             <Button
-              size="xs"
               variant="outline"
               disabled={!workspace || busy || !query.data || !!query.error}
               onClick={() => fileInput.current?.click()}
@@ -321,20 +340,25 @@ export function PlaybookLibrarySettings() {
               <TooltipTrigger
                 render={
                   <Button
-                    size="icon-xs"
+                    size="icon"
                     variant="ghost"
                     aria-label="Refresh playbooks"
                     disabled={!workspace || busy || query.isPending}
                     onClick={refresh}
                   >
-                    <RefreshCwIcon aria-hidden="true" />
+                    <RefreshCwIcon aria-hidden="true" className="size-4" />
                   </Button>
                 }
               />
               <TooltipPopup>Refresh playbooks</TooltipPopup>
             </Tooltip>
           </div>
-        </div>
+        }
+      >
+        <SettingsRow
+          title="Playbook library"
+          description="Reusable prompts that guide an agent through ordered steps. Create and refine them in a conversation."
+        />
         <SettingsRow
           title="Workspace"
           description={
@@ -355,173 +379,187 @@ export function PlaybookLibrarySettings() {
             )
           }
           control={
-            <select
-              aria-label="Playbook workspace"
-              value={workspace?.key ?? ""}
-              disabled={busy}
-              onChange={(event) => {
+            <Select
+              items={workspaceItems}
+              value={workspace?.key ?? null}
+              disabled={busy || !workspace}
+              onValueChange={(value) => {
+                if (value === null) return;
                 setRenameTarget(null);
-                setWorkspaceKey(event.target.value);
+                setWorkspaceKey(value);
                 setError(null);
               }}
-              className="w-full rounded-md border border-input bg-background p-2 text-foreground sm:w-72"
             >
-              {workspaces.length === 0 && <option value="">No projects available</option>}
-              {workspaces.map((entry) => (
-                <option key={entry.key} value={entry.key}>
-                  {entry.title}
-                  {environments.length > 1
-                    ? ` · ${environments.find((env) => env.environmentId === entry.environmentId)?.label ?? entry.environmentId}`
-                    : ""}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="w-full sm:w-56" aria-label="Playbook workspace">
+                <SelectValue placeholder="No projects available" />
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {workspaceItems.map((entry) => (
+                  <SelectItem key={entry.value} value={entry.value}>
+                    {entry.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
           }
         />
         <SettingsRow
           title="Authoring Squadron"
           description="Where the Playbook Author chat starts."
           control={
-            <select
-              aria-label="Playbook author Squadron"
+            <Select
               value={authorSquadron?.squadron.id ?? ""}
               disabled={!workspace || busy}
-              onChange={(event) => {
-                if (workspace)
-                  setAuthorScope({ workspaceKey: workspace.key, squadronId: event.target.value });
+              onValueChange={(value) => {
+                if (value === null) return;
+                if (workspace) setAuthorScope({ workspaceKey: workspace.key, squadronId: value });
                 setError(null);
               }}
-              className="w-full rounded-md border border-input bg-background p-2 text-foreground sm:w-72"
             >
-              <option value="">
-                {squadronStatus === "loading"
-                  ? "Loading Squadrons…"
-                  : authorSquadrons.length === 0
-                    ? "No Squadron available for this workspace"
-                    : "Choose a Squadron"}
-              </option>
-              {authorSquadrons.map((entry) => (
-                <option
-                  key={entry.squadron.id}
-                  value={entry.squadron.id}
-                  disabled={!entry.available}
-                >
-                  {entry.squadron.name}
-                  {entry.available ? "" : " (unavailable)"}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="w-full sm:w-56" aria-label="Playbook author Squadron">
+                <SelectValue>
+                  {authorSquadron
+                    ? `${authorSquadron.squadron.name}${authorSquadron.available ? "" : " (unavailable)"}`
+                    : authorSquadronPlaceholder}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem value="">{authorSquadronPlaceholder}</SelectItem>
+                {authorSquadrons.map((entry) => (
+                  <SelectItem
+                    key={entry.squadron.id}
+                    value={entry.squadron.id}
+                    disabled={!entry.available}
+                  >
+                    {entry.squadron.name}
+                    {entry.available ? "" : " (unavailable)"}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
           }
         />
-        <div className="space-y-4 px-3 py-3 sm:px-4">
-          {(error || query.error) && !renameTarget && (
-            <p role="alert" className="text-sm text-destructive">
-              {error ?? query.error}
-            </p>
-          )}
-          {!workspace && (
-            <p className="text-sm text-muted-foreground">
-              Connect an environment and add a project to create playbooks.
-            </p>
-          )}
-          {query.isPending && !query.data && (
-            <p role="status" className="text-sm text-muted-foreground">
-              Loading playbooks…
-            </p>
-          )}
-          {query.data?.playbooks.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              No playbooks in this workspace yet. Import a YAML file or create one with your agent.
-            </p>
-          )}
-          {query.data?.playbooks.map((playbook) => (
-            <article key={playbook.name} className="border-t border-border/60 pt-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  {renameTarget?.name === playbook.name ? (
-                    <form
-                      className="flex max-w-xl items-center gap-2"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        void submitRename();
-                      }}
-                    >
-                      <Input
-                        nativeInput
-                        autoFocus
-                        aria-label={`Name for ${playbook.name} playbook`}
-                        value={renameTarget.title}
-                        disabled={busy}
-                        onChange={(event) =>
-                          setRenameTarget({ ...renameTarget, title: event.currentTarget.value })
-                        }
-                        onKeyDown={(event) => {
-                          if (event.key === "Escape") setRenameTarget(null);
-                        }}
-                      />
-                      <Button size="xs" type="submit" disabled={busy || !renameTarget.title.trim()}>
-                        Save
-                      </Button>
-                      <Button
-                        size="xs"
-                        type="button"
-                        variant="outline"
-                        disabled={busy}
-                        onClick={() => setRenameTarget(null)}
-                      >
-                        Cancel
-                      </Button>
-                    </form>
-                  ) : (
-                    <h3 className="font-medium">{playbook.title}</h3>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    {playbook.name}.yaml · {playbook.stepCount} steps
-                  </p>
-                  {renameTarget?.name === playbook.name && (error || query.error) ? (
-                    <p role="alert" className="mt-2 text-sm text-destructive">
-                      {error ?? query.error}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={busy || !!query.error || !!playbook.issue}
-                    onClick={() => void openDraft(`Start playbook ${playbook.name}`)}
-                  >
-                    Prepare playbook chat
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={busy || !!query.error || !!playbook.issue}
-                    onClick={() => {
-                      setError(null);
-                      setRenameTarget({ name: playbook.name, title: playbook.title });
-                    }}
-                  >
-                    Rename
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={busy || !!query.error}
-                    onClick={() => void removePlaybook(playbook.name)}
-                  >
-                    Delete
-                  </Button>
-                </div>
+        {(error || query.error) && !renameTarget && (
+          <SettingsRow
+            title={query.error ? "Playbooks unavailable" : "Playbook action failed"}
+            status={
+              <p role="alert" className="text-destructive">
+                {error ?? query.error}
+              </p>
+            }
+          />
+        )}
+        {!workspace && (
+          <SettingsRow
+            title="No workspace available"
+            description="Connect an environment and add a project to create playbooks."
+          />
+        )}
+        {query.isPending && !query.data && <SettingsRow title="Loading playbooks…" role="status" />}
+        {query.data?.playbooks.length === 0 && (
+          <SettingsRow
+            title="No playbooks in this workspace yet"
+            description="Import a YAML file or create one with your agent."
+          />
+        )}
+        {query.data?.playbooks.map((playbook) => (
+          <SettingsRow
+            key={playbook.name}
+            title={playbook.title}
+            description={
+              <>
+                {playbook.description}
+                <span className="mt-1 block text-xs">
+                  {playbook.name}.yaml · {playbook.stepCount} steps
+                </span>
+              </>
+            }
+            control={
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy || !!query.error || !!playbook.issue}
+                  onClick={() => void openDraft(`Start playbook ${playbook.name}`)}
+                >
+                  Prepare playbook chat
+                </Button>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={`Rename ${playbook.title}`}
+                  title={`Rename ${playbook.title}`}
+                  disabled={busy || !!query.error || !!playbook.issue}
+                  onClick={() => {
+                    setError(null);
+                    setRenameTarget({ name: playbook.name, title: playbook.title });
+                  }}
+                >
+                  <PencilIcon aria-hidden="true" className="size-4" />
+                </Button>
+                <Button
+                  size="icon-sm"
+                  variant="destructive-outline"
+                  aria-label={`Delete ${playbook.title}`}
+                  title={`Delete ${playbook.title}`}
+                  disabled={busy || !!query.error}
+                  onClick={() => void removePlaybook(playbook.name)}
+                >
+                  <Trash2Icon aria-hidden="true" className="size-4" />
+                </Button>
               </div>
-              <p className="mt-2 text-sm text-muted-foreground">{playbook.description}</p>
+            }
+          >
+            <div className="space-y-3 py-2">
+              {renameTarget?.name === playbook.name && (
+                <form
+                  className="flex max-w-xl flex-wrap items-center gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void submitRename();
+                  }}
+                >
+                  <Input
+                    nativeInput
+                    autoFocus
+                    size="sm"
+                    className="min-w-0 flex-1 basis-40"
+                    aria-label={`Name for ${playbook.name} playbook`}
+                    value={renameTarget.title}
+                    disabled={busy}
+                    onChange={(event) =>
+                      setRenameTarget({ ...renameTarget, title: event.currentTarget.value })
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") setRenameTarget(null);
+                    }}
+                  />
+                  <Button size="sm" type="submit" disabled={busy || !renameTarget.title.trim()}>
+                    Save
+                  </Button>
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => setRenameTarget(null)}
+                  >
+                    Cancel
+                  </Button>
+                </form>
+              )}
+              {renameTarget?.name === playbook.name && (error || query.error) ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {error ?? query.error}
+                </p>
+              ) : null}
               {playbook.issue ? (
-                <p role="status" className="mt-2 text-sm text-destructive">
+                <p role="status" className="text-sm text-destructive">
                   {playbook.issue.message}
                 </p>
               ) : (
                 <ol
-                  className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
+                  className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
                   aria-label={`${playbook.title} steps`}
                 >
                   {playbook.steps.map((step, index) => (
@@ -531,9 +569,9 @@ export function PlaybookLibrarySettings() {
                   ))}
                 </ol>
               )}
-            </article>
-          ))}
-        </div>
+            </div>
+          </SettingsRow>
+        ))}
       </SettingsSection>
     </>
   );
