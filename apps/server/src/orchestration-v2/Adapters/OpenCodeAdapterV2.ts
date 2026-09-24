@@ -107,6 +107,10 @@ import {
   type ProviderAdapterDriverCreateInput,
 } from "../ProviderAdapterDriver.ts";
 import { makeSubagentChildThread, subagentThreadTitle } from "../SubagentProjection.ts";
+import {
+  j5OpenCodeAllowsT3McpTools,
+  j5OpenCodePermissionRules,
+} from "../../j5/a2a/mcp/openCodeToolApproval.ts";
 
 export const OPENCODE_PROVIDER = ProviderDriverKind.make("opencode");
 export const OPENCODE_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(OPENCODE_PROVIDER);
@@ -663,6 +667,7 @@ const OPENCODE_RESTRICTED_PERMISSIONS = [
  */
 export function openCodePermissionRules(
   runtimePolicy: ProviderAdapterV2RuntimePolicy,
+  j5T3McpTools = false,
 ): PermissionRuleset {
   const sandboxPolicy = recordValue(runtimePolicy, "sandboxPolicy");
   const sandboxType = recordString(sandboxPolicy, "type");
@@ -750,6 +755,7 @@ export function openCodePermissionRules(
     }
   }
 
+  rules.push(...j5OpenCodePermissionRules(runtimePolicy, j5T3McpTools));
   return rules;
 }
 
@@ -773,8 +779,9 @@ function permissionRuleEquals(
 export function openCodeChildPermissionRules(
   runtimePolicy: ProviderAdapterV2RuntimePolicy,
   nativeChildRules: PermissionRuleset,
+  j5T3McpTools = false,
 ): PermissionRuleset {
-  const parentRules = openCodePermissionRules(runtimePolicy);
+  const parentRules = openCodePermissionRules(runtimePolicy, j5T3McpTools);
   const inheritedRules = parentRules.filter(
     (rule) => rule.permission === "external_directory" || rule.action === "deny",
   );
@@ -1025,6 +1032,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             }),
           );
         }
+        const j5T3McpTools = yield* j5OpenCodeAllowsT3McpTools(client, hasT3Mcp);
 
         const now = yield* DateTime.now;
         let sessionEntity: OrchestrationV2ProviderSession = {
@@ -1445,6 +1453,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             const childPermission = openCodeChildPermissionRules(
               turn.runtimePolicy,
               nativeChildSession.permission ?? [],
+              j5T3McpTools,
             );
             yield* sdkCall(
               "session.update",
@@ -3013,12 +3022,12 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
                 "session.create",
                 {
                   title: `T3 Code ${threadInput.threadId}`,
-                  permission: openCodePermissionRules(threadInput.runtimePolicy),
+                  permission: openCodePermissionRules(threadInput.runtimePolicy, j5T3McpTools),
                 },
                 () =>
                   client.session.create({
                     title: `T3 Code ${threadInput.threadId}`,
-                    permission: openCodePermissionRules(threadInput.runtimePolicy),
+                    permission: openCodePermissionRules(threadInput.runtimePolicy, j5T3McpTools),
                   }),
               );
               const nativeSession = unwrapData("session.create", response);
