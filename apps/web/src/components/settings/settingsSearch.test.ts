@@ -45,6 +45,13 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
 ];
 
 describe("searchSettings", () => {
+  it("finds the skill inventory page by its title and discovery terms", () => {
+    for (const query of ["Skill Management", "inventory", "discovery"]) {
+      expect(searchSettings(query)).toContainEqual(
+        expect.objectContaining({ to: "/settings/skills" }),
+      );
+    }
+  });
   it("matches titles, sections, and remembered setting details", () => {
     expect(searchSettings("word", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
     expect(searchSettings("network", ITEMS).map((item) => item.id)).toEqual(["network-access"]);

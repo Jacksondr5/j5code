@@ -438,7 +438,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "skills",
     title: "Skills",
     to: "/settings/skills",
-    searchTerms: ["catalog groups install update source git local skills"],
+    searchTerms: [
+      "catalog groups install update source git local skills management inventory discovery installed",
+    ],
   },
   {
     id: "providers",

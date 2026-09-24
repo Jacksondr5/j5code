@@ -40,6 +40,7 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
+import { makeSkillPathResolver } from "../../j5/skills/skillPaths.ts";
 import { ServerConfig } from "../../config.ts";
 import { makeSkillWorkspaceRefresh } from "../../j5/skills/skillWorkspaceRefresh.ts";
 import { recordSkillDiscoveryFailure } from "../../j5/skills/skillProviderRefresh.ts";
@@ -299,6 +300,7 @@ export const ProviderRegistryLive = Layer.effect(
     const config = yield* ServerConfig;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
+    const skillPaths = yield* makeSkillPathResolver();
 
     // Aggregator PubSub — consumers (WS gateway, etc.) subscribe here for
     // coalesced updates across every instance.
@@ -441,7 +443,7 @@ export const ProviderRegistryLive = Layer.effect(
     ) {
       const nextProvidersWithUpdateState = yield* Effect.forEach(
         nextProviders,
-        applyProviderUpdateState,
+        (provider) => skillPaths.resolve(provider).pipe(Effect.flatMap(applyProviderUpdateState)),
         {
           concurrency: "unbounded",
         },
@@ -540,6 +542,7 @@ export const ProviderRegistryLive = Layer.effect(
       providerSource: ProviderSnapshotSource,
     ) {
       return yield* providerSource.refresh.pipe(
+        Effect.tap(skillPaths.invalidate),
         Effect.flatMap((nextProvider) =>
           correlateSnapshotWithSource(providerSource, nextProvider).pipe(
             Effect.flatMap(syncProvider),
