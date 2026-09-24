@@ -1,8 +1,10 @@
 import { presentPlaybook } from "@t3tools/client-runtime/j5/playbooks";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useIsFocused } from "@react-navigation/native";
 import { useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
+import { useThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { useRemoteEnvironmentRuntime } from "../../state/use-remote-environment-registry";
 import { j5Environment } from "../state";
@@ -19,6 +21,7 @@ const stepColor = {
 export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: ThreadId }) {
   const focused = useIsFocused();
   const runtime = useRemoteEnvironmentRuntime(props.environmentId);
+  const thread = useThreadShell(scopeThreadRef(props.environmentId, props.threadId));
   const query = useEnvironmentQuery(
     j5Environment.playbooks({
       environmentId: props.environmentId,
@@ -28,6 +31,11 @@ export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: T
   const [expanded, setExpanded] = useState(true);
   const [showSteps, setShowSteps] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const changes = useEnvironmentQuery(
+    focused && query.data?.supported
+      ? j5Environment.playbookChanges({ environmentId: props.environmentId, input: {} })
+      : null,
+  );
   useActivePlaybookRefresh({
     focused,
     connected: runtime?.connectionState === "connected",
@@ -35,6 +43,7 @@ export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: T
     activeRun:
       query.data?.supported === true && query.data.runs.some((run) => run.status === "active"),
     isPending: query.isPending,
+    refreshKey: `${thread?.latestRun?.runId}:${thread?.latestRun?.status}:${changes.data}`,
     refresh: query.refresh,
   });
   const runs = query.data?.supported ? query.data.runs : [];

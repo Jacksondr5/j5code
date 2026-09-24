@@ -1,16 +1,18 @@
 import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
 
-/** Refresh on return to the thread; only an active run keeps a foreground timer. */
+/** Refresh on playbook changes, thread turns, and return; only an active run keeps a foreground timer. */
 export function useActivePlaybookRefresh(input: {
   focused: boolean;
   connected: boolean;
   supported: boolean;
   activeRun: boolean;
   isPending: boolean;
+  refreshKey: string;
   refresh: () => void;
 }) {
   const latest = useRef(input);
+  const lastRefreshKey = useRef(input.refreshKey);
   useEffect(() => {
     latest.current = input;
   });
@@ -18,7 +20,10 @@ export function useActivePlaybookRefresh(input: {
     if (!input.focused || !input.connected || !input.supported) return;
     let timer: ReturnType<typeof setInterval> | undefined;
     const refresh = () => {
-      if (AppState.currentState === "active" && !latest.current.isPending) latest.current.refresh();
+      if (AppState.currentState === "active" && !latest.current.isPending) {
+        lastRefreshKey.current = latest.current.refreshKey;
+        latest.current.refresh();
+      }
     };
     const sync = () => {
       clearInterval(timer);
@@ -37,4 +42,17 @@ export function useActivePlaybookRefresh(input: {
       subscription.remove();
     };
   }, [input.focused, input.connected, input.supported, input.activeRun]);
+  useEffect(() => {
+    if (
+      !input.focused ||
+      !input.connected ||
+      !input.supported ||
+      input.isPending ||
+      AppState.currentState !== "active" ||
+      lastRefreshKey.current === input.refreshKey
+    )
+      return;
+    lastRefreshKey.current = input.refreshKey;
+    latest.current.refresh();
+  }, [input.focused, input.connected, input.supported, input.isPending, input.refreshKey]);
 }
