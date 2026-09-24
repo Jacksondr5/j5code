@@ -170,8 +170,9 @@ Use **Link…** on a standalone skill to link its whole folder to another Codex 
 Claude instance in the same environment. Choose user scope or an existing project,
 then review the destination and compatibility warnings. Catalog installation stays
 user-scoped; project scope is available only for individual links. Project links
-use absolute paths: heed the Git warning and exclude the destination before
-committing. The link does not copy files or install a plugin's other components.
+land inside the selected project's repository and point to absolute paths: heed
+the Git warning and exclude the destination before committing. The link does
+not copy files or install a plugin's other components.
 
 Choose **Unlink…** on a standalone skill to remove a Codex or Claude link, or
 **Unlink all** to remove every link shown for that skill in the selected user and
