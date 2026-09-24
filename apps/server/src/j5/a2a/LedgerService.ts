@@ -591,6 +591,8 @@ export const layer: Layer.Layer<
           // server has, so it projects the pending delivery a local send would.
           const received = yield* decodeMessageReceived(event.payload);
           if (received.originEnvironmentId === undefined) return;
+          // A withdrawal records its fact and wakes nobody, locally or across servers.
+          if (received.injection === "none") return;
           const message = yield* decodeMessageSent(received.message);
           if (event.sender === null || event.receiver === null) {
             return yield* new A2AStorageError({ operation: "project peer-received message" });

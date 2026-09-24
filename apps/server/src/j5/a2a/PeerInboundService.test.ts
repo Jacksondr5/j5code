@@ -399,14 +399,37 @@ it.effect(
         const cases: ReadonlyArray<[Partial<PeerInboundInput>, string]> = [
           [{ senderId: "human:someone", exchangeRole: "reply", exchangeId: "exchange:x" }, "human"],
           [{ senderId: "machine:watchdog" }, "machine"],
+          // The platform speaks only as the two ids that end Exchanges, each on its own channel, carrying the fact.
+          [{ senderId: "platform:someone-else", envelopeChannel: "lifecycle_notice" }, "platform"],
           [
             {
               senderId: "platform:silence-detector",
-              envelopeChannel: "silence_notice",
+              envelopeChannel: "lifecycle_notice",
+              exchangeRole: "terminal_notice",
+              exchangeId: "exchange:x",
+              terminal: { kind: "sender-cleared" },
+            },
+            "platform",
+          ],
+          [
+            {
+              senderId: "platform:lifecycle",
+              envelopeChannel: "lifecycle_notice",
               exchangeRole: "terminal_notice",
               exchangeId: "exchange:x",
             },
             "platform",
+          ],
+          // Well-formed, but about an Exchange this peer is no party to.
+          [
+            {
+              senderId: "platform:lifecycle",
+              envelopeChannel: "lifecycle_notice",
+              exchangeRole: "terminal_notice",
+              exchangeId: "exchange:x",
+              terminal: { kind: "sender-cleared" },
+            },
+            "exchange",
           ],
           [{ envelopeChannel: "lifecycle_notice" }, "channel"],
           [{ exchangeRole: "terminal_notice", exchangeId: "exchange:x" }, "role"],
@@ -486,7 +509,6 @@ it.effect(
           text: "[Cross-agent messaging system notice: exchange dropped]",
           terminal: {
             kind: "dropped",
-            disposition: "sender-retired",
             cause: {
               kind: "participant-archived",
               participantId: remoteAsker,
@@ -503,8 +525,12 @@ it.effect(
                json_extract(payload, '$.noticeMessageId') AS notice
         FROM j5_a2a_comm_event WHERE kind = 'exchange.dropped' AND exchange_id = ${ask.exchangeId}
       `;
+        // The notice is keyed the way every peer row is: by origin, under this ledger's namespace.
         assert.deepStrictEqual(dropped, [
-          { disposition: "sender-retired", notice: "message:j5:a2a:lifecycle:drop:remote" },
+          {
+            disposition: "sender-retired",
+            notice: localMessageId("message:j5:a2a:lifecycle:drop:remote"),
+          },
         ]);
         // Both the ask and the notice still reach the agent's thread.
         assert.equal((yield* worker.runOnce)?.state, "delivered");
@@ -568,7 +594,6 @@ it.effect("lets a peer speak only for agents it owns, and end only Exchanges it 
         text: "notice",
         terminal: {
           kind: "dropped",
-          disposition: "receiver-retired",
           cause: {
             kind: "participant-archived",
             participantId: "agent:j5:a2a:thread:somebody-else",
@@ -609,6 +634,16 @@ it.effect("closes the local Exchange as sender-cleared when the remote asker wit
         WHERE e.exchange_id = ${ask.exchangeId}
       `;
       assert.deepStrictEqual(closed, [{ status: "closed", closure: "sender-cleared" }]);
+      // The fact is recorded, the ask is still delivered, and no notice is injected into the agent's thread.
+      const pending = yield* sql<{ readonly envelope_channel: string }>`
+        SELECT envelope_channel FROM j5_a2a_delivery ORDER BY sent_seq
+      `;
+      assert.deepStrictEqual(pending, [{ envelope_channel: "peer" }]);
+      const facts = yield* sql<{ readonly injection: string | null }>`
+        SELECT json_extract(payload, '$.injection') AS injection
+        FROM j5_a2a_comm_event WHERE kind = 'message.received' ORDER BY seq
+      `;
+      assert.deepStrictEqual(facts, [{ injection: null }, { injection: "none" }]);
     }).pipe(Effect.provide(makeTestLayer(delivered)));
   }),
 );

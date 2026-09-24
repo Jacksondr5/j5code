@@ -557,6 +557,25 @@ export type PeerHelloResponse = typeof PeerHelloResponse.Type;
  * received row (and the Exchange fact an ask or reply implies) before it
  * delivers locally; a retry with the same message id replays the first receipt.
  */
+/**
+ * The closing fact a terminal notice carries between servers. A dropped
+ * Exchange names the retirement; a withdrawn ask says only that the asker
+ * cleared it. The receiver works out the disposition from its own copy of
+ * the Exchange, so the wire never says which side the retired party was on.
+ */
+export const PeerTerminalFact = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("dropped"),
+    cause: Schema.Struct({
+      kind: Schema.Literals(["participant-archived", "participant-deleted"]),
+      participantId: Schema.String,
+      squadronId: Schema.String,
+    }),
+  }),
+  Schema.Struct({ kind: Schema.Literal("sender-cleared") }),
+]);
+export type PeerTerminalFact = typeof PeerTerminalFact.Type;
+
 export const PeerDeliveryRequest = Schema.Struct({
   messageId: Schema.String.check(Schema.isNonEmpty()),
   senderId: Schema.String.check(Schema.isNonEmpty()),
@@ -571,23 +590,9 @@ export const PeerDeliveryRequest = Schema.Struct({
   intent: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   /**
    * Present on a `terminal_notice`: the closing fact the origin recorded, so the
-   * peer ends its own copy of the Exchange the same way. A dropped Exchange
-   * carries the retirement; a withdrawn ask carries only that the asker cleared it.
+   * peer ends its own copy of the Exchange the same way.
    */
-  terminal: Schema.optional(
-    Schema.Union([
-      Schema.Struct({
-        kind: Schema.Literal("dropped"),
-        disposition: Schema.Literals(["receiver-retired", "sender-retired"]),
-        cause: Schema.Struct({
-          kind: Schema.Literals(["participant-archived", "participant-deleted"]),
-          participantId: Schema.String,
-          squadronId: Schema.String,
-        }),
-      }),
-      Schema.Struct({ kind: Schema.Literal("sender-cleared") }),
-    ]),
-  ),
+  terminal: Schema.optional(PeerTerminalFact),
   /** The origin's clock, kept for display; the receiving server stamps its own time on what it records. */
   createdAt: Schema.String.check(
     Schema.makeFilter(

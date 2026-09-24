@@ -40,7 +40,7 @@ Run each pair of steps on the named host. Every command talks to the local serve
 ## Inspecting and ending peering
 
 - `j5 a2a peer list` prints one line per peer: environment id, label, origin, recorded at, whether the peer still holds a live session here (`inbound: active` or `inbound: no live session`), and when the credential it issued us expires.
-- `j5 a2a peer remove --environment <id>` deletes this server's record of the peer and revokes the session that peer held here. Delivery ends in both directions from this server's point of view; run it on the other server too to clean up its side.
+- `j5 a2a peer remove --environment <id>` deletes this server's record of the peer and revokes the session that peer held here. Delivery ends in both directions from this server's point of view; run it on the other server too to clean up its side. Open Exchanges with agents on that server are not closed by removal: a later reply or follow-up to one fails delivery and alarms, and the answerer's silence detector keeps measuring the debt. Close or withdraw them first, or archive the agents involved, if you want them settled (tracked in issue #286).
 - Revoking the `Peer: …` session in Settings → Connections ends inbound delivery from that peer: its deliveries are refused and alarm on its side. This server's own record and outbound delivery are untouched until you `remove` the peer; `peer list` shows the peer as `inbound: no live session` meanwhile.
 
 ## Exit codes

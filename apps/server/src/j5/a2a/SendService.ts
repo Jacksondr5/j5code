@@ -32,7 +32,7 @@ import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { isRegisteredHumanPerson, listRegisteredHumanPersonIds } from "./HumanPersonRegistry.ts";
 import { A2ALedgerTransactionWriter, A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 import { PeerDirectory, type PeerDirectoryError } from "./PeerDirectory.ts";
-import { findPeerCounterparty } from "./peerCounterparty.ts";
+import { findPeerCounterparty, findPeerRoute } from "./peerCounterparty.ts";
 
 const encodeSentPayload = Schema.encodeEffect(Schema.toCodecJson(MessageSentPayload));
 
@@ -380,9 +380,9 @@ interface ResolvedReceiver {
   readonly environmentId: string | null;
 }
 
-interface RecordedRouteRow {
-  readonly environment_id: string;
-  readonly squadron_id: string;
+/** What the tool reports, plus whether a withdrawal now waits for the delivery worker. Agents never see the flag. */
+export interface ClearOwnAskOutcome extends ClearOwnAskResult {
+  readonly withdrawalQueued: boolean;
 }
 
 /** The send body once the sender is resolved; agents and machines share it. */
@@ -394,7 +394,9 @@ export interface A2ASendServiceShape {
   readonly sendAsMachine: (
     input: SendAsMachineInput,
   ) => Effect.Effect<SendMessageResult, A2ASendError>;
-  readonly clearOwnAsk: (input: ClearOwnAskInput) => Effect.Effect<ClearOwnAskResult, A2ASendError>;
+  readonly clearOwnAsk: (
+    input: ClearOwnAskInput,
+  ) => Effect.Effect<ClearOwnAskOutcome, A2ASendError>;
   readonly listParticipants: (
     senderThreadId: ThreadId,
     includeArchived?: boolean,
@@ -532,36 +534,8 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
       const recordedRoute = Effect.fn("j5.a2a.send.recordedRoute")(function* (
         id: ParticipantId,
       ): Effect.fn.Return<ResolvedReceiver | null, SqlError> {
-        const outbound = yield* sql<RecordedRouteRow>`
-          SELECT receiver_environment_id AS environment_id, receiver_squadron_id AS squadron_id
-          FROM j5_a2a_delivery
-          WHERE receiver_id = ${id} AND receiver_environment_id IS NOT NULL
-          ORDER BY sent_seq DESC
-          LIMIT 1
-        `;
-        const inbound =
-          outbound[0] !== undefined
-            ? []
-            : yield* sql<RecordedRouteRow>`
-                SELECT
-                  json_extract(payload, '$.originEnvironmentId') AS environment_id,
-                  json_extract(payload, '$.originSquadronId') AS squadron_id
-                FROM j5_a2a_comm_event
-                WHERE kind = 'message.received'
-                  AND sender = ${id}
-                  AND json_extract(payload, '$.originEnvironmentId') IS NOT NULL
-                ORDER BY seq DESC
-                LIMIT 1
-              `;
-        const row = outbound[0] ?? inbound[0];
-        return row === undefined
-          ? null
-          : {
-              squadronId: SquadronId.make(row.squadron_id),
-              participantId: id,
-              kind: "agent",
-              environmentId: row.environment_id,
-            };
+        const route = yield* findPeerRoute(sql, id);
+        return route === null ? null : { participantId: id, kind: "agent", ...route };
       });
 
       /**
@@ -1067,7 +1041,8 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
               exchangeId: input.exchangeId,
               closureKind: "sender-cleared",
               closedAt: replay[0]!.created_at,
-            } satisfies ClearOwnAskResult;
+              withdrawalQueued: false,
+            } satisfies ClearOwnAskOutcome;
           }
 
           const rows = yield* sql<ExchangeRow>`
@@ -1127,6 +1102,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
                       receiverEnvironmentId: remote.environmentId,
                       exchangeRole: "terminal_notice",
                       envelopeChannel: "lifecycle_notice",
+                      terminal: { kind: "sender-cleared" },
                     },
                     createdAt: input.acceptedAt,
                   },
@@ -1148,8 +1124,9 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
               ...withdrawal,
             ],
           });
-          const closedEvent = result.events[0]!;
+          const closedEvent = result.events[0];
           const eventMatchesClear =
+            closedEvent !== undefined &&
             closedEvent.kind === "exchange.closed" &&
             closedEvent.exchangeId === input.exchangeId &&
             closedEvent.sender === sender.participantId &&
@@ -1157,19 +1134,18 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
             closedEvent.payload !== null &&
             "closureKind" in closedEvent.payload &&
             closedEvent.payload.closureKind === "sender-cleared";
-          const clearResult = {
-            exchangeId: input.exchangeId,
-            closureKind: "sender-cleared" as const,
-            closedAt: closedEvent.createdAt,
-          } satisfies ClearOwnAskResult;
-          if (!result.committed && eventMatchesClear) return clearResult;
-          if (!result.committed || !eventMatchesClear) {
+          if (!eventMatchesClear) {
             return yield* new A2AClearOwnAskCommandConflictError({
               commandId: input.commandId,
               exchangeId: input.exchangeId,
             });
           }
-          return clearResult;
+          return {
+            exchangeId: input.exchangeId,
+            closureKind: "sender-cleared" as const,
+            closedAt: closedEvent.createdAt,
+            withdrawalQueued: result.committed && withdrawal.length > 0,
+          } satisfies ClearOwnAskOutcome;
         });
 
       return A2ASendService.of({ send, sendAsMachine, clearOwnAsk, listParticipants });

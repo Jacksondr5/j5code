@@ -228,18 +228,18 @@ const makeLayer = (daemon: boolean) =>
         if (isHumanParticipantId(participantId)) {
           return { squadronId: SquadronId.make(exchange.squadron_id), environmentId: null };
         }
-        const remote = yield* findPeerCounterparty(sql, {
-          squadronId: SquadronId.make(exchange.squadron_id),
-          exchangeId: ExchangeId.make(exchange.exchange_id),
-          participantId,
-        });
-        if (remote !== null) return remote;
         const rows = yield* membershipRows(participantId);
         const row =
           rows.find((candidate) => candidate.squadron_id === exchange.squadron_id) ?? rows[0];
         if (row !== undefined) {
           return { squadronId: SquadronId.make(row.squadron_id), environmentId: null };
         }
+        const remote = yield* findPeerCounterparty(sql, {
+          squadronId: SquadronId.make(exchange.squadron_id),
+          exchangeId: ExchangeId.make(exchange.exchange_id),
+          participantId,
+        });
+        if (remote !== null) return remote;
         const historical = yield* historicalParticipantRows(participantId);
         const historicalRow =
           historical.find((candidate) => candidate.squadron_id === exchange.squadron_id) ??
@@ -326,7 +326,20 @@ const makeLayer = (daemon: boolean) =>
                     receiverSquadronId: receiver.squadronId,
                     ...(receiver.environmentId === null
                       ? {}
-                      : { receiverEnvironmentId: receiver.environmentId }),
+                      : {
+                          receiverEnvironmentId: receiver.environmentId,
+                          terminal: {
+                            kind: "dropped" as const,
+                            cause: {
+                              kind:
+                                input.operation === "deleted"
+                                  ? ("participant-deleted" as const)
+                                  : ("participant-archived" as const),
+                              participantId: input.participantId,
+                              squadronId: input.squadronId,
+                            },
+                          },
+                        }),
                     exchangeRole: "terminal_notice",
                     envelopeChannel: "lifecycle_notice",
                   },

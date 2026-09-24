@@ -26,8 +26,6 @@ import {
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import {
   type DeliveryEnvelopeChannel,
-  ExchangeClosedPayload,
-  ExchangeDroppedPayload,
   SquadronId,
   ExchangeId,
   isHumanParticipantId,
@@ -80,6 +78,10 @@ export interface PeerDeliveryInput extends AgentDeliveryInput {
   /** The delivery row's correlation id; the worker already holds it, so the transport never re-reads it. */
   readonly correlationId: string;
   readonly createdAt: string;
+  /** An ask's intent, so the peer can open the Exchange on its side. */
+  readonly intent?: string;
+  /** A terminal notice's closing fact, as written on the notice itself. */
+  readonly terminal?: PeerDeliveryRequest["terminal"];
 }
 
 const PEER_DELIVERY_TIMEOUT = Duration.seconds(15);
@@ -134,24 +136,6 @@ interface HumanExchangeRow {
 }
 
 const decodeParticipant = Schema.decodeUnknownEffect(Schema.fromJsonString(Participant));
-const decodeDropped = Schema.decodeUnknownEffect(Schema.fromJsonString(ExchangeDroppedPayload));
-const decodeClosed = Schema.decodeUnknownEffect(Schema.fromJsonString(ExchangeClosedPayload));
-
-/** The wire form of the origin's closing fact: a retirement drop, or the asker's own withdrawal. */
-const terminalFactFor = Effect.fn("j5.a2a.delivery.terminalFact")(function* (
-  row: { readonly kind: string; readonly payload: string } | undefined,
-): Effect.fn.Return<PeerDeliveryRequest["terminal"], Schema.SchemaError> {
-  if (row === undefined) return undefined;
-  if (row.kind === "exchange.dropped") {
-    const dropped = yield* decodeDropped(row.payload);
-    return { kind: "dropped", disposition: dropped.disposition, cause: dropped.cause };
-  }
-  const closed = yield* decodeClosed(row.payload);
-  return "closureKind" in closed && closed.closureKind === "sender-cleared"
-    ? { kind: "sender-cleared" }
-    : undefined;
-});
-
 const assertNever = (channel: never): never => {
   throw new Error(`Unsupported A2A delivery envelope channel: ${String(channel)}`);
 };
@@ -419,28 +403,6 @@ export const live: Layer.Layer<
               state: `peer ${input.receiverEnvironmentId} is no longer recorded on this server`,
             });
           }
-          // An ask carries its intent so the peer can open the Exchange on its side.
-          const intentRows =
-            input.exchangeRole === "ask" && input.exchangeId !== null
-              ? yield* sql<{ readonly intent: string }>`
-                  SELECT intent FROM j5_a2a_exchange
-                  WHERE squadron_id = ${input.originSquadronId} AND exchange_id = ${input.exchangeId}
-                  LIMIT 1
-                `
-              : [];
-          // A terminal notice carries the closing fact so the peer ends its own Exchange the same way.
-          const terminalRows =
-            input.exchangeRole === "terminal_notice" && input.exchangeId !== null
-              ? yield* sql<{ readonly kind: string; readonly payload: string }>`
-                  SELECT kind, payload FROM j5_a2a_comm_event
-                  WHERE squadron_id = ${input.originSquadronId}
-                    AND kind IN ('exchange.dropped', 'exchange.closed')
-                    AND exchange_id = ${input.exchangeId}
-                  ORDER BY seq DESC
-                  LIMIT 1
-                `
-              : [];
-          const terminal = yield* terminalFactFor(terminalRows[0]);
           const body = {
             messageId: input.messageId,
             senderId: input.senderId,
@@ -451,8 +413,8 @@ export const live: Layer.Layer<
             envelopeChannel: input.envelopeChannel,
             text: input.message,
             originSquadronId: input.originSquadronId,
-            ...(intentRows[0] === undefined ? {} : { intent: intentRows[0].intent }),
-            ...(terminal === undefined ? {} : { terminal }),
+            ...(input.intent === undefined ? {} : { intent: input.intent }),
+            ...(input.terminal === undefined ? {} : { terminal: input.terminal }),
             createdAt: input.createdAt,
           } satisfies PeerDeliveryRequest;
           const request = yield* HttpClientRequest.bodyJson(

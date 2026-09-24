@@ -192,6 +192,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
               exchangeId: input.exchangeId,
               closureKind: "sender-cleared" as const,
               closedAt: input.acceptedAt,
+              withdrawalQueued: false,
             }),
           ),
         listParticipants: () =>

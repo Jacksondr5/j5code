@@ -12,6 +12,11 @@ import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { A2ADeliveryTransport, live as deliveryTransportLive } from "./DeliveryTransport.ts";
+import {
+  A2ADeliveryHooks,
+  A2ADeliveryWorker,
+  layerWithHooks as deliveryWorkerLayerWithHooks,
+} from "./DeliveryWorker.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { PeerDirectory, type RemoteAgent } from "./PeerDirectory.ts";
@@ -273,7 +278,18 @@ const makeTransportLayer = (
     Layer.provide(Layer.mock(OrchestratorV2)({})),
     Layer.provide(Layer.mock(EffectOutboxV2)({})),
   );
-  return Layer.mergeAll(database, ledger, send, transport);
+  const worker = deliveryWorkerLayerWithHooks(false).pipe(
+    Layer.provide(ledger),
+    Layer.provide(database),
+    Layer.provide(transport),
+    Layer.provide(
+      Layer.succeed(
+        A2ADeliveryHooks,
+        A2ADeliveryHooks.of({ afterTransportSuccess: () => Effect.void }),
+      ),
+    ),
+  );
+  return Layer.mergeAll(database, ledger, send, transport, worker);
 };
 
 const crossingAsk = Effect.fn("test.j5.a2a.peer.outbound.crossing")(function* () {
@@ -288,28 +304,7 @@ const crossingAsk = Effect.fn("test.j5.a2a.peer.outbound.crossing")(function* ()
     intent: "incident status",
     acceptedAt: timestamp,
   });
-  const transport = yield* A2ADeliveryTransport;
-  const sql = yield* SqlClient.SqlClient;
-  const [row] = yield* sql<{ readonly correlation_id: string }>`
-    SELECT correlation_id FROM j5_a2a_delivery WHERE message_id = ${sent.messageId}
-  `;
-  return {
-    sent,
-    deliver: transport.deliverPeer({
-      originSquadronId: localSquadron,
-      receiverSquadronId: supportOnHome.squadronId,
-      receiverEnvironmentId: homePeer.environmentId,
-      correlationId: row!.correlation_id,
-      messageId: sent.messageId,
-      senderId: billing.id,
-      receiverId: remoteSupport,
-      exchangeId: ExchangeId.make(sent.exchangeId!),
-      exchangeRole: "ask",
-      message: "What is the incident status?",
-      envelopeChannel: "peer",
-      createdAt: timestamp,
-    }),
-  };
+  return { sent, deliver: (yield* A2ADeliveryWorker).runOnce };
 });
 
 it.effect(
@@ -319,7 +314,7 @@ it.effect(
       const posted: Array<{ url: string; authorization: string | undefined; body: unknown }> = [];
       yield* Effect.gen(function* () {
         const { sent, deliver } = yield* crossingAsk();
-        yield* deliver;
+        assert.equal((yield* deliver)?.state, "delivered");
         assert.equal(posted.length, 1);
         assert.equal(posted[0]!.url, `${homePeer.origin}${J5_PEER_API_PATHS.deliver}`);
         assert.equal(posted[0]!.authorization, "Bearer home-token");
@@ -346,9 +341,14 @@ it.effect(
 it.effect("turns a peer's refusal into a delivery failure the worker retries and alarms on", () =>
   Effect.gen(function* () {
     const posted: Array<{ url: string; authorization: string | undefined; body: unknown }> = [];
-    const failure = yield* Effect.gen(function* () {
+    const outcome = yield* Effect.gen(function* () {
       const { deliver } = yield* crossingAsk();
-      return yield* Effect.flip(deliver);
+      const milestone = yield* deliver;
+      const sql = yield* SqlClient.SqlClient;
+      const [row] = yield* sql<{ readonly last_error: string | null }>`
+        SELECT last_error FROM j5_a2a_delivery
+      `;
+      return { state: milestone?.state, lastError: row?.last_error ?? "" };
     }).pipe(
       Effect.provide(
         makeTransportLayer(
@@ -357,8 +357,8 @@ it.effect("turns a peer's refusal into a delivery failure the worker retries and
         ),
       ),
     );
-    assert.equal(failure._tag, "A2ADeliveryTransportError");
-    assert.include(String(failure.cause), "refused the delivery (HTTP 404)");
+    assert.equal(outcome.state, "retry_scheduled");
+    assert.include(outcome.lastError, "refused the delivery (HTTP 404)");
   }),
 );
 
@@ -445,15 +445,21 @@ it.effect("never resolves a machine sender's receiver through peers", () =>
 );
 
 it.effect(
-  "carries the recorded drop fact on a terminal notice so the peer ends its Exchange the same way",
+  "carries the drop fact the notice was written with, so the peer ends its Exchange the same way",
   () =>
     Effect.gen(function* () {
       const posted: Array<{ url: string; authorization: string | undefined; body: unknown }> = [];
       yield* Effect.gen(function* () {
-        const { sent } = yield* crossingAsk();
+        const { sent, deliver } = yield* crossingAsk();
+        assert.equal((yield* deliver)?.state, "delivered");
         const ledger = yield* A2ALedger;
         const exchangeId = ExchangeId.make(sent.exchangeId!);
         const noticeMessageId = LedgerMessageId.make("message:j5:a2a:lifecycle:drop:test");
+        const cause = {
+          kind: "participant-archived" as const,
+          participantId: billing.id,
+          squadronId: localSquadron,
+        };
         yield* ledger.appendEvents({
           commandId: CommCommandId.make("command:peer-outbound:drop"),
           squadronId: localSquadron,
@@ -467,11 +473,7 @@ it.effect(
               correlationId: CorrelationId.make("correlation:peer-outbound:drop"),
               payload: {
                 disposition: "sender-retired",
-                cause: {
-                  kind: "participant-archived",
-                  participantId: billing.id,
-                  squadronId: localSquadron,
-                },
+                cause,
                 facts: { replyRequired: false, retryAllowed: false, replacementRequired: false },
                 noticeMessageId,
               },
@@ -491,36 +493,17 @@ it.effect(
                 receiverEnvironmentId: homePeer.environmentId,
                 exchangeRole: "terminal_notice",
                 envelopeChannel: "lifecycle_notice",
+                terminal: { kind: "dropped", cause },
               },
               createdAt: timestamp,
             },
           ],
         });
-        const transport = yield* A2ADeliveryTransport;
-        yield* transport.deliverPeer({
-          originSquadronId: localSquadron,
-          receiverSquadronId: supportOnHome.squadronId,
-          receiverEnvironmentId: homePeer.environmentId,
-          messageId: noticeMessageId,
-          senderId: LIFECYCLE_PARTICIPANT_ID,
-          receiverId: remoteSupport,
-          exchangeId,
-          exchangeRole: "terminal_notice",
-          message: "exchange dropped",
-          envelopeChannel: "lifecycle_notice",
-          createdAt: timestamp,
-        });
+        assert.equal((yield* deliver)?.state, "delivered");
         const body = posted.at(-1)!.body as PeerDeliveryRequest;
+        assert.equal(body.messageId, noticeMessageId);
         assert.equal(body.exchangeRole, "terminal_notice");
-        assert.deepStrictEqual(body.terminal, {
-          kind: "dropped",
-          disposition: "sender-retired",
-          cause: {
-            kind: "participant-archived",
-            participantId: billing.id,
-            squadronId: localSquadron,
-          },
-        });
+        assert.deepStrictEqual(body.terminal, { kind: "dropped", cause });
         assert.isUndefined(body.intent);
       }).pipe(
         Effect.provide(
@@ -537,7 +520,8 @@ it.effect("carries a withdrawn ask to the peer as a sender-cleared terminal noti
   Effect.gen(function* () {
     const posted: Array<{ url: string; authorization: string | undefined; body: unknown }> = [];
     yield* Effect.gen(function* () {
-      const { sent } = yield* crossingAsk();
+      const { sent, deliver } = yield* crossingAsk();
+      assert.equal((yield* deliver)?.state, "delivered");
       const send = yield* A2ASendService;
       const sql = yield* SqlClient.SqlClient;
       const cleared = yield* send.clearOwnAsk({
@@ -547,6 +531,7 @@ it.effect("carries a withdrawn ask to the peer as a sender-cleared terminal noti
         acceptedAt: timestamp,
       });
       assert.equal(cleared.closureKind, "sender-cleared");
+      assert.isTrue(cleared.withdrawalQueued);
       const notice = yield* sql<{
         readonly message_id: string;
         readonly receiver_id: string;
@@ -559,22 +544,20 @@ it.effect("carries a withdrawn ask to the peer as a sender-cleared terminal noti
       assert.equal(notice[0]!.receiver_id, remoteSupport);
       assert.equal(notice[0]!.receiver_environment_id, homePeer.environmentId);
 
-      const transport = yield* A2ADeliveryTransport;
-      yield* transport.deliverPeer({
-        originSquadronId: localSquadron,
-        receiverSquadronId: supportOnHome.squadronId,
-        receiverEnvironmentId: homePeer.environmentId,
-        messageId: LedgerMessageId.make(notice[0]!.message_id),
-        senderId: LIFECYCLE_PARTICIPANT_ID,
-        receiverId: remoteSupport,
-        exchangeId: ExchangeId.make(sent.exchangeId!),
-        exchangeRole: "terminal_notice",
-        message: "withdrawn",
-        envelopeChannel: "lifecycle_notice",
-        createdAt: timestamp,
-      });
+      assert.equal((yield* deliver)?.state, "delivered");
       const body = posted.at(-1)!.body as PeerDeliveryRequest;
+      assert.equal(body.messageId, notice[0]!.message_id);
+      assert.equal(body.senderId, LIFECYCLE_PARTICIPANT_ID);
       assert.deepStrictEqual(body.terminal, { kind: "sender-cleared" });
+
+      // Clearing again replays; nothing new waits for the worker.
+      const replayed = yield* send.clearOwnAsk({
+        commandId: CommCommandId.make("command:peer-outbound:clear"),
+        senderThreadId: billing.threadId,
+        exchangeId: ExchangeId.make(sent.exchangeId!),
+        acceptedAt: timestamp,
+      });
+      assert.isFalse(replayed.withdrawalQueued);
     }).pipe(
       Effect.provide(
         makeTransportLayer(

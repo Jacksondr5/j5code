@@ -9,7 +9,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 import { stablePart } from "./spawnIds.ts";
-import { findPeerCounterparty } from "./peerCounterparty.ts";
+import { findPeerCounterparty, isRoutedElsewhere } from "./peerCounterparty.ts";
 import {
   type CommEvent,
   CommCommandId,
@@ -19,8 +19,10 @@ import {
   isMachineParticipantId,
   isPlatformParticipantId,
   LedgerMessageId,
+  LIFECYCLE_PARTICIPANT_ID,
   Participant,
   ParticipantId,
+  SILENCE_DETECTOR_PARTICIPANT_ID,
   SquadronId,
 } from "./contracts.ts";
 
@@ -97,7 +99,7 @@ export class A2APeerSenderNotAllowedError extends Schema.TaggedError<A2APeerSend
   "A2APeerSenderNotAllowedError",
   {
     senderId: Schema.String,
-    reason: Schema.Literals(["human", "machine", "platform", "channel", "role"]),
+    reason: Schema.Literals(["human", "machine", "platform", "channel", "role", "exchange"]),
   },
 ) {
   override get message(): string {
@@ -107,11 +109,13 @@ export class A2APeerSenderNotAllowedError extends Schema.TaggedError<A2APeerSend
       case "machine":
         return `${this.senderId} is a machine participant; a peer server may not deliver as one.`;
       case "platform":
-        return `${this.senderId} is a platform sender; a peer server may not deliver platform notices.`;
+        return `${this.senderId} is not a platform notice a peer may carry: only the lifecycle or silence detector, on its notice channel, ending an Exchange.`;
       case "channel":
         return `${this.senderId} must deliver on the peer envelope channel.`;
       case "role":
         return `${this.senderId} may send, ask, follow up or reply; a terminal notice is the platform's to send.`;
+      case "exchange":
+        return `${this.senderId} may end only an Exchange this peer is party to.`;
     }
   }
 }
@@ -158,16 +162,38 @@ const localMessageIdFor = (input: {
   );
 
 /** Refuse the sender kinds, channels and roles a peer may not use, before anything is read. */
+/**
+ * Who a peer may speak as. Its agents, on the peer channel, never a terminal
+ * notice. Or the platform itself, but only the two platform ids that ever end
+ * an Exchange, each on its own notice channel, carrying the fact it ends with;
+ * the receive path then checks the Exchange is one this peer is party to.
+ */
 const assertSenderShape = (input: PeerInboundInput) => {
   const senderId = ParticipantId.make(input.senderId);
   const refuse = (reason: A2APeerSenderNotAllowedError["reason"]) =>
     Effect.fail(new A2APeerSenderNotAllowedError({ senderId, reason }));
   if (isHumanParticipantId(senderId)) return refuse("human");
   if (isMachineParticipantId(senderId)) return refuse("machine");
-  if (isPlatformParticipantId(senderId)) return refuse("platform");
+  if (isPlatformParticipantId(senderId)) {
+    const channelOf = {
+      [LIFECYCLE_PARTICIPANT_ID]: "lifecycle_notice",
+      [SILENCE_DETECTOR_PARTICIPANT_ID]: "silence_notice",
+    } as const;
+    const expectedChannel =
+      senderId in channelOf ? channelOf[senderId as keyof typeof channelOf] : undefined;
+    const wellFormed =
+      expectedChannel !== undefined &&
+      input.envelopeChannel === expectedChannel &&
+      input.exchangeRole === "terminal_notice" &&
+      input.exchangeId !== null &&
+      input.terminal !== undefined;
+    return wellFormed
+      ? Effect.succeed({ senderId, platformNotice: true as const })
+      : refuse("platform");
+  }
   if (input.envelopeChannel !== "peer") return refuse("channel");
   if (input.exchangeRole === "terminal_notice") return refuse("role");
-  return Effect.succeed(senderId);
+  return Effect.succeed({ senderId, platformNotice: false as const });
 };
 
 interface MembershipRow {
@@ -176,10 +202,11 @@ interface MembershipRow {
   readonly archived_at: string | null;
 }
 
-interface OpenExchangeRow {
+interface ExchangeRow {
   readonly exchange_id: string;
   readonly sender_id: string;
   readonly receiver_id: string;
+  readonly status: "open" | "closed" | "dropped";
 }
 
 const decodeParticipant = Schema.decodeUnknownEffect(Schema.fromJsonString(Participant));
@@ -248,31 +275,18 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
       /**
        * A peer may speak only for agents it owns. An id homed here, or one the
        * ledger has already routed to a different peer, cannot be claimed by this
-       * origin. Platform senders and first contact from an unknown id pass.
+       * origin. First contact from an unknown id passes.
        */
       const assertSenderOwnedByOrigin = Effect.fn("j5.a2a.peer.inbound.senderOwned")(function* (
         senderId: ParticipantId,
         originEnvironmentId: string,
       ) {
-        if (senderId.startsWith("platform:")) return;
         const local = yield* sql<{ readonly one: number }>`
           SELECT 1 AS one FROM j5_a2a_squadron_membership WHERE participant_id = ${senderId} LIMIT 1
         `;
-        if (local[0] !== undefined) {
-          return yield* new A2APeerSenderNotOwnedError({
-            participantId: senderId,
-            originEnvironmentId,
-          });
-        }
-        const routed = yield* sql<{ readonly environment_id: string }>`
-          SELECT receiver_environment_id AS environment_id FROM j5_a2a_delivery
-          WHERE receiver_id = ${senderId} AND receiver_environment_id IS NOT NULL
-          UNION ALL
-          SELECT json_extract(payload, '$.originEnvironmentId') AS environment_id FROM j5_a2a_comm_event
-          WHERE kind = 'message.received' AND sender = ${senderId}
-            AND json_extract(payload, '$.originEnvironmentId') IS NOT NULL
-        `;
-        if (routed.some((row) => row.environment_id !== originEnvironmentId)) {
+        const owned =
+          local[0] === undefined && !(yield* isRoutedElsewhere(sql, senderId, originEnvironmentId));
+        if (!owned) {
           return yield* new A2APeerSenderNotOwnedError({
             participantId: senderId,
             originEnvironmentId,
@@ -288,8 +302,9 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
           });
           const replayed = yield* priorReceipt(commandId);
           if (replayed !== null) return replayed;
-          const senderId = yield* assertSenderShape(input);
-          yield* assertSenderOwnedByOrigin(senderId, input.originEnvironmentId);
+          const { senderId, platformNotice } = yield* assertSenderShape(input);
+          if (!platformNotice)
+            yield* assertSenderOwnedByOrigin(senderId, input.originEnvironmentId);
           const receiverId = ParticipantId.make(input.receiverId);
           const receiver = yield* localReceiver(receiverId);
           const exchangeId = input.exchangeId === null ? null : ExchangeId.make(input.exchangeId);
@@ -335,6 +350,8 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
               originEnvironmentId: input.originEnvironmentId,
               originMessageId: input.messageId,
               originCreatedAt: input.createdAt,
+              // A withdrawal closes the debt here as it does at the origin: silently.
+              ...(input.terminal?.kind === "sender-cleared" ? { injection: "none" as const } : {}),
               message: {
                 messageId,
                 text: input.text,
@@ -352,37 +369,37 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
            * may close or drop it here. A credential proves which server is
            * calling; this proves that server owns the participant it speaks for.
            */
-          const openExchangeWithPeer = Effect.fn("j5.a2a.peer.inbound.openExchangeWithPeer")(
-            function* (id: ExchangeId) {
-              const rows = yield* sql<OpenExchangeRow>`
-                SELECT exchange_id, sender_id, receiver_id
+          const exchangeWithPeer = Effect.fn("j5.a2a.peer.inbound.exchangeWithPeer")(function* (
+            id: ExchangeId,
+          ) {
+            const rows = yield* sql<ExchangeRow>`
+                SELECT exchange_id, sender_id, receiver_id, status
                 FROM j5_a2a_exchange
                 WHERE squadron_id = ${receiver.squadronId}
                   AND exchange_id = ${id}
-                  AND status = 'open'
                   AND (sender_id = ${receiverId} OR receiver_id = ${receiverId})
                 LIMIT 1
               `;
-              const row = rows[0];
-              if (row === undefined) return null;
-              const otherParty = ParticipantId.make(
-                row.sender_id === receiverId ? row.receiver_id : row.sender_id,
-              );
-              const counterparty = yield* findPeerCounterparty(sql, {
-                squadronId: receiver.squadronId,
-                exchangeId: id,
-                participantId: otherParty,
-              });
-              return counterparty?.environmentId === input.originEnvironmentId
-                ? { row, otherParty }
-                : null;
-            },
-          );
+            const row = rows[0];
+            if (row === undefined) return null;
+            const otherParty = ParticipantId.make(
+              row.sender_id === receiverId ? row.receiver_id : row.sender_id,
+            );
+            const counterparty = yield* findPeerCounterparty(sql, {
+              squadronId: receiver.squadronId,
+              exchangeId: id,
+              participantId: otherParty,
+            });
+            return counterparty?.environmentId === input.originEnvironmentId
+              ? { row, otherParty }
+              : null;
+          });
 
           if (input.exchangeRole === "reply" && exchangeId !== null) {
-            const open = yield* openExchangeWithPeer(exchangeId);
+            const open = yield* exchangeWithPeer(exchangeId);
             if (
               open !== null &&
+              open.row.status === "open" &&
               open.row.sender_id === receiverId &&
               open.otherParty === senderId
             ) {
@@ -398,29 +415,30 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
             }
           }
 
-          if (
-            input.exchangeRole === "terminal_notice" &&
-            input.terminal !== undefined &&
-            exchangeId !== null
-          ) {
-            // The origin ended the Exchange; this side holds the same Exchange and ends it the same way.
-            const open = yield* openExchangeWithPeer(exchangeId);
+          if (platformNotice && input.terminal !== undefined && exchangeId !== null) {
+            // The origin ended the Exchange; this side holds the same Exchange and
+            // ends it the same way. Which side retired is this ledger's to say.
+            const party = yield* exchangeWithPeer(exchangeId);
+            if (party === null) {
+              return yield* new A2APeerSenderNotAllowedError({ senderId, reason: "exchange" });
+            }
+            const { row, otherParty } = party;
             if (
-              open !== null &&
+              row.status === "open" &&
               input.terminal.kind === "dropped" &&
-              input.terminal.cause.participantId === open.otherParty
+              input.terminal.cause.participantId === otherParty
             ) {
               events.push({
                 kind: "exchange.dropped",
-                sender: ParticipantId.make(open.row.sender_id),
-                receiver: ParticipantId.make(open.row.receiver_id),
+                sender: ParticipantId.make(row.sender_id),
+                receiver: ParticipantId.make(row.receiver_id),
                 exchangeId,
                 correlationId,
                 payload: {
-                  disposition: input.terminal.disposition,
+                  disposition: otherParty === row.sender_id ? "sender-retired" : "receiver-retired",
                   cause: {
                     kind: input.terminal.cause.kind,
-                    participantId: open.otherParty,
+                    participantId: otherParty,
                     squadronId: SquadronId.make(input.terminal.cause.squadronId),
                   },
                   facts: {
@@ -430,22 +448,22 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
                   },
                   noticeMessageId: messageId,
                 },
-                createdAt: input.createdAt,
+                createdAt: receivedAt,
               });
             } else if (
-              open !== null &&
+              row.status === "open" &&
               input.terminal.kind === "sender-cleared" &&
-              open.row.sender_id === open.otherParty
+              row.sender_id === otherParty
             ) {
               // The remote asker withdrew its own ask; the local answerer owes nothing more.
               events.push({
                 kind: "exchange.closed",
-                sender: open.otherParty,
+                sender: otherParty,
                 receiver: receiverId,
                 exchangeId,
                 correlationId,
                 payload: { closureKind: "sender-cleared" },
-                createdAt: input.createdAt,
+                createdAt: receivedAt,
               });
             }
           }
