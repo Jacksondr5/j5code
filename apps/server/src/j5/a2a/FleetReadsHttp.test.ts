@@ -144,3 +144,66 @@ it("projects agents with origin, placement, crew seat, and owed asks; humans are
     ],
   );
 });
+
+it("keeps every live roster seat: one with no ledger row rides under its Captain with no thread", () => {
+  const critic = participantIdForThread(ThreadId.make("thread:critic"));
+  const retiredSeat = participantIdForThread(ThreadId.make("thread:retired-seat"));
+  const seat = (seatName: string, participantId: ParticipantId) => ({
+    seatName,
+    agentId: null,
+    participantId,
+    threadId: ThreadId.make(`thread:${seatName}`),
+    addedVersion: 1,
+    reason: null,
+  });
+  const projected = projectFleetSquadron({
+    squadron: { id: squadronId, name: "Fleet" },
+    participants: [
+      agentRow(captain, captainThread, { kind: "unrecorded" }, null),
+      agentRow(builder, builderThread, spawnedBy(captain), captain),
+      agentRow(
+        retiredSeat,
+        ThreadId.make("thread:retired-seat"),
+        spawnedBy(captain),
+        captain,
+        "2026-09-14T20:00:00Z",
+      ),
+    ],
+    crews: [
+      {
+        ...crew,
+        members: [...crew.members, seat("critic", critic), seat("retired", retiredSeat)],
+      },
+      // A retired Crew's never-created seats are not rows.
+      {
+        ...crew,
+        id: "crew:old",
+        archivedAt: "2026-09-09T18:00:00.000Z",
+        members: [seat("ghost", ParticipantId.make("agent:j5:a2a:ghost"))],
+      },
+    ],
+    openAsks: new Map(),
+  });
+  assert.deepStrictEqual(
+    projected.agents.map((agent) => [agent.participantId, agent.threadId, agent.placementParentId]),
+    [
+      [captain, captainThread, null],
+      [builder, builderThread, captain],
+      [critic, null, captain],
+    ],
+  );
+  assert.deepStrictEqual(projected.agents[2], {
+    participantId: critic,
+    threadId: null,
+    displayName: "critic",
+    origin: "agent",
+    placementParentId: captain,
+    crew: {
+      crewInstanceId: "crew:1",
+      crewName: "Review Pair",
+      seat: "critic",
+      captainParticipantId: captain,
+    },
+    openAsks: 0,
+  });
+});

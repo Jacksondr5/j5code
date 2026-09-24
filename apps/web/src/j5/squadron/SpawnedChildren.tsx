@@ -200,6 +200,17 @@ function SpawnedChildGroupRows(props: {
       {isOpen ? (
         <ul className="mt-0.5 flex flex-col gap-0.5 border-s border-border/60 ps-2">
           {group.rows.map(({ child, thread }) => {
+            // A seat the client holds no facts for is listed, not opened: there may be no thread.
+            if (thread === undefined)
+              return (
+                <li
+                  key={child.threadId}
+                  className="flex min-w-0 flex-col gap-0.5 px-1.5 py-1 text-xs"
+                >
+                  <span className="truncate text-foreground">{child.seat?.seat ?? "Seat"}</span>
+                  <span className="text-[11px] text-muted-foreground">Unknown</span>
+                </li>
+              );
             const status = resolveThreadStatusPill({ thread });
             const elapsed = formatElapsedDurationLabel(thread.updatedAt);
             const providerEntry =
