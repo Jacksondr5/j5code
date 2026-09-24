@@ -24,6 +24,7 @@ import {
   TableRow,
 } from "../../components/ui/table";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
+import { useOptionalSettingsScope } from "../../components/settings/SettingsScopeContext";
 import {
   Select,
   SelectItem,
@@ -89,7 +90,13 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
   const environment = useEnvironment(environmentId);
   const allProjects = useProjects();
   const projects = allProjects.filter((project) => project.environmentId === environmentId);
-  const [projectId, setProjectId] = useState<string | null>(null);
+  // A project named in the settings scope sentence is the starting project here.
+  const settingsScope = useOptionalSettingsScope()?.scope;
+  const scopedProjectId =
+    settingsScope?.kind === "project" || settingsScope?.kind === "checkout"
+      ? settingsScope.members.find((member) => member.environmentId === environmentId)?.id
+      : undefined;
+  const [projectId, setProjectId] = useState<string | null>(scopedProjectId ?? null);
   const project =
     projectId === ""
       ? undefined

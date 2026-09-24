@@ -44,6 +44,7 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
+import { useSettingsScopeEnvironments } from "../settingsScopeEnvironment";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -76,21 +77,26 @@ export function SkillInstallerSettings() {
       }),
     [environments, primaryEnvironmentId],
   );
+  const {
+    candidates: pickerEnvironments,
+    pinnedEnvironmentId,
+    initialEnvironmentId,
+  } = useSettingsScopeEnvironments(orderedEnvironments, primaryEnvironmentId);
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(
-    primaryEnvironmentId,
+    initialEnvironmentId,
   );
-  const effectiveEnvironmentId = orderedEnvironments.some(
-    (environment) => environment.environmentId === selectedEnvironmentId,
-  )
-    ? selectedEnvironmentId
-    : (orderedEnvironments[0]?.environmentId ?? null);
+  const effectiveEnvironmentId =
+    pinnedEnvironmentId ??
+    (pickerEnvironments.some((environment) => environment.environmentId === selectedEnvironmentId)
+      ? selectedEnvironmentId
+      : (pickerEnvironments[0]?.environmentId ?? null));
   const selectedEnvironment = orderedEnvironments.find(
     (environment) => environment.environmentId === effectiveEnvironmentId,
   );
 
   return (
     <SettingsPageContainer>
-      {orderedEnvironments.length > 1 ? (
+      {pinnedEnvironmentId === null && pickerEnvironments.length > 1 ? (
         <SettingsSection title="Environment">
           <SettingsRow
             title="Environment"
@@ -99,7 +105,7 @@ export function SkillInstallerSettings() {
               <Select
                 value={effectiveEnvironmentId ?? undefined}
                 onValueChange={(value) => {
-                  const environment = orderedEnvironments.find(
+                  const environment = pickerEnvironments.find(
                     (candidate) => candidate.environmentId === value,
                   );
                   if (environment) setSelectedEnvironmentId(environment.environmentId);
@@ -109,7 +115,7 @@ export function SkillInstallerSettings() {
                   <SelectValue>{selectedEnvironment?.label}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {orderedEnvironments.map((environment) => (
+                  {pickerEnvironments.map((environment) => (
                     <SelectItem key={environment.environmentId} value={environment.environmentId}>
                       {environment.label}
                     </SelectItem>
