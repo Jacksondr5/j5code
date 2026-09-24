@@ -72,6 +72,7 @@ export const makeCrewArchiveHttpRouteLayer = (path: HttpRouter.PathInput) =>
                   encodeArchive({
                     crewInstanceId,
                     status: result.status,
+                    // A seat whose thread never came to exist has no result a client knows.
                     members: result.members.flatMap((member) =>
                       member.result === "never_created"
                         ? []
@@ -83,9 +84,6 @@ export const makeCrewArchiveHttpRouteLayer = (path: HttpRouter.PathInput) =>
                             },
                           ],
                     ),
-                    neverCreatedSeats: result.members
-                      .filter((member) => member.result === "never_created")
-                      .map((member) => member.seatName),
                   }),
                 ),
               ),

@@ -306,11 +306,6 @@ export const CrewStopResponse = Schema.Struct({
       result: Schema.Literals(["interrupt_requested", "already_idle", "archived"]),
     }),
   ),
-  /**
-   * Seats whose row was recorded but whose thread never came to exist; they are not in `members`.
-   * Optional so a client built before it still decodes the response.
-   */
-  neverCreatedSeats: Schema.optional(Schema.Array(Schema.String)),
 });
 export type CrewStopResponse = typeof CrewStopResponse.Type;
 
@@ -352,8 +347,6 @@ export const CrewArchiveResponse = Schema.Struct({
       result: Schema.Literals(["archived", "already_archived"]),
     }),
   ),
-  /** As for a stop: seats retired past because their thread never came to exist. */
-  neverCreatedSeats: Schema.optional(Schema.Array(Schema.String)),
 });
 export type CrewArchiveResponse = typeof CrewArchiveResponse.Type;
 

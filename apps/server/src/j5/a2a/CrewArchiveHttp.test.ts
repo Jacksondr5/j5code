@@ -93,6 +93,7 @@ it("archives a crew for operators only, with the person's confirmation already s
       members: Array<{ seat: string; result: string }>;
     };
     assert.equal(body.status, "archived");
+    // The never-created ghost seat is left out, so every client decodes the members it gets.
     assert.deepStrictEqual(
       body.members.map((member) => [member.seat, member.result]),
       [
@@ -100,9 +101,6 @@ it("archives a crew for operators only, with the person's confirmation already s
         ["critic", "already_archived"],
       ],
     );
-    // A never-created seat rides its own optional field, so a client that predates it still
-    // decodes every member it knows.
-    assert.deepStrictEqual((body as { neverCreatedSeats?: unknown }).neverCreatedSeats, ["ghost"]);
     // A person is not a participant and confirmed the dialog: no Captain check, no token dance.
     assert.isNull(calls[0]?.callerParticipantId);
     assert.isNull(calls[0]?.squadronId);
