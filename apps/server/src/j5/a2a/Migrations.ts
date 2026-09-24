@@ -19,10 +19,11 @@ import Migration0015 from "./migrations/015_CustomCrewSeats.ts";
 import Migration0016 from "./migrations/016_CrewProposalClaims.ts";
 import Migration0017 from "./migrations/017_EnsureCustomCrewSeats.ts";
 import Migration0018 from "./migrations/018_Peers.ts";
+import Migration0019 from "./migrations/019_PeerDeliveryOrigin.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
-// Entries 1 through 14 are persisted migration history. Keep their file and manifest names unchanged;
+// Entries 1 through 15 are persisted migration history. Keep their file and manifest names unchanged;
 // applied migrations are skipped by id and never rerun.
 export const migrationEntries = [
   [1, "EpicCommunicationLedger", Migration0001],
@@ -47,6 +48,7 @@ export const migrationEntries = [
   // Covers databases that ran the lower stack through 16 before 15 became available.
   [17, "EnsureCustomCrewSeats", Migration0017],
   [18, "Peers", Migration0018],
+  [19, "PeerDeliveryOrigin", Migration0019],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>

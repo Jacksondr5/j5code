@@ -465,6 +465,10 @@ export const J5_MACHINE_API_PATHS = {
 export const PEER_SUBJECT_PREFIX = "peer:" as const;
 export const peerSubjectForEnvironment = (environmentId: string): string =>
   `${PEER_SUBJECT_PREFIX}${environmentId}`;
+export const environmentIdFromPeerSubject = (subject: string): string | null =>
+  subject.startsWith(PEER_SUBJECT_PREFIX) && subject.length > PEER_SUBJECT_PREFIX.length
+    ? subject.slice(PEER_SUBJECT_PREFIX.length)
+    : null;
 
 /** An http(s) origin with no path, query, or fragment. */
 export const PeerOrigin = Schema.String.check(
@@ -540,9 +544,38 @@ export const PeerHelloResponse = Schema.Struct({
 });
 export type PeerHelloResponse = typeof PeerHelloResponse.Type;
 
+/**
+ * One message crossing from a peer server. The receiving server records its own
+ * received row (and the Exchange fact an ask or reply implies) before it
+ * delivers locally; a retry with the same message id replays the first receipt.
+ */
+export const PeerDeliveryRequest = Schema.Struct({
+  messageId: Schema.String.check(Schema.isNonEmpty()),
+  senderId: Schema.String.check(Schema.isNonEmpty()),
+  receiverId: Schema.String.check(Schema.isNonEmpty()),
+  exchangeId: Schema.NullOr(Schema.String.check(Schema.isNonEmpty())),
+  correlationId: Schema.String.check(Schema.isNonEmpty()),
+  exchangeRole: Schema.Literals(["none", "ask", "followup", "reply", "terminal_notice"]),
+  envelopeChannel: Schema.Literals(["peer", "silence_notice", "lifecycle_notice"]),
+  text: Schema.String.check(Schema.isNonEmpty()),
+  originSquadronId: Schema.String.check(Schema.isNonEmpty()),
+  /** Required when `exchangeRole` is `ask`: the Exchange the receiver now owes a reply to. */
+  intent: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  createdAt: Schema.String,
+});
+export type PeerDeliveryRequest = typeof PeerDeliveryRequest.Type;
+export const PeerDeliveryResponse = Schema.Struct({
+  accepted: Schema.Literal(true),
+  receivedSeq: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  /** True when this message id had already been recorded; nothing was written twice. */
+  replay: Schema.Boolean,
+});
+export type PeerDeliveryResponse = typeof PeerDeliveryResponse.Type;
+
 export const J5_PEER_API_PATHS = {
   peers: "/api/j5/a2a/peers",
   credentials: "/api/j5/a2a/peers/credentials",
   remove: "/api/j5/a2a/peers/remove",
   hello: "/api/j5/a2a/peers/hello",
+  deliver: "/api/j5/a2a/peers/deliver",
 } as const;

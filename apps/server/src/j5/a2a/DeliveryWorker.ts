@@ -49,6 +49,9 @@ interface DeliveryRow {
   readonly status: "pending" | "retry_scheduled" | "delivered" | "alarmed";
   readonly attempts: number;
   readonly created_at: string;
+  /** Set when the row came in from a peer server; NULL means the origin is `squadron_id` here. */
+  readonly origin_squadron_id: string | null;
+  readonly origin_environment_id: string | null;
 }
 
 interface OpenExchangeRow {
@@ -203,7 +206,10 @@ const makeLayer = (daemon: boolean) =>
         row: DeliveryRow,
         attempt: number,
       ) {
-        const originSquadronId = SquadronId.make(row.squadron_id);
+        // The ledger that owns the row records the outcome; the envelope names
+        // the origin, which differs only for rows received from a peer server.
+        const ledgerSquadronId = SquadronId.make(row.squadron_id);
+        const originSquadronId = SquadronId.make(row.origin_squadron_id ?? row.squadron_id);
         const receiverSquadronId = SquadronId.make(row.receiver_squadron_id);
         const messageId = LedgerMessageId.make(row.message_id);
         const senderId = ParticipantId.make(row.sender_id);
@@ -254,7 +260,7 @@ const makeLayer = (daemon: boolean) =>
             envelopeChannel: row.envelope_channel,
           });
         }
-        yield* hooks.afterTransportSuccess({ squadronId: originSquadronId, messageId, attempt });
+        yield* hooks.afterTransportSuccess({ squadronId: ledgerSquadronId, messageId, attempt });
         const outcome = yield* writer.withPermit(
           sql.withTransaction(
             Effect.gen(function* () {
@@ -263,7 +269,7 @@ const makeLayer = (daemon: boolean) =>
               const deliveredAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
               return yield* writer.appendEventsInTransaction({
                 commandId: commandId("delivered", messageId),
-                squadronId: originSquadronId,
+                squadronId: ledgerSquadronId,
                 acceptedAt: deliveredAt,
                 events: [
                   {
@@ -287,7 +293,7 @@ const makeLayer = (daemon: boolean) =>
         if (outcome === null) return yield* cancelDelivery(row, attempt);
         if (outcome.committed) yield* writer.publishCommitted(outcome.events);
         return {
-          squadronId: originSquadronId,
+          squadronId: ledgerSquadronId,
           messageId,
           state: "delivered",
           attempt,
@@ -352,8 +358,11 @@ const makeLayer = (daemon: boolean) =>
           WHERE squadron_id = ${row.squadron_id} AND message_id = ${row.message_id}`;
         if (state[0]?.status === "cancelled") return true;
         if (state[0]?.status === "delivered") return false;
+        // A sender on a peer server has no membership here; only the receiver is checked.
         const ids =
-          row.envelope_channel === "peer" ? [row.sender_id, row.receiver_id] : [row.receiver_id];
+          row.envelope_channel === "peer" && row.origin_environment_id == null
+            ? [row.sender_id, row.receiver_id]
+            : [row.receiver_id];
         for (const id of ids) {
           if (isHumanParticipantId(ParticipantId.make(id))) continue;
           const membership =
@@ -430,7 +439,9 @@ const makeLayer = (daemon: boolean) =>
             message_text,
             status,
             attempts,
-            created_at
+            created_at,
+            origin_squadron_id,
+            origin_environment_id
           FROM j5_a2a_delivery
           WHERE status IN ('pending', 'retry_scheduled')
             AND (next_attempt_at IS NULL OR next_attempt_at <= ${now})
