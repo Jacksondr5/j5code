@@ -12,13 +12,13 @@ steps, writes the YAML, and checks the definition without starting a run. You ca
 customize the persona in Settings → Personas. Invalid definitions remain visible
 with their errors.
 
-You can import `.yaml` or `.yml` definitions into the selected workspace. Importing
+On web and desktop, you can import `.yaml` or `.yml` definitions into the selected workspace. Importing
 a file with an existing name asks before replacing it. Changes also apply to runs
 using that definition. An active run must be completed or cancelled before its
 definition can be deleted; completed run history remains.
 
-Open **Fleet** and use its **Playbook runs** section to follow runs across your
-connected environments. The overview shows
+On web and desktop, open **Fleet** and use its **Playbook runs** section to follow
+runs across your connected environments. The overview shows
 each run's owner thread, agent activity, and current step. Select a run to open
 its thread, or choose **All** to include completed and cancelled runs.
 Unavailable environments keep their last received progress marked as stale.

@@ -1,4 +1,5 @@
 import { useNavigation } from "@react-navigation/native";
+import { PlaybookBoard } from "../../j5/playbooks/PlaybookBoard";
 import { type EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type {
@@ -922,6 +923,11 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
 
   return (
     <View className="flex-1">
+      <PlaybookBoard
+        key={selectedThreadKey}
+        environmentId={props.environmentId}
+        threadId={props.selectedThread.id}
+      />
       {showContent ? (
         <BlurTargetView
           ref={feedBlurTarget}
