@@ -64,12 +64,13 @@ What this never does: no replicated state, no multi-master, no Squadron migratio
 14. Peering is done from a client connected to both environments with administrative scope; the person confirms the origin each server will use, which may differ from the one the client uses.
 15. A peer is recorded only after the recording server has reached the peer at the stated origin; an unreachable origin is refused with the reason, never recorded.
 16. An agent addresses a participant homed on a peer by the same participant id it would use locally; no agent verb takes, returns or reveals a server, and the envelope names the sender and its Squadron exactly as for a local send.
-17. The address book lists participants homed on peers beside local ones with their Squadron; a peer that cannot be read is reported as unread in the listing, never omitted silently.
+17. The address book lists participants homed on peers beside local ones with their Squadron's id and name; a peer that cannot be read is reported as unread in the listing, never omitted silently.
 18. A message to a participant on a peer is recorded in the sender's Squadron ledger before the call returns; the peer records its own received row before delivering to the agent's thread; the peer's acknowledgement is the sender's delivery receipt; failure to reach the peer retries and alarms as any delivery does.
 19. Retrying one message to a peer never yields a second received row or a second delivery.
 20. A reply, silence notice or lifecycle closure for an Exchange across peers travels the peer path back to the origin server and closes or notifies the origin Exchange exactly as a local one would.
 21. A person is never addressed across peers: an ask to a person is delivered on the sender's own server.
 22. Peers reach each other directly at the recorded origin; no relay or tunnel is required for peering.
+23. A delivery to a peer carries the sender's display name and its Squadron's name; the receiving server keeps them with its received row so the client names a remote sender in the timeline and the inbox as it names a local one, and no agent verb needs them.
 
 ## Scenarios
 

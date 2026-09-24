@@ -110,6 +110,8 @@ export type J5ParticipantProvenanceView = typeof J5ParticipantProvenanceView.Typ
 
 export const J5ParticipantDirectoryRow = Schema.Struct({
   squadron_id: SquadronId,
+  /** The Squadron's name beside its id; on the self row, the Squadron the caller belongs to. */
+  squadron_name: Schema.NullOr(Schema.String),
   participant_id: ParticipantId,
   participant: J5Participant,
   self: Schema.Boolean,
@@ -404,6 +406,7 @@ const placementDependencies = [
   ParticipantPlacementService,
   OrchestratorV2,
   PeerDirectory,
+  A2ALedger,
 ];
 
 const spawnDependencies = [

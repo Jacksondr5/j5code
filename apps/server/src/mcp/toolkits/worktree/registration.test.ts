@@ -15,6 +15,7 @@ import * as ServerConfig from "../../../config.ts";
 import * as GitWorkflowService from "../../../git/GitWorkflowService.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
+import { A2ALedger } from "../../../j5/a2a/LedgerService.ts";
 import { A2ASendService } from "../../../j5/a2a/SendService.ts";
 import { noneLayer as peerDirectoryNoneLayer } from "../../../j5/a2a/PeerDirectory.ts";
 import { ParticipantPlacementService } from "../../../j5/a2a/PlacementService.ts";
@@ -47,6 +48,7 @@ const StubServicesLive = Layer.mergeAll(
   }),
   Layer.mock(A2ASendService)({ listParticipants: () => Effect.succeed([]) }),
   Layer.mock(ParticipantPlacementService)({ listParticipants: () => Effect.succeed([]) }),
+  Layer.mock(A2ALedger)({ listSquadrons: () => Effect.succeed([]) }),
   peerDirectoryNoneLayer,
   Layer.mock(ProviderRegistry)({}),
   Layer.mock(ScheduledTaskService)({}),

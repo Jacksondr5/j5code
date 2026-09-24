@@ -138,7 +138,17 @@ const recordFromRow = (row: PeerRow): PeerRecord => ({
 
 const decodeHello = Schema.decodeUnknownEffect(PeerHelloResponse);
 
-const reasonOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+/** The message plus the cause chain: a transport error alone never says why the socket failed. */
+const reasonOf = (cause: unknown): string => {
+  const parts: Array<string> = [];
+  let current: unknown = cause;
+  for (let depth = 0; depth < 4 && current !== undefined && current !== null; depth += 1) {
+    const message = current instanceof Error ? current.message : String(current);
+    if (message.length > 0 && !parts.includes(message)) parts.push(message);
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return parts.join(": ");
+};
 
 /** GET the peer's hello with the credential it issued; the answer names the peer and whom the credential is for. */
 export const helloAtOrigin = Effect.fn("j5.a2a.peer.hello")(function* (input: {
