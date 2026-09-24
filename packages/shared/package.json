@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./j5/skillInventory": {
+      "types": "./src/j5/skillInventory.ts",
+      "import": "./src/j5/skillInventory.ts"
+    },
     "./themePalettes": {
       "types": "./src/themePalettes.ts",
       "import": "./src/themePalettes.ts"
