@@ -82,7 +82,8 @@ vi.mock("../../state/use-atom-command", () => ({
   },
 }));
 
-vi.mock("@t3tools/client-runtime/state/runtime", () => ({
+vi.mock("@t3tools/client-runtime/state/runtime", async (original) => ({
+  ...(await original<typeof import("@t3tools/client-runtime/state/runtime")>()),
   squashAtomCommandFailure: (result: unknown) =>
     result instanceof Error ? result : new Error("save failed"),
 }));

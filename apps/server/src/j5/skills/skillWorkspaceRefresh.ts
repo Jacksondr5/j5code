@@ -1,6 +1,9 @@
 import type { ProviderInstanceId, ServerProvider } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import { resolveProviderSkillPaths } from "./skillPaths.ts";
 import * as Equal from "effect/Equal";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
@@ -48,6 +51,8 @@ export const makeSkillWorkspaceRefresh = Effect.fn("j5.skills.makeWorkspaceRefre
   readonly providersRef: Ref.Ref<ReadonlyArray<ServerProvider>>;
   readonly changesPubSub: PubSub.PubSub<ReadonlyArray<ServerProvider>>;
 }) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const workspaceRefreshesRef = yield* Ref.make<
     ReadonlyMap<ProviderInstance, ReadonlyMap<string, symbol>>
   >(new Map());
@@ -86,6 +91,15 @@ export const makeSkillWorkspaceRefresh = Effect.fn("j5.skills.makeWorkspaceRefre
           message: "Workspace discovery failed.",
         });
       }),
+      Effect.flatMap((snapshot) =>
+        snapshot.status === "error"
+          ? Effect.succeed(snapshot)
+          : resolveProviderSkillPaths(snapshot.skills).pipe(
+              Effect.provideService(FileSystem.FileSystem, fs),
+              Effect.provideService(Path.Path, path),
+              Effect.map((skills): ServerProvider => ({ ...snapshot, skills })),
+            ),
+      ),
       Effect.flatMap((scopedSnapshot) =>
         instanceRegistry.getInstance(input.instanceId).pipe(
           Effect.flatMap(

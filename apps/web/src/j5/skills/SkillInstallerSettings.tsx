@@ -6,6 +6,7 @@ import {
 import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { SkillInventoryPanel } from "./SkillManagementSettings";
 import { skillCatalogEnvironment } from "./skillCatalogAtoms";
 import {
   catalogScopeFor,
@@ -73,11 +74,11 @@ export function SkillInstallerSettings() {
   );
 
   return (
-    <SettingsPageContainer>
+    <SettingsPageContainer width="expanded">
       <SettingsSection title="Skills">
         <div className="grid gap-4 p-4">
           <p className="text-sm text-muted-foreground">
-            Install shared skill groups from a catalog into this environment.
+            Install catalog groups and inspect discovered skills in this environment.
           </p>
           {orderedEnvironments.length > 1 ? (
             <label className="grid gap-2 text-sm">
@@ -109,10 +110,18 @@ export function SkillInstallerSettings() {
               Connect an environment to manage its skill catalog.
             </p>
           ) : (
-            <SkillCatalogPanel
-              key={effectiveEnvironmentId}
-              environmentId={effectiveEnvironmentId}
-            />
+            <div key={effectiveEnvironmentId} className="grid min-w-0 gap-6">
+              <SettingsSection id="skill-catalog" title="Catalog">
+                <div className="grid gap-4 p-4">
+                  <SkillCatalogPanel environmentId={effectiveEnvironmentId} />
+                </div>
+              </SettingsSection>
+              <SettingsSection id="installed-skills" title="Installed">
+                <div className="grid min-w-0 gap-4 p-4">
+                  <SkillInventoryPanel environmentId={effectiveEnvironmentId} />
+                </div>
+              </SettingsSection>
+            </div>
           )}
         </div>
       </SettingsSection>
