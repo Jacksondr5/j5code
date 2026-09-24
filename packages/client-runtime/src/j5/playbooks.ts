@@ -185,6 +185,43 @@ export function playbookWorkspaces(
   ]);
 }
 
+type PlaybookWorkspaceInputs = {
+  projects: Parameters<typeof playbookWorkspaces>[0];
+  threads: Parameters<typeof playbookWorkspaces>[1];
+};
+
+/** Ignore shell activity unless a workspace's identity or location changes. */
+export function samePlaybookWorkspaceInputs(
+  a: PlaybookWorkspaceInputs,
+  b: PlaybookWorkspaceInputs,
+) {
+  return (
+    a.projects.length === b.projects.length &&
+    a.threads.length === b.threads.length &&
+    a.projects.every((project, index) => {
+      const previous = b.projects[index];
+      return (
+        project.environmentId === previous?.environmentId &&
+        project.id === previous.id &&
+        project.title === previous.title &&
+        project.workspaceRoot === previous.workspaceRoot
+      );
+    }) &&
+    a.threads.every((thread, index) => {
+      const previous = b.threads[index];
+      return (
+        thread.environmentId === previous?.environmentId &&
+        thread.id === previous.id &&
+        thread.projectId === previous.projectId &&
+        thread.title === previous.title &&
+        thread.worktreePath === previous.worktreePath &&
+        thread.branch === previous.branch &&
+        thread.deletedAt === previous.deletedAt
+      );
+    })
+  );
+}
+
 /** A composer text expansion. The ordinary agent-message path performs the work. */
 export function expandPlaybookPrompt(text: string): string {
   return text.replace(

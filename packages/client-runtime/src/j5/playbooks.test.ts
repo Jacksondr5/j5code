@@ -12,6 +12,7 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
+import { Atom, AtomRegistry } from "effect/unstable/reactivity";
 import { PlaybookError, type PlaybookProgress } from "@t3tools/contracts/j5";
 import {
   ensurePlaybookAuthor,
@@ -21,6 +22,7 @@ import {
   presentPlaybook,
   sortPlaybookRuns,
   playbookWorkspaces,
+  samePlaybookWorkspaceInputs,
 } from "./playbooks.ts";
 
 const author: OrchestrationV2AgentPersonaCatalogEntry = {
@@ -301,6 +303,41 @@ it("keeps project and worktree libraries scoped when two environments share IDs"
     { environmentId: "bravo", threadId: null, workspaceRoot: "/bravo/main" },
     { environmentId: "bravo", threadId: "same-thread", workspaceRoot: "/bravo/feature" },
   ]);
+});
+
+it("keeps workspace inputs stable for thread activity and updates them for worktree changes", () => {
+  const project = {
+    environmentId: EnvironmentId.make("local"),
+    id: ProjectId.make("project"),
+    title: "Project",
+    workspaceRoot: "/project",
+  };
+  const thread = {
+    environmentId: project.environmentId,
+    projectId: project.id,
+    id: ThreadId.make("thread"),
+    title: "Task",
+    worktreePath: "/project/task",
+    branch: "task",
+    deletedAt: null,
+    updatedAt: "before",
+  };
+  const source = Atom.make({ projects: [project], threads: [thread] });
+  const selected = Atom.make((get) => get(source)).pipe(
+    Atom.withEquality(samePlaybookWorkspaceInputs),
+  );
+  const registry = AtomRegistry.make();
+  const dispose = registry.mount(selected);
+  try {
+    const before = registry.get(selected);
+    registry.set(source, { projects: [project], threads: [{ ...thread, updatedAt: "after" }] });
+    expect(registry.get(selected)).toBe(before);
+    registry.set(source, { projects: [project], threads: [{ ...thread, title: "Renamed" }] });
+    expect(registry.get(selected)).not.toBe(before);
+  } finally {
+    dispose();
+    registry.dispose();
+  }
 });
 
 describe("playbook composer expansion", () => {

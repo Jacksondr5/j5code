@@ -6,12 +6,13 @@ import {
   playbookAuthorLaunch,
   playbookAuthorSquadrons,
   playbookWorkspaces,
+  samePlaybookWorkspaceInputs,
 } from "@t3tools/client-runtime/j5/playbooks";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { CommandId } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 import { PencilIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsRow, SettingsSection } from "../../components/settings/settingsLayout";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -42,30 +43,24 @@ import { j5Environment } from "../state";
 import { playbookImportName } from "./importPlaybookFile";
 import { openPlaybookDraft } from "./openPlaybookDraft";
 
-let previousWorkspaces: ReturnType<typeof playbookWorkspaces> = [];
-const playbookWorkspacesAtom = Atom.make((get) => {
-  const next = playbookWorkspaces(
-    get(environmentProjects.projectsAtom),
-    get(environmentThreadShells.threadShellsAtom),
-  );
-  if (
-    next.length === previousWorkspaces.length &&
-    next.every(
-      (workspace, index) =>
-        workspace.key === previousWorkspaces[index]?.key &&
-        workspace.title === previousWorkspaces[index]?.title &&
-        workspace.workspaceRoot === previousWorkspaces[index]?.workspaceRoot &&
-        workspace.branch === previousWorkspaces[index]?.branch,
-    )
-  )
-    return previousWorkspaces;
-  previousWorkspaces = next;
-  return next;
-}).pipe(Atom.withLabel("j5-playbook-workspaces"));
+const workspaceInputsAtom = Atom.make((get) => ({
+  projects: get(environmentProjects.projectsAtom),
+  threads: get(environmentThreadShells.threadShellsAtom).filter(
+    (thread) => thread.deletedAt === null && thread.worktreePath !== null,
+  ),
+}));
+const playbookWorkspaceInputsAtom = Atom.withEquality(
+  workspaceInputsAtom,
+  samePlaybookWorkspaceInputs,
+).pipe(Atom.withLabel("j5-playbook-workspace-inputs"));
 
 export function PlaybookLibrarySettings() {
   const { environments } = useEnvironments();
-  const workspaces = useAtomValue(playbookWorkspacesAtom);
+  const workspaceInputs = useAtomValue(playbookWorkspaceInputsAtom);
+  const workspaces = useMemo(
+    () => playbookWorkspaces(workspaceInputs.projects, workspaceInputs.threads),
+    [workspaceInputs],
+  );
   const [workspaceKey, setWorkspaceKey] = useState("");
   const workspace = workspaces.find((entry) => entry.key === workspaceKey) ?? workspaces[0];
   const workspaceItems = workspaces.map((entry) => ({
