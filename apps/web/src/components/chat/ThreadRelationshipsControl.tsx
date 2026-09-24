@@ -390,8 +390,65 @@ export function ThreadRelationshipsPanel(props: {
               );
               return (
                 <li key={threadId} className="group flex h-9 items-center rounded-lg">
-                  {isMergeTarget ? (
-                    <div className={THREAD_DETAILS_PANEL_LINK_SPLIT_GROUP_CLASS}>
+                  {/* J5: a shrinkable slot so the row's title truncates and the saved-agent
+                      chips below stay inside the row. */}
+                  <div className="flex min-w-0 flex-1 items-center">
+                    {isMergeTarget ? (
+                      <div className={THREAD_DETAILS_PANEL_LINK_SPLIT_GROUP_CLASS}>
+                        <Tooltip>
+                          <TooltipTrigger
+                            delay={200}
+                            render={
+                              <ThreadDetailsControl
+                                size="sm"
+                                variant="ghost"
+                                part="link-primary"
+                                disabled={node?.missing === true}
+                                onClick={() => openThread(threadId)}
+                              />
+                            }
+                          >
+                            {relationshipContent}
+                          </TooltipTrigger>
+                          <RelationshipPopup side="left">{relationshipTooltip}</RelationshipPopup>
+                        </Tooltip>
+                        <span
+                          aria-hidden="true"
+                          className={THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS}
+                        />
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <ThreadDetailsControl
+                                size="sm"
+                                variant="ghost"
+                                part="secondary"
+                                aria-label={
+                                  parentTitle
+                                    ? `Merge back to ${parentTitle}`
+                                    : "Merge back to source conversation"
+                                }
+                                disabled={!canMerge || busyAction !== null}
+                                onClick={() => void merge()}
+                              >
+                                {busyAction === "merge" ? (
+                                  <LoaderCircleIcon className="size-3 animate-spin" />
+                                ) : (
+                                  <PullRequestGlyph.merged className="size-3" />
+                                )}
+                              </ThreadDetailsControl>
+                            }
+                          />
+                          <TooltipPopup side="left">
+                            {latestMergeBackRun === null
+                              ? "Complete a run in this fork before merging it back"
+                              : parentTitle
+                                ? `Merge this conversation back into ${parentTitle}`
+                                : "Merge this conversation back into its source"}
+                          </TooltipPopup>
+                        </Tooltip>
+                      </div>
+                    ) : (
                       <Tooltip>
                         <TooltipTrigger
                           delay={200}
@@ -399,9 +456,9 @@ export function ThreadRelationshipsPanel(props: {
                             <ThreadDetailsControl
                               size="sm"
                               variant="ghost"
-                              part="link-primary"
                               disabled={node?.missing === true}
                               onClick={() => openThread(threadId)}
+                              part="row"
                             />
                           }
                         >
@@ -409,61 +466,8 @@ export function ThreadRelationshipsPanel(props: {
                         </TooltipTrigger>
                         <RelationshipPopup side="left">{relationshipTooltip}</RelationshipPopup>
                       </Tooltip>
-                      <span
-                        aria-hidden="true"
-                        className={THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS}
-                      />
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <ThreadDetailsControl
-                              size="sm"
-                              variant="ghost"
-                              part="secondary"
-                              aria-label={
-                                parentTitle
-                                  ? `Merge back to ${parentTitle}`
-                                  : "Merge back to source conversation"
-                              }
-                              disabled={!canMerge || busyAction !== null}
-                              onClick={() => void merge()}
-                            >
-                              {busyAction === "merge" ? (
-                                <LoaderCircleIcon className="size-3 animate-spin" />
-                              ) : (
-                                <PullRequestGlyph.merged className="size-3" />
-                              )}
-                            </ThreadDetailsControl>
-                          }
-                        />
-                        <TooltipPopup side="left">
-                          {latestMergeBackRun === null
-                            ? "Complete a run in this fork before merging it back"
-                            : parentTitle
-                              ? `Merge this conversation back into ${parentTitle}`
-                              : "Merge this conversation back into its source"}
-                        </TooltipPopup>
-                      </Tooltip>
-                    </div>
-                  ) : (
-                    <Tooltip>
-                      <TooltipTrigger
-                        delay={200}
-                        render={
-                          <ThreadDetailsControl
-                            size="sm"
-                            variant="ghost"
-                            disabled={node?.missing === true}
-                            onClick={() => openThread(threadId)}
-                            part="row"
-                          />
-                        }
-                      >
-                        {relationshipContent}
-                      </TooltipTrigger>
-                      <RelationshipPopup side="left">{relationshipTooltip}</RelationshipPopup>
-                    </Tooltip>
-                  )}
+                    )}
+                  </div>
                   {/* J5: saved-agent chip and handoff link sit beside the row button, not inside it. */}
                   {isParent ? null : (
                     <AgentRowIdentity
