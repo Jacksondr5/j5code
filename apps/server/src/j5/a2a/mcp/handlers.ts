@@ -483,8 +483,9 @@ const handlers = {
         acceptedAt,
       });
       // A withdrawal addressed to a peer is a pending delivery; wake the worker as a send does.
-      yield* (yield* A2ADeliveryWorker).notify;
-      return cleared;
+      const { withdrawalQueued, ...result } = cleared;
+      if (withdrawalQueued) yield* (yield* A2ADeliveryWorker).notify;
+      return result;
     }).pipe(Effect.mapError(failure)),
   list_participants: (input) =>
     Effect.gen(function* () {
