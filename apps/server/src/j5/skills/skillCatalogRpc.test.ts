@@ -116,6 +116,30 @@ const fixture = Effect.gen(function* () {
 });
 
 describe("skill catalog RPC handlers", () => {
+  it.effect("replaces a confirmed external link and refreshes provider discovery", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const old = f.path.join(f.root, "old-skill");
+      yield* f.fs.makeDirectory(old);
+      yield* f.fs.writeFileString(f.path.join(old, "SKILL.md"), "old skill");
+      const link = f.path.join(f.homeDir, ".agents", "skills", "explain");
+      yield* f.fs.makeDirectory(f.path.dirname(link), { recursive: true });
+      yield* f.fs.symlink(old, link);
+      const input = { expectedSource: f.catalogDir, groups: ["core"] };
+      const preview = yield* f.handlers["j5.skills.apply"](input);
+      assert.equal(preview.conflicts.length, 1);
+      assert.deepEqual(yield* Ref.get(f.discovered), ["old skill"]);
+      const result = yield* f.handlers["j5.skills.apply"]({
+        ...input,
+        replacements: [preview.conflicts[0]!.replacement!],
+      });
+      assert.equal(result.installed, 1);
+      assert.equal(result.conflicts.length, 0);
+      assert.deepEqual(yield* Ref.get(f.discovered), [f.contents]);
+      assert.equal(yield* Ref.get(f.refreshes), 2);
+      assert.equal(yield* f.fs.readFileString(f.path.join(old, "SKILL.md")), "old skill");
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
   it.effect("honors default enablement and legacy disabled flags for catalog destinations", () =>
     Effect.gen(function* () {
       const f = yield* fixture;

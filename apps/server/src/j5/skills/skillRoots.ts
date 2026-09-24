@@ -49,9 +49,10 @@ export const affectedSkillProviderIds = Effect.fn("j5.skills.affectedProviders")
   snapshots: ReadonlyArray<ServerProvider>,
   instances: ProviderInstanceConfigMap,
   targets: ReadonlyArray<string>,
-  projectCwd?: string,
+  context?: { readonly scope: "user" | "project"; readonly cwd?: string | undefined },
 ) {
   const path = yield* Path.Path;
+  const projectCwd = context?.scope === "project" ? context.cwd : undefined;
   const roots = new Set(
     yield* Effect.tryPromise({
       try: () => Promise.all(targets.map(canonicalSkillRoot)),
@@ -67,7 +68,11 @@ export const affectedSkillProviderIds = Effect.fn("j5.skills.affectedProviders")
         const candidates = new Set<string>();
         const cwds = projectCwd
           ? [projectCwd]
-          : [undefined, ...(snapshot.workspaceSnapshots ?? []).map((entry) => entry.cwd)];
+          : [
+              undefined,
+              ...(snapshot.workspaceSnapshots ?? []).map((entry) => entry.cwd),
+              ...(context?.cwd ? [context.cwd] : []),
+            ];
         for (const cwd of cwds) {
           if (instance.driver === "codex" || instance.driver === "claudeAgent") {
             candidates.add(yield* resolveSkillRoot(instance, projectCwd ? "project" : "user", cwd));

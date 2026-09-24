@@ -40,10 +40,20 @@ export const SkillCatalogStatus = Schema.Struct({
 });
 export type SkillCatalogStatus = typeof SkillCatalogStatus.Type;
 
+/** A specific link observed during Apply, requiring explicit confirmation to replace. */
+export const SkillCatalogReplacement = Schema.Struct({
+  linkPath: TrimmedNonEmptyString,
+  currentTarget: TrimmedNonEmptyString,
+  target: TrimmedNonEmptyString,
+  identity: TrimmedNonEmptyString,
+});
+export type SkillCatalogReplacement = typeof SkillCatalogReplacement.Type;
+
 export const SkillCatalogConflict = Schema.Struct({
   skill: TrimmedNonEmptyString,
   linkPath: TrimmedNonEmptyString,
   detail: Schema.String,
+  replacement: Schema.optional(SkillCatalogReplacement),
 });
 export type SkillCatalogConflict = typeof SkillCatalogConflict.Type;
 
@@ -107,6 +117,7 @@ export const J5SkillCatalogRpcSchemas = {
     input: Schema.Struct({
       expectedSource: TrimmedString,
       groups: Schema.Array(TrimmedNonEmptyString),
+      replacements: Schema.optional(Schema.Array(SkillCatalogReplacement)),
     }),
     output: SkillCatalogApplyResult,
   },

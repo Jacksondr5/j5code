@@ -3,7 +3,9 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
+  type ManagedSkillLink,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import type * as React from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
@@ -12,6 +14,15 @@ import { SkillInventoryPanel } from "./SkillManagementSettings";
 const state = vi.hoisted(() => ({
   providers: [] as ReadonlyArray<ServerProvider>,
   refresh: vi.fn(),
+  preview: vi.fn(),
+  inspect: vi.fn(),
+  deletePreview: vi.fn(),
+  delete: vi.fn(),
+  unlink: vi.fn(),
+  create: vi.fn(),
+  remove: vi.fn(),
+  refreshLinks: vi.fn(),
+  links: [] as ReadonlyArray<ManagedSkillLink>,
   catalogSource: "/catalog",
 }));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => state.providers }));
@@ -37,8 +48,52 @@ vi.mock("../../state/server", () => ({
   EMPTY_SERVER_PROVIDERS: [],
   serverEnvironment: { providersValueAtom: () => "providers", refreshProviders: "refresh" },
 }));
+vi.mock("./skillLinkAtoms", () => ({
+  skillLinkEnvironment: {
+    list: () => "links",
+    preview: "preview",
+    inspect: "inspect",
+    deletePreview: "deletePreview",
+    delete: "delete",
+    unlink: "unlink",
+    create: "create",
+    remove: "remove",
+  },
+}));
+vi.mock("../../state/query", () => ({
+  useEnvironmentQuery: () => ({
+    data: state.links,
+    error: null,
+    isPending: false,
+    refresh: state.refreshLinks,
+  }),
+}));
 vi.mock("../../state/use-atom-command", () => ({
-  useAtomCommand: () => state.refresh,
+  useAtomCommand: (command: string) =>
+    command === "deletePreview"
+      ? state.deletePreview
+      : command === "delete"
+        ? state.delete
+        : command === "inspect"
+          ? state.inspect
+          : command === "unlink"
+            ? state.unlink
+            : command === "preview"
+              ? state.preview
+              : command === "create"
+                ? state.create
+                : command === "remove"
+                  ? state.remove
+                  : state.refresh,
+}));
+vi.mock("../../components/ui/dialog", () => ({
+  Dialog: ({ children }: { children: React.ReactNode }) => children,
+  DialogPopup: ({ children }: { children: React.ReactNode }) => <div role="dialog">{children}</div>,
+  DialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
+  DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogPanel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
 }));
 vi.mock("../../components/settings/settingsLayout", () => ({
   SettingsPageContainer: () => null,
@@ -96,6 +151,49 @@ let renderer: ReactTestRenderer | undefined;
 
 beforeEach(() => {
   state.catalogSource = "/catalog";
+  state.links = [];
+  state.inspect.mockReset().mockResolvedValue({ _tag: "Success", value: [] });
+  state.unlink.mockReset();
+  state.deletePreview.mockReset().mockResolvedValue({
+    _tag: "Success",
+    value: { expectedPath: "/home/.claude/skills/review", expectedIdentity: "identity" },
+  });
+  state.delete.mockReset().mockResolvedValue({
+    _tag: "Success",
+    value: {
+      action: "removed",
+      discovery: "not-detected",
+      message: "Skill permanently deleted.",
+    },
+  });
+  state.refreshLinks.mockReset();
+  state.preview.mockReset().mockResolvedValue({
+    _tag: "Success",
+    value: {
+      sourcePath: "/shared/review",
+      destinationPath: "/home/.claude/skills/review",
+      skillName: "review",
+      status: "available",
+      sharedWith: [],
+      warnings: ["Running sessions may need refreshing."],
+    },
+  });
+  state.create.mockReset().mockResolvedValue({
+    _tag: "Success",
+    value: {
+      action: "created",
+      discovery: "failed",
+      message: "Link created. Discovery refresh failed.",
+    },
+  });
+  state.remove.mockReset().mockResolvedValue({
+    _tag: "Success",
+    value: {
+      action: "removed",
+      discovery: "not-detected",
+      message: "Link removed. The source is unchanged.",
+    },
+  });
   state.providers = [
     {
       instanceId,
@@ -561,4 +659,328 @@ it("keeps collapsed categories across filters and refresh, and resets them on re
   });
   expect(categoryButton("Plugin").props["aria-expanded"]).toBe(true);
   expect(inventoryText()).toContain("review");
+});
+
+function buttonNamed(name: string) {
+  return renderer!.root.findAllByType("button").find((button) => textContent(button) === name)!;
+}
+function linkableSkill(scope = "user") {
+  state.providers = [
+    {
+      ...state.providers[0]!,
+      skills: [{ name: "review", path: "/shared/review/SKILL.md", scope, enabled: true }],
+    },
+    {
+      ...state.providers[0]!,
+      instanceId: ProviderInstanceId.make("claude-work"),
+      driver: ProviderDriverKind.make("claudeAgent"),
+      skills: [],
+    },
+  ];
+}
+it("offers only Codex and Claude instances in the inventory filter and link destination picker", async () => {
+  linkableSkill();
+  state.providers = [
+    ...state.providers,
+    { ...state.providers[0]!, instanceId: ProviderInstanceId.make("codex-home"), skills: [] },
+    ...["cursor", "grok", "opencode", "antigravity"].map((driver) => ({
+      ...state.providers[0]!,
+      instanceId: ProviderInstanceId.make(driver),
+      driver: ProviderDriverKind.make(driver),
+      skills: [],
+    })),
+  ];
+  const panel = await renderPanel();
+  const options = (select: ReactTestInstance) =>
+    select.findAllByType("option").map((option) => option.props.value);
+  expect(options(panel.root.findAllByType("select")[1]!)).toEqual([
+    "",
+    "codex-work",
+    "claude-work",
+    "codex-home",
+  ]);
+  await act(async () => buttonNamed("Link…").props.onClick());
+  const destination = panel.root.findByProps({ role: "dialog" }).findAllByType("select")[0]!;
+  expect(options(destination)).toEqual(["codex-work", "claude-work", "codex-home"]);
+  await act(async () => destination.props.onChange({ target: { value: "codex-home" } }));
+  expect(state.preview.mock.lastCall![0].input.targetInstanceId).toBe("codex-home");
+});
+it("previews an environment-scoped destination before linking and separates creation from discovery", async () => {
+  linkableSkill();
+  await renderPanel();
+  await act(async () => buttonNamed("Link…").props.onClick());
+  expect(state.preview).toHaveBeenLastCalledWith({
+    environmentId,
+    input: {
+      source: { instanceId, path: "/shared/review/SKILL.md", name: "review" },
+      targetInstanceId: "claude-work",
+      scope: "user",
+      projectId: "first",
+    },
+  });
+  expect(renderedText()).toContain("/home/.claude/skills/review");
+  expect(state.create).not.toHaveBeenCalled();
+  await act(async () => buttonNamed("Link skill").props.onClick());
+  expect(state.create).toHaveBeenLastCalledWith({
+    environmentId,
+    input: {
+      ...state.preview.mock.calls[0]![0].input,
+      expectedSourcePath: "/shared/review",
+      expectedDestinationPath: "/home/.claude/skills/review",
+    },
+  });
+  expect(renderedText()).toContain("Link created. Discovery refresh failed.");
+  expect(renderer!.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+  expect(state.refreshLinks).toHaveBeenCalledOnce();
+});
+it("defaults project skills to the selected project and discards a stale preview when scope changes", async () => {
+  linkableSkill("project");
+  await renderPanel();
+  await act(async () => buttonNamed("Link…").props.onClick());
+  expect(state.preview.mock.calls[0]![0].input.scope).toBe("project");
+  let resolve!: (value: unknown) => void;
+  state.preview.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  const dialog = renderer!.root.findByProps({ role: "dialog" });
+  await act(async () =>
+    dialog.findAllByType("select")[1]!.props.onChange({ target: { value: "user" } }),
+  );
+  expect(buttonNamed("Link skill").props.disabled).toBe(true);
+  expect(renderedText()).not.toContain("/home/.claude/skills/review");
+  await act(async () =>
+    resolve({
+      _tag: "Success",
+      value: {
+        sourcePath: "/shared/review",
+        destinationPath: "/new-destination",
+        skillName: "review",
+        sharedWith: [],
+        warnings: [],
+        status: "conflict",
+        conflict: "Existing directory. Nothing will be overwritten.",
+      },
+    }),
+  );
+  expect(renderedText()).toContain("Nothing will be overwritten");
+  expect(buttonNamed("Link skill").props.disabled).toBe(true);
+  expect(state.create).not.toHaveBeenCalled();
+});
+it("keeps plugin rows read-only and broken managed links removable", async () => {
+  linkableSkill("plugin");
+  state.links = [
+    {
+      id: "owned-link",
+      skillName: "review",
+      sourcePath: "/gone/review",
+      destinationPath: "/home/.claude/skills/review",
+      targetInstanceId: ProviderInstanceId.make("claude-work"),
+      scope: "user",
+      status: "broken",
+    },
+  ];
+  await renderPanel();
+  expect(buttonNamed("Link…")).toBeUndefined();
+  expect(buttonNamed("Unlink…")).toBeUndefined();
+  expect(renderedText()).not.toContain("Link unavailable");
+  expect(renderedText()).toContain("Broken link");
+  await act(async () => buttonNamed("Unlink").props.onClick());
+  expect(state.remove).toHaveBeenCalledWith({ environmentId, input: { id: "owned-link" } });
+  expect(renderedText()).toContain("Link removed. The source is unchanged.");
+});
+
+it("explains an outdated server and keeps linking disabled when the preview RPC is unknown", async () => {
+  linkableSkill();
+  state.preview.mockResolvedValueOnce({
+    _tag: "Failure",
+    cause: Cause.die("Unknown request tag: j5.skills.links.preview"),
+  });
+  await renderPanel();
+  await act(async () => buttonNamed("Link…").props.onClick());
+  expect(renderedText()).toContain("Update and restart the app or server hosting this environment");
+  expect(renderedText()).not.toContain("Close and reopen");
+  expect(buttonNamed("Link skill").props.disabled).toBe(true);
+  expect(state.create).not.toHaveBeenCalled();
+});
+
+it("lets changed links be forgotten and removes only their managed record", async () => {
+  state.links = [
+    {
+      id: "changed-link",
+      skillName: "review",
+      sourcePath: "/source/review",
+      destinationPath: "/home/.claude/skills/review",
+      targetInstanceId: instanceId,
+      scope: "user",
+      status: "changed",
+    },
+  ];
+  state.remove.mockImplementation(() => {
+    state.links = [];
+    return Promise.resolve({
+      _tag: "Success",
+      value: {
+        action: "forgotten",
+        discovery: "not-checked",
+        message: "Record forgotten. The destination and source were left unchanged.",
+      },
+    });
+  });
+  await renderPanel();
+  expect(buttonNamed("Unlink")).toBeUndefined();
+  expect(buttonNamed("Forget record").props.disabled).toBe(false);
+  await act(async () => buttonNamed("Forget record").props.onClick());
+  expect(state.remove).toHaveBeenCalledWith({
+    environmentId,
+    input: { id: "changed-link", forget: true },
+  });
+  expect(renderedText()).toContain("The destination and source were left unchanged");
+  expect(renderedText()).toContain("No managed links yet");
+});
+
+function existingLinks() {
+  return ["codex-work", "claude-work"].map((id) => ({
+    label: `${id} · User`,
+    request: {
+      targetInstanceId: ProviderInstanceId.make(id),
+      scope: "user" as const,
+      expectedSourcePath: "/shared/review",
+      expectedDestinationPath: `/home/${id}/skills/review`,
+      expectedIdentity: `identity-${id}`,
+    },
+  }));
+}
+it("loads existing links only on demand after remount and unlinks one provider without removing the other", async () => {
+  linkableSkill();
+  const options = existingLinks();
+  state.inspect.mockResolvedValue({ _tag: "Success", value: options });
+  const panel = await renderPanel();
+  expect(state.inspect).not.toHaveBeenCalled();
+  await act(async () =>
+    panel.update(<SkillInventoryPanel key="restarted" environmentId={environmentId} />),
+  );
+  expect(state.inspect).not.toHaveBeenCalled();
+  await act(async () => buttonNamed("Unlink…").props.onClick());
+  expect(state.inspect).toHaveBeenCalledOnce();
+  expect(state.preview).not.toHaveBeenCalled();
+  expect(renderedText()).toContain(options[1]!.request.expectedDestinationPath);
+  state.unlink.mockResolvedValue({
+    _tag: "Success",
+    value: {
+      removedPaths: [options[0]!.request.expectedDestinationPath],
+      failed: [],
+      refreshFailed: false,
+    },
+  });
+  await act(async () => buttonNamed("Unlink").props.onClick());
+  expect(state.unlink).toHaveBeenCalledWith({
+    environmentId,
+    input: { links: [options[0]!.request] },
+  });
+  expect(renderedText()).not.toContain(options[0]!.request.expectedDestinationPath);
+  expect(renderedText()).toContain(options[1]!.request.expectedDestinationPath);
+  expect(renderedText()).toContain("1 link removed. Source files stay in place.");
+  expect(buttonNamed("Unlink all")).toBeUndefined();
+  expect(state.inspect).toHaveBeenCalledOnce();
+});
+it("unlinks both providers in one request and keeps failed links available to retry", async () => {
+  linkableSkill();
+  const options = existingLinks();
+  state.inspect.mockResolvedValue({ _tag: "Success", value: options });
+  await renderPanel();
+  await act(async () => buttonNamed("Unlink…").props.onClick());
+  state.unlink.mockResolvedValue({
+    _tag: "Success",
+    value: {
+      removedPaths: [options[0]!.request.expectedDestinationPath],
+      failed: [
+        {
+          path: options[1]!.request.expectedDestinationPath,
+          message: "Link changed since preview",
+        },
+      ],
+      refreshFailed: true,
+    },
+  });
+  await act(async () => buttonNamed("Unlink all").props.onClick());
+  expect(state.unlink).toHaveBeenCalledOnce();
+  expect(state.unlink).toHaveBeenCalledWith({
+    environmentId,
+    input: { links: options.map((option) => option.request) },
+  });
+  expect(renderedText()).toContain("Link changed since preview");
+  expect(renderedText()).toContain("Discovery refresh failed");
+  expect(renderedText()).toContain(options[1]!.request.expectedDestinationPath);
+  expect(buttonNamed("Unlink").props.disabled).toBe(false);
+  expect(state.refreshLinks).toHaveBeenCalledOnce();
+});
+it("shows inspection errors without leaving an endless loading state", async () => {
+  linkableSkill();
+  state.inspect.mockResolvedValue({
+    _tag: "Failure",
+    cause: Cause.die("Unknown request tag: j5.skills.links.inspect"),
+  });
+  await renderPanel();
+  await act(async () => buttonNamed("Unlink…").props.onClick());
+  expect(renderedText()).toContain("Update and restart");
+  expect(renderedText()).not.toContain("Checking existing links");
+  expect(state.unlink).not.toHaveBeenCalled();
+});
+
+it("keeps built-in skill rows read-only while showing their metadata and provider status", async () => {
+  linkableSkill("system");
+  await renderPanel();
+  const table = renderer!.root.findByProps({ "aria-label": "Built-in skill inventory" });
+  expect(textContent(table)).toContain("review");
+  expect(textContent(table)).toContain("Enabled");
+  expect(table.findAllByType("button")).toHaveLength(0);
+  expect(textContent(table)).not.toContain("Link unavailable");
+  expect(state.preview).not.toHaveBeenCalled();
+  expect(state.inspect).not.toHaveBeenCalled();
+});
+
+it("warns with the exact folder, allows cancellation, and deletes only after explicit confirmation", async () => {
+  linkableSkill();
+  await renderPanel();
+  expect(state.deletePreview).not.toHaveBeenCalled();
+  await act(async () => buttonNamed("Unlink…").props.onClick());
+  expect(state.deletePreview).not.toHaveBeenCalled();
+  await act(async () => buttonNamed("Delete skill…").props.onClick());
+  expect(renderedText()).toContain("/home/.claude/skills/review");
+  expect(renderedText()).toContain(
+    "permanently deletes this skill folder and every file inside it",
+  );
+  expect(renderedText()).toContain("This cannot be undone");
+  expect(state.delete).not.toHaveBeenCalled();
+  await act(async () => buttonNamed("Cancel").props.onClick());
+  expect(buttonNamed("Permanently delete")).toBeUndefined();
+  expect(state.delete).not.toHaveBeenCalled();
+  await act(async () => buttonNamed("Delete skill…").props.onClick());
+  await act(async () => buttonNamed("Permanently delete").props.onClick());
+  expect(state.delete).toHaveBeenCalledExactlyOnceWith({
+    environmentId,
+    input: {
+      ...state.deletePreview.mock.calls[1]![0].input,
+      expectedPath: "/home/.claude/skills/review",
+      expectedIdentity: "identity",
+    },
+  });
+  expect(renderedText()).toContain("Skill permanently deleted.");
+  expect(renderer!.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+});
+it("keeps deletion unavailable after preview failure", async () => {
+  linkableSkill();
+  state.deletePreview.mockResolvedValue({
+    _tag: "Failure",
+    cause: Cause.die("Only an original skill folder can be deleted. Use Unlink for links."),
+  });
+  await renderPanel();
+  await act(async () => buttonNamed("Unlink…").props.onClick());
+  await act(async () => buttonNamed("Delete skill…").props.onClick());
+  expect(renderedText()).toContain("Use Unlink for links");
+  expect(buttonNamed("Permanently delete")).toBeUndefined();
+  expect(state.delete).not.toHaveBeenCalled();
 });

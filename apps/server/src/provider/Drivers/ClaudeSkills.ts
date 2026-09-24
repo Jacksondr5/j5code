@@ -36,6 +36,8 @@ type SkillFrontmatter =
   | { readonly kind: "malformed" }
   | {
       readonly kind: "parsed";
+      readonly metadata: Record<string, unknown>;
+      readonly name?: string;
       readonly description?: string;
       readonly userInvocationOnly?: boolean;
       readonly userInvocable?: boolean;
@@ -90,6 +92,8 @@ export function parseSkillFrontmatter(contents: string): SkillFrontmatter {
   const description = typeof record.description === "string" ? record.description.trim() : "";
   return {
     kind: "parsed",
+    metadata: record,
+    ...(typeof record.name === "string" && record.name.trim() ? { name: record.name.trim() } : {}),
     ...(description ? { description } : {}),
     ...(parseFrontmatterBoolean(record["disable-model-invocation"]) === true
       ? { userInvocationOnly: true }
