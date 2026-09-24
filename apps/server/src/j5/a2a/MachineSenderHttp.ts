@@ -1,5 +1,4 @@
 import {
-  AuthA2APeerScope,
   AuthA2ASendScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
@@ -263,12 +262,7 @@ export const machineSenderHttpRouteLayer = Layer.unwrap(
       Effect.gen(function* () {
         yield* annotateEnvironmentRequest("j5.a2a.machine.roster");
         const session = yield* authenticate;
-        // A peer server reads this address book to resolve a receiver homed here.
-        yield* requireAnyScope(session, [
-          AuthOrchestrationReadScope,
-          AuthA2ASendScope,
-          AuthA2APeerScope,
-        ]);
+        yield* requireAnyScope(session, [AuthOrchestrationReadScope, AuthA2ASendScope]);
         const participants = yield* Effect.result(roster.list());
         if (Result.isFailure(participants)) {
           yield* Effect.logError("J5 A2A roster read failed", { cause: participants.failure });

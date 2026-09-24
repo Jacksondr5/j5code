@@ -12,6 +12,7 @@ import {
   type PeerDeliveryResponse,
   type PeerHelloResponse,
   type PeerListResponse,
+  type PeerRosterResponse,
   type RemovePeerResponse,
 } from "@t3tools/contracts/j5";
 import * as DateTime from "effect/DateTime";
@@ -30,6 +31,7 @@ import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { PeerInboundService } from "./PeerInboundService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
+import { RosterService } from "./RosterService.ts";
 import {
   authenticate,
   jsonError,
@@ -46,9 +48,9 @@ import {
  * list, remove) carry the same `access:*` scopes as Settings → Connections,
  * because a peer is one more authorized session there. A peer credential
  * reaches two routes: hello, which proves reachability, tells the caller who
- * this server is and whom the credential names, and completes a rotation; and
- * deliver, which accepts one message from a registered peer and records it
- * before delivering locally.
+ * this server is and whom the credential names, and completes a rotation;
+ * roster, the agents a registered peer may address; and deliver, which accepts
+ * one message from a registered peer and records it before delivering locally.
  */
 
 /**
@@ -95,6 +97,8 @@ const deliveryFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpS
       return Effect.succeed(jsonError(403, "policy_refused", message, { reason: tag }));
     case "A2APeerAskIntentRequiredError":
       return Effect.succeed(requestFailure(message));
+    case "A2APeerSenderNotAllowedError":
+      return Effect.succeed(jsonError(403, "policy_refused", message, { reason: tag }));
     case "CommCommandConflictError":
       return Effect.succeed(jsonError(409, "message_id_conflict", message));
     default:
@@ -109,6 +113,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
     const peers = yield* PeerRegistryService;
     const inbound = yield* PeerInboundService;
     const worker = yield* A2ADeliveryWorker;
+    const roster = yield* RosterService;
     const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
 
@@ -361,8 +366,48 @@ export const peerHttpRouteLayer = Layer.unwrap(
       }).pipe(Effect.catchTags(respondableTags)),
     );
 
+    // A peer resolves receivers here, and sees only what it could address:
+    // agents by Squadron. People, machine participants and liveness stay home.
+    const rosterRoute = HttpRouter.add(
+      "GET",
+      J5_PEER_API_PATHS.roster,
+      Effect.gen(function* () {
+        yield* annotateEnvironmentRequest("j5.a2a.peer.roster");
+        const session = yield* authenticate;
+        yield* requireScope(session, AuthA2APeerScope);
+        const origin = yield* registeredPeerForSession(session);
+        if (Result.isFailure(origin)) return origin.failure;
+        const listed = yield* Effect.result(roster.list());
+        if (Result.isFailure(listed)) {
+          yield* Effect.logError("J5 A2A peer roster read failed", { cause: listed.failure });
+          return jsonError(500, tagOf(listed.failure), "Roster read failed.");
+        }
+        return HttpServerResponse.jsonUnsafe({
+          agents: listed.success.flatMap((entry) =>
+            entry.kind === "agent" &&
+            entry.squadronId !== null &&
+            entry.squadronName !== null &&
+            entry.threadId !== null
+              ? [
+                  {
+                    participantId: entry.participantId,
+                    squadronId: entry.squadronId,
+                    squadronName: entry.squadronName,
+                    threadId: entry.threadId,
+                    displayName: entry.displayName,
+                    archived: entry.archived,
+                    canReceiveMessage: entry.canReceiveMessage,
+                  },
+                ]
+              : [],
+          ),
+        } satisfies PeerRosterResponse);
+      }).pipe(Effect.catchTags(respondableTags)),
+    );
+
     return Layer.mergeAll(
       helloRoute,
+      rosterRoute,
       issueCredentialRoute,
       addRoute,
       listRoute,

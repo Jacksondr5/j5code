@@ -569,9 +569,28 @@ export const PeerDeliveryRequest = Schema.Struct({
   originSquadronId: Schema.String.check(Schema.isNonEmpty()),
   /** Required when `exchangeRole` is `ask`: the Exchange the receiver now owes a reply to. */
   intent: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
-  createdAt: Schema.String,
+  /** The origin's clock, kept for display; the receiving server stamps its own time on what it records. */
+  createdAt: Schema.String.check(
+    Schema.makeFilter(
+      (value) => !Number.isNaN(Date.parse(value)) || "createdAt must be an ISO-8601 timestamp.",
+    ),
+  ),
 });
 export type PeerDeliveryRequest = typeof PeerDeliveryRequest.Type;
+
+/** The one thing a peer may read here: the agents it could address, and nothing about people or machines. */
+export const PeerRosterAgent = Schema.Struct({
+  participantId: Schema.String,
+  squadronId: Schema.String,
+  squadronName: Schema.String,
+  threadId: ThreadId,
+  displayName: Schema.NullOr(Schema.String),
+  archived: Schema.Boolean,
+  canReceiveMessage: Schema.Boolean,
+});
+export type PeerRosterAgent = typeof PeerRosterAgent.Type;
+export const PeerRosterResponse = Schema.Struct({ agents: Schema.Array(PeerRosterAgent) });
+export type PeerRosterResponse = typeof PeerRosterResponse.Type;
 export const PeerDeliveryResponse = Schema.Struct({
   accepted: Schema.Literal(true),
   receivedSeq: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
@@ -585,5 +604,6 @@ export const J5_PEER_API_PATHS = {
   credentials: "/api/j5/a2a/peers/credentials",
   remove: "/api/j5/a2a/peers/remove",
   hello: "/api/j5/a2a/peers/hello",
+  roster: "/api/j5/a2a/peers/roster",
   deliver: "/api/j5/a2a/peers/deliver",
 } as const;

@@ -48,6 +48,7 @@ export const isDurableHumanParticipantId = (id: ParticipantId): boolean =>
 export const MACHINE_PARTICIPANT_ID_PREFIX = "machine:";
 export const isMachineParticipantId = (id: ParticipantId): boolean =>
   id.startsWith(MACHINE_PARTICIPANT_ID_PREFIX) && id.length > MACHINE_PARTICIPANT_ID_PREFIX.length;
+export const isPlatformParticipantId = (id: string): boolean => id.startsWith("platform:");
 export const machineParticipantIdForName = (name: string) =>
   ParticipantId.make(`${MACHINE_PARTICIPANT_ID_PREFIX}${name}`);
 
@@ -150,6 +151,9 @@ const NonMembershipCommEvent = Schema.Struct({
 export const MessageReceivedPayload = Schema.Struct({
   originSquadronId: SquadronId,
   originEnvironmentId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  /** The id and clock the origin used; this ledger keys and stamps the message itself. */
+  originMessageId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  originCreatedAt: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   message: Schema.Json,
 });
 export type MessageReceivedPayload = typeof MessageReceivedPayload.Type;

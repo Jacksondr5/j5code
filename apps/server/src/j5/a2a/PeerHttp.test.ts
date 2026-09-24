@@ -6,6 +6,7 @@ import {
   AuthOrchestrationOperateScope,
   AuthSessionId,
   EnvironmentId,
+  ThreadId,
   type AuthClientSession,
   type AuthEnvironmentScope,
 } from "@t3tools/contracts";
@@ -21,6 +22,7 @@ import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { peerHttpRouteLayer } from "./PeerHttp.ts";
+import { RosterService } from "./RosterService.ts";
 import {
   A2APeerReceiverNotDeliverableError,
   A2APeerReceiverNotFoundError,
@@ -172,6 +174,49 @@ const makeHandler = (input: {
         notify: Effect.sync(() => {
           if (input.notifications) input.notifications.count += 1;
         }),
+      }),
+    ),
+    Layer.provide(
+      Layer.mock(RosterService)({
+        list: () =>
+          Effect.succeed([
+            {
+              participantId: "agent:j5:a2a:thread:local-triage",
+              kind: "agent" as const,
+              squadronId: "squadron:work-billing",
+              squadronName: "Billing Migration",
+              displayName: "Local triage",
+              threadId: ThreadId.make("thread:local-triage"),
+              archived: false,
+              canReceiveMessage: true,
+              acceptsUrgency: false,
+              liveness: null,
+            },
+            {
+              participantId: "human:jackson",
+              kind: "human" as const,
+              squadronId: null,
+              squadronName: null,
+              displayName: "Jackson",
+              threadId: null,
+              archived: false,
+              canReceiveMessage: false,
+              acceptsUrgency: true,
+              liveness: null,
+            },
+            {
+              participantId: "machine:watchdog",
+              kind: "machine" as const,
+              squadronId: "squadron:work-billing",
+              squadronName: "Billing Migration",
+              displayName: "watchdog",
+              threadId: null,
+              archived: false,
+              canReceiveMessage: false,
+              acceptsUrgency: false,
+              liveness: null,
+            },
+          ]),
       }),
     ),
     Layer.provide(
@@ -463,5 +508,37 @@ it("maps inbound refusals: unknown receiver 404, a person 403 policy, a malforme
     assert.equal(malformed.status, 400);
   } finally {
     await dispose();
+  }
+});
+
+it("shows a recorded peer only the agents it could address, and nobody else the roster at all", async () => {
+  const peer = makeHandler({ subject: `peer:${home}`, scopes: [AuthA2APeerScope] });
+  const stranger = makeHandler({
+    subject: "peer:environment-stranger",
+    scopes: [AuthA2APeerScope],
+  });
+  const machine = makeHandler({ subject: "machine:watchdog", scopes: [AuthA2ASendScope] });
+  try {
+    const response = await peer.handler(get(J5_PEER_API_PATHS.roster));
+    assert.equal(response.status, 200);
+    assert.deepStrictEqual(await response.json(), {
+      agents: [
+        {
+          participantId: "agent:j5:a2a:thread:local-triage",
+          squadronId: "squadron:work-billing",
+          squadronName: "Billing Migration",
+          threadId: "thread:local-triage",
+          displayName: "Local triage",
+          archived: false,
+          canReceiveMessage: true,
+        },
+      ],
+    });
+    assert.equal((await stranger.handler(get(J5_PEER_API_PATHS.roster))).status, 403);
+    assert.equal((await machine.handler(get(J5_PEER_API_PATHS.roster))).status, 403);
+  } finally {
+    await peer.dispose();
+    await stranger.dispose();
+    await machine.dispose();
   }
 });

@@ -106,6 +106,9 @@ const ask: PeerInboundInput = {
   originEnvironmentId: homeEnvironment,
 };
 const { intent: _askIntent, ...askWithoutIntent } = ask;
+/** The id this ledger keys a peer's message by: the origin's id under its environment. */
+const localMessageId = (messageId: string) =>
+  `message:j5:a2a:peer:${homeEnvironment}:${encodeURIComponent(messageId)}`;
 
 it.effect(
   "records a peer's ask as a received row plus a local Exchange, delivers it naming the remote Squadron, and replays a retry",
@@ -149,7 +152,7 @@ it.effect(
           readonly status: string;
           readonly origin_squadron_id: string;
           readonly origin_environment_id: string;
-        }>`SELECT status, origin_squadron_id, origin_environment_id FROM j5_a2a_delivery WHERE message_id = ${ask.messageId}`;
+        }>`SELECT status, origin_squadron_id, origin_environment_id FROM j5_a2a_delivery WHERE message_id = ${localMessageId(ask.messageId)}`;
         assert.deepStrictEqual(pending, [
           {
             status: "pending",
@@ -198,13 +201,14 @@ it.effect("lets the local agent reply to a peer's ask as an ordinary same-Squadr
           acceptedAt: timestamp,
         })
         .pipe(Effect.result);
-      // Resolving the remote asker as a receiver is the next PR's work; the
-      // exchange guard itself must already accept this reply's squadron.
-      if (reply._tag === "Failure") {
-        assert.notEqual(reply.failure._tag, "A2ACrossSquadronReplyInvariantError");
-        assert.notEqual(reply.failure._tag, "A2AExchangeNotOpenError");
-        assert.notEqual(reply.failure._tag, "A2AExchangeParticipantMismatchError");
-      }
+      // Resolving the remote asker as a receiver is the next PR's work, so this
+      // send fails on the receiver, and only on the receiver: the Exchange guard
+      // has already accepted the reply's Squadron.
+      assert.equal(reply._tag, "Failure");
+      assert.equal(
+        reply._tag === "Failure" ? reply.failure._tag : "",
+        "A2AParticipantNotFoundError",
+      );
       const open = yield* sql<{ readonly status: string }>`
         SELECT status FROM j5_a2a_exchange WHERE exchange_id = ${ask.exchangeId}
       `;
@@ -290,16 +294,17 @@ it.effect(
           (yield* fail({ receiverId: "machine:watchdog" }))._tag,
           "A2APeerReceiverNotDeliverableError",
         );
-        assert.equal(
-          (yield* Effect.flip(
-            inbound.receive({
-              ...askWithoutIntent,
-              messageId: "message:j5:a2a:refused-no-intent",
-              correlationId: "correlation:j5:a2a:refused-no-intent",
-            }),
-          ))._tag,
-          "A2APeerAskIntentRequiredError",
+        const noIntent = yield* Effect.flip(
+          inbound.receive({
+            ...askWithoutIntent,
+            messageId: "message:j5:a2a:refused-no-intent",
+            correlationId: "correlation:j5:a2a:refused-no-intent",
+          }),
         );
+        assert.equal(noIntent._tag, "A2APeerAskIntentRequiredError");
+        const noExchange = yield* fail({ exchangeId: null });
+        assert.equal(noExchange._tag, "A2APeerAskIntentRequiredError");
+        assert.include(noExchange.message, "Exchange id");
 
         yield* ledger.append({
           commandId: CommCommandId.make("command:peer-inbound:archive"),
@@ -323,4 +328,93 @@ it.effect(
         assert.isTrue(replayed.replay);
       }).pipe(Effect.provide(makeTestLayer(delivered)));
     }),
+);
+
+it.effect(
+  "refuses a peer that speaks as a person, a machine, the platform, or off the peer channel",
+  () =>
+    Effect.gen(function* () {
+      const delivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
+      yield* Effect.gen(function* () {
+        yield* setup();
+        const inbound = yield* PeerInboundService;
+        const sql = yield* SqlClient.SqlClient;
+        let n = 0;
+        const forged = (input: Partial<PeerInboundInput>) =>
+          Effect.flip(
+            inbound.receive({
+              ...ask,
+              exchangeRole: "none",
+              exchangeId: null,
+              messageId: `message:j5:a2a:forged-${String((n += 1))}`,
+              correlationId: `correlation:j5:a2a:forged-${String(n)}`,
+              ...input,
+            }),
+          );
+        const cases: ReadonlyArray<[Partial<PeerInboundInput>, string]> = [
+          [{ senderId: "human:someone", exchangeRole: "reply", exchangeId: "exchange:x" }, "human"],
+          [{ senderId: "machine:watchdog" }, "machine"],
+          [
+            {
+              senderId: "platform:silence-detector",
+              envelopeChannel: "silence_notice",
+              exchangeRole: "terminal_notice",
+              exchangeId: "exchange:x",
+            },
+            "platform",
+          ],
+          [{ envelopeChannel: "lifecycle_notice" }, "channel"],
+          [{ exchangeRole: "terminal_notice", exchangeId: "exchange:x" }, "role"],
+        ];
+        for (const [input, reason] of cases) {
+          const refused = yield* forged(input);
+          assert.equal(refused._tag, "A2APeerSenderNotAllowedError", reason);
+          assert.equal((refused as { readonly reason?: string }).reason, reason);
+        }
+        const written = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM j5_a2a_comm_event WHERE kind = 'message.received'
+      `;
+        assert.equal(written[0]?.count, 0, "a refused sender leaves no received row");
+      }).pipe(Effect.provide(makeTestLayer(delivered)));
+    }),
+);
+
+it.effect("keys the received message by origin and stamps it with this server's clock", () =>
+  Effect.gen(function* () {
+    const delivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
+    yield* Effect.gen(function* () {
+      yield* setup();
+      const inbound = yield* PeerInboundService;
+      const worker = yield* A2ADeliveryWorker;
+      const sql = yield* SqlClient.SqlClient;
+      yield* inbound.receive({ ...ask, createdAt: "2099-01-01T00:00:00.000Z" });
+      const rows = yield* sql<{
+        readonly message_id: string;
+        readonly created_at: string;
+        readonly origin_message_id: string | null;
+        readonly origin_created_at: string | null;
+      }>`
+        SELECT delivery.message_id, delivery.created_at,
+               json_extract(event.payload, '$.originMessageId') AS origin_message_id,
+               json_extract(event.payload, '$.originCreatedAt') AS origin_created_at
+        FROM j5_a2a_delivery AS delivery
+        JOIN j5_a2a_comm_event AS event ON event.seq = delivery.sent_seq
+      `;
+      assert.equal(rows.length, 1);
+      assert.equal(
+        rows[0]!.message_id,
+        localMessageId(ask.messageId),
+        "a peer's id can never collide with a local message or another peer's",
+      );
+      assert.equal(rows[0]!.origin_message_id, ask.messageId);
+      assert.equal(rows[0]!.origin_created_at, "2099-01-01T00:00:00.000Z");
+      assert.notEqual(
+        rows[0]!.created_at,
+        "2099-01-01T00:00:00.000Z",
+        "the origin's clock is display only",
+      );
+      assert.equal((yield* worker.runOnce)?.state, "delivered");
+      assert.equal((yield* Ref.get(delivered))[0]!.messageId, rows[0]!.message_id);
+    }).pipe(Effect.provide(makeTestLayer(delivered)));
+  }),
 );

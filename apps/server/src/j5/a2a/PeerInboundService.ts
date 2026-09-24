@@ -1,5 +1,6 @@
 import type { PeerDeliveryRequest } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -7,6 +8,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
+import { stablePart } from "./spawnIds.ts";
 import {
   type CommEvent,
   CommCommandId,
@@ -14,6 +16,7 @@ import {
   ExchangeId,
   isHumanParticipantId,
   isMachineParticipantId,
+  isPlatformParticipantId,
   LedgerMessageId,
   Participant,
   ParticipantId,
@@ -66,10 +69,40 @@ export class A2APeerReceiverNotDeliverableError extends Schema.TaggedError<A2APe
 
 export class A2APeerAskIntentRequiredError extends Schema.TaggedError<A2APeerAskIntentRequiredError>()(
   "A2APeerAskIntentRequiredError",
-  { messageId: Schema.String },
+  { messageId: Schema.String, reason: Schema.Literals(["exchange-id", "intent"]) },
 ) {
   override get message(): string {
-    return `Message ${this.messageId} is an ask without an intent.`;
+    return this.reason === "intent"
+      ? `Message ${this.messageId} is an ask without an intent.`
+      : `Message ${this.messageId} is an ask without an Exchange id; an ask opens an Exchange or it is not an ask.`;
+  }
+}
+
+/**
+ * A peer speaks only for its agents. It may not deliver as a person, a machine
+ * participant or the platform, and an agent's message travels on the peer
+ * channel as a plain send, ask, follow-up or reply.
+ */
+export class A2APeerSenderNotAllowedError extends Schema.TaggedError<A2APeerSenderNotAllowedError>()(
+  "A2APeerSenderNotAllowedError",
+  {
+    senderId: Schema.String,
+    reason: Schema.Literals(["human", "machine", "platform", "channel", "role"]),
+  },
+) {
+  override get message(): string {
+    switch (this.reason) {
+      case "human":
+        return `${this.senderId} is a person; a peer server may not deliver as a person.`;
+      case "machine":
+        return `${this.senderId} is a machine participant; a peer server may not deliver as one.`;
+      case "platform":
+        return `${this.senderId} is a platform sender; a peer server may not deliver platform notices.`;
+      case "channel":
+        return `${this.senderId} must deliver on the peer envelope channel.`;
+      case "role":
+        return `${this.senderId} may send, ask, follow up or reply; a terminal notice is the platform's to send.`;
+    }
   }
 }
 
@@ -79,7 +112,8 @@ export type PeerInboundError =
   | A2ALedgerError
   | A2APeerReceiverNotFoundError
   | A2APeerReceiverNotDeliverableError
-  | A2APeerAskIntentRequiredError;
+  | A2APeerAskIntentRequiredError
+  | A2APeerSenderNotAllowedError;
 
 export interface PeerInboundServiceShape {
   readonly receive: (input: PeerInboundInput) => Effect.Effect<PeerInboundResult, PeerInboundError>;
@@ -90,16 +124,40 @@ export class PeerInboundService extends Context.Service<
   PeerInboundServiceShape
 >()("t3/j5/a2a/PeerInboundService") {}
 
-const stablePart = (value: string) => encodeURIComponent(value);
-
 /** One receipt per origin message, whatever the peer retries. */
-export const peerReceiveCommandId = (input: {
+const peerReceiveCommandId = (input: {
   readonly originEnvironmentId: string;
   readonly messageId: string;
 }) =>
   CommCommandId.make(
     `command:j5:a2a:peer:receive:${stablePart(input.originEnvironmentId)}:${stablePart(input.messageId)}`,
   );
+
+/**
+ * The message id this ledger keys the delivery by. The origin's id is
+ * namespaced by its environment so a peer can never collide with, replay
+ * into, or displace a local message or another peer's.
+ */
+const localMessageIdFor = (input: {
+  readonly originEnvironmentId: string;
+  readonly messageId: string;
+}) =>
+  LedgerMessageId.make(
+    `message:j5:a2a:peer:${stablePart(input.originEnvironmentId)}:${stablePart(input.messageId)}`,
+  );
+
+/** Refuse the sender kinds, channels and roles a peer may not use, before anything is read. */
+const assertSenderShape = (input: PeerInboundInput) => {
+  const senderId = ParticipantId.make(input.senderId);
+  const refuse = (reason: A2APeerSenderNotAllowedError["reason"]) =>
+    Effect.fail(new A2APeerSenderNotAllowedError({ senderId, reason }));
+  if (isHumanParticipantId(senderId)) return refuse("human");
+  if (isMachineParticipantId(senderId)) return refuse("machine");
+  if (isPlatformParticipantId(senderId)) return refuse("platform");
+  if (input.envelopeChannel !== "peer") return refuse("channel");
+  if (input.exchangeRole === "terminal_notice") return refuse("role");
+  return Effect.succeed(senderId);
+};
 
 interface MembershipRow {
   readonly squadron_id: string;
@@ -162,12 +220,8 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
        * since: the peer's acknowledgement was lost, not the fact it recorded.
        */
       const priorReceipt = Effect.fn("j5.a2a.peer.inbound.priorReceipt")(function* (
-        input: PeerInboundInput,
+        commandId: CommCommandId,
       ) {
-        const commandId = peerReceiveCommandId({
-          originEnvironmentId: input.originEnvironmentId,
-          messageId: input.messageId,
-        });
         const rows = yield* sql<{ readonly seq: number }>`
           SELECT seq FROM j5_a2a_comm_event
           WHERE command_id = ${commandId} AND kind = 'message.received'
@@ -180,20 +234,35 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
 
       const receive: PeerInboundServiceShape["receive"] = (input) =>
         Effect.gen(function* () {
-          const replayed = yield* priorReceipt(input);
+          const commandId = peerReceiveCommandId({
+            originEnvironmentId: input.originEnvironmentId,
+            messageId: input.messageId,
+          });
+          const replayed = yield* priorReceipt(commandId);
           if (replayed !== null) return replayed;
+          const senderId = yield* assertSenderShape(input);
           const receiverId = ParticipantId.make(input.receiverId);
-          const senderId = ParticipantId.make(input.senderId);
           const receiver = yield* localReceiver(receiverId);
           const exchangeId = input.exchangeId === null ? null : ExchangeId.make(input.exchangeId);
           const correlationId = CorrelationId.make(input.correlationId);
-          const messageId = LedgerMessageId.make(input.messageId);
+          const messageId = localMessageIdFor(input);
           const originSquadronId = SquadronId.make(input.originSquadronId);
+          // This ledger's clock stamps what happened here; the origin's time is kept for display.
+          const receivedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
           const events: Array<CommEvent> = [];
 
-          if (input.exchangeRole === "ask" && exchangeId !== null) {
+          if (input.exchangeRole === "ask") {
+            if (exchangeId === null) {
+              return yield* new A2APeerAskIntentRequiredError({
+                messageId: input.messageId,
+                reason: "exchange-id",
+              });
+            }
             if (input.intent === undefined) {
-              return yield* new A2APeerAskIntentRequiredError({ messageId: input.messageId });
+              return yield* new A2APeerAskIntentRequiredError({
+                messageId: input.messageId,
+                reason: "intent",
+              });
             }
             events.push({
               kind: "exchange.opened",
@@ -202,7 +271,7 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
               exchangeId,
               correlationId,
               payload: { intent: input.intent, urgency: null },
-              createdAt: input.createdAt,
+              createdAt: receivedAt,
             });
           }
 
@@ -215,6 +284,8 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
             payload: {
               originSquadronId,
               originEnvironmentId: input.originEnvironmentId,
+              originMessageId: input.messageId,
+              originCreatedAt: input.createdAt,
               message: {
                 messageId,
                 text: input.text,
@@ -224,7 +295,7 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
                 envelopeChannel: input.envelopeChannel,
               },
             },
-            createdAt: input.createdAt,
+            createdAt: receivedAt,
           });
 
           if (input.exchangeRole === "reply" && exchangeId !== null) {
@@ -246,18 +317,15 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
                 exchangeId,
                 correlationId,
                 payload: { replyMessageId: messageId },
-                createdAt: input.createdAt,
+                createdAt: receivedAt,
               });
             }
           }
 
           const appended = yield* ledger.appendEvents({
-            commandId: peerReceiveCommandId({
-              originEnvironmentId: input.originEnvironmentId,
-              messageId: input.messageId,
-            }),
+            commandId,
             squadronId: receiver.squadronId,
-            acceptedAt: input.createdAt,
+            acceptedAt: receivedAt,
             events,
           });
           const received = appended.events.find((event) => event.kind === "message.received");
