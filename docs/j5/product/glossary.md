@@ -15,20 +15,22 @@ The J5 vocabulary, in one place, so that a name used anywhere in these docs reso
 
 ## Organization
 
-| Term                | Gloss                                                                                              | Owner                                                        |
-| ------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| fleet               | All of a user's agents across every connected server — the totality, never a sub-grouping          | [cross-device.md](cross-device.md)                           |
-| **Squadron**        | The user-created grouping of agents and their work that everything else is organized under         | [features/squadron.md](features/squadron.md)                 |
-| **Squadron home**   | The one Squadron an agent belongs to, recorded when it is created                                  | [features/squadron.md](features/squadron.md)                 |
-| **Registrar**       | The part of the platform that records an agent's Squadron home when the agent is created           | [features/squadron.md](features/squadron.md)                 |
-| **Crew**            | A group of agents that work one task as a unit                                                     | [features/crews.md](features/crews.md)                       |
-| **Captain**         | Any agent with Crews placed under it                                                               | [features/crews.md](features/crews.md)                       |
-| **Role**            | A reusable, user-authored definition of a kind of agent                                            | [features/roles.md](features/roles.md)                       |
-| **Manifest**        | The approved roster snapshot of a Crew — implementation vocabulary, not a separate concept         | [features/crews.md](features/crews.md)                       |
-| **Playbook**        | User-authored step content that a Role or Crew follows                                             | [features/playbooks.md](features/playbooks.md)               |
-| placement           | Where an agent sits in the display tree                                                            | [features/squadron.md](features/squadron.md)                 |
-| provenance          | The recorded fact of how an agent came to exist — spawned by whom, forked from what, or unrecorded | [features/squadron.md](features/squadron.md)                 |
-| **Shared Squadron** | Several people sharing one Squadron on one server                                                  | [features/shared-squadrons.md](features/shared-squadrons.md) |
+| Term                   | Gloss                                                                                              | Owner                                                        |
+| ---------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| fleet                  | All of a user's agents across every connected server — the totality, never a sub-grouping          | [cross-device.md](cross-device.md)                           |
+| peer                   | Another server this server exchanges agent messages with, by mutual record                         | [cross-device.md](cross-device.md)                           |
+| peering, peer registry | The mutual recording of two servers as each other's peers, and the set of a server's peer records  | [cross-device.md](cross-device.md)                           |
+| **Squadron**           | The user-created grouping of agents and their work that everything else is organized under         | [features/squadron.md](features/squadron.md)                 |
+| **Squadron home**      | The one Squadron an agent belongs to, recorded when it is created                                  | [features/squadron.md](features/squadron.md)                 |
+| **Registrar**          | The part of the platform that records an agent's Squadron home when the agent is created           | [features/squadron.md](features/squadron.md)                 |
+| **Crew**               | A group of agents that work one task as a unit                                                     | [features/crews.md](features/crews.md)                       |
+| **Captain**            | Any agent with Crews placed under it                                                               | [features/crews.md](features/crews.md)                       |
+| **Role**               | A reusable, user-authored definition of a kind of agent                                            | [features/roles.md](features/roles.md)                       |
+| **Manifest**           | The approved roster snapshot of a Crew — implementation vocabulary, not a separate concept         | [features/crews.md](features/crews.md)                       |
+| **Playbook**           | User-authored step content that a Role or Crew follows                                             | [features/playbooks.md](features/playbooks.md)               |
+| placement              | Where an agent sits in the display tree                                                            | [features/squadron.md](features/squadron.md)                 |
+| provenance             | The recorded fact of how an agent came to exist — spawned by whom, forked from what, or unrecorded | [features/squadron.md](features/squadron.md)                 |
+| **Shared Squadron**    | Several people sharing one Squadron on one server                                                  | [features/shared-squadrons.md](features/shared-squadrons.md) |
 
 ## Agents
 
