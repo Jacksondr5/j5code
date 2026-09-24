@@ -498,8 +498,16 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
       ) : null}
       {lastApply && (lastApply.conflicts.length > 0 || lastApply.failed.length > 0) ? (
         <div className="grid gap-1 text-sm">
+          {lastApply.conflicts.length > 0 ? (
+            <p role="alert" className="text-destructive-foreground">
+              The conflicting paths were left unchanged. A link may belong to another environment or
+              an earlier installation; manage it there to keep using it. To use this catalog
+              instead, find the skill under Installed, choose Unlink…, then apply again. Existing
+              files or folders must be moved manually.
+            </p>
+          ) : null}
           {lastApply.conflicts.map((conflict) => (
-            <p key={`${conflict.skill}${conflict.linkPath}`}>
+            <p key={`${conflict.skill}${conflict.linkPath}`} className="break-words">
               Conflict: {conflict.skill} at {conflict.linkPath} — {conflict.detail}
             </p>
           ))}
