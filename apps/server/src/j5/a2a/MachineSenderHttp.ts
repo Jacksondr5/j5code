@@ -2,7 +2,6 @@ import {
   AuthA2ASendScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
-  type AuthEnvironmentScope,
 } from "@t3tools/contracts";
 import {
   J5_MACHINE_API_PATHS,
@@ -19,22 +18,21 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import {
-  HttpRouter,
-  HttpServerRequest,
-  HttpServerRespondable,
-  HttpServerResponse,
-} from "effect/unstable/http";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import packageJson from "../../../package.json" with { type: "json" };
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
-import {
-  annotateEnvironmentRequest,
-  failEnvironmentAuthInvalid,
-  failEnvironmentInternal,
-  failEnvironmentScopeRequired,
-} from "../../auth/http.ts";
+import { annotateEnvironmentRequest } from "../../auth/http.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
+import {
+  authenticate,
+  jsonError,
+  messageOf,
+  requestFailure,
+  requireAnyScope,
+  respondableTags,
+  tagOf,
+} from "./httpSupport.ts";
 import {
   MachineParticipantService,
   type MachineParticipantRecord,
@@ -71,41 +69,6 @@ export const machineRegisterCommandId = (input: {
   CommCommandId.make(
     `command:j5:a2a:machine:register:${stablePart(input.squadronId)}:${stablePart(input.name)}`,
   );
-
-const authenticate = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
-  const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-  return yield* serverAuth.authenticateHttpRequest(request).pipe(
-    Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
-      failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
-    ),
-    Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
-      failEnvironmentInternal("internal_error", error),
-    ),
-  );
-});
-
-const requireAnyScope = (
-  session: EnvironmentAuth.AuthenticatedSession,
-  scopes: ReadonlyArray<AuthEnvironmentScope>,
-) =>
-  scopes.some((scope) => session.scopes.includes(scope))
-    ? Effect.void
-    : failEnvironmentScopeRequired(scopes[0]!);
-
-const jsonError = (
-  status: number,
-  error: string,
-  message: string,
-  extra: Record<string, unknown> = {},
-) => HttpServerResponse.jsonUnsafe({ error, message, ...extra }, { status });
-
-const requestFailure = (message: string) => jsonError(400, "invalid_request", message);
-
-const tagOf = (error: unknown) =>
-  typeof error === "object" && error !== null && "_tag" in error ? String(error._tag) : "Error";
-const messageOf = (error: unknown, fallback: string) =>
-  error instanceof Error ? error.message : fallback;
 
 const wireRecord = (record: MachineParticipantRecord): MachineParticipantWire => ({
   participantId: record.participantId,
@@ -160,12 +123,6 @@ const registerFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpS
     Effect.as(jsonError(500, tag, "Registration failed.")),
   );
 };
-
-const respondableTags = {
-  EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
-  EnvironmentInternalError: HttpServerRespondable.toResponse,
-  EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
-} as const;
 
 export const machineSenderHttpRouteLayer = Layer.unwrap(
   Effect.gen(function* () {

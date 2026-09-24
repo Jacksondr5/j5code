@@ -462,7 +462,7 @@ export const J5_MACHINE_API_PATHS = {
  * only scope is `a2a:peer`. Records are mutual and pairwise; the client that is
  * connected to both environments introduces them.
  */
-export const PEER_SUBJECT_PREFIX = "peer:" as const;
+const PEER_SUBJECT_PREFIX = "peer:" as const;
 export const peerSubjectForEnvironment = (environmentId: string): string =>
   `${PEER_SUBJECT_PREFIX}${environmentId}`;
 
@@ -490,6 +490,10 @@ export const PeerRecord = Schema.Struct({
   environmentId: Schema.String,
   label: Schema.String,
   origin: Schema.String,
+  /** When the credential the peer issued to this server expires, as the peer reported it at hello. */
+  credentialExpiresAt: Schema.NullOr(Schema.String),
+  /** Whether the peer still holds a live session here; "missing" means it was revoked or expired and its deliveries are refused. */
+  inboundSession: Schema.Literals(["active", "missing"]),
   createdAt: Schema.String,
 });
 export type PeerRecord = typeof PeerRecord.Type;
@@ -517,6 +521,8 @@ export const AddPeerRequest = Schema.Struct({
   origin: PeerOrigin,
   credential: Schema.String.check(Schema.isNonEmpty()),
   label: Schema.optional(Schema.String),
+  /** A known peer keeps its recorded origin unless the caller says to move it. */
+  replaceOrigin: Schema.optional(Schema.Boolean),
 });
 export type AddPeerRequest = typeof AddPeerRequest.Type;
 export const AddPeerResponse = Schema.Struct({ peer: PeerRecord, created: Schema.Boolean });
@@ -536,6 +542,8 @@ export type RemovePeerResponse = typeof RemovePeerResponse.Type;
 export const PeerHelloResponse = Schema.Struct({
   environmentId: Schema.String,
   subject: Schema.String,
+  /** When the credential used for this hello expires; null when the session never expires. */
+  credentialExpiresAt: Schema.optional(Schema.NullOr(Schema.String)),
   server: Schema.Struct({ version: Schema.String }),
 });
 export type PeerHelloResponse = typeof PeerHelloResponse.Type;

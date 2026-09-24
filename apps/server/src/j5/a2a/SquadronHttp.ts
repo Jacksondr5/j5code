@@ -16,13 +16,8 @@ import {
   HttpServerResponse,
 } from "effect/unstable/http";
 
-import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
-import {
-  annotateEnvironmentRequest,
-  failEnvironmentAuthInvalid,
-  failEnvironmentInternal,
-  failEnvironmentScopeRequired,
-} from "../../auth/http.ts";
+import { annotateEnvironmentRequest } from "../../auth/http.ts";
+import { authenticate as sharedAuthenticate, requireScope } from "./httpSupport.ts";
 import { SquadronManagementService } from "./SquadronManagementService.ts";
 
 const SQUADRONS_PATH = J5_API_PATHS.squadrons;
@@ -32,19 +27,8 @@ export const authenticate = (
   scope: typeof AuthOrchestrationReadScope | typeof AuthOrchestrationOperateScope,
 ) =>
   Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-    const session = yield* serverAuth.authenticateHttpRequest(request).pipe(
-      Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
-        failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
-      ),
-      Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
-        failEnvironmentInternal("internal_error", error),
-      ),
-    );
-    if (!session.scopes.includes(scope)) {
-      return yield* failEnvironmentScopeRequired(scope);
-    }
+    const session = yield* sharedAuthenticate;
+    yield* requireScope(session, scope);
   });
 
 export const requestFailure = (message: string) =>

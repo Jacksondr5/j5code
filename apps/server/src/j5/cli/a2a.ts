@@ -258,22 +258,19 @@ const failureFromReply = (
     typeof body.message === "string"
       ? body.message
       : `The server answered HTTP ${String(reply.status)}.`;
+  // Status → exit code, with the two refinements the server's error codes carry.
+  const exitCodeByStatus: Record<number, number> = {
+    400: A2A_EXIT_CODES.usage,
+    401: A2A_EXIT_CODES.unauthenticated,
+    403: A2A_EXIT_CODES.unauthenticated,
+    404: A2A_EXIT_CODES.recipientNotFound,
+    409: options.conflictExitCode ?? A2A_EXIT_CODES.recipientNotFound,
+    502: A2A_EXIT_CODES.unreachable,
+  };
   const exitCode =
-    reply.status === 502
-      ? A2A_EXIT_CODES.unreachable
-      : reply.status === 401
-        ? A2A_EXIT_CODES.unauthenticated
-        : reply.status === 403
-          ? error === "policy_refused"
-            ? A2A_EXIT_CODES.refused
-            : A2A_EXIT_CODES.unauthenticated
-          : reply.status === 404
-            ? A2A_EXIT_CODES.recipientNotFound
-            : reply.status === 409
-              ? (options.conflictExitCode ?? A2A_EXIT_CODES.recipientNotFound)
-              : reply.status === 400
-                ? A2A_EXIT_CODES.usage
-                : A2A_EXIT_CODES.failure;
+    reply.status === 403 && error === "policy_refused"
+      ? A2A_EXIT_CODES.refused
+      : (exitCodeByStatus[reply.status] ?? A2A_EXIT_CODES.failure);
   const { error: _error, message: _message, ...extra } = body;
   return new A2ACliFailure({ exitCode, error, message, extra });
 };
@@ -597,7 +594,16 @@ const tokenCommand = Command.make("token").pipe(
 );
 
 const formatPeerLine = (peer: PeerRecord) =>
-  [peer.environmentId, peer.label, peer.origin, peer.createdAt].join("\t");
+  [
+    peer.environmentId,
+    peer.label,
+    peer.origin,
+    peer.createdAt,
+    peer.inboundSession === "active" ? "inbound: active" : "inbound: no live session",
+    peer.credentialExpiresAt === null ? "" : `our credential expires ${peer.credentialExpiresAt}`,
+  ]
+    .filter((part) => part.length > 0)
+    .join("\t");
 
 const peerCredentialCommand = Command.make("credential", {
   ...connectionFlags,
@@ -680,9 +686,15 @@ const peerAddCommand = Command.make("add", {
     Flag.withDescription("A name for the peer. Default: its environment id."),
     Flag.optional,
   ),
+  replaceOrigin: Flag.boolean("replace-origin").pipe(
+    Flag.withDescription(
+      "Move a known peer to a new origin. Without it, re-adding a peer at a different origin is refused, because hello proves reachability, not identity.",
+    ),
+    Flag.withDefault(false),
+  ),
 }).pipe(
   Command.withDescription(
-    "Record a peer after proving the credential at its origin. Re-adding a known peer rotates its origin and credential. Needs an access:write token, or runs on the server host with a temporary local admin session.",
+    "Record a peer after proving the credential at its origin. Re-adding a known peer rotates its credential; a different origin needs --replace-origin. Needs an access:write token, or runs on the server host with a temporary local admin session.",
   ),
   Command.withHandler((flags) =>
     runOutcome(
@@ -705,6 +717,7 @@ const peerAddCommand = Command.make("add", {
                 origin: peerOrigin,
                 credential,
                 ...(Option.isSome(flags.label) ? { label: flags.label.value } : {}),
+                ...(flags.replaceOrigin ? { replaceOrigin: true } : {}),
               },
               timeoutMs: Math.max(flags.timeoutMs, 10_000),
             });
@@ -811,9 +824,65 @@ const peerRemoveCommand = Command.make("remove", {
   ),
 );
 
+const peerIdentityCommand = Command.make("identity", {
+  ...authLocationFlags,
+  origin: originFlag,
+  timeoutMs: timeoutFlag,
+  json: jsonFlag,
+  token: tokenFlag,
+  tokenFile: tokenFileFlag,
+}).pipe(
+  Command.withDescription(
+    "Print this server's environment id, the value the other server passes to `peer credential --for`. Reads the public environment descriptor; no token is needed.",
+  ),
+  Command.withHandler((flags) =>
+    runOutcome(
+      flags.json,
+      Effect.gen(function* () {
+        const origin = yield* resolveOrigin(flags);
+        const client = yield* HttpClient.HttpClient;
+        const reply = yield* client
+          .execute(
+            HttpClientRequest.get(`${origin}/.well-known/t3/environment`).pipe(
+              HttpClientRequest.acceptJson,
+            ),
+          )
+          .pipe(
+            Effect.timeout(Duration.millis(flags.timeoutMs)),
+            Effect.flatMap((response) => response.json),
+            Effect.mapError(
+              (cause) =>
+                new A2ACliFailure({
+                  exitCode: A2A_EXIT_CODES.unreachable,
+                  error: "server_unreachable",
+                  message: `Could not read the environment descriptor at ${origin}: ${cause instanceof Error ? cause.message : String(cause)}`,
+                }),
+            ),
+          );
+        const descriptor = isRecord(reply) ? reply : {};
+        const environmentId =
+          typeof descriptor.environmentId === "string" ? descriptor.environmentId : null;
+        if (environmentId === null) {
+          return yield* new A2ACliFailure({
+            exitCode: A2A_EXIT_CODES.failure,
+            error: "unexpected_response",
+            message: `${origin} did not answer with an environment id.`,
+          });
+        }
+        const label = typeof descriptor.label === "string" ? descriptor.label : null;
+        return {
+          json: { environmentId, label, origin },
+          text: environmentId,
+        } satisfies Outcome;
+      }),
+    ),
+  ),
+);
+
 const peerCommand = Command.make("peer").pipe(
   Command.withDescription("Peer this server with another so their agents can exchange messages."),
   Command.withSubcommands([
+    peerIdentityCommand,
     peerCredentialCommand,
     peerAddCommand,
     peerListCommand,

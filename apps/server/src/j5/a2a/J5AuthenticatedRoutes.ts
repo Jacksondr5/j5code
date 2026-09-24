@@ -30,10 +30,6 @@ import { layer as agentHandoffArtifactDeleteLayer } from "../agents/agentHandoff
 import { artifactHttpRouteLayer } from "../artifacts/ArtifactHttp.ts";
 import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.ts";
 
-/**
- * One authenticated J5 route aggregate. New J5 HTTP route layers enter here
- * rather than adding another upstream server composition seam.
- */
 // The peer registry reaches other servers, so it carries its own HTTP client and
 // this server's identity rather than widening the shared A2A runtime layer. The
 // identity reads the same environment-id file the server publishes at startup.
@@ -46,6 +42,10 @@ const peerRoutesProvided = peerHttpRouteLayer.pipe(
   Layer.provide(serverIdentityLayer),
 );
 
+/**
+ * One authenticated J5 route aggregate. New J5 HTTP route layers enter here
+ * rather than adding another upstream server composition seam.
+ */
 export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
   agentCrewReadsHttpRouteLayer,
   crewArchiveHttpRouteLayer,
