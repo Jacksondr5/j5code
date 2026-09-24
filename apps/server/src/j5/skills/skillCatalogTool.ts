@@ -2,6 +2,7 @@ import * as NodeCrypto from "node:crypto";
 
 import {
   type SkillCatalogApplyResult,
+  type SkillCatalogReplacement,
   SkillCatalogError,
   SkillCatalogSource,
   type SkillCatalogStatus,
@@ -311,6 +312,7 @@ export const createSkillCatalogTool = (deps: SkillCatalogToolDeps) => {
   const apply = Effect.fn("j5.skillCatalog.apply")(function* (input: {
     readonly source: string;
     readonly groups: ReadonlyArray<string>;
+    readonly replacements?: ReadonlyArray<SkillCatalogReplacement>;
   }): Effect.fn.Return<SkillCatalogApplyResult, SkillCatalogError> {
     const catalogDir = yield* checkout(input.source);
     const state = yield* readState();
@@ -329,6 +331,7 @@ export const createSkillCatalogTool = (deps: SkillCatalogToolDeps) => {
         targets,
         state,
         selected: input.groups,
+        ...(input.replacements ? { replacements: input.replacements } : {}),
         windows: platform === "win32",
       }),
     ).pipe(Effect.uninterruptible);

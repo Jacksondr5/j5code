@@ -2,6 +2,7 @@ import {
   DEFAULT_SERVER_SETTINGS,
   type EnvironmentId,
   type SkillCatalogApplyResult,
+  type SkillCatalogReplacement,
 } from "@t3tools/contracts";
 import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -26,6 +27,15 @@ import {
 import { Button } from "../../components/ui/button";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Input } from "../../components/ui/input";
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "../../components/ui/dialog";
 import {
   Select,
   SelectItem,
@@ -175,6 +185,7 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
   const [saveError, setSaveError] = useState<string | null>(null);
   const [applyFailure, setApplyFailure] = useState<ApplyFailure | null>(null);
   const [lastApply, setLastApply] = useState<SkillCatalogApplyResult | null>(null);
+  const [replacementPaths, setReplacementPaths] = useState<ReadonlyArray<string> | null>(null);
 
   // Selections and results belong to one catalog identity. When acknowledged
   // settings move (another client saved A → B, or this panel saved), drop
@@ -184,6 +195,7 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
     selectionScopeRef.current = selectionScope;
     setSelection({ scope: null, groups: [] });
     setLastApply(null);
+    setReplacementPaths(null);
     setApplyFailure(null);
     setNotice(null);
     setSaveError(null);
@@ -232,8 +244,9 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
     }
   }
 
-  async function applySelected() {
+  async function applySelected(replacements?: ReadonlyArray<SkillCatalogReplacement>) {
     if (!catalogReady) return;
+    setReplacementPaths(null);
     const originScope = selectionScope;
     setBusy(true);
     setNotice(null);
@@ -241,7 +254,11 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
     try {
       const result = await applyGroupsCommand({
         environmentId,
-        input: { expectedSource: configuredSource, groups: selectedGroups },
+        input: {
+          expectedSource: configuredSource,
+          groups: selectedGroups,
+          ...(replacements ? { replacements } : {}),
+        },
       });
       // The source moved mid-operation: discard A's counts/conflicts instead
       // of showing them under B.
@@ -296,6 +313,14 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
     displayedSource,
     configuredSource,
   });
+  const replacementOptions =
+    lastApply?.conflicts.flatMap((conflict) =>
+      conflict.replacement ? [{ skill: conflict.skill, ...conflict.replacement }] : [],
+    ) ?? [];
+  const canReplace =
+    catalogReady &&
+    lastApply?.selectedGroups.length === selectedGroups.length &&
+    lastApply.selectedGroups.every((group) => selectedGroups.includes(group));
   const applyDisabled = !catalogReady;
   const updateDisabled = !catalogReady || upstreamOf(status.data) === null;
 
@@ -531,6 +556,20 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
                       moved manually.
                     </p>
                   ) : null}
+                  {replacementOptions.length > 0 ? (
+                    <div>
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        disabled={!canReplace}
+                        onClick={() =>
+                          setReplacementPaths(replacementOptions.map((option) => option.linkPath))
+                        }
+                      >
+                        Use this catalog…
+                      </Button>
+                    </div>
+                  ) : null}
                   {lastApply.conflicts.map((conflict) => (
                     <p key={`${conflict.skill}${conflict.linkPath}`} className="break-words">
                       Conflict: {conflict.skill} at {conflict.linkPath} — {conflict.detail}
@@ -547,6 +586,64 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
           </SettingsRow>
         ) : null}
       </SettingsSection>
+      <Dialog
+        open={replacementPaths !== null && canReplace}
+        onOpenChange={(open) => {
+          if (!open) setReplacementPaths(null);
+        }}
+      >
+        <DialogPopup className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Use this catalog</DialogTitle>
+            <DialogDescription>
+              Replace the selected links with this catalog's skills. Source folders are kept. This
+              affects every environment using these provider skill folders.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="grid gap-4">
+            {replacementOptions.map((option) => (
+              <label key={option.linkPath} className="flex min-w-0 items-start gap-3 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  aria-label={`Replace ${option.linkPath}`}
+                  checked={replacementPaths?.includes(option.linkPath) ?? false}
+                  onChange={(event) =>
+                    setReplacementPaths((paths) =>
+                      event.target.checked
+                        ? [...(paths ?? []), option.linkPath]
+                        : (paths ?? []).filter((path) => path !== option.linkPath),
+                    )
+                  }
+                />
+                <span className="grid min-w-0 gap-1 break-words">
+                  <strong>{option.skill}</strong>
+                  <span>Link: {option.linkPath}</span>
+                  <span>Current target: {option.currentTarget}</span>
+                  <span>New target: {option.target}</span>
+                </span>
+              </label>
+            ))}
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReplacementPaths(null)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!canReplace || !replacementPaths?.length}
+              onClick={() =>
+                void applySelected(
+                  replacementOptions
+                    .filter((option) => replacementPaths?.includes(option.linkPath))
+                    .map(({ skill: _skill, ...replacement }) => replacement),
+                )
+              }
+            >
+              Replace selected links
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
     </>
   );
 }

@@ -21,8 +21,32 @@ apply an empty selection to remove the catalog links. Update pulls the configure
 Git source, then Apply reconciles any changed groups. Running provider sessions
 may need restarting to discover changes.
 
-Installed skills are links, so keep the catalog folder in place. Ownership belongs
+Catalog skills are installed as links, so keep the catalog folder in place. Ownership belongs
 to the environment that created each link, while provider skill folders can be
-shared by several environments on one machine. Existing files and links owned
-elsewhere are preserved. Remove owned links before deleting the environment's
-state or its catalog folder.
+shared by several environments on one machine. When Apply reports a conflicting link,
+choose **Use this catalog…** to review its current and replacement targets. Confirm
+only the links you want to move, including links whose old folder is missing. This
+changes the shared provider link for every environment using it; source folders
+are kept. Existing files and directories cannot be replaced this way. Remove owned
+links before deleting the environment's state or its catalog folder.
+
+Use **Link…** on a standalone skill to link its whole folder to another Codex or
+Claude instance in the same environment. Choose user scope or an existing project,
+then review the destination and compatibility warnings. Catalog installation stays
+user-scoped; project scope is available only for individual links. Project links
+land inside the selected project's repository and point to absolute paths: heed
+the Git warning and exclude the destination before committing. The link does
+not copy files or install a plugin's other components.
+
+Choose **Unlink…** on a standalone skill to remove a Codex or Claude link, or
+**Unlink all** to remove every link shown for that skill in the selected user and
+project scopes. This includes links created elsewhere and works after restarting.
+The shared source folder stays in place. Providers sharing a destination are
+unlinked together. **Managed links** keeps broken links created here available
+for removal. If a managed destination was changed elsewhere, **Forget record**
+removes only its ownership record and leaves all files in place.
+
+When no links remain, an original Personal or Project skill can be permanently
+deleted after reviewing its folder path and confirming the warning. Deletion
+removes that folder and all its files from the environment's machine; it cannot
+be undone. Built-in and plugin skills remain read-only.

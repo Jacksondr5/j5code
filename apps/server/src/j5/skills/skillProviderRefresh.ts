@@ -25,7 +25,7 @@ export const recordSkillDiscoveryFailure = Effect.fn("j5.skills.recordDiscoveryF
 export const refreshSkillProviders = Effect.fn("j5.skills.refreshProviders")(function* (
   registry: ProviderRegistryShape,
   instanceIds?: ReadonlyArray<ProviderInstanceId>,
-  cwd?: string,
+  additionalCwds: ReadonlyArray<string> = [],
 ) {
   const snapshots = yield* registry.getProviders;
   yield* Effect.forEach(
@@ -38,7 +38,7 @@ export const refreshSkillProviders = Effect.fn("j5.skills.refreshProviders")(fun
         const cwds = new Set([
           ...pending,
           ...(provider.workspaceSnapshots ?? []).map((s) => s.cwd),
-          ...(cwd ? [cwd] : []),
+          ...additionalCwds,
         ]);
         yield* registry.refreshInstance(provider.instanceId);
         yield* Effect.forEach(

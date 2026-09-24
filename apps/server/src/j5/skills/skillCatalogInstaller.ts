@@ -6,6 +6,7 @@ import type {
   SkillCatalogApplyResult,
   SkillCatalogConflict,
   SkillCatalogFailedLink,
+  SkillCatalogReplacement,
 } from "@t3tools/contracts";
 import { parse } from "yaml";
 import * as Schema from "effect/Schema";
@@ -48,7 +49,11 @@ const decodeCatalog = Schema.decodeUnknownSync(CatalogDocument, { onExcessProper
 const decodeName = Schema.decodeUnknownSync(CatalogName);
 const decodeState = Schema.decodeUnknownSync(CatalogState);
 type Link = { readonly skill: string; readonly linkPath: string; readonly target: string };
-type Addition = Link & { readonly replace?: boolean; readonly previousTarget?: string };
+type Addition = Link & {
+  readonly replace?: boolean;
+  readonly previousTarget?: string;
+  readonly previousIdentity?: string;
+};
 export type Plan = {
   readonly additions: ReadonlyArray<Addition>;
   readonly removals: ReadonlyArray<Link>;
@@ -182,12 +187,21 @@ export async function planInstall({
         // Owned link pointing elsewhere (catalog moved or skill renamed): replace.
         additions.push({ skill, linkPath, target, replace: true, previousTarget: seen.target });
       } else {
+        let replacement: SkillCatalogReplacement | undefined;
+        if (seen.kind === "link") {
+          const identity = await skillLinkIdentity(linkPath);
+          const current = await linkDestination(linkPath);
+          if (current.kind === "link" && current.target === seen.target) {
+            replacement = { linkPath, currentTarget: seen.target, target, identity };
+          }
+        }
         conflicts.push({
           skill,
           linkPath,
+          ...(replacement ? { replacement } : {}),
           detail:
             seen.kind === "link"
-              ? `Already linked to ${seen.raw}. This environment cannot safely replace that link, so it was left unchanged.`
+              ? `Already linked to ${seen.raw}. The link was left unchanged. Review and confirm replacement to use this catalog.`
               : `An existing ${seen.kind} occupies this path and was left unchanged.`,
         });
       }
@@ -217,10 +231,15 @@ export async function applyPlan(
   const applied: Array<ApplyPlanResult["applied"][number]> = [];
   const failed: SkillCatalogFailedLink[] = [];
   const type = windows ? "junction" : "dir";
-  const remove = async (entry: Link, expectedTarget: string) => {
+  const remove = async (entry: Link, expectedTarget: string, expectedIdentity?: string) => {
     const seen = await linkDestination(entry.linkPath);
-    if (seen.kind === "absent") return "gone";
-    if (seen.kind !== "link" || seen.target !== expectedTarget) {
+    if (seen.kind === "absent" && !expectedIdentity) return "gone";
+    if (
+      seen.kind !== "link" ||
+      seen.target !== expectedTarget ||
+      (expectedIdentity !== undefined &&
+        (await skillLinkIdentity(entry.linkPath)) !== expectedIdentity)
+    ) {
       throw new Error(`${entry.linkPath} changed since inspection; stopping`);
     }
     await NodeFSP.unlink(entry.linkPath);
@@ -240,7 +259,7 @@ export async function applyPlan(
     // as one unit, so an unrelated later failure cannot orphan an earlier removal.
     try {
       if (entry.replace) {
-        await remove(entry, entry.previousTarget ?? entry.target);
+        await remove(entry, entry.previousTarget ?? entry.target, entry.previousIdentity);
         applied.push({ ...entry, action: "removed" });
       }
       const seen = await linkDestination(entry.linkPath);
@@ -404,6 +423,7 @@ export async function runApply(
     state,
     selected,
     windows,
+    replacements = [],
   }: {
     readonly catalog: Catalog;
     readonly catalogDir: string;
@@ -412,10 +432,21 @@ export async function runApply(
     readonly state: CatalogState;
     readonly selected: ReadonlyArray<string>;
     readonly windows: boolean;
+    readonly replacements?: ReadonlyArray<SkillCatalogReplacement>;
   },
   opts: { readonly verifyLinks?: typeof verifyLinks } = {},
 ): Promise<SkillCatalogApplyResult> {
   const explicitGroups = [...new Set(selected)];
+  if (
+    replacements.length > 0 &&
+    (state.folder !== catalogDir ||
+      state.groups.length !== explicitGroups.length ||
+      !state.groups.every((group) => explicitGroups.includes(group)))
+  ) {
+    throw new Error(
+      "Catalog selection changed since preview. Apply selected groups again to review current conflicts.",
+    );
+  }
   const resolved = resolveSelection(catalog, explicitGroups);
   await verifySkills(catalog, resolved.skills);
   const dirs = [...new Set(await readSkillsConcurrently(targets, canonicalSkillRoot))];
@@ -443,7 +474,42 @@ export async function runApply(
     dirs,
     recordedLinks: canonicalState.links,
   });
-  const result = await applyPlan(plan, { windows });
+  // Validate every confirmation against a fresh plan before any filesystem mutation.
+  const confirmed = new Set<string>();
+  // A replacement confirmation changes only the selected links, not new group changes.
+  const additions: Addition[] = replacements.length > 0 ? [] : [...plan.additions];
+  for (const replacement of replacements) {
+    const conflict = plan.conflicts.find((entry) => entry.linkPath === replacement.linkPath);
+    const current = conflict?.replacement;
+    if (
+      confirmed.has(replacement.linkPath) ||
+      !conflict ||
+      !current ||
+      current.currentTarget !== replacement.currentTarget ||
+      current.target !== replacement.target ||
+      current.identity !== replacement.identity
+    ) {
+      throw new Error(
+        `Link ${replacement.linkPath} changed since preview or is no longer eligible. Apply selected groups again to review current conflicts.`,
+      );
+    }
+    confirmed.add(replacement.linkPath);
+    additions.push({
+      skill: conflict.skill,
+      linkPath: current.linkPath,
+      target: current.target,
+      replace: true,
+      previousTarget: current.currentTarget,
+      previousIdentity: current.identity,
+    });
+  }
+  const confirmedPlan = {
+    ...plan,
+    additions,
+    removals: replacements.length > 0 ? [] : plan.removals,
+    conflicts: plan.conflicts.filter((entry) => !confirmed.has(entry.linkPath)),
+  };
+  const result = await applyPlan(confirmedPlan, { windows });
   const failed = [...result.failed];
   // A throwing verifier must not discard the operation result: record it as a
   // failure entry so counts are preserved and ownership is saved below.
@@ -469,7 +535,7 @@ export async function runApply(
     result,
     previousLinks: canonicalState.links,
   });
-  const output = toApplyResult({ explicitGroups, plan, result, failed });
+  const output = toApplyResult({ explicitGroups, plan: confirmedPlan, result, failed });
   // Save ownership before reporting failures so retry can recover.
   try {
     await saveState(stateDir, { folder: catalogDir, groups: explicitGroups, links });
@@ -477,7 +543,7 @@ export async function runApply(
     const rollback = await rollbackApply(result, windows);
     const recovered = toApplyResult({
       explicitGroups,
-      plan,
+      plan: confirmedPlan,
       result: { applied: rollback.applied, failed: [] },
       failed: [...failed, ...rollback.failed],
     });
