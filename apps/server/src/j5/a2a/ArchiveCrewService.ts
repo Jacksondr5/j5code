@@ -335,6 +335,9 @@ export const layer = Layer.effect(
       return { members } satisfies ArchiveCrewConsequenceFacts;
     });
 
+    // The roster is read, confirmed, and retired as one unit step, so an approved launch or
+    // addition either lands before the read and retires with the rest, or waits and meets the
+    // retired stamp before it reserves a seat.
     const archive: ArchiveCrewServiceShape["archive"] = (input) =>
       Effect.gen(function* () {
         const decodedToken =
@@ -436,7 +439,7 @@ export const layer = Layer.effect(
         }
         yield* crews.markArchived(instance.id, input.archivedAt).pipe(Effect.orDie);
         return { status: "archived" as const, members: results };
-      });
+      }).pipe((unit) => crews.serialize(input.crewInstanceId, unit));
 
     const readCaptainFacts: ArchiveCrewServiceShape["readCaptainFacts"] = (input) =>
       Effect.gen(function* () {

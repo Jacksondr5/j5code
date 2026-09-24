@@ -652,6 +652,15 @@ export const layer = Layer.effect(
         const earlier = yield* crews
           .read(crewInstanceId)
           .pipe(Effect.mapError(recordError("reading the earlier attempt")));
+        // A retry that reaches a Crew retired since its first attempt finds the record already
+        // there; the unit is gone, so nothing launches into it.
+        if (earlier !== null && earlier.archivedAt !== null)
+          return yield* new CrewLaunchOperationError({
+            phase: "recording the crew",
+            seatName: null,
+            createdSeats: [],
+            cause: `crew ${earlier.id} is retired`,
+          });
         const stale = (earlier?.members ?? []).filter(
           (member) => !planned.some((entry) => entry.seat.name === member.seatName),
         );
@@ -706,8 +715,19 @@ export const layer = Layer.effect(
         yield* spawnSeats(input.captain, planned);
         yield* startBriefs(input.captain, instance, planned, input.brief);
         return instance;
-      });
+      }).pipe((launch) =>
+        // One unit step from the record through the briefs, so a unit archive either waits for
+        // every seat to exist or has already retired the Crew this retry would launch into.
+        crews.serialize(
+          spawnCrewInstanceId({
+            providerSessionId: input.providerSessionId,
+            requestKey: input.requestKey,
+          }),
+          launch,
+        ),
+      );
 
+    // One unit step from the reservation through the briefs, like a launch.
     const addSeats: CrewLaunchServiceShape["addSeats"] = (input) =>
       Effect.gen(function* () {
         const resolved = input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats));
@@ -773,7 +793,7 @@ export const layer = Layer.effect(
           input.brief ?? reservation.instance.brief,
         );
         return reservation.instance;
-      });
+      }).pipe((addition) => crews.serialize(input.instance.id, addition));
 
     return CrewLaunchService.of({ launch, addSeats, resolveSeats });
   }),

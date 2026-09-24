@@ -2,6 +2,7 @@ import { ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
@@ -109,6 +110,18 @@ export interface AgentCrewInstanceServiceShape {
   }) => Effect.Effect<ReadonlyArray<AgentCrewInstance>, SqlError>;
   /** Idempotent: the first archive timestamp wins. */
   readonly markArchived: (id: string, archivedAt: string) => Effect.Effect<void, SqlError>;
+  /**
+   * Run one unit step on a Crew with no other unit step on it: a launch or addition from its
+   * record or reservation through its briefs, and a unit archive from its roster read through
+   * the retired stamp. A seat is therefore either created before an archive reads the roster, so
+   * the archive retires it, or its reservation runs after the stamp and is refused. Held in this
+   * process only; a restart drops the steps it interrupted along with the lock, and an archive
+   * cut short never reached the stamp, so the Crew it leaves is still live.
+   */
+  readonly serialize: <A, E, R>(
+    id: string,
+    effect: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E, R>;
 }
 
 export class AgentCrewInstanceService extends Context.Service<
@@ -387,7 +400,19 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
         return rows.map((row) => row.seat_name);
       });
 
+      const locks = new Map<string, Semaphore.Semaphore>();
+      const serialize: AgentCrewInstanceServiceShape["serialize"] = (id, effect) =>
+        Effect.suspend(() => {
+          let lock = locks.get(id);
+          if (lock === undefined) {
+            lock = Semaphore.makeUnsafe(1);
+            locks.set(id, lock);
+          }
+          return lock.withPermits(1)(effect);
+        });
+
       return AgentCrewInstanceService.of({
+        serialize,
         record,
         addMembers,
         read,
