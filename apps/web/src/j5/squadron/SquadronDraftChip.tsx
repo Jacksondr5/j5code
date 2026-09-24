@@ -65,7 +65,7 @@ export function SquadronDraftChip({
             aria-label="Choose Squadron for this draft"
             className="h-7 max-w-56"
             disabled={frozen || source?.status !== "ready" || !source.canOperate}
-            size="sm"
+            size="xs"
             type="button"
             variant="ghost-muted"
           />

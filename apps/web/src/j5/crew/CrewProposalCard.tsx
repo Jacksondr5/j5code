@@ -81,7 +81,9 @@ export function CrewProposalCard(props: {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Badge variant="warning">
-              {proposal.kind === "roster" ? "New crew" : "Add a seat"}
+              <span className="uppercase tracking-wide">
+                {proposal.kind === "roster" ? "New crew" : "Add a seat"}
+              </span>
             </Badge>
             {props.environmentId === null ? (
               <span>Captain</span>

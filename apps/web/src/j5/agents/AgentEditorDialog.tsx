@@ -115,14 +115,16 @@ export function AgentEditorDialog(props: {
             </label>
             <label className="grid gap-1.5 text-sm">
               Instructions
-              <Textarea
-                value={instructions ?? ""}
-                required
-                disabled={saving || instructions === null}
-                placeholder={instructions === null ? "Loading…" : undefined}
-                className="min-h-40"
-                onChange={(event) => setInstructions(event.target.value)}
-              />
+              <div className="font-mono">
+                <Textarea
+                  value={instructions ?? ""}
+                  required
+                  disabled={saving || instructions === null}
+                  placeholder={instructions === null ? "Loading…" : undefined}
+                  className="min-h-40"
+                  onChange={(event) => setInstructions(event.target.value)}
+                />
+              </div>
               <span className="text-xs text-muted-foreground">
                 Markdown. Instructions describe behavior; the runtime policy below is what is
                 enforced.

@@ -2015,13 +2015,14 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   // A spawn brief shows only the spawner's words; the platform identity block
   // is already reflected in the thread header and the "Spawned by" divider.
   // It is literal text, so legacy composer-context upgrades skip it (J5).
-  const spawnBrief = presentSpawnBrief(row.message);
-  const resolvedContext = useMemo(() => {
-    const brief = presentSpawnBrief(row.message);
-    return brief === null
-      ? resolveUserMessageContext(row.message)
-      : resolvedSpawnBriefContext(brief.brief);
-  }, [row.message]);
+  const spawnBrief = useMemo(() => presentSpawnBrief(row.message), [row.message]);
+  const resolvedContext = useMemo(
+    () =>
+      spawnBrief === null
+        ? resolveUserMessageContext(row.message)
+        : resolvedSpawnBriefContext(spawnBrief.brief),
+    [row.message, spawnBrief],
+  );
   const previewImages = useMemo(
     () => userImages.filter((image) => image.name.startsWith("preview-annotation-")),
     [userImages],

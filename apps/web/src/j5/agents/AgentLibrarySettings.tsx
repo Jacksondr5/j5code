@@ -530,7 +530,7 @@ export function AgentLibrarySettings() {
                         <TooltipTrigger
                           render={<Badge variant="outline">{persona.originLabel}</Badge>}
                         />
-                        <TooltipPopup>{persona.origin.path}</TooltipPopup>
+                        <TooltipPopup variant="code">{persona.origin.path}</TooltipPopup>
                       </Tooltip>
                     ) : (
                       <Badge variant="outline">{persona.originLabel}</Badge>

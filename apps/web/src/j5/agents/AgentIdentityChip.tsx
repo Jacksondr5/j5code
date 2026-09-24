@@ -7,6 +7,7 @@ import type {
 import { BotIcon } from "lucide-react";
 
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
+import { AgentHandoffChip } from "./AgentHandoffChip";
 import { useThreadShell } from "../../state/entities";
 
 /** Compact "which persona is this" chip for thread cards and runtime rows. */
@@ -40,11 +41,12 @@ export function AgentIdentityChip(props: {
 }
 
 /**
- * Persona label for upstream's lineage and subagent-card rows (#12835 replaced
- * the Agents panel). Those rows are already buttons with their own hover card,
- * so this stays a plain, non-interactive label: no nested tooltip or link.
+ * Persona chip plus handoff link for upstream's lineage rows and subagent cards
+ * (#12835 replaced the Agents panel). Both are interactive, so callers mount this
+ * beside the row's navigation button, never inside it. Runtime rows know only the
+ * child thread; look up its shell for the pinned assignment.
  */
-export function AgentLineageIdentity(props: {
+export function AgentRowIdentity(props: {
   readonly environmentId: EnvironmentId;
   readonly childThreadId: string | null;
 }) {
@@ -54,14 +56,14 @@ export function AgentLineageIdentity(props: {
       : null,
   );
   const assignment = shell?.agentPersonaAssignment;
-  if (assignment === undefined) return null;
+  if (assignment === undefined || props.childThreadId === null) return null;
   return (
-    <span
-      data-j5-agent-identity=""
-      className="inline-flex max-w-28 shrink-0 items-center gap-1 truncate rounded-sm border border-border/60 px-1 text-[.65rem] text-muted-foreground"
-    >
-      <BotIcon aria-hidden className="size-3 shrink-0" />
-      <span className="truncate">{presentAgentPersonaAssignment(assignment).personaLabel}</span>
-    </span>
+    <>
+      <AgentIdentityChip assignment={assignment} />
+      <AgentHandoffChip
+        environmentId={props.environmentId}
+        threadId={props.childThreadId as ThreadId}
+      />
+    </>
   );
 }

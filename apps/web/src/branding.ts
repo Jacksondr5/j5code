@@ -28,4 +28,4 @@ export const APP_DISPLAY_NAME =
   formatAppDisplayName({ baseName: APP_BASE_NAME, stageLabel: APP_STAGE_LABEL });
 export const APP_VERSION = import.meta.env.APP_VERSION || "0.0.0";
 /** The PATH command release archives install (`install.sh` / `j5 update`); the wizard and pairing copy build subcommands on it. */
-export const CLI_COMMAND = "j5";
+export const CLI_COMMAND = J5_BRANDING.cli.command;

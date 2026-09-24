@@ -28,7 +28,7 @@ export function SteerUnavailableNotice(props: {
         {notSteerableStateText(props.state.phase)}. Your message is still in the composer.
       </span>
       <Button
-        size="xs"
+        size="micro"
         variant="outline"
         className="h-6"
         onClick={() => {
@@ -39,7 +39,7 @@ export function SteerUnavailableNotice(props: {
         Interrupt
       </Button>
       <Button
-        size="xs"
+        size="micro"
         variant="ghost"
         className="h-6"
         onClick={() => {

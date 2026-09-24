@@ -192,7 +192,7 @@ function OpenInboxItem({
       <details className="group/details">
         <summary className="flex cursor-pointer list-none items-start gap-3 px-1 py-4 outline-hidden marker:hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:gap-4 [&::-webkit-details-marker]:hidden">
           <Badge className="mt-0.5" variant={urgency.variant}>
-            {urgency.label}
+            <span className="uppercase tracking-wide">{urgency.label}</span>
           </Badge>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">

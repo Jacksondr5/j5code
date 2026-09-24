@@ -76,6 +76,7 @@ export function AgentFolderPickerDialog(props: {
           <Input
             value={pathInput}
             aria-label="Folder path"
+            font="mono"
             autoComplete="off"
             spellCheck={false}
             onChange={(event) => setPathInput(event.target.value)}

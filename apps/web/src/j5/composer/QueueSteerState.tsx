@@ -27,9 +27,8 @@ export function QueueSteerState(props: {
     >
       <span className="truncate">{notSteerableStateText(props.state.phase)}</span>
       <Button
-        size="xs"
+        size="micro"
         variant="ghost"
-        className="h-5"
         disabled={busy}
         title="Interrupt the active run"
         onClick={() => {

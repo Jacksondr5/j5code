@@ -3,7 +3,7 @@ import { AgentElapsed } from "./AgentElapsed";
 import { projectedSubagentsToRuntime } from "@t3tools/client-runtime/state/subagentRuntime";
 import type { ReactNode } from "react";
 import { useThreadShell, useProject } from "../../state/entities";
-import { AgentLineageIdentity } from "../../j5/agents/AgentIdentityChip";
+import { AgentRowIdentity } from "../../j5/agents/AgentIdentityChip";
 import { SubagentTooltipContent } from "./SubagentTooltipContent";
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef, scopeProjectRef } from "@t3tools/client-runtime/environment";
@@ -368,10 +368,6 @@ function SubagentTimelineLink(props: {
           <span className="min-w-0 truncate text-xs font-medium text-foreground">
             {props.title}
           </span>
-          <AgentLineageIdentity
-            environmentId={props.parentRef.environmentId}
-            childThreadId={threadId}
-          />
           {detail !== null && status !== "completed" ? (
             <span
               className={cn(
@@ -411,43 +407,54 @@ function SubagentTimelineLink(props: {
   );
   const className =
     "group/subagent flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-left";
+  // J5: the saved-agent chip and handoff link are interactive, so they sit beside
+  // the card's button rather than inside it.
   return (
-    <Tooltip>
-      <TooltipTrigger
-        delay={200}
-        render={
-          threadId === null ? (
-            <div data-v2-item-type="subagent" aria-description={statusLabel} className={className}>
-              {content}
-            </div>
-          ) : (
-            <button
-              type="button"
-              data-v2-item-type="subagent"
-              aria-label={`Open ${props.title}`}
-              aria-description={statusLabel}
-              onClick={() => props.onOpenThread(threadId)}
-              className={cn(
-                className,
-                "cursor-pointer transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
-              )}
-            >
-              {content}
-            </button>
-          )
-        }
-      />
-      <ThreadHoverCardPopup>
-        <SubagentTimelineTooltip
-          {...props}
-          elapsed={agent ? <AgentElapsed agent={projectedSubagentsToRuntime([agent])[0]!} /> : null}
-          model={agent?.model ?? null}
-          status={status}
-          result={agent?.result ?? props.result}
-          progress={agent?.progress ?? props.progress}
+    <div className="flex min-w-0 items-center gap-1">
+      <Tooltip>
+        <TooltipTrigger
+          delay={200}
+          render={
+            threadId === null ? (
+              <div
+                data-v2-item-type="subagent"
+                aria-description={statusLabel}
+                className={className}
+              >
+                {content}
+              </div>
+            ) : (
+              <button
+                type="button"
+                data-v2-item-type="subagent"
+                aria-label={`Open ${props.title}`}
+                aria-description={statusLabel}
+                onClick={() => props.onOpenThread(threadId)}
+                className={cn(
+                  className,
+                  "cursor-pointer transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+                )}
+              >
+                {content}
+              </button>
+            )
+          }
         />
-      </ThreadHoverCardPopup>
-    </Tooltip>
+        <ThreadHoverCardPopup>
+          <SubagentTimelineTooltip
+            {...props}
+            elapsed={
+              agent ? <AgentElapsed agent={projectedSubagentsToRuntime([agent])[0]!} /> : null
+            }
+            model={agent?.model ?? null}
+            status={status}
+            result={agent?.result ?? props.result}
+            progress={agent?.progress ?? props.progress}
+          />
+        </ThreadHoverCardPopup>
+      </Tooltip>
+      <AgentRowIdentity environmentId={props.parentRef.environmentId} childThreadId={threadId} />
+    </div>
   );
 }
 
