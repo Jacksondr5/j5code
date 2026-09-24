@@ -749,6 +749,8 @@ const handlers = {
             participantId: facts.home.participantId,
             squadronId: facts.home.squadronId,
             squadronName: caller.squadron.name,
+            spawnedByParticipantId: caller.participantId,
+            spawnerThreadId: scope.threadId,
           }),
           attachments: [],
           modelSelection,
