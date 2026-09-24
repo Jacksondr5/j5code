@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+export * from "./j5/playbook.ts";
 
 import { ModelSelection } from "./modelSelection.ts";
 import { RuntimeMode } from "./providerPolicy.ts";

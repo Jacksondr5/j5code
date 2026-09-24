@@ -13,7 +13,7 @@ import type { ProviderAdapterV2RuntimePolicy } from "../../../orchestration-v2/P
  * the same policy, and a child inherits its parent's sandbox through the escalation check. The
  * rest of the t3-code server (worktree handoff, browser preview, scheduling) keeps Codex's own
  * verdict, so a read-only persona under `never` still cannot reach those. Interactive modes
- * pre-approve only routine communication and filing roster requests; the latter still require
+ * pre-approve routine communication, owner-thread playbook progress, and filing roster requests; the latter still require
  * human approval in the app before any member launches. Lifecycle and spawning tools keep
  * Codex's prompting in those modes. Kept as a leaf module (no toolkit import) so the adapter
  * avoids a cycle; the test checks the full list against J5Toolkit.
@@ -37,6 +37,14 @@ export const J5_CODEX_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
   "stop_crew",
   "archive_crew",
   "clear_own_ask",
+  "playbook_list",
+  "playbook_start",
+  "playbook_current",
+  "playbook_next",
+  "playbook_back",
+  "playbook_reselect",
+  "playbook_complete",
+  "playbook_cancel",
 ];
 
 /** These calls coordinate approved work or file a request in the app's human approval inbox. */
@@ -45,6 +53,12 @@ export const J5_CODEX_COORDINATION_TOOLS: ReadonlyArray<string> = [
   "clear_own_ask",
   "propose_crew",
   "request_crew_member",
+  "playbook_start",
+  "playbook_next",
+  "playbook_back",
+  "playbook_reselect",
+  "playbook_complete",
+  "playbook_cancel",
 ];
 
 /** Codex `mcp_servers.<id>.tools.<tool>.approval_mode`, never a server-wide default. */

@@ -9,6 +9,28 @@ A driver kind identifies an integration; an instance identifies one configuratio
 lifecycle. Route work by instance, so two accounts using the same driver do not share mutable
 session or catalog state.
 
+## Playbook tool permissions
+
+Playbook tools only read live prompts and change the calling thread's run. They do not execute
+steps or grant workspace access, so their approval policy can differ from file and process tools.
+
+- Codex pre-approves the six Playbook mutations as coordination in interactive modes as well as
+  full access; discovery and current-step reads carry read-only annotations. The named allowlists
+  live in [codexToolApproval.ts](../../apps/server/src/j5/a2a/mcp/codexToolApproval.ts).
+- Claude includes all eight tools in its explicit MCP allowlist, including read-only threads;
+  see [claudeAllowedTools.ts](../../apps/server/src/j5/a2a/mcp/claudeAllowedTools.ts).
+- Cursor exposes the same tools through its thread-scoped MCP connection and retains the SDK's
+  native review and sandbox policy. Its adapter cannot resolve interactive approval requests;
+  no Playbook-specific approval bypass is added.
+- Grok and Antigravity use the ACP MCP connection and retain ACP permission handling: requests
+  can prompt in approval-required mode, and restricted sandboxes can deny mutation requests.
+  Playbooks do not widen those policies.
+- Managed OpenCode exposes the tools through its thread-scoped MCP registration and retains its
+  permission rules: supervised policies can ask and restricted policies can deny MCP calls.
+  External OpenCode connections do not receive T3's MCP registration or Playbook guidance.
+
+These are adapter policy decisions, not a claim that every provider runs Playbooks unattended.
+
 ## Process and account isolation
 
 T3-managed OpenCode chat uses one server per thread. Its MCP registrations are directory-scoped, while
