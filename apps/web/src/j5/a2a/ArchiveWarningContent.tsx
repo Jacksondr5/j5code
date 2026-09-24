@@ -183,9 +183,10 @@ export function ArchiveWarningContent({ payload }: { readonly payload: ArchiveWa
       ) : null}
       {payload.placement.state === "known" ? (
         <p>
-          Also archives {payload.placement.participants.length} agent
+          {payload.placement.participants.length} agent
           {payload.placement.participants.length === 1 ? "" : "s"} placed under{" "}
-          {payload.threadTitle}:{" "}
+          {payload.threadTitle} keep{payload.placement.participants.length === 1 ? "s" : ""}{" "}
+          running:{" "}
           {payload.placement.participants.map((participant, index) => (
             <span key={`${participant.displayName}-${index}`}>
               {index > 0 ? ", " : null}

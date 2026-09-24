@@ -199,6 +199,61 @@ it.effect("reports real placement descendants without including the archived roo
   }).pipe(Effect.provide(makeTestLayer())),
 );
 
+it.effect("leaves already archived descendants out and keeps their live children", () =>
+  Effect.gen(function* () {
+    yield* seed;
+    const placements = yield* ParticipantPlacementService;
+    const ledger = yield* A2ALedger;
+    // subject -> inbound (archived) -> outbound (live)
+    yield* placements.recordCreation({
+      commandId: PlacementCommandId.make("command:archive-facts:placement:subject"),
+      squadronId,
+      participantId: participant.id,
+      actor: "platform",
+      provenance: { kind: "unknown", source: "native_or_unobserved" },
+      createdAt: timestamp,
+    });
+    for (const [child, parent] of [
+      [inboundCounterparty, participant],
+      [outboundCounterparty, inboundCounterparty],
+    ] as const) {
+      yield* placements.recordCreation({
+        commandId: PlacementCommandId.make(`command:archive-facts:placement:${child.id}`),
+        squadronId,
+        participantId: child.id,
+        actor: "platform",
+        provenance: {
+          kind: "spawned-by",
+          spawnedByParticipantId: parent.id,
+          source: "j5_spawn",
+        },
+        createdAt: timestamp,
+      });
+    }
+    yield* ledger.append({
+      commandId: CommCommandId.make("command:archive-facts:archive-inbound"),
+      squadronId,
+      acceptedAt: timestamp,
+      event: {
+        kind: "participant.archived",
+        sender: null,
+        receiver: inboundCounterparty.id,
+        exchangeId: null,
+        correlationId: null,
+        payload: { participant: inboundCounterparty },
+        createdAt: "2026-08-29T12:00:04.000Z",
+      },
+    });
+    const facts = yield* (yield* A2AArchiveFacts).readForThread(participant.threadId);
+    assert.equal(facts.state, "registered");
+    if (facts.state !== "registered") return;
+    assert.deepStrictEqual(facts.placementSubtree, {
+      state: "known",
+      participantIds: [outboundCounterparty.id],
+    });
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
 it.effect(
   "renders a failed placement lookup as unknown instead of a reassuring empty subtree",
   () =>
