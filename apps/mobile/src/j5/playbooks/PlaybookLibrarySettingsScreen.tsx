@@ -99,19 +99,14 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
   );
   function openDraft(prompt: string) {
     if (!workspace) return;
-    if (!preparePlaybookDraft(workspace, prompt)) {
-      Alert.alert(
-        "Draft preserved",
-        "Finish or clear this project's existing draft before choosing a playbook action.",
-      );
-      return;
-    }
+    const draftId = preparePlaybookDraft(workspace, prompt);
     navigation.navigate("NewTaskSheet", {
       screen: "NewTaskDraft",
       params: {
         environmentId: workspace.environmentId,
         projectId: workspace.projectId,
         title: workspace.title,
+        draftId,
       },
     });
   }

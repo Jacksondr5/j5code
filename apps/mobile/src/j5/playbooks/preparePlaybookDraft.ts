@@ -1,8 +1,6 @@
 import type { playbookWorkspaces } from "@t3tools/client-runtime/j5/playbooks";
-import { scopedProjectKey } from "../../lib/scopedEntities";
 import {
-  getComposerDraftSnapshot,
-  isComposerDraftEmpty,
+  createNewTaskDraft,
   setComposerDraftText,
   updateComposerDraftSettings,
 } from "../../state/use-composer-drafts";
@@ -10,9 +8,11 @@ import {
 export function preparePlaybookDraft(
   workspace: ReturnType<typeof playbookWorkspaces>[number],
   prompt: string,
-): boolean {
-  const key = `new-task:${scopedProjectKey(workspace.environmentId, workspace.projectId)}`;
-  if (!isComposerDraftEmpty(getComposerDraftSnapshot(key))) return false;
+) {
+  const key = createNewTaskDraft({
+    environmentId: workspace.environmentId,
+    projectId: workspace.projectId,
+  });
   updateComposerDraftSettings(key, {
     workspaceSelection: {
       mode: "local",
@@ -22,5 +22,5 @@ export function preparePlaybookDraft(
     },
   });
   setComposerDraftText(key, prompt);
-  return true;
+  return key;
 }
