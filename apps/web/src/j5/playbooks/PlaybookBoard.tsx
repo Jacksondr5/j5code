@@ -28,7 +28,7 @@ export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: T
   const runs = query.data?.supported ? query.data.runs : [];
   useVisibleRefresh(
     query.refresh,
-    runs.some((run) => run.status === "active") ? 7_500 : null,
+    runs.some((run) => run.status === "active") ? 30_000 : null,
     environment?.connection.phase === "connected" &&
       query.data?.supported !== false &&
       !query.isPending,
