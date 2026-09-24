@@ -652,15 +652,6 @@ export const layer = Layer.effect(
         const earlier = yield* crews
           .read(crewInstanceId)
           .pipe(Effect.mapError(recordError("reading the earlier attempt")));
-        // A retry that reaches a Crew retired since its first attempt finds the record already
-        // there; the unit is gone, so nothing launches into it.
-        if (earlier !== null && earlier.archivedAt !== null)
-          return yield* new CrewLaunchOperationError({
-            phase: "recording the crew",
-            seatName: null,
-            createdSeats: [],
-            cause: `crew ${earlier.id} is retired`,
-          });
         const stale = (earlier?.members ?? []).filter(
           (member) => !planned.some((entry) => entry.seat.name === member.seatName),
         );
@@ -716,8 +707,8 @@ export const layer = Layer.effect(
         yield* startBriefs(input.captain, instance, planned, input.brief);
         return instance;
       }).pipe((launch) =>
-        // One unit step from the record through the briefs, so a unit archive either waits for
-        // every seat to exist or has already retired the Crew this retry would launch into.
+        // One unit step from the record through the briefs, so a unit archive waits for every
+        // seat to exist before it reads the roster.
         crews.serialize(
           spawnCrewInstanceId({
             providerSessionId: input.providerSessionId,

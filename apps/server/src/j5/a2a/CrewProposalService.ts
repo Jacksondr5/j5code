@@ -279,8 +279,9 @@ export const layer = Layer.effect(
         threadManagement,
         proposal.captainThreadId,
       ).pipe(Effect.mapError(operationError("reading the Captain thread")));
-      // A roster or addition left open while its Captain was archived or deleted would seat agents
-      // under no one; the Captain cascade already ran when there was nothing to retire.
+      // Checked when the person approves, not held: a Captain archived or deleted while its gate
+      // is open is refused here, since new seats would be briefed to report to a participant
+      // delivery no longer reaches. A Captain archived after this read is not caught.
       if (projection === null || projection.thread.deletedAt != null)
         return yield* new CrewProposalRequestError({
           detail: `Captain ${projection?.thread.title ?? proposal.captainParticipantId} has been deleted, so this crew has no one to command it.`,

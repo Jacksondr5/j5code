@@ -2,10 +2,10 @@ import { ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
+import { makeKeyedSerialExecutor } from "../../orchestration-v2/KeyedSerialExecutor.ts";
 import { ParticipantId, type SquadronId } from "./contracts.ts";
 
 export interface AgentCrewMember {
@@ -400,16 +400,10 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
         return rows.map((row) => row.seat_name);
       });
 
-      const locks = new Map<string, Semaphore.Semaphore>();
+      // Keyed and reference-counted, so a Crew's lock is gone once no step holds or awaits it.
+      const units = yield* makeKeyedSerialExecutor<string>();
       const serialize: AgentCrewInstanceServiceShape["serialize"] = (id, effect) =>
-        Effect.suspend(() => {
-          let lock = locks.get(id);
-          if (lock === undefined) {
-            lock = Semaphore.makeUnsafe(1);
-            locks.set(id, lock);
-          }
-          return lock.withPermits(1)(effect);
-        });
+        units.withLock(id, effect);
 
       return AgentCrewInstanceService.of({
         serialize,

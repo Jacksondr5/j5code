@@ -1416,7 +1416,9 @@ it.effect(
         yield* Queue.clear(unit.entered);
 
         // The archive has read the roster and is retiring its first member when the addition,
-        // already past the gate's checks, asks to reserve its seat.
+        // already past the gate's checks, asks to reserve its seat. This proves the outcome, not
+        // the lock: without it the addition may still happen to reserve after the stamp. The
+        // mid-spawn test below is the one that fails without the lock.
         const archiving = yield* Deferred.make<void>();
         const release = yield* Deferred.make<void>();
         yield* Ref.set(
@@ -1516,21 +1518,4 @@ it.effect(
         assert.isNotNull((yield* crews.read(instance.id))!.archivedAt);
       }).pipe(Effect.provide(unit.layer));
     }).pipe(Effect.scoped),
-);
-
-it.effect("a launch retry that reaches a retired Crew spawns nothing", () =>
-  Effect.gen(function* () {
-    const unit = yield* unitFixture;
-    yield* Effect.gen(function* () {
-      const archive = yield* ArchiveCrewService;
-      const instance = yield* unit.launchPair;
-      yield* archive.archive(unit.archiveInput(instance.id));
-      const before = (yield* Ref.get(unit.commands)).length;
-
-      const refused = yield* unit.launchPair.pipe(Effect.flip);
-      assert.equal(refused._tag, "CrewLaunchOperationError");
-      assert.include(refused.message, "is retired");
-      assert.lengthOf(yield* Ref.get(unit.commands), before);
-    }).pipe(Effect.provide(unit.layer));
-  }).pipe(Effect.scoped),
 );
