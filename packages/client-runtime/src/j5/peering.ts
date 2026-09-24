@@ -1,3 +1,4 @@
+import type { EnvironmentId } from "@t3tools/contracts";
 import { PeerOrigin } from "@t3tools/contracts/j5";
 import * as Schema from "effect/Schema";
 
@@ -10,7 +11,7 @@ import * as Schema from "effect/Schema";
 
 /** One server in an introduction. `origin` is where the *other* server reaches this one. */
 export interface PeeringSide {
-  readonly environmentId: string;
+  readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly origin: string;
 }
@@ -115,6 +116,12 @@ const detailOf = (cause: unknown) =>
  * Mutual, in one act: each server issues a credential for the other, then each
  * records the other after proving that credential at the origin. Stops at the
  * first failure and reports every step, so the person sees exactly what stands.
+ *
+ * Issuing revokes nothing: a server retires a peer's older sessions only when
+ * the peer first presents the newer credential, at record time. So re-peering
+ * an already peered pair leaves the existing link working if a later step
+ * fails; what a failed run leaves behind is at most an issued, unused
+ * credential, listed under Connections until a later peering replaces it.
  */
 export async function introducePeers(input: {
   readonly local: PeeringSide;
@@ -129,7 +136,7 @@ export async function introducePeers(input: {
   ) => Promise<unknown>;
 }): Promise<PeeringOutcome> {
   const steps: Array<PeeringStepOutcome> = [];
-  const run = async (step: PeeringStep, action: () => Promise<unknown>) => {
+  const run = async <A>(step: PeeringStep, action: () => Promise<A>): Promise<A> => {
     try {
       const result = await action();
       steps.push({ step, status: "done", detail: null });
@@ -140,12 +147,8 @@ export async function introducePeers(input: {
     }
   };
   try {
-    const forRemote = (await run("issue-local", () => input.issue(input.local, input.remote))) as {
-      credential: string;
-    };
-    const forLocal = (await run("issue-remote", () => input.issue(input.remote, input.local))) as {
-      credential: string;
-    };
+    const forRemote = await run("issue-local", () => input.issue(input.local, input.remote));
+    const forLocal = await run("issue-remote", () => input.issue(input.remote, input.local));
     await run("record-remote", () => input.record(input.local, input.remote, forLocal.credential));
     await run("record-local", () => input.record(input.remote, input.local, forRemote.credential));
     return { ok: true, steps };

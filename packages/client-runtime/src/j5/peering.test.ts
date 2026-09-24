@@ -1,3 +1,4 @@
+import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -9,12 +10,12 @@ import {
 } from "./peering.ts";
 
 const work: PeeringSide = {
-  environmentId: "environment-work",
+  environmentId: EnvironmentId.make("environment-work"),
   label: "Work",
   origin: "https://work.example:3773",
 };
 const home: PeeringSide = {
-  environmentId: "environment-home",
+  environmentId: EnvironmentId.make("environment-home"),
   label: "Home",
   origin: "https://home.example:3773",
 };
