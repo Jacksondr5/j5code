@@ -94,7 +94,45 @@ vi.mock("../../commandPaletteBus", () => ({
 
 vi.mock("../../components/settings/settingsLayout", () => ({
   SettingsPageContainer: ({ children }: { children: React.ReactNode }) => children,
-  SettingsSection: ({ children }: { children: React.ReactNode }) => children,
+  SettingsSection: ({
+    children,
+    headerAction,
+  }: {
+    children: React.ReactNode;
+    headerAction?: React.ReactNode;
+  }) => (
+    <section>
+      {headerAction}
+      {children}
+    </section>
+  ),
+  SettingsRow: ({
+    children,
+    control,
+  }: {
+    children?: React.ReactNode;
+    control?: React.ReactNode;
+  }) => (
+    <div>
+      {control}
+      {children}
+    </div>
+  ),
+}));
+
+vi.mock("../../components/ui/checkbox", () => ({
+  Checkbox: ({
+    onCheckedChange,
+    ...props
+  }: React.InputHTMLAttributes<HTMLInputElement> & {
+    onCheckedChange?: (checked: boolean) => void;
+  }) => (
+    <input
+      type="checkbox"
+      {...props}
+      onChange={(event) => onCheckedChange?.(event.target.checked)}
+    />
+  ),
 }));
 
 vi.mock("../../components/ui/button", () => ({
@@ -311,7 +349,11 @@ describe("SkillCatalogPanel source identity", () => {
   it("requires a new Apply after the group selection changes", async () => {
     const renderer = await renderConflicts();
     await act(async () =>
-      renderer.root.findByProps({ "aria-label": "Install core group" }).props.onChange(),
+      renderer.root
+        .findAll(
+          (node) => node.type === "input" && node.props["aria-label"] === "Install core group",
+        )[0]!
+        .props.onChange({ target: { checked: false } }),
     );
     expect(buttonByText(renderer, "Use this catalog…").props.disabled).toBe(true);
     expect(state.applyCalls).toHaveLength(1);
@@ -392,6 +434,20 @@ describe("SkillCatalogPanel source identity", () => {
     expect(state.applyCalls.at(-1)).toMatchObject({
       input: { expectedSource: "/catalog/B" },
     });
+    await act(async () => renderer.unmount());
+  });
+
+  it("applies the groups selected in the settings rows", async () => {
+    setStatusLoaded("/catalog/A");
+    const renderer = await renderPanel();
+    const group = renderer.root.findAll(
+      (node) => node.type === "input" && node.props["aria-label"] === "Install core group",
+    )[0]!;
+
+    await act(async () => group.props.onChange({ target: { checked: false } }));
+    await act(async () => applyButton(renderer).props.onClick());
+
+    expect(state.applyCalls.at(-1)).toMatchObject({ input: { groups: [] } });
     await act(async () => renderer.unmount());
   });
 
