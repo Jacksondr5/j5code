@@ -176,7 +176,25 @@ old unit was recreated), and step 1 showed the unit is J5's, run
   Rollback.
 - Connect from a client and confirm that threads, Squadrons, and agents appear.
 
-## 6. Clean up (after a few days of normal use)
+## 6. Report the upgrade (final step)
+
+J5 still carries the code that upgrades databases from the August and September
+2026 builds. It stays only until every J5 install has started once on 0.0.43 or
+later, and this report is how we know.
+
+After the first successful start on 0.0.43 or later (step 5 passed), comment on
+[Jacksondr5/j5code#275](https://github.com/Jacksondr5/j5code/issues/275) with
+the machine or owner name and the version, for example:
+
+```sh
+gh issue comment 275 -R Jacksondr5/j5code \
+  --body "Upgraded: <machine or owner>, $(j5 --version)"
+```
+
+If `gh` isn't available or signed in, give the owner that text to post. An agent
+following this guide stops here; step 7 is a separate visit days later.
+
+## 7. Clean up (after a few days of normal use)
 
 Keep the old files until you are sure you will not roll back.
 
