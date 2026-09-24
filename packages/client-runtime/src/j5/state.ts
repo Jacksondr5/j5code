@@ -1,4 +1,5 @@
-import type { ProjectId } from "@t3tools/contracts";
+import type { ProjectId, ThreadId } from "@t3tools/contracts";
+import { J5_PLAYBOOK_WS_METHODS } from "@t3tools/contracts/j5";
 import type {
   AnswerHumanExchangeRequest,
   AssignImportedThreadsRequest,
@@ -7,6 +8,10 @@ import type {
   CrewArchiveRequest,
   CrewStopRequest,
   FleetReadRequest,
+  PlaybookLibraryRequest,
+  PlaybookDeleteRequest,
+  PlaybookRenameRequest,
+  PlaybookRunsRequest,
 } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -16,7 +21,11 @@ import type { Atom } from "effect/unstable/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
-import { createEnvironmentCommand, createEnvironmentQueryAtomFamily } from "../state/runtime.ts";
+import {
+  createEnvironmentCommand,
+  createEnvironmentQueryAtomFamily,
+  createEnvironmentRpcSubscriptionAtomFamily,
+} from "../state/runtime.ts";
 import * as J5Http from "./http.ts";
 
 const preparedConnection = Effect.gen(function* () {
@@ -29,11 +38,66 @@ const preparedConnection = Effect.gen(function* () {
   return prepared.value;
 });
 
+export const supportedJ5Read = <A extends object, E, R>(read: Effect.Effect<A, E, R>) =>
+  read.pipe(
+    Effect.map((data) => ({ ...data, supported: true as const })),
+    Effect.catchIf(J5Http.isJ5UnsupportedError, () =>
+      Effect.succeed({ supported: false as const }),
+    ),
+  );
+
 /** J5 uses the same environment registry, query lifecycle, and command dispatch as other features. */
 export function createJ5EnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | HttpClient.HttpClient | R, E>,
 ) {
   return {
+    playbookChanges: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "j5:playbook-changes",
+      tag: J5_PLAYBOOK_WS_METHODS.subscribeChanges,
+      idleTtlMs: 0,
+    }),
+    playbookRuns: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:playbook-runs",
+      staleTimeMs: 2_500,
+      execute: (input: PlaybookRunsRequest) =>
+        supportedJ5Read(
+          preparedConnection.pipe(
+            Effect.flatMap((prepared) => J5Http.readAllPlaybooks(prepared, input)),
+          ),
+        ),
+    }),
+    playbookLibrary: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:playbook-library",
+      staleTimeMs: 0,
+      execute: (input: PlaybookLibraryRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.readPlaybookLibrary(prepared, input)),
+        ),
+    }),
+    deletePlaybook: createEnvironmentCommand(runtime, {
+      label: "j5:delete-playbook",
+      execute: (input: PlaybookDeleteRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.deletePlaybook(prepared, input)),
+        ),
+    }),
+    renamePlaybook: createEnvironmentCommand(runtime, {
+      label: "j5:rename-playbook",
+      execute: (input: PlaybookRenameRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.renamePlaybook(prepared, input)),
+        ),
+    }),
+    playbooks: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:playbooks",
+      staleTimeMs: 2_500,
+      execute: (input: { readonly threadId: ThreadId }) =>
+        supportedJ5Read(
+          preparedConnection.pipe(
+            Effect.flatMap((prepared) => J5Http.readThreadPlaybooks(prepared, input.threadId)),
+          ),
+        ),
+    }),
     squadrons: createEnvironmentQueryAtomFamily(runtime, {
       label: "j5:squadrons",
       staleTimeMs: 30_000,

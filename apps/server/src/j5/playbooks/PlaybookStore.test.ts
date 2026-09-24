@@ -1,25 +1,30 @@
 import { seedPlaybookOwners } from "./testFixtures.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { ThreadId } from "@t3tools/contracts";
+import { AuthOrchestrationReadScope, ThreadId } from "@t3tools/contracts";
 import {
+  J5_PLAYBOOK_WS_METHODS,
   PLAYBOOK_MAX_BYTES,
   PLAYBOOK_MAX_STEPS,
   PLAYBOOK_RUNS_PAGE_SIZE,
   type PlaybookDefinition,
+  type PlaybookProgress,
 } from "@t3tools/contracts/j5";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Result from "effect/Result";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 import { stringify } from "yaml";
 
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { makePlaybookStore, type PlaybookMutation } from "./PlaybookStore.ts";
+import { makePlaybookRpcHandlers, PLAYBOOK_RPC_SCOPES } from "./playbookRpc.ts";
 
 const owner = ThreadId.make("thread:playbook:owner");
 const otherOwner = ThreadId.make("thread:playbook:other");
@@ -59,6 +64,83 @@ const makeFixture = Effect.gen(function* () {
   const store = yield* initializeStore;
   return { ...workspace, store };
 });
+
+it.effect(
+  "publishes committed playbook changes during a turn and ignores failures and retries",
+  () =>
+    Effect.gen(function* () {
+      const { store, workspaceRoot } = yield* makeFixture;
+      const snapshots = yield* Queue.unbounded<{
+        revision: number;
+        runs: ReadonlyArray<PlaybookProgress>;
+      }>();
+      const handlers = makePlaybookRpcHandlers(store, (_method, stream) => stream);
+      assert.equal(
+        PLAYBOOK_RPC_SCOPES[J5_PLAYBOOK_WS_METHODS.subscribeChanges],
+        AuthOrchestrationReadScope,
+      );
+      yield* handlers[J5_PLAYBOOK_WS_METHODS.subscribeChanges]().pipe(
+        Stream.runForEach((revision) =>
+          Effect.gen(function* () {
+            const { runs } = yield* store.listForThread(owner);
+            yield* Queue.offer(snapshots, { revision, runs });
+          }),
+        ),
+        Effect.forkScoped,
+      );
+      assert.deepStrictEqual(yield* Queue.take(snapshots), { revision: 0, runs: [] });
+      const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+      const started = yield* Queue.take(snapshots);
+      assert.equal(started.revision, 1);
+      assert.equal(started.runs[0]?.runId, run.runId);
+      assert.equal(started.runs[0]?.status, "active");
+      yield* store.start(owner, workspaceRoot, "demo", "start");
+      yield* Effect.flip(store.start(owner, workspaceRoot, "demo", "duplicate"));
+      yield* Effect.flip(
+        store.mutate(otherOwner, {
+          operation: "cancel",
+          runId: run.runId,
+          client_request_id: "foreign",
+        }),
+      );
+      assert.deepStrictEqual(yield* Stream.runHead(store.changes), Option.some(1));
+
+      const moves = [
+        { operation: "next", expectedStepId: "research", step: "implement", status: "active" },
+        { operation: "back", expectedStepId: "implement", step: "research", status: "active" },
+        {
+          operation: "reselect",
+          expectedStepId: "research",
+          stepId: "review",
+          step: "review",
+          status: "active",
+        },
+        { operation: "complete", expectedStepId: "review", step: "review", status: "completed" },
+      ] as const;
+      for (const [index, { step, status, ...movement }] of moves.entries()) {
+        const input = { ...movement, runId: run.runId, client_request_id: `move-${index}` };
+        yield* store.mutate(owner, input);
+        const changed = yield* Queue.take(snapshots);
+        assert.equal(changed.revision, index + 2);
+        assert.equal(changed.runs[0]?.currentStepId, step);
+        assert.equal(changed.runs[0]?.status, status);
+        yield* store.mutate(owner, input);
+        assert.deepStrictEqual(yield* Stream.runHead(store.changes), Option.some(index + 2));
+      }
+      const second = yield* store.start(owner, workspaceRoot, "demo", "second");
+      assert.equal((yield* Queue.take(snapshots)).revision, 6);
+      yield* store.mutate(owner, {
+        operation: "cancel",
+        runId: second.runId,
+        client_request_id: "cancel",
+      });
+      const cancelled = yield* Queue.take(snapshots);
+      assert.equal(cancelled.revision, 7);
+      assert.equal(cancelled.runs[0]?.status, "cancelled");
+      // A new subscriber receives the latest revision even if it missed the mutation.
+      assert.deepStrictEqual(yield* Stream.runHead(store.changes), Option.some(7));
+    }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
 
 it.effect(
   "lists owners together, filters active runs, and reads shared live definitions once per page",

@@ -1,7 +1,15 @@
 # Playbooks
 
 Playbooks give an agent an ordered sequence of prompts. The agent does the work
-in its existing thread and decides when to advance. The agent can retrieve its current step and run status throughout the conversation.
+in its existing thread and decides when to advance. The thread's phase board
+shows the current step and whether the run is active, completed, or cancelled.
+Earlier steps describe position, not a guarantee that their work passed validation.
+
+Open **Fleet** and use its **Playbook runs** section to follow runs across your
+connected environments. The overview shows
+each run's owner thread, agent activity, and current step. Select a run to open
+its thread, or choose **All** to include completed and cancelled runs.
+Unavailable environments keep their last received progress marked as stale.
 
 Ask your agent to create a playbook, or save a YAML file in your thread's workspace
 under `.j5/playbooks/`. For example, `.j5/playbooks/review.yaml`:
@@ -21,7 +29,8 @@ steps:
     prompt: Summarize confirmed findings and remaining uncertainty.
 ```
 
-Ask your agent to list available playbooks, or say “Start playbook review.” One playbook can be active per thread;
+Send `/playbook review` to start, or `/playbook` to ask what is available. You can
+also ask directly: “Start playbook review.” One playbook can be active per thread;
 finishing or cancelling it leaves the agent ready for other work or another playbook.
 
 You can edit prompts and reorder steps while the run is active. The next retrieval
@@ -31,7 +40,7 @@ progress unchanged; restore the file or ask the agent to cancel the run.
 
 Ask the agent to go back when you want to revisit a phase. Going back changes its
 position, not your files or previous work. Progress survives context compaction and
-provider restarts.
+provider restarts. Select an earlier run in the thread to inspect its status.
 
 Each run belongs to one thread. Deleting that thread cancels its active run, so
 you can remove the playbook file. Archiving a thread leaves its run available when

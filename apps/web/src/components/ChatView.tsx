@@ -32,6 +32,8 @@ import {
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
 import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
 import { CrewRosterGate } from "../j5/crew/CrewRosterGate";
+import { expandPlaybookPrompt } from "@t3tools/client-runtime/j5/playbooks";
+import { PlaybookBoard } from "../j5/playbooks/PlaybookBoard";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import * as Schema from "effect/Schema";
 import { Minimize2Icon } from "lucide-react";
@@ -8134,11 +8136,12 @@ export default function ChatView(props: ChatViewProps) {
         : sendContextPreviewAnnotations;
     // A direct "send annotation" writes the draft and sends in the same tick; the reference
     // must be in the text now, not after the next render.
-    const promptForSend = directAnnotation
+    const draftPromptForSend = directAnnotation
       ? ensureInlineContextReferences(promptRef.current, [
           previewAnnotationContextReference(directAnnotation.annotation),
         ])
       : promptRef.current;
+    const promptForSend = expandPlaybookPrompt(draftPromptForSend);
     if (editingQueuedRun !== null) {
       // Edit mode repurposes the composer: sending saves the queued message
       // in place instead of dispatching a new turn.
@@ -8507,6 +8510,9 @@ export default function ChatView(props: ChatViewProps) {
         promptForSend,
       )
       .trim();
+    // A failed send restores what was typed, not the `/playbook` expansion.
+    const draftTextForRestore =
+      promptForSend === draftPromptForSend ? messageTextForSend : draftPromptForSend;
     // Records bind attachments by the id each side knows: the local id for the optimistic
     // row, the upload id (or local id on the data-URL path) on the wire; the server
     // rebinds them to the persisted id.
@@ -9287,12 +9293,12 @@ export default function ChatView(props: ChatViewProps) {
           const next = existing.filter((message) => message.id !== messageIdForSend);
           return next.length === existing.length ? existing : next;
         });
-        promptRef.current = messageTextForSend;
+        promptRef.current = draftTextForRestore;
         const retryComposerImages = composerImagesSnapshot.map(cloneComposerImageForRetry);
         composerImagesRef.current = retryComposerImages;
         composerFilesRef.current = composerFilesSnapshot;
         composerTerminalContextsRef.current = composerTerminalContextsSnapshot;
-        setComposerDraftPrompt(composerDraftTarget, messageTextForSend);
+        setComposerDraftPrompt(composerDraftTarget, draftTextForRestore);
         addComposerDraftImages(composerDraftTarget, retryComposerImages);
         addComposerDraftFiles(composerDraftTarget, composerFilesSnapshot);
         setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
@@ -9300,8 +9306,8 @@ export default function ChatView(props: ChatViewProps) {
         setComposerDraftReviewComments(composerDraftTarget, composerReviewCommentsSnapshot);
         setComposerDraftThreadContexts(composerDraftTarget, composerThreadContextsSnapshot);
         composerRef.current?.resetCursorState({
-          cursor: collapseExpandedComposerCursor(messageTextForSend, messageTextForSend.length),
-          prompt: messageTextForSend,
+          cursor: collapseExpandedComposerCursor(draftTextForRestore, draftTextForRestore.length),
+          prompt: draftTextForRestore,
           detectTrigger: true,
         });
       }
@@ -9607,7 +9613,7 @@ export default function ChatView(props: ChatViewProps) {
       return false;
     }
 
-    const trimmed = text.trim();
+    const trimmed = expandPlaybookPrompt(text.trim());
     if (!trimmed) {
       return false;
     }
@@ -10525,6 +10531,14 @@ export default function ChatView(props: ChatViewProps) {
               : {})}
           />
         </header>
+
+        {isServerThread && (
+          <PlaybookBoard
+            key={`${activeThread.environmentId}:${activeThread.id}`}
+            environmentId={activeThread.environmentId}
+            threadId={activeThread.id}
+          />
+        )}
 
         {/* Main content area with optional plan sidebar */}
         <div className="relative flex min-h-0 min-w-0 flex-1">

@@ -137,6 +137,7 @@ import { J5AgentPersonaRpcGroup } from "./j5/agentPersona.ts";
 import { J5ArtifactRpcGroup } from "./j5/artifacts.ts";
 import { J5SkillLinkRpcGroup } from "./j5/skillLinks.ts";
 import { J5SkillCatalogRpcGroup } from "./j5/skillCatalog.ts";
+import { J5PlaybookRpcGroup } from "./j5/playbook.ts";
 import {
   PullRequestActionInput,
   PullRequestActivity,
@@ -1800,4 +1801,5 @@ export const WsRpcGroup = RpcGroup.make(
   .merge(J5AgentPersonaRpcGroup)
   .merge(J5ArtifactRpcGroup)
   .merge(J5SkillCatalogRpcGroup)
-  .merge(J5SkillLinkRpcGroup);
+  .merge(J5SkillLinkRpcGroup)
+  .merge(J5PlaybookRpcGroup);

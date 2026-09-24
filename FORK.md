@@ -261,7 +261,7 @@ migrations after upstream migrations.
 
 44. Skills linking extends the J5 contract/RPC exports and the authorization/handler spreads from case 42 with `j5.skills.links.*`. The Settings inventory mounts J5's link preview, inspected unlink batch, confirmed original-folder deletion, and managed-record panel; search continues to use the single Skills route. The shared J5 inventory helpers classify linkable origins and discovery state; catalog and standalone linking reuse J5 root resolution, filesystem operations, and affected-provider refresh. On rebase, preserve fresh preview validation, canonical project containment, the Git exposure warning, ownership identity and forget-only recovery, stale unlink/deletion preview rejection, and release the mutation permit before refreshing providers. Catalog remains user-scoped; standalone links can target an explicitly selected project.
 
-45. Agent-led playbooks: `apps/server/src/provider/T3OrchestrationInstructions.ts` appends J5-owned retrieval and advancement guidance. All state, YAML reading, MCP operations, and authenticated reads remain under J5-owned modules; advancement never creates turns or controls provider lifecycle.
+45. Agent-led playbooks: `apps/server/src/provider/T3OrchestrationInstructions.ts` appends J5-owned retrieval and advancement guidance. All state, YAML reading, MCP operations, and authenticated reads remain under J5-owned modules; advancement never creates turns or controls provider lifecycle. Web `ChatView.tsx` mounts the J5 phase board and expands submitted `/playbook` text; `ChatComposer.tsx` and `composer-logic.ts` append an ordinary built-in command. `packages/client-runtime/package.json` exports the shared J5 presentation and expansion helper. `docs/user/playbooks.md` describes that text expansion; upstream's `docs/user/composer.md` is untouched. The runs overview is a section of the existing J5-owned Fleet page. A J5-owned read-scoped revision stream notifies visible clients of committed playbook mutations. The RPC group, authorization scope map, handlers, and subscription tag are appended through existing J5 integration seams; the WebSocket handlers share the server-lifetime PlaybookStore.
 
 ## Pin and upstream advance runbook
 
@@ -556,14 +556,18 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/server/src/serviceLauncher.ts`                                                                       | R       | H                                     |
 | `apps/server/src/telemetry/Identify.ts`                                                                    | R       | H                                     |
 | `apps/server/src/textGeneration/CodexTextGeneration.test.ts`                                               | N       | T                                     |
-| `apps/server/src/ws.ts`                                                                                    | A       | 10, 11, 37                            |
+| `apps/server/src/ws.ts`                                                                                    | A       | 10, 11, 37, 45                        |
 | `apps/web/index.html`                                                                                      | R       | B                                     |
 | `apps/web/src/branding.test.ts`                                                                            | R       | B                                     |
 | `apps/web/src/branding.ts`                                                                                 | R       | B                                     |
 | `apps/web/src/commandPaletteBus.ts`                                                                        | R       | 13                                    |
 | `apps/web/src/components/ChatView.logic.test.ts`                                                           | R       | 9, 19                                 |
 | `apps/web/src/components/ChatView.logic.ts`                                                                | A       | 9, 19                                 |
-| `apps/web/src/components/ChatView.tsx`                                                                     | A       | 9–11, 19, 24, 34                      |
+| `packages/contracts/src/rpc.ts`                                                                            | A       | 45                                    |
+| `packages/client-runtime/src/rpc/client.ts`                                                                | A       | 45                                    |
+| `apps/web/src/composer-logic.ts`                                                                           | A       | 45                                    |
+| `apps/server/src/auth/RpcAuthorization.ts`                                                                 | A       | 45                                    |
+| `apps/web/src/components/ChatView.tsx`                                                                     | A       | 9–11, 19, 24, 34, 45                  |
 | `apps/web/src/components/CommandPalette.logic.test.ts`                                                     | R       | 15b, 34                               |
 | `apps/web/src/components/CommandPalette.logic.ts`                                                          | R       | 15b, 34                               |
 | `apps/web/src/components/CommandPalette.tsx`                                                               | A       | 13, 15b, 19, 20, 34                   |
@@ -573,7 +577,7 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/web/src/components/Sidebar.logic.test.ts`                                                            | R       | 16, 19, 21                            |
 | `apps/web/src/components/Sidebar.logic.ts`                                                                 | R       | 16, 19, 21, 34                        |
 | `apps/web/src/components/Sidebar.tsx`                                                                      | A       | 9, 16, 19, 21–23, 34                  |
-| `apps/web/src/components/chat/ChatComposer.tsx`                                                            | A       | 9, Saved-agent mentions, Role library |
+| `apps/web/src/components/chat/ChatComposer.tsx`                                                            | A       | 9, Saved-agent mentions, Role library, 45 |
 | `apps/web/src/components/chat/ChatHeader.tsx`                                                              | A       | 19                                    |
 | `apps/web/src/components/chat/DraftHeroHeadline.tsx`                                                       | A       | 9                                     |
 | `apps/web/src/components/chat/MessagesTimeline.test.tsx`                                                   | N       | 7, 14, 24                             |
@@ -593,7 +597,7 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/web/src/routes/_chat.tsx`                                                                            | R       | 19, 34                                |
 | `apps/web/tsconfig.json`                                                                                   | R       | B                                     |
 | `docs/user/composer.md`                                                                                    | N       | 26, 27                                |
-| `packages/client-runtime/package.json`                                                                     | R       | 34                                    |
+| `packages/client-runtime/package.json`                                                                     | R       | 34, 45                                |
 | `packages/client-runtime/src/operations/commands.test.ts`                                                  | R       | 10, 11                                |
 | `packages/client-runtime/src/operations/commands.ts`                                                       | R       | 10, 11                                |
 | `packages/contracts/package.json`                                                                          | N       | 34                                    |

@@ -2589,6 +2589,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (composerTrigger.kind === "slash-command") {
       const builtInSlashCommandItems = [
         {
+          id: "slash:playbook",
+          type: "slash-command",
+          command: "playbook",
+          label: "/playbook",
+          description: "Start a playbook in this thread",
+        },
+        {
           id: "slash:model",
           type: "slash-command",
           command: "model",
@@ -3890,6 +3897,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
       if (item.type === "slash-command") {
+        if (item.command === "playbook") {
+          applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "Start playbook ", {
+            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+          });
+          setComposerHighlightedItemId(null);
+          return;
+        }
         if (item.command === "model") {
           const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
             expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
