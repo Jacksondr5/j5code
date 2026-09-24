@@ -8,19 +8,19 @@ upstream pin advance.
 
 Fork-owned values live in `scripts/lib/j5-branding.ts`:
 
-| Surface                     | Production                                                           | Development / preview                                           |
-| --------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Display name                | `J5 Code`                                                            | `J5 Code (Dev)`, `J5 Code (Nightly)`, `J5 Code Preview`         |
-| Desktop / mobile app ID     | `codes.jackson.j5code`                                               | `.dev` and `.preview` suffixes                                  |
-| URL scheme                  | `j5code`                                                             | `j5code-dev`, `j5code-preview`                                  |
-| Default desktop state       | `~/.j5code/userdata`                                                 | `~/.j5code/dev`                                                 |
-| Default server state        | `~/.j5code/userdata`                                                 | `~/.j5code/dev`                                                 |
-| Desktop App Support         | `j5code`                                                             | `j5code-dev`                                                    |
-| Linux executable / WM class | `j5code`                                                             | `j5code-dev`                                                    |
-| Desktop artifact prefix     | `J5-Code-`                                                           | same                                                            |
-| CLI command on PATH         | `j5`                                                                 | symlink `~/.local/bin/j5` → `<home>/runtime/versions/<v>/t3`    |
-| Background service          | `j5code.service` (systemd), `codes.jackson.j5code.service` (launchd) | same                                                            |
-| CLI release repository      | `Jacksondr5/j5code`                                                  | archives `t3-<v>-<platform>.tar.gz`, `SHA256SUMS`, `install.sh` |
+| Surface                     | Production                                                                                                                                                        | Development / preview                                                                                |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Display name                | `J5 Code`                                                                                                                                                         | `J5 Code (Dev)`, `J5 Code (Nightly)`, `J5 Code Preview`                                              |
+| Desktop / mobile app ID     | `codes.jackson.j5code`                                                                                                                                            | `.dev` and `.preview` suffixes                                                                       |
+| URL scheme                  | `j5code`                                                                                                                                                          | `j5code-dev`, `j5code-preview`                                                                       |
+| Default desktop state       | `~/.j5code/userdata`                                                                                                                                              | `~/.j5code/dev`                                                                                      |
+| Default server state        | `~/.j5code/userdata`                                                                                                                                              | `~/.j5code/dev`                                                                                      |
+| Desktop App Support         | `j5code`                                                                                                                                                          | `j5code-dev`                                                                                         |
+| Linux executable / WM class | `j5code`                                                                                                                                                          | `j5code-dev`                                                                                         |
+| Desktop artifact prefix     | `J5-Code-`                                                                                                                                                        | same                                                                                                 |
+| CLI command on PATH         | `j5` (`J5_BRANDING.cli.command`; web `CLI_COMMAND` reads it for WelcomeWizard connect/pair/serve and pairing copy; `packageName` is the historical npm name only) | symlink `~/.local/bin/j5` → `<home>/runtime/versions/<v>/t3` (`install.sh` links the archive's `t3`) |
+| Background service          | `j5code.service` (systemd), `codes.jackson.j5code.service` (launchd)                                                                                              | same                                                                                                 |
+| CLI release repository      | `Jacksondr5/j5code`                                                                                                                                               | archives `t3-<v>-<platform>.tar.gz`, `SHA256SUMS`, `install.sh`                                      |
 
 The macOS development launcher adds a checkout-derived suffix to the development bundle ID so
 multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5code`.
