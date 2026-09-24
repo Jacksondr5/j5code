@@ -23,7 +23,7 @@ import {
   agentHandoffLogicalPath,
 } from "../agents/agentPersonaArtifacts.ts";
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
-import { ArtifactWorkspace } from "../artifacts/ArtifactWorkspace.ts";
+import { ArtifactWorkspace, type ArtifactWorkspaceError } from "../artifacts/ArtifactWorkspace.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
@@ -218,11 +218,15 @@ const makeLayer = (daemon: boolean) =>
         return Number(rows[0]?.count ?? 0);
       });
 
-      /** Where the seat's declared handoff stands: the file itself is the fact, not the store. */
+      /**
+       * Where the seat's declared handoff stands: the file itself is the fact, not the store. Only
+       * a read that found no file is "missing"; any other failure fails the notice, which leaves
+       * the seat unreported for the next finish or the boot sweep to retry.
+       */
       const handoffFact = Effect.fn("j5.a2a.crewSeatFinish.handoffFact")(function* (
         projection: OrchestrationV2ThreadProjection,
         kind: string | null,
-      ): Effect.fn.Return<SeatHandoffFact, never, never> {
+      ): Effect.fn.Return<SeatHandoffFact, ArtifactWorkspaceError, never> {
         const assignment = projection.thread.agentPersonaAssignment;
         if (kind === null || assignment === undefined) return { status: "none declared" } as const;
         const path = agentHandoffArtifactPath({
@@ -235,13 +239,8 @@ const makeLayer = (daemon: boolean) =>
         // known path is a full directory walk on every seat finish.
         const content = yield* Effect.result(workspace.read({ projectId, relativePath: path }));
         if (Result.isFailure(content)) {
-          if (content.failure.reason !== "not_found") {
-            yield* Effect.logWarning("J5 crew seat notifier could not read a seat handoff", {
-              path,
-              cause: content.failure,
-            });
-          }
-          return { status: "missing", kind, path };
+          if (content.failure.reason === "not_found") return { status: "missing", kind, path };
+          return yield* content.failure;
         }
         return {
           status: "written",
@@ -340,8 +339,8 @@ const makeLayer = (daemon: boolean) =>
             ? null
             : ((yield* agents.readSnapshot(assignment)).outputArtifact ?? null);
         const handoff = yield* handoffFact(projection, owedKind);
-        // A failed dispatch is logged. Retry is passive: a later finish or the boot sweep;
-        // there is no guarantee of prompt delivery while the seat stays idle.
+        // A failed dispatch or an unreadable handoff is logged. Retry is passive: a later finish
+        // or the boot sweep; there is no guarantee of prompt delivery while the seat stays idle.
         yield* notifyCaptain(instance, membership.seatName, projection, run, handoff);
         return threadId;
       });
