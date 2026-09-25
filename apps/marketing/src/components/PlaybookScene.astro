@@ -7,7 +7,7 @@
 ---
 
 <svg class="pb" viewBox="0 0 520 170" role="img" aria-label="A Captain leading three agents along a route of numbered buoys" data-motion>
-  <path class="pb-channel" d="M-40 120 C 80 60, 160 150, 260 105 S 440 40, 560 96" />
+  <path class="pb-channel" d="M0 122 C 90 60, 170 150, 270 105 S 440 40, 520 92" />
 
   <g class="pb-buoy" style="offset-distance: 20%"><circle r="7" /><text y="2.6">1</text></g>
   <g class="pb-buoy" style="offset-distance: 40%"><circle r="7" /><text y="2.6">2</text></g>
@@ -25,7 +25,7 @@
     display: block;
     width: 100%;
     height: auto;
-    overflow: visible;
+    overflow: hidden;
   }
 
   .pb-channel {
@@ -37,7 +37,7 @@
   }
 
   .pb-buoy {
-    offset-path: path("M-40 120 C 80 60, 160 150, 260 105 S 440 40, 560 96");
+    offset-path: path("M0 122 C 90 60, 170 150, 270 105 S 440 40, 520 92");
     offset-rotate: 0deg;
   }
 
@@ -56,7 +56,7 @@
   }
 
   .pb-boat {
-    offset-path: path("M-40 120 C 80 60, 160 150, 260 105 S 440 40, 560 96");
+    offset-path: path("M0 122 C 90 60, 170 150, 270 105 S 440 40, 520 92");
     offset-rotate: 0deg;
     opacity: 0;
     animation: pb-sail 24s linear infinite;
@@ -64,9 +64,9 @@
   }
 
   /* Negative delays put the Captain furthest along, the last seat trailing. */
-  .pb-boat--captain { animation-delay: -3.6s; }
-  .pb-boat--s1 { animation-delay: -2.4s; }
-  .pb-boat--s2 { animation-delay: -1.2s; }
+  .pb-boat--captain { animation-delay: -6.6s; }
+  .pb-boat--s1 { animation-delay: -4.4s; }
+  .pb-boat--s2 { animation-delay: -2.2s; }
   .pb-boat--s3 { animation-delay: 0s; }
 
   @keyframes pb-sail {
@@ -78,9 +78,9 @@
 
   @media (prefers-reduced-motion: reduce) {
     .pb-boat { animation: none; opacity: 1; }
-    .pb-boat--captain { offset-distance: 62%; }
-    .pb-boat--s1 { offset-distance: 54%; }
+    .pb-boat--captain { offset-distance: 66%; }
+    .pb-boat--s1 { offset-distance: 56%; }
     .pb-boat--s2 { offset-distance: 47%; }
-    .pb-boat--s3 { offset-distance: 40%; }
+    .pb-boat--s3 { offset-distance: 38%; }
   }
 </style>

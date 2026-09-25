@@ -34,9 +34,9 @@
   <svg class="hv hv--lead" viewBox="0 0 380 240" role="img" aria-label="A Captain leading three agents around a circle" data-motion>
     <circle class="hs-ring" cx="190" cy="120" r="72" />
     <g class="orbit orbit--captain"><g transform="translate(-38 -37) scale(1.2)"><g class="bob" style="--bob-dur:5s"><use class="boat boat--dark" href="#j5-captain" /></g></g></g>
-    <g class="orbit orbit--s1"><g transform="translate(-32 -30)"><g class="bob" style="--bob-dur:4.7s;--bob-delay:-1s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
-    <g class="orbit orbit--s2"><g transform="translate(-32 -30)"><g class="bob" style="--bob-dur:5.3s;--bob-delay:-2s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
-    <g class="orbit orbit--s3"><g transform="translate(-32 -30)"><g class="bob" style="--bob-dur:4.4s;--bob-delay:-3s"><use class="boat boat--dark boat--waiting" href="#j5-boat" /></g></g></g>
+    <g class="orbit orbit--s1"><g transform="translate(-27 -26) scale(0.85)"><g class="bob" style="--bob-dur:4.7s;--bob-delay:-1s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
+    <g class="orbit orbit--s2"><g transform="translate(-27 -26) scale(0.85)"><g class="bob" style="--bob-dur:5.3s;--bob-delay:-2s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
+    <g class="orbit orbit--s3"><g transform="translate(-27 -26) scale(0.85)"><g class="bob" style="--bob-dur:4.4s;--bob-delay:-3s"><use class="boat boat--dark boat--waiting" href="#j5-boat" /></g></g></g>
   </svg>
 
   <svg class="hv hv--spawn" viewBox="0 0 380 240" role="img" aria-label="An agent spawning two peers beside it, which each spawn one more" data-motion>
@@ -69,14 +69,20 @@
   .hv {
     position: absolute;
     display: block;
-    width: clamp(220px, 20vw, 320px);
+    width: clamp(200px, 18vw, 300px);
     height: auto;
     overflow: visible;
+    animation: hv-in 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) 520ms both;
   }
 
-  .hv--talk { left: 1.5vw; top: 64px; }
-  .hv--lead { right: 1.5vw; top: 170px; }
-  .hv--spawn { left: 1.5vw; top: 330px; }
+  @keyframes hv-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .hv--talk { left: 1vw; top: 64px; }
+  .hv--lead { right: 1vw; top: 170px; }
+  .hv--spawn { left: 1vw; top: 330px; }
 
   @media (max-width: 1279px) {
     .hs {
@@ -187,9 +193,9 @@
     animation-play-state: var(--motion-state, paused);
   }
   .orbit--captain { offset-path: path("M190 48 A 72 72 0 1 1 190 192 A 72 72 0 1 1 190 48"); }
-  .orbit--s1 { offset-path: path("M145.7 63.3 A 72 72 0 1 1 234.3 176.7 A 72 72 0 1 1 145.7 63.3"); }
-  .orbit--s2 { offset-path: path("M120.1 102.6 A 72 72 0 1 1 259.9 137.4 A 72 72 0 1 1 120.1 102.6"); }
-  .orbit--s3 { offset-path: path("M124.2 149.3 A 72 72 0 1 1 255.8 90.7 A 72 72 0 1 1 124.2 149.3"); }
+  .orbit--s1 { offset-path: path("M131.0 78.7 A 72 72 0 1 1 249.0 161.3 A 72 72 0 1 1 131.0 78.7"); }
+  .orbit--s2 { offset-path: path("M122.3 144.6 A 72 72 0 1 1 257.7 95.4 A 72 72 0 1 1 122.3 144.6"); }
+  .orbit--s3 { offset-path: path("M171.4 189.5 A 72 72 0 1 1 208.6 50.5 A 72 72 0 1 1 171.4 189.5"); }
 
   @keyframes lap {
     from { offset-distance: 0%; }
@@ -226,6 +232,7 @@
   @keyframes sp-4 { 0%, 50% { transform: translate(292px, 96px) scale(0); } 58%, 100% { transform: translate(292px, 178px) scale(1); } }
 
   @media (prefers-reduced-motion: reduce) {
+    .hv { animation: none; }
     .hs-dot, .flag, .orbit, .kids, .sp { animation: none; }
     .hs-dot { opacity: 0; }
     .sp-1 { transform: translate(88px, 96px); }
