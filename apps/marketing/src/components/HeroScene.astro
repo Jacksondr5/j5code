@@ -1,12 +1,13 @@
 ---
+import Boat from "./Boat.astro";
 /**
  * Three teasers around the hero copy, each on its own loop: agents trading
  * asks and replies (flags turn orange when an agent sends, blue when one
  * receives, green when one replies), a Captain leading its Crew around a
  * circle, and an agent spawning two peers beside it, which each spawn one
- * below. On wide screens they sit in the flanks; below that they form a row
- * under the copy, and a column on phones. Everything is transform, opacity,
- * offset or a registered custom property, gated by --motion-state.
+ * below. They sit in the flanks and scale with the viewport; on phones they
+ * give way to a few boats bobbing around the copy. Everything is transform,
+ * opacity, offset or a registered custom property, gated by --motion-state.
  */
 ---
 
@@ -48,6 +49,14 @@
       <g class="sp sp-4"><g transform="translate(-26 -24) scale(0.82)"><g class="bob" style="--bob-dur:5.6s;--bob-delay:-2.5s"><use class="boat boat--dark boat--waiting" href="#j5-boat" /></g></g></g>
     </g>
   </svg>
+
+  <!-- Phones: no room for scenes, so a few boats keep the copy company. -->
+  <div class="hs-mobile" aria-hidden="true" data-motion>
+    <span class="hs-mb hs-mb-1"><Boat tone="dark" size={40} class="bob" style="--bob-dur:5.2s" /></span>
+    <span class="hs-mb hs-mb-2"><Boat captain tone="dark" size={52} class="bob" style="--bob-dur:6s;--bob-delay:-2s" /></span>
+    <span class="hs-mb hs-mb-3"><Boat tone="dark" status="waiting" size={36} class="bob" style="--bob-dur:4.8s;--bob-delay:-1s" /></span>
+    <span class="hs-mb hs-mb-4"><Boat tone="dark" status="settled" size={38} class="bob" style="--bob-dur:5.6s;--bob-delay:-3s" /></span>
+  </div>
 </div>
 
 <style>
@@ -58,7 +67,7 @@
     initial-value: #8fa0ad;
   }
 
-  /* Wide: flanks around the copy. Narrow: a row under it. Phones: a column. */
+  /* The teasers live in the section's flanks at every width above phones. */
   .hs {
     position: absolute;
     inset: 0;
@@ -86,31 +95,42 @@
   .hv--spawn { left: 3vw; top: 330px; }
   .hv--lead { right: 2.5vw; top: 300px; width: clamp(280px, 25vw, 400px); }
 
-  @media (max-width: 1279px) {
-    .hs {
-      position: relative;
-      inset: auto;
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 16px;
-      max-width: 1200px;
-      margin: 40px auto 0;
-      padding: 0 32px;
-    }
+  .hs-mobile {
+    display: none;
+  }
 
-    .hv {
-      position: static;
-      width: 100%;
-    }
+  /* Laptops and tablets: same flanks, sized by the viewport so they stay clear
+     of the copy, which also narrows at these widths (see .hero-sub). */
+  @media (max-width: 1279px) and (min-width: 821px) {
+    .hv { width: 16vw; }
+    .hv--talk { left: 2vw; top: 72px; }
+    .hv--spawn { left: 2vw; top: 290px; }
+    .hv--lead { right: 2vw; top: 270px; width: 21vw; }
   }
 
   @media (max-width: 820px) {
-    .hs {
-      grid-template-columns: 1fr;
-      max-width: 360px;
-      padding: 0 20px;
-      gap: 24px;
+    .hv {
+      display: none;
     }
+
+    .hs-mobile {
+      display: block;
+      position: absolute;
+      inset: 0;
+    }
+
+    .hs-mb {
+      position: absolute;
+    }
+
+    .hs-mb .boat {
+      filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.4));
+    }
+
+    .hs-mb-1 { left: 6%; top: 6px; }
+    .hs-mb-2 { right: 6%; top: 2px; }
+    .hs-mb-3 { left: 10%; bottom: 22px; }
+    .hs-mb-4 { right: 12%; bottom: 30px; }
   }
 
   .hs-arc,
