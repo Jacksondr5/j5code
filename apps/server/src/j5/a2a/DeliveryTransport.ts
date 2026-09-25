@@ -2,7 +2,9 @@ import {
   type ChatAttachment,
   CommandId,
   MessageId,
+  type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
+  ThreadId,
 } from "@t3tools/contracts";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import * as Context from "effect/Context";
@@ -51,6 +53,25 @@ export class A2ADeliveryTransportError extends Schema.TaggedError<A2ADeliveryTra
   },
 ) {}
 
+/**
+ * The receiver durably accepted the message, but its run waits behind a held queue
+ * (upstream holds queued runs after a restart until someone resumes the thread).
+ * The message is not delivered yet; the worker retries without alarming.
+ */
+export class A2ADeliveryHeldError extends Schema.TaggedError<A2ADeliveryHeldError>()(
+  "A2ADeliveryHeldError",
+  {
+    participantId: Schema.String,
+    runId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `${this.participantId} holds queued messages until someone resumes its thread; run ${this.runId} is queued, not delivered.`;
+  }
+}
+
+export const isHeldError = Schema.is(A2ADeliveryHeldError);
+
 export interface AgentDeliveryInput {
   readonly originSquadronId: SquadronId;
   readonly receiverSquadronId: SquadronId;
@@ -76,7 +97,7 @@ export interface A2ADeliveryTransportShape {
   }) => Effect.Effect<"cancelled" | "delivered", A2ADeliveryTransportError>;
   readonly deliverAgent: (
     input: AgentDeliveryInput,
-  ) => Effect.Effect<void, A2ADeliveryTransportError>;
+  ) => Effect.Effect<void, A2ADeliveryTransportError | A2ADeliveryHeldError>;
   readonly deliverHuman: (
     input: HumanDeliveryInput,
   ) => Effect.Effect<void, A2ADeliveryTransportError>;
@@ -209,6 +230,17 @@ export const live: Layer.Layer<
       }
     });
     const sql = yield* SqlClient.SqlClient;
+    // An agent sender is homed in the delivery's origin Squadron, so its thread
+    // is one primary-key read on the (agent-only) membership projection.
+    const agentThreadId = Effect.fn("j5.a2a.delivery.agentThreadId")(function* (
+      squadronId: SquadronId,
+      participantId: ParticipantId,
+    ) {
+      const rows = yield* sql<{ readonly thread_id: string }>`SELECT thread_id
+        FROM j5_a2a_squadron_membership
+        WHERE squadron_id = ${squadronId} AND participant_id = ${participantId}`;
+      return rows[0] === undefined ? undefined : ThreadId.make(rows[0].thread_id);
+    });
 
     return A2ADeliveryTransport.of({
       cancelAgent: (input) =>
@@ -313,11 +345,19 @@ export const live: Layer.Layer<
             ? undefined
             : astraPeerSteeringRun(target, input.envelopeChannel);
           const envelope = formatAgentDeliveryEnvelope(input);
+          // Upstream links an agent-authored message to its sending thread.
+          const senderThreadId =
+            input.envelopeChannel === "peer" &&
+            !isHumanParticipantId(input.senderId) &&
+            !isMachineParticipantId(input.senderId)
+              ? yield* agentThreadId(input.originSquadronId, input.senderId)
+              : undefined;
           const sendInput = {
             projectId: target.thread.projectId,
             commandId: deliveryCommandId(input.messageId),
             threadId: participant.threadId,
             messageId: deliveryMessageId(input.messageId),
+            ...(senderThreadId === undefined ? {} : { senderThreadId }),
             text: envelope,
             attachments: input.attachments ?? [],
             mode: "queue",
@@ -330,8 +370,14 @@ export const live: Layer.Layer<
                   : "agent",
             creationSource: "mcp",
           } satisfies ThreadManagement.ThreadManagementSendInput;
+          const heldRun = (run: OrchestrationV2Run | undefined) =>
+            run?.status === "queued" && run.queueHeld === true
+              ? Effect.fail(
+                  new A2ADeliveryHeldError({ participantId: input.receiverId, runId: run.id }),
+                )
+              : Effect.void;
           if (steeringRun === undefined) {
-            yield* threads.sendToThread(sendInput);
+            yield* heldRun((yield* threads.sendToThread(sendInput)).run);
           } else {
             // Pin the checked run and model. If it completed before admission,
             // upstream can accept this same message as a queued follow-up.
@@ -342,6 +388,9 @@ export const live: Layer.Layer<
               messageId: sendInput.messageId,
               text: sendInput.text,
               attachments: sendInput.attachments,
+              ...(sendInput.senderThreadId === undefined
+                ? {}
+                : { senderThreadId: sendInput.senderThreadId }),
               createdBy: sendInput.createdBy,
               creationSource: sendInput.creationSource,
               modelSelection: steeringRun.modelSelection,
@@ -356,15 +405,18 @@ export const live: Layer.Layer<
             yield* awaitSteeringOutcome(steer.id);
           } else if (steeringRun !== undefined) {
             const accepted = yield* orchestrator.getThreadProjection(participant.threadId);
-            if (accepted.runs.some((run) => run.userMessageId === sendInput.messageId)) return;
+            const followUp = accepted.runs.find((run) => run.userMessageId === sendInput.messageId);
+            if (followUp !== undefined) return yield* heldRun(followUp);
             return yield* new A2ADeliveryTransportError({
               operation: "await peer steering",
               cause: "The committed command has no steering effect.",
             });
           }
         }).pipe(
-          Effect.mapError(
-            (cause) => new A2ADeliveryTransportError({ operation: "deliver agent", cause }),
+          Effect.mapError((cause) =>
+            isHeldError(cause)
+              ? cause
+              : new A2ADeliveryTransportError({ operation: "deliver agent", cause }),
           ),
         ),
       deliverHuman: (input) =>

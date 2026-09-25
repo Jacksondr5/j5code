@@ -120,7 +120,7 @@ const runEvent = (threadId: ThreadId, facts: RunFacts): OrchestrationV2StoredEve
 const seat = (name: string, agentId: string) => ({ seat: name, agentId, reason: `${name} works` });
 
 const fixture = Effect.gen(function* () {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const storage = Layer.mergeAll(crewInstanceLayer, proposalStoreLayer, ledgerLayer).pipe(
     Layer.provideMerge(database),
   );

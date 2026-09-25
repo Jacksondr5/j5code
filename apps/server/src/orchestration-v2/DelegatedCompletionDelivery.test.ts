@@ -1,3 +1,4 @@
+import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
 import { J5SquadronCreationLayer } from "../j5/a2a/runtimeLayer.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -41,6 +42,11 @@ import {
 } from "./runtimeLayer.ts";
 import { worktreeRepairDependenciesTestLayer } from "./ProviderTurnStartService.testkit.ts";
 
+const PlatformTestLayer = Layer.merge(
+  NodeServices.layer,
+  Layer.mock(SourceControlProviderRegistry)({ resolveLink: () => Effect.die("unused title link") }),
+);
+
 const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
   Layer.provideMerge(J5SquadronCreationLayer),
 );
@@ -57,7 +63,7 @@ const modelSelection = {
 const VcsDriverRegistryTestLayer = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProcess.layer),
   Layer.provide(ServerConfigLayer),
-  Layer.provide(NodeServices.layer),
+  Layer.provide(PlatformTestLayer),
 );
 
 const CheckpointStoreTestLayer = CheckpointStore.layer.pipe(
@@ -126,7 +132,7 @@ const TestLayer = Layer.mergeAll(
   Layer.provide(ServerConfigLayer),
   Layer.provide(ServerSettingsService.layerTest()),
   Layer.provide(TestProviderInstanceRegistry),
-  Layer.provide(NodeServices.layer),
+  Layer.provide(PlatformTestLayer),
 );
 
 const seedParentWithTerminalTask = (input: {

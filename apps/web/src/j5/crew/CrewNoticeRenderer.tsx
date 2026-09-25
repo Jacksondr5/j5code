@@ -112,7 +112,7 @@ function CrewGateCard(props: {
                     <TooltipTrigger
                       render={
                         <span className="flex min-w-0 items-center gap-2">
-                          <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
+                          <Badge variant="outline" size="sm" className="shrink-0">
                             {seat.seat}
                           </Badge>
                           {label.toLowerCase() !== seat.seat.toLowerCase() ? (
@@ -217,7 +217,7 @@ function CrewSeatsCard(props: {
                 >
                   {status.label}
                 </span>
-                <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
+                <Badge variant="outline" size="sm" className="shrink-0">
                   {seat.seat}
                 </Badge>
                 {crews.size > 1 && seat.crewName !== null ? (

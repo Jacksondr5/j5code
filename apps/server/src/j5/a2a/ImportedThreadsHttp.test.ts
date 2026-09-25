@@ -63,7 +63,7 @@ const projects = Layer.mock(ProjectService)({
   getById: (id) =>
     Effect.succeed(id === projectId ? Option.some({ id } as Project) : Option.none()),
 });
-const db = NodeSqliteClient.layerMemory();
+const db = NodeSqliteClient.layer({ filename: ":memory:" });
 const ledger = ledgerLayer.pipe(Layer.provide(db));
 const homes = homesLayer.pipe(Layer.provide(ledger), Layer.provide(db));
 const transactions = transactionLayer.pipe(Layer.provide(ledger), Layer.provide(db));

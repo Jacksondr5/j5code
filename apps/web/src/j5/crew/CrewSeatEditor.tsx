@@ -94,7 +94,7 @@ export function CrewSeatEditor(props: CrewSeatEditorProps) {
         Instructions
         <Textarea
           aria-label={`${value.seat || "New seat"} instructions`}
-          className="min-h-20 text-sm"
+          className="min-h-20"
           value={value.instructions}
           disabled={disabled}
           placeholder={

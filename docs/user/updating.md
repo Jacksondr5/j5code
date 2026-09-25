@@ -25,6 +25,17 @@ Updates from the previous orchestration system preserve conversation transcripts
 every kind of runtime history forward. Read [Threads from older T3 Code versions](./thread-migration.md)
 before continuing an important older thread.
 
+## When versions don't match
+
+A client and server must speak the same orchestration protocol. If they do not, the connection is
+refused rather than running half-upgraded:
+
+- An app newer than the server is blocked before connecting, with a notice telling you to update
+  T3 Code on the machine named in the notice.
+- A server newer than your app refuses the connection with an update message.
+
+Update the side the notice names, then reconnect.
+
 ## Update a connected server
 
 The offered action depends on how the server runs:
@@ -35,21 +46,22 @@ The offered action depends on how the server runs:
 | **Update the desktop app** | Update the desktop app on the machine running the server, then reopen it if needed.                                                                                                             |
 | **Copy update command**    | Stop the command-line server on its host and relaunch with the copied command, keeping your usual startup options.                                                                              |
 
-For a background service, run the matching version's CLI on the host:
+On the host, run:
 
 ```sh
-npx @jacksondr5/j5code@<client-version> service update
+j5 update <client-version>
 ```
 
-Replace `<client-version>` with the version shown in the notice. Using
-`@latest` only resolves the mismatch if your client is on that release. An older
-service launcher may require this local update before it supports remote updates
-and rollback.
+Replace `<client-version>` with the version shown in the notice. The command
+asks before restarting the background service; if you decline, run
+`j5 service restart` when you are ready. For a server you started by hand,
+stop it and start it again afterwards with your usual options such as `--host`
+or `--tailscale-serve`.
 
-For a foreground server, the copied command is `npx @jacksondr5/j5code@<client-version>`. Add
-`serve` if you normally run without a browser, and preserve options such as
-`--host` or `--tailscale-serve`. See
-[background services](./background-service.md) for service management.
+A server installed from npm (`@jacksondr5/j5code` 0.0.42 or earlier) cannot
+update itself to a release archive: **Update server** fails because no newer npm
+version exists. Follow [Migrating to release archives](./migrating-to-release-archives.md)
+on that machine once; later updates work from the app and with `j5 update` again.
 
 ## If an update fails
 
@@ -61,6 +73,18 @@ update can roll back to the previous version. If the update still fails:
 3. For a command-line server, stop it and relaunch the exact version shown in the notice.
 
 ## Mobile updates
+
+To update an environment from your phone, open **Settings → Environments** and
+select it. **Check for updates** finds the latest release on that environment's
+current release channel. Keep the app open while the environment updates and
+reconnects. Hosts that cannot update remotely show instructions for updating on
+the machine instead.
+
+The same page lets you refresh provider status and update supported providers.
+These controls require a connected environment and permission to operate it.
+Provider update checks and restart continuation preferences are in
+**Settings → Maintenance**. If provider update checks are disabled, enable them
+there before refreshing to find newer versions.
 
 Install App Store or Google Play releases as usual. The mobile app can also
 download updates in the background and apply them when you next leave the app.

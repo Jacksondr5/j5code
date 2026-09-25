@@ -33,7 +33,7 @@ import { CommCommandId, ParticipantId, SquadronId } from "./contracts.ts";
 import { PlacementCommandId } from "./placementContracts.ts";
 
 const createdAt = "2026-08-30T16:00:00.000Z";
-const database = NodeSqliteClient.layerMemory();
+const database = NodeSqliteClient.layer({ filename: ":memory:" });
 const ledger = ledgerLayer.pipe(Layer.provide(database));
 const homes = homeRegistrarLayer.pipe(Layer.provide(ledger), Layer.provide(database));
 const homeTransactions = homeRegistrationTransactionLayer.pipe(
@@ -249,7 +249,7 @@ it.effect("rolls home registration back when placement fails afterward", () =>
 it.effect("waits for a DeliveryWorker ledger permit before entering the spawn transaction", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const databaseContext = yield* Layer.build(NodeSqliteClient.layerMemory());
+      const databaseContext = yield* Layer.build(NodeSqliteClient.layer({ filename: ":memory:" }));
       const sql = Context.get(databaseContext, SqlClient.SqlClient);
       const databaseLayer = Layer.succeed(SqlClient.SqlClient, sql);
       yield* runJ5A2AMigrations().pipe(Effect.provide(databaseLayer));

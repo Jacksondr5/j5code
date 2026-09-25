@@ -1,3 +1,4 @@
+import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { ProviderDriverKind, ProviderReplayTranscript } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -109,7 +110,10 @@ export function makeReplayServerConfig(
       traceMaxFiles: 10,
       otlpTracesUrl: undefined,
       otlpMetricsUrl: undefined,
-      otlpExportIntervalMs: 10_000,
+      otlpLogsUrl: undefined,
+      otlpTracesExport: DEFAULT_SIGNAL_EXPORT,
+      otlpMetricsExport: DEFAULT_SIGNAL_EXPORT,
+      otlpLogsExport: DEFAULT_SIGNAL_EXPORT,
       otlpServiceName: "t3-server",
       mode: "web",
       port: 0,
@@ -181,7 +185,6 @@ export function runOrchestratorV2ProviderReplayScenario<
       SqlClient.SqlClient,
       MigrationError | PlatformError.PlatformError | SqlError
     >;
-    readonly enableLegacyTokenStreaming?: boolean;
     readonly runEffectWorker?: boolean;
   } = {},
 ): Effect.Effect<
@@ -220,7 +223,6 @@ export function makeOrchestratorV2ProviderReplayLayer<
       SqlClient.SqlClient,
       MigrationError | PlatformError.PlatformError | SqlError
     >;
-    readonly enableLegacyTokenStreaming?: boolean;
     readonly runEffectWorker?: boolean;
     readonly replayGate?: ProviderReplayGate;
   } = {},
@@ -243,7 +245,6 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
       SqlClient.SqlClient,
       MigrationError | PlatformError.PlatformError | SqlError
     >;
-    readonly enableLegacyTokenStreaming?: boolean;
     readonly runEffectWorker?: boolean;
   } = {},
 ): Layer.Layer<
@@ -262,7 +263,7 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
         );
   const databaseLayer = options.databaseLayer ?? SqlitePersistenceMemory;
   const serverSettingsLayer = ServerSettingsService.layerTest({
-    enableLegacyTokenStreaming: options.enableLegacyTokenStreaming ?? false,
+    responseStreamingMode: "turn",
   }).pipe(Layer.orDie);
   const storesLayer = Layer.mergeAll(
     eventStoreLayer,
@@ -405,6 +406,7 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
             const orchestrator = yield* OrchestratorV2;
             return Layer.mock(ThreadManagementService)({
               dispatch: orchestrator.dispatch,
+              getThreadRecords: orchestrator.getThreadRecords,
               getThreadProjection: orchestrator.getThreadProjection,
             });
           }),

@@ -14,6 +14,7 @@ import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopAssets from "./DesktopAssets.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import * as DesktopUserData from "./DesktopUserData.ts";
 
 const defaultEnvironmentInput = {
   dirname: "/repo/apps/desktop/dist-electron",
@@ -57,7 +58,6 @@ const makeElectronAppLayer = (calls: ElectronAppCalls) =>
       }),
     setAppUserModelId: () => Effect.void,
     getAppMetrics: Effect.succeed([]),
-    isDefaultProtocolClient: () => Effect.succeed(false),
     setAsDefaultProtocolClient: () => Effect.succeed(true),
     setDesktopName: () => Effect.void,
     setDockIcon: (iconPath) =>
@@ -125,6 +125,7 @@ const withIdentity = <A, E, R>(
   return effect.pipe(
     Effect.provide(
       DesktopAppIdentity.layer.pipe(
+        Layer.provide(NodePath.layerPosix),
         Layer.provideMerge(
           FileSystem.layerNoop({
             exists: (path) =>
@@ -144,7 +145,7 @@ const withIdentity = <A, E, R>(
 };
 
 describe("DesktopAppIdentity", () => {
-  it.effect("keeps using the legacy userData path when it already exists", () =>
+  it.effect("keeps an existing J5 Code production profile (no V2 profile split in J5)", () =>
     withIdentity(
       Effect.gen(function* () {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
@@ -156,8 +157,24 @@ describe("DesktopAppIdentity", () => {
     ),
   );
 
+  it.effect("keeps using the legacy development profile", () =>
+    withIdentity(
+      Effect.gen(function* () {
+        const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
+        assert.equal(
+          yield* identity.resolveUserDataPath,
+          "/Users/alice/Library/Application Support/J5 Code (Dev)",
+        );
+      }),
+      {
+        legacyPathExists: true,
+        environment: { env: { VITE_DEV_SERVER_URL: "http://localhost:5173" } },
+      },
+    ),
+  );
+
   it.effect("preserves failures while inspecting the legacy userData path", () => {
-    const legacyPath = "/Users/alice/Library/Application Support/J5 Code";
+    const legacyPath = "/Users/alice/Library/Application Support/J5 Code (Dev)";
     const cause = PlatformError.systemError({
       _tag: "PermissionDenied",
       module: "FileSystem",
@@ -171,15 +188,18 @@ describe("DesktopAppIdentity", () => {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
         const error = yield* identity.resolveUserDataPath.pipe(Effect.flip);
 
-        assert.instanceOf(error, DesktopAppIdentity.DesktopUserDataPathResolutionError);
-        assert.equal(error.legacyPath, legacyPath);
+        assert.instanceOf(error, DesktopUserData.DesktopUserDataInitializationError);
+        assert.equal(error.resourcePath, legacyPath);
         assert.strictEqual(error.cause, cause);
         assert.equal(
           error.message,
-          `Failed to inspect legacy desktop user-data path at "${legacyPath}".`,
+          `Could not initialize Electron user data during inspect at ${legacyPath} (PermissionDenied).`,
         );
       }),
-      { legacyPathProbeError: cause },
+      {
+        legacyPathProbeError: cause,
+        environment: { env: { VITE_DEV_SERVER_URL: "http://localhost:5173" } },
+      },
     );
   });
 
