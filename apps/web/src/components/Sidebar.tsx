@@ -211,7 +211,7 @@ import {
 } from "../j5/squadron/SquadronDraftState";
 import {
   buildSquadronPickerEntries,
-  canCreateThreadWithoutSquadronPicker,
+  resolveCurrentThreadNewThreadDestination,
   startSquadronDraft,
 } from "../j5/squadron/SquadronPicker.logic";
 import {
@@ -4382,16 +4382,18 @@ export default function Sidebar() {
     openSquadronCreate();
   }, [isMobile, setOpenMobile]);
 
+  // The list's Squadron filter already names the home a new thread should
+  // take; only an unscoped list falls back to the exact-one shortcut or picker.
   const handleNewThreadClick = useCallback(() => {
-    if (canCreateThreadWithoutSquadronPicker(squadronDirectoryStatus, squadrons.length)) {
-      const entry = squadronPickerEntries[0];
-      if (entry === undefined || !entry.available) {
-        openCommandPalette({ open: "new-thread-in" });
-        return;
-      }
-      if (isMobile) setOpenMobile(false);
+    if (isMobile) setOpenMobile(false);
+    const destination = resolveCurrentThreadNewThreadDestination(
+      squadronScopeId,
+      squadronDirectoryStatus,
+      squadronPickerEntries,
+    );
+    if (destination.kind === "single-squadron") {
       void startSquadronDraft({
-        entry,
+        entry: destination.entry,
         handleNewThread: (folder) =>
           newThreadContext.handleNewThread(scopeProjectRef(folder.environmentId, folder.id)),
         selectDraftSquadron,
@@ -4402,7 +4404,6 @@ export default function Sidebar() {
       openSquadronCreateFromSidebar();
       return;
     }
-    if (isMobile) setOpenMobile(false);
     openCommandPalette({ open: "new-thread-in" });
   }, [
     isMobile,
@@ -4411,6 +4412,7 @@ export default function Sidebar() {
     setOpenMobile,
     squadronDirectoryStatus,
     squadronPickerEntries,
+    squadronScopeId,
     squadrons.length,
   ]);
 

@@ -6,7 +6,6 @@ import { filterThreadsForSquadronScope } from "./SquadronScope.logic";
 import {
   buildSquadronPickerRow,
   buildSquadronPickerEntries,
-  canCreateThreadWithoutSquadronPicker,
   resolveCurrentThreadNewThreadDestination,
   resolveHeaderSquadronRef,
   resolveIndexDraftDestination,
@@ -108,10 +107,50 @@ describe("Squadron picker", () => {
   });
 
   it("requires the picker until exactly one Registrar Squadron is ready", () => {
-    expect(canCreateThreadWithoutSquadronPicker("loading", 1)).toBe(false);
-    expect(canCreateThreadWithoutSquadronPicker("ready", 0)).toBe(false);
-    expect(canCreateThreadWithoutSquadronPicker("ready", 1)).toBe(true);
-    expect(canCreateThreadWithoutSquadronPicker("ready", 2)).toBe(false);
+    const entry = {
+      ...environmentScope,
+      squadronId: "squadron:sole",
+      name: "Sole",
+      folder: sharedFolder,
+    };
+    expect(resolveCurrentThreadNewThreadDestination(null, "loading", [entry])).toEqual({
+      kind: "picker",
+    });
+    expect(resolveCurrentThreadNewThreadDestination(null, "ready", [])).toEqual({
+      kind: "picker",
+    });
+    expect(resolveCurrentThreadNewThreadDestination(null, "ready", [entry])).toMatchObject({
+      kind: "single-squadron",
+      entry: { squadronId: "squadron:sole" },
+    });
+    expect(
+      resolveCurrentThreadNewThreadDestination(null, "ready", [
+        entry,
+        { ...entry, squadronId: "squadron:other", name: "Other" },
+      ]),
+    ).toEqual({ kind: "picker" });
+  });
+
+  it("starts a new thread in the Sidebar's filtered Squadron instead of opening the picker", () => {
+    const entries = [
+      { ...environmentScope, squadronId: "squadron:alpha", name: "Alpha", folder: sharedFolder },
+      { ...environmentScope, squadronId: "squadron:bravo", name: "Bravo", folder: sharedFolder },
+    ];
+
+    expect(
+      resolveCurrentThreadNewThreadDestination(squadronRef("squadron:bravo"), "ready", entries),
+    ).toMatchObject({ kind: "single-squadron", entry: { squadronId: "squadron:bravo" } });
+    // A stale filter for a Squadron the directory no longer lists still asks.
+    expect(
+      resolveCurrentThreadNewThreadDestination(squadronRef("squadron:gone"), "ready", entries),
+    ).toEqual({ kind: "picker" });
+    // A filtered Squadron on an unreachable environment still asks.
+    expect(
+      resolveCurrentThreadNewThreadDestination(squadronRef("squadron:bravo"), "ready", [
+        entries[0]!,
+        { ...entries[1]!, available: false },
+      ]),
+    ).toEqual({ kind: "picker" });
   });
 
   it("routes keyboard creation through the picker for shared-folder Squadrons", () => {

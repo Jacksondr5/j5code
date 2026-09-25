@@ -2364,6 +2364,9 @@ export default function ChatView(props: ChatViewProps) {
       }),
     [allProjects, squadrons],
   );
+  // The header's own Squadron (durable home, else the draft's chosen one) wins;
+  // without one, the Sidebar's Squadron filter names the home before the
+  // exact-one shortcut or picker applies.
   const newThreadDestination = useMemo(
     () =>
       resolveCurrentThreadNewThreadDestination(
@@ -2371,11 +2374,12 @@ export default function ChatView(props: ChatViewProps) {
           environmentId,
           durableHomeId: durableSquadronHome?.id ?? null,
           draftSquadronId: draftSquadron.squadronId,
-        }),
+        }) ?? ambientSquadronScope,
         squadronDirectoryStatus,
         squadronPickerEntries,
       ),
     [
+      ambientSquadronScope,
       environmentId,
       durableSquadronHome?.id,
       draftSquadron.squadronId,

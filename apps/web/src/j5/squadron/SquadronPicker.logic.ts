@@ -45,13 +45,6 @@ export function squadronDraftScopeKey(
 }
 
 /** A direct launch never stands in for a choice among multiple Registrar homes. */
-export function canCreateThreadWithoutSquadronPicker(
-  directoryStatus: SquadronDirectoryState["status"],
-  squadronCount: number,
-): boolean {
-  return directoryStatus === "ready" && squadronCount === 1;
-}
-
 export function resolveNewThreadShortcutDestination(
   directoryStatus: SquadronDirectoryState["status"],
   entries: ReadonlyArray<SquadronPickerEntry>,
@@ -64,13 +57,9 @@ export function resolveNewThreadShortcutDestination(
 }
 
 /**
- * A thread with a durable Registrar home keeps that home when it starts its
- * next draft. Threads without one may only use the ready/exact-one shortcut.
- */
-/**
  * The Squadron the current-thread header names and starts new threads in: the thread's
  * durable home, else the Squadron a draft has explicitly chosen, else none (the header
- * then falls back to the directory shortcut or the picker).
+ * then falls back to the Sidebar's ambient filter, the directory shortcut, or the picker).
  */
 export function resolveHeaderSquadronRef(input: {
   readonly environmentId: EnvironmentId;
@@ -81,6 +70,12 @@ export function resolveHeaderSquadronRef(input: {
   return squadronId === null ? null : { environmentId: input.environmentId, squadronId };
 }
 
+/**
+ * Every "new thread" door resolves through here. A selected Squadron (the
+ * active thread's durable Registrar home, or the Sidebar's ambient filter)
+ * is the home when it is available; otherwise only the ready/exact-one
+ * shortcut avoids the picker.
+ */
 export function resolveCurrentThreadNewThreadDestination(
   activeSquadron: ScopedSquadronRef | null,
   directoryStatus: SquadronDirectoryState["status"],
@@ -109,10 +104,11 @@ export function resolveIndexDraftDestination(
 ):
   | { readonly kind: "index" }
   | { readonly kind: "single-squadron"; readonly entry: SquadronPickerEntry } {
-  const destination =
-    selectedSquadronId === null
-      ? resolveNewThreadShortcutDestination(directoryStatus, entries)
-      : resolveCurrentThreadNewThreadDestination(selectedSquadronId, directoryStatus, entries);
+  const destination = resolveCurrentThreadNewThreadDestination(
+    selectedSquadronId,
+    directoryStatus,
+    entries,
+  );
   return destination.kind === "single-squadron" ? destination : { kind: "index" };
 }
 
