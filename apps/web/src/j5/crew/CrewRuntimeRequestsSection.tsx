@@ -101,7 +101,7 @@ export function CrewRuntimeRequestsSection(props: {
             <li key={key} className="rounded-lg border border-border bg-card px-4 py-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium text-foreground">{request.crewName}</span>
-                <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                <Badge variant="outline" size="sm">
                   {request.seat ?? "Captain"}
                 </Badge>
                 <button
