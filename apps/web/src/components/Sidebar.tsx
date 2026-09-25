@@ -199,6 +199,7 @@ import {
   type SidebarSection,
 } from "./Sidebar.logic";
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
+import { openSquadronCreate } from "../j5/squadron/SquadronCreateRequest";
 import { SquadronScopeDropdown } from "../j5/squadron/SquadronScopeDropdown";
 import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
 import { archiveWithPreflight } from "../j5/a2a/archiveFlow";
@@ -2426,7 +2427,6 @@ export default function Sidebar() {
   squadronDirectoryStatusRef.current = squadronDirectoryStatus;
   const squadronPickerEntriesRef = useRef(squadronPickerEntries);
   squadronPickerEntriesRef.current = squadronPickerEntries;
-  const [squadronCreateOpen, setSquadronCreateOpen] = useState(false);
   const squadronScopeId = useSquadronAmbientScope();
   const squadronScopeSelectionGeneration = useSquadronAmbientScopeSelectionGeneration();
   const squadronScope = useMemo(
@@ -4376,6 +4376,12 @@ export default function Sidebar() {
     updateThreadJumpHintsVisibility(shouldShowJumpHintsNow);
   }, [shouldShowJumpHintsNow, updateThreadJumpHintsVisibility]);
 
+  // J5 (case 16): the app shell hosts the one Create Squadron dialog; the mobile sheet steps aside.
+  const openSquadronCreateFromSidebar = useCallback(() => {
+    if (isMobile) setOpenMobile(false);
+    openSquadronCreate();
+  }, [isMobile, setOpenMobile]);
+
   const handleNewThreadClick = useCallback(() => {
     if (canCreateThreadWithoutSquadronPicker(squadronDirectoryStatus, squadrons.length)) {
       const entry = squadronPickerEntries[0];
@@ -4393,8 +4399,7 @@ export default function Sidebar() {
       return;
     }
     if (squadronDirectoryStatus === "ready" && squadrons.length === 0) {
-      if (isMobile) setOpenMobile(false);
-      setSquadronCreateOpen(true);
+      openSquadronCreateFromSidebar();
       return;
     }
     if (isMobile) setOpenMobile(false);
@@ -4402,6 +4407,7 @@ export default function Sidebar() {
   }, [
     isMobile,
     newThreadContext,
+    openSquadronCreateFromSidebar,
     setOpenMobile,
     squadronDirectoryStatus,
     squadronPickerEntries,
@@ -4429,15 +4435,11 @@ export default function Sidebar() {
               hasProjects={projectGroups.length > 0}
               projectScope={
                 // J5 (SQ1 case 9): the Squadron scope replaces upstream's project filter.
-                <SquadronScopeDropdown
-                  variant="header"
-                  createOpen={squadronCreateOpen}
-                  onCreateOpenChange={setSquadronCreateOpen}
-                />
+                <SquadronScopeDropdown variant="header" />
               }
               // J5 (case 16): the header's add-folder button creates a Squadron (name, then
               // folder) instead of opening a Squadron-less draft in a bare folder.
-              onNewProject={() => setSquadronCreateOpen(true)}
+              onNewProject={openSquadronCreateFromSidebar}
               onNewThread={handleNewThreadClick}
               newThreadDisabled={projects.length === 0}
               newThreadShortcutLabel={newThreadShortcutLabel}
@@ -4858,7 +4860,7 @@ export default function Sidebar() {
                   <span>{sidebarEmptyState.message}</span>
                   <button
                     type="button"
-                    onClick={() => setSquadronCreateOpen(true)}
+                    onClick={openSquadronCreateFromSidebar}
                     className="inline-flex items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-[11px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
                   >
                     <PlusIcon className="-mx-0.5 size-3" />

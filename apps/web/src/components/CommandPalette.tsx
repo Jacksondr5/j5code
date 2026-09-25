@@ -203,6 +203,7 @@ import {
 import type { Project } from "../types";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
+import { openSquadronCreate, resolveAddProjectDoor } from "../j5/squadron/SquadronCreateRequest";
 import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
 import { selectDraftSquadron } from "../j5/squadron/SquadronDraftState";
 import {
@@ -580,6 +581,12 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       onOpenCommandPalette((detail) => {
+        // J5 (case 13): an Add Project door without a carrier creates a Squadron instead.
+        if (detail.open === "add-project" && resolveAddProjectDoor(detail) === "create-squadron") {
+          setOpen(false);
+          openSquadronCreate();
+          return;
+        }
         const picker = detail.open === "add-project" ? detail.sourcePicker : undefined;
         sourcePickerRef.current = picker;
         setSourcePicker(
@@ -1675,6 +1682,13 @@ function OpenCommandPaletteDialog(props: {
   }, [clearOpenIntent, browseNavigation, openIntent, squadronThreadItems, pushPaletteView]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+  // J5 (case 13): outside a flow waiting for a folder, the Add project actions create a Squadron.
+  const openSquadronCreateForAddProject = () => {
+    if (resolveAddProjectDoor({ onProjectSelected, sourcePicker }) === "pick-folder") return false;
+    setOpen(false);
+    openSquadronCreate();
+    return true;
+  };
 
   if (squadronPickerEntries.length > 0) {
     const activeHome = activeThread
@@ -1816,6 +1830,7 @@ function OpenCommandPaletteDialog(props: {
     icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
     keepOpen: true,
     run: async () => {
+      if (openSquadronCreateForAddProject()) return;
       openAddProjectFlow();
     },
   });
@@ -1830,6 +1845,7 @@ function OpenCommandPaletteDialog(props: {
       icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
       keepOpen: true,
       run: async () => {
+        if (openSquadronCreateForAddProject()) return;
         await startAddProjectBrowse(wslAddProjectEnvironmentOption.environmentId);
       },
     });

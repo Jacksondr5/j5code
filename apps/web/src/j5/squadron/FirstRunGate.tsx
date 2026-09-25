@@ -42,7 +42,11 @@ export function SquadronFirstRunGate({
         <EmptyHeader className="max-w-md">
           <EmptyTitle>{content.title}</EmptyTitle>
           <EmptyDescription className="mt-2">{content.description}</EmptyDescription>
-          {state === "requires_creation" ? <SquadronCreateForm /> : null}
+          {state === "requires_creation" ? (
+            <div className="mt-5 w-full max-w-sm">
+              <SquadronCreateForm />
+            </div>
+          ) : null}
           {state === "unavailable" && onRetry !== undefined ? (
             <div className="mt-5 flex justify-center">
               <Button size="sm" onClick={onRetry}>

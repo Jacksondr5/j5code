@@ -19,7 +19,7 @@ import { SidebarHeaderIconButton } from "../../components/sidebar/SidebarThreadH
 import { resolveSquadronActionsState } from "./SquadronActions.logic";
 import { useSquadronDirectory } from "./SquadronDirectory";
 import { setAmbientSquadronScope, useSquadronAmbientScope } from "./SquadronDraftState";
-import { SquadronCreateDialog } from "./SquadronCreateDialog";
+import { openSquadronCreate } from "./SquadronCreateRequest";
 import { SquadronDeleteDialog } from "./SquadronDeleteDialog";
 import { SquadronRenameDialog, type SquadronActionTarget } from "./SquadronRenameDialog";
 import { resolveSquadronScope } from "./SquadronScope.logic";
@@ -29,29 +29,7 @@ import { resolveSquadronScope } from "./SquadronScope.logic";
  * `header` renders the compact trigger for upstream's SidebarThreadHeader scope
  * slot: an icon while every Squadron is shown, plus the capped name once one is scoped.
  */
-type SquadronScopeDropdownProps = { readonly variant?: "row" | "header" } & (
-  | {
-      readonly createOpen: boolean;
-      readonly onCreateOpenChange: (open: boolean) => void;
-    }
-  | {
-      readonly createOpen?: never;
-      readonly onCreateOpenChange?: never;
-    }
-);
-
-function hasControlledCreateState(
-  props: SquadronScopeDropdownProps,
-): props is Extract<SquadronScopeDropdownProps, { readonly createOpen: boolean }> {
-  return "createOpen" in props;
-}
-
-export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
-  const [uncontrolledCreateOpen, setUncontrolledCreateOpen] = useState(false);
-  const createOpen = hasControlledCreateState(props) ? props.createOpen : uncontrolledCreateOpen;
-  const setCreateOpen = hasControlledCreateState(props)
-    ? props.onCreateOpenChange
-    : setUncontrolledCreateOpen;
+export function SquadronScopeDropdown(props: { readonly variant?: "row" | "header" } = {}) {
   // The dialogs keep their own target so a scope change mid-dialog cannot swap the Squadron.
   const [action, setAction] = useState<{
     readonly kind: "rename" | "delete";
@@ -216,13 +194,12 @@ export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
             </>
           ) : null}
           <MenuSeparator />
-          <MenuItem onClick={() => setCreateOpen(true)}>
+          <MenuItem onClick={openSquadronCreate}>
             <PlusIcon />
             Create Squadron…
           </MenuItem>
         </MenuPopup>
       </Menu>
-      <SquadronCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
       {action?.kind === "rename" ? (
         <SquadronRenameDialog
           open={actionOpen}
