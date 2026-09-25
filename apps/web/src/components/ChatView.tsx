@@ -2177,14 +2177,24 @@ export default function ChatView(props: ChatViewProps) {
       }),
     [allProjects, squadrons],
   );
+  // The active thread's durable home wins; without one, the Sidebar's Squadron
+  // filter names the home before the exact-one shortcut or picker applies.
   const newThreadDestination = useMemo(
     () =>
       resolveCurrentThreadNewThreadDestination(
-        durableSquadronHome === null ? null : { environmentId, squadronId: durableSquadronHome.id },
+        durableSquadronHome === null
+          ? ambientSquadronScope
+          : { environmentId, squadronId: durableSquadronHome.id },
         squadronDirectoryStatus,
         squadronPickerEntries,
       ),
-    [environmentId, durableSquadronHome?.id, squadronDirectoryStatus, squadronPickerEntries],
+    [
+      ambientSquadronScope,
+      environmentId,
+      durableSquadronHome?.id,
+      squadronDirectoryStatus,
+      squadronPickerEntries,
+    ],
   );
   const handleNewThreadInActiveProject = useCallback(() => {
     if (newThreadDestination.kind === "picker") {

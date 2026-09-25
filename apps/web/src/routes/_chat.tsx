@@ -18,10 +18,10 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
-import { selectDraftSquadron } from "../j5/squadron/SquadronDraftState";
+import { selectDraftSquadron, useSquadronAmbientScope } from "../j5/squadron/SquadronDraftState";
 import {
   buildSquadronPickerEntries,
-  resolveNewThreadShortcutDestination,
+  resolveCurrentThreadNewThreadDestination,
   startSquadronDraft,
 } from "../j5/squadron/SquadronPicker.logic";
 
@@ -32,6 +32,7 @@ function ChatRouteGlobalShortcuts() {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const projects = useProjects();
   const { status: squadronDirectoryStatus, squadrons } = useSquadronDirectory();
+  const ambientSquadronId = useSquadronAmbientScope();
   const squadronEntries = useMemo(
     () => buildSquadronPickerEntries({ squadrons, projects }),
     [projects, squadrons],
@@ -84,7 +85,10 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.newLocal" || command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
-        const destination = resolveNewThreadShortcutDestination(
+        // The Sidebar's Squadron filter names the home; an unscoped list
+        // keeps the exact-one shortcut.
+        const destination = resolveCurrentThreadNewThreadDestination(
+          ambientSquadronId,
           squadronDirectoryStatus,
           squadronEntries,
         );
@@ -166,6 +170,7 @@ function ChatRouteGlobalShortcuts() {
       window.removeEventListener("keydown", onWindowKeyDown);
     };
   }, [
+    ambientSquadronId,
     clearSelection,
     handleNewThread,
     keybindings,

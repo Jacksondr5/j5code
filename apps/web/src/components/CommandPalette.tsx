@@ -177,10 +177,11 @@ import {
   buildSidebarProjectSnapshots,
 } from "../sidebarProjectGrouping";
 import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
-import { selectDraftSquadron } from "../j5/squadron/SquadronDraftState";
+import { selectDraftSquadron, useSquadronAmbientScope } from "../j5/squadron/SquadronDraftState";
 import {
   buildSquadronPickerRow,
   buildSquadronPickerEntries,
+  resolveCurrentThreadNewThreadDestination,
   startSquadronDraft,
   type SquadronPickerEntry,
 } from "../j5/squadron/SquadronPicker.logic";
@@ -679,7 +680,8 @@ function OpenCommandPaletteDialog(props: {
   }, [activeThreadReferenceCopyTarget]);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
-  const { squadrons } = useSquadronDirectory();
+  const { status: squadronDirectoryStatus, squadrons } = useSquadronDirectory();
+  const ambientSquadronScope = useSquadronAmbientScope();
   const threadHomes = useThreadHomes(
     threads.map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
   );
@@ -1504,14 +1506,17 @@ function OpenCommandPaletteDialog(props: {
           scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id)),
         )
       : undefined;
+    // Same rule as the chat.new shortcut: the active thread's durable home,
+    // else the Sidebar's Squadron filter, else the sole ready Squadron.
+    const newThreadDestination = resolveCurrentThreadNewThreadDestination(
+      activeThread && activeHome?.kind === "known"
+        ? { environmentId: activeThread.environmentId, squadronId: activeHome.squadron.id }
+        : ambientSquadronScope,
+      squadronDirectoryStatus,
+      squadronPickerEntries,
+    );
     const activeSquadron =
-      activeHome?.kind === "known"
-        ? (squadronPickerEntries.find(
-            (entry) =>
-              entry.environmentId === activeThread?.environmentId &&
-              entry.squadronId === activeHome.squadron.id,
-          ) ?? null)
-        : null;
+      newThreadDestination.kind === "single-squadron" ? newThreadDestination.entry : null;
 
     if (activeSquadron !== null) {
       actionItems.push({
