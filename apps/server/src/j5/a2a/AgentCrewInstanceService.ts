@@ -108,8 +108,21 @@ export interface AgentCrewInstanceServiceShape {
     readonly threadIds: ReadonlyArray<ThreadId>;
     readonly participantIds: ReadonlyArray<ParticipantId>;
   }) => Effect.Effect<ReadonlyArray<AgentCrewInstance>, SqlError>;
-  /** Idempotent: the first archive timestamp wins. */
-  readonly markArchived: (id: string, archivedAt: string) => Effect.Effect<void, SqlError>;
+  /**
+   * Idempotent: the first archive timestamp wins. `withCaptain` records that the Crew retired
+   * because its Captain was archived, so unarchiving the Captain brings it back.
+   */
+  readonly markArchived: (
+    id: string,
+    archivedAt: string,
+    options?: { readonly withCaptain?: boolean },
+  ) => Effect.Effect<void, SqlError>;
+  /** Retired Crews that retired with their Captain, optionally for one Captain thread. */
+  readonly listRetiredWithCaptain: (
+    captainThreadId?: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<AgentCrewInstance>, SqlError>;
+  /** Makes a Crew that retired with its Captain live again; false when it was not one. */
+  readonly restoreWithCaptain: (id: string) => Effect.Effect<boolean, SqlError>;
   /**
    * Run one unit step on a Crew with no other unit step on it: a launch or addition from its
    * record or reservation through its briefs, and a unit archive from its roster read through
@@ -380,12 +393,45 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
       const markArchived = Effect.fn("j5.a2a.agentCrewInstances.markArchived")(function* (
         id: string,
         archivedAt: string,
+        options?: { readonly withCaptain?: boolean },
       ) {
         yield* sql`
-          UPDATE j5_agent_crew_instance SET archived_at = ${archivedAt}
+          UPDATE j5_agent_crew_instance
+          SET archived_at = ${archivedAt},
+            retired_with_captain = ${options?.withCaptain === true ? 1 : 0}
           WHERE id = ${id} AND archived_at IS NULL
         `;
       });
+
+      const listRetiredWithCaptain = Effect.fn("j5.a2a.agentCrewInstances.listRetiredWithCaptain")(
+        function* (captainThreadId?: ThreadId) {
+          const rows =
+            captainThreadId === undefined
+              ? yield* sql<InstanceRow>`
+                  SELECT * FROM j5_agent_crew_instance
+                  WHERE archived_at IS NOT NULL AND retired_with_captain = 1
+                  ORDER BY created_at, id
+                `
+              : yield* sql<InstanceRow>`
+                  SELECT * FROM j5_agent_crew_instance
+                  WHERE archived_at IS NOT NULL AND retired_with_captain = 1
+                    AND captain_thread_id = ${captainThreadId}
+                  ORDER BY created_at, id
+                `;
+          return yield* readMany(rows);
+        },
+      );
+
+      const restoreWithCaptain = Effect.fn("j5.a2a.agentCrewInstances.restoreWithCaptain")(
+        function* (id: string) {
+          const rows = yield* sql<{ readonly id: string }>`
+            UPDATE j5_agent_crew_instance SET archived_at = NULL, retired_with_captain = 0
+            WHERE id = ${id} AND archived_at IS NOT NULL AND retired_with_captain = 1
+            RETURNING id
+          `;
+          return rows.length > 0;
+        },
+      );
 
       const removeMembers = Effect.fn("j5.a2a.agentCrewInstances.removeMembers")(function* (
         id: string,
@@ -417,6 +463,8 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
         listLive,
         listInvolving,
         markArchived,
+        listRetiredWithCaptain,
+        restoreWithCaptain,
       });
     }),
   );

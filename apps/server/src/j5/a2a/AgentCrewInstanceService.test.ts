@@ -203,3 +203,48 @@ it.effect("refuses a same-name seat under a different identity, and any seat onc
     assert.lengthOf((yield* service.read("crew:conflict"))!.members, 1);
   }).pipe(Effect.provide(testLayer)),
 );
+
+it.effect("brings back only a Crew that retired with its Captain", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const squadronId = SquadronId.make("squadron:crew-restore");
+    yield* (yield* A2ALedger).createSquadron({
+      squadron: { id: squadronId, name: "Restore Squadron", createdAt },
+    });
+    const service = yield* AgentCrewInstanceService;
+    const captainThreadId = ThreadId.make("thread:restore-captain");
+    const record = (id: string) =>
+      service.record({
+        id,
+        squadronId,
+        captainParticipantId: ParticipantId.make("agent:j5:a2a:restore-captain"),
+        captainThreadId,
+        displayName: id,
+        brief: "Keep going.",
+        createdAt,
+        members: [],
+      });
+    yield* record("crew:with-captain");
+    yield* record("crew:on-its-own");
+    yield* service.markArchived("crew:with-captain", "2026-09-09T17:00:00.000Z", {
+      withCaptain: true,
+    });
+    yield* service.markArchived("crew:on-its-own", "2026-09-09T17:00:00.000Z");
+    assert.deepStrictEqual(
+      (yield* service.listRetiredWithCaptain(captainThreadId)).map(({ id }) => id),
+      ["crew:with-captain"],
+    );
+    assert.deepStrictEqual(
+      (yield* service.listRetiredWithCaptain(ThreadId.make("thread:other"))).map(({ id }) => id),
+      [],
+    );
+    assert.isFalse(yield* service.restoreWithCaptain("crew:on-its-own"));
+    assert.isTrue(yield* service.restoreWithCaptain("crew:with-captain"));
+    assert.isNull((yield* service.read("crew:with-captain"))?.archivedAt);
+    assert.isNotNull((yield* service.read("crew:on-its-own"))?.archivedAt);
+    // Restoring twice is a no-op, and a later archive on its own does not come back.
+    assert.isFalse(yield* service.restoreWithCaptain("crew:with-captain"));
+    yield* service.markArchived("crew:with-captain", "2026-09-09T18:00:00.000Z");
+    assert.deepStrictEqual(yield* service.listRetiredWithCaptain(), []);
+  }).pipe(Effect.provide(testLayer)),
+);

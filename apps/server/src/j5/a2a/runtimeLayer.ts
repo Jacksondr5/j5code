@@ -105,7 +105,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(crewLaunchProvided),
     Layer.provideMerge(crewLaunchReporterProvided),
   );
-  // A person's archive of a Captain retires its Crews from the same event stream the notifier reads.
+  // A Captain's lifecycle carries its Crews, read from the same event stream the notifier reads.
   const captainArchiveCascadeProvided = captainArchiveCascadeLayer.pipe(
     Layer.provideMerge(archiveCrewProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
