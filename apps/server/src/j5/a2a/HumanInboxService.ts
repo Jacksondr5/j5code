@@ -32,7 +32,7 @@ import {
   A2AParticipantNotFoundError,
 } from "./SendService.ts";
 
-export class A2AHumanPersonIdError extends Schema.TaggedErrorClass<A2AHumanPersonIdError>()(
+export class A2AHumanPersonIdError extends Schema.TaggedError<A2AHumanPersonIdError>()(
   "A2AHumanPersonIdError",
   { personId: Schema.String },
 ) {

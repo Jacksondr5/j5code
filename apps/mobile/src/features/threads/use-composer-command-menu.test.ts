@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { ProviderDriverKind } from "@t3tools/contracts";
+vi.mock("react-native", () => ({ Alert: { alert: vi.fn() } }));
 
 vi.mock("../../j5/agents/useAgentMentionPicker", () => ({
   useAgentMentionPicker: () => ({ items: [], isPending: false, error: null }),
@@ -7,7 +8,13 @@ vi.mock("../../j5/agents/useAgentMentionPicker", () => ({
 
 vi.mock("../../state/queries", () => ({
   useComposerPathSearch: () => ({ entries: [], isPending: false }),
+  useComposerPullRequestSearch: () => ({ entries: [], isPending: false, error: null }),
 }));
+vi.mock("../../state/use-composer-drafts", () => ({
+  getComposerDraftSnapshot: vi.fn(),
+  setComposerDraftContext: vi.fn(),
+}));
+vi.mock("../../lib/uuid", () => ({ uuidv4: () => "context-id" }));
 vi.mock("../../state/server", () => ({
   serverEnvironment: { refreshProviders: Symbol("refreshProviders") },
 }));
@@ -17,17 +24,32 @@ vi.mock("../../state/use-atom-command", () => ({
 
 import {
   buildComposerSlashCommandItems,
-  composerSelectionAtEnd,
   resolveComposerCommandSelection,
 } from "./use-composer-command-menu";
 
-describe("composerSelectionAtEnd", () => {
-  it("resets a changed draft owner to the new draft end", () => {
-    expect(composerSelectionAtEnd("queued task 🧪")).toEqual({ start: 14, end: 14 });
-  });
-});
-
 describe("mobile slash commands", () => {
+  it("expands a playbook into ordinary text without changing interaction mode", () => {
+    const item = buildComposerSlashCommandItems({
+      query: "playbook",
+      atMessageStart: true,
+      hasThread: true,
+      allowInteractionMode: false,
+      selectedProviderStatus: null,
+    })[0];
+    if (!item) throw new Error("Expected playbook command");
+    expect(
+      resolveComposerCommandSelection({
+        draftMessage: "/playbook release",
+        trigger: { rangeStart: 0, rangeEnd: 10 },
+        item,
+        allowInteractionMode: false,
+      }),
+    ).toEqual({
+      text: "Start playbook release",
+      cursor: 15,
+      interactionMode: null,
+    });
+  });
   const antigravity = {
     driver: ProviderDriverKind.make("antigravity"),
     showInteractionModeToggle: false,
@@ -45,9 +67,8 @@ describe("mobile slash commands", () => {
         selectedProviderStatus: antigravity,
       });
 
-      expect(items).toHaveLength(1);
-      expect(items[0]?.type).toBe("provider-slash-command");
-      const item = items[0];
+      expect(items.map((item) => item.type)).toEqual(["slash-command", "provider-slash-command"]);
+      const item = items.find((item) => item.type === "provider-slash-command");
       if (!item) throw new Error("Expected the native plan command");
       expect(
         resolveComposerCommandSelection({

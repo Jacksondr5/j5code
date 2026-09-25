@@ -26,6 +26,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { makeClaudeTextGeneration } from "../../textGeneration/ClaudeTextGeneration.ts";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import {
   createClaudeAdapterV2,
@@ -122,7 +123,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         driverKind: DRIVER_KIND,
         instanceId,
       });
-      const effectiveConfig = { ...config, enabled } satisfies ClaudeSettings;
+      const effectiveConfig = {
+        ...config,
+        enabled,
+        binaryPath: expandHomePath(config.binaryPath),
+      } satisfies ClaudeSettings;
       const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
         resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
           binaryPath: effectiveConfig.binaryPath,
@@ -133,7 +138,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
           Effect.provideService(Path.Path, path),
         ),
       );
-      const continuationGroupKey = yield* makeClaudeContinuationGroupKey(effectiveConfig);
+      const continuationGroupKey = yield* makeClaudeContinuationGroupKey(
+        effectiveConfig,
+        processEnv,
+      );
       const stampIdentity = withInstanceIdentity({
         instanceId,
         driverKind: DRIVER_KIND,
@@ -180,7 +188,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
             Effect.provideService(Path.Path, path),
           ),
       });
-      const capabilitiesCacheKey = yield* makeClaudeCapabilitiesCacheKey(effectiveConfig, cwd);
+      const capabilitiesCacheKey = yield* makeClaudeCapabilitiesCacheKey(
+        effectiveConfig,
+        cwd,
+        processEnv,
+      );
 
       // Start the TTL-gated refresh without delaying provider readiness. The
       // next check observes a remote manifest after the background fetch lands.
@@ -252,6 +264,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         accentColor,
         enabled,
         snapshot,
+        invalidateCaches: Cache.invalidateAll(capabilitiesProbeCache),
         snapshotForCwd: (cwd: string) =>
           !effectiveConfig.enabled
             ? snapshot.getSnapshot
@@ -259,7 +272,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
                 snapshot.getSnapshot,
                 discoverClaudeSkills(effectiveConfig, cwd, processEnv),
               ]).pipe(
-                Effect.map(([machineSnapshot, skills]) => ({ ...machineSnapshot, skills })),
+                Effect.map(([machineSnapshot, skills]) => ({
+                  ...machineSnapshot,
+                  skills: [
+                    ...skills,
+                    ...machineSnapshot.skills.filter((skill) => skill.scope === "builtin"),
+                  ].sort((a, b) => a.name.localeCompare(b.name)),
+                })),
                 Effect.provideService(FileSystem.FileSystem, fileSystem),
                 Effect.provideService(Path.Path, path),
               ),

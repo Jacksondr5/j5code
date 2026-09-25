@@ -1,3 +1,4 @@
+import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 // @effect-diagnostics nodeBuiltinImport:off - CLI integration uses temporary Node paths.
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -23,7 +24,7 @@ import * as References from "effect/References";
 import * as Stream from "effect/Stream";
 import { Command } from "effect/unstable/cli";
 
-import { cli } from "../bin.ts";
+import { cli } from "../binCli.ts";
 import * as ServerConfig from "../config.ts";
 import { EventSinkV2 } from "../orchestration-v2/EventSink.ts";
 import * as EventStore from "../orchestration-v2/EventStore.ts";
@@ -61,7 +62,10 @@ const makeConfig = (baseDir: string) =>
       traceMaxFiles: 10,
       otlpTracesUrl: undefined,
       otlpMetricsUrl: undefined,
-      otlpExportIntervalMs: 10_000,
+      otlpLogsUrl: undefined,
+      otlpTracesExport: DEFAULT_SIGNAL_EXPORT,
+      otlpMetricsExport: DEFAULT_SIGNAL_EXPORT,
+      otlpLogsExport: DEFAULT_SIGNAL_EXPORT,
       otlpServiceName: "t3-server",
       mode: "web",
       port: 0,

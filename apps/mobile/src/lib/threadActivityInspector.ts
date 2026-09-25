@@ -1,4 +1,5 @@
 import type { V2ItemSupport } from "@t3tools/client-runtime/state/item-support";
+import { toolItemForDisplay } from "@t3tools/client-runtime/work-log/presentation";
 import type { ThreadId } from "@t3tools/contracts";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import * as DateTime from "effect/DateTime";
@@ -71,7 +72,7 @@ function addBlock(
 }
 
 export function buildThreadActivityInspector(
-  activity: ThreadFeedActivity,
+  activity: Pick<ThreadFeedActivity, "projectedItem">,
   support: V2ItemSupport,
   currentThreadId: ThreadId,
 ): ThreadActivityInspectorModel {
@@ -145,22 +146,23 @@ export function buildThreadActivityInspector(
       break;
     case "command_execution":
       addBlock(blocks, "Command", item.input);
-      addBlock(blocks, "Output", item.output);
       if (item.exitCode !== undefined) {
         addBlock(blocks, "Exit", `Process exited with code ${item.exitCode}`);
       }
       break;
     case "file_change":
-      fileLinks.push({ label: item.fileName, path: item.fileName });
+      for (const change of item.changes ?? [{ path: item.fileName, operation: "modify" }]) {
+        fileLinks.push({
+          label: `${change.operation} ${change.oldPath ? `${change.oldPath} → ` : ""}${change.path}`,
+          path: change.path,
+        });
+      }
       if (item.additions !== undefined || item.deletions !== undefined) {
         fields.push({
           label: "Changes",
           value: `+${item.additions ?? 0} −${item.deletions ?? 0}`,
         });
       }
-      addBlock(blocks, "Patch", item.diffStr);
-      addBlock(blocks, "Before", item.oldStr);
-      addBlock(blocks, "After", item.newStr);
       break;
     case "file_search":
       addBlock(blocks, "Query", item.pattern);
@@ -187,7 +189,6 @@ export function buildThreadActivityInspector(
       break;
     case "dynamic_tool":
       addBlock(blocks, "Input", item.input);
-      addBlock(blocks, "Output", item.output);
       break;
     case "approval_request":
       addBlock(blocks, "Prompt", item.prompt, false);
@@ -302,7 +303,7 @@ export function buildThreadActivityInspector(
       visibility: row.visibility,
       sourceThreadId: row.sourceThreadId,
       sourceItemId: row.sourceItemId,
-      item,
+      item: toolItemForDisplay(item),
     }),
   };
 }

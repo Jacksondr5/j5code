@@ -7,8 +7,12 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
+  TextGenerationError,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
@@ -181,7 +185,7 @@ describe("formatThreadTitleContext", () => {
       { role: "assistant", text: "y".repeat(6_000) },
       { role: "user", text: "z".repeat(1_500) },
     ]);
-    assert.isTrue(context.message.startsWith("USER:\nAncient context that anchors the topic"));
+    assert.isTrue(context.message.includes("USER:\nAncient context that anchors the topic"));
     assert.isTrue(context.message.includes("[Earlier content truncated]\n\n"));
     assert.isTrue(context.message.includes("y".repeat(100)));
   });
@@ -192,8 +196,8 @@ describe("formatThreadTitleContext", () => {
       { role: "assistant", text: "y".repeat(9_000) },
       { role: "user", text: "z".repeat(1_500) },
     ]);
-    assert.isTrue(context.message.startsWith("USER:\nTopic anchor"));
-    assert.isTrue(context.message.includes("[First user message truncated]"));
+    assert.isTrue(context.message.includes("USER:\nTopic anchor"));
+    assert.isTrue(context.message.includes("[Content truncated]"));
     assert.isTrue(context.message.includes("[Earlier content truncated]\n\n"));
   });
 
@@ -208,7 +212,7 @@ describe("formatThreadTitleContext", () => {
     ]);
     assert.deepEqual(
       context.attachments.map((entry) => entry.name),
-      ["b.png", "c.png", "d.png", "e.png"],
+      ["a.png", "c.png", "d.png", "e.png"],
     );
   });
 });
@@ -432,3 +436,70 @@ describe("ThreadTitleRegenerationService", () => {
     }),
   );
 });
+
+for (const outcome of ["success", "exhausted", "stale", "interrupted"] as const) {
+  it.effect(`initial title retry: ${outcome}`, () =>
+    Effect.gen(function* () {
+      const attempted = yield* Deferred.make<void>();
+      let attempts = 0;
+      const harness = makeHarness({
+        generateTitle: () =>
+          Effect.gen(function* () {
+            attempts += 1;
+            yield* Deferred.succeed(attempted, undefined);
+            if (outcome === "success" && attempts === 3) return { title: "Recovered title" };
+            return yield* new TextGenerationError({
+              operation: "generateThreadTitle",
+              detail: "Temporary failure",
+            });
+          }),
+      });
+      yield* Effect.gen(function* () {
+        const threads = yield* ThreadManagement.ThreadManagementService;
+        const service = yield* ThreadTitleRegeneration.ThreadTitleRegenerationService;
+        const threadId = yield* createThread({
+          command: `create:${outcome}`,
+          thread: `thread:${outcome}`,
+        });
+        const messageCommand = `message:${outcome}`;
+        yield* dispatchUserMessage({ command: messageCommand, threadId, text: "Fix the title" });
+        const requestId = yield* armRegeneration({ command: `title:${outcome}`, threadId });
+        const fiber = yield* service
+          .execute({
+            threadId,
+            requestId,
+            kind: { type: "initial", messageId: MessageId.make(`${messageCommand}:message`) },
+          })
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(attempted);
+        if (outcome === "interrupted") {
+          yield* Fiber.interrupt(fiber);
+        } else {
+          if (outcome === "stale")
+            yield* threads.dispatch({
+              type: "thread.metadata.update",
+              commandId: CommandId.make("manual-title"),
+              threadId,
+              title: "Manual title",
+            });
+          yield* TestClock.adjust("2 seconds");
+          if (outcome !== "stale") yield* TestClock.adjust("4 seconds");
+          yield* Fiber.join(fiber);
+        }
+        assert.equal(attempts, outcome === "success" || outcome === "exhausted" ? 3 : 1);
+        const projection = yield* threads.getThreadProjection(threadId);
+        assert.equal(
+          projection.thread.title,
+          outcome === "success"
+            ? "Recovered title"
+            : outcome === "stale"
+              ? "Manual title"
+              : "Seed title",
+        );
+        if (outcome === "interrupted")
+          assert.equal(projection.thread.titleRegeneration?.requestId, requestId);
+        else assert.isNotOk(projection.thread.titleRegeneration);
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+}

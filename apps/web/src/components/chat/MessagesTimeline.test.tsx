@@ -18,30 +18,47 @@ import { useComposerFocusState } from "./useComposerFocusState";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { LegendListRef } from "@legendapp/list/react";
 
+const activityTestState = vi.hoisted(() => ({
+  expanded: false,
+  expandedRuns: false,
+  subagentTooltips: false,
+}));
 const peerInteractionHarness = vi.hoisted(() => ({ enabled: false }));
-// Only the mounted peer-row probes replace browser tooltip positioning.
+
+// Expose tooltip contents in the renderer without requiring a browser portal
+// (upstream subagent tooltips); the J5 peer-row probes replace positioning.
 vi.mock("../ui/tooltip", async (importOriginal) => {
   const original = await importOriginal<typeof import("../ui/tooltip")>();
   return {
     ...original,
     Tooltip: (props: Parameters<typeof original.Tooltip>[0]) =>
-      peerInteractionHarness.enabled ? props.children : createElement(original.Tooltip, props),
-    TooltipPopup: (props: Parameters<typeof original.TooltipPopup>[0]) =>
-      peerInteractionHarness.enabled ? null : createElement(original.TooltipPopup, props),
+      activityTestState.subagentTooltips || peerInteractionHarness.enabled
+        ? props.children
+        : createElement(original.Tooltip, props),
     TooltipTrigger: (props: Parameters<typeof original.TooltipTrigger>[0]) =>
-      peerInteractionHarness.enabled
-        ? cloneElement(
-            props.render as ReactElement<{ children?: ReactNode }>,
-            {},
-            props.children ??
-              (props.render as ReactElement<{ children?: ReactNode }>).props.children,
-          )
-        : createElement(original.TooltipTrigger, props),
+      activityTestState.subagentTooltips ? (
+        <>
+          {props.render as ReactElement}
+          {props.children}
+        </>
+      ) : peerInteractionHarness.enabled ? (
+        cloneElement(
+          props.render as ReactElement<{ children?: ReactNode }>,
+          {},
+          props.children ?? (props.render as ReactElement<{ children?: ReactNode }>).props.children,
+        )
+      ) : (
+        createElement(original.TooltipTrigger, props)
+      ),
+    TooltipPopup: (props: Parameters<typeof original.TooltipPopup>[0]) =>
+      activityTestState.subagentTooltips
+        ? props.children
+        : peerInteractionHarness.enabled
+          ? null
+          : createElement(original.TooltipPopup, props),
   };
 });
 vi.mock("../../hooks/useNowMinute", () => ({ useNowMinute: () => "2026-09-05T00:00" }));
-
-const activityTestState = vi.hoisted(() => ({ expanded: false }));
 
 vi.mock("../DiffWorkerPoolProvider", () => ({
   DiffWorkerPoolProvider: ({ children }: { children?: ReactNode }) => children,
@@ -55,6 +72,9 @@ vi.mock("./MessagesTimeline.logic", async (importOriginal) => {
       input: Parameters<typeof logic.deriveMessagesTimelineRowsWithState>[0],
       previous: Parameters<typeof logic.deriveMessagesTimelineRowsWithState>[1],
     ) {
+      if (activityTestState.expandedRuns) {
+        input = { ...input, expandedRunIds: new Set([RunId.make("run-1")]) };
+      }
       const projection = logic.deriveMessagesTimelineRowsWithState(input, previous);
       if (!activityTestState.expanded) return projection;
       return logic.deriveMessagesTimelineRowsWithState({
@@ -70,8 +90,10 @@ vi.mock("./MessagesTimeline.logic", async (importOriginal) => {
 });
 
 beforeEach(() => {
+  activityTestState.subagentTooltips = false;
   activityTestState.expanded = false;
   peerInteractionHarness.enabled = false;
+  activityTestState.expandedRuns = false;
 });
 
 vi.mock("@legendapp/list/react", async () => {
@@ -206,8 +228,10 @@ function matchMedia() {
 }
 
 let MessagesTimeline: typeof import("./MessagesTimeline").MessagesTimeline;
+let resolvePreviewAnnotationImage: typeof import("./MessagesTimeline").resolvePreviewAnnotationImage;
 
-beforeAll(async () => {
+const ElementStub = class ElementStub {};
+function stubDomGlobals() {
   const classList = {
     add: () => {},
     remove: () => {},
@@ -215,6 +239,7 @@ beforeAll(async () => {
     contains: () => false,
   };
 
+  vi.stubGlobal("Element", ElementStub);
   vi.stubGlobal("localStorage", {
     getItem: () => null,
     setItem: () => {},
@@ -222,6 +247,8 @@ beforeAll(async () => {
     clear: () => {},
   });
   vi.stubGlobal("window", {
+    Element: ElementStub,
+    localStorage: globalThis.localStorage,
     matchMedia,
     addEventListener: () => {},
     removeEventListener: () => {},
@@ -238,8 +265,12 @@ beforeAll(async () => {
       offsetHeight: 0,
     },
   });
+}
 
-  ({ MessagesTimeline } = await import("./MessagesTimeline"));
+beforeEach(stubDomGlobals);
+beforeAll(async () => {
+  stubDomGlobals();
+  ({ MessagesTimeline, resolvePreviewAnnotationImage } = await import("./MessagesTimeline"));
 }, 30_000);
 
 const ACTIVE_THREAD_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
@@ -251,14 +282,16 @@ function buildProps() {
     activeTurnInProgress: false,
     listRef: createRef<LegendListRef | null>(),
     latestRun: null,
-    turnDiffSummaryByAssistantMessageId: new Map(),
+    turnDiffSummaries: [],
+    providerStatuses: [],
+    runs: [],
     routeThreadKey: "environment-local:thread-1",
     onOpenTurnDiff: () => {},
     onOpenThread: () => {},
     onForkFromRun: async () => {},
     onRollbackCheckpoint: () => {},
-    revertTurnCountByUserMessageId: new Map(),
-    onRevertUserMessage: () => {},
+    supportsConversationRollback: false,
+    onRevertToTurnCount: () => {},
     isRevertingCheckpoint: false,
     openingVideoAttachmentId: null,
     onImageExpand: () => {},
@@ -307,6 +340,33 @@ function buildAssistantTimelineEntry(text: string) {
     message: {
       ...entry.message,
       role: "assistant" as const,
+    },
+  };
+}
+
+function buildSnapShotTimelineEntry(previewUrl?: string) {
+  const entry = buildUserTimelineEntry("First prompt.");
+  return {
+    ...entry,
+    message: {
+      ...entry.message,
+      attachments: [
+        {
+          type: "image" as const,
+          id: "attachment-1",
+          name: "screenshot.png",
+          mimeType: "image/png",
+          sizeBytes: 1,
+          ...(previewUrl ? { previewUrl } : {}),
+          source: {
+            kind: "snap-shot" as const,
+            capturedAt: "2026-03-17T19:12:28.000Z",
+            appName: "Terminal",
+            windowTitle: "t3code — Tests",
+            appIconDataUrl: "data:image/png;base64,aWNvbg==",
+          },
+        },
+      ],
     },
   };
 }
@@ -400,6 +460,51 @@ describe("MessagesTimeline", () => {
       }
     },
   );
+  it("shows dynamic tool input without cached output when the row is expanded", async () => {
+    activityTestState.expanded = true;
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(() => {
+        renderer = create(
+          <MessagesTimeline
+            {...buildProps()}
+            timelineEntries={[
+              {
+                id: "tool-with-cached-output",
+                kind: "work",
+                createdAt: MESSAGE_CREATED_AT,
+                entry: {
+                  id: "tool-with-cached-output",
+                  createdAt: MESSAGE_CREATED_AT,
+                  label: "Example tool",
+                  toolTitle: "Example tool",
+                  tone: "tool",
+                  itemType: "dynamic_tool",
+                  toolLifecycleStatus: "completed",
+                  toolData: {
+                    input: { query: "KEEP_TOOL_INPUT" },
+                    output: { text: "RAW_CACHED_TOOL_OUTPUT" },
+                  },
+                },
+              },
+            ]}
+          />,
+        );
+      });
+      const row = renderer!.root.findByProps({ "aria-label": "Example tool" });
+      await act(() => row.props.onClick());
+      const visible = JSON.stringify(renderer!.toJSON());
+      expect(visible).toContain("KEEP_TOOL_INPUT");
+      expect(visible).not.toContain("RAW_CACHED_TOOL_OUTPUT");
+      await act(() => row.props.onClick());
+      expect(JSON.stringify(renderer!.toJSON())).not.toContain("KEEP_TOOL_INPUT");
+    } finally {
+      await act(() => renderer?.unmount());
+    }
+  });
 
   it.each([
     { toolLifecycleStatus: "inProgress", isAtEnd: true },
@@ -430,17 +535,19 @@ describe("MessagesTimeline", () => {
         getState: () => ({ isAtEnd: timelineIsAtEnd }),
         getScrollableNode: () => null,
       } as unknown as LegendListRef;
-      let isResting = true;
+      let isResting = false;
+      let composerState: ReturnType<typeof useComposerFocusState> | undefined;
       function ThreadProbe() {
-        const composer = useComposerFocusState(false);
+        const composer = useComposerFocusState();
         useLayoutEffect(() => {
+          composerState = composer;
           isResting = shouldUseRestingComposerLayout({
             isExistingThread: true,
             isMobileViewport: false,
-            isFocused: composer.isComposerFocused,
             isScrollCollapsed: composer.isComposerScrollCollapsed,
             hasExpandedChrome: false,
-            collapseOnBlur: true,
+            hasMultilinePrompt: false,
+            timelineOverflows: true,
           });
         });
         return (
@@ -473,6 +580,8 @@ describe("MessagesTimeline", () => {
         await act(() => {
           renderer = create(<ThreadProbe />);
         });
+        // The user scrolled up to read, so the composer is resting.
+        await act(() => composerState!.setIsComposerScrollCollapsed(true));
         const toggle = renderer!.root.findByProps({ "aria-expanded": false });
         await act(() => toggle.props.onClick());
         await flushFrame();
@@ -638,10 +747,10 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain('aria-label="Load earlier activity"');
-    expect(markup).toContain("Load earlier activity");
+    expect(markup).toContain('aria-label="Load earlier turns"');
+    expect(markup).toContain("Load earlier turns");
     expect(markup).toContain("Earlier activity could not be loaded.");
-    expect(markup.indexOf("Load earlier activity")).toBeLessThan(markup.indexOf("Recent activity"));
+    expect(markup.indexOf("Load earlier turns")).toBeLessThan(markup.indexOf("Recent activity"));
   });
 
   it("keeps an empty bounded timeline actionable while earlier history loads", () => {
@@ -658,7 +767,7 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Loading earlier activity…");
+    expect(markup).toContain("Loading earlier turns…");
     expect(markup).toContain("disabled");
     expect(markup).not.toContain("Send a message to start the conversation.");
   });
@@ -707,22 +816,17 @@ describe("MessagesTimeline", () => {
             },
           },
         ]}
-        turnDiffSummaryByAssistantMessageId={
-          new Map([
-            [
-              assistantMessageId,
-              {
-                runId,
-                checkpointTurnCount: 1,
-                checkpointRef: CheckpointRef.make("checkpoint-with-files"),
-                status: "ready",
-                files: [{ path: "README.md", kind: "modified", additions: 2, deletions: 1 }],
-                assistantMessageId,
-                completedAt: MESSAGE_CREATED_AT,
-              },
-            ],
-          ])
-        }
+        turnDiffSummaries={[
+          {
+            runId,
+            checkpointTurnCount: 1,
+            checkpointRef: CheckpointRef.make("checkpoint-with-files"),
+            status: "ready",
+            files: [{ path: "README.md", kind: "modified", additions: 2, deletions: 1 }],
+            assistantMessageId,
+            completedAt: MESSAGE_CREATED_AT,
+          },
+        ]}
       />,
     );
 
@@ -873,6 +977,38 @@ describe("MessagesTimeline", () => {
     expect(onAnchorReady).toHaveBeenCalledOnce();
     expect(onAnchorReady).toHaveBeenCalledWith(secondEntry.message.id, 1);
     expect(onAnchorSizeChanged).toHaveBeenCalledWith(secondEntry.message.id, 240);
+  });
+
+  it("renders SnapShot window details after the preview resolves", () => {
+    const onAnchorReady = vi.fn();
+    const firstEntry = buildSnapShotTimelineEntry("data:image/png;base64,iVBORw0KGgo=");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        anchorMessageId={firstEntry.message.id}
+        onAnchorReady={onAnchorReady}
+        contentInsetEndAdjustment={144}
+        timelineEntries={[firstEntry]}
+      />,
+    );
+
+    expect(markup).toContain("Terminal");
+    expect(markup).toContain("t3code — Tests");
+    expect(markup).toContain('src="data:image/png;base64,aWNvbg=="');
+    expect(onAnchorReady).toHaveBeenCalledOnce();
+    expect(onAnchorReady).toHaveBeenCalledWith(firstEntry.message.id, 0);
+  });
+
+  it("does not render SnapShot window details before the preview resolves", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} timelineEntries={[buildSnapShotTimelineEntry()]} />,
+    );
+
+    expect(markup).toContain("screenshot.png");
+    expect(markup).not.toContain("Terminal");
+    expect(markup).not.toContain("t3code — Tests");
+    expect(markup).not.toContain('src="data:image/png;base64,aWNvbg=="');
+    expect(markup).not.toContain("h-28 w-52 max-w-full");
   });
 
   it("does not reserve end space for a follow-up user message", () => {
@@ -1130,7 +1266,7 @@ describe("MessagesTimeline", () => {
 
     expect(markup).not.toContain("Show full message");
     expect(markup).toContain('data-user-message-collapsible="false"');
-    expect(markup).toContain("rounded-2xl bg-accent p-3");
+    expect(markup).toContain("rounded-2xl bg-message p-3");
   });
 
   it("identifies user-role messages sent by another agent", async () => {
@@ -1384,8 +1520,8 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("Terminal 1 lines 1-5");
     expect(markup).toContain("lucide-terminal");
-    expect(markup).toContain("yoo what&#x27;s</p>");
-    expect(markup).toContain('<span aria-hidden="true"> </span>');
+    expect(markup).toContain("yoo what&#x27;s");
+    expect(markup).not.toContain("terminal_context");
     expect(markup).toContain("Show full message");
   }, 20_000);
 
@@ -1423,7 +1559,7 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain('aria-label="Copy link"');
+    expect(markup).toContain('aria-label="Copy message"');
     expect(markup).toContain('data-user-message-collapsed="true"');
     expect(markup).toContain('data-user-message-footer="true"');
   });
@@ -1638,7 +1774,7 @@ describe("MessagesTimeline", () => {
     expect(bareMarkup).not.toContain("Full conversation context");
   });
 
-  it("renders created threads as linked cards outside the work log", async () => {
+  it("renders created threads as lean rows with inline chat links", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
@@ -1683,7 +1819,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-v2-item-type="thread_created"');
     expect(markup).toContain('aria-label="Open Claude research thread"');
     expect(markup).toContain("Claude research thread");
-    expect(markup).toContain("claude-default · claude-sonnet-4-6");
+    expect(markup).toContain("Open chat");
     expect(markup).not.toContain("Work Log");
   });
 
@@ -1780,322 +1916,132 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain('aria-label="Hidden work includes a failure"');
   });
 
-  it("renders live subagent progress on the persistent linked card", async () => {
-    const { MessagesTimeline } = await import("./MessagesTimeline");
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        timelineEntries={[
-          {
-            id: "subagent-progress",
-            kind: "event",
-            createdAt: MESSAGE_CREATED_AT,
-            projectedItem: {
-              position: 0,
-              visibility: "local",
-              sourceThreadId: "thread-1",
-              sourceItemId: "subagent-progress",
-              item: {
-                id: "subagent-progress",
-                threadId: "thread-1",
-                runId: "run-1",
-                nodeId: "node-subagent-1",
-                providerThreadId: "provider-thread-1",
-                providerTurnId: "provider-turn-1",
-                nativeItemRef: null,
-                parentItemId: null,
-                ordinal: 1,
-                status: "running",
-                title: "Package audit",
-                startedAt: null,
-                completedAt: null,
-                updatedAt: {},
-                type: "subagent",
-                subagentId: "node-subagent-1",
-                origin: "provider_native",
-                driver: "claudeAgent",
-                providerInstanceId: "claudeAgent",
-                childThreadId: "thread-subagent-1",
-                prompt: "Inspect the package",
-                progress: "Reading src/index.ts",
-                result: null,
-              },
-            } as never,
-          },
-        ]}
-      />,
-    );
-
-    expect(markup).toContain('data-v2-item-type="subagent"');
-    expect(markup).toContain('aria-label="Open Package audit"');
-    expect(markup).toContain("Reading src/index.ts");
-    expect(markup).not.toContain("Inspect the package");
-    expect(markup).not.toContain('data-v2-subagent-result-disclosure="true"');
-    expect(markup).not.toContain("Work Log");
-  });
-
-  it("discloses the full Codex subagent result without projecting child events", async () => {
-    const { MessagesTimeline } = await import("./MessagesTimeline");
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        timelineEntries={[
-          {
-            id: "codex-subagent-result",
-            kind: "event",
-            createdAt: MESSAGE_CREATED_AT,
-            projectedItem: {
-              position: 0,
-              visibility: "local",
-              sourceThreadId: "thread-1",
-              sourceItemId: "codex-subagent-result",
-              item: {
-                id: "codex-subagent-result",
-                threadId: "thread-1",
-                runId: "run-1",
-                nodeId: "node-subagent-1",
-                providerThreadId: "provider-thread-1",
-                providerTurnId: "provider-turn-1",
-                nativeItemRef: null,
-                parentItemId: null,
-                ordinal: 1,
-                status: "completed",
-                title: "Isolation report",
-                startedAt: null,
-                completedAt: null,
-                updatedAt: {},
-                type: "subagent",
-                subagentId: "node-subagent-1",
-                origin: "provider_native",
-                driver: "codex",
-                providerInstanceId: "codex",
-                childThreadId: "thread-subagent-1",
-                prompt: "Explain test isolation",
-                result: "Tests should be isolated.\n\nResult: no shared state.",
-              },
-            } as never,
-          },
-        ]}
-      />,
-    );
-
-    expect(markup).toContain('data-v2-item-type="subagent"');
-    expect(markup).toContain('data-v2-subagent-result-disclosure="true"');
-    expect(markup).toContain('data-v2-subagent-result="true"');
-    expect(markup).toContain('aria-label="Show full result for Isolation report"');
-    expect(markup).toContain('aria-label="Open Isolation report"');
-    expect(markup).toContain("Tests should be isolated.");
-    expect(markup).toContain("Result: no shared state.");
-    expect(markup).not.toContain("Explain test isolation");
-  });
-
-  it("keeps live progress when a running subagent streams a partial result", async () => {
-    const { MessagesTimeline } = await import("./MessagesTimeline");
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        timelineEntries={[
-          {
-            id: "subagent-partial-result",
-            kind: "event",
-            createdAt: MESSAGE_CREATED_AT,
-            projectedItem: {
-              position: 0,
-              visibility: "local",
-              sourceThreadId: "thread-1",
-              sourceItemId: "subagent-partial-result",
-              item: {
-                id: "subagent-partial-result",
-                threadId: "thread-1",
-                runId: "run-1",
-                nodeId: "node-subagent-1",
-                providerThreadId: "provider-thread-1",
-                providerTurnId: "provider-turn-1",
-                nativeItemRef: null,
-                parentItemId: null,
-                ordinal: 1,
-                status: "running",
-                title: "Package audit",
-                startedAt: null,
-                completedAt: null,
-                updatedAt: {},
-                type: "subagent",
-                subagentId: "node-subagent-1",
-                origin: "provider_native",
-                driver: "codex",
-                providerInstanceId: "codex",
-                childThreadId: "thread-subagent-1",
-                prompt: "Inspect the package",
-                progress: "Reading src/index.ts",
-                result: "Partial streamed answer so far",
-              },
-            } as never,
-          },
-        ]}
-      />,
-    );
-
-    expect(markup).toContain('data-v2-item-type="subagent"');
-    expect(markup).toContain('aria-label="Open Package audit"');
-    expect(markup).toContain("Reading src/index.ts");
-    expect(markup).not.toContain("Partial streamed answer so far");
-    expect(markup).not.toContain('data-v2-subagent-result-disclosure="true"');
-  });
-
-  it("shows the streamed result while a subagent runs without progress", async () => {
-    const { MessagesTimeline } = await import("./MessagesTimeline");
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        timelineEntries={[
-          {
-            id: "subagent-streamed-result",
-            kind: "event",
-            createdAt: MESSAGE_CREATED_AT,
-            projectedItem: {
-              position: 0,
-              visibility: "local",
-              sourceThreadId: "thread-1",
-              sourceItemId: "subagent-streamed-result",
-              item: {
-                id: "subagent-streamed-result",
-                threadId: "thread-1",
-                runId: "run-1",
-                nodeId: "node-subagent-1",
-                providerThreadId: "provider-thread-1",
-                providerTurnId: "provider-turn-1",
-                nativeItemRef: null,
-                parentItemId: null,
-                ordinal: 1,
-                status: "running",
-                title: "Package audit",
-                startedAt: null,
-                completedAt: null,
-                updatedAt: {},
-                type: "subagent",
-                subagentId: "node-subagent-1",
-                origin: "provider_native",
-                driver: "codex",
-                providerInstanceId: "codex",
-                childThreadId: "thread-subagent-1",
-                prompt: "Inspect the package",
-                progress: null,
-                result: "Streaming answer so far",
-              },
-            } as never,
-          },
-        ]}
-      />,
-    );
-
-    expect(markup).toContain('data-v2-item-type="subagent"');
-    expect(markup).toContain("Streaming answer so far");
-    expect(markup).not.toContain("Inspect the package");
-    expect(markup).not.toContain('data-v2-subagent-result-disclosure="true"');
-  });
-
-  it("treats a cancelled subagent result as partial output", async () => {
-    const { MessagesTimeline } = await import("./MessagesTimeline");
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        timelineEntries={[
-          {
-            id: "subagent-cancelled-result",
-            kind: "event",
-            createdAt: MESSAGE_CREATED_AT,
-            projectedItem: {
-              position: 0,
-              visibility: "local",
-              sourceThreadId: "thread-1",
-              sourceItemId: "subagent-cancelled-result",
-              item: {
-                id: "subagent-cancelled-result",
-                threadId: "thread-1",
-                runId: "run-1",
-                nodeId: "node-subagent-1",
-                providerThreadId: "provider-thread-1",
-                providerTurnId: "provider-turn-1",
-                nativeItemRef: null,
-                parentItemId: null,
-                ordinal: 1,
-                status: "cancelled",
-                title: "Package audit",
-                startedAt: null,
-                completedAt: null,
-                updatedAt: {},
-                type: "subagent",
-                subagentId: "node-subagent-1",
-                origin: "provider_native",
-                driver: "codex",
-                providerInstanceId: "codex",
-                childThreadId: "thread-subagent-1",
-                prompt: "Inspect the package",
-                progress: "Reading src/index.ts",
-                result: "Partial output before cancel",
-              },
-            } as never,
-          },
-        ]}
-      />,
-    );
-
-    expect(markup).toContain('data-v2-item-type="subagent"');
-    expect(markup).toContain("Partial output before cancel");
-    expect(markup).not.toContain("Reading src/index.ts");
-    expect(markup).not.toContain('data-v2-subagent-result-disclosure="true"');
-  });
-
-  it("falls back to progress when a completed subagent result is whitespace-only", async () => {
-    const { MessagesTimeline } = await import("./MessagesTimeline");
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        timelineEntries={[
-          {
-            id: "subagent-blank-result",
-            kind: "event",
-            createdAt: MESSAGE_CREATED_AT,
-            projectedItem: {
-              position: 0,
-              visibility: "local",
-              sourceThreadId: "thread-1",
-              sourceItemId: "subagent-blank-result",
-              item: {
-                id: "subagent-blank-result",
-                threadId: "thread-1",
-                runId: "run-1",
-                nodeId: "node-subagent-1",
-                providerThreadId: "provider-thread-1",
-                providerTurnId: "provider-turn-1",
-                nativeItemRef: null,
-                parentItemId: null,
-                ordinal: 1,
-                status: "completed",
-                title: "Package audit",
-                startedAt: null,
-                completedAt: null,
-                updatedAt: {},
-                type: "subagent",
-                subagentId: "node-subagent-1",
-                origin: "provider_native",
-                driver: "codex",
-                providerInstanceId: "codex",
-                childThreadId: "thread-subagent-1",
-                prompt: "Inspect the package",
-                progress: "Audited 12 packages",
-                result: "  \n\t  ",
-              },
-            } as never,
-          },
-        ]}
-      />,
-    );
-
-    expect(markup).toContain('data-v2-item-type="subagent"');
-    expect(markup).toContain("Audited 12 packages");
-    expect(markup).not.toContain('data-v2-subagent-result-disclosure="true"');
-  });
+  it.each([
+    {
+      status: "running",
+      progress: "Reading src/index.ts",
+      result: null,
+      preview: "Reading src/index.ts",
+    },
+    {
+      status: "completed",
+      progress: "Reading src/index.ts",
+      result: "Tests should be isolated.",
+      preview: "Tests should be isolated.",
+    },
+    {
+      status: "running",
+      progress: "Reading src/index.ts",
+      result: "Partial streamed answer",
+      preview: "Reading src/index.ts",
+    },
+    {
+      status: "running",
+      progress: undefined,
+      result: "Streaming answer so far",
+      preview: "Streaming answer so far",
+    },
+    {
+      status: "cancelled",
+      progress: "Reading src/index.ts",
+      result: "Partial output before cancel",
+      preview: "Partial output before cancel",
+    },
+    {
+      status: "completed",
+      progress: "Audited 12 packages",
+      result: "  \n\t  ",
+      preview: "Audited 12 packages",
+    },
+  ] as const)(
+    "folds a $status subagent and shows '$preview' when expanded",
+    async ({ status, progress, result, preview }) => {
+      activityTestState.expandedRuns = true;
+      activityTestState.subagentTooltips = true;
+      vi.stubGlobal("HTMLElement", ElementStub);
+      window.HTMLElement = ElementStub as typeof HTMLElement;
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      vi.stubGlobal("requestAnimationFrame", () => 0);
+      vi.stubGlobal("cancelAnimationFrame", () => {});
+      const onOpenThread = vi.fn();
+      let renderer: ReactTestRenderer | undefined;
+      try {
+        await act(() => {
+          renderer = create(
+            <MessagesTimeline
+              {...buildProps()}
+              onOpenThread={onOpenThread}
+              timelineEntries={[
+                {
+                  id: "subagent-progress",
+                  kind: "event",
+                  createdAt: MESSAGE_CREATED_AT,
+                  projectedItem: {
+                    position: 0,
+                    visibility: "local",
+                    sourceThreadId: "thread-1",
+                    sourceItemId: "subagent-progress",
+                    item: {
+                      id: "subagent-progress",
+                      threadId: "thread-1",
+                      runId: "run-1",
+                      nodeId: "node-subagent-1",
+                      providerThreadId: "provider-thread-1",
+                      providerTurnId: "provider-turn-1",
+                      nativeItemRef: null,
+                      parentItemId: null,
+                      ordinal: 1,
+                      status,
+                      title: "Package audit",
+                      startedAt: null,
+                      completedAt: null,
+                      updatedAt: {},
+                      type: "subagent",
+                      subagentId: "node-subagent-1",
+                      origin: "provider_native",
+                      driver: "claudeAgent",
+                      providerInstanceId: "claudeAgent",
+                      childThreadId: "thread-subagent-1",
+                      prompt: "Inspect the package",
+                      progress,
+                      result,
+                    },
+                  } as never,
+                },
+              ]}
+            />,
+          );
+        });
+        const groupLabel = "1 subagent";
+        const group = () =>
+          renderer!.root.findAll(
+            (node) => node.type === "button" && node.props["aria-label"] === groupLabel,
+          )[0]!;
+        const child = () =>
+          renderer!.root.findAll(
+            (node) => node.type === "button" && node.props["aria-label"] === "Open Package audit",
+          );
+        expect(child()).toHaveLength(0);
+        await act(() => group().props.onClick({ nativeEvent: new Event("click") }));
+        expect(child()).toHaveLength(1);
+        const content = renderer!.root
+          .findAll((node) => typeof node.type === "string")
+          .flatMap((node) => node.children.filter((child) => typeof child === "string"))
+          .join("");
+        expect(content).toContain(preview);
+        expect(content).not.toContain("Inspect the package");
+        if (result?.trim() && result !== preview) expect(content).not.toContain(result);
+        if (progress && progress !== preview) expect(content).not.toContain(progress);
+        await act(() => child()[0]!.props.onClick());
+        expect(onOpenThread).toHaveBeenCalledWith("thread-subagent-1");
+        await act(() => group().props.onClick({ nativeEvent: new Event("click") }));
+        expect(child()).toHaveLength(0);
+      } finally {
+        await act(() => renderer?.unmount());
+        vi.stubGlobal("HTMLElement", undefined);
+      }
+    },
+  );
 
   it("renders V2 provider retries in the normal work log", () => {
     activityTestState.expanded = true;
@@ -2397,9 +2343,8 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("contextWindow.test.ts");
-    expect(markup).toContain("Wadduo");
-    expect(markup).toContain('data-testid="file-diff"');
+    expect(markup).toContain("contextWindow.test.ts +47 to +58");
+    expect(markup).toContain("lucide-message-circle");
     expect(markup).not.toContain(">Review comment<");
     expect(markup).not.toContain("&lt;review_comment");
     expect(markup).not.toContain("&lt;/review_comment&gt;");
@@ -2436,9 +2381,8 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("plan.md");
-    expect(markup).toContain("Clarify this.");
-    expect(markup).toContain("# Plan");
+    expect(markup).toContain("plan.md L1 to L2");
+    expect(markup).not.toContain("review_comment");
     expect(markup).not.toContain('data-testid="file-diff"');
   });
 
@@ -2560,5 +2504,122 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("lucide-circle-alert");
     expect(markup).toContain("text-destructive");
+  });
+
+  it.each([
+    [
+      "**Viewing image first** with *care*, ~~old~~ `code` and [context](https://example.com)",
+      "Viewing image first with care, old code and context",
+      1,
+    ],
+    ["first paragraph\n\nsecond paragraph", "first paragraph second paragraph", 0],
+    ["- first\n- second", "first second", 0],
+    ["first  \nsecond", "first second", 0],
+    ["![image description](image.png)", "image description", 0],
+    ["![](image.png)", "Thought", 0],
+    ["---", "Thought", 0],
+  ] as const)(
+    "shows plain text for a V2 reasoning preview: %s",
+    async (markdown, expected, strongCount) => {
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      vi.stubGlobal("requestAnimationFrame", () => 0);
+      vi.stubGlobal("cancelAnimationFrame", () => {});
+      activityTestState.expanded = true;
+      let renderer: ReactTestRenderer | undefined;
+      try {
+        await act(() => {
+          renderer = create(
+            <MessagesTimeline
+              {...buildProps()}
+              timelineEntries={[
+                {
+                  id: "reasoning-preview",
+                  kind: "work",
+                  createdAt: MESSAGE_CREATED_AT,
+                  entry: {
+                    id: "reasoning-preview",
+                    createdAt: MESSAGE_CREATED_AT,
+                    label: markdown,
+                    detail: markdown,
+                    tone: "thinking",
+                    itemType: "reasoning",
+                    toolLifecycleStatus: "completed",
+                  },
+                },
+              ]}
+            />,
+          );
+        });
+        const previewText = () =>
+          renderer!.root
+            .findAllByType("span")
+            .flatMap((node) => node.findAll(() => true))
+            .flatMap((node) => node.children)
+            .filter((child) => typeof child === "string")
+            .join(" ");
+        expect(previewText()).toContain(expected);
+        expect(renderer!.root.findAllByType("strong")).toHaveLength(0);
+        const row = () =>
+          renderer!.root.findAll(
+            (node) =>
+              node.type === "div" &&
+              node.props.role === "button" &&
+              typeof node.props["aria-expanded"] === "boolean",
+          )[0]!;
+        await act(() => row().props.onClick());
+        expect(renderer!.root.findAllByType("strong")).toHaveLength(strongCount);
+        await act(() => row().props.onClick());
+        expect(previewText()).toContain(expected);
+        expect(renderer!.root.findAllByType("strong")).toHaveLength(0);
+      } finally {
+        await act(() => renderer?.unmount());
+      }
+    },
+  );
+
+  it("expands and collapses a tool call through its header", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(() => {
+        renderer = create(
+          <MessagesTimeline
+            {...buildProps()}
+            timelineEntries={[
+              {
+                id: "entry-standalone",
+                kind: "work",
+                createdAt: MESSAGE_CREATED_AT,
+                entry: {
+                  id: "work-standalone",
+                  createdAt: MESSAGE_CREATED_AT,
+                  toolCallId: "call-standalone",
+                  label: "Run lint",
+                  tone: "tool",
+                  itemType: "command_execution",
+                  command: "pnpm lint",
+                  toolLifecycleStatus: "completed",
+                },
+              },
+            ]}
+          />,
+        );
+      });
+      await act(() => renderer!.root.findByProps({ "aria-expanded": false }).props.onClick());
+      const expanded = renderer!.root.findAll(
+        (node) => node.type === "div" && node.props["aria-expanded"] === true,
+      )[0]!;
+      expect(expanded).toBeDefined();
+      await act(() => expanded.props.onClick());
+      expect(
+        renderer!.root.findAll(
+          (node) => node.type === "div" && node.props["aria-expanded"] === true,
+        ),
+      ).toHaveLength(0);
+    } finally {
+      await act(() => renderer?.unmount());
+    }
   });
 });

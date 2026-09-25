@@ -13,7 +13,7 @@ import {
 import { SquadronId } from "./contracts.ts";
 
 const createdAt = "2026-08-29T16:00:00.000Z";
-const database = NodeSqliteClient.layerMemory();
+const database = NodeSqliteClient.layer({ filename: ":memory:" });
 const ledger = ledgerLayer.pipe(Layer.provide(database));
 const references = squadronProjectReferencesLayer.pipe(Layer.provide(database));
 const testLayer = Layer.mergeAll(database, ledger, references);

@@ -10,6 +10,15 @@
  * tools.test.ts checks it against J5Toolkit.
  */
 export const J5_CLAUDE_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
+  "mcp__t3-code__playbook_list",
+  "mcp__t3-code__playbook_start",
+  "mcp__t3-code__playbook_current",
+  "mcp__t3-code__playbook_next",
+  "mcp__t3-code__playbook_back",
+  "mcp__t3-code__playbook_reselect",
+  "mcp__t3-code__playbook_complete",
+  "mcp__t3-code__playbook_cancel",
+
   "mcp__t3-code__send_message",
   "mcp__t3-code__list_participants",
   "mcp__t3-code__list_squadrons",
@@ -25,7 +34,6 @@ export const J5_CLAUDE_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__t3-code__task_cancel",
   "mcp__t3-code__stop_agent",
   "mcp__t3-code__stop_crew",
-  "mcp__t3-code__archive_agent",
   "mcp__t3-code__archive_crew",
   "mcp__t3-code__clear_own_ask",
 ];

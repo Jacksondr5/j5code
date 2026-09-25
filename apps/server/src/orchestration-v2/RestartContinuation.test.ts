@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import {
+  ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderSessionId,
@@ -32,7 +33,13 @@ const attemptId = RunAttemptId.make("attempt:restart");
 
 function makeProjection() {
   return {
-    thread: { id: threadId, providerInstanceId: instanceId, archivedAt: null, deletedAt: null },
+    thread: {
+      id: threadId,
+      projectId: ProjectId.make("restart-project"),
+      providerInstanceId: instanceId,
+      archivedAt: null,
+      deletedAt: null,
+    },
     runs: [
       {
         id: runId,
@@ -132,48 +139,65 @@ it("recovers an admitted continuation after another crash before provider start"
   assert.equal(restartContinuationRun(starting)?.id, runId);
 });
 
-for (const enabled of [false, true]) {
-  it.effect(`atomically records restart intent with cancellation when opt-in is ${enabled}`, () =>
-    Effect.gen(function* () {
-      let committed: Parameters<EventSink.EventSinkV2["Service"]["commitCommand"]>[0] | undefined;
-      const recovery = yield* ProviderRuntimeRecovery.make.pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            ServerSettings.layerTest({ continueThreadsAfterServerUpdate: enabled }),
-            Layer.mock(ProjectionStore.ProjectionStoreV2)({
-              getRecoveryThreadIds: () => Effect.succeed([threadId]),
-              getThreadProjection: () => Effect.succeed(makeProjection()),
-            }),
-            Layer.mock(EventSink.EventSinkV2)({
-              commitCommand: (input) => {
-                committed = input;
-                return Effect.succeed({ committed: true, cancelledEffectCount: 1 } as never);
-              },
-            }),
-            IdAllocator.layer,
-            Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({
-              runRecoveryOnce: Effect.succeed(false),
-            }),
-            Layer.mock(EffectOutbox.EffectOutboxV2)({
-              reconcileAfterProcessLoss: Effect.succeed({ requeued: 0, cancelled: 0 }),
-            }),
+for (const [enabled, projectOverride] of [
+  [false, undefined],
+  [true, undefined],
+  [false, true],
+  [true, false],
+] as const) {
+  it.effect(
+    `atomically records restart intent with cancellation when opt-in is ${enabled} and project override is ${projectOverride}`,
+    () =>
+      Effect.gen(function* () {
+        let committed: Parameters<EventSink.EventSinkV2["Service"]["commitCommand"]>[0] | undefined;
+        const recovery = yield* ProviderRuntimeRecovery.make.pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              ServerSettings.layerTest({
+                continueThreadsAfterServerUpdate: enabled,
+                projectSettingsOverrides:
+                  projectOverride === undefined
+                    ? {}
+                    : {
+                        [ProjectId.make("restart-project")]: {
+                          continueThreadsAfterServerUpdate: projectOverride,
+                        },
+                      },
+              }),
+              Layer.mock(ProjectionStore.ProjectionStoreV2)({
+                getRecoveryThreadIds: () => Effect.succeed([threadId]),
+                getRuntimeRecoveryProjection: () => Effect.succeed(makeProjection()),
+              }),
+              Layer.mock(EventSink.EventSinkV2)({
+                commitCommand: (input) => {
+                  committed = input;
+                  return Effect.succeed({ committed: true, cancelledEffectCount: 1 } as never);
+                },
+              }),
+              IdAllocator.layer,
+              Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({
+                runRecoveryOnce: Effect.succeed(false),
+              }),
+              Layer.mock(EffectOutbox.EffectOutboxV2)({
+                reconcileAfterProcessLoss: Effect.succeed({ requeued: 0, cancelled: 0 }),
+              }),
+            ),
           ),
-        ),
-      );
-      yield* recovery.reconcile("startup");
-      assert.isDefined(committed);
-      assert.isTrue(
-        committed!.events.some(
-          (event) => event.type === "run.updated" && event.payload.status === "cancelled",
-        ),
-      );
-      assert.lengthOf(committed!.effects, enabled ? 1 : 0);
-      if (enabled)
-        assert.deepEqual(committed!.effects[0]?.request, {
-          type: "provider-runtime.continue",
-          sourceRunId: runId,
-        });
-    }),
+        );
+        yield* recovery.reconcile("startup");
+        assert.isDefined(committed);
+        assert.isTrue(
+          committed!.events.some(
+            (event) => event.type === "run.updated" && event.payload.status === "cancelled",
+          ),
+        );
+        assert.lengthOf(committed!.effects, (projectOverride ?? enabled) ? 1 : 0);
+        if (projectOverride ?? enabled)
+          assert.deepEqual(committed!.effects[0]?.request, {
+            type: "provider-runtime.continue",
+            sourceRunId: runId,
+          });
+      }),
   );
 }
 
@@ -183,7 +207,7 @@ it.effect("does not duplicate delivery and yields to newer user work or opt-out"
     projection = { ...projection, runs: [{ ...projection.runs[0]!, status: "cancelled" }] };
     const commands: Parameters<ThreadManagementService["Service"]["dispatch"]>[0][] = [];
     const threads = Layer.mock(ThreadManagementService)({
-      getThreadProjection: () => Effect.succeed(projection),
+      getThreadRecords: () => Effect.succeed(projection),
       dispatch: (command) => {
         commands.push(command);
         if (command.type === "message.dispatch")
@@ -236,7 +260,7 @@ it.effect("does not cancel or resume a run that completes while shutdown intent 
           ServerSettings.layerTest({ continueThreadsAfterServerUpdate: true }),
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
             getRecoveryThreadIds: () => Effect.succeed([threadId]),
-            getThreadProjection: () => Effect.sync(() => projection),
+            getRuntimeRecoveryProjection: () => Effect.sync(() => projection),
           }),
           Layer.mock(EventSink.EventSinkV2)({
             writeWithEffects: (input) =>
@@ -276,7 +300,7 @@ it.effect("does not cancel or resume a run that completes while shutdown intent 
         Layer.mergeAll(
           ServerSettings.layerTest({ continueThreadsAfterServerUpdate: true }),
           Layer.mock(ThreadManagementService)({
-            getThreadProjection: () => Effect.succeed(projection),
+            getThreadRecords: () => Effect.succeed(projection),
             dispatch: () =>
               Effect.sync(() => {
                 dispatched = true;

@@ -1,4 +1,7 @@
+import { makeProviderFailure } from "../ProviderFailure.ts";
+import { xAiRateLimitedErrorCode } from "../../provider/acp/XAiAcpExtension.ts";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { resolveSelfInvocation, type SelfInvocation } from "@t3tools/shared/nodeRuntime";
 import {
   defaultInstanceIdForDriver,
   GrokSettings,
@@ -8,15 +11,18 @@ import {
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import type * as EffectAcpErrors from "effect-acp/errors";
+import * as EffectAcpErrors from "effect-acp/errors";
 
 import { ServerConfig } from "../../config.ts";
 import { makeAcpNativeLoggerFactory } from "../../provider/acp/AcpNativeLogging.ts";
 import {
+  applyGrokAcpModelSelection,
+  currentGrokModelIdFromSessionSetup,
   makeGrokAcpRuntime,
   resolveGrokAcpBaseModelId,
 } from "../../provider/acp/GrokAcpSupport.ts";
@@ -60,7 +66,7 @@ import {
 } from "./AcpAdapterV2.ts";
 
 export const GROK_PROVIDER = ProviderDriverKind.make("grok");
-export const GROK_DRIVER_KIND = GROK_PROVIDER;
+const GROK_DRIVER_KIND = GROK_PROVIDER;
 export const GROK_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(GROK_DRIVER_KIND);
 const DEFAULT_GROK_SETTINGS = Schema.decodeSync(GrokSettings)({});
 
@@ -100,6 +106,7 @@ export interface GrokAdapterV2Options {
   readonly hostPlatform: NodeJS.Platform;
   readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly crypto: Crypto.Crypto;
+  readonly selfInvocation: SelfInvocation;
   readonly fileSystem: FileSystem.FileSystem;
   readonly idAllocator: IdAllocatorV2["Service"];
   readonly serverConfig: ServerConfig["Service"];
@@ -115,7 +122,7 @@ export interface GrokAdapterV2Options {
   readonly assertComplete?: Effect.Effect<void, EffectAcpErrors.AcpError>;
 }
 
-export const registerGrokAcpExtensions: NonNullable<AcpAdapterV2Flavor["registerExtensions"]> = ({
+const registerGrokAcpExtensions: NonNullable<AcpAdapterV2Flavor["registerExtensions"]> = ({
   runtime,
   requestUserInput,
   applyBackgroundTaskMutation,
@@ -170,7 +177,7 @@ const registerGrokAskUserQuestionExtensions = ({
   Effect.forEach(
     ["x.ai/ask_user_question", "_x.ai/ask_user_question"] as const,
     (method) =>
-      runtime.handleExtRequest(method, XAiAskUserQuestionRequest, (params) => {
+      runtime.handleExtRequest(method, XAiAskUserQuestionRequest, (params, requestContext) => {
         const identity = extractXAiAskUserQuestionIdentity(params);
         const questions = extractXAiAskUserQuestions(params).map((question) => ({
           id: question.id,
@@ -178,13 +185,14 @@ const registerGrokAskUserQuestionExtensions = ({
           question: question.question,
           options: [...question.options],
         }));
-        return requestUserInput({
-          nativeItemId: `${identity.sessionId}:xai-question:${identity.toolCallId}`,
-          nativeMethod: method,
-          nativeRequestId: identity.toolCallId,
-          nativeSessionId: identity.sessionId,
-          questions,
-        }).pipe(
+        return requestUserInput(
+          {
+            nativeItemId: `${identity.sessionId}:xai-question:${identity.toolCallId}`,
+            nativeRequestId: identity.toolCallId,
+            questions,
+          },
+          requestContext,
+        ).pipe(
           Effect.flatMap(({ acknowledgeNativeResponse, answers }) =>
             Effect.succeed(
               answers === null
@@ -202,9 +210,6 @@ export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdap
     driver: GROK_PROVIDER,
     runtimeHarness: "Grok",
     capabilities: GrokProviderCapabilitiesV2,
-    // Idle settle over-settled preamble-before-tools turns and cancelled the
-    // prompt while Grok continued, freezing T3 projection mid-turn.
-    settleRootTurnWhenIdle: false,
     interruptPromptOnCancel: false,
     // User Stop (requestRuntimeRestart) still hard-kills the process group and
     // respawns so existing background tasks stop too. Older 0.2.x builds could
@@ -225,6 +230,24 @@ export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdap
     supportsImagePrompts: true,
     supportsCompaction: true,
     resolveModelId: (selection) => resolveGrokAcpBaseModelId(selection.model),
+    applyModelSelection: ({ runtime, startResult, modelSelection }) =>
+      Effect.gen(function* () {
+        const legacy = startResult.initializeResult.protocolVersion === 1;
+        const options = legacy ? [] : yield* runtime.getConfigOptions;
+        const configuredModel = options.find((option) => option.category === "model")?.currentValue;
+        return yield* applyGrokAcpModelSelection({
+          runtime: legacy
+            ? runtime
+            : { setSessionModel: (model) => runtime.setModel(model).pipe(Effect.as({})) },
+          currentModelId: legacy
+            ? currentGrokModelIdFromSessionSetup(startResult.sessionSetupResult)
+            : typeof configuredModel === "string"
+              ? configuredModel
+              : undefined,
+          requestedModelId: resolveGrokAcpBaseModelId(modelSelection.model),
+          mapError: (cause) => cause,
+        });
+      }),
     makeRuntime:
       options.makeRuntime ??
       ((input) =>
@@ -235,6 +258,17 @@ export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdap
           environment: options.environment,
           childProcessSpawner: options.childProcessSpawner,
         })),
+    promptFailure: (cause) =>
+      makeProviderFailure({
+        cause,
+        ...(Schema.is(EffectAcpErrors.AcpRequestError)(cause)
+          ? {
+              message: cause.errorMessage,
+              code: String(cause.code),
+              class: cause.code === xAiRateLimitedErrorCode ? "usage_limit" : "provider_error",
+            }
+          : { class: "provider_error" }),
+      }),
     registerExtensions: registerGrokAcpExtensions,
     extractSubagentUpdate: extractXAiAcpSubagentUpdate,
     extractSubagentEndNotice: extractXAiAcpSubagentEndNotice,
@@ -268,6 +302,7 @@ export function makeGrokAdapterV2(options: GrokAdapterV2Options) {
     fileSystem: options.fileSystem,
     idAllocator: options.idAllocator,
     serverConfig: options.serverConfig,
+    selfInvocation: options.selfInvocation,
     ...(options.nativeLogging === undefined ? {} : { nativeLogging: options.nativeLogging }),
     ...(options.continuationRequests === undefined
       ? {}
@@ -280,6 +315,7 @@ export type GrokAdapterV2DriverEnv =
   | Crypto.Crypto
   | FileSystem.FileSystem
   | IdAllocatorV2
+  | Path.Path
   | ProviderEventLoggers
   | ServerConfig;
 
@@ -291,6 +327,7 @@ export const GrokAdapterV2Driver: ProviderAdapterDriver<GrokSettings, GrokAdapte
     function* (input: ProviderAdapterDriverCreateInput<GrokSettings>) {
       const hostEnvironment = yield* HostProcessEnvironment;
       const hostPlatform = yield* HostProcessPlatform;
+      const selfInvocation = yield* resolveSelfInvocation();
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const crypto = yield* Crypto.Crypto;
       const fileSystem = yield* FileSystem.FileSystem;
@@ -309,6 +346,7 @@ export const GrokAdapterV2Driver: ProviderAdapterDriver<GrokSettings, GrokAdapte
         fileSystem,
         idAllocator,
         serverConfig,
+        selfInvocation,
         continuationRequests,
         nativeLogging: (threadId) =>
           makeNativeLogger({
@@ -333,9 +371,10 @@ export const GrokAdapterV2Driver: ProviderAdapterDriver<GrokSettings, GrokAdapte
   ),
 };
 
-export const layer: Layer.Layer<
+const layer: Layer.Layer<
   ProviderAdapterV2,
   never,
+  | Path.Path
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
@@ -347,6 +386,7 @@ export const layer: Layer.Layer<
   Effect.gen(function* () {
     const hostEnvironment = yield* HostProcessEnvironment;
     const hostPlatform = yield* HostProcessPlatform;
+    const selfInvocation = yield* resolveSelfInvocation();
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const crypto = yield* Crypto.Crypto;
     const fileSystem = yield* FileSystem.FileSystem;
@@ -365,6 +405,7 @@ export const layer: Layer.Layer<
       fileSystem,
       idAllocator,
       serverConfig,
+      selfInvocation,
       continuationRequests,
       nativeLogging: (threadId) =>
         makeNativeLogger({

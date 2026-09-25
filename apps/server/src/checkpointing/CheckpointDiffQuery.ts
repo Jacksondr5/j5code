@@ -73,6 +73,7 @@ function buildTurnDiffResult(
   };
 }
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const checkpointStore = yield* CheckpointStore.CheckpointStore;
@@ -157,9 +158,10 @@ export const make = Effect.gen(function* () {
       const fromCheckpointRef =
         input.fromTurnCount === 0
           ? (() => {
-              const firstRun = projection.runs.find((run) => run.ordinal === 1);
+              // The root scope is shared by every run in this thread. Its
+              // runId tracks the latest owner, while ordinal zero stays the baseline.
               const firstScope = projection.checkpointScopes.find(
-                (scope) => scope.runId === firstRun?.id && scope.kind === "root_run",
+                (scope) => scope.kind === "root_run",
               );
               return firstScope === undefined
                 ? undefined

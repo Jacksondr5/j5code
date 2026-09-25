@@ -21,7 +21,7 @@ export interface ThreadForkPlanV2 {
   readonly transfer: OrchestrationV2ContextTransfer;
 }
 
-export class ThreadForkPlanError extends Schema.TaggedErrorClass<ThreadForkPlanError>()(
+export class ThreadForkPlanError extends Schema.TaggedError<ThreadForkPlanError>()(
   "ThreadForkPlanError",
   {
     sourceThreadId: ThreadId,
@@ -32,7 +32,7 @@ export class ThreadForkPlanError extends Schema.TaggedErrorClass<ThreadForkPlanE
 
 export interface ThreadForkServiceV2Shape {
   readonly plan: (input: {
-    readonly sourceProjection: OrchestrationV2ThreadProjection;
+    readonly sourceProjection: Pick<OrchestrationV2ThreadProjection, "thread">;
     readonly sourceRun: OrchestrationV2Run;
     readonly sourceProviderThread: OrchestrationV2ProviderThread | undefined;
     readonly canonicalSourcePoint: OrchestrationV2ContextSourcePoint;

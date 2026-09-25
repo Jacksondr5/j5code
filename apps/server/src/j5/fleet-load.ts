@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { J5SquadronCreationLayer } from "./a2a/runtimeLayer.ts";
 // @effect-diagnostics nodeBuiltinImport:off globalTimersInEffect:off globalDateInEffect:off globalConsole:off - Standalone host-side benchmark owns an isolated process and temporary SQLite state.
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -26,17 +27,22 @@ import { ProjectService } from "../project/ProjectService.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../mcp/McpSessionRegistry.testkit.ts";
 import {
   OrchestrationV2EventSinkLayerLive,
-  OrchestrationV2LayerLive,
+  OrchestrationV2LayerLive as UpstreamOrchestrationV2LayerLive,
 } from "../orchestration-v2/runtimeLayer.ts";
 import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import { OrchestratorV2, type OrchestratorV2Shape } from "../orchestration-v2/Orchestrator.ts";
 import type { ProviderAdapterV2Shape } from "../orchestration-v2/ProviderAdapter.ts";
 import { makeSqlitePersistenceLive } from "../persistence/Layers/Sqlite.ts";
+import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
 import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+
+const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
+  Layer.provideMerge(J5SquadronCreationLayer),
+);
 
 const FLEET_SIZE = 30;
 const BASELINE_SAMPLES = 30;
@@ -45,7 +51,7 @@ const INTERACTIVE_BATCH_MS = 1_000;
 
 const keepState = process.argv.includes("--keep-state");
 const stateRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "j5-fleet-load-"));
-const dbPath = NodePath.join(stateRoot, "userdata", "state.sqlite");
+const dbPath = NodePath.join(stateRoot, "userdata", "statev2.sqlite");
 
 const modelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
@@ -99,6 +105,11 @@ const SqlitePersistenceLive = makeSqlitePersistenceLive(dbPath).pipe(
 
 const HarnessLayer = Layer.merge(OrchestrationV2LayerLive, OrchestrationV2EventSinkLayerLive).pipe(
   Layer.provide(Layer.mock(GitWorkflowService)({})),
+  Layer.provide(
+    Layer.mock(SourceControlProviderRegistry)({
+      resolveLink: () => Effect.die("The J5 load harness does not resolve title links."),
+    }),
+  ),
   Layer.provide(Layer.mock(ProjectService)({ getById: () => Effect.succeed(Option.none()) })),
   Layer.provide(mcpSessionRegistryTestLayer),
   Layer.provideMerge(SqlitePersistenceLive),

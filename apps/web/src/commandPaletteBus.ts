@@ -1,4 +1,10 @@
 import type { ScopedProjectRef } from "@t3tools/contracts";
+import type { EnvironmentId, PullRequestLinkedThreadsResult } from "@t3tools/contracts";
+
+export interface CommandPaletteLinkedThreads {
+  readonly environmentId: EnvironmentId;
+  readonly threads: PullRequestLinkedThreadsResult["threads"];
+}
 
 // Tiny event bus allowing components to programmatically open the command palette
 // without owning its React state.
@@ -11,13 +17,22 @@ export interface CommandPaletteProjectSelection {
   readonly workspaceRoot: string;
 }
 
+export interface CommandPaletteSourcePicker {
+  readonly environmentId: EnvironmentId;
+  readonly onSelect: (source: string) => void;
+}
+
 export interface CommandPaletteOpenDetail {
   readonly open?: "add-project" | "new-thread-in";
+  readonly query?: string;
+  readonly linkedThreads?: CommandPaletteLinkedThreads;
   /**
    * Opts into returning the normal Add Project picker result instead of opening a thread.
-   * Absent callers retain the normal Add Project navigation behavior.
+   * J5: without this or `sourcePicker`, Add Project opens Create Squadron instead (case 13).
    */
   readonly onProjectSelected?: (selection: CommandPaletteProjectSelection) => void;
+  /** Select an existing folder or repository URL without creating a project or cloning. */
+  readonly sourcePicker?: CommandPaletteSourcePicker;
 }
 
 /** Returns whether an opt-in caller consumed the selection. */

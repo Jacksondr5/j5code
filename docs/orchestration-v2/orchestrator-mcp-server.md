@@ -10,6 +10,7 @@ agent can use this endpoint to:
 - cancel an active delegated task; and
 - create one or more ordinary top-level T3 threads;
 - list and incrementally read project threads;
+- rename threads, regenerate titles, and link or unlink pull requests;
 - send or steer follow-up messages; and
 - wait for or interrupt ordinary thread runs.
 
@@ -116,12 +117,24 @@ provider-specific MCP tools.
 ### ACP Registry V2
 
 The `acpRegistry` driver is the generic flavor of the same shared ACP adapter.
-Each provider instance names an agent from the official ACP Registry. At
-session startup the driver resolves the current platform distribution, uses a
-managed binary cache or the declared `npx`/`uvx` package, and then negotiates
-standard ACP capabilities during `initialize`. A local executable may override
-the managed command without changing the registry-declared arguments or
-environment.
+Each provider instance names an agent from the official ACP Registry. Settings
+searches the registry through the connected server, then prepares a compatible
+distribution before persisting the provider instance. Binary distributions use
+a managed, versioned cache; declared checksums are verified when present.
+Version-pinned `npx` packages install globally through `npm`; `uvx` packages use
+`uv tool install`. ACP launches the resulting global command directly, so the
+same command is available for terminal authentication. A local executable may
+override the installed command without changing the registry-declared arguments
+or environment.
+
+Search, preparation, provider status, and session startup share one
+server-scoped catalog service. This keeps platform selection and registry
+validation identical across settings and runtime use. Catalog inspection never
+starts an ACP process, probes models, or performs authentication. The managed
+provider snapshot creates a disposable `session/new` through the normal provider
+refresh lifecycle, using success as the authentication-readiness proof and
+projecting advertised models into the snapshot. Terminal-only login remains a
+manual operation on the connected server.
 
 Capabilities such as session loading, session forking, models, modes, and MCP
 transport are enabled only when the selected agent advertises them. Missing
@@ -130,13 +143,43 @@ forking uses portable context when native `session/fork` is unavailable, and
 subagents use orchestrator-owned child threads. Registry agents do not receive
 provider-specific extensions; those remain in flavors such as Grok.
 
-### Initial Provider Support
+### Pi V2
 
-The V2 provider adapters are Codex, Claude Agent SDK, Cursor Agent SDK, and
-Grok plus generic registry agents over ACP.
-Capability discovery still reports other registered provider instances, but marks them
-unavailable for orchestration when no V2 adapter exists. This keeps provider
-selection model-visible without allowing a request that cannot run.
+Pi core has no MCP client. When a provider session credential exists, the
+adapter writes a T3-owned extension into the server cache and spawns
+`pi --mode rpc --extension <cache>/pi-t3-mcp-extension.ts` with:
+
+```text
+T3_MCP_URL=http://127.0.0.1:<port>/mcp
+T3_MCP_BEARER_TOKEN=<provider-session-token>
+```
+
+The extension connects to that HTTP endpoint, lists tools, and registers each
+one with `pi.registerTool` under a `mcp__t3-code__` namespace
+(`mcp__t3-code__delegate_task`, `mcp__t3-code__t3_thread_launch`, and the rest).
+The bridge calls the original MCP tool name over HTTP. Follow-up requests send
+`mcp-protocol-version: 2025-06-18`; Effect's MCP transport returns 400
+without it. The first turn of a session also receives the shared T3
+orchestration instructions.
+
+Pi keeps ownership of native extension discovery. T3 does not replace Pi's
+`subagent` tool or reproduce Pi's package and project-trust loader. Durable
+delegation goes through the namespaced T3 MCP `delegate_task` tool and the
+shared orchestration child-thread lifecycle. When Pi's example `subagent`
+extension is installed, the adapter observes its documented `details.results`
+shape and projects task cards with no child thread id. Unknown result shapes
+remain ordinary dynamic tool output.
+
+### Provider Support
+
+A provider instance can run child tasks when its live `ProviderInstance`
+exposes a V2 `orchestrationAdapter` — the same registration the orchestrator
+resolves when a `delegated_task.request` executes. That covers Codex, Claude
+Agent SDK, Cursor Agent SDK, Grok, generic registry agents over ACP, OpenCode,
+OpenCode 2, Pi, Antigravity, and any future driver that builds an adapter.
+Capability discovery still reports other registered provider instances, but
+marks them unavailable for orchestration when no adapter resolves. This keeps
+provider selection model-visible without allowing a request that cannot run.
 
 ## Tool Surface
 
@@ -179,7 +222,10 @@ type DelegateTaskInput = {
 ```
 
 Provider, model, runtime mode, and interaction mode inherit from the parent
-when omitted. Selecting a different provider without a model uses that
+when omitted. A driver-only target inherits the parent's provider instance
+when it can run child tasks, and otherwise selects an available instance of
+that driver; an explicit `providerInstanceId` is honored exactly and fails
+when unavailable. Selecting a different provider without a model uses that
 provider's first advertised model.
 
 Delegation requires an active parent run owned by the MCP credential's
@@ -187,7 +233,7 @@ provider session. The request becomes the V2 command
 `delegated_task.request`.
 
 `mode: "async"` returns the current durable state immediately.
-`mode: "wait"` polls the original delegated run until it becomes terminal or
+`mode: "wait"` waits for the task result, including nested work and completion follow-ups, or until
 the timeout expires. A wait timeout does not cancel the child; the result sets
 `waitTimedOut: true`, and the caller can continue with `task_status`.
 
@@ -198,6 +244,7 @@ type DelegateTaskResult = {
   childRunId: string | null;
   childNodeId: string;
   status: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "interrupted";
+  workState: "working" | "waiting_for_children" | "result_available";
   hasPendingChildRuns: boolean;
   providerInstanceId: string;
   model: string | null;
@@ -214,18 +261,18 @@ type DelegateTaskResult = {
 ### `task_status`
 
 Reads a delegated task from the parent thread's durable projection. A task ID
-from another parent thread is rejected. The primary `childRunId`, `status`,
-`summary`, and `resultContextTransferId` fields stay tied to the original
-delegated run. `hasPendingChildRuns` remains true while any later child run is
-queued or executing. The `latestTerminal*` fields expose the original run or
-the highest-ordinal later terminal run that began execution. Rolled-back runs
-and never-started later cancellations do not displace the latest meaningful
-result.
+from another parent thread is rejected. `childRunId` identifies the original
+run. `workState` distinguishes active work, a finished turn waiting for children,
+and an available result. The task remains nonterminal until its known work
+finishes. Its published `summary` and result transfer then remain stable across
+later follow-ups. `hasPendingChildRuns` reports later queued or executing turns;
+`latestTerminal*` exposes later executed, non-monitor results without replacing
+the published task result.
 
 ### `task_cancel`
 
-Interrupts the original delegated run through the normal V2 `run.interrupt`
-command. It is idempotent for terminal tasks and accepts an optional cancellation
+Interrupts the currently active task run through the normal V2 `run.interrupt`
+command. Native background work between turns currently has no interruptible run. It is idempotent for terminal tasks and accepts an optional cancellation
 reason. Use `t3_thread_interrupt` to interrupt a later follow-up run.
 
 ### `create_threads`
@@ -254,12 +301,20 @@ inherit the parent's project, branch, and worktree path, but they have no
 sub-agent lineage. Entries with a prompt immediately dispatch a run; entries
 without a prompt remain idle.
 
-### `t3_thread_start`
+### `t3_thread_launch`
 
-Creates one ordinary top-level thread and immediately dispatches its first
-prompt. It is the single-thread convenience form of `create_threads` and
-returns the created thread and run IDs. Use `clientRequestId` when a caller may
-retry the request.
+Launches one ordinary top-level thread through the app's launch service. Use an
+explicit `workspaceStrategy` to create a new worktree (`worktree` with `baseRef`),
+attach an existing checkout (`existing_worktree` with `worktreePath`), or use the
+project root (`root`, also the default). The thread is bound to that workspace
+before the agent starts. Creating a worktree in the task prompt does not update
+this binding.
+
+Pass the task in `message`. Project, model, and modes inherit when omitted;
+workspace does not. For stacked PRs, use the parent branch as `baseRef` with
+`startFromOrigin: false`. Launch requires a full-access/default caller and has
+no retry key, so inspect existing threads after a failed or lost response before
+launching again. `create_threads` remains the batch option for a shared checkout.
 
 ### `t3_thread_list`
 
@@ -282,6 +337,20 @@ provenance. MCP-created threads and user-role messages use `createdBy: "agent"`
 and `creationSource: "mcp"`; provider output uses `creationSource: "provider"`.
 Actor and ingress are separate so agent-authored user-role messages remain
 distinguishable from human-authored messages.
+
+### `t3_thread_update`
+
+Updates metadata for the calling thread or another thread in the same project.
+The typed actions are `rename`, `regenerate_title`, `link_pull_request`, and
+`unlink_pull_request`. A link input supplies the repository, number, and URL;
+the server records the target thread's project ID. Branch and workspace changes
+are outside this tool.
+
+The result includes the command ID and durable event sequence together with the
+resultant title, title-regeneration marker, and linked pull request. Reusing a
+`clientRequestId` for the same action and thread replays the same command
+receipt. Thread list and read results expose the linked pull request, and thread
+detail also exposes an in-flight title regeneration.
 
 ### `t3_thread_send`
 
@@ -343,8 +412,8 @@ persisted events and then follows live events, so finalization also runs after
 a server restart. An existing `subagent_result` transfer makes finalization
 idempotent.
 
-The result summary prefers the latest assistant content from the child run and
-falls back to a terminal-status message when no assistant text exists.
+A failed run exposes its provider error before any progress text. Successful
+results use the latest assistant content from the final work turn.
 
 ## Policy And Idempotency
 
@@ -385,8 +454,10 @@ orchestration_error
 
 ## Code Ownership
 
-- Shared schemas: `packages/contracts/src/orchestratorMcp.ts`
-- MCP service: `apps/server/src/mcp/OrchestratorMcpService.ts`
+- Shared schemas: `packages/contracts/src/orchestratorMcp.ts` and
+  `packages/contracts/src/threadMetadataMcp.ts`
+- MCP services: `apps/server/src/mcp/OrchestratorMcpService.ts` and the focused
+  `apps/server/src/mcp/ThreadMetadataMcpService.ts`
 - Tool definitions and handlers:
   `apps/server/src/mcp/toolkits/orchestrator/`
 - HTTP registration and authentication:

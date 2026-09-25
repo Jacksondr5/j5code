@@ -650,10 +650,11 @@ export const ClientRequest__PluginShareUpdateDiscoverability = Schema.Literals([
   "LISTED",
 ]).annotate({ identifier: "ClientRequest__PluginShareUpdateDiscoverability" });
 
-export type ClientRequest__PluginShareListParams = {};
-export const ClientRequest__PluginShareListParams = Schema.Struct({}).annotate({
-  identifier: "ClientRequest__PluginShareListParams",
-});
+export type ClientRequest__PluginShareListParams = { readonly [x: string]: never };
+export const ClientRequest__PluginShareListParams = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({ identifier: "ClientRequest__PluginShareListParams" });
 
 export type ClientRequest__PluginShareCheckoutParams = { readonly remotePluginId: string };
 export const ClientRequest__PluginShareCheckoutParams = Schema.Struct({
@@ -933,10 +934,11 @@ export const ClientRequest__ModelListParams = Schema.Struct({
   ),
 }).annotate({ identifier: "ClientRequest__ModelListParams" });
 
-export type ClientRequest__ModelProviderCapabilitiesReadParams = {};
-export const ClientRequest__ModelProviderCapabilitiesReadParams = Schema.Struct({}).annotate({
-  identifier: "ClientRequest__ModelProviderCapabilitiesReadParams",
-});
+export type ClientRequest__ModelProviderCapabilitiesReadParams = { readonly [x: string]: never };
+export const ClientRequest__ModelProviderCapabilitiesReadParams = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({ identifier: "ClientRequest__ModelProviderCapabilitiesReadParams" });
 
 export type ClientRequest__ExperimentalFeatureListParams = {
   readonly cursor?: string | null;
@@ -2454,8 +2456,11 @@ export const ServerNotification__ThreadRevertedNotification = Schema.Struct({
   threadId: Schema.String,
 }).annotate({ identifier: "ServerNotification__ThreadRevertedNotification" });
 
-export type ServerNotification__SkillsChangedNotification = {};
-export const ServerNotification__SkillsChangedNotification = Schema.Struct({}).annotate({
+export type ServerNotification__SkillsChangedNotification = { readonly [x: string]: never };
+export const ServerNotification__SkillsChangedNotification = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({
   description:
     "Notification emitted when watched local skill files change.\n\nTreat this as an invalidation signal and re-run `skills/list` with the client's current parameters when refreshed skill metadata is needed.",
   identifier: "ServerNotification__SkillsChangedNotification",
@@ -3845,10 +3850,11 @@ export const ServerRequest__ChatgptAuthTokensRefreshReason = Schema.Union(
   { mode: "oneOf" },
 ).annotate({ identifier: "ServerRequest__ChatgptAuthTokensRefreshReason" });
 
-export type ServerRequest__AttestationGenerateParams = {};
-export const ServerRequest__AttestationGenerateParams = Schema.Struct({}).annotate({
-  identifier: "ServerRequest__AttestationGenerateParams",
-});
+export type ServerRequest__AttestationGenerateParams = { readonly [x: string]: never };
+export const ServerRequest__AttestationGenerateParams = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({ identifier: "ServerRequest__AttestationGenerateParams" });
 
 export type ServerRequest__ThreadId = string;
 export const ServerRequest__ThreadId = Schema.String.annotate({
@@ -4412,8 +4418,7 @@ export const V2ConfigBatchWriteParams__MergeStrategy = Schema.Literals([
   "upsert",
 ]).annotate({ identifier: "V2ConfigBatchWriteParams__MergeStrategy" });
 
-export type V2ConfigReadResponse__AnalyticsConfig = {
-  readonly enabled?: boolean | null;
+export type V2ConfigReadResponse__AnalyticsConfig = { readonly enabled?: boolean | null } & {
   readonly [x: string]: Schema.Json;
 };
 export const V2ConfigReadResponse__AnalyticsConfig = Schema.StructWithRest(
@@ -4594,10 +4599,11 @@ export const V2ConfigReadResponse__AppToolApproval = Schema.Literals([
   "approve",
 ]).annotate({ identifier: "V2ConfigReadResponse__AppToolApproval" });
 
-export type V2ConfigReadResponse__AppToolsConfig = {};
-export const V2ConfigReadResponse__AppToolsConfig = Schema.Struct({}).annotate({
-  identifier: "V2ConfigReadResponse__AppToolsConfig",
-});
+export type V2ConfigReadResponse__AppToolsConfig = { readonly [x: string]: never };
+export const V2ConfigReadResponse__AppToolsConfig = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({ identifier: "V2ConfigReadResponse__AppToolsConfig" });
 
 export type V2ConfigRequirementsReadResponse__AskForApproval =
   | "untrusted"
@@ -18562,82 +18568,73 @@ export const ServerNotification__ThreadRealtimeStartedNotification = Schema.Stru
 
 export type ServerNotification__ThreadRealtimeItem =
   | {
-      readonly type: "realtimeSessionStarted";
       readonly id: string;
       readonly realtimeSessionId: string;
+      readonly type: "realtimeSessionStarted";
     }
   | {
+      readonly id: string;
+      readonly realtimeSessionId: string;
       readonly role: ServerNotification__ThreadRealtimeTranscriptRole;
       readonly text: string;
       readonly type: "transcriptSegment";
-      readonly id: string;
-      readonly realtimeSessionId: string;
     }
   | {
+      readonly id: string;
+      readonly realtimeSessionId: string;
       readonly item_id: string;
       readonly presentation: ServerNotification__ThreadRealtimeBemItemPresentation;
       readonly turn_id: string;
       readonly type: "bemItemPromoted";
-      readonly id: string;
-      readonly realtimeSessionId: string;
     }
   | {
-      readonly outcome: ServerNotification__ThreadRealtimeSessionOutcome;
-      readonly type: "realtimeSessionClosed";
       readonly id: string;
       readonly realtimeSessionId: string;
+      readonly outcome: ServerNotification__ThreadRealtimeSessionOutcome;
+      readonly type: "realtimeSessionClosed";
     };
 export const ServerNotification__ThreadRealtimeItem = Schema.Union(
   [
     Schema.Struct({
+      id: Schema.String,
+      realtimeSessionId: Schema.String,
       type: Schema.Literal("realtimeSessionStarted").annotate({
         title: "RealtimeSessionStartedThreadRealtimeItemType",
       }),
+    }).annotate({ title: "RealtimeSessionStartedThreadRealtimeItem" }),
+    Schema.Struct({
       id: Schema.String,
       realtimeSessionId: Schema.String,
-    }).annotate({
-      title: "RealtimeSessionStartedThreadRealtimeItem",
-      description: "EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline.",
-    }),
-    Schema.Struct({
       role: ServerNotification__ThreadRealtimeTranscriptRole,
       text: Schema.String,
       type: Schema.Literal("transcriptSegment").annotate({
         title: "TranscriptSegmentThreadRealtimeItemType",
       }),
+    }).annotate({ title: "TranscriptSegmentThreadRealtimeItem" }),
+    Schema.Struct({
       id: Schema.String,
       realtimeSessionId: Schema.String,
-    }).annotate({
-      title: "TranscriptSegmentThreadRealtimeItem",
-      description: "EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline.",
-    }),
-    Schema.Struct({
       item_id: Schema.String,
       presentation: ServerNotification__ThreadRealtimeBemItemPresentation,
       turn_id: Schema.String,
       type: Schema.Literal("bemItemPromoted").annotate({
         title: "BemItemPromotedThreadRealtimeItemType",
       }),
+    }).annotate({ title: "BemItemPromotedThreadRealtimeItem" }),
+    Schema.Struct({
       id: Schema.String,
       realtimeSessionId: Schema.String,
-    }).annotate({
-      title: "BemItemPromotedThreadRealtimeItem",
-      description: "EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline.",
-    }),
-    Schema.Struct({
       outcome: ServerNotification__ThreadRealtimeSessionOutcome,
       type: Schema.Literal("realtimeSessionClosed").annotate({
         title: "RealtimeSessionClosedThreadRealtimeItemType",
       }),
-      id: Schema.String,
-      realtimeSessionId: Schema.String,
-    }).annotate({
-      title: "RealtimeSessionClosedThreadRealtimeItem",
-      description: "EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline.",
-    }),
+    }).annotate({ title: "RealtimeSessionClosedThreadRealtimeItem" }),
   ],
   { mode: "oneOf" },
-).annotate({ identifier: "ServerNotification__ThreadRealtimeItem" });
+).annotate({
+  description: "EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline.",
+  identifier: "ServerNotification__ThreadRealtimeItem",
+});
 
 export type ServerNotification__ThreadRealtimeOutputAudioDeltaNotification = {
   readonly audio: ServerNotification__ThreadRealtimeAudioChunk;
@@ -20381,9 +20378,25 @@ export const V2HookCompletedNotification__HookOutputEntry = Schema.Struct({
 
 export type V2HooksListResponse__HookMetadata =
   | {
+      readonly additionalContextLimit?: number | null;
+      readonly currentHash: string;
+      readonly displayOrder: number;
+      readonly enabled: boolean;
+      readonly eventName: V2HooksListResponse__HookEventName;
+      readonly isManaged: boolean;
+      readonly key: string;
+      readonly matcher?: string | null;
+      readonly pluginId?: string | null;
+      readonly source: V2HooksListResponse__HookSource;
+      readonly sourcePath: V2HooksListResponse__AbsolutePathBuf;
+      readonly statusMessage?: string | null;
+      readonly timeoutSec: number;
+      readonly trustStatus: V2HooksListResponse__HookTrustStatus;
       readonly async?: boolean;
       readonly command: string;
       readonly handlerType: "command";
+    }
+  | {
       readonly additionalContextLimit?: number | null;
       readonly currentHash: string;
       readonly displayOrder: number;
@@ -20398,11 +20411,11 @@ export type V2HooksListResponse__HookMetadata =
       readonly statusMessage?: string | null;
       readonly timeoutSec: number;
       readonly trustStatus: V2HooksListResponse__HookTrustStatus;
-    }
-  | {
       readonly handlerType: "mcpTool";
       readonly server: string;
       readonly tool: string;
+    }
+  | {
       readonly additionalContextLimit?: number | null;
       readonly currentHash: string;
       readonly displayOrder: number;
@@ -20417,26 +20430,9 @@ export type V2HooksListResponse__HookMetadata =
       readonly statusMessage?: string | null;
       readonly timeoutSec: number;
       readonly trustStatus: V2HooksListResponse__HookTrustStatus;
-    }
-  | {
       readonly handlerType: "prompt";
-      readonly additionalContextLimit?: number | null;
-      readonly currentHash: string;
-      readonly displayOrder: number;
-      readonly enabled: boolean;
-      readonly eventName: V2HooksListResponse__HookEventName;
-      readonly isManaged: boolean;
-      readonly key: string;
-      readonly matcher?: string | null;
-      readonly pluginId?: string | null;
-      readonly source: V2HooksListResponse__HookSource;
-      readonly sourcePath: V2HooksListResponse__AbsolutePathBuf;
-      readonly statusMessage?: string | null;
-      readonly timeoutSec: number;
-      readonly trustStatus: V2HooksListResponse__HookTrustStatus;
     }
   | {
-      readonly handlerType: "agent";
       readonly additionalContextLimit?: number | null;
       readonly currentHash: string;
       readonly displayOrder: number;
@@ -20451,13 +20447,53 @@ export type V2HooksListResponse__HookMetadata =
       readonly statusMessage?: string | null;
       readonly timeoutSec: number;
       readonly trustStatus: V2HooksListResponse__HookTrustStatus;
+      readonly handlerType: "agent";
     };
 export const V2HooksListResponse__HookMetadata = Schema.Union(
   [
     Schema.Struct({
+      additionalContextLimit: Schema.optionalKey(
+        Schema.Union([
+          Schema.Number.annotate({
+            description:
+              "Configured `additionalContext` spill threshold. `null` uses 2,500 tokens; `0` disables spilling.",
+            format: "uint",
+          })
+            .check(Schema.isInt().annotate({ expected: "an integer" }))
+            .check(
+              Schema.isGreaterThanOrEqualTo(0).annotate({
+                expected: "a value greater than or equal to 0",
+              }),
+            ),
+          Schema.Null,
+        ]),
+      ),
+      currentHash: Schema.String,
+      displayOrder: Schema.Number.annotate({ format: "int64" }).check(
+        Schema.isInt().annotate({ expected: "an integer" }),
+      ),
+      enabled: Schema.Boolean,
+      eventName: V2HooksListResponse__HookEventName,
+      isManaged: Schema.Boolean,
+      key: Schema.String,
+      matcher: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      pluginId: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      source: V2HooksListResponse__HookSource,
+      sourcePath: V2HooksListResponse__AbsolutePathBuf,
+      statusMessage: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      timeoutSec: Schema.Number.annotate({ format: "uint64" })
+        .check(Schema.isInt().annotate({ expected: "an integer" }))
+        .check(
+          Schema.isGreaterThanOrEqualTo(0).annotate({
+            expected: "a value greater than or equal to 0",
+          }),
+        ),
+      trustStatus: V2HooksListResponse__HookTrustStatus,
       async: Schema.optionalKey(Schema.Boolean.annotate({ default: false })),
       command: Schema.String,
       handlerType: Schema.Literal("command"),
+    }),
+    Schema.Struct({
       additionalContextLimit: Schema.optionalKey(
         Schema.Union([
           Schema.Number.annotate({
@@ -20495,51 +20531,11 @@ export const V2HooksListResponse__HookMetadata = Schema.Union(
           }),
         ),
       trustStatus: V2HooksListResponse__HookTrustStatus,
-    }),
-    Schema.Struct({
       handlerType: Schema.Literal("mcpTool"),
       server: Schema.String,
       tool: Schema.String,
-      additionalContextLimit: Schema.optionalKey(
-        Schema.Union([
-          Schema.Number.annotate({
-            description:
-              "Configured `additionalContext` spill threshold. `null` uses 2,500 tokens; `0` disables spilling.",
-            format: "uint",
-          })
-            .check(Schema.isInt().annotate({ expected: "an integer" }))
-            .check(
-              Schema.isGreaterThanOrEqualTo(0).annotate({
-                expected: "a value greater than or equal to 0",
-              }),
-            ),
-          Schema.Null,
-        ]),
-      ),
-      currentHash: Schema.String,
-      displayOrder: Schema.Number.annotate({ format: "int64" }).check(
-        Schema.isInt().annotate({ expected: "an integer" }),
-      ),
-      enabled: Schema.Boolean,
-      eventName: V2HooksListResponse__HookEventName,
-      isManaged: Schema.Boolean,
-      key: Schema.String,
-      matcher: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
-      pluginId: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
-      source: V2HooksListResponse__HookSource,
-      sourcePath: V2HooksListResponse__AbsolutePathBuf,
-      statusMessage: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
-      timeoutSec: Schema.Number.annotate({ format: "uint64" })
-        .check(Schema.isInt().annotate({ expected: "an integer" }))
-        .check(
-          Schema.isGreaterThanOrEqualTo(0).annotate({
-            expected: "a value greater than or equal to 0",
-          }),
-        ),
-      trustStatus: V2HooksListResponse__HookTrustStatus,
     }),
     Schema.Struct({
-      handlerType: Schema.Literal("prompt"),
       additionalContextLimit: Schema.optionalKey(
         Schema.Union([
           Schema.Number.annotate({
@@ -20577,9 +20573,9 @@ export const V2HooksListResponse__HookMetadata = Schema.Union(
           }),
         ),
       trustStatus: V2HooksListResponse__HookTrustStatus,
+      handlerType: Schema.Literal("prompt"),
     }).annotate({ title: "PromptHookMetadata" }),
     Schema.Struct({
-      handlerType: Schema.Literal("agent"),
       additionalContextLimit: Schema.optionalKey(
         Schema.Union([
           Schema.Number.annotate({
@@ -20617,6 +20613,7 @@ export const V2HooksListResponse__HookMetadata = Schema.Union(
           }),
         ),
       trustStatus: V2HooksListResponse__HookTrustStatus,
+      handlerType: Schema.Literal("agent"),
     }).annotate({ title: "AgentHookMetadata" }),
   ],
   { mode: "oneOf" },
@@ -24104,161 +24101,143 @@ export const V2ThreadReadResponse__CollabAgentState = Schema.Struct({
 
 export type V2ThreadRealtimeItemCompletedNotification__ThreadRealtimeItem =
   | {
-      readonly type: "realtimeSessionStarted";
       readonly id: string;
       readonly realtimeSessionId: string;
+      readonly type: "realtimeSessionStarted";
     }
   | {
+      readonly id: string;
+      readonly realtimeSessionId: string;
       readonly role: V2ThreadRealtimeItemCompletedNotification__ThreadRealtimeTranscriptRole;
       readonly text: string;
       readonly type: "transcriptSegment";
-      readonly id: string;
-      readonly realtimeSessionId: string;
     }
   | {
+      readonly id: string;
+      readonly realtimeSessionId: string;
       readonly item_id: string;
       readonly presentation: V2ThreadRealtimeItemCompletedNotification__ThreadRealtimeBemItemPresentation;
       readonly turn_id: string;
       readonly type: "bemItemPromoted";
-      readonly id: string;
-      readonly realtimeSessionId: string;
     }
   | {
-      readonly outcome: V2ThreadRealtimeItemCompletedNotification__ThreadRealtimeSessionOutcome;
-      readonly type: "realtimeSessionClosed";
       readonly id: string;
       readonly realtimeSessionId: string;
+      readonly outcome: V2ThreadRealtimeItemCompletedNotification__ThreadRealtimeSessionOutcome;
+      readonly type: "realtimeSessionClosed";
     };
 export const V2ThreadRealtimeItemCompletedNotification__ThreadRealtimeItem = Schema.Union(
   [
     Schema.Struct({
+      id: Schema.String,
+      realtimeSessionId: Schema.String,
       type: Schema.Literal("realtimeSessionStarted").annotate({
         title: "RealtimeSessionStartedThreadRealtimeItemType",
       }),
+    }).annotate({ title: "RealtimeSessionStartedThreadRealtimeItem" }),
+    Schema.Struct({
       id: Schema.String,
       realtimeSessionId: Schema.String,
-    }).annotate({
-      title: "RealtimeSessionStartedThreadRealtimeItem",
-      description: "EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline.",
-    }),
-    Schema.Struct({
       role: V2ThreadRealtimeItemCompletedNotification__ThreadRealtimeTranscriptRole,
       text: Schema.String,
       type: Schema.Literal("transcriptSegment").annotate({
         title: "TranscriptSegmentThreadRealtimeItemType",
       }),
+    }).annotate({ title: "TranscriptSegmentThreadRealtimeItem" }),
+    Schema.Struct({
       id: Schema.String,
       realtimeSessionId: Schema.String,
-    }).annotate({
-      title: "TranscriptSegmentThreadRealtimeItem",
-      description: "EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline.",
-    }),
-    Schema.Struct({
       item_id: Schema.String,
       presentation: V2ThreadRealtimeItemCompletedNotification__ThreadRealtimeBemItemPresentation,
       turn_id: Schema.String,
       type: Schema.Literal("bemItemPromoted").annotate({
         title: "BemItemPromotedThreadRealtimeItemType",
       }),
+    }).annotate({ title: "BemItemPromotedThreadRealtimeItem" }),
+    Schema.Struct({
       id: Schema.String,
       realtimeSessionId: Schema.String,
-    }).annotate({
-      title: "BemItemPromotedThreadRealtimeItem",
-      description: "EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline.",
-    }),
-    Schema.Struct({
       outcome: V2ThreadRealtimeItemCompletedNotification__ThreadRealtimeSessionOutcome,
       type: Schema.Literal("realtimeSessionClosed").annotate({
         title: "RealtimeSessionClosedThreadRealtimeItemType",
       }),
-      id: Schema.String,
-      realtimeSessionId: Schema.String,
-    }).annotate({
-      title: "RealtimeSessionClosedThreadRealtimeItem",
-      description: "EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline.",
-    }),
+    }).annotate({ title: "RealtimeSessionClosedThreadRealtimeItem" }),
   ],
   { mode: "oneOf" },
-).annotate({ identifier: "V2ThreadRealtimeItemCompletedNotification__ThreadRealtimeItem" });
+).annotate({
+  description: "EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline.",
+  identifier: "V2ThreadRealtimeItemCompletedNotification__ThreadRealtimeItem",
+});
 
 export type V2ThreadRealtimeItemStartedNotification__ThreadRealtimeItem =
   | {
-      readonly type: "realtimeSessionStarted";
       readonly id: string;
       readonly realtimeSessionId: string;
+      readonly type: "realtimeSessionStarted";
     }
   | {
+      readonly id: string;
+      readonly realtimeSessionId: string;
       readonly role: V2ThreadRealtimeItemStartedNotification__ThreadRealtimeTranscriptRole;
       readonly text: string;
       readonly type: "transcriptSegment";
-      readonly id: string;
-      readonly realtimeSessionId: string;
     }
   | {
+      readonly id: string;
+      readonly realtimeSessionId: string;
       readonly item_id: string;
       readonly presentation: V2ThreadRealtimeItemStartedNotification__ThreadRealtimeBemItemPresentation;
       readonly turn_id: string;
       readonly type: "bemItemPromoted";
-      readonly id: string;
-      readonly realtimeSessionId: string;
     }
   | {
-      readonly outcome: V2ThreadRealtimeItemStartedNotification__ThreadRealtimeSessionOutcome;
-      readonly type: "realtimeSessionClosed";
       readonly id: string;
       readonly realtimeSessionId: string;
+      readonly outcome: V2ThreadRealtimeItemStartedNotification__ThreadRealtimeSessionOutcome;
+      readonly type: "realtimeSessionClosed";
     };
 export const V2ThreadRealtimeItemStartedNotification__ThreadRealtimeItem = Schema.Union(
   [
     Schema.Struct({
+      id: Schema.String,
+      realtimeSessionId: Schema.String,
       type: Schema.Literal("realtimeSessionStarted").annotate({
         title: "RealtimeSessionStartedThreadRealtimeItemType",
       }),
+    }).annotate({ title: "RealtimeSessionStartedThreadRealtimeItem" }),
+    Schema.Struct({
       id: Schema.String,
       realtimeSessionId: Schema.String,
-    }).annotate({
-      title: "RealtimeSessionStartedThreadRealtimeItem",
-      description: "EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline.",
-    }),
-    Schema.Struct({
       role: V2ThreadRealtimeItemStartedNotification__ThreadRealtimeTranscriptRole,
       text: Schema.String,
       type: Schema.Literal("transcriptSegment").annotate({
         title: "TranscriptSegmentThreadRealtimeItemType",
       }),
+    }).annotate({ title: "TranscriptSegmentThreadRealtimeItem" }),
+    Schema.Struct({
       id: Schema.String,
       realtimeSessionId: Schema.String,
-    }).annotate({
-      title: "TranscriptSegmentThreadRealtimeItem",
-      description: "EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline.",
-    }),
-    Schema.Struct({
       item_id: Schema.String,
       presentation: V2ThreadRealtimeItemStartedNotification__ThreadRealtimeBemItemPresentation,
       turn_id: Schema.String,
       type: Schema.Literal("bemItemPromoted").annotate({
         title: "BemItemPromotedThreadRealtimeItemType",
       }),
+    }).annotate({ title: "BemItemPromotedThreadRealtimeItem" }),
+    Schema.Struct({
       id: Schema.String,
       realtimeSessionId: Schema.String,
-    }).annotate({
-      title: "BemItemPromotedThreadRealtimeItem",
-      description: "EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline.",
-    }),
-    Schema.Struct({
       outcome: V2ThreadRealtimeItemStartedNotification__ThreadRealtimeSessionOutcome,
       type: Schema.Literal("realtimeSessionClosed").annotate({
         title: "RealtimeSessionClosedThreadRealtimeItemType",
       }),
-      id: Schema.String,
-      realtimeSessionId: Schema.String,
-    }).annotate({
-      title: "RealtimeSessionClosedThreadRealtimeItem",
-      description: "EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline.",
-    }),
+    }).annotate({ title: "RealtimeSessionClosedThreadRealtimeItem" }),
   ],
   { mode: "oneOf" },
-).annotate({ identifier: "V2ThreadRealtimeItemStartedNotification__ThreadRealtimeItem" });
+).annotate({
+  description: "EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline.",
+  identifier: "V2ThreadRealtimeItemStartedNotification__ThreadRealtimeItem",
+});
 
 export type V2ThreadResumeParams__FunctionCallOutputContentItem =
   | { readonly text: string; readonly type: "input_text" }
@@ -32489,11 +32468,11 @@ export type ServerNotification__ThreadItem =
       readonly memoryCitation?: ServerNotification__MemoryCitation | null;
       readonly phase?: ServerNotification__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -32622,7 +32601,6 @@ export const ServerNotification__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([ServerNotification__MessagePhase, Schema.Null])),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -32634,6 +32612,7 @@ export const ServerNotification__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -33097,11 +33076,11 @@ export type V2ItemCompletedNotification__ThreadItem =
       readonly memoryCitation?: V2ItemCompletedNotification__MemoryCitation | null;
       readonly phase?: V2ItemCompletedNotification__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -33234,7 +33213,6 @@ export const V2ItemCompletedNotification__ThreadItem = Schema.Union(
         Schema.Union([V2ItemCompletedNotification__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -33246,6 +33224,7 @@ export const V2ItemCompletedNotification__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -33582,11 +33561,11 @@ export type V2ItemStartedNotification__ThreadItem =
       readonly memoryCitation?: V2ItemStartedNotification__MemoryCitation | null;
       readonly phase?: V2ItemStartedNotification__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -33717,7 +33696,6 @@ export const V2ItemStartedNotification__ThreadItem = Schema.Union(
         Schema.Union([V2ItemStartedNotification__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -33729,6 +33707,7 @@ export const V2ItemStartedNotification__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -34786,11 +34765,11 @@ export type V2ReviewStartResponse__ThreadItem =
       readonly memoryCitation?: V2ReviewStartResponse__MemoryCitation | null;
       readonly phase?: V2ReviewStartResponse__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -34919,7 +34898,6 @@ export const V2ReviewStartResponse__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([V2ReviewStartResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -34931,6 +34909,7 @@ export const V2ReviewStartResponse__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -35253,11 +35232,11 @@ export type V2ThreadForkResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadForkResponse__MemoryCitation | null;
       readonly phase?: V2ThreadForkResponse__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -35386,7 +35365,6 @@ export const V2ThreadForkResponse__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([V2ThreadForkResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -35398,6 +35376,7 @@ export const V2ThreadForkResponse__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -35709,11 +35688,11 @@ export type V2ThreadItemsListResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadItemsListResponse__MemoryCitation | null;
       readonly phase?: V2ThreadItemsListResponse__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -35844,7 +35823,6 @@ export const V2ThreadItemsListResponse__ThreadItem = Schema.Union(
         Schema.Union([V2ThreadItemsListResponse__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -35856,6 +35834,7 @@ export const V2ThreadItemsListResponse__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -36168,11 +36147,11 @@ export type V2ThreadListResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadListResponse__MemoryCitation | null;
       readonly phase?: V2ThreadListResponse__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -36301,7 +36280,6 @@ export const V2ThreadListResponse__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([V2ThreadListResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -36313,6 +36291,7 @@ export const V2ThreadListResponse__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -36624,11 +36603,11 @@ export type V2ThreadMetadataUpdateResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadMetadataUpdateResponse__MemoryCitation | null;
       readonly phase?: V2ThreadMetadataUpdateResponse__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -36761,7 +36740,6 @@ export const V2ThreadMetadataUpdateResponse__ThreadItem = Schema.Union(
         Schema.Union([V2ThreadMetadataUpdateResponse__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -36773,6 +36751,7 @@ export const V2ThreadMetadataUpdateResponse__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -37085,11 +37064,11 @@ export type V2ThreadReadResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadReadResponse__MemoryCitation | null;
       readonly phase?: V2ThreadReadResponse__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -37218,7 +37197,6 @@ export const V2ThreadReadResponse__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([V2ThreadReadResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -37230,6 +37208,7 @@ export const V2ThreadReadResponse__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -37541,11 +37520,11 @@ export type V2ThreadResumeResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadResumeResponse__MemoryCitation | null;
       readonly phase?: V2ThreadResumeResponse__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -37674,7 +37653,6 @@ export const V2ThreadResumeResponse__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([V2ThreadResumeResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -37686,6 +37664,7 @@ export const V2ThreadResumeResponse__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -37997,11 +37976,11 @@ export type V2ThreadRevertResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadRevertResponse__MemoryCitation | null;
       readonly phase?: V2ThreadRevertResponse__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -38130,7 +38109,6 @@ export const V2ThreadRevertResponse__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([V2ThreadRevertResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -38142,6 +38120,7 @@ export const V2ThreadRevertResponse__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -38453,11 +38432,11 @@ export type V2ThreadRollbackResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadRollbackResponse__MemoryCitation | null;
       readonly phase?: V2ThreadRollbackResponse__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -38588,7 +38567,6 @@ export const V2ThreadRollbackResponse__ThreadItem = Schema.Union(
         Schema.Union([V2ThreadRollbackResponse__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -38600,6 +38578,7 @@ export const V2ThreadRollbackResponse__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -38949,11 +38928,11 @@ export type V2ThreadStartedNotification__ThreadItem =
       readonly memoryCitation?: V2ThreadStartedNotification__MemoryCitation | null;
       readonly phase?: V2ThreadStartedNotification__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -39086,7 +39065,6 @@ export const V2ThreadStartedNotification__ThreadItem = Schema.Union(
         Schema.Union([V2ThreadStartedNotification__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -39098,6 +39076,7 @@ export const V2ThreadStartedNotification__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -39410,11 +39389,11 @@ export type V2ThreadStartResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadStartResponse__MemoryCitation | null;
       readonly phase?: V2ThreadStartResponse__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -39543,7 +39522,6 @@ export const V2ThreadStartResponse__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([V2ThreadStartResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -39555,6 +39533,7 @@ export const V2ThreadStartResponse__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -39866,11 +39845,11 @@ export type V2ThreadTurnsListResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadTurnsListResponse__MemoryCitation | null;
       readonly phase?: V2ThreadTurnsListResponse__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -40001,7 +39980,6 @@ export const V2ThreadTurnsListResponse__ThreadItem = Schema.Union(
         Schema.Union([V2ThreadTurnsListResponse__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -40013,6 +39991,7 @@ export const V2ThreadTurnsListResponse__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -40325,11 +40304,11 @@ export type V2ThreadUnarchiveResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadUnarchiveResponse__MemoryCitation | null;
       readonly phase?: V2ThreadUnarchiveResponse__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -40460,7 +40439,6 @@ export const V2ThreadUnarchiveResponse__ThreadItem = Schema.Union(
         Schema.Union([V2ThreadUnarchiveResponse__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -40472,6 +40450,7 @@ export const V2ThreadUnarchiveResponse__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -40784,11 +40763,11 @@ export type V2TurnCompletedNotification__ThreadItem =
       readonly memoryCitation?: V2TurnCompletedNotification__MemoryCitation | null;
       readonly phase?: V2TurnCompletedNotification__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -40921,7 +40900,6 @@ export const V2TurnCompletedNotification__ThreadItem = Schema.Union(
         Schema.Union([V2TurnCompletedNotification__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -40933,6 +40911,7 @@ export const V2TurnCompletedNotification__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -41245,11 +41224,11 @@ export type V2TurnStartedNotification__ThreadItem =
       readonly memoryCitation?: V2TurnStartedNotification__MemoryCitation | null;
       readonly phase?: V2TurnStartedNotification__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -41380,7 +41359,6 @@ export const V2TurnStartedNotification__ThreadItem = Schema.Union(
         Schema.Union([V2TurnStartedNotification__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -41392,6 +41370,7 @@ export const V2TurnStartedNotification__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -41715,11 +41694,11 @@ export type V2TurnStartResponse__ThreadItem =
       readonly memoryCitation?: V2TurnStartResponse__MemoryCitation | null;
       readonly phase?: V2TurnStartResponse__MessagePhase | null;
       readonly text: string;
-      readonly type: "agentMessage";
       readonly questions?: ReadonlyArray<{
         readonly title: string;
         readonly options?: ReadonlyArray<string> | null;
       }> | null;
+      readonly type: "agentMessage";
     }
   | {
       readonly id: string;
@@ -41848,7 +41827,6 @@ export const V2TurnStartResponse__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([V2TurnStartResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
-      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
       questions: Schema.optionalKey(
         Schema.Union([
           Schema.Array(
@@ -41860,6 +41838,7 @@ export const V2TurnStartResponse__ThreadItem = Schema.Union(
           Schema.Null,
         ]),
       ),
+      type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
       id: Schema.String,
@@ -42614,8 +42593,7 @@ export type V2ConfigReadResponse__Config = {
   readonly service_tier?: string | null;
   readonly tools?: V2ConfigReadResponse__ToolsV2 | null;
   readonly web_search?: V2ConfigReadResponse__WebSearchMode | null;
-  readonly [x: string]: Schema.Json;
-};
+} & { readonly [x: string]: Schema.Json };
 export const V2ConfigReadResponse__Config = Schema.StructWithRest(
   Schema.Struct({
     analytics: Schema.optionalKey(
@@ -46369,49 +46347,62 @@ export const ServerNotification__ItemGuardianApprovalReviewCompletedNotification
 
 export type ServerRequest__McpServerElicitationRequestParams =
   | {
+      readonly serverName: string;
+      readonly threadId: string;
+      readonly turnId?: string | null;
       readonly _meta?: Schema.Json;
       readonly message: string;
       readonly mode: "form";
       readonly requestedSchema: ServerRequest__McpElicitationSchema;
+    }
+  | {
       readonly serverName: string;
       readonly threadId: string;
       readonly turnId?: string | null;
-    }
-  | {
       readonly _meta?: Schema.Json;
       readonly message: string;
       readonly mode: "openai/form";
       readonly requestedSchema: Schema.Json;
+    }
+  | {
       readonly serverName: string;
       readonly threadId: string;
       readonly turnId?: string | null;
-    }
-  | {
       readonly _meta?: Schema.Json;
       readonly message: string;
       readonly mode: "openaiForm";
       readonly requestedSchema: Schema.Json;
+    }
+  | {
       readonly serverName: string;
       readonly threadId: string;
       readonly turnId?: string | null;
-    }
-  | {
       readonly _meta?: Schema.Json;
       readonly elicitationId: string;
       readonly message: string;
       readonly mode: "url";
       readonly url: string;
-      readonly serverName: string;
-      readonly threadId: string;
-      readonly turnId?: string | null;
     };
 export const ServerRequest__McpServerElicitationRequestParams = Schema.Union(
   [
     Schema.Struct({
+      serverName: Schema.String,
+      threadId: Schema.String,
+      turnId: Schema.optionalKey(
+        Schema.Union([
+          Schema.String.annotate({
+            description:
+              "Active Codex turn when this elicitation was observed, if app-server could correlate one.\n\nThis is nullable because MCP models elicitation as a standalone server-to-client request identified by the MCP server request id. It may be triggered during a turn, but turn context is app-server correlation rather than part of the protocol identity of the elicitation itself.",
+          }),
+          Schema.Null,
+        ]),
+      ),
       _meta: Schema.optionalKey(Schema.Json.annotate({ expected: "JSON value" })),
       message: Schema.String,
       mode: Schema.Literal("form"),
       requestedSchema: ServerRequest__McpElicitationSchema,
+    }),
+    Schema.Struct({
       serverName: Schema.String,
       threadId: Schema.String,
       turnId: Schema.optionalKey(
@@ -46423,12 +46414,12 @@ export const ServerRequest__McpServerElicitationRequestParams = Schema.Union(
           Schema.Null,
         ]),
       ),
-    }),
-    Schema.Struct({
       _meta: Schema.optionalKey(Schema.Json.annotate({ expected: "JSON value" })),
       message: Schema.String,
       mode: Schema.Literal("openai/form"),
       requestedSchema: Schema.Json.annotate({ expected: "JSON value" }),
+    }),
+    Schema.Struct({
       serverName: Schema.String,
       threadId: Schema.String,
       turnId: Schema.optionalKey(
@@ -46440,12 +46431,12 @@ export const ServerRequest__McpServerElicitationRequestParams = Schema.Union(
           Schema.Null,
         ]),
       ),
-    }),
-    Schema.Struct({
       _meta: Schema.optionalKey(Schema.Json.annotate({ expected: "JSON value" })),
       message: Schema.String,
       mode: Schema.Literal("openaiForm"),
       requestedSchema: Schema.Json.annotate({ expected: "JSON value" }),
+    }),
+    Schema.Struct({
       serverName: Schema.String,
       threadId: Schema.String,
       turnId: Schema.optionalKey(
@@ -46457,24 +46448,11 @@ export const ServerRequest__McpServerElicitationRequestParams = Schema.Union(
           Schema.Null,
         ]),
       ),
-    }),
-    Schema.Struct({
       _meta: Schema.optionalKey(Schema.Json.annotate({ expected: "JSON value" })),
       elicitationId: Schema.String,
       message: Schema.String,
       mode: Schema.Literal("url"),
       url: Schema.String,
-      serverName: Schema.String,
-      threadId: Schema.String,
-      turnId: Schema.optionalKey(
-        Schema.Union([
-          Schema.String.annotate({
-            description:
-              "Active Codex turn when this elicitation was observed, if app-server could correlate one.\n\nThis is nullable because MCP models elicitation as a standalone server-to-client request identified by the MCP server request id. It may be triggered during a turn, but turn context is app-server correlation rather than part of the protocol identity of the elicitation itself.",
-          }),
-          Schema.Null,
-        ]),
-      ),
     }),
   ],
   { mode: "oneOf" },
@@ -46520,8 +46498,8 @@ export const ApplyPatchApprovalResponse = Schema.Struct({
   decision: ApplyPatchApprovalResponse__ReviewDecision,
 }).annotate({ title: "ApplyPatchApprovalResponse" });
 
-export type AttestationGenerateParams = {};
-export const AttestationGenerateParams = Schema.Struct({}).annotate({
+export type AttestationGenerateParams = { readonly [x: string]: never };
+export const AttestationGenerateParams = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "AttestationGenerateParams",
 });
 
@@ -48761,49 +48739,62 @@ export const JSONRPCResponse = Schema.Struct({
 
 export type McpServerElicitationRequestParams =
   | {
+      readonly serverName: string;
+      readonly threadId: string;
+      readonly turnId?: string | null;
       readonly _meta?: Schema.Json;
       readonly message: string;
       readonly mode: "form";
       readonly requestedSchema: McpServerElicitationRequestParams__McpElicitationSchema;
+    }
+  | {
       readonly serverName: string;
       readonly threadId: string;
       readonly turnId?: string | null;
-    }
-  | {
       readonly _meta?: Schema.Json;
       readonly message: string;
       readonly mode: "openai/form";
       readonly requestedSchema: Schema.Json;
+    }
+  | {
       readonly serverName: string;
       readonly threadId: string;
       readonly turnId?: string | null;
-    }
-  | {
       readonly _meta?: Schema.Json;
       readonly message: string;
       readonly mode: "openaiForm";
       readonly requestedSchema: Schema.Json;
+    }
+  | {
       readonly serverName: string;
       readonly threadId: string;
       readonly turnId?: string | null;
-    }
-  | {
       readonly _meta?: Schema.Json;
       readonly elicitationId: string;
       readonly message: string;
       readonly mode: "url";
       readonly url: string;
-      readonly serverName: string;
-      readonly threadId: string;
-      readonly turnId?: string | null;
     };
 export const McpServerElicitationRequestParams = Schema.Union(
   [
     Schema.Struct({
+      serverName: Schema.String,
+      threadId: Schema.String,
+      turnId: Schema.optionalKey(
+        Schema.Union([
+          Schema.String.annotate({
+            description:
+              "Active Codex turn when this elicitation was observed, if app-server could correlate one.\n\nThis is nullable because MCP models elicitation as a standalone server-to-client request identified by the MCP server request id. It may be triggered during a turn, but turn context is app-server correlation rather than part of the protocol identity of the elicitation itself.",
+          }),
+          Schema.Null,
+        ]),
+      ),
       _meta: Schema.optionalKey(Schema.Json.annotate({ expected: "JSON value" })),
       message: Schema.String,
       mode: Schema.Literal("form"),
       requestedSchema: McpServerElicitationRequestParams__McpElicitationSchema,
+    }),
+    Schema.Struct({
       serverName: Schema.String,
       threadId: Schema.String,
       turnId: Schema.optionalKey(
@@ -48815,12 +48806,12 @@ export const McpServerElicitationRequestParams = Schema.Union(
           Schema.Null,
         ]),
       ),
-    }).annotate({ title: "McpServerElicitationRequestParams" }),
-    Schema.Struct({
       _meta: Schema.optionalKey(Schema.Json.annotate({ expected: "JSON value" })),
       message: Schema.String,
       mode: Schema.Literal("openai/form"),
       requestedSchema: Schema.Json.annotate({ expected: "JSON value" }),
+    }),
+    Schema.Struct({
       serverName: Schema.String,
       threadId: Schema.String,
       turnId: Schema.optionalKey(
@@ -48832,12 +48823,12 @@ export const McpServerElicitationRequestParams = Schema.Union(
           Schema.Null,
         ]),
       ),
-    }).annotate({ title: "McpServerElicitationRequestParams" }),
-    Schema.Struct({
       _meta: Schema.optionalKey(Schema.Json.annotate({ expected: "JSON value" })),
       message: Schema.String,
       mode: Schema.Literal("openaiForm"),
       requestedSchema: Schema.Json.annotate({ expected: "JSON value" }),
+    }),
+    Schema.Struct({
       serverName: Schema.String,
       threadId: Schema.String,
       turnId: Schema.optionalKey(
@@ -48849,28 +48840,15 @@ export const McpServerElicitationRequestParams = Schema.Union(
           Schema.Null,
         ]),
       ),
-    }).annotate({ title: "McpServerElicitationRequestParams" }),
-    Schema.Struct({
       _meta: Schema.optionalKey(Schema.Json.annotate({ expected: "JSON value" })),
       elicitationId: Schema.String,
       message: Schema.String,
       mode: Schema.Literal("url"),
       url: Schema.String,
-      serverName: Schema.String,
-      threadId: Schema.String,
-      turnId: Schema.optionalKey(
-        Schema.Union([
-          Schema.String.annotate({
-            description:
-              "Active Codex turn when this elicitation was observed, if app-server could correlate one.\n\nThis is nullable because MCP models elicitation as a standalone server-to-client request identified by the MCP server request id. It may be triggered during a turn, but turn context is app-server correlation rather than part of the protocol identity of the elicitation itself.",
-          }),
-          Schema.Null,
-        ]),
-      ),
-    }).annotate({ title: "McpServerElicitationRequestParams" }),
+    }),
   ],
   { mode: "oneOf" },
-);
+).annotate({ title: "McpServerElicitationRequestParams" });
 
 export type McpServerElicitationRequestResponse = {
   readonly _meta?: Schema.Json;
@@ -48954,1697 +48932,995 @@ export type ServerNotification =
   | {
       readonly method: "error";
       readonly params: ServerNotification__ErrorNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/started";
       readonly params: ServerNotification__ThreadStartedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/status/changed";
       readonly params: ServerNotification__ThreadStatusChangedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/archived";
       readonly params: ServerNotification__ThreadArchivedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/deleted";
       readonly params: ServerNotification__ThreadDeletedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/unarchived";
       readonly params: ServerNotification__ThreadUnarchivedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/closed";
       readonly params: ServerNotification__ThreadClosedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/reverted";
       readonly params: ServerNotification__ThreadRevertedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "skills/changed";
       readonly params: ServerNotification__SkillsChangedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/name/updated";
       readonly params: ServerNotification__ThreadNameUpdatedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/goal/updated";
       readonly params: ServerNotification__ThreadGoalUpdatedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/goal/cleared";
       readonly params: ServerNotification__ThreadGoalClearedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/queue/changed";
       readonly params: ServerNotification__ThreadQueueChangedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "project/changed";
       readonly params: ServerNotification__ProjectChangedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/project/updated";
       readonly params: ServerNotification__ThreadProjectUpdatedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/environment/connected";
       readonly params: ServerNotification__EnvironmentConnectionNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/environment/disconnected";
       readonly params: ServerNotification__EnvironmentConnectionNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/settings/updated";
       readonly params: ServerNotification__ThreadSettingsUpdatedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/tokenUsage/updated";
       readonly params: ServerNotification__ThreadTokenUsageUpdatedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "turn/started";
       readonly params: ServerNotification__TurnStartedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "hook/started";
       readonly params: ServerNotification__HookStartedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "turn/completed";
       readonly params: ServerNotification__TurnCompletedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "hook/completed";
       readonly params: ServerNotification__HookCompletedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "turn/diff/updated";
       readonly params: ServerNotification__TurnDiffUpdatedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "turn/plan/updated";
       readonly params: ServerNotification__TurnPlanUpdatedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "item/started";
       readonly params: ServerNotification__ItemStartedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "item/autoApprovalReview/started";
       readonly params: ServerNotification__ItemGuardianApprovalReviewStartedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "item/autoApprovalReview/completed";
       readonly params: ServerNotification__ItemGuardianApprovalReviewCompletedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "autoApprovalReview/strictReviewRequired";
       readonly params: ServerNotification__StrictReviewRequiredNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "item/completed";
       readonly params: ServerNotification__ItemCompletedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "item/agentMessage/delta";
       readonly params: ServerNotification__AgentMessageDeltaNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "item/plan/delta";
       readonly params: ServerNotification__PlanDeltaNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "command/exec/outputDelta";
       readonly params: ServerNotification__CommandExecOutputDeltaNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "process/outputDelta";
       readonly params: ServerNotification__ProcessOutputDeltaNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "process/exited";
       readonly params: ServerNotification__ProcessExitedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "item/commandExecution/outputDelta";
       readonly params: ServerNotification__CommandExecutionOutputDeltaNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "item/commandExecution/terminalInteraction";
       readonly params: ServerNotification__TerminalInteractionNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "item/fileChange/outputDelta";
       readonly params: ServerNotification__FileChangeOutputDeltaNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "item/fileChange/patchUpdated";
       readonly params: ServerNotification__FileChangePatchUpdatedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "serverRequest/resolved";
       readonly params: ServerNotification__ServerRequestResolvedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "item/mcpToolCall/progress";
       readonly params: ServerNotification__McpToolCallProgressNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "mcpServer/oauthLogin/completed";
       readonly params: ServerNotification__McpServerOauthLoginCompletedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "mcpServer/startupStatus/updated";
       readonly params: ServerNotification__McpServerStatusUpdatedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "mcpServer/event/stream/notification";
       readonly params: ServerNotification__McpServerEventStreamNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "account/updated";
       readonly params: ServerNotification__AccountUpdatedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "account/rateLimits/updated";
       readonly params: ServerNotification__AccountRateLimitsUpdatedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "app/list/updated";
       readonly params: ServerNotification__AppListUpdatedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "remoteControl/status/changed";
       readonly params: ServerNotification__RemoteControlStatusChangedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "externalAgentConfig/import/progress";
       readonly params: ServerNotification__ExternalAgentConfigImportProgressNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "externalAgentConfig/import/completed";
       readonly params: ServerNotification__ExternalAgentConfigImportCompletedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "fs/changed";
       readonly params: ServerNotification__FsChangedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "item/reasoning/summaryTextDelta";
       readonly params: ServerNotification__ReasoningSummaryTextDeltaNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "item/reasoning/summaryPartAdded";
       readonly params: ServerNotification__ReasoningSummaryPartAddedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "item/reasoning/textDelta";
       readonly params: ServerNotification__ReasoningTextDeltaNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/compacted";
       readonly params: ServerNotification__ContextCompactedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "model/rerouted";
       readonly params: ServerNotification__ModelReroutedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "model/verification";
       readonly params: ServerNotification__ModelVerificationNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "modelProvider/authRecoveryStarted";
       readonly params: ServerNotification__AuthRecoveryNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "modelProvider/authRecoveryCompleted";
       readonly params: ServerNotification__AuthRecoveryNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "turn/moderationMetadata";
       readonly params: ServerNotification__TurnModerationMetadataNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "model/safetyBuffering/updated";
       readonly params: ServerNotification__ModelSafetyBufferingUpdatedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "warning";
       readonly params: ServerNotification__WarningNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "guardianWarning";
       readonly params: ServerNotification__GuardianWarningNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "deprecationNotice";
       readonly params: ServerNotification__DeprecationNoticeNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "configWarning";
       readonly params: ServerNotification__ConfigWarningNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "fuzzyFileSearch/sessionUpdated";
       readonly params: ServerNotification__FuzzyFileSearchSessionUpdatedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "fuzzyFileSearch/sessionCompleted";
       readonly params: ServerNotification__FuzzyFileSearchSessionCompletedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/realtime/started";
       readonly params: ServerNotification__ThreadRealtimeStartedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/realtime/itemAdded";
       readonly params: ServerNotification__ThreadRealtimeItemAddedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/realtime/item/started";
       readonly params: ServerNotification__ThreadRealtimeItemStartedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/realtime/item/transcript/delta";
       readonly params: ServerNotification__ThreadRealtimeItemTranscriptDeltaNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/realtime/item/completed";
       readonly params: ServerNotification__ThreadRealtimeItemCompletedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/realtime/transcript/delta";
       readonly params: ServerNotification__ThreadRealtimeTranscriptDeltaNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/realtime/transcript/done";
       readonly params: ServerNotification__ThreadRealtimeTranscriptDoneNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/realtime/outputAudio/delta";
       readonly params: ServerNotification__ThreadRealtimeOutputAudioDeltaNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/realtime/sdp";
       readonly params: ServerNotification__ThreadRealtimeSdpNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/realtime/error";
       readonly params: ServerNotification__ThreadRealtimeErrorNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "thread/realtime/closed";
       readonly params: ServerNotification__ThreadRealtimeClosedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "windows/worldWritableWarning";
       readonly params: ServerNotification__WindowsWorldWritableWarningNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "windowsSandbox/setupCompleted";
       readonly params: ServerNotification__WindowsSandboxSetupCompletedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     }
   | {
       readonly method: "account/login/completed";
       readonly params: ServerNotification__AccountLoginCompletedNotification;
-      readonly emittedAtMs?: number;
+      readonly emittedAtMs?: never;
     };
 export const ServerNotification = Schema.Union(
   [
     Schema.Struct({
       method: Schema.Literal("error").annotate({ title: "ErrorNotificationMethod" }),
       params: ServerNotification__ErrorNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "ErrorNotification", description: "NEW NOTIFICATIONS" }),
     Schema.Struct({
       method: Schema.Literal("thread/started").annotate({
         title: "Thread/startedNotificationMethod",
       }),
       params: ServerNotification__ThreadStartedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/startedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/status/changed").annotate({
         title: "Thread/status/changedNotificationMethod",
       }),
       params: ServerNotification__ThreadStatusChangedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/status/changedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/archived").annotate({
         title: "Thread/archivedNotificationMethod",
       }),
       params: ServerNotification__ThreadArchivedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/archivedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/deleted").annotate({
         title: "Thread/deletedNotificationMethod",
       }),
       params: ServerNotification__ThreadDeletedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/deletedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/unarchived").annotate({
         title: "Thread/unarchivedNotificationMethod",
       }),
       params: ServerNotification__ThreadUnarchivedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/unarchivedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/closed").annotate({
         title: "Thread/closedNotificationMethod",
       }),
       params: ServerNotification__ThreadClosedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/closedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/reverted").annotate({
         title: "Thread/revertedNotificationMethod",
       }),
       params: ServerNotification__ThreadRevertedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/revertedNotification" }),
     Schema.Struct({
       method: Schema.Literal("skills/changed").annotate({
         title: "Skills/changedNotificationMethod",
       }),
       params: ServerNotification__SkillsChangedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Skills/changedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/name/updated").annotate({
         title: "Thread/name/updatedNotificationMethod",
       }),
       params: ServerNotification__ThreadNameUpdatedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/name/updatedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/goal/updated").annotate({
         title: "Thread/goal/updatedNotificationMethod",
       }),
       params: ServerNotification__ThreadGoalUpdatedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/goal/updatedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/goal/cleared").annotate({
         title: "Thread/goal/clearedNotificationMethod",
       }),
       params: ServerNotification__ThreadGoalClearedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/goal/clearedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/queue/changed").annotate({
         title: "Thread/queue/changedNotificationMethod",
       }),
       params: ServerNotification__ThreadQueueChangedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/queue/changedNotification" }),
     Schema.Struct({
       method: Schema.Literal("project/changed").annotate({
         title: "Project/changedNotificationMethod",
       }),
       params: ServerNotification__ProjectChangedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Project/changedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/project/updated").annotate({
         title: "Thread/project/updatedNotificationMethod",
       }),
       params: ServerNotification__ThreadProjectUpdatedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/project/updatedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/environment/connected").annotate({
         title: "Thread/environment/connectedNotificationMethod",
       }),
       params: ServerNotification__EnvironmentConnectionNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/environment/connectedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/environment/disconnected").annotate({
         title: "Thread/environment/disconnectedNotificationMethod",
       }),
       params: ServerNotification__EnvironmentConnectionNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/environment/disconnectedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/settings/updated").annotate({
         title: "Thread/settings/updatedNotificationMethod",
       }),
       params: ServerNotification__ThreadSettingsUpdatedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/settings/updatedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/tokenUsage/updated").annotate({
         title: "Thread/tokenUsage/updatedNotificationMethod",
       }),
       params: ServerNotification__ThreadTokenUsageUpdatedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/tokenUsage/updatedNotification" }),
     Schema.Struct({
       method: Schema.Literal("turn/started").annotate({ title: "Turn/startedNotificationMethod" }),
       params: ServerNotification__TurnStartedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Turn/startedNotification" }),
     Schema.Struct({
       method: Schema.Literal("hook/started").annotate({ title: "Hook/startedNotificationMethod" }),
       params: ServerNotification__HookStartedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Hook/startedNotification" }),
     Schema.Struct({
       method: Schema.Literal("turn/completed").annotate({
         title: "Turn/completedNotificationMethod",
       }),
       params: ServerNotification__TurnCompletedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Turn/completedNotification" }),
     Schema.Struct({
       method: Schema.Literal("hook/completed").annotate({
         title: "Hook/completedNotificationMethod",
       }),
       params: ServerNotification__HookCompletedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Hook/completedNotification" }),
     Schema.Struct({
       method: Schema.Literal("turn/diff/updated").annotate({
         title: "Turn/diff/updatedNotificationMethod",
       }),
       params: ServerNotification__TurnDiffUpdatedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Turn/diff/updatedNotification" }),
     Schema.Struct({
       method: Schema.Literal("turn/plan/updated").annotate({
         title: "Turn/plan/updatedNotificationMethod",
       }),
       params: ServerNotification__TurnPlanUpdatedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Turn/plan/updatedNotification" }),
     Schema.Struct({
       method: Schema.Literal("item/started").annotate({ title: "Item/startedNotificationMethod" }),
       params: ServerNotification__ItemStartedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Item/startedNotification" }),
     Schema.Struct({
       method: Schema.Literal("item/autoApprovalReview/started").annotate({
         title: "Item/autoApprovalReview/startedNotificationMethod",
       }),
       params: ServerNotification__ItemGuardianApprovalReviewStartedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Item/autoApprovalReview/startedNotification" }),
     Schema.Struct({
       method: Schema.Literal("item/autoApprovalReview/completed").annotate({
         title: "Item/autoApprovalReview/completedNotificationMethod",
       }),
       params: ServerNotification__ItemGuardianApprovalReviewCompletedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Item/autoApprovalReview/completedNotification" }),
     Schema.Struct({
       method: Schema.Literal("autoApprovalReview/strictReviewRequired").annotate({
         title: "AutoApprovalReview/strictReviewRequiredNotificationMethod",
       }),
       params: ServerNotification__StrictReviewRequiredNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "AutoApprovalReview/strictReviewRequiredNotification" }),
     Schema.Struct({
       method: Schema.Literal("item/completed").annotate({
         title: "Item/completedNotificationMethod",
       }),
       params: ServerNotification__ItemCompletedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Item/completedNotification" }),
     Schema.Struct({
       method: Schema.Literal("item/agentMessage/delta").annotate({
         title: "Item/agentMessage/deltaNotificationMethod",
       }),
       params: ServerNotification__AgentMessageDeltaNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Item/agentMessage/deltaNotification" }),
     Schema.Struct({
       method: Schema.Literal("item/plan/delta").annotate({
         title: "Item/plan/deltaNotificationMethod",
       }),
       params: ServerNotification__PlanDeltaNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
     }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
+      title: "Item/plan/deltaNotification",
+      description: "EXPERIMENTAL - proposed plan streaming deltas for plan items.",
     }),
     Schema.Struct({
       method: Schema.Literal("command/exec/outputDelta").annotate({
         title: "Command/exec/outputDeltaNotificationMethod",
       }),
       params: ServerNotification__CommandExecOutputDeltaNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
     }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
+      title: "Command/exec/outputDeltaNotification",
+      description:
+        "Stream base64-encoded stdout/stderr chunks for a running `command/exec` session.",
     }),
     Schema.Struct({
       method: Schema.Literal("process/outputDelta").annotate({
         title: "Process/outputDeltaNotificationMethod",
       }),
       params: ServerNotification__ProcessOutputDeltaNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
     }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
+      title: "Process/outputDeltaNotification",
+      description:
+        "Stream base64-encoded stdout/stderr chunks for a running `process/spawn` session.",
     }),
     Schema.Struct({
       method: Schema.Literal("process/exited").annotate({
         title: "Process/exitedNotificationMethod",
       }),
       params: ServerNotification__ProcessExitedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
     }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
+      title: "Process/exitedNotification",
+      description: "Final exit notification for a `process/spawn` session.",
     }),
     Schema.Struct({
       method: Schema.Literal("item/commandExecution/outputDelta").annotate({
         title: "Item/commandExecution/outputDeltaNotificationMethod",
       }),
       params: ServerNotification__CommandExecutionOutputDeltaNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Item/commandExecution/outputDeltaNotification" }),
     Schema.Struct({
       method: Schema.Literal("item/commandExecution/terminalInteraction").annotate({
         title: "Item/commandExecution/terminalInteractionNotificationMethod",
       }),
       params: ServerNotification__TerminalInteractionNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Item/commandExecution/terminalInteractionNotification" }),
     Schema.Struct({
       method: Schema.Literal("item/fileChange/outputDelta").annotate({
         title: "Item/fileChange/outputDeltaNotificationMethod",
       }),
       params: ServerNotification__FileChangeOutputDeltaNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
     }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
+      title: "Item/fileChange/outputDeltaNotification",
+      description: "Deprecated legacy apply_patch output stream notification.",
     }),
     Schema.Struct({
       method: Schema.Literal("item/fileChange/patchUpdated").annotate({
         title: "Item/fileChange/patchUpdatedNotificationMethod",
       }),
       params: ServerNotification__FileChangePatchUpdatedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Item/fileChange/patchUpdatedNotification" }),
     Schema.Struct({
       method: Schema.Literal("serverRequest/resolved").annotate({
         title: "ServerRequest/resolvedNotificationMethod",
       }),
       params: ServerNotification__ServerRequestResolvedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "ServerRequest/resolvedNotification" }),
     Schema.Struct({
       method: Schema.Literal("item/mcpToolCall/progress").annotate({
         title: "Item/mcpToolCall/progressNotificationMethod",
       }),
       params: ServerNotification__McpToolCallProgressNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Item/mcpToolCall/progressNotification" }),
     Schema.Struct({
       method: Schema.Literal("mcpServer/oauthLogin/completed").annotate({
         title: "McpServer/oauthLogin/completedNotificationMethod",
       }),
       params: ServerNotification__McpServerOauthLoginCompletedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "McpServer/oauthLogin/completedNotification" }),
     Schema.Struct({
       method: Schema.Literal("mcpServer/startupStatus/updated").annotate({
         title: "McpServer/startupStatus/updatedNotificationMethod",
       }),
       params: ServerNotification__McpServerStatusUpdatedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "McpServer/startupStatus/updatedNotification" }),
     Schema.Struct({
       method: Schema.Literal("mcpServer/event/stream/notification").annotate({
         title: "McpServer/event/stream/notificationNotificationMethod",
       }),
       params: ServerNotification__McpServerEventStreamNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "McpServer/event/stream/notificationNotification" }),
     Schema.Struct({
       method: Schema.Literal("account/updated").annotate({
         title: "Account/updatedNotificationMethod",
       }),
       params: ServerNotification__AccountUpdatedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Account/updatedNotification" }),
     Schema.Struct({
       method: Schema.Literal("account/rateLimits/updated").annotate({
         title: "Account/rateLimits/updatedNotificationMethod",
       }),
       params: ServerNotification__AccountRateLimitsUpdatedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Account/rateLimits/updatedNotification" }),
     Schema.Struct({
       method: Schema.Literal("app/list/updated").annotate({
         title: "App/list/updatedNotificationMethod",
       }),
       params: ServerNotification__AppListUpdatedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "App/list/updatedNotification" }),
     Schema.Struct({
       method: Schema.Literal("remoteControl/status/changed").annotate({
         title: "RemoteControl/status/changedNotificationMethod",
       }),
       params: ServerNotification__RemoteControlStatusChangedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "RemoteControl/status/changedNotification" }),
     Schema.Struct({
       method: Schema.Literal("externalAgentConfig/import/progress").annotate({
         title: "ExternalAgentConfig/import/progressNotificationMethod",
       }),
       params: ServerNotification__ExternalAgentConfigImportProgressNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "ExternalAgentConfig/import/progressNotification" }),
     Schema.Struct({
       method: Schema.Literal("externalAgentConfig/import/completed").annotate({
         title: "ExternalAgentConfig/import/completedNotificationMethod",
       }),
       params: ServerNotification__ExternalAgentConfigImportCompletedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "ExternalAgentConfig/import/completedNotification" }),
     Schema.Struct({
       method: Schema.Literal("fs/changed").annotate({ title: "Fs/changedNotificationMethod" }),
       params: ServerNotification__FsChangedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Fs/changedNotification" }),
     Schema.Struct({
       method: Schema.Literal("item/reasoning/summaryTextDelta").annotate({
         title: "Item/reasoning/summaryTextDeltaNotificationMethod",
       }),
       params: ServerNotification__ReasoningSummaryTextDeltaNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Item/reasoning/summaryTextDeltaNotification" }),
     Schema.Struct({
       method: Schema.Literal("item/reasoning/summaryPartAdded").annotate({
         title: "Item/reasoning/summaryPartAddedNotificationMethod",
       }),
       params: ServerNotification__ReasoningSummaryPartAddedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Item/reasoning/summaryPartAddedNotification" }),
     Schema.Struct({
       method: Schema.Literal("item/reasoning/textDelta").annotate({
         title: "Item/reasoning/textDeltaNotificationMethod",
       }),
       params: ServerNotification__ReasoningTextDeltaNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Item/reasoning/textDeltaNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/compacted").annotate({
         title: "Thread/compactedNotificationMethod",
       }),
       params: ServerNotification__ContextCompactedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
     }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
+      title: "Thread/compactedNotification",
+      description: "Deprecated: Use `ContextCompaction` item type instead.",
     }),
     Schema.Struct({
       method: Schema.Literal("model/rerouted").annotate({
         title: "Model/reroutedNotificationMethod",
       }),
       params: ServerNotification__ModelReroutedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Model/reroutedNotification" }),
     Schema.Struct({
       method: Schema.Literal("model/verification").annotate({
         title: "Model/verificationNotificationMethod",
       }),
       params: ServerNotification__ModelVerificationNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Model/verificationNotification" }),
     Schema.Struct({
       method: Schema.Literal("modelProvider/authRecoveryStarted").annotate({
         title: "ModelProvider/authRecoveryStartedNotificationMethod",
       }),
       params: ServerNotification__AuthRecoveryNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "ModelProvider/authRecoveryStartedNotification" }),
     Schema.Struct({
       method: Schema.Literal("modelProvider/authRecoveryCompleted").annotate({
         title: "ModelProvider/authRecoveryCompletedNotificationMethod",
       }),
       params: ServerNotification__AuthRecoveryNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "ModelProvider/authRecoveryCompletedNotification" }),
     Schema.Struct({
       method: Schema.Literal("turn/moderationMetadata").annotate({
         title: "Turn/moderationMetadataNotificationMethod",
       }),
       params: ServerNotification__TurnModerationMetadataNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Turn/moderationMetadataNotification" }),
     Schema.Struct({
       method: Schema.Literal("model/safetyBuffering/updated").annotate({
         title: "Model/safetyBuffering/updatedNotificationMethod",
       }),
       params: ServerNotification__ModelSafetyBufferingUpdatedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Model/safetyBuffering/updatedNotification" }),
     Schema.Struct({
       method: Schema.Literal("warning").annotate({ title: "WarningNotificationMethod" }),
       params: ServerNotification__WarningNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "WarningNotification" }),
     Schema.Struct({
       method: Schema.Literal("guardianWarning").annotate({
         title: "GuardianWarningNotificationMethod",
       }),
       params: ServerNotification__GuardianWarningNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "GuardianWarningNotification" }),
     Schema.Struct({
       method: Schema.Literal("deprecationNotice").annotate({
         title: "DeprecationNoticeNotificationMethod",
       }),
       params: ServerNotification__DeprecationNoticeNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "DeprecationNoticeNotification" }),
     Schema.Struct({
       method: Schema.Literal("configWarning").annotate({
         title: "ConfigWarningNotificationMethod",
       }),
       params: ServerNotification__ConfigWarningNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "ConfigWarningNotification" }),
     Schema.Struct({
       method: Schema.Literal("fuzzyFileSearch/sessionUpdated").annotate({
         title: "FuzzyFileSearch/sessionUpdatedNotificationMethod",
       }),
       params: ServerNotification__FuzzyFileSearchSessionUpdatedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "FuzzyFileSearch/sessionUpdatedNotification" }),
     Schema.Struct({
       method: Schema.Literal("fuzzyFileSearch/sessionCompleted").annotate({
         title: "FuzzyFileSearch/sessionCompletedNotificationMethod",
       }),
       params: ServerNotification__FuzzyFileSearchSessionCompletedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "FuzzyFileSearch/sessionCompletedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/realtime/started").annotate({
         title: "Thread/realtime/startedNotificationMethod",
       }),
       params: ServerNotification__ThreadRealtimeStartedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/realtime/startedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/realtime/itemAdded").annotate({
         title: "Thread/realtime/itemAddedNotificationMethod",
       }),
       params: ServerNotification__ThreadRealtimeItemAddedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/realtime/itemAddedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/realtime/item/started").annotate({
         title: "Thread/realtime/item/startedNotificationMethod",
       }),
       params: ServerNotification__ThreadRealtimeItemStartedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/realtime/item/startedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/realtime/item/transcript/delta").annotate({
         title: "Thread/realtime/item/transcript/deltaNotificationMethod",
       }),
       params: ServerNotification__ThreadRealtimeItemTranscriptDeltaNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/realtime/item/transcript/deltaNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/realtime/item/completed").annotate({
         title: "Thread/realtime/item/completedNotificationMethod",
       }),
       params: ServerNotification__ThreadRealtimeItemCompletedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/realtime/item/completedNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/realtime/transcript/delta").annotate({
         title: "Thread/realtime/transcript/deltaNotificationMethod",
       }),
       params: ServerNotification__ThreadRealtimeTranscriptDeltaNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/realtime/transcript/deltaNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/realtime/transcript/done").annotate({
         title: "Thread/realtime/transcript/doneNotificationMethod",
       }),
       params: ServerNotification__ThreadRealtimeTranscriptDoneNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/realtime/transcript/doneNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/realtime/outputAudio/delta").annotate({
         title: "Thread/realtime/outputAudio/deltaNotificationMethod",
       }),
       params: ServerNotification__ThreadRealtimeOutputAudioDeltaNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/realtime/outputAudio/deltaNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/realtime/sdp").annotate({
         title: "Thread/realtime/sdpNotificationMethod",
       }),
       params: ServerNotification__ThreadRealtimeSdpNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/realtime/sdpNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/realtime/error").annotate({
         title: "Thread/realtime/errorNotificationMethod",
       }),
       params: ServerNotification__ThreadRealtimeErrorNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/realtime/errorNotification" }),
     Schema.Struct({
       method: Schema.Literal("thread/realtime/closed").annotate({
         title: "Thread/realtime/closedNotificationMethod",
       }),
       params: ServerNotification__ThreadRealtimeClosedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Thread/realtime/closedNotification" }),
     Schema.Struct({
       method: Schema.Literal("windows/worldWritableWarning").annotate({
         title: "Windows/worldWritableWarningNotificationMethod",
       }),
       params: ServerNotification__WindowsWorldWritableWarningNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
     }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
+      title: "Windows/worldWritableWarningNotification",
+      description:
+        "Notifies the user of world-writable directories on Windows, which cannot be protected by the sandbox.",
     }),
     Schema.Struct({
       method: Schema.Literal("windowsSandbox/setupCompleted").annotate({
         title: "WindowsSandbox/setupCompletedNotificationMethod",
       }),
       params: ServerNotification__WindowsSandboxSetupCompletedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "WindowsSandbox/setupCompletedNotification" }),
     Schema.Struct({
       method: Schema.Literal("account/login/completed").annotate({
         title: "Account/login/completedNotificationMethod",
       }),
       params: ServerNotification__AccountLoginCompletedNotification,
-      emittedAtMs: Schema.optionalKey(
-        Schema.Number.annotate({
-          description:
-            "Unix timestamp (in milliseconds) when app-server emitted this notification.",
-          format: "int64",
-        }).check(Schema.isInt().annotate({ expected: "an integer" })),
-      ),
-    }).annotate({
-      title: "ServerNotification",
-      description: "Notification sent from the server to the client.",
-    }),
+      emittedAtMs: Schema.optionalKey(Schema.Never),
+    }).annotate({ title: "Account/login/completedNotification" }),
   ],
   { mode: "oneOf" },
-);
+).annotate({
+  title: "ServerNotification",
+  description: "Notification sent from the server to the client.",
+});
 
 export type ServerNotification__AgentMessageDelivery = "async";
 export const ServerNotification__AgentMessageDelivery = Schema.Literal("async");
@@ -50664,8 +49940,8 @@ export const ServerNotification__MultiAgentMode = Schema.Union(
     "Controls the effective multi-agent delegation instructions for a turn. `custom` means the configured mode hint defines the policy instead of a built-in policy.",
 });
 
-export type ServerNotification__ThreadExtra = {};
-export const ServerNotification__ThreadExtra = Schema.Struct({}).annotate({
+export type ServerNotification__ThreadExtra = { readonly [x: string]: never };
+export const ServerNotification__ThreadExtra = Schema.Record(Schema.String, Schema.Never).annotate({
   description: "Extra app-server data for a thread.",
 });
 
@@ -51353,8 +50629,8 @@ export const V2CommandExecResizeParams = Schema.Struct({
   description: "Resize a running PTY-backed `command/exec` session.",
 });
 
-export type V2CommandExecResizeResponse = {};
-export const V2CommandExecResizeResponse = Schema.Struct({}).annotate({
+export type V2CommandExecResizeResponse = { readonly [x: string]: never };
+export const V2CommandExecResizeResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "CommandExecResizeResponse",
   description: "Empty success response for `command/exec/resize`.",
 });
@@ -51392,8 +50668,8 @@ export const V2CommandExecTerminateParams = Schema.Struct({
   description: "Terminate a running `command/exec` session.",
 });
 
-export type V2CommandExecTerminateResponse = {};
-export const V2CommandExecTerminateResponse = Schema.Struct({}).annotate({
+export type V2CommandExecTerminateResponse = { readonly [x: string]: never };
+export const V2CommandExecTerminateResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "CommandExecTerminateResponse",
   description: "Empty success response for `command/exec/terminate`.",
 });
@@ -51437,8 +50713,8 @@ export const V2CommandExecWriteParams = Schema.Struct({
   description: "Write stdin bytes to a running `command/exec` session, close stdin, or both.",
 });
 
-export type V2CommandExecWriteResponse = {};
-export const V2CommandExecWriteResponse = Schema.Struct({}).annotate({
+export type V2CommandExecWriteResponse = { readonly [x: string]: never };
+export const V2CommandExecWriteResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "CommandExecWriteResponse",
   description: "Empty success response for `command/exec/write`.",
 });
@@ -52201,8 +51477,8 @@ export const V2FsCopyParams = Schema.Struct({
   description: "Copy a file or directory tree on the host filesystem.",
 });
 
-export type V2FsCopyResponse = {};
-export const V2FsCopyResponse = Schema.Struct({}).annotate({
+export type V2FsCopyResponse = { readonly [x: string]: never };
+export const V2FsCopyResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "FsCopyResponse",
   description: "Successful response for `fs/copy`.",
 });
@@ -52229,8 +51505,8 @@ export const V2FsCreateDirectoryParams = Schema.Struct({
   description: "Create a directory on the host filesystem.",
 });
 
-export type V2FsCreateDirectoryResponse = {};
-export const V2FsCreateDirectoryResponse = Schema.Struct({}).annotate({
+export type V2FsCreateDirectoryResponse = { readonly [x: string]: never };
+export const V2FsCreateDirectoryResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "FsCreateDirectoryResponse",
   description: "Successful response for `fs/createDirectory`.",
 });
@@ -52342,8 +51618,8 @@ export const V2FsRemoveParams = Schema.Struct({
   description: "Remove a file or directory tree from the host filesystem.",
 });
 
-export type V2FsRemoveResponse = {};
-export const V2FsRemoveResponse = Schema.Struct({}).annotate({
+export type V2FsRemoveResponse = { readonly [x: string]: never };
+export const V2FsRemoveResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "FsRemoveResponse",
   description: "Successful response for `fs/remove`.",
 });
@@ -52358,8 +51634,8 @@ export const V2FsUnwatchParams = Schema.Struct({
   description: "Stop filesystem watch notifications for a prior `fs/watch`.",
 });
 
-export type V2FsUnwatchResponse = {};
-export const V2FsUnwatchResponse = Schema.Struct({}).annotate({
+export type V2FsUnwatchResponse = { readonly [x: string]: never };
+export const V2FsUnwatchResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "FsUnwatchResponse",
   description: "Successful response for `fs/unwatch`.",
 });
@@ -52398,8 +51674,8 @@ export const V2FsWriteFileParams = Schema.Struct({
   ).annotate({ description: "Absolute path to write." }),
 }).annotate({ title: "FsWriteFileParams", description: "Write a file on the host filesystem." });
 
-export type V2FsWriteFileResponse = {};
-export const V2FsWriteFileResponse = Schema.Struct({}).annotate({
+export type V2FsWriteFileResponse = { readonly [x: string]: never };
+export const V2FsWriteFileResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "FsWriteFileResponse",
   description: "Successful response for `fs/writeFile`.",
 });
@@ -52859,8 +52135,8 @@ export const V2LoginAccountResponse = Schema.Union(
   { mode: "oneOf" },
 ).annotate({ title: "LoginAccountResponse" });
 
-export type V2LogoutAccountResponse = {};
-export const V2LogoutAccountResponse = Schema.Struct({}).annotate({
+export type V2LogoutAccountResponse = { readonly [x: string]: never };
+export const V2LogoutAccountResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "LogoutAccountResponse",
 });
 
@@ -53013,8 +52289,8 @@ export const V2McpServerOauthLoginResponse = Schema.Struct({
   authorizationUrl: Schema.String,
 }).annotate({ title: "McpServerOauthLoginResponse" });
 
-export type V2McpServerRefreshResponse = {};
-export const V2McpServerRefreshResponse = Schema.Struct({}).annotate({
+export type V2McpServerRefreshResponse = { readonly [x: string]: never };
+export const V2McpServerRefreshResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "McpServerRefreshResponse",
 });
 
@@ -53135,10 +52411,11 @@ export const V2ModelListResponse = Schema.Struct({
   ),
 }).annotate({ title: "ModelListResponse" });
 
-export type V2ModelProviderCapabilitiesReadParams = {};
-export const V2ModelProviderCapabilitiesReadParams = Schema.Struct({}).annotate({
-  title: "ModelProviderCapabilitiesReadParams",
-});
+export type V2ModelProviderCapabilitiesReadParams = { readonly [x: string]: never };
+export const V2ModelProviderCapabilitiesReadParams = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({ title: "ModelProviderCapabilitiesReadParams" });
 
 export type V2ModelProviderCapabilitiesReadResponse = {
   readonly imageGeneration: boolean;
@@ -53432,13 +52709,13 @@ export const V2PluginShareDeleteParams = Schema.Struct({ remotePluginId: Schema.
   title: "PluginShareDeleteParams",
 });
 
-export type V2PluginShareDeleteResponse = {};
-export const V2PluginShareDeleteResponse = Schema.Struct({}).annotate({
+export type V2PluginShareDeleteResponse = { readonly [x: string]: never };
+export const V2PluginShareDeleteResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "PluginShareDeleteResponse",
 });
 
-export type V2PluginShareListParams = {};
-export const V2PluginShareListParams = Schema.Struct({}).annotate({
+export type V2PluginShareListParams = { readonly [x: string]: never };
+export const V2PluginShareListParams = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "PluginShareListParams",
 });
 
@@ -53518,8 +52795,8 @@ export const V2PluginUninstallParams = Schema.Struct({ pluginId: Schema.String }
   title: "PluginUninstallParams",
 });
 
-export type V2PluginUninstallResponse = {};
-export const V2PluginUninstallResponse = Schema.Struct({}).annotate({
+export type V2PluginUninstallResponse = { readonly [x: string]: never };
+export const V2PluginUninstallResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "PluginUninstallResponse",
 });
 
@@ -53745,8 +53022,8 @@ export const V2ServerRequestResolvedNotification = Schema.Struct({
   threadId: Schema.String,
 }).annotate({ title: "ServerRequestResolvedNotification" });
 
-export type V2SkillsChangedNotification = {};
-export const V2SkillsChangedNotification = Schema.Struct({}).annotate({
+export type V2SkillsChangedNotification = { readonly [x: string]: never };
+export const V2SkillsChangedNotification = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "SkillsChangedNotification",
   description:
     "Notification emitted when watched local skill files change.\n\nTreat this as an invalidation signal and re-run `skills/list` with the client's current parameters when refreshed skill metadata is needed.",
@@ -53781,8 +53058,8 @@ export const V2SkillsExtraRootsSetParams = Schema.Struct({
   extraRoots: Schema.Array(V2SkillsExtraRootsSetParams__AbsolutePathBuf),
 }).annotate({ title: "SkillsExtraRootsSetParams" });
 
-export type V2SkillsExtraRootsSetResponse = {};
-export const V2SkillsExtraRootsSetResponse = Schema.Struct({}).annotate({
+export type V2SkillsExtraRootsSetResponse = { readonly [x: string]: never };
+export const V2SkillsExtraRootsSetResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "SkillsExtraRootsSetResponse",
 });
 
@@ -53851,10 +53128,11 @@ export const V2ThreadApproveGuardianDeniedActionParams = Schema.Struct({
   threadId: Schema.String,
 }).annotate({ title: "ThreadApproveGuardianDeniedActionParams" });
 
-export type V2ThreadApproveGuardianDeniedActionResponse = {};
-export const V2ThreadApproveGuardianDeniedActionResponse = Schema.Struct({}).annotate({
-  title: "ThreadApproveGuardianDeniedActionResponse",
-});
+export type V2ThreadApproveGuardianDeniedActionResponse = { readonly [x: string]: never };
+export const V2ThreadApproveGuardianDeniedActionResponse = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({ title: "ThreadApproveGuardianDeniedActionResponse" });
 
 export type V2ThreadArchivedNotification = { readonly threadId: string };
 export const V2ThreadArchivedNotification = Schema.Struct({ threadId: Schema.String }).annotate({
@@ -53866,8 +53144,8 @@ export const V2ThreadArchiveParams = Schema.Struct({ threadId: Schema.String }).
   title: "ThreadArchiveParams",
 });
 
-export type V2ThreadArchiveResponse = {};
-export const V2ThreadArchiveResponse = Schema.Struct({}).annotate({
+export type V2ThreadArchiveResponse = { readonly [x: string]: never };
+export const V2ThreadArchiveResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "ThreadArchiveResponse",
 });
 
@@ -53881,8 +53159,8 @@ export const V2ThreadCompactStartParams = Schema.Struct({ threadId: Schema.Strin
   title: "ThreadCompactStartParams",
 });
 
-export type V2ThreadCompactStartResponse = {};
-export const V2ThreadCompactStartResponse = Schema.Struct({}).annotate({
+export type V2ThreadCompactStartResponse = { readonly [x: string]: never };
+export const V2ThreadCompactStartResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "ThreadCompactStartResponse",
 });
 
@@ -53896,8 +53174,10 @@ export const V2ThreadDeleteParams = Schema.Struct({ threadId: Schema.String }).a
   title: "ThreadDeleteParams",
 });
 
-export type V2ThreadDeleteResponse = {};
-export const V2ThreadDeleteResponse = Schema.Struct({}).annotate({ title: "ThreadDeleteResponse" });
+export type V2ThreadDeleteResponse = { readonly [x: string]: never };
+export const V2ThreadDeleteResponse = Schema.Record(Schema.String, Schema.Never).annotate({
+  title: "ThreadDeleteResponse",
+});
 
 export type V2ThreadForkParams = {
   readonly approvalPolicy?: V2ThreadForkParams__AskForApproval | null;
@@ -54060,10 +53340,11 @@ export const V2ThreadForkResponse__MultiAgentMode = Schema.Union(
     "Controls the effective multi-agent delegation instructions for a turn. `custom` means the configured mode hint defines the policy instead of a built-in policy.",
 });
 
-export type V2ThreadForkResponse__ThreadExtra = {};
-export const V2ThreadForkResponse__ThreadExtra = Schema.Struct({}).annotate({
-  description: "Extra app-server data for a thread.",
-});
+export type V2ThreadForkResponse__ThreadExtra = { readonly [x: string]: never };
+export const V2ThreadForkResponse__ThreadExtra = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({ description: "Extra app-server data for a thread." });
 
 export type V2ThreadGoalClearedNotification = { readonly threadId: string };
 export const V2ThreadGoalClearedNotification = Schema.Struct({ threadId: Schema.String }).annotate({
@@ -54139,8 +53420,8 @@ export const V2ThreadInjectItemsParams = Schema.Struct({
   threadId: Schema.String,
 }).annotate({ title: "ThreadInjectItemsParams" });
 
-export type V2ThreadInjectItemsResponse = {};
-export const V2ThreadInjectItemsResponse = Schema.Struct({}).annotate({
+export type V2ThreadInjectItemsResponse = { readonly [x: string]: never };
+export const V2ThreadInjectItemsResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "ThreadInjectItemsResponse",
 });
 
@@ -54354,10 +53635,11 @@ export const V2ThreadListResponse = Schema.Struct({
 export type V2ThreadListResponse__AgentMessageDelivery = "async";
 export const V2ThreadListResponse__AgentMessageDelivery = Schema.Literal("async");
 
-export type V2ThreadListResponse__ThreadExtra = {};
-export const V2ThreadListResponse__ThreadExtra = Schema.Struct({}).annotate({
-  description: "Extra app-server data for a thread.",
-});
+export type V2ThreadListResponse__ThreadExtra = { readonly [x: string]: never };
+export const V2ThreadListResponse__ThreadExtra = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({ description: "Extra app-server data for a thread." });
 
 export type V2ThreadLoadedListParams = {
   readonly cursor?: string | null;
@@ -54435,10 +53717,11 @@ export const V2ThreadMetadataUpdateResponse = Schema.Struct({
 export type V2ThreadMetadataUpdateResponse__AgentMessageDelivery = "async";
 export const V2ThreadMetadataUpdateResponse__AgentMessageDelivery = Schema.Literal("async");
 
-export type V2ThreadMetadataUpdateResponse__ThreadExtra = {};
-export const V2ThreadMetadataUpdateResponse__ThreadExtra = Schema.Struct({}).annotate({
-  description: "Extra app-server data for a thread.",
-});
+export type V2ThreadMetadataUpdateResponse__ThreadExtra = { readonly [x: string]: never };
+export const V2ThreadMetadataUpdateResponse__ThreadExtra = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({ description: "Extra app-server data for a thread." });
 
 export type V2ThreadNameUpdatedNotification = {
   readonly threadId: string;
@@ -54482,10 +53765,11 @@ export const V2ThreadReadResponse = Schema.Struct({
 export type V2ThreadReadResponse__AgentMessageDelivery = "async";
 export const V2ThreadReadResponse__AgentMessageDelivery = Schema.Literal("async");
 
-export type V2ThreadReadResponse__ThreadExtra = {};
-export const V2ThreadReadResponse__ThreadExtra = Schema.Struct({}).annotate({
-  description: "Extra app-server data for a thread.",
-});
+export type V2ThreadReadResponse__ThreadExtra = { readonly [x: string]: never };
+export const V2ThreadReadResponse__ThreadExtra = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({ description: "Extra app-server data for a thread." });
 
 export type V2ThreadRealtimeClosedNotification = {
   readonly reason?: string | null;
@@ -55128,10 +54412,11 @@ export const V2ThreadResumeResponse__MultiAgentMode = Schema.Union(
     "Controls the effective multi-agent delegation instructions for a turn. `custom` means the configured mode hint defines the policy instead of a built-in policy.",
 });
 
-export type V2ThreadResumeResponse__ThreadExtra = {};
-export const V2ThreadResumeResponse__ThreadExtra = Schema.Struct({}).annotate({
-  description: "Extra app-server data for a thread.",
-});
+export type V2ThreadResumeResponse__ThreadExtra = { readonly [x: string]: never };
+export const V2ThreadResumeResponse__ThreadExtra = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({ description: "Extra app-server data for a thread." });
 
 export type V2ThreadResumeResponse__TurnsPage = {
   readonly backwardsCursor?: string | null;
@@ -55196,10 +54481,11 @@ export const V2ThreadRevertResponse = Schema.Struct({
 export type V2ThreadRevertResponse__AgentMessageDelivery = "async";
 export const V2ThreadRevertResponse__AgentMessageDelivery = Schema.Literal("async");
 
-export type V2ThreadRevertResponse__ThreadExtra = {};
-export const V2ThreadRevertResponse__ThreadExtra = Schema.Struct({}).annotate({
-  description: "Extra app-server data for a thread.",
-});
+export type V2ThreadRevertResponse__ThreadExtra = { readonly [x: string]: never };
+export const V2ThreadRevertResponse__ThreadExtra = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({ description: "Extra app-server data for a thread." });
 
 export type V2ThreadRollbackParams = { readonly numTurns: number; readonly threadId: string };
 export const V2ThreadRollbackParams = Schema.Struct({
@@ -55231,10 +54517,11 @@ export const V2ThreadRollbackResponse = Schema.Struct({
 export type V2ThreadRollbackResponse__AgentMessageDelivery = "async";
 export const V2ThreadRollbackResponse__AgentMessageDelivery = Schema.Literal("async");
 
-export type V2ThreadRollbackResponse__ThreadExtra = {};
-export const V2ThreadRollbackResponse__ThreadExtra = Schema.Struct({}).annotate({
-  description: "Extra app-server data for a thread.",
-});
+export type V2ThreadRollbackResponse__ThreadExtra = { readonly [x: string]: never };
+export const V2ThreadRollbackResponse__ThreadExtra = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({ description: "Extra app-server data for a thread." });
 
 export type V2ThreadSectionCreateParams = {
   readonly appearance?: V2ThreadSectionCreateParams__ThreadSectionAppearance | null;
@@ -55270,8 +54557,8 @@ export const V2ThreadSectionDeleteParams = Schema.Struct({
   description: "Parameters for deleting an independently persisted thread section.",
 });
 
-export type V2ThreadSectionDeleteResponse = {};
-export const V2ThreadSectionDeleteResponse = Schema.Struct({}).annotate({
+export type V2ThreadSectionDeleteResponse = { readonly [x: string]: never };
+export const V2ThreadSectionDeleteResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "ThreadSectionDeleteResponse",
   description: "Successful deletion does not return additional section data.",
 });
@@ -55356,8 +54643,8 @@ export const V2ThreadSectionMoveParams = Schema.Struct({
   description: "Parameters for moving a thread within a server-owned section ordering.",
 });
 
-export type V2ThreadSectionMoveResponse = {};
-export const V2ThreadSectionMoveResponse = Schema.Struct({}).annotate({
+export type V2ThreadSectionMoveResponse = { readonly [x: string]: never };
+export const V2ThreadSectionMoveResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "ThreadSectionMoveResponse",
 });
 
@@ -55397,8 +54684,8 @@ export const V2ThreadSetNameParams = Schema.Struct({
   threadId: Schema.String,
 }).annotate({ title: "ThreadSetNameParams" });
 
-export type V2ThreadSetNameResponse = {};
-export const V2ThreadSetNameResponse = Schema.Struct({}).annotate({
+export type V2ThreadSetNameResponse = { readonly [x: string]: never };
+export const V2ThreadSetNameResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "ThreadSetNameResponse",
 });
 
@@ -55449,8 +54736,8 @@ export const V2ThreadShellCommandParams = Schema.Struct({
   ),
 }).annotate({ title: "ThreadShellCommandParams" });
 
-export type V2ThreadShellCommandResponse = {};
-export const V2ThreadShellCommandResponse = Schema.Struct({}).annotate({
+export type V2ThreadShellCommandResponse = { readonly [x: string]: never };
+export const V2ThreadShellCommandResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "ThreadShellCommandResponse",
 });
 
@@ -55462,10 +54749,11 @@ export const V2ThreadStartedNotification = Schema.Struct({
 export type V2ThreadStartedNotification__AgentMessageDelivery = "async";
 export const V2ThreadStartedNotification__AgentMessageDelivery = Schema.Literal("async");
 
-export type V2ThreadStartedNotification__ThreadExtra = {};
-export const V2ThreadStartedNotification__ThreadExtra = Schema.Struct({}).annotate({
-  description: "Extra app-server data for a thread.",
-});
+export type V2ThreadStartedNotification__ThreadExtra = { readonly [x: string]: never };
+export const V2ThreadStartedNotification__ThreadExtra = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({ description: "Extra app-server data for a thread." });
 
 export type V2ThreadStartParams = {
   readonly approvalPolicy?: V2ThreadStartParams__AskForApproval | null;
@@ -55690,10 +54978,11 @@ export const V2ThreadStartResponse__MultiAgentMode = Schema.Union(
     "Controls the effective multi-agent delegation instructions for a turn. `custom` means the configured mode hint defines the policy instead of a built-in policy.",
 });
 
-export type V2ThreadStartResponse__ThreadExtra = {};
-export const V2ThreadStartResponse__ThreadExtra = Schema.Struct({}).annotate({
-  description: "Extra app-server data for a thread.",
-});
+export type V2ThreadStartResponse__ThreadExtra = { readonly [x: string]: never };
+export const V2ThreadStartResponse__ThreadExtra = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({ description: "Extra app-server data for a thread." });
 
 export type V2ThreadStatusChangedNotification = {
   readonly status: V2ThreadStatusChangedNotification__ThreadStatus;
@@ -55804,10 +55093,11 @@ export const V2ThreadUnarchiveResponse = Schema.Struct({
 export type V2ThreadUnarchiveResponse__AgentMessageDelivery = "async";
 export const V2ThreadUnarchiveResponse__AgentMessageDelivery = Schema.Literal("async");
 
-export type V2ThreadUnarchiveResponse__ThreadExtra = {};
-export const V2ThreadUnarchiveResponse__ThreadExtra = Schema.Struct({}).annotate({
-  description: "Extra app-server data for a thread.",
-});
+export type V2ThreadUnarchiveResponse__ThreadExtra = { readonly [x: string]: never };
+export const V2ThreadUnarchiveResponse__ThreadExtra = Schema.Record(
+  Schema.String,
+  Schema.Never,
+).annotate({ description: "Extra app-server data for a thread." });
 
 export type V2ThreadUnsubscribeParams = { readonly threadId: string };
 export const V2ThreadUnsubscribeParams = Schema.Struct({ threadId: Schema.String }).annotate({
@@ -55854,8 +55144,8 @@ export const V2TurnInterruptParams = Schema.Struct({
   turnId: Schema.String,
 }).annotate({ title: "TurnInterruptParams" });
 
-export type V2TurnInterruptResponse = {};
-export const V2TurnInterruptResponse = Schema.Struct({}).annotate({
+export type V2TurnInterruptResponse = { readonly [x: string]: never };
+export const V2TurnInterruptResponse = Schema.Record(Schema.String, Schema.Never).annotate({
   title: "TurnInterruptResponse",
 });
 

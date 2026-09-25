@@ -8,6 +8,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
 
 import { ServerConfig } from "../../config.ts";
 import { layer as idAllocatorLayer, IdAllocatorV2 } from "../IdAllocator.ts";
@@ -25,7 +26,7 @@ import { GROK_DEFAULT_INSTANCE_ID, GROK_PROVIDER, makeGrokAdapterV2 } from "./Gr
 
 const DEFAULT_GROK_SETTINGS = Schema.decodeUnknownSync(GrokSettings)({});
 
-export function makeGrokProviderAdapterRegistryReplayLayer(transcript: AcpReplayTranscript) {
+function makeGrokProviderAdapterRegistryReplayLayer(transcript: AcpReplayTranscript) {
   const serverConfigLayer = Layer.effect(
     ServerConfig,
     makeReplayServerConfig(`grok-${transcript.scenario}`).pipe(Effect.orDie),
@@ -59,6 +60,7 @@ export function makeGrokProviderAdapterRegistryReplayLayer(transcript: AcpReplay
         fileSystem,
         idAllocator,
         serverConfig,
+        selfInvocation: yield* resolveSelfInvocation(),
         makeRuntime: makeAcpReplayRuntime({
           transcript,
           statusPath,

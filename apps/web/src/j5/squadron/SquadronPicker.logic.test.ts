@@ -7,6 +7,7 @@ import {
   buildSquadronPickerRow,
   buildSquadronPickerEntries,
   resolveCurrentThreadNewThreadDestination,
+  resolveHeaderSquadronRef,
   resolveIndexDraftDestination,
   resolveNewThreadShortcutDestination,
   squadronDraftScopeKey,
@@ -251,6 +252,33 @@ describe("Squadron picker", () => {
     expect(
       resolveCurrentThreadNewThreadDestination(squadronRef("squadron:active"), "ready", entries),
     ).toMatchObject({ kind: "single-squadron", entry: { squadronId: "squadron:active" } });
+  });
+
+  it("names a draft's chosen Squadron in the header, and the durable home over it", () => {
+    const entries = [
+      { ...environmentScope, squadronId: "squadron:live", name: "Live Pass", folder: sharedFolder },
+      { ...environmentScope, squadronId: "squadron:other", name: "Other", folder: sharedFolder },
+    ];
+    const destination = (durableHomeId: string | null, draftSquadronId: string | null) =>
+      resolveCurrentThreadNewThreadDestination(
+        resolveHeaderSquadronRef({
+          environmentId: sharedFolder.environmentId,
+          durableHomeId,
+          draftSquadronId,
+        }),
+        "ready",
+        entries,
+      );
+
+    expect(destination(null, "squadron:live")).toMatchObject({
+      kind: "single-squadron",
+      entry: { name: "Live Pass" },
+    });
+    expect(destination("squadron:other", "squadron:live")).toMatchObject({
+      kind: "single-squadron",
+      entry: { name: "Other" },
+    });
+    expect(destination(null, null)).toEqual({ kind: "picker" });
   });
 
   it("routes the Sidebar branch door through the source Registrar home and carrier", async () => {

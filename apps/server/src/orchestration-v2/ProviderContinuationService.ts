@@ -9,6 +9,7 @@ import {
   ProviderContinuationRequests,
 } from "./ProviderContinuationRequests.ts";
 import { ThreadManagementService } from "./ThreadManagementService.ts";
+import { isUndeliveredMailboxSteer } from "./NotificationMailbox.ts";
 
 const CONTINUATION_MESSAGE_TEXT = "Background task completed.";
 
@@ -20,7 +21,7 @@ function delegatedCompletionText(taskIds: ReadonlyArray<string>): string {
 }
 
 function currentDelegatedCompletionDelivery(
-  projection: OrchestrationV2ThreadProjection,
+  projection: Pick<OrchestrationV2ThreadProjection, "messages" | "runs" | "providerTurns">,
   completion: NonNullable<ProviderContinuationRequest["delegatedCompletion"]>,
 ) {
   const sourceRun = projection.runs.find((candidate) => candidate.id === completion.parentRunId);
@@ -34,7 +35,7 @@ function currentDelegatedCompletionDelivery(
     delivery === undefined ||
     delivery.generation !== completion.generation ||
     delivery.messageId !== completion.messageId ||
-    alreadyDispatched
+    (alreadyDispatched && !isUndeliveredMailboxSteer(projection, completion.messageId))
   ) {
     return undefined;
   }
@@ -51,9 +52,9 @@ function delegatedCompletionRetryKey(
 /**
  * Drains ProviderContinuationRequests and dispatches an internal
  * message.dispatch per request so the wake turn buffered by the adapter is
- * ingested as a normal run. Dispatches queue_after_active, so a continuation
- * racing a user run simply queues behind it and drains the wake buffer once
- * that run finishes.
+ * ingested as a normal run. Delegated completions are durable mailbox offers:
+ * the orchestrator selects native steering or queued delivery under its thread
+ * lock. Adapter-buffered continuations still queue behind active work.
  */
 export const workerLive = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -80,7 +81,16 @@ export const workerLive = Layer.effectDiscard(
 
     const dispatchContinuation = Effect.fn("ProviderContinuationService.dispatchContinuation")(
       function* (request: ProviderContinuationRequest) {
-        const projection = yield* threads.getThreadProjection(request.threadId);
+        const projection = yield* threads.getThreadRecords(
+          request.threadId,
+          ["messages", "runs", "providerTurns"],
+          {
+            messageIds:
+              request.delegatedCompletion === undefined
+                ? []
+                : [request.delegatedCompletion.messageId],
+          },
+        );
         if (projection.thread.archivedAt !== null || projection.thread.deletedAt !== null) {
           yield* Effect.logInfo("orchestration-v2.provider-continuation.thread-archived", {
             threadId: request.threadId,
@@ -147,6 +157,11 @@ export const workerLive = Layer.effectDiscard(
           threadId: request.threadId,
           messageId,
           text: request.detail ?? CONTINUATION_MESSAGE_TEXT,
+          notification: request.notification ?? {
+            source: { kind: "background_task" },
+            outcome: "updated",
+            summary: "Background activity updated",
+          },
           attachments: [],
           dispatchMode: { type: "queue_after_active" },
           createdBy: "agent",
@@ -180,7 +195,16 @@ export const workerLive = Layer.effectDiscard(
                 const retryDelay = yield* nextRetryDelay(retryKey);
                 yield* Effect.gen(function* () {
                   yield* Effect.sleep(`${retryDelay} millis`);
-                  const projection = yield* threads.getThreadProjection(request.threadId);
+                  const projection = yield* threads.getThreadRecords(
+                    request.threadId,
+                    ["messages", "runs", "providerTurns"],
+                    {
+                      messageIds:
+                        request.delegatedCompletion === undefined
+                          ? []
+                          : [request.delegatedCompletion.messageId],
+                    },
+                  );
                   if (currentDelegatedCompletionDelivery(projection, completion) !== undefined) {
                     yield* requests.offer(request);
                   } else {

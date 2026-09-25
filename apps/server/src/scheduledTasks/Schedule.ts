@@ -55,9 +55,17 @@ export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedul
   if (a.type === "interval") {
     return b.type === "interval" && a.everyMs === b.everyMs;
   }
+  if (b.type !== "fixed_time") return false;
+  // The contract accepts padded and unpadded hours ("9:00" and "09:00"), so
+  // compare the parsed time — string equality would treat a format-only edit
+  // as a schedule change and recompute the pending run.
+  const aTime = parseTimeOfDay(a.timeOfDay);
+  const bTime = parseTimeOfDay(b.timeOfDay);
   return (
-    b.type === "fixed_time" &&
-    a.timeOfDay === b.timeOfDay &&
+    aTime !== null &&
+    bTime !== null &&
+    aTime.hour === bTime.hour &&
+    aTime.minute === bTime.minute &&
     weekdayKey(a.weekdays) === weekdayKey(b.weekdays)
   );
 }
@@ -67,7 +75,7 @@ export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedul
  * jitter and short sleeps, while a server booted hours after the slot skips
  * to the next occurrence instead of firing stale work at a random time.
  */
-export const MISSED_FIXED_TIME_GRACE_MS = 10 * MINUTE_MS;
+const MISSED_FIXED_TIME_GRACE_MS = 10 * MINUTE_MS;
 
 /**
  * True when a due fixed-time run was missed by more than the grace window and
@@ -84,7 +92,7 @@ export function isMissedFixedTimeRun(
   return DateTime.toEpochMillis(now) - DateTime.toEpochMillis(dueAt) > MISSED_FIXED_TIME_GRACE_MS;
 }
 
-export function describeSchedule(schedule: ScheduledTaskSchedule): string {
+function describeSchedule(schedule: ScheduledTaskSchedule): string {
   if (schedule.type === "interval") {
     const minutes = schedule.everyMs / MINUTE_MS;
     if (Number.isInteger(minutes)) {

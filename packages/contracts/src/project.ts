@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import {
@@ -32,6 +33,8 @@ export const ProjectScript = Schema.Struct({
   command: TrimmedNonEmptyString,
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
+  /** Start the agent while setup runs unless explicitly disabled. */
+  async: Schema.optional(Schema.Boolean),
   previewUrl: Schema.optional(TrimmedNonEmptyString),
   autoOpenPreview: Schema.optional(Schema.Boolean),
 });
@@ -66,17 +69,62 @@ const ProjectLucideIconName = TrimmedNonEmptyString.check(
 
 const ProjectEmoji = TrimmedNonEmptyString.check(Schema.isMaxLength(32));
 
+// Grapheme-count validation belongs to the server command boundary, not snapshot decoding.
+export const ProjectMonogramText = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(32),
+  Schema.isPattern(/^[\p{L}\p{N}][\p{L}\p{N}\p{M}\u200c\u200d]*$/u),
+);
+
+const ProjectLucideIcon = Schema.Struct({
+  kind: Schema.Literal("lucide"),
+  name: ProjectLucideIconName,
+  color: ProjectIconColor,
+});
+const ProjectEmojiIcon = Schema.Struct({
+  kind: Schema.Literal("emoji"),
+  emoji: ProjectEmoji,
+});
+const ProjectMonogramIcon = Schema.Struct({
+  kind: Schema.Literal("monogram"),
+  text: ProjectMonogramText,
+  color: ProjectIconColor,
+});
+const ProjectIcon = Schema.Union([ProjectLucideIcon, ProjectEmojiIcon, ProjectMonogramIcon]);
+const ProjectLucideIconWire = Schema.Struct({
+  ...ProjectLucideIcon.fields,
+  monogramText: Schema.optional(ProjectMonogramText),
+  monogram: Schema.optional(ProjectMonogramText),
+});
+
+// Older peers only know lucide/emoji. Keep monograms out of their validated
+// `monogram` field too: old grapheme counters can reject otherwise valid text.
 export const ProjectIconOverride = Schema.Union([
-  Schema.Struct({
-    kind: Schema.Literal("lucide"),
-    name: ProjectLucideIconName,
-    color: ProjectIconColor,
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("emoji"),
-    emoji: ProjectEmoji,
-  }),
-]);
+  ProjectLucideIconWire,
+  ProjectEmojiIcon,
+  ProjectMonogramIcon,
+]).pipe(
+  Schema.decodeTo(
+    ProjectIcon,
+    SchemaTransformation.transform({
+      decode: (icon): typeof ProjectIcon.Type => {
+        if (icon.kind !== "lucide") return icon;
+        const text = icon.monogramText ?? icon.monogram;
+        return text === undefined
+          ? { kind: "lucide", name: icon.name, color: icon.color }
+          : { kind: "monogram", text, color: icon.color };
+      },
+      encode: (icon) =>
+        icon.kind === "monogram"
+          ? {
+              kind: "lucide" as const,
+              name: "folder-code",
+              color: icon.color,
+              monogramText: icon.text,
+            }
+          : icon,
+    }),
+  ),
+);
 export type ProjectIconOverride = typeof ProjectIconOverride.Type;
 
 export const Project = Schema.Struct({
@@ -113,29 +161,39 @@ export const ProjectChange = Schema.Union([
 ]);
 export type ProjectChange = typeof ProjectChange.Type;
 
+export const ProjectCreatePayload = Schema.Struct({
+  title: TrimmedNonEmptyString,
+  workspaceRoot: TrimmedNonEmptyString,
+  createWorkspaceRootIfMissing: Schema.optional(Schema.Boolean),
+  defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
+  scripts: Schema.optional(Schema.Array(ProjectScript)),
+});
+export type ProjectCreatePayload = typeof ProjectCreatePayload.Type;
+
+export const ProjectUpdatePayload = Schema.Struct({
+  title: Schema.optional(TrimmedNonEmptyString),
+  workspaceRoot: Schema.optional(TrimmedNonEmptyString),
+  defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
+  autoPull: Schema.optional(Schema.Boolean),
+  projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
+  scripts: Schema.optional(Schema.Array(ProjectScript)),
+});
+export type ProjectUpdatePayload = typeof ProjectUpdatePayload.Type;
+
 export const ProjectMutation = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("project.create"),
     commandId: CommandId,
     projectId: ProjectId,
-    title: TrimmedNonEmptyString,
-    workspaceRoot: TrimmedNonEmptyString,
-    createWorkspaceRootIfMissing: Schema.optional(Schema.Boolean),
-    defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
-    scripts: Schema.optional(Schema.Array(ProjectScript)),
+    ...ProjectCreatePayload.fields,
   }),
   Schema.Struct({
     type: Schema.Literal("project.update"),
     commandId: CommandId,
     projectId: ProjectId,
-    title: Schema.optional(TrimmedNonEmptyString),
-    workspaceRoot: Schema.optional(TrimmedNonEmptyString),
-    defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
-    autoPull: Schema.optional(Schema.Boolean),
-    projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
-    faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
-    defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
-    scripts: Schema.optional(Schema.Array(ProjectScript)),
+    ...ProjectUpdatePayload.fields,
   }),
   Schema.Struct({
     type: Schema.Literal("project.delete"),
@@ -146,7 +204,7 @@ export const ProjectMutation = Schema.Union([
 ]);
 export type ProjectMutation = typeof ProjectMutation.Type;
 
-export class ProjectMutationError extends Schema.TaggedErrorClass<ProjectMutationError>()(
+export class ProjectMutationError extends Schema.TaggedError<ProjectMutationError>()(
   "ProjectMutationError",
   {
     commandId: CommandId,
@@ -172,6 +230,7 @@ export type ProjectSearchEntriesInput = typeof ProjectSearchEntriesInput.Type;
 export const ProjectEntry = Schema.Struct({
   path: TrimmedNonEmptyString,
   kind: ProjectEntryKind,
+  ignored: Schema.optional(Schema.Boolean),
 });
 export type ProjectEntry = typeof ProjectEntry.Type;
 
@@ -216,6 +275,9 @@ export type ProjectSearchContentsResult = typeof ProjectSearchContentsResult.Typ
 
 export const ProjectListEntriesInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
+  // Present for immediate filesystem children, including ignored entries; empty means root.
+  // Omitted preserves the indexed recursive listing used by older clients.
+  directoryPath: Schema.optional(TrimmedString),
 });
 export type ProjectListEntriesInput = typeof ProjectListEntriesInput.Type;
 
@@ -233,6 +295,7 @@ export const ProjectEntriesFailure = Schema.Literals([
   "search_index_create_failed",
   "search_index_scan_timed_out",
   "search_index_search_failed",
+  "directory_list_failed",
 ]);
 export type ProjectEntriesFailure = typeof ProjectEntriesFailure.Type;
 
@@ -249,7 +312,7 @@ function decodedProjectErrorMessage(props: object): string | undefined {
   return typeof props.message === "string" ? props.message : undefined;
 }
 
-export class ProjectSearchEntriesError extends Schema.TaggedErrorClass<ProjectSearchEntriesError>()(
+export class ProjectSearchEntriesError extends Schema.TaggedError<ProjectSearchEntriesError>()(
   "ProjectSearchEntriesError",
   {
     cwd: Schema.optional(TrimmedNonEmptyString),
@@ -282,7 +345,7 @@ export class ProjectSearchEntriesError extends Schema.TaggedErrorClass<ProjectSe
   }
 }
 
-export class ProjectSearchContentsError extends Schema.TaggedErrorClass<ProjectSearchContentsError>()(
+export class ProjectSearchContentsError extends Schema.TaggedError<ProjectSearchContentsError>()(
   "ProjectSearchContentsError",
   {
     cwd: Schema.optional(TrimmedNonEmptyString),
@@ -313,7 +376,7 @@ export class ProjectSearchContentsError extends Schema.TaggedErrorClass<ProjectS
   }
 }
 
-export class ProjectListEntriesError extends Schema.TaggedErrorClass<ProjectListEntriesError>()(
+export class ProjectListEntriesError extends Schema.TaggedError<ProjectListEntriesError>()(
   "ProjectListEntriesError",
   {
     cwd: Schema.optional(TrimmedNonEmptyString),
@@ -383,7 +446,7 @@ type ProjectFileFailureContext = {
   readonly cause?: unknown;
 };
 
-export class ProjectReadFileError extends Schema.TaggedErrorClass<ProjectReadFileError>()(
+export class ProjectReadFileError extends Schema.TaggedError<ProjectReadFileError>()(
   "ProjectReadFileError",
   {
     cwd: Schema.optional(TrimmedNonEmptyString),
@@ -420,7 +483,7 @@ export const ProjectWriteFileResult = Schema.Struct({
 });
 export type ProjectWriteFileResult = typeof ProjectWriteFileResult.Type;
 
-export class ProjectWriteFileError extends Schema.TaggedErrorClass<ProjectWriteFileError>()(
+export class ProjectWriteFileError extends Schema.TaggedError<ProjectWriteFileError>()(
   "ProjectWriteFileError",
   {
     cwd: Schema.optional(TrimmedNonEmptyString),

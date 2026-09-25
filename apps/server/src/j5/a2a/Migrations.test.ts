@@ -58,6 +58,8 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 15, name: "CustomCrewSeats" },
       { migration_id: 16, name: "CrewProposalClaims" },
       { migration_id: 17, name: "EnsureCustomCrewSeats" },
+      { migration_id: 18, name: "AgentLedPlaybooks" },
+      { migration_id: 19, name: "PlaybookRunMaintenance" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -79,9 +81,29 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [15, "CustomCrewSeats"],
         [16, "CrewProposalClaims"],
         [17, "EnsureCustomCrewSeats"],
+        [18, "AgentLedPlaybooks"],
+        [19, "PlaybookRunMaintenance"],
       ],
     );
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+);
+
+it.effect("adds playbooks after an environment has applied the Crew migrations", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 17 });
+    const before = yield* sql`SELECT * FROM ${sql(J5_A2A_MIGRATIONS_TABLE)} ORDER BY migration_id`;
+    yield* runJ5A2AMigrations();
+    assert.deepStrictEqual(
+      yield* sql`SELECT * FROM ${sql(J5_A2A_MIGRATIONS_TABLE)} WHERE migration_id <= 17 ORDER BY migration_id`,
+      before,
+    );
+    assert.deepStrictEqual(
+      yield* sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'j5_playbook_%' ORDER BY name`,
+      [{ name: "j5_playbook_request" }, { name: "j5_playbook_run" }],
+    );
+    yield* runJ5A2AMigrations();
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("creates the exact namespaced ledger schema and receiver correlation constraint", () =>
@@ -300,7 +322,7 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       WHERE participant_id = 'human:forbidden-membership'
     `;
     assert.deepStrictEqual(forbiddenRows, [{ count: 0 }]);
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("requires a non-null, non-blank reparent actor subject", () =>
@@ -366,7 +388,7 @@ it.effect("requires a non-null, non-blank reparent actor subject", () =>
         actor_subject: "human:placement-owner",
       },
     ]);
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("adds lifecycle terminal state without mutating the A4 human inbox projection", () =>
@@ -619,7 +641,7 @@ it.effect("adds lifecycle terminal state without mutating the A4 human inbox pro
         '2026-08-23T00:01:00.000Z', 'lifecycle_notice'
       )
     `;
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("reports conflicting thread ids before creating the immutable-home index", () =>
@@ -734,7 +756,7 @@ it.effect("reports conflicting thread ids before creating the immutable-home ind
       WHERE type = 'index' AND name = 'j5_a2a_comm_event_agent_home_thread_idx'
     `;
     assert.deepStrictEqual(indexes, [{ count: 0 }]);
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect(
@@ -1008,7 +1030,7 @@ it.effect(
       WHERE value = 'human:global'
     `;
       assert.deepStrictEqual(remainingGlobalReferences, [{ count: 0 }]);
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("renames existing Squadron data without changing ledger semantics", () =>
@@ -1132,7 +1154,7 @@ it.effect("renames existing Squadron data without changing ledger semantics", ()
         )
     `;
     assert.deepStrictEqual(legacySchema, []);
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("runs the J5 migration lane during normal SQLite setup", () =>
@@ -1186,7 +1208,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
     `;
     assert.deepStrictEqual(
       applied.map((row) => row.migration_id),
-      [13, 14, 15, 16, 17],
+      [13, 14, 15, 16, 17, 18, 19],
     );
     const memberColumns = yield* sql<{ readonly name: string }>`
       SELECT name FROM pragma_table_info('j5_agent_crew_member') ORDER BY cid
@@ -1202,7 +1224,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
       proposalColumns.map((column) => column.name),
       "runbook_declared",
     );
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect(
@@ -1250,7 +1272,7 @@ it.effect(
         indexes.map((row) => row.name),
         "j5_agent_crew_proposal_open_idx",
       );
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 for (const skipped15 of [false, true]) {
@@ -1295,6 +1317,52 @@ for (const skipped15 of [false, true]) {
           yield* sql`SELECT "notnull" FROM pragma_table_info('j5_agent_crew_member') WHERE name='agent_id'`;
         assert.deepStrictEqual(columns, [{ notnull: 0 }]);
         assert.lengthOf(yield* sql`SELECT * FROM j5_a2a_migrations WHERE migration_id=17`, 1);
-      }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 }
+
+it.effect(
+  "upgrades existing playbook runs, prunes terminal movement receipts, and indexes both board queries",
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runJ5A2AMigrations({ toMigrationInclusive: 18 });
+      for (const status of ["active", "completed", "cancelled"] as const) {
+        yield* sql`INSERT INTO j5_playbook_run VALUES (${status}, ${status}, '/workspace/.j5/playbooks/demo.yaml', 'first', ${status}, '2026-09-23', '2026-09-23')`;
+        for (const operation of [
+          "start",
+          "next",
+          "back",
+          status === "cancelled" ? "cancel" : "complete",
+        ]) {
+          yield* sql`INSERT INTO j5_playbook_request VALUES (${status}, ${operation}, json_array(${operation}), ${status})`;
+        }
+      }
+      const before = yield* sql`SELECT * FROM j5_playbook_run ORDER BY run_id`;
+      yield* runJ5A2AMigrations();
+      assert.deepStrictEqual(yield* sql`SELECT * FROM j5_playbook_run ORDER BY run_id`, before);
+      assert.equal(
+        (yield* sql`SELECT * FROM j5_playbook_request WHERE run_id = 'active'`).length,
+        4,
+      );
+      for (const status of ["completed", "cancelled"]) {
+        assert.equal(
+          (yield* sql`SELECT * FROM j5_playbook_request WHERE run_id = ${status}`).length,
+          2,
+        );
+      }
+      const activePlan = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+      SELECT * FROM j5_playbook_run WHERE status = 'active' ORDER BY updated_at DESC, rowid DESC LIMIT 100`;
+      const allPlan = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+      SELECT * FROM j5_playbook_run ORDER BY (status = 'active') DESC, updated_at DESC, rowid DESC LIMIT 100`;
+      assert.isTrue(activePlan.some((row) => row.detail.includes("j5_playbook_status_updated")));
+      assert.isTrue(allPlan.some((row) => row.detail.includes("j5_playbook_active_updated")));
+      assert.isFalse([...activePlan, ...allPlan].some((row) => row.detail.includes("TEMP B-TREE")));
+      yield* sql`UPDATE j5_playbook_run SET status = 'cancelled' WHERE run_id = 'active'`;
+      assert.equal(
+        (yield* sql`SELECT * FROM j5_playbook_request WHERE run_id = 'active'`).length,
+        2,
+      );
+      yield* runJ5A2AMigrations();
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+);

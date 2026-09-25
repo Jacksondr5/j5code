@@ -7,6 +7,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import { CREW_NAME_MAX_CHARS, CREW_REASON_MAX_CHARS, CREW_TEXT_MAX_CHARS } from "./crewLimits.ts";
+import { crewSeatReservedBy } from "./crewSeatIds.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
 
 // The same bounds as the MCP verbs: the human's card edits arrive over HTTP and must not be the
@@ -82,9 +83,26 @@ export interface CreateCrewProposalInput {
   readonly createdAt: string;
 }
 
+export type AdmitCrewProposalOutcome =
+  | { readonly status: "created"; readonly proposal: CrewProposal }
+  /** A request with this id already exists; returned before any counting. */
+  | { readonly status: "existing"; readonly proposal: CrewProposal }
+  /** Wrote nothing: the seats would pass the cap counting rows and open requests. */
+  | { readonly status: "cap-exceeded"; readonly held: number; readonly adding: number };
+
 export interface AgentCrewProposalServiceShape {
   /** Idempotent by proposal id; a retried tool call finds its earlier proposal. */
   readonly create: (input: CreateCrewProposalInput) => Effect.Effect<CrewProposal, SqlError>;
+  /**
+   * Files an addition only if the Crew can seat it: its member rows plus the unreserved seats of
+   * every open request, plus this one, must fit under `maxSeats`. The existence check (a replay finds its row
+   * before anything is counted), the count, and the insert run in one transaction, so two
+   * requests racing for the last seat cannot both be filed.
+   */
+  readonly admit: (
+    input: CreateCrewProposalInput,
+    options: { readonly maxSeats: number },
+  ) => Effect.Effect<AdmitCrewProposalOutcome, SqlError>;
   readonly read: (id: string) => Effect.Effect<CrewProposal | null, SqlError>;
   readonly listOpen: () => Effect.Effect<ReadonlyArray<CrewProposal>, SqlError>;
   readonly listForCaptain: (
@@ -195,6 +213,51 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
         return (yield* read(input.id))!;
       });
 
+      // A failed addition launch reopens its proposal with the member rows it reserved still in
+      // place; those rows are counted as members, not again as the proposal's pending seats.
+      // Delete the subtraction when the launch-once change removes reopen.
+      const countHeldSeats = Effect.fn("j5.a2a.agentCrewProposals.countHeldSeats")(function* (
+        crewInstanceId: string,
+      ) {
+        const members = yield* sql<{ readonly participant_id: string; readonly seat_name: string }>`
+          SELECT participant_id, seat_name FROM j5_agent_crew_member
+          WHERE crew_instance_id = ${crewInstanceId}
+        `;
+        const open = (yield* sql<Row>`
+          SELECT * FROM j5_agent_crew_proposal
+          WHERE crew_instance_id = ${crewInstanceId} AND status = 'open'
+        `).map(fromRow);
+        return open.reduce((held, proposal) => {
+          const reserved = members.filter((row) =>
+            crewSeatReservedBy(proposal.id)({
+              participantId: row.participant_id,
+              seatName: row.seat_name,
+            }),
+          ).length;
+          const seats = (proposal.approvedSeats ?? proposal.requestedSeats).length;
+          return held + Math.max(0, seats - reserved);
+        }, members.length);
+      });
+
+      const admit = Effect.fn("j5.a2a.agentCrewProposals.admit")(function* (
+        input: CreateCrewProposalInput,
+        options: { readonly maxSeats: number },
+      ) {
+        return yield* sql.withTransaction(
+          Effect.gen(function* () {
+            const existing = yield* read(input.id);
+            if (existing !== null) return { status: "existing", proposal: existing } as const;
+            if (input.crewInstanceId !== null) {
+              const held = yield* countHeldSeats(input.crewInstanceId);
+              const adding = input.requestedSeats.length;
+              if (held + adding > options.maxSeats)
+                return { status: "cap-exceeded", held, adding } as const;
+            }
+            return { status: "created", proposal: yield* create(input) } as const;
+          }),
+        );
+      });
+
       const listOpen = Effect.fn("j5.a2a.agentCrewProposals.listOpen")(function* () {
         const rows = yield* sql<Row>`
           SELECT * FROM j5_agent_crew_proposal WHERE status = 'open' ORDER BY created_at, id
@@ -299,6 +362,7 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
 
       return AgentCrewProposalService.of({
         create,
+        admit,
         read,
         listOpen,
         listForCaptain,

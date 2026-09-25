@@ -11,7 +11,7 @@ import { Atom } from "effect/unstable/reactivity";
 
 import type { EnvironmentThreadShell } from "./models.ts";
 import { presentThreadShell } from "./models.ts";
-import type { EnvironmentCatalogState } from "./connections.ts";
+import { type EnvironmentCatalogState, enabledEnvironmentIds } from "./connections.ts";
 import {
   arrayElementsEqual,
   parseProjectRefCollectionKey,
@@ -174,7 +174,7 @@ export function createEnvironmentThreadShellAtoms(input: {
   let previousThreadRefs: ReadonlyArray<ScopedThreadRef> = [];
   const threadRefsAtom = Atom.make((get) => {
     const refs: ScopedThreadRef[] = [];
-    for (const environmentId of get(input.catalogValueAtom).entries.keys()) {
+    for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
       refs.push(...get(environmentThreadRefsAtom(environmentId)));
     }
     if (threadRefsEqual(previousThreadRefs, refs)) {
@@ -187,7 +187,7 @@ export function createEnvironmentThreadShellAtoms(input: {
   let previousThreadShells: ReadonlyArray<EnvironmentThreadShell> = [];
   const threadShellsAtom = Atom.make((get) => {
     const next: EnvironmentThreadShell[] = [];
-    for (const environmentId of get(input.catalogValueAtom).entries.keys()) {
+    for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
       for (const thread of get(environmentThreadsAtom(environmentId))) {
         next.push(scopedThread(environmentId, thread));
       }
@@ -199,6 +199,21 @@ export function createEnvironmentThreadShellAtoms(input: {
     return previousThreadShells;
   }).pipe(Atom.withLabel("environment-thread-shell-list"));
 
+  let previousNavigationShells: ReadonlyArray<EnvironmentThreadShell> = [];
+  const navigationThreadShellsAtom = Atom.make((get) => {
+    const next: EnvironmentThreadShell[] = [];
+    for (const environmentId of get(input.catalogValueAtom).entries.keys()) {
+      for (const thread of get(environmentThreadsAtom(environmentId))) {
+        if (thread.archivedAt !== null || thread.lineage.relationshipToParent === "subagent")
+          continue;
+        next.push(scopedThread(environmentId, thread));
+      }
+    }
+    if (arrayElementsEqual(previousNavigationShells, next)) return previousNavigationShells;
+    previousNavigationShells = next;
+    return next;
+  }).pipe(Atom.withLabel("environment-navigation-thread-shells"));
+
   return {
     environmentThreadsAtom,
     environmentThreadIndexAtom,
@@ -206,6 +221,7 @@ export function createEnvironmentThreadShellAtoms(input: {
     environmentThreadRefsByProjectAtom,
     threadRefsAtom,
     threadShellsAtom,
+    navigationThreadShellsAtom,
     threadShellsForProjectRefsAtom: (refs: ReadonlyArray<ScopedProjectRef>) =>
       threadShellsForProjectRefsAtomFamily(projectRefCollectionKey(refs)),
     threadShellAtom: (ref: ScopedThreadRef) => threadShellAtomFamily(threadKey(ref)),

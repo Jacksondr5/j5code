@@ -26,7 +26,7 @@ import { IdAllocatorV2, type IdAllocatorV2Shape } from "./IdAllocator.ts";
 const CHECKPOINT_REFS_PREFIX = "refs/t3/orchestration-v2/checkpoints";
 const ROOT_CHECKPOINT_SCOPE_NAME = "root";
 
-export class CheckpointRootScopePrepareError extends Schema.TaggedErrorClass<CheckpointRootScopePrepareError>()(
+export class CheckpointRootScopePrepareError extends Schema.TaggedError<CheckpointRootScopePrepareError>()(
   "CheckpointRootScopePrepareError",
   {
     threadId: ThreadId,
@@ -39,7 +39,7 @@ export class CheckpointRootScopePrepareError extends Schema.TaggedErrorClass<Che
   }
 }
 
-export class CheckpointScopeEnsureError extends Schema.TaggedErrorClass<CheckpointScopeEnsureError>()(
+export class CheckpointScopeEnsureError extends Schema.TaggedError<CheckpointScopeEnsureError>()(
   "CheckpointScopeEnsureError",
   {
     scopeId: CheckpointScopeId,
@@ -51,7 +51,7 @@ export class CheckpointScopeEnsureError extends Schema.TaggedErrorClass<Checkpoi
   }
 }
 
-export class CheckpointBaselineCaptureError extends Schema.TaggedErrorClass<CheckpointBaselineCaptureError>()(
+export class CheckpointBaselineCaptureError extends Schema.TaggedError<CheckpointBaselineCaptureError>()(
   "CheckpointBaselineCaptureError",
   {
     scopeId: CheckpointScopeId,
@@ -64,7 +64,7 @@ export class CheckpointBaselineCaptureError extends Schema.TaggedErrorClass<Chec
   }
 }
 
-export class CheckpointCaptureError extends Schema.TaggedErrorClass<CheckpointCaptureError>()(
+export class CheckpointCaptureError extends Schema.TaggedError<CheckpointCaptureError>()(
   "CheckpointCaptureError",
   {
     scopeId: CheckpointScopeId,
@@ -77,7 +77,7 @@ export class CheckpointCaptureError extends Schema.TaggedErrorClass<CheckpointCa
   }
 }
 
-export class CheckpointRestoreError extends Schema.TaggedErrorClass<CheckpointRestoreError>()(
+export class CheckpointRestoreError extends Schema.TaggedError<CheckpointRestoreError>()(
   "CheckpointRestoreError",
   {
     scopeId: CheckpointScopeId,
@@ -90,7 +90,7 @@ export class CheckpointRestoreError extends Schema.TaggedErrorClass<CheckpointRe
   }
 }
 
-export class CheckpointDeleteStaleRefsError extends Schema.TaggedErrorClass<CheckpointDeleteStaleRefsError>()(
+export class CheckpointDeleteStaleRefsError extends Schema.TaggedError<CheckpointDeleteStaleRefsError>()(
   "CheckpointDeleteStaleRefsError",
   {
     scopeId: CheckpointScopeId,
@@ -329,10 +329,20 @@ export const layer: Layer.Layer<
             });
             const checkpointable = yield* isGitCheckpointable(input.scope.cwd);
             const available = checkpointable
-              ? yield* checkpointStore.hasCheckpointRef({
-                  cwd: input.scope.cwd,
-                  checkpointRef,
-                })
+              ? yield* checkpointStore
+                  .hasCheckpointRef({
+                    cwd: input.scope.cwd,
+                    checkpointRef,
+                  })
+                  .pipe(
+                    Effect.catch((cause) =>
+                      Effect.logWarning("orchestration V2 baseline ref lookup failed", {
+                        scopeId: input.scope.id,
+                        checkpointRef,
+                        cause: String(cause),
+                      }).pipe(Effect.as(false)),
+                    ),
+                  )
               : false;
             return makeCheckpoint({
               id: checkpointId,
@@ -430,10 +440,20 @@ export const layer: Layer.Layer<
             });
           }
 
-          const previousExists = yield* checkpointStore.hasCheckpointRef({
-            cwd: input.scope.cwd,
-            checkpointRef: previousCheckpointRef,
-          });
+          const previousExists = yield* checkpointStore
+            .hasCheckpointRef({
+              cwd: input.scope.cwd,
+              checkpointRef: previousCheckpointRef,
+            })
+            .pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("orchestration V2 previous checkpoint ref lookup failed", {
+                  scopeId: input.scope.id,
+                  checkpointRef: previousCheckpointRef,
+                  cause: String(cause),
+                }).pipe(Effect.as(false)),
+              ),
+            );
           const files = previousExists
             ? yield* checkpointStore
                 .diffCheckpoints({

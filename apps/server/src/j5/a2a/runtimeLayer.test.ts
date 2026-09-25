@@ -1,3 +1,5 @@
+import { DeviceService } from "../../device/DeviceService.ts";
+import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { assert, it } from "@effect/vitest";
@@ -25,6 +27,7 @@ import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { VcsProcess } from "../../vcs/VcsProcess.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { layer as outboxLayer } from "../../orchestration-v2/EffectOutbox.ts";
+import { ProviderAdapterRegistryV2 } from "../../orchestration-v2/ProviderAdapterRegistry.ts";
 import { A2ADeliveryTransport, live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import { j5AuthenticatedRoutesLayer } from "./J5AuthenticatedRoutes.ts";
 
@@ -33,7 +36,6 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { runMigrations } from "../../persistence/Migrations.ts";
 import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { ArchiveAgentService } from "./ArchiveAgentService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import { A2ALifecycleService } from "./LifecycleService.ts";
@@ -56,7 +58,7 @@ const archiveDependencies = Layer.mergeAll(
 const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
   Effect.scoped(
     Effect.gen(function* () {
-      const databaseContext = yield* Layer.build(NodeSqliteClient.layerMemory());
+      const databaseContext = yield* Layer.build(NodeSqliteClient.layer({ filename: ":memory:" }));
       const database = Layer.succeed(
         SqlClient.SqlClient,
         Context.get(databaseContext, SqlClient.SqlClient),
@@ -104,7 +106,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
 it.effect("shares one runtime and outbox across the production HTTP and MCP registrations", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const databaseContext = yield* Layer.build(NodeSqliteClient.layerMemory());
+      const databaseContext = yield* Layer.build(NodeSqliteClient.layer({ filename: ":memory:" }));
       const database = Layer.succeed(
         SqlClient.SqlClient,
         Context.get(databaseContext, SqlClient.SqlClient),
@@ -132,7 +134,6 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
       const silenceConsumer = Layer.effectDiscard(A2ASilenceDetector.pipe(Effect.asVoid));
       const lifecycleConsumer = Layer.effectDiscard(A2ALifecycleService.pipe(Effect.asVoid));
       const archiveFactsConsumer = Layer.effectDiscard(A2AArchiveFacts.pipe(Effect.asVoid));
-      const archiveAgentConsumer = Layer.effectDiscard(ArchiveAgentService.pipe(Effect.asVoid));
       const threadHomesConsumer = Layer.effectDiscard(ThreadHomesService.pipe(Effect.asVoid));
       const spawnCompositionConsumer = Layer.effectDiscard(
         SpawnCompositionService.pipe(Effect.asVoid),
@@ -156,12 +157,13 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
             silenceConsumer,
             lifecycleConsumer,
             archiveFactsConsumer,
-            archiveAgentConsumer,
             threadHomesConsumer,
             spawnCompositionConsumer,
           ).pipe(
             Layer.provideMerge(runtime),
             Layer.provide(countedThreadManagement),
+            Layer.provide(Layer.mock(DeviceService)({})),
+            Layer.provide(Layer.mock(ProjectionSnapshotQuery)({})),
             Layer.provide(Layer.mock(OrchestratorV2)({})),
             Layer.provide(
               outboxLayer.pipe(
@@ -185,6 +187,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
                 Layer.mock(ProjectService)({}),
                 Layer.mock(ProjectSetupScriptRunner)({}),
                 Layer.mock(ProviderRegistry)({}),
+                Layer.mock(ProviderAdapterRegistryV2)({}),
                 Layer.mock(ScheduledTaskService)({}),
                 Layer.mock(GitWorkflowService)({}),
                 Layer.mock(VcsStatusBroadcaster)({}),

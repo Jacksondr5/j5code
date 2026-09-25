@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+export * from "./j5/playbook.ts";
 
 import { ModelSelection } from "./modelSelection.ts";
 import { RuntimeMode } from "./providerPolicy.ts";
@@ -22,6 +23,34 @@ export type ManagedSquadron = typeof ManagedSquadron.Type;
 export const SquadronListResponse = Schema.Struct({ squadrons: Schema.Array(ManagedSquadron) });
 export const CreateSquadronRequest = Schema.Struct({ name: Schema.String, projectId: ProjectId });
 export const CreateSquadronResponse = Schema.Struct({ squadron: ManagedSquadron });
+export const RenameSquadronRequest = Schema.Struct({ name: Schema.String });
+export const RenameSquadronResponse = Schema.Struct({ squadron: ManagedSquadron });
+export const DeleteSquadronResponse = Schema.Struct({
+  deleted: Schema.Literal(true),
+  squadronId: Schema.String,
+});
+
+export const AssignImportedThreadsRequest = Schema.Struct({
+  squadronId: Schema.String.check(Schema.isNonEmpty()),
+  projectId: ProjectId,
+});
+export type AssignImportedThreadsRequest = typeof AssignImportedThreadsRequest.Type;
+export const AssignImportedThreadsResponse = Schema.Struct({
+  entries: Schema.Array(
+    Schema.Struct({
+      threadId: ThreadId,
+      status: Schema.Literals([
+        "assigned",
+        "already_assigned",
+        "kept_elsewhere",
+        "kept_retired",
+        "kept_archived",
+        "failed",
+      ]),
+    }),
+  ),
+});
+export type AssignImportedThreadsResponse = typeof AssignImportedThreadsResponse.Type;
 
 export const ThreadHome = Schema.Union([
   Schema.Struct({
@@ -250,8 +279,6 @@ export const FleetAgent = Schema.Struct({
   ),
   /** Open Exchanges this agent owes a reply on. */
   openAsks: Schema.Number,
-  /** A retired agent kept only as a placeholder above an active descendant; never a live row. */
-  archived: Schema.Boolean,
 });
 export type FleetAgent = typeof FleetAgent.Type;
 export const FleetSquadron = Schema.Struct({
@@ -325,6 +352,7 @@ export type CrewArchiveResponse = typeof CrewArchiveResponse.Type;
 
 export const J5_API_PATHS = {
   squadrons: "/api/j5/squadrons",
+  assignImportedThreads: "/api/j5/squadrons/assign-imported",
   threadHomes: "/api/j5/a2a/client-reads/participant-homes",
   inbox: "/api/j5/a2a/inbox",
   answer: "/api/j5/a2a/inbox/answer",
@@ -338,6 +366,13 @@ export const J5_API_PATHS = {
   crewMemberships: "/api/j5/a2a/client-reads/crew-memberships",
   spawnedChildren: "/api/j5/a2a/client-reads/spawned-children",
 } as const;
+
+/**
+ * Action path for one Squadron; ids carry a colon so they are encoded. Both
+ * actions are POST so cross-origin browser clients pass the CORS allowlist.
+ */
+export const j5SquadronActionPath = (squadronId: string, action: "rename" | "delete"): string =>
+  `${J5_API_PATHS.squadrons}/${encodeURIComponent(squadronId)}/${action}`;
 
 /**
  * Machine participants: registered non-agent senders (cron jobs, watchdogs,

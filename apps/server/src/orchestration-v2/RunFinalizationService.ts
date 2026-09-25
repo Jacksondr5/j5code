@@ -1,4 +1,4 @@
-import { CheckpointScopeId, RunId, ThreadId } from "@t3tools/contracts";
+import { CheckpointScopeId, ProjectId, RunId, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -11,7 +11,7 @@ import { QueuedRunWatchdog } from "../j5/run-observability/QueuedRunWatchdog.ts"
 import * as CheckpointCapture from "./CheckpointCaptureService.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 
-export class RunFinalizationError extends Schema.TaggedErrorClass<RunFinalizationError>()(
+export class RunFinalizationError extends Schema.TaggedError<RunFinalizationError>()(
   "RunFinalizationError",
   {
     threadId: ThreadId,
@@ -22,20 +22,20 @@ export class RunFinalizationError extends Schema.TaggedErrorClass<RunFinalizatio
   },
 ) {}
 
-export class RunFinalizationRefreshError extends Schema.TaggedErrorClass<RunFinalizationRefreshError>()(
+export class RunFinalizationRefreshError extends Schema.TaggedError<RunFinalizationRefreshError>()(
   "RunFinalizationRefreshError",
   { cwd: Schema.String, cause: Schema.Defect() },
 ) {}
 
 export class RunFinalizationObserver extends Context.Reference<{
-  readonly refreshAfterTurn: Effect.Effect<void>;
+  readonly refreshAfterTurn: (projectId: ProjectId) => Effect.Effect<void>;
   readonly refresh: (input: {
     readonly cwd: string;
     readonly threadId: ThreadId;
     readonly runId: RunId;
   }) => Effect.Effect<void, RunFinalizationRefreshError>;
 }>("t3/orchestration-v2/RunFinalizationObserver", {
-  defaultValue: () => ({ refresh: () => Effect.void, refreshAfterTurn: Effect.void }),
+  defaultValue: () => ({ refresh: () => Effect.void, refreshAfterTurn: () => Effect.void }),
 }) {}
 
 export class RunFinalizationService extends Context.Service<
@@ -49,7 +49,7 @@ export class RunFinalizationService extends Context.Service<
   }
 >()("t3/orchestration-v2/RunFinalizationService") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const checkpointCapture = yield* CheckpointCapture.CheckpointCaptureServiceV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const observer = yield* RunFinalizationObserver;
@@ -66,7 +66,7 @@ export const make = Effect.gen(function* () {
         ),
       );
     const projection = yield* projections
-      .getThreadProjection(input.threadId)
+      .getCheckpointContext(input.threadId)
       .pipe(
         Effect.mapError(
           (cause) => new RunFinalizationError({ ...input, operation: "refresh-workspace", cause }),

@@ -57,6 +57,20 @@ export function resolveNewThreadShortcutDestination(
 }
 
 /**
+ * The Squadron the current-thread header names and starts new threads in: the thread's
+ * durable home, else the Squadron a draft has explicitly chosen, else none (the header
+ * then falls back to the Sidebar's ambient filter, the directory shortcut, or the picker).
+ */
+export function resolveHeaderSquadronRef(input: {
+  readonly environmentId: EnvironmentId;
+  readonly durableHomeId: string | null;
+  readonly draftSquadronId: string | null;
+}): ScopedSquadronRef | null {
+  const squadronId = input.durableHomeId ?? input.draftSquadronId;
+  return squadronId === null ? null : { environmentId: input.environmentId, squadronId };
+}
+
+/**
  * Every "new thread" door resolves through here. A selected Squadron (the
  * active thread's durable Registrar home, or the Sidebar's ambient filter)
  * is the home when it is available; otherwise only the ready/exact-one

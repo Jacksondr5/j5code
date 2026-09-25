@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  archiveMayRetireCrews,
   archiveWithPreflight,
   formatArchiveWarning,
   needsArchiveWarning,
@@ -87,7 +88,7 @@ describe("archive flow", () => {
     expect(needsArchiveWarning(preflight)).toBe(true);
     expect(warning.message).toBe("Archive Release agent?");
     expect(warning.confirmLabel).toBe("Archive anyway");
-    expect(markup).toContain("Also archives 1 agent placed under Release agent:");
+    expect(markup).toContain("1 agent placed under Release agent keeps running:");
     expect(markup).toContain("Child");
     expect(markup).toContain("2 open asks will be terminated — counterparties are notified");
     expect(markup).toContain("Blocking");
@@ -123,6 +124,48 @@ describe("archive flow", () => {
       }),
     ).resolves.toBe("archived");
     expect(archive).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers Undo only when the archive cannot have retired Crews", async () => {
+    expect(archiveMayRetireCrews(registered())).toBe(false);
+    expect(archiveMayRetireCrews(registered({ liveCrews: [reviewPair] }))).toBe(true);
+    expect(archiveMayRetireCrews(registered({ liveCrews: null }))).toBe(true);
+    expect(archiveMayRetireCrews({ facts: null, participantLabels: new Map() })).toBe(true);
+
+    const archive = vi.fn(async (_outcome: { readonly undoable: boolean }) => "archived");
+    vi.spyOn(client, "readArchivePreflight").mockResolvedValueOnce(
+      registered({ liveCrews: [reviewPair] }),
+    );
+    await archiveWithPreflight({
+      threadRef: archiveThreadRef,
+      threadTitle: "Captain",
+      confirm: async () => true,
+      archive,
+    });
+    expect(archive).toHaveBeenLastCalledWith({ undoable: false });
+
+    vi.spyOn(client, "readArchivePreflight").mockResolvedValueOnce(registered());
+    await archiveWithPreflight({
+      threadRef: archiveThreadRef,
+      threadTitle: "Clean",
+      confirm: async () => true,
+      archive,
+    });
+    expect(archive).toHaveBeenLastCalledWith({ undoable: true });
+  });
+
+  it("names the agents beneath that keep running, leaving the Crew's seats to the Crew", () => {
+    const preflight = registered({
+      liveCrews: [reviewPair],
+      placementSubtree: { state: "known", participantIds: ["agent:child", "agent:critic"] },
+    });
+    const markup = renderToStaticMarkup(
+      formatArchiveWarning({ threadTitle: "Captain", preflight }).content,
+    );
+    const keptRunning = markup.slice(markup.indexOf("keeps running:"));
+    expect(markup).toContain("1 agent placed under Captain keeps running:");
+    expect(keptRunning).toContain("Child");
+    expect(keptRunning).not.toContain("Critic");
   });
 
   it("refuses to archive a Crew seat on its own, as archive_agent does for agents", async () => {

@@ -2,7 +2,9 @@ import {
   CommandId,
   MessageId,
   ThreadId,
+  type ChatAttachment,
   type ModelSelection,
+  type OrchestrationMessageContext,
   type ProjectId,
   type ProviderInteractionMode,
   type RuntimeMode,
@@ -20,8 +22,9 @@ export interface ProjectThreadStartTurnSpec {
   readonly messageId: string;
   readonly createdAt: string;
   readonly text: string;
-  /** Wire attachments from `prepareTurnAttachments`, in composer order. */
-  readonly uploadedAttachments: ReadonlyArray<UploadedMobileAttachment>;
+  readonly context?: OrchestrationMessageContext;
+  /** New uploads or server-owned attachments from a cancelled setup. */
+  readonly uploadedAttachments: ReadonlyArray<UploadedMobileAttachment | ChatAttachment>;
   readonly modelSelection: ModelSelection;
   /** Launch as a persona; the server resolves and pins its route. */
   readonly agentPersonaId?: string;
@@ -51,6 +54,7 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
       messageId: MessageId.make(spec.messageId),
       role: "user" as const,
       text: spec.text,
+      ...(spec.context ? { context: spec.context } : {}),
       attachments: spec.uploadedAttachments,
     },
     modelSelection: spec.modelSelection,

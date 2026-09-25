@@ -127,7 +127,6 @@ it.layer(TestLayer)("CheckpointStore.layer", (it) => {
       expect(yield* checkpointStore.isGitRepository(nested)).toBe(true);
     }),
   );
-
   describe("diffCheckpoints", () => {
     it.effect("returns full oversized checkpoint diffs without truncation", () =>
       Effect.gen(function* () {

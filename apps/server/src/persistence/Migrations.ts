@@ -10,6 +10,8 @@
 
 import * as Migrator from "effect/unstable/sql/Migrator";
 import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
 
 // Import all migrations statically
 import Migration0001 from "./Migrations/001_OrchestrationEvents.ts";
@@ -59,18 +61,14 @@ import Migration0044 from "./Migrations/044_ClearAutomaticProjectModelDefaults.t
 import Migration0045 from "./Migrations/045_ProjectionProjectsAutoPull.ts";
 import Migration0046 from "./Migrations/046_RepairAutomaticSettlementTimestamps.ts";
 import Migration0047 from "./Migrations/047_ProjectionProjectIcon.ts";
-import Migration0048 from "./Migrations/048_OrchestrationV2.ts";
-import Migration0049 from "./Migrations/049_OrchestrationV2Subagents.ts";
-import Migration0050 from "./Migrations/050_OrchestrationV2Foundation.ts";
-import Migration0051 from "./Migrations/051_OrchestrationV2ProviderSessionBindings.ts";
-import Migration0052 from "./Migrations/052_OrchestrationV2ThreadLaunchWorkflows.ts";
-import Migration0053 from "./Migrations/053_ApplicationEventSource.ts";
-import Migration0054 from "./Migrations/054_OrchestrationV2EffectCancellation.ts";
-import Migration0055 from "./Migrations/055_ScheduledTasks.ts";
-import Migration0056 from "./Migrations/056_LegacyV1ImportState.ts";
-import Migration0057 from "./Migrations/057_ApplicationEventSequenceIndexes.ts";
-import Migration0058 from "./Migrations/058_OrchestrationV2RecoveryIndexes.ts";
-import Migration0059 from "./Migrations/059_OrchestrationV2ShellIndexes.ts";
+import Migration0048 from "./Migrations/048_ProjectionThreadBranchPullRequest.ts";
+import Migration0049 from "./Migrations/049_ProjectionThreadsActiveOrderKey.ts";
+import Migration0050 from "./Migrations/050_ProjectionThreadPullRequests.ts";
+import Migration0051 from "./Migrations/051_ProjectionThreadMessageContext.ts";
+import Migration0052 from "./Migrations/052_ProjectionThreadTitleState.ts";
+import Migration0053 from "./Migrations/053_PullRequestFilesViewed.ts";
+import Migration0054 from "./Migrations/054_OrchestrationV2.ts";
+import Migration0055 from "./Migrations/055_RemoveRedundantProjectionIndexes.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -130,23 +128,21 @@ export const migrationEntries = [
   [45, "ProjectionProjectsAutoPull", Migration0045],
   [46, "RepairAutomaticSettlementTimestamps", Migration0046],
   [47, "ProjectionProjectIcon", Migration0047],
-  [48, "OrchestrationV2", Migration0048],
-  [49, "OrchestrationV2Subagents", Migration0049],
-  [50, "OrchestrationV2Foundation", Migration0050],
-  [51, "OrchestrationV2ProviderSessionBindings", Migration0051],
-  [52, "OrchestrationV2ThreadLaunchWorkflows", Migration0052],
-  [53, "ApplicationEventSource", Migration0053],
-  [54, "OrchestrationV2EffectCancellation", Migration0054],
-  [55, "ScheduledTasks", Migration0055],
-  [56, "LegacyV1ImportState", Migration0056],
-  [57, "ApplicationEventSequenceIndexes", Migration0057],
-  [58, "OrchestrationV2RecoveryIndexes", Migration0058],
-  [59, "OrchestrationV2ShellIndexes", Migration0059],
+  [48, "ProjectionThreadBranchPullRequest", Migration0048],
+  [49, "ProjectionThreadsActiveOrderKey", Migration0049],
+  [50, "ProjectionThreadPullRequests", Migration0050],
+  [51, "ProjectionThreadMessageContext", Migration0051],
+  [52, "ProjectionThreadTitleState", Migration0052],
+  [53, "PullRequestFilesViewed", Migration0053],
+  // Released as 53 in V2 previews; reconcileV2PreviewMigration handles that collision.
+  // Preserve this migration's schema. Future V2 schema changes need new migrations.
+  [54, "OrchestrationV2", Migration0054],
+  [55, "RemoveRedundantProjectionIndexes", Migration0055],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
 
-export const makeMigrationLoader = (throughId?: number) =>
+const makeMigrationLoader = (throughId?: number) =>
   Migrator.fromRecord(
     Object.fromEntries(
       migrationEntries
@@ -178,10 +174,42 @@ export interface RunMigrationsOptions {
 export const runMigrations = Effect.fn("runMigrations")(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {}) {
-  const executedMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
+  const previewMigrations =
+    toMigrationInclusive === undefined || toMigrationInclusive >= 54
+      ? yield* reconcileV2PreviewMigration()
+      : [];
+  const executedMigrations = [
+    ...previewMigrations,
+    ...(yield* run({ loader: makeMigrationLoader(toMigrationInclusive) })),
+  ];
   const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);
   yield* migrations.length === 0
     ? Effect.logDebug("Database schema is current")
     : Effect.log("Migrations ran successfully").pipe(Effect.annotateLogs({ migrations }));
+
+  // The migrator keys on migration_id: a database that recorded a different
+  // migration under a shared id (local or fork builds) keeps that id and
+  // silently skips this build's migration at it. Surface the divergence so the
+  // skipped schema change is diagnosable.
+  const sql = yield* SqlClient.SqlClient;
+  const recorded = yield* sql<{
+    readonly migration_id: number;
+    readonly name: string;
+  }>`SELECT migration_id, name FROM effect_sql_migrations`;
+  const manifestNames = new Map<number, string>(migrationEntries.map(([id, name]) => [id, name]));
+  const divergent = recorded.flatMap((row) => {
+    const expected = manifestNames.get(row.migration_id);
+    if (expected === undefined) {
+      return [`${row.migration_id}:${row.name} (unknown to this build)`];
+    }
+    return expected === row.name
+      ? []
+      : [`${row.migration_id}:${row.name} (this build: ${expected})`];
+  });
+  if (divergent.length > 0) {
+    yield* Effect.logWarning(
+      "Database migration history diverges from this build; recorded migration ids are skipped, not reconciled by name.",
+    ).pipe(Effect.annotateLogs({ divergent }));
+  }
   return executedMigrations;
 });

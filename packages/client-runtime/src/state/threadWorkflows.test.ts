@@ -101,10 +101,34 @@ describe("thread workflows", () => {
     expect(state.canPromoteToSteer).toBe(true);
   });
 
+  it("keeps held messages visible and clears the hold when they leave the queue", () => {
+    for (const status of ["queued", "cancelled", "starting"] as const) {
+      const state = deriveThreadQueueWorkflowState({
+        thread: { id: "thread", activeProviderThreadId: null },
+        runs: [{ id: "held", status, userMessageId: "message", ordinal: 1, queueHeld: true }],
+        messages: [{ id: "message", text: "Saved message" }],
+        providerThreads: [],
+        providerTurns: [],
+        providerSessions: [],
+      } as never);
+      expect(state.isHeld).toBe(status === "queued");
+      expect(state.queuedRuns.map(({ text }) => text)).toEqual(
+        status === "queued" ? ["Saved message"] : [],
+      );
+    }
+  });
+
   it("hides automatic completion delivery from the visible queue", () => {
     const state = deriveThreadQueueWorkflowState({
       thread: { id: "thread", activeProviderThreadId: null },
       runs: [
+        {
+          id: "provider-wake",
+          status: "queued",
+          userMessageId: "provider-wake",
+          ordinal: 4,
+          queuePosition: 3,
+        },
         {
           id: "automatic",
           status: "queued",
@@ -121,6 +145,15 @@ describe("thread workflows", () => {
         },
       ],
       messages: [
+        {
+          id: "provider-wake",
+          text: "Model-facing text",
+          notification: {
+            source: { kind: "monitor" },
+            outcome: "updated",
+            summary: "Monitor updated",
+          },
+        },
         {
           id: "message-automatic",
           text: "A delegated task reached a terminal state.",

@@ -1,3 +1,5 @@
+import * as NodeV8 from "node:v8";
+
 import {
   CommandId,
   EventId,
@@ -360,12 +362,12 @@ layer("OrchestrationEventStore", (it) => {
       const range = { threadId, afterSequence: baseline, throughSequence: head, maxEvents: 128 };
       assert.deepEqual(yield* store.getAgentReplayStats(range), {
         eventCount: 2,
-        payloadBytes: Buffer.byteLength(unicodePayload) + Buffer.byteLength(oversizedPayload),
+        rawPayloadBytes: Buffer.byteLength(unicodePayload) + Buffer.byteLength(oversizedPayload),
         hasCreateEvent: true,
       });
       assert.deepEqual(yield* store.getAgentReplayStats({ ...range, afterSequence: first }), {
         eventCount: 1,
-        payloadBytes: Buffer.byteLength(oversizedPayload),
+        rawPayloadBytes: Buffer.byteLength(oversizedPayload),
         hasCreateEvent: false,
       });
       assert.equal(
@@ -375,7 +377,7 @@ layer("OrchestrationEventStore", (it) => {
       );
       assert.deepEqual(yield* store.getAgentReplayStats({ ...range, afterSequence: later }), {
         eventCount: 0,
-        payloadBytes: 0,
+        rawPayloadBytes: 0,
         hasCreateEvent: false,
       });
     }),
@@ -454,3 +456,55 @@ for (const phase of ["high-water", "replay"] as const) {
     ).pipe(Effect.provide(Layer.fresh(TestLayer))),
   );
 }
+
+it.effect("releases consumed application replay pages", () =>
+  Effect.gen(function* () {
+    const store = yield* OrchestrationEventStore;
+    const afterSequence = yield* store.latestApplicationSequence;
+    yield* Effect.forEach(
+      Array.from({ length: 1501 }, (_, index) => index),
+      (index) =>
+        store.append({
+          type: "project.created",
+          eventId: EventId.make(`retention-${index}`),
+          aggregateKind: "project",
+          aggregateId: ProjectId.make(`retention-${index}`),
+          occurredAt: "2026-09-08T00:00:00Z",
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          payload: {
+            projectId: ProjectId.make(`retention-${index}`),
+            title: "Replay",
+            workspaceRoot: "/tmp/replay",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: "2026-09-08T00:00:00Z",
+            updatedAt: "2026-09-08T00:00:00Z",
+          },
+        }),
+      { discard: true },
+    );
+    // oxlint-disable-next-line typescript/no-extraneous-class -- Counts retained page markers after full GC.
+    class ReplayPage {}
+    let count = 0;
+    yield* store
+      .readApplicationEvents({
+        afterSequence,
+        throughSequence: yield* store.latestApplicationSequence,
+      })
+      .pipe(
+        Stream.runForEach((event) =>
+          Effect.sync(() => {
+            if (count % 500 === 0) {
+              Object.assign(event, { replayPage: new ReplayPage() });
+              assert.isAtMost(NodeV8.queryObjects(ReplayPage, { format: "count" }), 1);
+            }
+            count++;
+          }),
+        ),
+      );
+    assert.equal(count, 1501);
+  }).pipe(Effect.provide(TestLayer)),
+);

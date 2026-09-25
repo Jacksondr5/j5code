@@ -1,4 +1,5 @@
 import * as Layer from "effect/Layer";
+import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
 
 import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.ts";
 import { layer as agentCrewInstanceLayer } from "./AgentCrewInstanceService.ts";
@@ -50,7 +51,9 @@ export const makeJ5SquadronCreationLayer = (
 ) => {
   const ledgerProvided = options.ledger ?? ledgerLayer;
   const registrarAndReferences = Layer.mergeAll(homeRegistrarLayer, squadronProjectReferencesLayer);
-  return squadronThreadCreationServiceLayer.pipe(
+  return Layer.merge(squadronThreadCreationServiceLayer, spawnCompositionLayer).pipe(
+    Layer.provideMerge(homeRegistrationTransactionLayer),
+    Layer.provideMerge(participantPlacementLayer),
     Layer.provideMerge(registrarAndReferences),
     Layer.provideMerge(ledgerProvided),
   );
@@ -74,13 +77,6 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(deliveryWorkerProvided),
   );
   const archiveFactsProvided = archiveFactsLayer.pipe(Layer.provide(placementFactsLayer));
-  const archiveAgentProvided = archiveAgentLayer.pipe(
-    Layer.provideMerge(archiveFactsProvided),
-    Layer.provideMerge(lifecycleServiceProvided),
-  );
-  const spawnCompositionProvided = spawnCompositionLayer.pipe(
-    Layer.provideMerge(homeRegistrationTransactionLayer),
-  );
   const squadronJoinProvided = squadronJoinLayer.pipe(
     Layer.provideMerge(homeRegistrationTransactionLayer),
   );
@@ -89,14 +85,15 @@ export const makeJ5A2AAuxiliaryLayer = (
   const agentHandoffNudgeWorkerProvided = agentHandoffNudgeWorkerLayer.pipe(
     Layer.provide(agentHandoffNudgeQueueLayer),
   );
+  const archiveAgentProvided = archiveAgentLayer.pipe(
+    Layer.provideMerge(lifecycleServiceProvided),
+    Layer.provideMerge(archiveFactsProvided),
+  );
   const archiveCrewProvided = archiveCrewLayer.pipe(
     Layer.provideMerge(archiveAgentProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
   );
-  const crewLaunchProvided = crewLaunchLayer.pipe(
-    Layer.provideMerge(spawnCompositionProvided),
-    Layer.provideMerge(agentCrewInstanceLayer),
-  );
+  const crewLaunchProvided = crewLaunchLayer.pipe(Layer.provideMerge(agentCrewInstanceLayer));
   // The report watches the seats an approval launched and tells the Captain how they started; the
   // finish notifier's stream feeds it, so one stream serves every Crew reaction.
   const crewLaunchReporterProvided = crewLaunchReporterLayer.pipe(
@@ -125,6 +122,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provide(artifactWorkspaceLayer),
   );
   const runtimeWithoutClientReads = Layer.mergeAll(
+    playbookStoreLayer,
     agentHandoffNudgeWorkerProvided,
     // Exported to the routes so the J5 WebSocket handler streams the same revision counter the
     // observer bumps (server.ts provides this layer object to the observer; Effect memoizes it).
@@ -138,9 +136,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     humanInboxLayer,
     lifecycleServiceProvided,
     archiveFactsProvided,
-    archiveAgentProvided,
     threadHomesServiceLayer,
-    spawnCompositionProvided,
     squadronJoinProvided,
     agentCrewInstanceLayer,
     archiveCrewProvided,
@@ -148,7 +144,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     crewProposalBootSweepProvided,
     crewStopProvided,
     crewSeatFinishNotifierProvided,
-  ).pipe(Layer.provideMerge(participantPlacementLayer));
+  );
   return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };
 

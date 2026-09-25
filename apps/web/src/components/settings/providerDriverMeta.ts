@@ -6,19 +6,10 @@ import {
   CursorSettings,
   GrokSettings,
   OpenCodeSettings,
+  PiSettings,
   ProviderDriverKind,
 } from "@t3tools/contracts";
 import type * as Schema from "effect/Schema";
-import {
-  ACPRegistryIcon,
-  AntigravityIcon,
-  ClaudeAI,
-  CursorIcon,
-  GrokIcon,
-  type Icon,
-  OpenAI,
-  OpenCodeIcon,
-} from "../Icons";
 
 type ProviderSettingsSchema = {
   readonly fields: Readonly<Record<string, Schema.Top>>;
@@ -33,7 +24,6 @@ type ProviderSettingsSchema = {
 export interface ProviderClientDefinition {
   readonly value: ProviderDriverKind;
   readonly label: string;
-  readonly icon: Icon;
   readonly settingsSchema: ProviderSettingsSchema;
   readonly environmentFields?: readonly ProviderEnvironmentFieldDefinition[];
   /** Whether this driver has a built-in default instance backed by legacy settings. */
@@ -56,29 +46,26 @@ export interface ProviderEnvironmentFieldDefinition {
   readonly sensitive?: boolean;
 }
 
-export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
+const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
   {
     value: ProviderDriverKind.make("codex"),
     label: "Codex",
-    icon: OpenAI,
     settingsSchema: CodexSettings,
   },
   {
     value: ProviderDriverKind.make("claudeAgent"),
     label: "Claude",
-    icon: ClaudeAI,
     settingsSchema: ClaudeSettings,
   },
   {
     value: ProviderDriverKind.make("cursor"),
     label: "Cursor",
-    icon: CursorIcon,
     settingsSchema: CursorSettings,
     environmentFields: [
       {
         name: "CURSOR_API_KEY",
         label: "Cursor API key",
-        description: "Required by the Cursor Agent SDK.",
+        description: "Optional. Overrides browser sign-in for this provider.",
         placeholder: "Paste API key",
         sensitive: true,
       },
@@ -87,32 +74,34 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
   {
     value: ProviderDriverKind.make("grok"),
     label: "Grok",
-    icon: GrokIcon,
     settingsSchema: GrokSettings,
-  },
-  {
-    value: ProviderDriverKind.make("acpRegistry"),
-    label: "ACP Registry",
-    icon: ACPRegistryIcon,
-    badgeLabel: "V2 Preview",
-    settingsSchema: AcpRegistrySettings,
-    hasDefaultInstance: false,
   },
   {
     value: ProviderDriverKind.make("opencode"),
     label: "OpenCode",
-    icon: OpenCodeIcon,
     settingsSchema: OpenCodeSettings,
   },
   {
     value: ProviderDriverKind.make("antigravity"),
     label: "Antigravity",
-    icon: AntigravityIcon,
     settingsSchema: AntigravitySettings,
+  },
+  {
+    value: ProviderDriverKind.make("pi"),
+    label: "Pi",
+    badgeLabel: "Early Access",
+    settingsSchema: PiSettings,
+  },
+  {
+    value: ProviderDriverKind.make("acpRegistry"),
+    label: "ACP Registry",
+    badgeLabel: "Early Access",
+    settingsSchema: AcpRegistrySettings,
+    hasDefaultInstance: false,
   },
 ];
 
-export const PROVIDER_CLIENT_DEFINITION_BY_VALUE: Partial<
+const PROVIDER_CLIENT_DEFINITION_BY_VALUE: Partial<
   Record<ProviderDriverKind, ProviderClientDefinition>
 > = Object.fromEntries(
   PROVIDER_CLIENT_DEFINITIONS.map((definition) => [definition.value, definition]),

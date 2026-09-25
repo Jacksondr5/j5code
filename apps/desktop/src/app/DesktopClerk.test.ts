@@ -1,3 +1,4 @@
+import * as NodePath from "@effect/platform-node/NodePath";
 import { assert, describe, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -28,15 +29,21 @@ import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import * as DesktopPreReadyFileSystem from "./DesktopPreReadyFileSystem.ts";
 
-const makeDesktopClerkLayer = (isDevelopment = true, events: string[] = []) => {
+const makeDesktopClerkLayer = (
+  isDevelopment = true,
+  events: string[] = [],
+  platform: NodeJS.Platform = "darwin",
+  fileSystemLayer: Layer.Layer<FileSystem.FileSystem> = FileSystem.layerNoop({
+    exists: () => Effect.succeed(false),
+  }),
+) => {
   const environment = DesktopEnvironment.DesktopEnvironment.of({
     stateDir: "/tmp/t3-state",
     isDevelopment,
     appDataDirectory: "/tmp/app-data",
-    userDataDirName: isDevelopment ? "j5code-dev" : "j5code",
-    legacyUserDataDirName: isDevelopment ? "J5 Code (Dev)" : "J5 Code",
-    path: { join: (...parts: ReadonlyArray<string>) => parts.join("/") },
+    platform,
   } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
 
   const electronApp = {
@@ -49,9 +56,10 @@ const makeDesktopClerkLayer = (isDevelopment = true, events: string[] = []) => {
   return DesktopClerk.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        NodePath.layerPosix,
         Layer.succeed(DesktopEnvironment.DesktopEnvironment, environment),
         Layer.succeed(ElectronApp.ElectronApp, electronApp),
-        FileSystem.layerNoop({ exists: () => Effect.succeed(false) }),
+        fileSystemLayer,
       ),
     ),
   );
@@ -61,17 +69,6 @@ describe("DesktopClerk", () => {
   beforeEach(() => {
     createClerkBridgeMock.mockReset();
     storageMock.mockReset();
-  });
-
-  it("derives the Clerk Frontend API hostname used by the desktop CSP", () => {
-    const publishableKey = `pk_test_${btoa("clerk.t3.codes$")}`;
-
-    assert.equal(
-      DesktopClerk.resolveDesktopClerkFrontendApiHostname(publishableKey),
-      "clerk.t3.codes",
-    );
-    assert.equal(DesktopClerk.resolveDesktopClerkFrontendApiHostname(""), undefined);
-    assert.equal(DesktopClerk.resolveDesktopClerkFrontendApiHostname("invalid"), undefined);
   });
 
   it.effect("acquires and releases the SDK bridge with the layer", () => {
@@ -104,6 +101,43 @@ describe("DesktopClerk", () => {
       createClerkBridgeMock.mockClear();
     });
   });
+
+  it.each([
+    {
+      name: "packaged Windows",
+      isDevelopment: false,
+      platform: "win32" as const,
+      userData: "/tmp/app-data/j5code",
+    },
+    {
+      name: "development",
+      isDevelopment: true,
+      platform: "win32" as const,
+      userData: "/tmp/app-data/j5code-dev",
+    },
+  ])(
+    "creates the bridge before startup can yield to the event loop ($name)",
+    ({ isDevelopment, platform, userData }) => {
+      const events: string[] = [];
+      storageMock.mockReturnValue(storageAdapter);
+      createClerkBridgeMock.mockImplementation(() => {
+        events.push("createClerkBridge");
+        return { cleanup: vi.fn(), isPrimaryInstance: true };
+      });
+      // runSync throws if the layer ever suspends, which would let Electron emit
+      // ready before the bridge exists. main.ts provides the same FileSystem.
+      // oxlint-disable-next-line t3code/no-manual-effect-runtime-in-tests -- The assertion IS that the layer builds synchronously; it.effect would mask a regression to async.
+      Effect.runSync(
+        Effect.scoped(
+          Layer.build(
+            makeDesktopClerkLayer(isDevelopment, events, platform, DesktopPreReadyFileSystem.layer),
+          ),
+        ),
+      );
+
+      assert.deepEqual(events, [`setPath:userData:${userData}`, "createClerkBridge"]);
+    },
+  );
 
   it.effect("preserves bridge initialization failures", () => {
     const cause = new Error("bridge initialization failed");
@@ -207,28 +241,5 @@ describe("DesktopClerk", () => {
       Effect.provideService(ElectronApp.ElectronApp, electronApp),
       Effect.provideService(ElectronWindow.ElectronWindow, electronWindow),
     );
-  });
-
-  it.each([
-    { isDevelopment: true, scheme: "j5code-dev" },
-    { isDevelopment: false, scheme: "j5code" },
-  ])("configures the SDK with the $scheme renderer origin", ({ isDevelopment, scheme }) => {
-    const bridge = { cleanup: vi.fn(), isPrimaryInstance: true };
-    storageMock.mockReturnValue(storageAdapter);
-    createClerkBridgeMock.mockReturnValue(bridge);
-
-    assert.equal(DesktopClerk.createDesktopClerkBridge("/tmp/t3-state", isDevelopment), bridge);
-    assert.deepEqual(storageMock.mock.calls, [[{ path: "/tmp/t3-state" }]]);
-    assert.deepEqual(createClerkBridgeMock.mock.calls, [
-      [
-        {
-          storage: storageAdapter,
-          passkeys: true,
-          renderer: { scheme, host: "app" },
-        },
-      ],
-    ]);
-    storageMock.mockClear();
-    createClerkBridgeMock.mockClear();
   });
 });

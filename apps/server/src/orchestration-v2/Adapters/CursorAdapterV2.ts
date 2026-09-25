@@ -10,6 +10,7 @@ import type {
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import {
   CursorSettings,
+  isOrchestrationV2WorkActive,
   defaultInstanceIdForDriver,
   type ChatAttachment,
   type ModelSelection,
@@ -42,6 +43,7 @@ import * as Stream from "effect/Stream";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { CursorTransportFailure } from "../../provider/acp/CursorTransportFailure.ts";
 import { cursorSdkModelSelection } from "../../provider/cursorSdkModel.ts";
 import {
   discoverCursorSkills,
@@ -97,8 +99,6 @@ import {
   type CursorAgentSdkRunnerShape,
   type CursorAgentSdkSession,
 } from "./CursorAgentSdk.ts";
-
-export { CURSOR_PROVIDER } from "./CursorAgentSdk.ts";
 export { cursorSdkModelSelection } from "../../provider/cursorSdkModel.ts";
 
 export const CURSOR_DRIVER_KIND = CURSOR_PROVIDER;
@@ -193,6 +193,9 @@ export const CursorProviderCapabilitiesV2 = {
     nativeTurnIds: "strong",
     nativeItemIds: "weak",
     nativeRequestIds: "none",
+  },
+  runtimePolicy: {
+    enforcement: "native",
   },
 } satisfies OrchestrationV2ProviderCapabilities;
 
@@ -431,9 +434,28 @@ function cursorToolSearchPattern(toolCall: ToolCall): string | undefined {
   }
 }
 
-function cursorToolSearchResults(toolCall: ToolCall): ReadonlyArray<{
+type CursorLsDirectoryNode = Extract<
+  Extract<ToolCall, { readonly type: "ls" }>["result"],
+  { readonly status: "success" }
+>["value"]["directoryTreeRoot"];
+
+function cursorLsSearchResults(
+  node: CursorLsDirectoryNode,
+  path: Path.Path,
+): ReadonlyArray<{ readonly fileName: string }> {
+  return [
+    ...node.childrenFiles.map((file) => ({ fileName: path.join(node.absPath, file.name) })),
+    ...node.childrenDirs.flatMap((child) => cursorLsSearchResults(child, path)),
+  ];
+}
+
+function cursorToolSearchResults(
+  toolCall: ToolCall,
+  path: Path.Path,
+): ReadonlyArray<{
   readonly fileName: string;
   readonly line?: number;
+  readonly column?: number;
   readonly preview?: string;
 }> {
   if (toolCall.result?.status !== "success") {
@@ -466,6 +488,27 @@ function cursorToolSearchResults(toolCall: ToolCall): ReadonlyArray<{
           preview: entry.line,
         }));
       });
+    case "ls":
+      return cursorLsSearchResults(toolCall.result.value.directoryTreeRoot, path);
+    case "readLints":
+      return toolCall.result.value.fileDiagnostics.flatMap((file) =>
+        file.diagnostics.map((diagnostic) => {
+          const line = diagnostic.range?.start?.line;
+          const character = diagnostic.range?.start?.character;
+          const hasLine = typeof line === "number" && Number.isInteger(line) && line >= 0;
+          return {
+            fileName: file.path,
+            ...(hasLine ? { line: line + 1 } : {}),
+            ...(hasLine &&
+            typeof character === "number" &&
+            Number.isInteger(character) &&
+            character >= 0
+              ? { column: character + 1 }
+              : {}),
+            preview: diagnostic.message,
+          };
+        }),
+      );
     case "semSearch":
       return [
         {
@@ -770,6 +813,7 @@ interface ActiveCursorToolCall {
 
 interface ActiveCursorSubagent {
   task: OrchestrationV2Subagent;
+  toolCall: Extract<ToolCall, { readonly type: "task" }>;
   readonly callId: string;
   readonly childThreadId: ThreadId;
   readonly childRootNodeId: OrchestrationV2ExecutionNode["id"];
@@ -799,6 +843,7 @@ interface ActiveCursorTurn {
   readonly tools: Map<string, ActiveCursorToolCall>;
   readonly subagents: Map<string, ActiveCursorSubagent>;
   readonly assistant: ActiveCursorTextStream;
+  readonly assistantReply: CursorTransportFailure;
   readonly reasoning: ActiveCursorTextStream;
   interrupted: boolean;
   finalized: boolean;
@@ -1216,7 +1261,7 @@ export function makeCursorAdapterV2(
             case "ls":
             case "readLints":
             case "semSearch": {
-              const results = cursorToolSearchResults(toolCall);
+              const results = cursorToolSearchResults(toolCall, path);
               turnItem = {
                 ...base,
                 type: "file_search",
@@ -1450,17 +1495,26 @@ export function makeCursorAdapterV2(
           readonly callId: string;
           readonly toolCall: Extract<ToolCall, { readonly type: "task" }>;
           readonly completed: boolean;
+          readonly status?: OrchestrationV2Subagent["status"];
         }) {
           const args = input.toolCall.args;
           const result =
             input.toolCall.result?.status === "success" ? input.toolCall.result.value : undefined;
           const existing = input.context.subagents.get(input.callId);
+          if (
+            existing !== undefined &&
+            !isOrchestrationV2WorkActive(existing.task.status) &&
+            !input.completed
+          )
+            return;
           const now = yield* DateTime.now;
-          const status: OrchestrationV2Subagent["status"] = input.completed
-            ? cursorToolFailed(input.toolCall)
-              ? "failed"
-              : "completed"
-            : "running";
+          const status: OrchestrationV2Subagent["status"] =
+            input.status ??
+            (input.completed
+              ? cursorToolFailed(input.toolCall)
+                ? "failed"
+                : "completed"
+              : "running");
           const resultText = [
             ...assistantTextsFromConversationSteps(result?.conversationSteps ?? []),
             ...(result?.resultSuffix === undefined ? [] : [result.resultSuffix]),
@@ -1516,11 +1570,12 @@ export function makeCursorAdapterV2(
             },
             status,
             result: resultText.length === 0 ? (existing?.task.result ?? null) : resultText,
-            completedAt: input.completed ? now : null,
+            completedAt: input.completed ? (existing?.task.completedAt ?? now) : null,
             updatedAt: now,
           };
           const subagent: ActiveCursorSubagent = {
             task,
+            toolCall: input.toolCall,
             callId: input.callId,
             childThreadId,
             childRootNodeId,
@@ -1561,6 +1616,7 @@ export function makeCursorAdapterV2(
             });
             const promptNativeId = `${nativeItemId}:prompt`;
             const promptArtifacts = makeSubagentConversationArtifacts({
+              senderThreadId: input.context.input.threadId,
               messageId: idAllocator.derive.messageFromProviderItem({
                 driver: CURSOR_PROVIDER,
                 nativeItemId: promptNativeId,
@@ -1613,7 +1669,7 @@ export function makeCursorAdapterV2(
               runtimeRequestId: null,
               checkpointScopeId: null,
               startedAt: task.startedAt,
-              completedAt: input.completed ? now : null,
+              completedAt: task.completedAt,
             },
           });
           yield* emitProviderEvent({
@@ -1634,7 +1690,7 @@ export function makeCursorAdapterV2(
               runtimeRequestId: null,
               checkpointScopeId: null,
               startedAt: task.startedAt,
-              completedAt: input.completed ? now : null,
+              completedAt: task.completedAt,
             },
           });
           yield* emitProviderEvent({
@@ -1809,6 +1865,7 @@ export function makeCursorAdapterV2(
           }
           switch (update.type) {
             case "text-delta":
+              context.assistantReply.push(update.text);
               yield* completeReasoning(context);
               yield* appendTextSegment({
                 context,
@@ -1897,6 +1954,19 @@ export function makeCursorAdapterV2(
             yield* emitToolArtifacts({ active: tool, completed: true });
           }
           input.context.tools.clear();
+          // This interaction stops delivering updates at finalization. Tasks
+          // without a completion have an unknown outcome. Background launch
+          // acknowledgements have already settled their rows.
+          for (const subagent of input.context.subagents.values()) {
+            if (!isOrchestrationV2WorkActive(subagent.task.status)) continue;
+            yield* emitSubagent({
+              context: input.context,
+              callId: subagent.callId,
+              toolCall: subagent.toolCall,
+              completed: true,
+              status: input.status === "completed" ? "idle" : input.status,
+            });
+          }
           yield* completeReasoning(input.context);
           yield* completeAssistant(input.context);
           yield* emitProviderEvent({
@@ -2020,6 +2090,9 @@ export function makeCursorAdapterV2(
           turnInput: ProviderAdapterV2TurnInput,
         ) {
           const rawText = turnInput.message.text;
+          if (rawText.trim() === "/compress" && turnInput.message.attachments.length === 0) {
+            return "/compress";
+          }
           if (hasCursorSkillMention(rawText) && cursorSkillNames === undefined) {
             const skills = yield* discoverCursorSkills(
               turnInput.runtimePolicy.cwd ?? undefined,
@@ -2147,6 +2220,7 @@ export function makeCursorAdapterV2(
                 current: null,
                 nextSegment: 0,
               },
+              assistantReply: new CursorTransportFailure(),
               reasoning: {
                 current: null,
                 nextSegment: 0,
@@ -2187,6 +2261,7 @@ export function makeCursorAdapterV2(
                     result.result !== undefined &&
                     result.result.length > 0
                   ) {
+                    context.assistantReply.push(result.result);
                     yield* appendTextSegment({
                       context,
                       stream: context.assistant,
@@ -2195,15 +2270,21 @@ export function makeCursorAdapterV2(
                     });
                   }
                   if (context !== null) {
-                    const status = terminalStatus(context, result);
+                    const transportFailure = context.assistantReply.failure;
+                    const status =
+                      transportFailure === undefined ? terminalStatus(context, result) : "failed";
                     yield* finalizeTurn({
                       context,
                       status,
                       ...(status === "failed"
                         ? {
                             failure: makeProviderFailure({
-                              cause: (result as { readonly error?: unknown }).error,
-                              class: "provider_error",
+                              cause:
+                                transportFailure ?? (result as { readonly error?: unknown }).error,
+                              class:
+                                transportFailure === undefined
+                                  ? "provider_error"
+                                  : "transport_error",
                             }),
                           }
                         : {}),
@@ -2335,6 +2416,11 @@ export function makeCursorAdapterV2(
               ),
           ),
           startTurn,
+          compactThread: (turnInput) =>
+            startTurn({
+              ...turnInput,
+              message: { ...turnInput.message, text: "/compress" },
+            }),
           steerTurn: (turnInput) =>
             Effect.fail(
               new ProviderAdapterSteerRunUnsupportedError({
@@ -2544,7 +2630,7 @@ export const CursorAdapterV2Driver: ProviderAdapterDriver<
   ),
 };
 
-export const layer: Layer.Layer<
+const layer: Layer.Layer<
   ProviderAdapterV2,
   never,
   CursorAgentSdkRunner | FileSystem.FileSystem | Path.Path | IdAllocatorV2 | ServerConfig

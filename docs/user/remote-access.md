@@ -12,17 +12,18 @@ Connections**, sign in, and enable **T3 Connect** for that environment.
 For a command-line host, run:
 
 ```bash
-npx @jacksondr5/j5code@latest connect
+j5 connect
 ```
 
 Follow the sign-in instructions. Setup offers a
 [background service](./background-service.md); if you decline it, start the
-server with `npx @jacksondr5/j5code serve`. Saving your sign-in alone does not make the machine
+server with `j5 serve`. Saving your sign-in alone does not make the machine
 reachable.
 
 On your other device, sign in to the same T3 Connect account and choose the
-environment. Over SSH, the CLI prints a browser link and accepts the returned
-authorization code, so you do not need to forward an OAuth callback port.
+environment. Over SSH, the CLI prints a browser link and a short code. Open the
+link on any device, confirm the code matches, and approve. The CLI continues on
+its own, so you do not need to forward an OAuth callback port.
 
 T3 Connect renews access credentials when needed without disconnecting a healthy
 connection. Pull request diffs and provider settings keep working after the
@@ -41,13 +42,13 @@ For a command-line host, replace `<private-ip>` with the host's LAN or tailnet
 address:
 
 ```bash
-npx @jacksondr5/j5code serve --host <private-ip>
+j5 serve --host <private-ip>
 ```
 
 If a server is already running, generate a fresh link without restarting it:
 
 ```bash
-npx @jacksondr5/j5code pair
+j5 pair
 ```
 
 Scan the QR code on your phone or paste the pairing URL into **Add environment**
@@ -61,6 +62,24 @@ created in Settings can only be copied from the client that created them while
 its Connections page stays open. If you leave or reload that page, create
 another link to share.
 
+### Balance new threads across machines
+
+Auto balance is off by default. On web and desktop, enable it in
+**Settings → Connections → Load balancing** to automatically choose a machine for
+new threads in projects grouped across connected environments. The section
+appears once two or more machines are switched on.
+Each machine starts at **Normal**. Choose **Prefer** to favor it when it has CPU and
+memory available, **Less often** to reduce its share, or **Manual only** to exclude
+it from automatic selection. These are preferences, not fixed traffic percentages.
+Preferences are saved separately in each client.
+
+The composer checks eligible machines when choosing a draft's environment, then keeps
+that choice stable. Choose **Auto balance** again to check current resources, or choose
+a specific machine to override it. Choosing a branch or worktree also keeps the draft
+on that machine. Existing threads stay where they started. If resource checks are
+unavailable or all eligible machines are full, choose a machine manually to continue.
+Mobile keeps its manual environment selection.
+
 ### Tailscale HTTPS
 
 Join both devices to the same tailnet. In the desktop app, enable **Tailscale
@@ -69,13 +88,13 @@ HTTPS** in **Settings → Connections**. Turn it off there to remove that route.
 To start a command-line server with Tailscale HTTPS:
 
 ```bash
-npx @jacksondr5/j5code serve --tailscale-serve
+j5 serve --tailscale-serve
 ```
 
 For an already-running server:
 
 ```bash
-npx @jacksondr5/j5code pair --tailscale
+j5 pair --tailscale
 ```
 
 The pairing link uses an address such as `https://machine.tailnet.ts.net/`.
@@ -87,7 +106,7 @@ tailscale serve --https=443 off
 ```
 
 If that port is already in use, choose another with
-`--tailscale-serve-port`. See `npx @jacksondr5/j5code pair --help` for other pairing options.
+`--tailscale-serve-port`. See `j5 pair --help` for other pairing options.
 
 ### Hosted web app
 
@@ -106,17 +125,17 @@ In the desktop app, open **Settings → Connections → Add environment**, choos
 or reuses a server there and opens the port forward for you. Projects, provider
 credentials, and agent work stay on the remote machine.
 
-The remote host needs a compatible [Node.js installation](./install.md#requirements)
-and [provider setup](./install.md#providers). If launch cannot find Node or reports
-an incompatible version, check it through a non-interactive SSH session:
+The remote host must be Linux or an Apple Silicon Mac with `curl` or `wget`,
+`tar`, `sha256sum` or `shasum`, and [provider setup](./install.md#providers).
+The first launch downloads the J5 Code server release for the desktop app's
+version to `~/.j5code/runtime` on the host, so it takes longer than later ones.
+The host must be Linux x64 or an Apple Silicon Mac, the platforms J5 publishes.
+Provider CLIs must be on the `PATH` of a non-interactive login shell there;
+check with:
 
 ```bash
-ssh user@example.com 'sh -lc "command -v node && node --version"'
+ssh user@example.com 'sh -lc "command -v claude codex"'
 ```
-
-Configure your version manager for non-interactive shells if this differs from
-your normal terminal. With nvm, setting a compatible default, such as
-`nvm alias default 24`, can resolve the problem.
 
 If SSH reconnecting fails after an app update, retry the launch once. Removing
 the connection stops a server that T3 Code launched; a server that was already
@@ -130,7 +149,7 @@ For Antigravity's Google callback on a remote host, see
 On the host, **Settings → Connections** lets authorized administrators create
 pairing links and revoke client sessions. Revoking an unused link prevents new
 pairings; revoke a device's session to remove its existing access. Command-line
-management is available through `npx @jacksondr5/j5code auth --help`.
+management is available through `j5 auth --help`.
 
 A session with an open connection stays listed after its access credential
 expires.
@@ -163,9 +182,20 @@ when SSH closes, see [background-service troubleshooting](./background-service.m
 | HTTP 408, 429, or 5xx                                     | Check network and relay availability. Startup retries temporary failures for up to ten minutes.                                             |
 
 After fixing a permanent rejection, restart the host's server. On Linux, use
-`systemctl --user restart t3code.service` for the background service. For a
+`systemctl --user restart j5code.service` for the background service. For a
 foreground server, stop it and run `j5 serve` again with your usual options.
 Include the diagnostic message and trace ID when reporting a persistent failure.
 
 For a connection that still fails after linking, check the date and time on both
 devices. For server version warnings, follow [Updating T3 Code](./updating.md).
+
+## Using the Desktop App as a Remote Only
+
+If a computer should only drive work running elsewhere, turn off its local environment. In the
+desktop app, open **Settings → Connections** and switch off **Local
+environment**. T3 Code restarts without a local server: no local agents or terminals run, WSL
+backends stay off, and other devices can no longer connect to this computer. Your projects,
+history, and saved connections are kept, and you keep working through pairing, T3 Connect, or SSH.
+
+Switch **Local environment** back on in the same place to restart with your previous local
+settings.

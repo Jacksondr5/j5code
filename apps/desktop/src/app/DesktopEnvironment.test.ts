@@ -51,7 +51,11 @@ describe("DesktopEnvironment", () => {
           VITE_DEV_SERVER_URL: "http://localhost:5173",
           T3CODE_DEV_REMOTE_T3_SERVER_ENTRY_PATH: " /remote/server.mjs ",
           T3CODE_OTLP_TRACES_URL: " http://127.0.0.1:4318/v1/traces ",
+          T3CODE_OTLP_METRICS_URL: " http://127.0.0.1:4318/v1/metrics ",
+          T3CODE_OTLP_LOGS_URL: " http://127.0.0.1:4318/v1/logs ",
           T3CODE_OTLP_EXPORT_INTERVAL_MS: "2500",
+          T3CODE_OTLP_HEADERS: "authorization=Basic%20abc%3D%3D,x-tenant=t3",
+          T3CODE_OTLP_PROTOCOL: "http/protobuf",
         },
       );
 
@@ -75,6 +79,7 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.backendCwd, "/repo");
       assert.equal(environment.appUserModelId, "codes.jackson.j5code.dev");
       assert.equal(environment.linuxWmClass, "j5code-dev");
+      assert.equal(environment.linuxDesktopEntryName, "j5code-dev.desktop");
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
         Option.some("http://localhost:5173/"),
@@ -83,7 +88,17 @@ describe("DesktopEnvironment", () => {
       assert.deepEqual(environment.configuredBackendPort, Option.some(4949));
       assert.deepEqual(environment.commitHashOverride, Option.some("0123456789abcdef"));
       assert.deepEqual(environment.otlpTracesUrl, Option.some("http://127.0.0.1:4318/v1/traces"));
+      assert.deepEqual(environment.otlpMetricsUrl, Option.some("http://127.0.0.1:4318/v1/metrics"));
+      assert.deepEqual(environment.otlpLogsUrl, Option.some("http://127.0.0.1:4318/v1/logs"));
       assert.equal(environment.otlpExportIntervalMs, 2500);
+      assert.deepEqual(
+        environment.otlpHeaders,
+        Option.some({
+          authorization: "Basic abc==",
+          "x-tenant": "t3",
+        }),
+      );
+      assert.equal(environment.otlpProtocol, "http/protobuf");
     }),
   );
 
@@ -101,8 +116,7 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
       assert.equal(environment.browserArtifactsDir, "/tmp/t3/userdata/browser-artifacts");
       assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
-      assert.equal(environment.userDataDirName, "j5code");
-      assert.equal(environment.legacyUserDataDirName, "J5 Code");
+      assert.equal(environment.otlpProtocol, "http/json");
     }),
   );
 
@@ -121,6 +135,23 @@ describe("DesktopEnvironment", () => {
         environment.backendEntryPath,
         "/install/resources/server.asar/apps/server/dist/bin.mjs",
       );
+      assert.equal(
+        environment.clientAssetsDir,
+        "/install/resources/server.asar/apps/server/dist/client",
+      );
+    }),
+  );
+
+  it.effect("uses the stable desktop entry as the packaged Linux portal identity", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        platform: "linux",
+        isPackaged: true,
+        appPath: "/tmp/.mount_t3code/resources/app.asar",
+        resourcesPath: "/tmp/.mount_t3code/resources",
+      });
+
+      assert.equal(environment.linuxDesktopEntryName, "j5code.desktop");
     }),
   );
 
@@ -142,12 +173,12 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment(
         {},
         {
-          T3CODE_DESKTOP_APP_USER_MODEL_ID: " com.t3tools.t3code.dev.local ",
+          T3CODE_DESKTOP_APP_USER_MODEL_ID: " codes.jackson.j5code.dev.local ",
           VITE_DEV_SERVER_URL: "http://localhost:5173",
         },
       );
 
-      assert.equal(environment.appUserModelId, "com.t3tools.t3code.dev.local");
+      assert.equal(environment.appUserModelId, "codes.jackson.j5code.dev.local");
     }),
   );
 

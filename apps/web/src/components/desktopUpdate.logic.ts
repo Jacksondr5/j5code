@@ -2,7 +2,8 @@ import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/con
 
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
 
-const DESKTOP_RELEASE_HISTORY_URL = "https://github.com/pingdotgg/t3code/releases";
+// J5 releases (desktop and CLI archives) publish on the fork, never upstream.
+const DESKTOP_RELEASE_HISTORY_URL = "https://github.com/Jacksondr5/j5code/releases";
 const DESKTOP_RELEASE_TAG_URL = `${DESKTOP_RELEASE_HISTORY_URL}/tag`;
 
 /**
@@ -45,16 +46,6 @@ export function resolveDesktopUpdateButtonAction(
     }
   }
   return "none";
-}
-
-export function shouldShowDesktopUpdateButton(state: DesktopUpdateState | null): boolean {
-  if (!state || !state.enabled) {
-    return false;
-  }
-  if (state.status === "downloading") {
-    return true;
-  }
-  return resolveDesktopUpdateButtonAction(state) !== "none";
 }
 
 export function shouldShowArm64IntelBuildWarning(state: DesktopUpdateState | null): boolean {
