@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { OpencodeClient, ToolPart } from "@opencode-ai/sdk/v2";
 import {
+  CheckpointId,
   NodeId,
   OpenCodeSettings,
   ProjectId,
@@ -580,6 +581,38 @@ describe("OpenCodeAdapterV2", () => {
     );
   }
 
+  for (const { failure, missing } of [
+    { failure: { status: 404 }, missing: true },
+    { failure: { name: "NotFoundError" }, missing: true },
+    { failure: { status: 500, name: "NotFoundError" }, missing: false },
+    { failure: new Error("session not found"), missing: false },
+  ]) {
+    it.effect(
+      `reports whether a failed resume is a missing session: ${JSON.stringify(failure)}`,
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* makeOpenCodeRuntimeHarness("resume-missing", "root", {
+            event: { subscribe: async () => ({ stream: asyncEventStream().stream }) },
+            session: {
+              create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+              get: async () => {
+                throw failure;
+              },
+            },
+          });
+          const error = yield* harness.runtime
+            .resumeThread({ providerThread: harness.providerThread })
+            .pipe(Effect.flip);
+
+          assert.equal(error._tag, "ProviderAdapterResumeThreadError");
+          assert.equal(
+            error._tag === "ProviderAdapterResumeThreadError" && error.nativeThreadMissing,
+            missing,
+          );
+        }).pipe(Effect.provide(idAllocatorLayer), Effect.scoped),
+    );
+  }
+
   it.effect(
     "preserves tool lifecycle, approval kinds, and late assistant text without cached tool payloads",
     () =>
@@ -742,6 +775,96 @@ describe("OpenCodeAdapterV2", () => {
         assert.equal(assistant.at(-1)?.text, "Tool results received");
         assert.equal(assistant.at(-1)?.status, "completed");
       }).pipe(Effect.provide(idAllocatorLayer), Effect.scoped),
+  );
+
+  it.effect("admits a native command on its user receipt before generation completes", () =>
+    Effect.gen(function* () {
+      const nativeEvents = asyncEventStream();
+      const release = promiseGate<void>();
+      const calls = yield* Queue.unbounded<{
+        messageID: string;
+        command: string;
+        arguments: string;
+        model: string;
+      }>();
+      let promptCalls = 0;
+      const sessionId = "native-command";
+      const harness = yield* makeOpenCodeRuntimeHarness("native-command", sessionId, {
+        event: {
+          subscribe: async (_input: unknown, options: { signal?: AbortSignal }) => {
+            options.signal?.addEventListener("abort", () => nativeEvents.close(), { once: true });
+            return { stream: nativeEvents.stream };
+          },
+        },
+        command: { list: async () => ({ data: [{ name: "review" }] }) },
+        session: {
+          create: async () => ({ data: { id: sessionId, time: { created: 1, updated: 1 } } }),
+          command: async (input: {
+            messageID: string;
+            command: string;
+            arguments: string;
+            model: string;
+          }) => {
+            Queue.offerUnsafe(calls, input);
+            await release.promise;
+            return { data: true };
+          },
+          promptAsync: async () => {
+            promptCalls++;
+            return { data: true };
+          },
+        },
+      });
+      const start = yield* harness.startTurn("/review staged changes").pipe(Effect.forkScoped);
+      const call = yield* Queue.take(calls);
+      assert.equal(call.command, "review");
+      assert.equal(call.arguments, "staged changes");
+      assert.equal(call.model, "anthropic/claude-sonnet");
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "message.updated",
+          properties: {
+            sessionID: sessionId,
+            info: {
+              id: call.messageID,
+              sessionID: sessionId,
+              role: "user",
+              time: { created: DateTime.toEpochMillis(harness.now) },
+            },
+          },
+        }),
+      );
+      yield* Fiber.join(start);
+      assert.equal(promptCalls, 0);
+      release.resolve();
+    }).pipe(Effect.provide(idAllocatorLayer), Effect.scoped),
+  );
+
+  it.effect("sends unadvertised slash commands as ordinary prompts", () =>
+    Effect.gen(function* () {
+      const nativeEvents = asyncEventStream();
+      const prompts: unknown[] = [];
+      const harness = yield* makeOpenCodeRuntimeHarness("unknown-command", "unknown-command", {
+        event: {
+          subscribe: async (_input: unknown, options: { signal?: AbortSignal }) => {
+            options.signal?.addEventListener("abort", () => nativeEvents.close(), { once: true });
+            return { stream: nativeEvents.stream };
+          },
+        },
+        command: { list: async () => ({ data: [{ name: "review" }] }) },
+        session: {
+          create: async () => ({
+            data: { id: "unknown-command", time: { created: 1, updated: 1 } },
+          }),
+          promptAsync: async (input: { parts: unknown }) => {
+            prompts.push(input.parts);
+            return { data: true };
+          },
+        },
+      });
+      yield* harness.startTurn("/unknown words");
+      assert.deepEqual(prompts, [[{ type: "text", text: "/unknown words" }]]);
+    }).pipe(Effect.provide(idAllocatorLayer), Effect.scoped),
   );
 
   it.effect("compacts with the native summarize API and emits a completed compaction", () =>
@@ -2134,3 +2257,67 @@ describe("OpenCodeAdapterV2", () => {
     assert.isUndefined(openCodeBoundaryAfterProviderTurn([first, synthetic, third], third.id));
   });
 });
+
+it.effect.each([false, true])(
+  "OpenCode rewind forks history and validates the retained boundary, invalid=%s",
+  (invalid) =>
+    Effect.gen(function* () {
+      const events = asyncEventStream();
+      const nativeSessionId = "rewind-source";
+      const forkId = "rewind-fork";
+      const calls: string[] = [];
+      const removed = {
+        info: { id: "first-user", sessionID: nativeSessionId, role: "user", time: { created: 1 } },
+        parts: [],
+      };
+      const harness = yield* makeOpenCodeRuntimeHarness("rewind-fork", nativeSessionId, {
+        event: {
+          subscribe: async (_input: unknown, options: { signal?: AbortSignal }) => {
+            options.signal?.addEventListener("abort", () => events.close(), { once: true });
+            return { stream: events.stream };
+          },
+        },
+        session: {
+          create: async () => ({ data: { id: nativeSessionId, time: { created: 1, updated: 1 } } }),
+          get: async ({ sessionID }: { sessionID: string }) => ({
+            data: { id: sessionID, time: { created: 1, updated: 2 } },
+          }),
+          messages: async ({ sessionID }: { sessionID: string }) => ({
+            data: sessionID === nativeSessionId || invalid ? [removed] : [],
+          }),
+          fork: async ({ sessionID, messageID }: { sessionID: string; messageID: string }) => {
+            assert.equal(sessionID, nativeSessionId);
+            assert.equal(messageID, "first-user");
+            calls.push("fork");
+            return { data: { id: forkId, time: { created: 1, updated: 2 } } };
+          },
+          update: async () => {
+            calls.push("permissions");
+            return { data: {} };
+          },
+          revert: async () => {
+            throw new Error("Native revert would change workspace files");
+          },
+        },
+      });
+      const effect = harness.runtime.rollbackThread({
+        providerThread: harness.providerThread,
+        target: {
+          type: "thread_start",
+          checkpointId: CheckpointId.make("rewind-checkpoint"),
+          appRunOrdinal: 0,
+        },
+        providerThreadTurns: [],
+      });
+      if (invalid) {
+        const error = yield* effect.pipe(Effect.flip);
+        assert.equal(error._tag, "ProviderAdapterRollbackThreadError");
+        assert.deepEqual(calls, ["fork"]);
+      } else {
+        const result = yield* effect;
+        assert.equal(result.providerThread.nativeThreadRef?.nativeId, forkId);
+        assert.equal(result.messages.length, 0);
+        assert.deepEqual(calls, ["fork", "permissions"]);
+      }
+    }).pipe(Effect.provide(idAllocatorLayer), Effect.scoped),
+);

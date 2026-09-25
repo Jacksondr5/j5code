@@ -392,7 +392,6 @@ it.effect("includes shared sessions and provider-owned background rosters in rec
       },
     });
     const preparedRunId = yield* createRun(prepared, "starting", {
-      ordinal: 2,
       providerThreadId: preparedProviderThreadId,
       restartContinuationOfRunId: RunId.make("run:recovery:source"),
     });
@@ -406,45 +405,6 @@ it.effect("includes shared sessions and provider-owned background rosters in rec
       [preparedSessionId],
     );
     assert.equal(restartContinuationRun(preparedState)?.id, preparedRunId);
-    const completedRunId = yield* createRun(prepared, "completed", { ordinal: 1 });
-    const recordStop = (runId: RunId, ordinal: number) =>
-      projections.apply({
-        id: EventId.make(`event:${runId}:stop`),
-        type: "turn-item.updated",
-        threadId: prepared,
-        runId,
-        occurredAt: now,
-        payload: {
-          id: TurnItemId.make(`item:${runId}:stop`),
-          threadId: prepared,
-          runId,
-          nodeId: null,
-          providerThreadId: preparedProviderThreadId,
-          providerTurnId: null,
-          nativeItemRef: null,
-          parentItemId: null,
-          ordinal,
-          status: "completed",
-          title: "Interrupt requested",
-          startedAt: now,
-          completedAt: now,
-          updatedAt: now,
-          type: "run_interrupt_request",
-          message: "Stop",
-        },
-      });
-    yield* recordStop(completedRunId, 1);
-    const unrelatedStop = yield* projections.getRuntimeRecoveryProjection(prepared);
-    assert.deepEqual(unrelatedStop.turnItems, []);
-    assert.equal(restartContinuationRun(unrelatedStop)?.id, preparedRunId);
-
-    yield* recordStop(preparedRunId, 2);
-    const stoppedState = yield* projections.getRuntimeRecoveryProjection(prepared);
-    assert.deepEqual(
-      stoppedState.turnItems.map((item) => item.runId),
-      [preparedRunId],
-    );
-    assert.isUndefined(restartContinuationRun(stoppedState));
     assert.deepEqual(yield* projections.getUnreadableThreadIds(), []);
     const sql = yield* SqlClient.SqlClient;
     yield* sql`

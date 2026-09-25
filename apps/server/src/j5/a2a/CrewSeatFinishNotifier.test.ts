@@ -194,7 +194,7 @@ const terminalRunEvent = (
 
 it.effect("tells the Captain how each finished seat ended, and settles nothing", () =>
   Effect.gen(function* () {
-    const database = NodeSqliteClient.layerMemory();
+    const database = NodeSqliteClient.layer({ filename: ":memory:" });
     const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
       Layer.provideMerge(database),
     );
@@ -404,7 +404,7 @@ it.effect(
   "folds a notice into the digest queued behind the Captain's turn and stays silent when nothing changed",
   () =>
     Effect.gen(function* () {
-      const database = NodeSqliteClient.layerMemory();
+      const database = NodeSqliteClient.layer({ filename: ":memory:" });
       const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
         Layer.provideMerge(database),
       );
@@ -573,7 +573,7 @@ it.effect(
   "leaves a seat unreported when its notice to the Captain fails, so the next pass retries",
   () =>
     Effect.gen(function* () {
-      const database = NodeSqliteClient.layerMemory();
+      const database = NodeSqliteClient.layer({ filename: ":memory:" });
       const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
         Layer.provideMerge(database),
       );
@@ -801,7 +801,7 @@ it.effect(
 
 it.effect("the boot sweep tells the Captain about a finished seat nothing reported", () =>
   Effect.gen(function* () {
-    const database = NodeSqliteClient.layerMemory();
+    const database = NodeSqliteClient.layer({ filename: ":memory:" });
     const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
       Layer.provideMerge(database),
     );

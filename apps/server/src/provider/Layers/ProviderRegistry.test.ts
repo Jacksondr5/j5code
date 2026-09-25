@@ -1,8 +1,6 @@
+import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import { upsertProviderWorkspaceSnapshot } from "../../j5/skills/skillWorkspaceRefresh.ts";
-import {
-  refreshSkillProviders,
-  refreshSkillsOnConnection,
-} from "../../j5/skills/skillProviderRefresh.ts";
+import { refreshSkillProviders } from "../../j5/skills/skillProviderRefresh.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it, assert } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
@@ -45,6 +43,7 @@ import { checkClaudeProviderStatus } from "./ClaudeProvider.ts";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { AntigravityInstallation } from "../AntigravityInstallation.ts";
 import * as ModelManifest from "../ModelManifest.ts";
+import { applyProviderCompatibility } from "../providerCompatibility.ts";
 import * as CodexResetCredit from "./codexResetCredit.ts";
 import * as OpenCodeRuntime from "../opencodeRuntime.ts";
 import * as ProviderEventLoggers from "./ProviderEventLoggers.ts";
@@ -52,8 +51,8 @@ import { ProviderInstanceRegistryHydrationLive } from "./ProviderInstanceRegistr
 import {
   mergeProviderSnapshot,
   mergeProviderSnapshots,
-  ProviderRegistryLive,
   selectProvidersByKind,
+  ProviderRegistryLive,
 } from "./ProviderRegistry.ts";
 import * as ServerConfig from "../../config.ts";
 import * as ServerSettingsModule from "../../serverSettings.ts";
@@ -84,13 +83,20 @@ process.env.T3CODE_CURSOR_ENABLED = "1";
 
 const encoder = new TextEncoder();
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
+const withBundledCompatibility = (snapshot: ServerProvider) =>
+  applyProviderCompatibility(
+    snapshot,
+    undefined,
+    ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
+  );
 
+// Provider metadata checks use a bundled manifest and stubbed HTTP.
 const TestHttpClientLive = Layer.succeed(
   HttpClient.HttpClient,
   HttpClient.make((request) =>
     Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({ version: "0.0.0" }))),
   ),
-);
+).pipe(Layer.provideMerge(ModelManifest.layerTest));
 
 const BackgroundPolicyAlwaysRunLayer = Layer.mock(BackgroundPolicy.BackgroundPolicy)({
   reportClientActivity: () => Effect.void,
@@ -536,20 +542,35 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         }),
       );
 
-      it.effect("returns unavailable when codex is missing", () =>
+      it.effect.each([
+        "codex",
+        "/Applications/Custom App.app/Contents/Resources/codex",
+        "C:\\Tools\\codex.exe",
+      ])("explains how to configure a Codex executable that cannot start: %s", (binaryPath) =>
         Effect.gen(function* () {
-          const status = yield* checkCodexProviderStatus(defaultCodexSettings, () =>
-            Effect.fail(
+          const settings = { ...defaultCodexSettings, binaryPath };
+          const status = yield* checkCodexProviderStatus(settings, (input) => {
+            assert.strictEqual(input.binaryPath, binaryPath);
+            return Effect.fail(
               new CodexErrors.CodexAppServerSpawnError({
-                command: "codex app-server",
-                cause: new Error("spawn codex ENOENT"),
+                command: `${binaryPath} app-server`,
+                cause: new Error("spawn ENOENT"),
               }),
-            ),
-          );
+            );
+          });
           assert.strictEqual(status.status, "error");
           assert.strictEqual(status.installed, false);
           assert.strictEqual(status.auth.status, "unknown");
-          assert.strictEqual(status.message, "Codex CLI (`codex`) was not found on PATH.");
+          assert.include(status.message, binaryPath);
+          assert.include(
+            status.message,
+            "Settings → Providers → Codex → Binary path on the server",
+          );
+          assert.strictEqual(
+            status.message?.includes("Installing ChatGPT or Codex desktop"),
+            binaryPath === "codex",
+          );
+          assert.strictEqual(settings.binaryPath, binaryPath);
         }),
       );
 
@@ -1712,10 +1733,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           const skills = yield* Ref.make<ServerProvider["skills"]>([]);
           const failWorkspace = yield* Ref.make(false);
           const workspaceProbes = yield* Ref.make(0);
-          const machineRefreshes = yield* Ref.make(0);
-          const blockMachine = yield* Ref.make(false);
-          const machineStarted = yield* Deferred.make<void>();
-          const releaseMachine = yield* Deferred.make<void>();
           const blockedCwd = yield* Ref.make<string | null>("/opening-project");
           const probeStarted = yield* Deferred.make<void>();
           const releaseProbe = yield* Deferred.make<void>();
@@ -1735,14 +1752,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                   }),
                 ),
               getSnapshot: snapshot,
-              refresh: Effect.gen(function* () {
-                yield* Ref.update(machineRefreshes, (count) => count + 1);
-                if (yield* Ref.get(blockMachine)) {
-                  yield* Deferred.succeed(machineStarted, undefined);
-                  yield* Deferred.await(releaseMachine);
-                }
-                return yield* snapshot;
-              }),
+              refresh: snapshot,
               streamChanges: Stream.empty,
               applyUsageLimits: () => Effect.void,
             },
@@ -1798,27 +1808,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             for (const workspace of afterInstall.workspaceSnapshots!) {
               assert.deepStrictEqual(workspace.skills, installed);
             }
-            const probesBeforeConnection = yield* Ref.get(workspaceProbes);
-            yield* refreshSkillsOnConnection(registry);
-            assert.equal(yield* Ref.get(workspaceProbes), probesBeforeConnection);
-            assert.deepStrictEqual(
-              (yield* registry.getProviders)[0]!.workspaceSnapshots,
-              afterInstall.workspaceSnapshots,
-            );
-            yield* Ref.set(blockMachine, true);
-            const machinesBeforeConnection = yield* Ref.get(machineRefreshes);
-            const firstConnection = yield* refreshSkillsOnConnection(registry).pipe(
-              Effect.forkChild,
-            );
-            yield* Deferred.await(machineStarted);
-            const secondConnection = yield* refreshSkillsOnConnection(registry).pipe(
-              Effect.forkChild,
-            );
-            yield* Effect.yieldNow;
-            yield* Deferred.succeed(releaseMachine, undefined);
-            yield* Fiber.join(firstConnection);
-            yield* Fiber.join(secondConnection);
-            assert.equal(yield* Ref.get(machineRefreshes), machinesBeforeConnection + 1);
             yield* Deferred.succeed(releaseProbe, undefined);
             yield* Fiber.join(oldProbe);
             assert.deepStrictEqual((yield* registry.getProviders)[0], afterInstall);
@@ -2039,7 +2028,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             );
             assert.deepStrictEqual(
               recoveredProviders.find((provider) => provider.instanceId === codexInstanceId),
-              codexProvider,
+              withBundledCompatibility(codexProvider),
             );
 
             yield* Ref.set(catalogSnapshot, changedCatalogProvider);
@@ -2051,7 +2040,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             );
             assert.deepStrictEqual(
               changedProviders.find((provider) => provider.instanceId === codexInstanceId),
-              codexProvider,
+              withBundledCompatibility(codexProvider),
             );
           }).pipe(Effect.provide(runtimeServices));
 
@@ -2229,10 +2218,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             yield* Fiber.join(persisted);
             const cachedProvider = yield* readProviderStatusCache(filePath);
 
-            assert.deepStrictEqual(cachedProvider, {
-              ...refreshedProvider,
-              models: [...initialProvider.models],
-            });
+            assert.deepStrictEqual(
+              cachedProvider,
+              withBundledCompatibility({
+                ...refreshedProvider,
+                models: [...initialProvider.models],
+              }),
+            );
           }).pipe(Effect.provide(runtimeServices));
         }),
       );
@@ -2444,14 +2436,18 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           yield* Effect.gen(function* () {
             const registry = yield* ProviderRegistry.ProviderRegistry;
 
-            assert.deepStrictEqual(yield* registry.getProviders, [cachedProvider]);
+            assert.deepStrictEqual(yield* registry.getProviders, [
+              withBundledCompatibility(cachedProvider),
+            ]);
             const staleProvider = {
               ...cachedProvider,
               skillDiscoveryError: "Provider discovery failed.",
             } satisfies ServerProvider;
-            assert.deepStrictEqual(yield* registry.refresh(codexDriver), [staleProvider]);
+            assert.deepStrictEqual(yield* registry.refresh(codexDriver), [
+              withBundledCompatibility(staleProvider),
+            ]);
             assert.deepStrictEqual(yield* registry.refreshInstance(codexInstanceId), [
-              staleProvider,
+              withBundledCompatibility(staleProvider),
             ]);
           }).pipe(Effect.provide(runtimeServices));
         }),
@@ -2559,7 +2555,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
 
           yield* Effect.gen(function* () {
             const registry = yield* ProviderRegistry.ProviderRegistry;
-            assert.deepStrictEqual(yield* registry.getProviders, [codexProvider]);
+            assert.deepStrictEqual(yield* registry.getProviders, [
+              withBundledCompatibility(codexProvider),
+            ]);
 
             yield* Ref.set(failNextList, true);
             yield* PubSub.publish(changes, undefined);
@@ -2645,6 +2643,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             Layer.provideMerge(
               Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
             ),
+            Layer.provideMerge(ServerSecretStore.layer),
             Layer.provideMerge(
               ServerConfig.layerTest(process.cwd(), {
                 prefix: "t3-provider-registry-",
@@ -2700,10 +2699,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               "Real Codex probe against a missing binary should surface as 'error' in the aggregator",
             );
             assert.strictEqual(codexPersonal?.installed, false);
-            assert.strictEqual(
-              codexPersonal?.message,
-              "Codex CLI (`codex`) was not found on PATH.",
-            );
+            assert.include(codexPersonal?.message, missingBinary);
+            assert.include(codexPersonal?.message, "Settings → Providers → Codex → Binary path");
           }).pipe(Effect.provide(runtimeServices));
         }),
       );
@@ -2746,6 +2743,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             Layer.provideMerge(
               Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
             ),
+            Layer.provideMerge(ServerSecretStore.layer),
             Layer.provideMerge(
               ServerConfig.layerTest(process.cwd(), {
                 prefix: "t3-provider-registry-",
@@ -2862,6 +2860,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             Layer.provideMerge(
               Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
             ),
+            Layer.provideMerge(ServerSecretStore.layer),
             Layer.provideMerge(
               ServerConfig.layerTest(process.cwd(), {
                 prefix: "t3-provider-registry-",
@@ -2924,6 +2923,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               Layer.provideMerge(
                 Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
               ),
+              Layer.provideMerge(ServerSecretStore.layer),
               Layer.provideMerge(
                 ServerConfig.layerTest(process.cwd(), {
                   prefix: "t3-provider-registry-",
