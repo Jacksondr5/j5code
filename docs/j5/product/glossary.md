@@ -9,7 +9,7 @@ The J5 vocabulary, in one place, so that a name used anywhere in these docs reso
 
 **Two kinds of entry.** Most terms name something a product definition owns; for those the entry is an index — the term, a one-line gloss that only identifies the thing, and the definition that owns it. The gloss never states a rule or a property; if a sentence here could be argued with, it belongs in the owning definition instead. A few terms are distinctions everyone must share but that no feature builds and for those the glossary is the owner and the entry is the full definition.
 
-**Casing.** A named product concept is written in Title Case — Squadron, Crew, Captain, Role, etc. — so a reader knows it is our concept and not the ordinary word. Everything else is lowercase, including fleet, agent, participant, inbox, ledger and dashboard. A surface's proper name is Title Case (Fleet page). Code identifiers keep their own spelling.
+**Casing.** A named product concept is written in Title Case — Squadron, Crew, Captain, Persona, etc. — so a reader knows it is our concept and not the ordinary word. Everything else is lowercase, including fleet, agent, participant, inbox, ledger and dashboard. A surface's proper name is Title Case (Fleet page). Code identifiers keep their own spelling.
 
 **Upstream's words.** T3 Code's own vocabulary is defined in [upstream's glossary](../../internals/glossary.md) and is not restated here. Upstream words that upstream does not define are used in J5 docs with upstream's meaning; where J5 defines behavior around one of them, the entry below points at the definition that does. J5 does not write its own definition of an upstream word unless a measured confusion requires one.
 
@@ -23,9 +23,9 @@ The J5 vocabulary, in one place, so that a name used anywhere in these docs reso
 | **Registrar**       | The part of the platform that records an agent's Squadron home when the agent is created           | [features/squadron.md](features/squadron.md)                 |
 | **Crew**            | A group of agents that work one task as a unit                                                     | [features/crews.md](features/crews.md)                       |
 | **Captain**         | Any agent with Crews placed under it                                                               | [features/crews.md](features/crews.md)                       |
-| **Role**            | A reusable, user-authored definition of a kind of agent                                            | [features/roles.md](features/roles.md)                       |
+| **Persona**         | A reusable, user-authored definition of a kind of agent                                            | [features/roles.md](features/roles.md)                       |
 | **Manifest**        | The approved roster snapshot of a Crew — implementation vocabulary, not a separate concept         | [features/crews.md](features/crews.md)                       |
-| **Playbook**        | User-authored ordered prompts that a Role or Crew follows, with progress declared by its agents    | [features/playbooks.md](features/playbooks.md)               |
+| **Playbook**        | User-authored ordered prompts that a persona or Crew follows, with progress declared by its agents | [features/playbooks.md](features/playbooks.md)               |
 | placement           | Where an agent sits in the display tree                                                            | [features/squadron.md](features/squadron.md)                 |
 | provenance          | The recorded fact of how an agent came to exist — spawned by whom, forked from what, or unrecorded | [features/squadron.md](features/squadron.md)                 |
 | **Shared Squadron** | Several people sharing one Squadron on one server                                                  | [features/shared-squadrons.md](features/shared-squadrons.md) |

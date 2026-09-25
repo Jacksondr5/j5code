@@ -632,8 +632,8 @@ export function renderThreadA2AOutboundTool(input: {
  * returns null for non-A2A messages so the existing renderer owns that path.
  */
 export function renderThreadA2ADelivery(props: ThreadA2ADeliveryCompositionInput): ReactNode {
-  // Crew notices share this user-row seam: the person's `/crew` turn and the platform's gate
-  // decisions render as cards here, so the upstream row never shows their tagged blocks.
+  // Crew notices share this user-row seam: the platform's gate decisions and seat notices render
+  // as cards here, so the upstream row never shows their tagged blocks.
   const crewNotice = renderCrewNotice(props);
   if (crewNotice !== null) return crewNotice;
   const presentation = presentThreadA2ADelivery(props);

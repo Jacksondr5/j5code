@@ -236,8 +236,9 @@ export const SpawnedChildrenResponse = Schema.Struct({
 });
 
 /**
- * A Crew as the Fleet page records it: the approved roster snapshot with who approved each seat
- * and why. Archived Crews keep their snapshot so a successor can be briefed from it (Crews AC20).
+ * A Crew as the Fleet page records it: the approved roster snapshot with why each seat joined;
+ * every seat was approved by the person. Archived Crews keep their snapshot so a successor can be
+ * briefed from it (Crews AC20).
  */
 export const FleetCrew = Schema.Struct({
   crewInstanceId: Schema.String,
