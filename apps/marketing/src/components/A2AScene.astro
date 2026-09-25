@@ -4,8 +4,8 @@
  * the receiver nods, and a green reply comes back. Flags follow the messages:
  * orange on send, blue on receive, green on reply, held until the next event,
  * and each boat starts the loop in the color it ends with. The second pair
- * shows the conversation is any-to-any, not a hub. One 12s loop, gated by the
- * motion controller through --motion-state.
+ * shows the conversation is any-to-any, not a hub. Eight hops on an 8s loop,
+ * gated by the motion controller through --motion-state.
  */
 ---
 
@@ -13,6 +13,7 @@
   <path class="a2a-water" d="M0 150 Q 60 142 120 150 T 240 150 T 360 150 T 480 150 T 600 150 T 720 150" />
   <path class="a2a-arc" d="M98 86 Q 228 14 358 86" />
   <path class="a2a-arc" d="M618 86 Q 488 14 358 86" />
+  <path class="a2a-arc" d="M98 86 Q 358 -40 618 86" />
 
   <g transform="translate(60 88) scale(1.2)"><g class="bob a2a-b1"><use class="boat a2a-flag a2a-flag-a" href="#j5-boat" /></g></g>
   <g transform="translate(320 88) scale(1.2)"><g class="bob a2a-b2"><use class="boat a2a-flag a2a-flag-b" href="#j5-boat" /></g></g>
@@ -22,9 +23,11 @@
   <circle class="a2a-dot a2a-dot--reply a2a-d2" r="4.5" />
   <circle class="a2a-dot a2a-dot--ask a2a-d3" r="4.5" />
   <circle class="a2a-dot a2a-dot--reply a2a-d4" r="4.5" />
+  <circle class="a2a-dot a2a-dot--ask a2a-d5" r="4.5" />
+  <circle class="a2a-dot a2a-dot--reply a2a-d6" r="4.5" />
+  <circle class="a2a-dot a2a-dot--ask a2a-d7" r="4.5" />
+  <circle class="a2a-dot a2a-dot--reply a2a-d8" r="4.5" />
 
-  <text class="a2a-label" x="60" y="20">ask</text>
-  <text class="a2a-label" x="660" y="20" text-anchor="end">reply</text>
 </svg>
 
 <style>
@@ -52,35 +55,30 @@
     stroke-dasharray: 3 6;
   }
 
-  .a2a-label {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    fill: var(--ink-dim, #77838f);
-  }
 
   .a2a-b1 { --bob-dur: 5.2s; --bob-delay: -1s; }
   .a2a-b3 { --bob-dur: 5.8s; --bob-delay: -3s; }
 
-  /* The middle boat nods when an ask lands. Same 12s clock as the dots. */
+  /* The middle boat nods when an ask lands. Same 8s clock as the dots. */
   .a2a-b2 {
-    animation: a2a-nod 12s ease-in-out infinite;
+    animation: a2a-nod 8s ease-in-out infinite;
     animation-play-state: var(--motion-state, paused);
     transform-box: fill-box;
     transform-origin: 50% 85%;
   }
 
   @keyframes a2a-nod {
-    0%, 12%, 20%, 62%, 70%, 100% { transform: translateY(0) rotate(0deg); }
-    14%, 64% { transform: translateY(-2px) rotate(-5deg); }
-    17%, 67% { transform: translateY(0) rotate(3deg); }
+    0%, 9%, 14%, 31%, 36%, 89%, 94%, 100% { transform: translateY(0) rotate(0deg); }
+    10.5%, 32.5%, 90.5% { transform: translateY(-2px) rotate(-5deg); }
+    12.5%, 34.5%, 92.5% { transform: translateY(0) rotate(3deg); }
   }
 
+  /* Eight hops, well under a second each: A asks B, B replies; C asks B, B
+     replies; A asks C, C replies; B asks A, A replies. */
   .a2a-dot {
     opacity: 0;
     offset-rotate: 0deg;
-    animation-duration: 12s;
+    animation-duration: 8s;
     animation-timing-function: ease-in-out;
     animation-iteration-count: infinite;
     animation-play-state: var(--motion-state, paused);
@@ -89,60 +87,52 @@
   .a2a-dot--ask { fill: var(--msg-ask); }
   .a2a-dot--reply { fill: var(--msg-reply); }
 
-  .a2a-d1 { offset-path: path("M98 86 Q 228 14 358 86"); animation-name: a2a-travel-1; }
-  .a2a-d2 { offset-path: path("M358 86 Q 228 14 98 86"); animation-name: a2a-travel-2; }
-  .a2a-d3 { offset-path: path("M618 86 Q 488 14 358 86"); animation-name: a2a-travel-3; }
-  .a2a-d4 { offset-path: path("M358 86 Q 488 14 618 86"); animation-name: a2a-travel-4; }
+  .a2a-d1 { offset-path: path("M98 86 Q 228 14 358 86"); animation-name: hop-1; }
+  .a2a-d2 { offset-path: path("M358 86 Q 228 14 98 86"); animation-name: hop-2; }
+  .a2a-d3 { offset-path: path("M618 86 Q 488 14 358 86"); animation-name: hop-3; }
+  .a2a-d4 { offset-path: path("M358 86 Q 488 14 618 86"); animation-name: hop-4; }
+  .a2a-d5 { offset-path: path("M98 86 Q 358 -40 618 86"); animation-name: hop-5; }
+  .a2a-d6 { offset-path: path("M618 86 Q 358 -40 98 86"); animation-name: hop-6; }
+  .a2a-d7 { offset-path: path("M358 86 Q 228 14 98 86"); animation-name: hop-7; }
+  .a2a-d8 { offset-path: path("M98 86 Q 228 14 358 86"); animation-name: hop-8; }
 
-  @keyframes a2a-travel-1 {
-    0% { offset-distance: 0%; opacity: 0; }
-    2% { opacity: 1; }
-    12% { opacity: 1; }
-    14%, 100% { offset-distance: 100%; opacity: 0; }
-  }
-  @keyframes a2a-travel-2 {
-    0%, 22% { offset-distance: 0%; opacity: 0; }
-    24% { opacity: 1; }
-    34% { opacity: 1; }
-    36%, 100% { offset-distance: 100%; opacity: 0; }
-  }
-  @keyframes a2a-travel-3 {
-    0%, 50% { offset-distance: 0%; opacity: 0; }
-    52% { opacity: 1; }
-    62% { opacity: 1; }
-    64%, 100% { offset-distance: 100%; opacity: 0; }
-  }
-  @keyframes a2a-travel-4 {
-    0%, 72% { offset-distance: 0%; opacity: 0; }
-    74% { opacity: 1; }
-    84% { opacity: 1; }
-    86%, 100% { offset-distance: 100%; opacity: 0; }
-  }
+  @keyframes hop-1 { 0%, 2% { offset-distance: 0%; opacity: 0; } 3% { opacity: 1; } 9% { opacity: 1; } 10%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hop-2 { 0%, 12% { offset-distance: 0%; opacity: 0; } 13% { opacity: 1; } 19% { opacity: 1; } 20%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hop-3 { 0%, 24% { offset-distance: 0%; opacity: 0; } 25% { opacity: 1; } 31% { opacity: 1; } 32%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hop-4 { 0%, 34% { offset-distance: 0%; opacity: 0; } 35% { opacity: 1; } 41% { opacity: 1; } 42%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hop-5 { 0%, 48% { offset-distance: 0%; opacity: 0; } 49% { opacity: 1; } 55% { opacity: 1; } 56%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hop-6 { 0%, 58% { offset-distance: 0%; opacity: 0; } 59% { opacity: 1; } 65% { opacity: 1; } 66%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hop-7 { 0%, 72% { offset-distance: 0%; opacity: 0; } 73% { opacity: 1; } 79% { opacity: 1; } 80%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hop-8 { 0%, 82% { offset-distance: 0%; opacity: 0; } 83% { opacity: 1; } 89% { opacity: 1; } 90%, 100% { offset-distance: 100%; opacity: 0; } }
 
-  /* Flags on the 12s clock. A: sends at 2, receives the reply at 36.
-     B: receives at 14, replies at 24, receives at 64, replies at 74.
-     C: sends at 52, receives the reply at 86. */
+  /* Flags on the same clock. A: sends 2, receives 20, sends 48, receives 66,
+     receives 80, replies 82. B: receives 10, replies 12, receives 32, replies
+     34, sends 72, receives 90. C: sends 24, receives 42, receives 56, replies
+     58. Each starts the loop in the color it ends with. */
   .a2a-flag {
-    animation-duration: 12s;
+    animation-duration: 8s;
     animation-timing-function: ease-in-out;
     animation-iteration-count: infinite;
     animation-play-state: var(--motion-state, paused);
   }
-  .a2a-flag-a { --pennant: var(--msg-receive); animation-name: a2a-flag-a; }
-  .a2a-flag-b { --pennant: var(--msg-reply); animation-name: a2a-flag-b; }
-  .a2a-flag-c { --pennant: var(--msg-receive); animation-name: a2a-flag-c; }
+  .a2a-flag-a { --pennant: var(--msg-reply); animation-name: a2a-flag-a; }
+  .a2a-flag-b { --pennant: var(--msg-receive); animation-name: a2a-flag-b; }
+  .a2a-flag-c { --pennant: var(--msg-reply); animation-name: a2a-flag-c; }
 
   @keyframes a2a-flag-a {
-    0%, 1.5%, 36.5%, 100% { --pennant: var(--msg-receive); }
-    2.5%, 35.5% { --pennant: var(--msg-ask); }
+    0%, 1.5%, 82.5%, 100% { --pennant: var(--msg-reply); }
+    2.5%, 19.5%, 48.5%, 65.5% { --pennant: var(--msg-ask); }
+    20.5%, 47.5%, 66.5%, 81.5% { --pennant: var(--msg-receive); }
   }
   @keyframes a2a-flag-b {
-    0%, 13.5%, 24.5%, 63.5%, 74.5%, 100% { --pennant: var(--msg-reply); }
-    14.5%, 23.5%, 64.5%, 73.5% { --pennant: var(--msg-receive); }
+    0%, 11.5%, 32.5%, 33.5%, 90.5%, 100% { --pennant: var(--msg-receive); }
+    12.5%, 31.5%, 34.5%, 71.5% { --pennant: var(--msg-reply); }
+    72.5%, 89.5% { --pennant: var(--msg-ask); }
   }
   @keyframes a2a-flag-c {
-    0%, 51.5%, 86.5%, 100% { --pennant: var(--msg-receive); }
-    52.5%, 85.5% { --pennant: var(--msg-ask); }
+    0%, 23.5%, 58.5%, 100% { --pennant: var(--msg-reply); }
+    24.5%, 41.5% { --pennant: var(--msg-ask); }
+    42.5%, 57.5% { --pennant: var(--msg-receive); }
   }
 
   @media (prefers-reduced-motion: reduce) {

@@ -3,15 +3,16 @@
  * One paper boat refolds through five personas: Researcher, Designer, Builder,
  * Reviewer, Tester. The hull says how heavy the model is (skiff, sloop,
  * freighter); the gear says the job. Each persona holds for about four
- * seconds, folds flat, and the next unfolds. Twenty-second loop, transform and
- * opacity only, gated by --motion-state.
+ * seconds, sails off to the right, and the next sails in from the left. Under
+ * each, the provider's mark with the model and reasoning it runs on.
+ * Twenty-second loop, transform and opacity only, gated by --motion-state.
  */
 const personas = [
-  { key: "researcher", name: "Researcher", note: "light, fast model" },
-  { key: "designer", name: "Designer", note: "light, fast model" },
-  { key: "builder", name: "Builder", note: "heavy model" },
-  { key: "reviewer", name: "Reviewer", note: "standard route" },
-  { key: "tester", name: "Tester", note: "heavy model" },
+  { name: "Researcher", provider: "Antigravity", icon: "/harnesses/antigravity.png", model: "Gemini 3.8 Flash", reasoning: "medium" },
+  { name: "Designer", provider: "Claude Code", icon: "/harnesses/claude-ai-icon.svg", model: "Fable 5.1", reasoning: "high" },
+  { name: "Builder", provider: "Codex", icon: "/harnesses/openai_dark.svg", model: "Astra", reasoning: "high" },
+  { name: "Reviewer", provider: "Grok", icon: "/harnesses/grok-dark.svg", model: "Grok 4.6", reasoning: "extra high" },
+  { name: "Tester", provider: "OpenCode", icon: "/harnesses/opencode-dark.svg", model: "Qwen 3.5 Coder", reasoning: "high" },
 ];
 ---
 
@@ -98,8 +99,12 @@ const personas = [
 
   {personas.map((p, i) => (
     <g class:list={["ps-label", `ps-l${i + 1}`]}>
-      <text class="ps-name" x="160" y="150">{p.name}</text>
-      <text class="ps-note" x="160" y="163">{p.note}</text>
+      <text class="ps-name" x="160" y="148">{p.name}</text>
+      <g class="ps-route" transform="translate(160 158)">
+        <rect class="ps-tile" x={-(p.model.length + p.reasoning.length + 3) * 3.1 - 10} y="-7" width="14" height="14" rx="4" />
+        <image href={p.icon} x={-(p.model.length + p.reasoning.length + 3) * 3.1 - 8} y="-5" width="10" height="10" />
+        <text class="ps-note" x="6" y="3.2">{p.model} · {p.reasoning}</text>
+      </g>
     </g>
   ))}
 </svg>
@@ -111,7 +116,7 @@ const personas = [
     max-width: 340px;
     height: auto;
     margin: 0 auto;
-    overflow: visible;
+    overflow: hidden;
   }
 
   .ps-paper { fill: #fbf7ee; stroke: #12202f; stroke-width: 1.6; stroke-linejoin: round; }
@@ -146,63 +151,66 @@ const personas = [
   .ps-note {
     font-family: var(--font-mono);
     font-size: 8.5px;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
     text-anchor: middle;
     fill: var(--fg-dim);
   }
 
-  /* Each persona owns a fifth of the 20s loop: unfold over the first half
-     second, hold, fold flat over the last half second. The fold squashes the
-     whole boat toward its waterline, which reads as paper going flat. */
+  /* White-on-transparent provider marks need a dark tile on chart paper. */
+  .ps-tile {
+    fill: var(--navy-900);
+  }
+
+  /* Each persona owns a fifth of the 20s loop: sails in from the left over
+     the first second, holds, sails off to the right over the last second. The
+     next one is already entering as this one leaves, like boats in a channel. */
   .ps-p {
     opacity: 0;
-    transform-box: fill-box;
-    transform-origin: 50% 100%;
     animation-duration: 20s;
-    animation-timing-function: cubic-bezier(0.2, 0.7, 0.2, 1);
+    animation-timing-function: cubic-bezier(0.3, 0.6, 0.2, 1);
     animation-iteration-count: infinite;
     animation-play-state: var(--motion-state, paused);
   }
-  .ps-p1 { animation-name: refold-1; }
-  .ps-p2 { animation-name: refold-2; }
-  .ps-p3 { animation-name: refold-3; }
-  .ps-p4 { animation-name: refold-4; }
-  .ps-p5 { animation-name: refold-5; }
+  .ps-p1 { animation-name: sail-1; }
+  .ps-p2 { animation-name: sail-2; }
+  .ps-p3 { animation-name: sail-3; }
+  .ps-p4 { animation-name: sail-4; }
+  .ps-p5 { animation-name: sail-5; }
 
-  @keyframes refold-1 {
-    0% { opacity: 1; transform: scaleY(0.06); }
-    2.5%, 17% { opacity: 1; transform: scaleY(1); }
-    19.5% { opacity: 1; transform: scaleY(0.06); }
-    20%, 100% { opacity: 0; transform: scaleY(0.06); }
+  @keyframes sail-1 {
+    0% { opacity: 1; transform: translateX(-240px); }
+    5%, 15% { opacity: 1; transform: translateX(0); }
+    19.9% { opacity: 1; transform: translateX(240px); }
+    20%, 100% { opacity: 0; transform: translateX(-240px); }
   }
-  @keyframes refold-2 {
-    0%, 19.9% { opacity: 0; transform: scaleY(0.06); }
-    20% { opacity: 1; transform: scaleY(0.06); }
-    22.5%, 37% { opacity: 1; transform: scaleY(1); }
-    39.5% { opacity: 1; transform: scaleY(0.06); }
-    40%, 100% { opacity: 0; transform: scaleY(0.06); }
+  @keyframes sail-2 {
+    0%, 14.9% { opacity: 0; transform: translateX(-240px); }
+    15% { opacity: 1; transform: translateX(-240px); }
+    25%, 35% { opacity: 1; transform: translateX(0); }
+    39.9% { opacity: 1; transform: translateX(240px); }
+    40%, 100% { opacity: 0; transform: translateX(-240px); }
   }
-  @keyframes refold-3 {
-    0%, 39.9% { opacity: 0; transform: scaleY(0.06); }
-    40% { opacity: 1; transform: scaleY(0.06); }
-    42.5%, 57% { opacity: 1; transform: scaleY(1); }
-    59.5% { opacity: 1; transform: scaleY(0.06); }
-    60%, 100% { opacity: 0; transform: scaleY(0.06); }
+  @keyframes sail-3 {
+    0%, 34.9% { opacity: 0; transform: translateX(-240px); }
+    35% { opacity: 1; transform: translateX(-240px); }
+    45%, 55% { opacity: 1; transform: translateX(0); }
+    59.9% { opacity: 1; transform: translateX(240px); }
+    60%, 100% { opacity: 0; transform: translateX(-240px); }
   }
-  @keyframes refold-4 {
-    0%, 59.9% { opacity: 0; transform: scaleY(0.06); }
-    60% { opacity: 1; transform: scaleY(0.06); }
-    62.5%, 77% { opacity: 1; transform: scaleY(1); }
-    79.5% { opacity: 1; transform: scaleY(0.06); }
-    80%, 100% { opacity: 0; transform: scaleY(0.06); }
+  @keyframes sail-4 {
+    0%, 54.9% { opacity: 0; transform: translateX(-240px); }
+    55% { opacity: 1; transform: translateX(-240px); }
+    65%, 75% { opacity: 1; transform: translateX(0); }
+    79.9% { opacity: 1; transform: translateX(240px); }
+    80%, 100% { opacity: 0; transform: translateX(-240px); }
   }
-  @keyframes refold-5 {
-    0%, 79.9% { opacity: 0; transform: scaleY(0.06); }
-    80% { opacity: 1; transform: scaleY(0.06); }
-    82.5%, 97% { opacity: 1; transform: scaleY(1); }
-    99.5% { opacity: 1; transform: scaleY(0.06); }
-    100% { opacity: 0; transform: scaleY(0.06); }
+  @keyframes sail-5 {
+    0%, 74.9% { opacity: 0; transform: translateX(-240px); }
+    75% { opacity: 1; transform: translateX(-240px); }
+    85%, 95% { opacity: 1; transform: translateX(0); }
+    99.9% { opacity: 1; transform: translateX(240px); }
+    100% { opacity: 0; transform: translateX(-240px); }
   }
 
   .ps-label {
@@ -218,11 +226,11 @@ const personas = [
   .ps-l4 { animation-name: label-4; }
   .ps-l5 { animation-name: label-5; }
 
-  @keyframes label-1 { 0% { opacity: 0; } 2.5%, 17.5% { opacity: 1; } 20%, 100% { opacity: 0; } }
-  @keyframes label-2 { 0%, 20% { opacity: 0; } 22.5%, 37.5% { opacity: 1; } 40%, 100% { opacity: 0; } }
-  @keyframes label-3 { 0%, 40% { opacity: 0; } 42.5%, 57.5% { opacity: 1; } 60%, 100% { opacity: 0; } }
-  @keyframes label-4 { 0%, 60% { opacity: 0; } 62.5%, 77.5% { opacity: 1; } 80%, 100% { opacity: 0; } }
-  @keyframes label-5 { 0%, 80% { opacity: 0; } 82.5%, 97.5% { opacity: 1; } 100% { opacity: 0; } }
+  @keyframes label-1 { 0%, 2% { opacity: 0; } 5%, 15% { opacity: 1; } 18%, 100% { opacity: 0; } }
+  @keyframes label-2 { 0%, 22% { opacity: 0; } 25%, 35% { opacity: 1; } 38%, 100% { opacity: 0; } }
+  @keyframes label-3 { 0%, 42% { opacity: 0; } 45%, 55% { opacity: 1; } 58%, 100% { opacity: 0; } }
+  @keyframes label-4 { 0%, 62% { opacity: 0; } 65%, 75% { opacity: 1; } 78%, 100% { opacity: 0; } }
+  @keyframes label-5 { 0%, 82% { opacity: 0; } 85%, 95% { opacity: 1; } 98%, 100% { opacity: 0; } }
 
   @media (prefers-reduced-motion: reduce) {
     .ps-p, .ps-label { animation: none; }

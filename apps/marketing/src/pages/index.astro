@@ -95,7 +95,6 @@ const harnesses = [
     <div class="t3-grid" aria-hidden="true"></div>
     <div class="container">
       <div class="section-head">
-        <div class="eyebrow">Foundation</div>
         <h2>Built on T3 Code. Kept up to date.</h2>
         <p>
           Everything T3 Code does, J5 Code does: six agent harnesses on your own subscriptions,
@@ -173,7 +172,6 @@ const harnesses = [
     </div>
     <div class="container">
       <div class="section-head">
-        <div class="eyebrow">The fleet layer</div>
         <h2 class="display">Organize the work. Let the agents talk. Read the state.</h2>
         <p>
           T3 Code is built around one agent at a time. J5 is built for the moment you have twelve,
@@ -235,14 +233,14 @@ const harnesses = [
           </div>
           <div class="pb-side" data-motion>
             <PlaybookScene />
-            <ol class="steps" aria-label="Example Playbook">
-              <span class="steps-marker" aria-hidden="true"></span>
-              <li class="step"><span class="step-n">1</span><span>Build and test</span><span class="step-who">Builder</span></li>
-              <li class="step"><span class="step-n">2</span><span>Independent review</span><span class="step-who">Critic</span></li>
-              <li class="step"><span class="step-n">3</span><span>Sit on CI, triage failures</span><span class="step-who">Sitter</span></li>
-              <li class="step"><span class="step-n">4</span><span>Is the migration safe to run?</span><span class="step-who">Captain</span></li>
-              <li class="step"><span class="step-n">5</span><span>Merge and report</span><span class="step-who">Sitter</span></li>
-            </ol>
+            <!-- One step card; the current step slides through on the boats' 24s clock. -->
+            <div class="step-flip" aria-label="Example Playbook, current step">
+              <div class="step step-1"><span class="step-n">1</span><span>Build and test</span><span class="step-who">Builder</span></div>
+              <div class="step step-2"><span class="step-n">2</span><span>Independent review</span><span class="step-who">Critic</span></div>
+              <div class="step step-3"><span class="step-n">3</span><span>Sit on CI, triage failures</span><span class="step-who">Sitter</span></div>
+              <div class="step step-4"><span class="step-n">4</span><span>Is the migration safe to run?</span><span class="step-who">Captain</span></div>
+              <div class="step step-5"><span class="step-n">5</span><span>Merge and report</span><span class="step-who">Sitter</span></div>
+            </div>
           </div>
         </article>
       </div>
@@ -309,10 +307,9 @@ const harnesses = [
   </section>
 
   <!-- ── Standing orders ──────────────────────────────────────── -->
-  <section class="sec-orders" aria-labelledby="orders-title" data-motion>
+  <section class="sec-orders" aria-label="Standing orders" data-motion>
     <div class="container orders-inner">
       <span class="orders-boat" aria-hidden="true"><Boat tone="dark" size={52} class="bob" style="--bob-dur:6s" /></span>
-      <h2 id="orders-title" class="eyebrow orders-eyebrow">Standing orders</h2>
       <ul class="orders">
         <li><span class="order-n">I</span><span>The platform delivers facts, never judgment.</span></li>
         <li><span class="order-n">II</span><span>Status is read, never asked.</span></li>
@@ -326,7 +323,6 @@ const harnesses = [
   <section id="horizon" class="sec-horizon">
     <div class="container">
       <div class="section-head">
-        <div class="eyebrow">Over the horizon</div>
         <h2 class="display">One person, many servers. Then many people.</h2>
         <p>
           The architecture was drawn for more than one machine and more than one person from the
@@ -453,10 +449,6 @@ const harnesses = [
     max-width: 760px;
   }
 
-  .section-head .eyebrow {
-    margin-bottom: 14px;
-    display: block;
-  }
 
   .section-head h2 {
     font-family: var(--font-display);
@@ -809,8 +801,6 @@ const harnesses = [
   /* ── Fleet layer (chart paper) ────────────────────────────── */
   .sec-fleet {
     z-index: 1;
-    --msg-reply: #2f7d5b;
-    --msg-receive: #2f7f9e;
     --bg: var(--canvas);
     --fg: var(--ink);
     --fg-muted: var(--ink-muted);
@@ -926,56 +916,53 @@ const harnesses = [
   .pb-side {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
   }
 
-  .steps {
+  .step-flip {
     position: relative;
-    list-style: none;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  /* The current-step marker shares the 24s clock with the boats passing the buoys. */
-  .steps-marker {
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 0;
     height: 40px;
-    border-radius: 8px;
-    border: 1px solid var(--brass-deep);
-    background: rgba(201, 162, 77, 0.14);
-    pointer-events: none;
-    animation: steps-advance 24s steps(5, jump-none) infinite;
-    animation-play-state: var(--motion-state, paused);
   }
 
-  @keyframes steps-advance {
-    from { transform: translateY(0); }
-    to { transform: translateY(184px); }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .steps-marker { animation: none; transform: translateY(92px); }
-  }
-
+  /* Five steps stacked; each owns a fifth of the 24s clock, sliding up into
+     place as the boats pass its buoy and sliding out as they pass the next. */
   .step {
-    position: relative;
+    position: absolute;
+    inset: 0;
     display: grid;
     grid-template-columns: 26px minmax(0, 1fr) auto;
     align-items: center;
     gap: 12px;
-    height: 40px;
     padding: 0 12px;
     border-radius: 8px;
-    border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.5);
+    border: 1px solid var(--brass-deep);
+    background: rgba(201, 162, 77, 0.12);
     font-size: 13.5px;
-    color: var(--fg-muted);
+    color: var(--fg);
     white-space: nowrap;
     overflow: hidden;
+    opacity: 0;
+    animation-duration: 24s;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-play-state: var(--motion-state, paused);
+  }
+
+  .step-1 { animation-name: step-1; }
+  .step-2 { animation-name: step-2; }
+  .step-3 { animation-name: step-3; }
+  .step-4 { animation-name: step-4; }
+  .step-5 { animation-name: step-5; }
+
+  @keyframes step-1 { 0% { opacity: 0; transform: translateY(8px); } 2%, 18% { opacity: 1; transform: none; } 20%, 100% { opacity: 0; transform: translateY(-8px); } }
+  @keyframes step-2 { 0%, 20% { opacity: 0; transform: translateY(8px); } 22%, 38% { opacity: 1; transform: none; } 40%, 100% { opacity: 0; transform: translateY(-8px); } }
+  @keyframes step-3 { 0%, 40% { opacity: 0; transform: translateY(8px); } 42%, 58% { opacity: 1; transform: none; } 60%, 100% { opacity: 0; transform: translateY(-8px); } }
+  @keyframes step-4 { 0%, 60% { opacity: 0; transform: translateY(8px); } 62%, 78% { opacity: 1; transform: none; } 80%, 100% { opacity: 0; transform: translateY(-8px); } }
+  @keyframes step-5 { 0%, 80% { opacity: 0; transform: translateY(8px); } 82%, 98% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-8px); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .step { animation: none; }
+    .step-3 { opacity: 1; transform: none; }
   }
 
   .step > span:nth-child(2) {
@@ -989,9 +976,11 @@ const harnesses = [
     width: 22px;
     height: 22px;
     border-radius: 50%;
-    border: 1px solid var(--border-strong);
+    background: var(--brass);
+    color: var(--navy-950);
     font-family: var(--font-mono);
     font-size: 11px;
+    font-weight: 600;
   }
 
   .step-who {
@@ -1018,7 +1007,7 @@ const harnesses = [
 
   /* ── Standing orders ──────────────────────────────────────── */
   .sec-orders {
-    padding: 56px 0;
+    padding: 72px 0 56px;
     background: var(--navy-800);
   }
 
@@ -1026,16 +1015,13 @@ const harnesses = [
     position: relative;
   }
 
+  /* Rides above the list now that the strip has no label. */
   .orders-boat {
     position: absolute;
     right: 32px;
-    top: -14px;
+    top: -54px;
   }
 
-  .orders-eyebrow {
-    color: var(--brass);
-    margin-bottom: 22px;
-  }
 
   .orders {
     list-style: none;
@@ -1284,7 +1270,7 @@ const harnesses = [
 
     .orders-boat {
       right: 20px;
-      top: -22px;
+      top: -46px;
     }
 
     .harness-float {
