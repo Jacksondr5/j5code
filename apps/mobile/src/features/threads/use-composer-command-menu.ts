@@ -1,6 +1,12 @@
 import { useAgentMentionPicker } from "../../j5/agents/useAgentMentionPicker";
 import { agentMentionReplacement } from "@t3tools/shared/j5/agentMention";
-import type { EnvironmentId, ProviderInteractionMode, ServerProvider } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProjectId,
+  ProviderInteractionMode,
+  ServerProvider,
+  ThreadId,
+} from "@t3tools/contracts";
 import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
 import {
   detectComposerTrigger,
@@ -25,6 +31,8 @@ import type { ComposerEditorSelection } from "../../components/ComposerEditor";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useComposerPathSearch } from "../../state/queries";
+import { useEnvironmentQuery } from "../../state/query";
+import { j5Environment } from "../../j5/state";
 import type { ComposerCommandItem } from "./ComposerCommandPopover";
 import { matchesSlashSkillQuery } from "./composerSlashSkillSearch";
 
@@ -145,7 +153,9 @@ export function resolveComposerCommandSelection(input: {
   } else if (item.type === "skill") {
     replacement = `$${item.skill.name} `;
   } else if (item.type === "slash-command") {
-    replacement = item.command === "playbook" ? "Start playbook " : `/${item.command} `;
+    replacement = `/${item.command} `;
+  } else if (item.type === "playbook") {
+    replacement = `/playbook ${item.name} `;
   } else if (item.type === "provider-slash-command") {
     replacement = `/${item.command.name} `;
   }
@@ -160,6 +170,8 @@ export function useComposerCommandMenu({
   draftMessage,
   ownerKey,
   environmentId,
+  projectId,
+  threadId,
   projectCwd,
   selectedProviderStatus,
   hasThread,
@@ -173,6 +185,8 @@ export function useComposerCommandMenu({
   readonly draftMessage: string;
   readonly ownerKey: string | null;
   readonly environmentId: EnvironmentId | null;
+  readonly projectId: ProjectId | null;
+  readonly threadId?: ThreadId | null;
   readonly projectCwd: string | null;
   readonly selectedProviderStatus: ServerProvider | null;
   readonly hasThread: boolean;
@@ -283,11 +297,36 @@ export function useComposerCommandMenu({
     cwd: trigger?.kind === "path" ? projectCwd : null,
     query: trigger?.kind === "path" ? trigger.query : null,
   });
+  const playbookQuery = useEnvironmentQuery(
+    trigger?.kind === "slash-playbook" && environmentId && projectId
+      ? j5Environment.playbookLibrary({
+          environmentId,
+          input: { projectId, ...(threadId ? { threadId } : {}) },
+        })
+      : null,
+  );
 
   const agentPicker = useAgentMentionPicker(environmentId, selectedProviderStatus?.driver, trigger);
   const items = useMemo<ComposerCommandItem[]>(() => {
     if (!trigger) return [];
     if (trigger.kind === "agent") return agentPicker.items;
+    if (trigger.kind === "slash-playbook") {
+      const query = trigger.query.trim().toLowerCase();
+      return (playbookQuery.data?.playbooks ?? [])
+        .filter(
+          (playbook) =>
+            !playbook.issue &&
+            (playbook.name.toLowerCase().includes(query) ||
+              playbook.title.toLowerCase().includes(query)),
+        )
+        .map((playbook) => ({
+          id: `playbook:${playbook.name}`,
+          type: "playbook" as const,
+          name: playbook.name,
+          label: playbook.name,
+          description: playbook.title,
+        }));
+    }
 
     if (trigger.kind === "slash-command") {
       const q = trigger.query.toLowerCase();
@@ -418,6 +457,7 @@ export function useComposerCommandMenu({
     return [];
   }, [
     agentPicker.items,
+    playbookQuery.data,
     hasThread,
     hasCompactableConversation,
     onUpdateInteractionMode,
@@ -474,7 +514,10 @@ export function useComposerCommandMenu({
     trigger,
     items,
     skills,
-    isLoading: pathSearch.isPending || (trigger?.kind === "agent" && agentPicker.isPending),
+    isLoading:
+      pathSearch.isPending ||
+      playbookQuery.isPending ||
+      (trigger?.kind === "agent" && agentPicker.isPending),
     onSelect,
   };
 }

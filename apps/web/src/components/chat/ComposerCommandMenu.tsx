@@ -47,6 +47,13 @@ export type ComposerCommandItem =
     }
   | {
       id: string;
+      type: "playbook";
+      name: string;
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
       type: "provider-slash-command";
       provider: ProviderDriverKind;
       command: ServerProviderSlashCommand;
@@ -119,7 +126,9 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
               {props.isLoading
                 ? props.triggerKind === "skill"
                   ? "Searching workspace skills..."
-                  : "Searching workspace files..."
+                  : props.triggerKind === "slash-playbook"
+                    ? "Loading playbooks..."
+                    : "Searching workspace files..."
                 : (props.emptyStateText ??
                   (props.triggerKind === "skill"
                     ? "No skills found. Try / to browse provider commands."

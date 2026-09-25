@@ -21,6 +21,16 @@ describe("agent mention syntax", () => {
     expect(detectComposerTrigger("$review", 7)?.kind).toBe("skill");
     expect(detectComposerTrigger("me@example.com", 14)).toBeNull();
   });
+  it("searches playbook names after /playbook", () => {
+    const text = "/playbook debug";
+    expect(detectComposerTrigger(text, text.length)).toEqual({
+      kind: "slash-playbook",
+      query: "debug",
+      rangeStart: 0,
+      rangeEnd: text.length,
+    });
+    expect(detectComposerTrigger("/playbook debugging ", 20)).toBeNull();
+  });
   it("keeps agent references editable text without mistaking them for files", () => {
     expect(collectComposerInlineTokens("@persona:researcher @./src/index.ts ")).toEqual([
       expect.objectContaining({ type: "mention", value: "./src/index.ts" }),

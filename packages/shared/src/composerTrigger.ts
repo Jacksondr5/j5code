@@ -1,5 +1,11 @@
 import { detectAgentMention } from "./j5/agentMention.ts";
-export type ComposerTriggerKind = "agent" | "path" | "slash-command" | "slash-model" | "skill";
+export type ComposerTriggerKind =
+  | "agent"
+  | "path"
+  | "slash-command"
+  | "slash-model"
+  | "slash-playbook"
+  | "skill";
 export type ComposerSlashCommand = "model" | "plan" | "default";
 
 export interface ComposerTrigger {
@@ -82,6 +88,16 @@ export function detectComposerTrigger(
       return {
         kind: "slash-model",
         query: (modelMatch[1] ?? "").trim(),
+        rangeStart: lineStart,
+        rangeEnd: cursor,
+      };
+    }
+
+    const playbookMatch = /^\/playbook[ \t]+([^ \t\r\n]*)$/i.exec(linePrefix);
+    if (playbookMatch) {
+      return {
+        kind: "slash-playbook",
+        query: playbookMatch[1] ?? "",
         rangeStart: lineStart,
         rangeEnd: cursor,
       };

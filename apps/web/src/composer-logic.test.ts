@@ -165,6 +165,17 @@ describe("detectComposerTrigger", () => {
     });
   });
 
+  it("searches playbook names after /playbook", () => {
+    const text = "/playbook debug";
+    expect(detectComposerTrigger(text, text.length)).toEqual({
+      kind: "slash-playbook",
+      query: "debug",
+      rangeStart: 0,
+      rangeEnd: text.length,
+    });
+    expect(detectComposerTrigger("/playbook debugging ", 20)).toBeNull();
+  });
+
   it("keeps slash command detection active for provider commands", () => {
     const text = "/rev";
     const trigger = detectComposerTrigger(text, text.length);
