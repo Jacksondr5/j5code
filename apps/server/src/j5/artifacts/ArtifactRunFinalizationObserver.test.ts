@@ -50,7 +50,7 @@ it.effect("exports a completed plan into shared project application storage", ()
         }),
         Layer.succeed(RunFinalization.RunFinalizationObserver, {
           refresh,
-          refreshAfterTurn: Effect.void,
+          refreshAfterTurn: () => Effect.void,
         }),
         Layer.mock(ArtifactWorkspace)({ exportPlan }),
       ),

@@ -3,6 +3,26 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./composerThreadItems": {
+      "types": "./src/composerThreadItems.ts",
+      "default": "./src/composerThreadItems.ts"
+    },
+    "./handoff": {
+      "types": "./src/handoff.ts",
+      "default": "./src/handoff.ts"
+    },
+    "./device/stream": {
+      "types": "./src/device/stream.ts",
+      "default": "./src/device/stream.ts"
+    },
+    "./device/hub-access": {
+      "types": "./src/device/hubAccess.ts",
+      "default": "./src/device/hubAccess.ts"
+    },
+    "./worktree-setup": {
+      "types": "./src/worktreeSetup.ts",
+      "default": "./src/worktreeSetup.ts"
+    },
     "./load-balancing": {
       "types": "./src/load-balancing.ts",
       "default": "./src/load-balancing.ts"
@@ -110,6 +130,10 @@
     "./state/attachments": {
       "types": "./src/state/attachments.ts",
       "default": "./src/state/attachments.ts"
+    },
+    "./text-paste": {
+      "types": "./src/textPaste.ts",
+      "default": "./src/textPaste.ts"
     },
     "./state/connections": {
       "types": "./src/state/connections.ts",
@@ -219,6 +243,10 @@
       "types": "./src/state/threads.ts",
       "default": "./src/state/threads.ts"
     },
+    "./state/subagent-display": {
+      "types": "./src/state/subagentDisplay.ts",
+      "default": "./src/state/subagentDisplay.ts"
+    },
     "./state/subagentRuntime": {
       "types": "./src/state/subagentRuntime.ts",
       "default": "./src/state/subagentRuntime.ts"
@@ -247,6 +275,14 @@
       "types": "./src/state/threadWorkflows.ts",
       "default": "./src/state/threadWorkflows.ts"
     },
+    "./state/composer-dispatch": {
+      "types": "./src/state/composerDispatch.ts",
+      "default": "./src/state/composerDispatch.ts"
+    },
+    "./state/thread-subagents": {
+      "types": "./src/state/threadSubagents.ts",
+      "default": "./src/state/threadSubagents.ts"
+    },
     "./j5/agent-personas": {
       "types": "./src/j5/agentPersonas.ts",
       "default": "./src/j5/agentPersonas.ts"
@@ -258,10 +294,6 @@
     "./j5/agent-mentions": {
       "types": "./src/j5/agentMentions.ts",
       "default": "./src/j5/agentMentions.ts"
-    },
-    "./j5/steer-state": {
-      "types": "./src/j5/steerState.ts",
-      "default": "./src/j5/steerState.ts"
     },
     "./state/thread-settled": {
       "types": "./src/state/threadSettled.ts",
@@ -330,6 +362,34 @@
     "./thread-pull-request-compatibility": {
       "types": "./src/threadPullRequestCompatibility.ts",
       "default": "./src/threadPullRequestCompatibility.ts"
+    },
+    "./file-preview": {
+      "types": "./src/filePreview.ts",
+      "default": "./src/filePreview.ts"
+    },
+    "./device/frame": {
+      "types": "./src/device/frame.ts",
+      "default": "./src/device/frame.ts"
+    },
+    "./device/phone-viewer": {
+      "types": "./src/device/phoneViewer.ts",
+      "default": "./src/device/phoneViewer.ts"
+    },
+    "./device/phone-interaction": {
+      "types": "./src/device/phoneInteraction.ts",
+      "default": "./src/device/phoneInteraction.ts"
+    },
+    "./device/shape-profile": {
+      "types": "./src/device/shapeProfile.ts",
+      "default": "./src/device/shapeProfile.ts"
+    },
+    "./device/screenshot": {
+      "types": "./src/device/screenshot.ts",
+      "default": "./src/device/screenshot.ts"
+    },
+    "./device/model": {
+      "types": "./src/device/model.ts",
+      "default": "./src/device/model.ts"
     }
   },
   "scripts": {
@@ -344,10 +404,12 @@
     "micromark-extension-directive": "^4.0.0",
     "micromark-util-character": "^2.1.1",
     "remark-parse": "^11.0.0",
+    "three": "0.180.0",
     "unified": "^11.0.5"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
+    "@types/three": "0.180.0",
     "micromark-util-types": "^2.0.2",
     "vite-plus": "catalog:"
   }
