@@ -100,7 +100,10 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(agentCrewProposalLayer),
     Layer.provideMerge(agentCrewInstanceLayer),
   );
-  const crewStopProvided = crewStopLayer.pipe(Layer.provideMerge(agentCrewInstanceLayer));
+  const crewStopProvided = crewStopLayer.pipe(
+    Layer.provideMerge(agentCrewInstanceLayer),
+    Layer.provideMerge(archiveFactsProvided),
+  );
   const crewProposalProvided = crewProposalLayer.pipe(
     Layer.provideMerge(crewLaunchProvided),
     Layer.provideMerge(crewLaunchReporterProvided),

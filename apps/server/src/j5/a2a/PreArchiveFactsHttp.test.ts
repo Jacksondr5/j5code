@@ -68,6 +68,7 @@ it("returns the pre-archive facts without turning a failed read into a clean arc
                 participantId: "agent:critic" as never,
                 threadId: ThreadId.make("thread:critic"),
                 alreadyArchived: false,
+                neverCreated: false,
                 facts: {
                   openExchanges: [],
                   runningTurn: { runId: "run:critic" as never, status: "running" },

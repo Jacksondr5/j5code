@@ -1407,6 +1407,7 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
           participantId: memberParticipantId,
           threadId: memberRow.participant.threadId,
           alreadyArchived: false,
+          neverCreated: false,
           facts: {
             openExchanges: [
               {
