@@ -147,7 +147,7 @@ const makeThreads = () => {
 
 const setup = Effect.gen(function* () {
   const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
-    Layer.provideMerge(NodeSqliteClient.layerMemory()),
+    Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
   );
   const context = yield* Layer.build(storage);
   yield* runJ5A2AMigrations().pipe(Effect.provide(context));
