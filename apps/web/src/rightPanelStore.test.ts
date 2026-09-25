@@ -553,6 +553,21 @@ describe("rightPanelStore", () => {
     });
   });
 
+  it("keeps visualization as a singleton surface", () => {
+    useRightPanelStore.getState().open(refA, "visualization");
+    useRightPanelStore.getState().open(refA, "agents");
+    useRightPanelStore.getState().open(refA, "visualization");
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "visualization",
+      surfaces: [
+        { id: "visualization", kind: "visualization" },
+        { id: "agents", kind: "agents" },
+      ],
+    });
+  });
+
   it("keeps artifacts as a workspace singleton surface", () => {
     useRightPanelStore.getState().open(refA, "artifacts");
     useRightPanelStore.getState().open(refA, "artifacts");

@@ -25,6 +25,7 @@ import {
   GitPullRequest,
   GitPullRequestArrow,
   Globe2,
+  Network,
   Plus,
   TerminalSquare,
   Volume2,
@@ -122,6 +123,8 @@ interface RightPanelTabsProps {
   onAddPullRequests: () => void;
   onAddAgents: () => void;
   onAddDevice: () => void;
+  /** J5 office visualization; optional so upstream call sites need no change. */
+  onAddVisualization?: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -131,6 +134,7 @@ interface RightPanelTabsProps {
   pullRequestsAvailable: boolean;
   agentsAvailable: boolean;
   deviceAvailable: boolean;
+  visualizationAvailable?: boolean;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
   /** Running + waiting subagents; badges the Agents card in the empty state. */
   liveAgentCount: number;
@@ -163,6 +167,7 @@ const SURFACE_DISABLED_REASONS = {
   pullRequests: "Linked pull requests are only available for server threads.",
   agents: "Agents are only available from a thread.",
   device: "Devices are only available from a thread.",
+  visualization: "Visualization is only available from a thread.",
 } as const;
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -188,6 +193,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   pullRequests: "Available for server threads.",
   agents: "Available from a thread.",
   device: "Available from a thread.",
+  visualization: "Available from a thread.",
 } as const;
 
 type TabContextMenuAction =
@@ -329,6 +335,7 @@ function RightPanelEmptyState(props: {
   onAddPullRequests: () => void;
   onAddAgents: () => void;
   onAddDevice: () => void;
+  onAddVisualization?: (() => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -338,6 +345,7 @@ function RightPanelEmptyState(props: {
   pullRequestsAvailable: boolean;
   agentsAvailable: boolean;
   deviceAvailable: boolean;
+  visualizationAvailable?: boolean | undefined;
   liveAgentCount: number;
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
@@ -426,6 +434,16 @@ function RightPanelEmptyState(props: {
       disabledReason: SURFACE_UNAVAILABLE_HINTS.device,
       onClick: props.onAddDevice,
       badgeCount: 0,
+    },
+    {
+      label: "Visualization",
+      description: "Watch agents move through the workspace.",
+      icon: Network,
+      shortcut: "V",
+      available: props.visualizationAvailable ?? false,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.visualization,
+      onClick: props.onAddVisualization ?? (() => undefined),
+      badgeCount: props.liveAgentCount,
     },
   ] as const;
 
@@ -653,6 +671,8 @@ function surfaceTitle(
       return "Agents";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
+    case "visualization":
+      return "Visualization";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -746,6 +766,8 @@ function SurfaceIcon({
       ) : (
         <Smartphone className="size-3 shrink-0" />
       );
+    case "visualization":
+      return <Network className="size-3 shrink-0" />;
   }
 }
 
@@ -955,6 +977,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       available: props.deviceAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.device,
       onClick: props.onAddDevice,
+    },
+    {
+      label: "Visualization",
+      icon: Network,
+      shortcut: "V",
+      available: props.visualizationAvailable ?? false,
+      disabledReason: SURFACE_DISABLED_REASONS.visualization,
+      onClick: props.onAddVisualization ?? (() => undefined),
     },
   ] as const;
 
@@ -1430,6 +1460,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddPullRequests={props.onAddPullRequests}
             onAddAgents={props.onAddAgents}
             onAddDevice={props.onAddDevice}
+            onAddVisualization={props.onAddVisualization}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
@@ -1439,6 +1470,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             pullRequestsAvailable={props.pullRequestsAvailable}
             agentsAvailable={props.agentsAvailable}
             deviceAvailable={props.deviceAvailable}
+            visualizationAvailable={props.visualizationAvailable}
             liveAgentCount={props.liveAgentCount}
           />
         ) : (
