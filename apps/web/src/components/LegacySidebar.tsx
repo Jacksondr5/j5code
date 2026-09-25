@@ -1935,7 +1935,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                     confirmCleanArchive,
                   }
                 : {}),
-              archive: ({ undoable }) => archiveThread(threadRef, { onArchived, undoable }),
+              archive: () => archiveThread(threadRef, { onArchived }),
             }),
         });
         for (const failure of archiveOutcome.followupFailures) {
@@ -2116,7 +2116,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         confirm: ({ message, content, confirmLabel }) =>
           requestConfirmDialog(message, { variant: "destructive" }, { content, confirmLabel }) ??
           Promise.resolve(false),
-        archive: ({ undoable }) => archiveThread(threadRef, { undoable }),
+        archive: () => archiveThread(threadRef),
       });
       if (result === undefined) return;
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {

@@ -59,6 +59,8 @@ export interface ArchiveCrewInput {
    */
   readonly confirmationSatisfied?: boolean;
   readonly archivedAt: string;
+  /** Set by the Captain cascade: the Crew comes back when its Captain is unarchived. */
+  readonly withCaptain?: boolean;
   /** Per-seat command ids derive from the caller's request key so retries replay each member. */
   readonly commandIds: (seatName: string) => {
     readonly interruptCommandId: CommandId;
@@ -455,7 +457,9 @@ export const layer = Layer.effect(
             );
           results.push({ seatName: member.seatName, participantId: member.participantId, result });
         }
-        yield* crews.markArchived(instance.id, input.archivedAt).pipe(Effect.orDie);
+        yield* crews
+          .markArchived(instance.id, input.archivedAt, { withCaptain: input.withCaptain === true })
+          .pipe(Effect.orDie);
         return { status: "archived" as const, members: results };
       }).pipe((unit) => crews.serialize(input.crewInstanceId, unit));
 
