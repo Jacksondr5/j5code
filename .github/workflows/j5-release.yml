@@ -74,12 +74,30 @@ jobs:
             }
             // A published release that already carries SHA256SUMS is final:
             // rebuilding would change archive bytes under existing checksums.
+            // An existing release for this version must come from the same
+            // commit; a mismatch means the version was not bumped, so fail
+            // rather than report "already published".
+            const tag = `v${version}`;
             let published = false;
+            let release = null;
             try {
-              const { data: release } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag: `v${version}` });
-              published = !release.draft && release.assets.some(asset => asset.name === 'SHA256SUMS');
+              ({ data: release } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag }));
             } catch (error) {
               if (error.status !== 404) throw error;
+            }
+            if (release !== null) {
+              let tagSha = null;
+              try {
+                // Same resolution as the publish job: commits/<tag> dereferences annotated tags.
+                ({ data: { sha: tagSha } } = await github.rest.repos.getCommit({ ...context.repo, ref: tag }));
+              } catch (error) {
+                // A draft release may not have created its tag yet.
+                if (error.status !== 404 && error.status !== 422) throw error;
+              }
+              if (tagSha !== null && tagSha !== run.head_sha) {
+                throw new Error(`Release ${tag} already exists at ${tagSha}, but this build is ${run.head_sha}. Bump the version before releasing.`);
+              }
+              published = tagSha === run.head_sha && !release.draft && release.assets.some(asset => asset.name === 'SHA256SUMS');
             }
             core.setOutput('ref', run.head_sha);
             core.setOutput('version', version);
