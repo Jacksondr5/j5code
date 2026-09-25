@@ -24,6 +24,7 @@ import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import { parse as parseYamlDocument } from "yaml";
 
+import { discoverClaudePluginSkills } from "../../j5/skills/claudePluginSkills.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 
 type ClaudeSkillScope = "user" | "project";
@@ -35,6 +36,8 @@ type SkillFrontmatter =
   | { readonly kind: "malformed" }
   | {
       readonly kind: "parsed";
+      readonly metadata: Record<string, unknown>;
+      readonly name?: string;
       readonly description?: string;
       readonly userInvocationOnly?: boolean;
       readonly userInvocable?: boolean;
@@ -69,7 +72,7 @@ function parseFrontmatterBoolean(value: unknown): boolean | undefined {
   }
 }
 
-function parseSkillFrontmatter(contents: string): SkillFrontmatter {
+export function parseSkillFrontmatter(contents: string): SkillFrontmatter {
   const match = FRONTMATTER_PATTERN.exec(contents);
   if (!match) {
     return { kind: "missing" };
@@ -89,6 +92,8 @@ function parseSkillFrontmatter(contents: string): SkillFrontmatter {
   const description = typeof record.description === "string" ? record.description.trim() : "";
   return {
     kind: "parsed",
+    metadata: record,
+    ...(typeof record.name === "string" && record.name.trim() ? { name: record.name.trim() } : {}),
     ...(description ? { description } : {}),
     ...(parseFrontmatterBoolean(record["disable-model-invocation"]) === true
       ? { userInvocationOnly: true }
@@ -104,7 +109,7 @@ function parseSkillFrontmatter(contents: string): SkillFrontmatter {
  * user and project one. Absent on almost every machine, which is why a missing
  * file is the normal case rather than an error.
  */
-function claudeManagedSettingsPath(
+export function claudeManagedSettingsPath(
   path: Path.Path,
   platform: NodeJS.Platform,
   environment: NodeJS.ProcessEnv,
@@ -159,7 +164,7 @@ export function skillOverrideSettingsPaths(
  * boundary Claude Code walks up to for project settings. `undefined` outside
  * a repository.
  */
-const findRepositoryRoot = Effect.fn("findRepositoryRoot")(function* (
+export const findRepositoryRoot = Effect.fn("findRepositoryRoot")(function* (
   cwd: string,
 ): Effect.fn.Return<string | undefined, never, FileSystem.FileSystem | Path.Path> {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -273,7 +278,7 @@ const readSkillOverrides = Effect.fn("readSkillOverrides")(function* (
  * `CLAUDE_CONFIG_DIR` by `makeClaudeEnvironment`), then a `CLAUDE_CONFIG_DIR`
  * already present in the process environment, then `~/.claude`.
  */
-const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(function* (
+export const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(function* (
   config: Pick<ClaudeSettings, "homePath">,
   environment: NodeJS.ProcessEnv,
   cwd?: string,
@@ -292,7 +297,10 @@ const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(funct
   if (environmentConfigDir.length > 0) {
     return cwd ? path.resolve(cwd, environmentConfigDir) : path.resolve(environmentConfigDir);
   }
-  return path.join(NodeOS.homedir(), ".claude");
+  const platform = yield* HostProcessPlatform;
+  const userHome =
+    (platform === "win32" ? environment.USERPROFILE : environment.HOME) || NodeOS.homedir();
+  return path.resolve(cwd ?? process.cwd(), userHome, ".claude");
 });
 
 /**
@@ -380,5 +388,12 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
     }
   }
 
-  return [...skillsByName.values()].sort((left, right) => left.name.localeCompare(right.name));
+  const pluginSkills = yield* discoverClaudePluginSkills(
+    configDirPath,
+    cwd,
+    environment ?? process.env,
+  );
+  return [...skillsByName.values(), ...pluginSkills].sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
 });

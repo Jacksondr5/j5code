@@ -25,7 +25,7 @@ The J5 vocabulary, in one place, so that a name used anywhere in these docs reso
 | **Captain**         | Any agent with Crews placed under it                                                               | [features/crews.md](features/crews.md)                       |
 | **Role**            | A reusable, user-authored definition of a kind of agent                                            | [features/roles.md](features/roles.md)                       |
 | **Manifest**        | The approved roster snapshot of a Crew — implementation vocabulary, not a separate concept         | [features/crews.md](features/crews.md)                       |
-| **Playbook**        | User-authored step content that a Role or Crew follows                                             | [features/playbooks.md](features/playbooks.md)               |
+| **Playbook**        | User-authored ordered prompts that a Role or Crew follows, with progress declared by its agents    | [features/playbooks.md](features/playbooks.md)               |
 | placement           | Where an agent sits in the display tree                                                            | [features/squadron.md](features/squadron.md)                 |
 | provenance          | The recorded fact of how an agent came to exist — spawned by whom, forked from what, or unrecorded | [features/squadron.md](features/squadron.md)                 |
 | **Shared Squadron** | Several people sharing one Squadron on one server                                                  | [features/shared-squadrons.md](features/shared-squadrons.md) |

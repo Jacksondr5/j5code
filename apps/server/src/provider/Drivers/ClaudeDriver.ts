@@ -264,7 +264,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
                 snapshot.getSnapshot,
                 discoverClaudeSkills(effectiveConfig, cwd, processEnv),
               ]).pipe(
-                Effect.map(([machineSnapshot, skills]) => ({ ...machineSnapshot, skills })),
+                Effect.map(([machineSnapshot, skills]) => ({
+                  ...machineSnapshot,
+                  skills: [
+                    ...skills,
+                    ...machineSnapshot.skills.filter((skill) => skill.scope === "builtin"),
+                  ].sort((a, b) => a.name.localeCompare(b.name)),
+                })),
                 Effect.provideService(FileSystem.FileSystem, fileSystem),
                 Effect.provideService(Path.Path, path),
               ),

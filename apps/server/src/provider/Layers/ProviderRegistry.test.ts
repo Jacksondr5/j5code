@@ -1,8 +1,14 @@
+import { upsertProviderWorkspaceSnapshot } from "../../j5/skills/skillWorkspaceRefresh.ts";
+import {
+  refreshSkillProviders,
+  refreshSkillsOnConnection,
+} from "../../j5/skills/skillProviderRefresh.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it, assert } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -23,6 +29,7 @@ import {
   ProviderInstanceId,
   ServerSettings,
   type ServerProvider,
+  type ServerProviderSkill,
   type ServerProviderSlashCommand,
   type ServerSettings as ContractServerSettings,
 } from "@t3tools/contracts";
@@ -45,7 +52,6 @@ import { ProviderInstanceRegistryHydrationLive } from "./ProviderInstanceRegistr
 import {
   mergeProviderSnapshot,
   mergeProviderSnapshots,
-  upsertProviderWorkspaceSnapshot,
   ProviderRegistryLive,
   selectProvidersByKind,
 } from "./ProviderRegistry.ts";
@@ -145,6 +151,7 @@ type TestClaudeCapabilities = {
   readonly tokenSource: string | undefined;
   readonly apiProvider: string | undefined;
   readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
+  readonly bundledSkills: ReadonlyArray<ServerProviderSkill>;
 };
 
 function claudeCapabilities(overrides: Partial<TestClaudeCapabilities> = {}) {
@@ -155,6 +162,7 @@ function claudeCapabilities(overrides: Partial<TestClaudeCapabilities> = {}) {
       tokenSource: undefined,
       apiProvider: undefined,
       slashCommands: [],
+      bundledSkills: [],
       ...overrides,
     });
 }
@@ -602,6 +610,21 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             skills: scopedSnapshot.skills,
           },
         ]);
+        const stale = upsertProviderWorkspaceSnapshot(result, "/project", {
+          ...scopedSnapshot,
+          status: "error",
+          message: "Refresh failed",
+          skills: [],
+        });
+        assert.deepStrictEqual(stale.workspaceSnapshots, [
+          { ...result.workspaceSnapshots![0]!, refreshError: "Refresh failed" },
+        ]);
+        const recovered = upsertProviderWorkspaceSnapshot(stale, "/project", {
+          ...scopedSnapshot,
+          skills: [],
+        });
+        assert.deepStrictEqual(recovered.workspaceSnapshots?.[0]?.skills, []);
+        assert.isUndefined(recovered.workspaceSnapshots?.[0]?.refreshError);
       });
 
       it("preserves previously discovered provider models when a refresh returns none", () => {
@@ -1619,7 +1642,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           yield* Effect.gen(function* () {
             const registry = yield* ProviderRegistry.ProviderRegistry;
             yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace" });
-            assert.strictEqual((yield* registry.getProviders)[0]?.workspaceSnapshots, undefined);
+            assert.strictEqual(
+              (yield* registry.getProviders)[0]?.workspaceSnapshots?.[0]?.refreshError,
+              "Workspace discovery failed.",
+            );
             yield* Ref.set(returnPendingSnapshot, false);
             const workspaceUpdate = yield* registry.streamChanges.pipe(
               Stream.runHead,
@@ -1663,6 +1689,190 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             assert.strictEqual(rebuilt[0]?.checkedAt, rebuiltProvider.checkedAt);
             assert.strictEqual(rebuilt[0]?.workspaceSnapshots, undefined);
           }).pipe(Effect.provide(runtimeServices));
+        }),
+      );
+
+      it.effect("refreshes cached workspace skills and supersedes an older in-flight probe", () =>
+        Effect.gen(function* () {
+          const driver = ProviderDriverKind.make("codex");
+          const instanceId = ProviderInstanceId.make("codex");
+          const provider = {
+            instanceId,
+            driver,
+            status: "ready",
+            enabled: true,
+            installed: true,
+            auth: { status: "authenticated" },
+            checkedAt: "2026-06-10T00:00:00.000Z",
+            version: "1.0.0",
+            models: [],
+            slashCommands: [],
+            skills: [],
+          } as const satisfies ServerProvider;
+          const skills = yield* Ref.make<ServerProvider["skills"]>([]);
+          const failWorkspace = yield* Ref.make(false);
+          const workspaceProbes = yield* Ref.make(0);
+          const machineRefreshes = yield* Ref.make(0);
+          const blockMachine = yield* Ref.make(false);
+          const machineStarted = yield* Deferred.make<void>();
+          const releaseMachine = yield* Deferred.make<void>();
+          const blockedCwd = yield* Ref.make<string | null>("/opening-project");
+          const probeStarted = yield* Deferred.make<void>();
+          const releaseProbe = yield* Deferred.make<void>();
+          const snapshot = Ref.get(skills).pipe(Effect.map((skills) => ({ ...provider, skills })));
+          const instance: ProviderInstance = {
+            instanceId,
+            driverKind: driver,
+            continuationIdentity: { driverKind: driver, continuationKey: "codex:instance:codex" },
+            displayName: undefined,
+            enabled: true,
+            snapshot: {
+              resolveMaintenance: () =>
+                Effect.succeed(
+                  makeManualOnlyProviderMaintenanceCapabilities({
+                    provider: driver,
+                    packageName: null,
+                  }),
+                ),
+              getSnapshot: snapshot,
+              refresh: Effect.gen(function* () {
+                yield* Ref.update(machineRefreshes, (count) => count + 1);
+                if (yield* Ref.get(blockMachine)) {
+                  yield* Deferred.succeed(machineStarted, undefined);
+                  yield* Deferred.await(releaseMachine);
+                }
+                return yield* snapshot;
+              }),
+              streamChanges: Stream.empty,
+              applyUsageLimits: () => Effect.void,
+            },
+            snapshotForCwd: (cwd) =>
+              Effect.gen(function* () {
+                yield* Ref.update(workspaceProbes, (count) => count + 1);
+                if (yield* Ref.get(failWorkspace))
+                  return yield* Effect.die(new Error("Workspace unavailable"));
+                const result = yield* snapshot;
+                if ((yield* Ref.getAndSet(blockedCwd, null)) === cwd) {
+                  yield* Deferred.succeed(probeStarted, undefined);
+                  yield* Deferred.await(releaseProbe);
+                }
+                return result;
+              }),
+            orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+            textGeneration: {} as ProviderInstance["textGeneration"],
+          };
+          const registryChanges = yield* PubSub.unbounded<void>();
+          const instanceRegistryLayer = Layer.succeed(
+            ProviderInstanceRegistry.ProviderInstanceRegistry,
+            {
+              getInstance: () => Effect.succeed(instance),
+              listInstances: Effect.succeed([instance]),
+              listUnavailable: Effect.succeed([]),
+              streamChanges: Stream.fromPubSub(registryChanges),
+              subscribeChanges: PubSub.subscribe(registryChanges),
+            },
+          );
+          const testLayer = ProviderRegistryLive.pipe(
+            Layer.provide(instanceRegistryLayer),
+            Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-skills-refresh-" })),
+            Layer.provide(NodeServices.layer),
+          );
+          yield* Effect.gen(function* () {
+            const registry = yield* ProviderRegistry.ProviderRegistry;
+            const oldProbe = yield* registry
+              .refreshWorkspaceSnapshot({ instanceId, cwd: "/opening-project" })
+              .pipe(Effect.forkChild);
+            yield* Deferred.await(probeStarted);
+            yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: "/cached-project" });
+            const installed = [
+              { name: "explain", path: "/skills/explain/SKILL.md", enabled: true },
+            ];
+            yield* Ref.set(skills, installed);
+            yield* refreshSkillProviders(registry, [instanceId]);
+            const afterInstall = (yield* registry.getProviders)[0]!;
+            assert.deepStrictEqual(afterInstall.skills, installed);
+            assert.deepStrictEqual(afterInstall.workspaceSnapshots?.map((s) => s.cwd).toSorted(), [
+              "/cached-project",
+              "/opening-project",
+            ]);
+            for (const workspace of afterInstall.workspaceSnapshots!) {
+              assert.deepStrictEqual(workspace.skills, installed);
+            }
+            const probesBeforeConnection = yield* Ref.get(workspaceProbes);
+            yield* refreshSkillsOnConnection(registry);
+            assert.equal(yield* Ref.get(workspaceProbes), probesBeforeConnection);
+            assert.deepStrictEqual(
+              (yield* registry.getProviders)[0]!.workspaceSnapshots,
+              afterInstall.workspaceSnapshots,
+            );
+            yield* Ref.set(blockMachine, true);
+            const machinesBeforeConnection = yield* Ref.get(machineRefreshes);
+            const firstConnection = yield* refreshSkillsOnConnection(registry).pipe(
+              Effect.forkChild,
+            );
+            yield* Deferred.await(machineStarted);
+            const secondConnection = yield* refreshSkillsOnConnection(registry).pipe(
+              Effect.forkChild,
+            );
+            yield* Effect.yieldNow;
+            yield* Deferred.succeed(releaseMachine, undefined);
+            yield* Fiber.join(firstConnection);
+            yield* Fiber.join(secondConnection);
+            assert.equal(yield* Ref.get(machineRefreshes), machinesBeforeConnection + 1);
+            yield* Deferred.succeed(releaseProbe, undefined);
+            yield* Fiber.join(oldProbe);
+            assert.deepStrictEqual((yield* registry.getProviders)[0], afterInstall);
+
+            yield* Ref.set(failWorkspace, true);
+            yield* refreshSkillProviders(registry, [instanceId]);
+            const afterFailure = (yield* registry.getProviders)[0]!;
+            for (const workspace of afterFailure.workspaceSnapshots!) {
+              assert.deepStrictEqual(workspace.skills, installed);
+              assert.strictEqual(workspace.refreshError, "Workspace discovery failed.");
+            }
+            yield* Ref.set(failWorkspace, false);
+
+            yield* Ref.set(skills, []);
+            const removed = yield* registry.streamChanges.pipe(
+              Stream.filter(
+                (providers) =>
+                  providers[0]?.workspaceSnapshots?.every((s) => s.skills.length === 0) === true,
+              ),
+              Stream.runHead,
+              Effect.forkChild,
+            );
+            yield* Effect.yieldNow;
+            yield* refreshSkillProviders(registry, [instanceId]);
+            const afterRemoval = yield* Fiber.join(removed);
+            assert.strictEqual(afterRemoval._tag, "Some");
+            for (const workspace of (yield* registry.getProviders)[0]!.workspaceSnapshots!) {
+              assert.deepStrictEqual(workspace.skills, []);
+              assert.isUndefined(workspace.refreshError);
+            }
+            // Providers can return the same array after a link is retargeted on disk.
+            const fs = yield* FileSystem.FileSystem;
+            const path = yield* Path.Path;
+            const root = yield* fs.makeTempDirectoryScoped();
+            const first = path.join(root, "first.md");
+            const second = path.join(root, "second.md");
+            const linked = path.join(root, "SKILL.md");
+            yield* fs.writeFileString(first, "# First");
+            yield* fs.writeFileString(second, "# Second");
+            yield* fs.symlink(first, linked);
+            yield* Ref.set(skills, [{ name: "linked", path: linked, enabled: true }]);
+            for (const target of [first, second, undefined]) {
+              if (target !== first) {
+                yield* fs.remove(linked);
+                yield* fs.symlink(target ?? path.join(root, "missing.md"), linked);
+              }
+              yield* refreshSkillProviders(registry, [instanceId]);
+              const current = (yield* registry.getProviders)[0]!;
+              const expected = target ? yield* fs.realPath(target) : undefined;
+              assert.equal(current.skills[0]!.linkTarget, expected);
+              for (const workspace of current.workspaceSnapshots!)
+                assert.equal(workspace.skills[0]!.linkTarget, expected);
+            }
+          }).pipe(Effect.provide(testLayer));
         }),
       );
 
@@ -2235,9 +2445,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             const registry = yield* ProviderRegistry.ProviderRegistry;
 
             assert.deepStrictEqual(yield* registry.getProviders, [cachedProvider]);
-            assert.deepStrictEqual(yield* registry.refresh(codexDriver), [cachedProvider]);
+            const staleProvider = {
+              ...cachedProvider,
+              skillDiscoveryError: "Provider discovery failed.",
+            } satisfies ServerProvider;
+            assert.deepStrictEqual(yield* registry.refresh(codexDriver), [staleProvider]);
             assert.deepStrictEqual(yield* registry.refreshInstance(codexInstanceId), [
-              cachedProvider,
+              staleProvider,
             ]);
           }).pipe(Effect.provide(runtimeServices));
         }),
@@ -2801,6 +3015,49 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
     // ── checkClaudeProviderStatus tests ──────────────────────────
 
     describe("checkClaudeProviderStatus", () => {
+      it.effect("merges reported bundled skills with filesystem discovery", () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const homePath = yield* fs.makeTempDirectoryScoped();
+          const skillPath = path.join(homePath, "skills", "review", "SKILL.md");
+          yield* fs.makeDirectory(path.dirname(skillPath), { recursive: true });
+          yield* fs.writeFileString(
+            skillPath,
+            "---\nname: review\ndescription: Review changes\n---\n",
+          );
+          const status = yield* checkClaudeProviderStatus(
+            { ...defaultClaudeSettings, homePath },
+            claudeCapabilities({
+              slashCommands: [{ name: "simplify" }, { name: "review" }],
+              bundledSkills: ["simplify", "loop"].map((name) => ({
+                name,
+                path: "/usr/bin/claude",
+                scope: "builtin",
+                enabled: true,
+              })),
+            }),
+          );
+          assert.deepStrictEqual(
+            status.skills?.map((skill) => ({
+              name: skill.name,
+              path: skill.path,
+              scope: skill.scope,
+            })),
+            [
+              { name: "loop", path: "/usr/bin/claude", scope: "builtin" },
+              { name: "review", path: skillPath, scope: "user" },
+              { name: "simplify", path: "/usr/bin/claude", scope: "builtin" },
+            ],
+          );
+          assert.deepStrictEqual(
+            status.slashCommands?.map((command) => command.name),
+            ["compact", "simplify", "review"],
+          );
+        }).pipe(
+          Effect.provide(mockSpawnerLayer(() => ({ stdout: "1.0.0\n", stderr: "", code: 0 }))),
+        ),
+      );
       it.effect("returns ready when claude is installed and authenticated", () =>
         Effect.gen(function* () {
           const status = yield* checkClaudeProviderStatus(

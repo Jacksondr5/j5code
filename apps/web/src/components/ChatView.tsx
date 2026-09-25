@@ -19,6 +19,8 @@ import {
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
 import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
 import { CrewRosterGate } from "../j5/crew/CrewRosterGate";
+import { expandPlaybookPrompt } from "@t3tools/client-runtime/j5/playbooks";
+import { PlaybookBoard } from "../j5/playbooks/PlaybookBoard";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import * as Schema from "effect/Schema";
 import { Minimize2Icon } from "lucide-react";
@@ -7504,7 +7506,8 @@ export default function ChatView(props: ChatViewProps) {
             },
           ]
         : sendContextPreviewAnnotations;
-    const promptForSend = promptRef.current;
+    const originalPrompt = promptRef.current;
+    const promptForSend = expandPlaybookPrompt(originalPrompt);
     if (editingQueuedRun !== null) {
       // Edit mode repurposes the composer: sending saves the queued message
       // in place instead of dispatching a new turn.
@@ -8113,13 +8116,13 @@ export default function ChatView(props: ChatViewProps) {
           const next = existing.filter((message) => message.id !== messageIdForSend);
           return next.length === existing.length ? existing : next;
         });
-        promptRef.current = promptForSend;
+        promptRef.current = originalPrompt;
         const retryComposerImages = composerImagesSnapshot.map(cloneComposerImageForRetry);
         composerImagesRef.current = retryComposerImages;
         composerFilesRef.current = composerFilesSnapshot;
         composerTerminalContextsRef.current = composerTerminalContextsSnapshot;
         composerElementContextsRef.current = composerElementContextsSnapshot;
-        setComposerDraftPrompt(composerDraftTarget, promptForSend);
+        setComposerDraftPrompt(composerDraftTarget, originalPrompt);
         addComposerDraftImages(composerDraftTarget, retryComposerImages);
         addComposerDraftFiles(composerDraftTarget, composerFilesSnapshot);
         setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
@@ -8127,8 +8130,8 @@ export default function ChatView(props: ChatViewProps) {
         setComposerDraftPreviewAnnotations(composerDraftTarget, composerPreviewAnnotationsSnapshot);
         setComposerDraftReviewComments(composerDraftTarget, composerReviewCommentsSnapshot);
         composerRef.current?.resetCursorState({
-          cursor: collapseExpandedComposerCursor(promptForSend, promptForSend.length),
-          prompt: promptForSend,
+          cursor: collapseExpandedComposerCursor(originalPrompt, originalPrompt.length),
+          prompt: originalPrompt,
           detectTrigger: true,
         });
       }
@@ -8404,7 +8407,7 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
 
-    const trimmed = text.trim();
+    const trimmed = expandPlaybookPrompt(text.trim());
     if (!trimmed) {
       return;
     }
@@ -9274,6 +9277,14 @@ export default function ChatView(props: ChatViewProps) {
               : {})}
           />
         </header>
+
+        {isServerThread && (
+          <PlaybookBoard
+            key={`${activeThread.environmentId}:${activeThread.id}`}
+            environmentId={activeThread.environmentId}
+            threadId={activeThread.id}
+          />
+        )}
 
         {/* Main content area with optional plan sidebar */}
         <div

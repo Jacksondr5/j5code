@@ -1,4 +1,6 @@
 import * as Layer from "effect/Layer";
+import { playbookHttpRouteLayer } from "../playbooks/PlaybookHttp.ts";
+import { playbookLibraryHttpRouteLayer } from "../playbooks/PlaybookLibraryHttp.ts";
 
 import { agentCrewReadsHttpRouteLayer } from "./AgentCrewReadsHttp.ts";
 import { crewArchiveHttpRouteLayer } from "./CrewArchiveHttp.ts";
@@ -34,6 +36,8 @@ export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
   crewStopHttpRouteLayer,
   fleetReadsHttpRouteLayer,
   spawnedChildrenHttpRouteLayer,
+  playbookHttpRouteLayer,
+  playbookLibraryHttpRouteLayer,
   artifactHttpRouteLayer,
   humanInboxHttpRouteLayer,
   importedThreadsHttpRouteLayer,

@@ -1,4 +1,18 @@
 import {
+  PLAYBOOK_DELETE_PATH,
+  PlaybookDeleteResponse,
+  type PlaybookDeleteRequest,
+  PLAYBOOK_RENAME_PATH,
+  PlaybookRenameResponse,
+  type PlaybookRenameRequest,
+  PLAYBOOK_LIBRARY_PATH,
+  PlaybookLibraryResponse,
+  type PlaybookLibraryRequest,
+  PLAYBOOK_PROGRESS_PATH,
+  PLAYBOOK_RUNS_PATH,
+  PlaybookRunsResponse,
+  type PlaybookRunsRequest,
+  ThreadPlaybooksResponse,
   AnswerHumanExchangeResponse,
   AssignImportedThreadsResponse,
   type AssignImportedThreadsRequest,
@@ -9,10 +23,12 @@ import {
   CrewProposalsResponse,
   CrewArchiveResponse,
   CrewStopResponse,
+  DeleteSquadronResponse,
   FleetResponse,
   HumanInboxResponse,
   J5_API_PATHS,
   OpenInboxCountResponse,
+  RenameSquadronResponse,
   SpawnedChildrenResponse,
   SquadronListResponse,
   ThreadHomesResponse,
@@ -22,6 +38,7 @@ import {
   type CrewArchiveRequest,
   type CrewStopRequest,
   type FleetReadRequest,
+  j5SquadronActionPath,
 } from "@t3tools/contracts/j5";
 import type { ProjectId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -61,6 +78,61 @@ export const isJ5UnsupportedError = (error: unknown): boolean =>
 
 const READ_TIMEOUT_MS = 10_000;
 const WRITE_TIMEOUT_MS = 15_000;
+
+export const readPlaybookLibrary = Effect.fn("j5.http.readPlaybookLibrary")(function* (
+  prepared: PreparedConnection,
+  input: PlaybookLibraryRequest,
+) {
+  const request = yield* HttpClientRequest.post(PLAYBOOK_LIBRARY_PATH).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(PlaybookLibraryResponse)(response);
+});
+
+export const deletePlaybook = Effect.fn("j5.http.deletePlaybook")(function* (
+  prepared: PreparedConnection,
+  input: PlaybookDeleteRequest,
+) {
+  const request = yield* HttpClientRequest.post(PLAYBOOK_DELETE_PATH).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(PlaybookDeleteResponse)(response);
+});
+
+export const renamePlaybook = Effect.fn("j5.http.renamePlaybook")(function* (
+  prepared: PreparedConnection,
+  input: PlaybookRenameRequest,
+) {
+  const request = yield* HttpClientRequest.post(PLAYBOOK_RENAME_PATH).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(PlaybookRenameResponse)(response);
+});
+
+export const readThreadPlaybooks = Effect.fn("j5.http.readThreadPlaybooks")(function* (
+  prepared: PreparedConnection,
+  threadId: ThreadId,
+) {
+  const request = yield* HttpClientRequest.post(PLAYBOOK_PROGRESS_PATH).pipe(
+    HttpClientRequest.bodyJson({ threadId }),
+  );
+  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(ThreadPlaybooksResponse)(response);
+});
+
+export const readAllPlaybooks = Effect.fn("j5.http.readAllPlaybooks")(function* (
+  prepared: PreparedConnection,
+  input: PlaybookRunsRequest,
+) {
+  const request = yield* HttpClientRequest.post(PLAYBOOK_RUNS_PATH).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(PlaybookRunsResponse)(response);
+});
 
 /**
  * Authorizes against this prepared environment only, through the same
@@ -131,6 +203,29 @@ export const createSquadron = Effect.fn("j5.http.createSquadron")(function* (
   );
   const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
   return (yield* HttpClientResponse.schemaBodyJson(CreateSquadronResponse)(response)).squadron;
+});
+
+export const renameSquadron = Effect.fn("j5.http.renameSquadron")(function* (
+  prepared: PreparedConnection,
+  input: { readonly squadronId: string; readonly name: string },
+) {
+  const request = yield* HttpClientRequest.post(
+    j5SquadronActionPath(input.squadronId, "rename"),
+  ).pipe(HttpClientRequest.bodyJson({ name: input.name }));
+  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
+  return (yield* HttpClientResponse.schemaBodyJson(RenameSquadronResponse)(response)).squadron;
+});
+
+export const deleteSquadron = Effect.fn("j5.http.deleteSquadron")(function* (
+  prepared: PreparedConnection,
+  input: { readonly squadronId: string },
+) {
+  const response = yield* executeJ5Request(
+    prepared,
+    HttpClientRequest.post(j5SquadronActionPath(input.squadronId, "delete")),
+    WRITE_TIMEOUT_MS,
+  );
+  yield* HttpClientResponse.schemaBodyJson(DeleteSquadronResponse)(response);
 });
 
 export const assignImportedThreads = Effect.fn("j5.http.assignImportedThreads")(function* (

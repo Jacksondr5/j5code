@@ -36,13 +36,12 @@ const spawnedBy = (parent: ParticipantId): ParticipantPlacementView["provenance"
   source: "j5_spawn",
 });
 
-it("drops retired agents unless they hold the place of an active descendant", () => {
+it("drops retired agents; a live child keeps its parent id for the client to root", () => {
   const retiredCaptain = ParticipantId.make("agent:j5:a2a:retired-captain");
   const retiredSeat = ParticipantId.make("agent:j5:a2a:retired-seat");
   const projected = projectFleetSquadron({
     squadron: { id: squadronId, name: "Fleet" },
     participants: [
-      // Archived, but its builder still works: a dimmed placeholder keeps the tree's shape.
       agentRow(
         retiredCaptain,
         ThreadId.make("t-rc"),
@@ -51,7 +50,6 @@ it("drops retired agents unless they hold the place of an active descendant", ()
         "2026-09-14T20:00:00Z",
       ),
       agentRow(builder, builderThread, spawnedBy(retiredCaptain), retiredCaptain),
-      // Archived with nothing active beneath it: not a row.
       agentRow(
         retiredSeat,
         ThreadId.make("t-rs"),
@@ -65,11 +63,10 @@ it("drops retired agents unless they hold the place of an active descendant", ()
     openAsks: new Map(),
   });
   assert.deepStrictEqual(
-    projected.agents.map((agent) => [agent.participantId, agent.archived]),
+    projected.agents.map((agent) => [agent.participantId, agent.placementParentId]),
     [
-      [retiredCaptain, true],
-      [builder, false],
-      [captain, false],
+      [builder, retiredCaptain],
+      [captain, null],
     ],
   );
 });

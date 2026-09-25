@@ -2,6 +2,10 @@ import type { ScopedSquadronRef } from "@t3tools/contracts/j5";
 import { useSyncExternalStore } from "react";
 
 import {
+  dropDraftStatesForDeletedSquadron,
+  resolveScopeAfterSquadronDelete,
+} from "./SquadronActions.logic";
+import {
   freezeSquadronForFirstSend,
   selectSquadronForDraft,
   type SquadronDraftState,
@@ -46,6 +50,16 @@ export const setAmbientSquadronScope = (scope: ScopedSquadronRef | null) => {
     ambientSquadronRef: scope,
     ambientScopeSelectionGeneration: snapshot.ambientScopeSelectionGeneration + 1,
   };
+  notify();
+};
+
+/** A deleted Squadron leaves the ambient scope and every pre-send carrier that still named it. */
+export const forgetDeletedSquadron = (deleted: ScopedSquadronRef) => {
+  const ambientSquadronRef = resolveScopeAfterSquadronDelete(snapshot.ambientSquadronRef, deleted);
+  const draftStates = dropDraftStatesForDeletedSquadron(snapshot.draftStates, deleted);
+  if (ambientSquadronRef === snapshot.ambientSquadronRef && draftStates === snapshot.draftStates)
+    return;
+  snapshot = { ...snapshot, ambientSquadronRef, draftStates };
   notify();
 };
 

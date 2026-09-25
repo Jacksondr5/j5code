@@ -165,6 +165,15 @@ import {
 } from "./j5/a2a/crewSeatArchiveGuard.ts";
 import { makeAgentPersonaRpcHandlers } from "./j5/agents/agentPersonaRpc.ts";
 import { makeArtifactRpcHandlers } from "./j5/artifacts/artifactRpc.ts";
+import { SkillLinkError } from "@t3tools/contracts";
+import { makeSkillLinkRpcHandlers } from "./j5/skills/skillLinkRpc.ts";
+import { makeSkillCatalogRpcHandlers } from "./j5/skills/skillCatalogRpc.ts";
+import {
+  refreshSkillProviders,
+  refreshSkillsOnConnection,
+} from "./j5/skills/skillProviderRefresh.ts";
+import { makePlaybookRpcHandlers } from "./j5/playbooks/playbookRpc.ts";
+import { PlaybookStore } from "./j5/playbooks/PlaybookStore.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
@@ -1702,6 +1711,20 @@ const makeWsRpcLayer = (
         observe: observeRpcEffect,
         observeStream: observeRpcStream,
       });
+      const skillCatalogRpcHandlers = yield* makeSkillCatalogRpcHandlers({
+        observe: observeRpcEffect,
+      });
+      const skillLinkRpcHandlers = yield* makeSkillLinkRpcHandlers({
+        observe: observeRpcEffect,
+        getProjectRoot: (projectId) =>
+          projectionSnapshotQuery.getProjectShellById(projectId).pipe(
+            Effect.map((project) =>
+              Option.isSome(project) ? project.value.workspaceRoot : undefined,
+            ),
+            Effect.mapError((cause) => new SkillLinkError({ message: String(cause) })),
+          ),
+      });
+      const playbookRpcHandlers = makePlaybookRpcHandlers(yield* PlaybookStore, observeRpcStream);
       const handlers = ServerWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
@@ -1750,6 +1773,9 @@ const makeWsRpcLayer = (
             },
           ),
         ...agentPersonaRpcHandlers,
+        ...skillCatalogRpcHandlers,
+        ...skillLinkRpcHandlers,
+        ...playbookRpcHandlers,
         [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.getWorkflowScript,
@@ -2130,10 +2156,11 @@ const makeWsRpcLayer = (
               ? providerRegistry.refreshWorkspaceSnapshot({
                   instanceId: input.instanceId,
                   cwd: input.cwd,
+                  force: true,
                 })
               : input.instanceId !== undefined
-                ? providerRegistry.refreshInstance(input.instanceId)
-                : providerRegistry.refresh()
+                ? refreshSkillProviders(providerRegistry, [input.instanceId])
+                : refreshSkillProviders(providerRegistry)
             ).pipe(Effect.map((providers) => ({ providers }))),
             { "rpc.aggregate": "server" },
           ),
@@ -3243,9 +3270,10 @@ const makeWsRpcLayer = (
                 })),
               );
 
-              yield* providerRegistry
-                .refresh()
-                .pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped);
+              yield* refreshSkillsOnConnection(providerRegistry).pipe(
+                Effect.ignoreCause({ log: true }),
+                Effect.forkScoped,
+              );
 
               const liveUpdates = Stream.merge(
                 keybindingsUpdates,
@@ -3351,6 +3379,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
     const sql = yield* SqlClient.SqlClient;
     // J5: the revision counter the saved-agent handoff observer bumps; one instance per server.
     const agentHandoffRefreshes = yield* AgentHandoffRefreshes;
+    const playbooks = yield* PlaybookStore;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -3406,6 +3435,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
               Layer.provide(Layer.succeed(AgentHandoffRefreshes, agentHandoffRefreshes)),
+              Layer.provide(Layer.succeed(PlaybookStore, playbooks)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(
