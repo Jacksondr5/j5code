@@ -15,8 +15,10 @@ import { type J5RuntimePolicy, j5PreapprovedTools } from "./j5ToolPreapproval.ts
  * toolCallId in the root session; the permission request can only confirm it, and must repeat the
  * recorded kind. Every identity field present (state and request, including goose's extension)
  * must name t3-code and the same tool. Only a one-time `allow_once` option is ever selected.
- * Grok and Antigravity carry none of these fields, so they keep today's verdict. Kept as a leaf
- * module (type-only imports) so the adapter avoids a cycle.
+ * Accepted risk: a harness that runs a user-configured server named exactly `t3-code` in place of
+ * T3's bridge gets that server's J5-named tools pre-approved. Grok and Antigravity carry none of
+ * these fields, so they keep today's verdict. Kept as a leaf module (type-only imports) so the
+ * adapter avoids a cycle.
  */
 
 const T3_SERVER = "t3-code";
