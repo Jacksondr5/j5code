@@ -91,7 +91,7 @@ const iso = (second: number) => `2026-08-19T12:00:${String(second).padStart(2, "
 const decodeSilenceNotice = Schema.decodeUnknownEffect(SilenceNoticePayload);
 
 const makeTestLayer = () => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   const threads = Layer.mock(ThreadManagementService)({

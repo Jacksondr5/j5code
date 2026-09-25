@@ -1,16 +1,35 @@
+import { ThreadHoverCardPopup } from "../ThreadHoverCard";
+import { AgentElapsed } from "./AgentElapsed";
+import { projectedSubagentsToRuntime } from "@t3tools/client-runtime/state/subagentRuntime";
+import type { ReactNode } from "react";
+import { useThreadShell, useProject } from "../../state/entities";
+import { AgentRowIdentity } from "../../j5/agents/AgentIdentityChip";
+import { SubagentTooltipContent } from "./SubagentTooltipContent";
+import { useAtomValue } from "@effect/atom-react";
+import { scopeThreadRef, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { environmentThreadDetails } from "../../state/threads";
+import { MiddleTruncate } from "../ui/middle-truncate";
+import * as DateTime from "effect/DateTime";
+import { WorkLogRow } from "./WorkLog";
+import { resolveHandoffEndpoints, type HandoffTimelineRun } from "@t3tools/client-runtime/handoff";
 import { Fragment } from "react";
-import type {
-  OrchestrationV2Run,
-  OrchestrationV2TurnItem,
-  ProviderInstanceId,
-  ServerProvider,
-  ThreadId,
+import { formatSubagentDisplayTitle } from "@t3tools/client-runtime/state/subagent-display";
+import {
+  ProviderDriverKind,
+  type OrchestrationV2TurnItem,
+  type ProviderInstanceId,
+  type ServerProvider,
+  type ThreadId,
+  type EnvironmentId,
+  type NodeId,
+  type ScopedThreadRef,
 } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
+  BotIcon,
+  ChevronRightIcon,
   ArrowRightLeftIcon,
   ArrowRightIcon,
-  BotIcon,
   GitForkIcon,
   MessageSquareIcon,
   MinusIcon,
@@ -18,11 +37,13 @@ import {
 } from "lucide-react";
 
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
-import { cn } from "../../lib/utils";
 import { getProviderInstanceEntry } from "../../providerInstances";
 import { formatShortTimestamp } from "../../timestampFormat";
-import { PROVIDER_ICON_BY_PROVIDER, getTriggerDisplayModelName } from "./providerIconUtils";
+import { getTriggerDisplayModelName } from "./providerIconUtils";
+import { ProviderInstanceIcon, providerTextColorClassName } from "./ProviderInstanceIcon";
+import { cn } from "~/lib/utils";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
+import { Button, InlineButton } from "../ui/button";
 import { T3Wordmark } from "../T3Wordmark";
 
 const LIFECYCLE_TYPES = new Set<OrchestrationV2TurnItem["type"]>([
@@ -39,27 +60,11 @@ export function isV2LifecycleItem(item: OrchestrationV2TurnItem): boolean {
   return LIFECYCLE_TYPES.has(item.type);
 }
 
-// Once a subagent stops, its last streamed result says more than the stale
-// progress line; while it runs, live progress comes first.
-const TERMINAL_SUBAGENT_STATUSES = new Set<OrchestrationV2TurnItem["status"]>([
-  "completed",
-  "failed",
-  "cancelled",
-  "interrupted",
-]);
-
-/**
- * The subset of a projection run that handoff rows read. Kept minimal so the
- * timeline can hold a content-stable snapshot: run status/timestamps churn on
- * every stream event, but these fields only change when a run is added.
- */
-export type HandoffTimelineRun = Pick<
-  OrchestrationV2Run,
-  "id" | "ordinal" | "providerInstanceId" | "modelSelection"
->;
+export type { HandoffTimelineRun } from "@t3tools/client-runtime/handoff";
 
 export function V2LifecycleRow(props: {
   readonly item: OrchestrationV2TurnItem;
+  readonly environmentId: EnvironmentId;
   readonly resourceSummary?: boolean | undefined;
   readonly createdAt: string;
   readonly timestampFormat: TimestampFormat;
@@ -115,28 +120,7 @@ export function V2LifecycleRow(props: {
     );
   }
   if (item.type === "handoff") {
-    // Items persisted before models were stamped only carry instance ids;
-    // recover the models from the thread's runs (the handoff's own run is
-    // the target, the newest earlier run per source instance is the origin).
-    // HandoffEndpoint falls back to the provider display name when neither
-    // source has a model.
-    const handoffRun =
-      item.runId === null ? undefined : props.runs.find((run) => run.id === item.runId);
-    const toModel =
-      item.toModel ??
-      (handoffRun !== undefined && handoffRun.providerInstanceId === item.toProviderInstanceId
-        ? handoffRun.modelSelection.model
-        : undefined);
-    const fromEndpoints: ReadonlyArray<{
-      readonly instanceId: ProviderInstanceId;
-      readonly model?: string | undefined;
-    }> =
-      item.fromModelSelections !== undefined && item.fromModelSelections.length > 0
-        ? item.fromModelSelections
-        : item.fromProviderInstanceIds.map((instanceId) => ({
-            instanceId,
-            model: latestRunModelBefore(props.runs, instanceId, handoffRun?.ordinal),
-          }));
+    const { from: fromEndpoints, to } = resolveHandoffEndpoints(item, props.runs);
     return (
       <TimelineSystemDivider
         label="Context handoff"
@@ -144,7 +128,7 @@ export function V2LifecycleRow(props: {
         showDetailSeparator={false}
         tone={item.status === "failed" ? "danger" : "neutral"}
         detail={
-          <span className="inline-flex min-w-0 items-center gap-1.5">
+          <span className="inline-flex min-w-0 flex-wrap items-center justify-center gap-1.5">
             {fromEndpoints.map((endpoint, index) => (
               <Fragment key={`${endpoint.instanceId}:${endpoint.model ?? ""}`}>
                 {index > 0 ? (
@@ -165,7 +149,7 @@ export function V2LifecycleRow(props: {
             <HandoffEndpoint
               providers={props.providerStatuses}
               instanceId={item.toProviderInstanceId}
-              model={toModel}
+              model={to.model}
             />
           </span>
         }
@@ -196,49 +180,48 @@ export function V2LifecycleRow(props: {
           <span className="min-w-0 flex-1 truncate text-sm font-medium">
             {item.title ?? "Created thread"}
           </span>
-          <button
-            type="button"
+          <Button
+            size="xs"
+            variant="outline"
             aria-label={`Open ${item.title ?? "created thread"}`}
             onClick={() => props.onOpenThread(item.targetThreadId)}
-            className="shrink-0 rounded-md border border-border px-2.5 py-1 text-sm hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Open chat
-          </button>
+          </Button>
         </div>
       );
     }
     return (
-      <div
-        className="flex min-w-0 items-center gap-1.5 px-0.5 py-0.5 text-sm leading-relaxed text-secondary-label"
+      <WorkLogRow
         data-v2-item-type={item.type}
-      >
-        <span className="flex size-6 shrink-0 items-center justify-center">
-          <T3Wordmark className="size-4 text-icon-muted" aria-hidden />
-        </span>
-        <span className="min-w-0 flex-1 truncate">
-          Created thread{item.title ? ` · ${item.title}` : ""}
-        </span>
-        <button
-          type="button"
-          aria-label={`Open ${item.title ?? "created thread"}`}
-          onClick={() => props.onOpenThread(item.targetThreadId)}
-          className="shrink-0 rounded-sm text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          Open chat
-        </button>
-      </div>
+        icon={<T3Wordmark className="size-4 text-icon-muted" aria-hidden />}
+        label={<>Created thread{item.title ? ` · ${item.title}` : ""}</>}
+        trailing={
+          <InlineButton
+            aria-label={`Open ${item.title ?? "created thread"}`}
+            onClick={() => props.onOpenThread(item.targetThreadId)}
+          >
+            Open chat
+          </InlineButton>
+        }
+      />
     );
   }
   if (item.type === "subagent") {
-    const streamedResult = item.result?.trim() ? item.result : null;
-    const detail = TERMINAL_SUBAGENT_STATUSES.has(item.status)
-      ? (streamedResult ?? item.progress ?? item.prompt)
-      : (item.progress ?? streamedResult ?? item.prompt);
     return (
       <SubagentTimelineLink
+        parentRef={scopeThreadRef(props.environmentId, item.threadId)}
+        subagentId={item.subagentId}
         status={item.status}
-        title={subagentDisplayTitle(item.title ?? "Subagent")}
-        detail={detail}
+        driver={item.driver}
+        provider={props.providerStatuses.find(
+          (provider) => provider.instanceId === item.providerInstanceId,
+        )}
+        title={formatSubagentDisplayTitle(item.title ?? "Subagent")}
+        result={item.result}
+        progress={item.progress}
+        startedAt={item.startedAt}
+        completedAt={item.completedAt}
         threadId={item.childThreadId}
         onOpenThread={props.onOpenThread}
       />
@@ -247,108 +230,270 @@ export function V2LifecycleRow(props: {
   return null;
 }
 
+/**
+ * In-flight states all present as Working, the way the agents fleet view did:
+ * detail belongs in the activity line, and a waiting or queued subagent is
+ * still the fleet doing its job. Only settled states differentiate. Idle reads
+ * as settled rather than in progress, since a resting child looks done unless
+ * resumed.
+ */
+const STATUS_VISUALS: Record<
+  OrchestrationV2TurnItem["status"],
+  { dotClass: string; label: string }
+> = {
+  pending: { dotClass: "bg-info", label: "Working" },
+  running: { dotClass: "bg-info", label: "Working" },
+  waiting: { dotClass: "bg-info", label: "Working" },
+  idle: { dotClass: "bg-muted-foreground/50", label: "Idle · resumable" },
+  completed: { dotClass: "bg-success", label: "Completed" },
+  failed: { dotClass: "bg-destructive", label: "Failed" },
+  cancelled: { dotClass: "bg-muted-foreground/60", label: "Stopped" },
+  interrupted: { dotClass: "bg-muted-foreground/60", label: "Stopped" },
+};
+
+function subagentStatusVisual(status: OrchestrationV2TurnItem["status"]) {
+  return STATUS_VISUALS[status];
+}
+
+const SETTLED_SUBAGENT_STATUSES = new Set<OrchestrationV2TurnItem["status"]>([
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+]);
+
+/** The server's placeholder when a child ends without output; the status dot already says it. */
+const GENERIC_CHILD_END = /^Child task ended with status\b/i;
+
+/** One line of a markdown result: drop list bullets, code ticks, and link targets. */
+function plainDetail(text: string): string {
+  return text
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/`/g, "")
+    .replace(/^[ \t]*[-*][ \t]+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isoOrNull(value: DateTime.Utc | null | undefined): string | null {
+  return value ? DateTime.formatIso(value) : null;
+}
+
+export function SubagentElapsed({ agent }: { agent: Parameters<typeof AgentElapsed>[0]["agent"] }) {
+  return <AgentElapsed agent={agent} />;
+}
+
+/** Round provider tile with the agents panel's status dot; rings let a header stack overlap. */
+export function SubagentAvatar({
+  driver,
+  provider,
+  status,
+  className,
+}: {
+  driver?: ProviderDriverKind | undefined;
+  provider?: ServerProvider | undefined;
+  /** Omitted inside an overlapped stack, where a covered dot would only add noise. */
+  status?: OrchestrationV2TurnItem["status"] | undefined;
+  className?: string;
+}) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "relative inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-border/70 bg-muted ring-2 ring-background",
+        className,
+      )}
+    >
+      {driver ? (
+        <ProviderInstanceIcon
+          driverKind={driver}
+          displayName={provider?.displayName ?? driver}
+          acpRegistryIconUrl={provider?.iconUrl}
+          className="z-auto"
+          iconClassName="size-3.5"
+        />
+      ) : (
+        <BotIcon className="size-3.5 text-muted-foreground" />
+      )}
+      {status ? (
+        <span
+          className={cn(
+            "absolute -right-px -bottom-px size-2 rounded-full ring-2 ring-background",
+            subagentStatusVisual(status).dotClass,
+          )}
+        />
+      ) : null}
+    </span>
+  );
+}
+
 function SubagentTimelineLink(props: {
+  readonly parentRef: ScopedThreadRef;
+  readonly subagentId: NodeId;
+  readonly driver: ProviderDriverKind;
+  readonly provider: ServerProvider | undefined;
   readonly title: string;
-  readonly detail: string;
+  readonly result: string | null;
+  readonly progress: string | undefined;
   readonly status: OrchestrationV2TurnItem["status"];
+  readonly startedAt: DateTime.Utc | null;
+  readonly completedAt: DateTime.Utc | null;
   readonly threadId: ThreadId | null;
   readonly onOpenThread: (threadId: ThreadId) => void;
 }) {
+  const agent = useAtomValue(
+    environmentThreadDetails.threadAtom(props.parentRef),
+    (thread) => thread?.projection.subagents.find((agent) => agent.id === props.subagentId) ?? null,
+  );
   const threadId = props.threadId;
-  const statusLabel = props.status.replaceAll("_", " ");
+  const status = agent?.status ?? props.status;
+  const statusLabel = subagentStatusVisual(status).label;
+  const result = (agent?.result ?? props.result)?.trim();
+  const progress = (agent?.progress ?? props.progress)?.trim();
+  const settled = SETTLED_SUBAGENT_STATUSES.has(status);
+  const rawDetail = settled ? result || progress : progress || result;
+  const detail =
+    rawDetail && !GENERIC_CHILD_END.test(rawDetail) ? plainDetail(rawDetail) || null : null;
+  const failed = status === "failed";
+  const timing = {
+    status,
+    startedAt: isoOrNull(agent?.startedAt ?? props.startedAt),
+    completedAt: isoOrNull(agent?.completedAt ?? props.completedAt),
+  };
   const content = (
     <>
-      <span className="relative flex size-6 shrink-0 items-center justify-center">
-        <BotIcon className="size-4 text-icon-muted" aria-hidden />
+      <SubagentAvatar driver={props.driver} provider={props.provider} status={status} />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-2">
+          <span className="min-w-0 truncate text-xs font-medium text-foreground">
+            {props.title}
+          </span>
+          {detail !== null && status !== "completed" ? (
+            <span
+              className={cn(
+                "shrink-0 text-[10px]",
+                failed ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {statusLabel}
+            </span>
+          ) : null}
+        </span>
         <span
-          role="img"
-          aria-label={statusLabel}
           className={cn(
-            "absolute right-0.5 bottom-0.5 size-1.5 rounded-full ring-2 ring-background",
-            props.status === "failed"
-              ? "bg-destructive"
-              : props.status === "completed"
-                ? "bg-success"
-                : props.status === "cancelled" || props.status === "interrupted"
-                  ? "bg-muted-foreground/60"
-                  : "bg-info",
+            "block text-[11px] leading-relaxed",
+            failed ? "text-destructive" : "text-muted-foreground",
           )}
-        />
+        >
+          {detail === null ? (
+            statusLabel
+          ) : detail.includes("/") && !detail.includes(" ") ? (
+            <MiddleTruncate value={detail} showTitle={false} className="flex" />
+          ) : (
+            <span className="block truncate">{detail}</span>
+          )}
+        </span>
       </span>
-      <span className="min-w-0 truncate">{props.title}</span>
+      <span className="shrink-0 font-mono text-[10px] text-muted-foreground/80">
+        <SubagentElapsed agent={timing} />
+      </span>
+      {threadId !== null ? (
+        <ChevronRightIcon
+          aria-hidden
+          className="size-3.5 shrink-0 text-muted-foreground/60 transition-colors group-hover/subagent:text-foreground"
+        />
+      ) : null}
     </>
   );
+  const className =
+    "group/subagent flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-left";
+  // J5: the saved-agent chip and handoff link are interactive, so they sit beside
+  // the card's button rather than inside it.
   return (
-    <div
-      data-v2-item-type="subagent"
-      className="flex min-w-0 max-w-full items-center gap-0.5 text-sm text-secondary-label"
-    >
+    <div className="flex min-w-0 items-center gap-1">
       <Tooltip>
         <TooltipTrigger
+          delay={200}
           render={
             threadId === null ? (
-              <span
-                aria-description={`${statusLabel}: ${props.detail}`}
-                className="flex min-w-0 items-center gap-1.5 px-0.5 py-0.5 leading-relaxed"
+              <div
+                data-v2-item-type="subagent"
+                aria-description={statusLabel}
+                className={className}
               >
                 {content}
-              </span>
+              </div>
             ) : (
               <button
                 type="button"
+                data-v2-item-type="subagent"
                 aria-label={`Open ${props.title}`}
-                aria-description={`${statusLabel}: ${props.detail}`}
+                aria-description={statusLabel}
                 onClick={() => props.onOpenThread(threadId)}
-                className="flex min-w-0 items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left leading-relaxed hover:bg-accent/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className={cn(
+                  className,
+                  "cursor-pointer transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+                )}
               >
                 {content}
               </button>
             )
           }
         />
-        <TooltipPopup className="max-w-80 whitespace-pre-wrap break-words">
-          {props.title} · {statusLabel}
-          {props.detail ? `\n${props.detail}` : ""}
-        </TooltipPopup>
+        <ThreadHoverCardPopup>
+          <SubagentTimelineTooltip
+            {...props}
+            elapsed={
+              agent ? <AgentElapsed agent={projectedSubagentsToRuntime([agent])[0]!} /> : null
+            }
+            model={agent?.model ?? null}
+            status={status}
+            result={agent?.result ?? props.result}
+            progress={agent?.progress ?? props.progress}
+          />
+        </ThreadHoverCardPopup>
       </Tooltip>
+      <AgentRowIdentity environmentId={props.parentRef.environmentId} childThreadId={threadId} />
     </div>
   );
 }
 
-function subagentDisplayTitle(title: string): string {
-  return title.replace(/^Subagent:\s*/i, "");
+function SubagentTimelineTooltip(
+  props: Parameters<typeof SubagentTimelineLink>[0] & { model: string | null; elapsed: ReactNode },
+) {
+  const environmentId = props.parentRef.environmentId;
+  const parent = useThreadShell(props.parentRef)?.source;
+  const child = useThreadShell(
+    props.threadId ? scopeThreadRef(environmentId, props.threadId) : null,
+  )?.source;
+  const parentProject = useProject(
+    parent ? scopeProjectRef(environmentId, parent.projectId) : null,
+  );
+  const childProject = useProject(child ? scopeProjectRef(environmentId, child.projectId) : null);
+  return (
+    <SubagentTooltipContent
+      title={formatSubagentDisplayTitle(child?.title ?? props.title)}
+      model={props.model}
+      provider={props.provider}
+      driver={props.driver}
+      elapsed={props.elapsed}
+      status={props.status}
+      result={props.result}
+      progress={props.progress}
+      parentThread={parent}
+      childThread={child}
+      parentProject={parentProject ?? undefined}
+      childProject={childProject ?? undefined}
+    />
+  );
 }
 
-/**
- * Model of the newest run for `instanceId` that started before the handoff's
- * own run. Legacy handoff items don't record their source models, but the
- * covered runs are still in the projection.
- */
-function latestRunModelBefore(
-  runs: ReadonlyArray<HandoffTimelineRun>,
-  instanceId: ProviderInstanceId,
-  beforeOrdinal: number | undefined,
-): string | undefined {
-  let latest: HandoffTimelineRun | undefined;
-  for (const run of runs) {
-    if (run.providerInstanceId !== instanceId) continue;
-    if (beforeOrdinal !== undefined && run.ordinal >= beforeOrdinal) continue;
-    if (latest === undefined || run.ordinal > latest.ordinal) latest = run;
-  }
-  return latest?.modelSelection.model;
-}
-
-/** Provider icon with the resolved handoff model available on hover or focus. */
 function HandoffEndpoint(props: {
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly instanceId: ProviderInstanceId;
   readonly model?: string | undefined;
 }) {
   const entry = getProviderInstanceEntry(props.providers, props.instanceId);
-  const Icon =
-    Object.entries(PROVIDER_ICON_BY_PROVIDER).find(
-      ([driver]) => driver === (entry?.driverKind ?? props.instanceId),
-    )?.[1] ?? BotIcon;
   const model = props.model?.trim();
   const providerModel =
     model === undefined || model.length === 0
@@ -366,15 +511,31 @@ function HandoffEndpoint(props: {
         render={
           <span
             tabIndex={0}
-            role="img"
-            aria-label={label}
-            className="inline-flex shrink-0 items-center justify-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex min-w-0 items-center gap-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <Icon aria-hidden="true" className="size-3 shrink-0" />
+            <ProviderInstanceIcon
+              driverKind={entry?.driverKind ?? ProviderDriverKind.make(props.instanceId)}
+              displayName={entry?.displayName ?? props.instanceId}
+              acpRegistryAgentId={entry?.acpRegistryAgentId}
+              acpRegistryIconUrl={entry?.acpRegistryIconUrl}
+              iconClassName="size-3"
+            />
+            <span
+              className={cn(
+                "truncate font-medium",
+                providerTextColorClassName(
+                  entry?.driverKind ?? ProviderDriverKind.make(props.instanceId),
+                ),
+              )}
+            >
+              {label}
+            </span>
           </span>
         }
       />
-      <TooltipPopup>{label}</TooltipPopup>
+      <TooltipPopup>
+        {entry?.displayName ?? props.instanceId} · {label}
+      </TooltipPopup>
     </Tooltip>
   );
 }

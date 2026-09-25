@@ -214,7 +214,7 @@ const assertCrewFull = (error: { readonly _tag: string; readonly message: string
 };
 
 const fixture = Effect.gen(function* () {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const storage = Layer.mergeAll(crewInstanceLayer, proposalStoreLayer, ledgerLayer).pipe(
     Layer.provideMerge(database),
   );
