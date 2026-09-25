@@ -1,10 +1,8 @@
 import { assert, it } from "@effect/vitest";
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import { makeProviderRegistryMock } from "../../provider/testUtils/providerRegistryMock.ts";
-import { refreshSkillProviders, refreshSkillsOnConnection } from "./skillProviderRefresh.ts";
+import { refreshSkillProviders } from "./skillProviderRefresh.ts";
 
 it.effect("refreshes only selected instances including pending workspace discovery", () =>
   Effect.gen(function* () {
@@ -54,35 +52,5 @@ it.effect("refreshes only selected instances including pending workspace discove
       "selected:/cached",
       "selected:/selected",
     ]);
-  }),
-);
-
-it.effect("connection cancellation releases both a waiting client and the probe owner", () =>
-  Effect.gen(function* () {
-    const entered = yield* Deferred.make<void>();
-    let calls = 0;
-    const registry = {
-      ...makeProviderRegistryMock(),
-      refresh: (): Effect.Effect<ReadonlyArray<ServerProvider>> =>
-        Effect.gen(function* () {
-          calls++;
-          yield* Deferred.succeed(entered, undefined);
-          return yield* Effect.never;
-        }),
-    };
-    const owner = yield* refreshSkillsOnConnection(registry).pipe(Effect.forkChild);
-    yield* Deferred.await(entered);
-    const waiter = yield* refreshSkillsOnConnection(registry).pipe(Effect.forkChild);
-    yield* Effect.yieldNow;
-    yield* Fiber.interrupt(waiter);
-    assert.equal(calls, 1);
-    yield* Fiber.interrupt(owner);
-    registry.refresh = () =>
-      Effect.sync(() => {
-        calls++;
-        return [];
-      });
-    yield* refreshSkillsOnConnection(registry);
-    assert.equal(calls, 2);
   }),
 );

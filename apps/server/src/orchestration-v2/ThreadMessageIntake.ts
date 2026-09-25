@@ -1,3 +1,4 @@
+import { remapComposerContextAttachments } from "@t3tools/shared/composerContextReferences";
 import { appendUserInputAttachmentPaths } from "../provider/userInputAttachments.ts";
 import type { ChatAttachment, OrchestrationV2Command } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -29,10 +30,10 @@ function dispatchWasNotAccepted(
 const isOrchestratorError = Schema.is(Orchestrator.OrchestratorV2Error);
 
 const releaseUnusedClaims = Effect.fn("ThreadMessageIntake.releaseUnusedClaims")(function* (
-  claimed: AttachmentClaims.ClaimedAttachments,
+  claimedPaths: ReadonlyArray<string>,
   accepted: ReadonlyArray<ChatAttachment>,
 ) {
-  if (claimed.claimedPaths.length === 0) return;
+  if (claimedPaths.length === 0) return;
   const config = yield* ServerConfig.ServerConfig;
   const retained = new Set(
     accepted.map((attachment) =>
@@ -43,7 +44,7 @@ const releaseUnusedClaims = Effect.fn("ThreadMessageIntake.releaseUnusedClaims")
     ),
   );
   yield* AttachmentClaims.releaseClaimedAttachments(
-    claimed.claimedPaths.filter((path) => !retained.has(path)),
+    claimedPaths.filter((path) => !retained.has(path)),
   );
 });
 
@@ -53,27 +54,73 @@ export const dispatchCommand = Effect.fn("ThreadMessageIntake.dispatchCommand")(
   const threads = yield* ThreadManagement.ThreadManagementService;
   if (command.type === "runtime-request.respond" && command.attachmentsByQuestionId) {
     const config = yield* ServerConfig.ServerConfig;
-    const attachmentsByQuestionId: import("@t3tools/contracts").UserInputAttachments = {};
-    for (const [questionId, attachments] of Object.entries(command.attachmentsByQuestionId)) {
-      const claimed = yield* AttachmentClaims.claimPendingAttachments({
-        threadId: command.threadId,
-        attachments,
-      });
-      Object.defineProperty(attachmentsByQuestionId, questionId, {
-        value: claimed.attachments,
-        enumerable: true,
-      });
-    }
-    const answers = yield* appendUserInputAttachmentPaths({
-      answers: command.answers ?? {},
-      attachmentsByQuestionId,
-      attachmentsDir: config.attachmentsDir,
-    }).pipe(
-      Effect.mapError(
-        (cause) => new AttachmentClaims.AttachmentClaimError({ message: cause.issue }),
-      ),
-    );
-    return yield* threads.dispatch({ ...command, answers, attachmentsByQuestionId });
+    const incomingByQuestionId = command.attachmentsByQuestionId;
+    yield* AttachmentClaims.validateAttachmentLimits(Object.values(incomingByQuestionId).flat());
+    // Claims accumulate across questions, so all of preparation shares one
+    // rollback boundary: any failure before dispatch removes every new copy.
+    const claimedPaths: string[] = [];
+    const prepared = yield* Effect.gen(function* () {
+      const attachmentsByQuestionId: import("@t3tools/contracts").UserInputAttachments = {};
+      for (const [questionId, attachments] of Object.entries(incomingByQuestionId)) {
+        const claimed = yield* AttachmentClaims.claimPendingAttachments({
+          threadId: command.threadId,
+          attachments,
+        });
+        claimedPaths.push(...claimed.claimedPaths);
+        Object.defineProperty(attachmentsByQuestionId, questionId, {
+          value: claimed.attachments,
+          enumerable: true,
+        });
+      }
+      const answers = yield* appendUserInputAttachmentPaths({
+        answers: command.answers ?? {},
+        attachmentsByQuestionId,
+        attachmentsDir: config.attachmentsDir,
+      }).pipe(
+        Effect.mapError(
+          (cause) => new AttachmentClaims.AttachmentClaimError({ message: cause.issue }),
+        ),
+      );
+      return { answers, attachmentsByQuestionId };
+    }).pipe(Effect.onError(() => AttachmentClaims.releaseClaimedAttachments(claimedPaths)));
+    return yield* threads
+      .dispatch({
+        ...command,
+        answers: prepared.answers,
+        attachmentsByQuestionId: prepared.attachmentsByQuestionId,
+      })
+      .pipe(
+        Effect.tap((result) => {
+          // A replayed receipt reports the first attempt's answer, so this
+          // attempt's copies go unreferenced and are released. The resolved
+          // turn item proves the respond was applied; questionAnswer is only
+          // recorded when the accepted command carried attachments, so its
+          // absence means the accepted answer referenced no copies. With no
+          // resolved item at all the outcome is ambiguous and everything stays.
+          const answeredItems = result.storedEvents.flatMap(({ event }) =>
+            event.type === "turn-item.updated" &&
+            event.payload.type === "user_input_request" &&
+            event.payload.requestId === command.requestId
+              ? [event.payload]
+              : [],
+          );
+          return answeredItems.length > 0
+            ? releaseUnusedClaims(
+                claimedPaths,
+                answeredItems.flatMap((item) =>
+                  item.questionAnswer === undefined
+                    ? []
+                    : Object.values(item.questionAnswer.attachmentsByQuestionId).flat(),
+                ),
+              )
+            : Effect.void;
+        }),
+        Effect.tapError((error) =>
+          dispatchWasNotAccepted(error)
+            ? AttachmentClaims.releaseClaimedAttachments(claimedPaths)
+            : Effect.void,
+        ),
+      );
   }
   if (
     command.type !== "message.dispatch" &&
@@ -84,21 +131,35 @@ export const dispatchCommand = Effect.fn("ThreadMessageIntake.dispatchCommand")(
     threadId: command.threadId,
     attachments: command.attachments ?? [],
   });
-  return yield* threads.dispatch({ ...command, attachments: claimed.attachments }).pipe(
-    Effect.tap((result) =>
-      releaseUnusedClaims(
-        claimed,
-        result.storedEvents.flatMap(({ event }) =>
-          event.type === "message.updated" ? event.payload.attachments : [],
+  return yield* threads
+    .dispatch({
+      ...command,
+      attachments: claimed.attachments,
+      ...(command.context
+        ? {
+            context: remapComposerContextAttachments(
+              command.context,
+              command.attachments ?? [],
+              claimed.attachments,
+            ),
+          }
+        : {}),
+    })
+    .pipe(
+      Effect.tap((result) =>
+        releaseUnusedClaims(
+          claimed.claimedPaths,
+          result.storedEvents.flatMap(({ event }) =>
+            event.type === "message.updated" ? event.payload.attachments : [],
+          ),
         ),
       ),
-    ),
-    Effect.tapError((error) =>
-      dispatchWasNotAccepted(error)
-        ? AttachmentClaims.releaseClaimedAttachments(claimed.claimedPaths)
-        : Effect.void,
-    ),
-  );
+      Effect.tapError((error) =>
+        dispatchWasNotAccepted(error)
+          ? AttachmentClaims.releaseClaimedAttachments(claimed.claimedPaths)
+          : Effect.void,
+      ),
+    );
 });
 
 export const sendToThread = Effect.fn("ThreadMessageIntake.sendToThread")(function* (
@@ -107,7 +168,7 @@ export const sendToThread = Effect.fn("ThreadMessageIntake.sendToThread")(functi
   const threads = yield* ThreadManagement.ThreadManagementService;
   const claimed = yield* AttachmentClaims.claimPendingAttachments(input);
   return yield* threads.sendToThread({ ...input, attachments: claimed.attachments }).pipe(
-    Effect.tap((result) => releaseUnusedClaims(claimed, result.message.attachments)),
+    Effect.tap((result) => releaseUnusedClaims(claimed.claimedPaths, result.message.attachments)),
     Effect.tapError((error) =>
       dispatchWasNotAccepted(error)
         ? AttachmentClaims.releaseClaimedAttachments(claimed.claimedPaths)
@@ -120,6 +181,7 @@ export const launchThread = Effect.fn("ThreadMessageIntake.launchThread")(functi
   input: ThreadLaunch.ThreadLaunchInput,
 ) {
   const launches = yield* ThreadLaunch.ThreadLaunchService;
+  yield* AttachmentClaims.validateAttachmentLimits(input.initialMessage?.attachments ?? []);
   if (!input.initialMessage?.attachments.some(AttachmentClaims.attachmentIsPendingUpload)) {
     return yield* launches.launch(input);
   }
@@ -135,12 +197,24 @@ export const launchThread = Effect.fn("ThreadMessageIntake.launchThread")(functi
   return yield* launches
     .launch({
       ...input,
-      initialMessage: { ...input.initialMessage, attachments: claimed.attachments },
+      initialMessage: {
+        ...input.initialMessage,
+        attachments: claimed.attachments,
+        ...(input.initialMessage.context
+          ? {
+              context: remapComposerContextAttachments(
+                input.initialMessage.context,
+                input.initialMessage.attachments,
+                claimed.attachments,
+              ),
+            }
+          : {}),
+      },
     })
     .pipe(
       Effect.tap((result) =>
         releaseUnusedClaims(
-          claimed,
+          claimed.claimedPaths,
           result.projection.messages.flatMap((message) => message.attachments),
         ),
       ),

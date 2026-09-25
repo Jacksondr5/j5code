@@ -20,7 +20,7 @@ import { layer as squadronProjectReferencesLayer } from "./SquadronProjectRefere
 import { CommCommandId, ParticipantId, SquadronId } from "./contracts.ts";
 
 const projectId = ProjectId.make("project:squadron-management");
-const database = NodeSqliteClient.layerMemory();
+const database = NodeSqliteClient.layer({ filename: ":memory:" });
 const ledger = ledgerLayer.pipe(Layer.provide(database));
 const references = squadronProjectReferencesLayer.pipe(Layer.provide(database));
 const projects = Layer.mock(ProjectService.ProjectService)({

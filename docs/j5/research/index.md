@@ -23,3 +23,7 @@ Sub-artifacts (written by the research agents):
 - `traycer/` — Traycer findings
 
 These feed the next phase: product definition and architecture design for the new app.
+
+Other research:
+
+- [Upstream convergence watchlist](upstream-convergence.md) — where upstream T3 Code is building toward J5's areas; rewritten at every upstream advance.
