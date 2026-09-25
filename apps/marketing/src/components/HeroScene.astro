@@ -69,7 +69,7 @@
   .hv {
     position: absolute;
     display: block;
-    width: clamp(200px, 18vw, 300px);
+    width: clamp(220px, 19vw, 320px);
     height: auto;
     overflow: visible;
     animation: hv-in 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) 520ms both;
@@ -80,9 +80,11 @@
     to { opacity: 1; }
   }
 
-  .hv--talk { left: 1vw; top: 64px; }
-  .hv--lead { right: 1vw; top: 170px; }
-  .hv--spawn { left: 1vw; top: 330px; }
+  /* Talking upper left, spawning lower left, the Captain's lap lower right and
+     larger. The compass rose already fills the upper right. */
+  .hv--talk { left: 3vw; top: 72px; }
+  .hv--spawn { left: 3vw; top: 330px; }
+  .hv--lead { right: 2.5vw; top: 300px; width: clamp(280px, 25vw, 400px); }
 
   @media (max-width: 1279px) {
     .hs {
@@ -149,40 +151,40 @@
   @keyframes hop-7 { 0%, 78% { offset-distance: 0%; opacity: 0; } 79% { opacity: 1; } 87% { opacity: 1; } 88%, 100% { offset-distance: 100%; opacity: 0; } }
 
   /* Flags follow the hops on the same 8s clock: orange on send, blue on
-     receive, green on reply, grey between. */
+     receive, green on reply, and they keep that color until their next event.
+     Each boat starts the loop in the color it ends with, so nothing resets. */
   .flag {
-    --pennant: #8fa0ad;
     animation-duration: 8s;
     animation-timing-function: ease-in-out;
     animation-iteration-count: infinite;
     animation-play-state: var(--motion-state, paused);
   }
-  .flag-a { animation-name: flag-a; }
-  .flag-b { animation-name: flag-b; }
-  .flag-c { animation-name: flag-c; }
-  .flag-d { animation-name: flag-d; }
+  .flag-a { --pennant: var(--msg-receive); animation-name: flag-a; }
+  .flag-b { --pennant: var(--msg-ask); animation-name: flag-b; }
+  .flag-c { --pennant: var(--msg-reply); animation-name: flag-c; }
+  .flag-d { --pennant: var(--msg-receive); animation-name: flag-d; }
 
+  /* A: sends at 2, receives at 24, sends at 52, receives at 74. */
   @keyframes flag-a {
-    0%, 1%, 11%, 23%, 33%, 51%, 61%, 73%, 83%, 100% { --pennant: #8fa0ad; }
-    2%, 9%, 52%, 59% { --pennant: var(--msg-ask); }
-    24%, 31%, 74%, 81% { --pennant: var(--msg-receive); }
+    0%, 1.5%, 24.5%, 51.5%, 74.5%, 100% { --pennant: var(--msg-receive); }
+    2.5%, 23.5%, 52.5%, 73.5% { --pennant: var(--msg-ask); }
   }
+  /* B: receives at 12, replies at 14, sends at 78. */
   @keyframes flag-b {
-    0%, 11%, 23%, 77%, 87%, 100% { --pennant: #8fa0ad; }
-    12%, 13% { --pennant: var(--msg-receive); }
-    14%, 21% { --pennant: var(--msg-reply); }
-    78%, 85% { --pennant: var(--msg-ask); }
+    0%, 11.5%, 78.5%, 100% { --pennant: var(--msg-ask); }
+    12.5%, 13.5% { --pennant: var(--msg-receive); }
+    14.5%, 77.5% { --pennant: var(--msg-reply); }
   }
+  /* C: sends at 26, receives at 48 and 62, replies at 64. */
   @keyframes flag-c {
-    0%, 25%, 35%, 47%, 57%, 61%, 73%, 100% { --pennant: #8fa0ad; }
-    26%, 33% { --pennant: var(--msg-ask); }
-    48%, 55%, 62%, 63% { --pennant: var(--msg-receive); }
-    64%, 71% { --pennant: var(--msg-reply); }
+    0%, 25.5%, 64.5%, 100% { --pennant: var(--msg-reply); }
+    26.5%, 47.5% { --pennant: var(--msg-ask); }
+    48.5%, 63.5% { --pennant: var(--msg-receive); }
   }
+  /* D: receives at 36, replies at 38, receives at 88. */
   @keyframes flag-d {
-    0%, 35%, 47%, 87%, 97%, 100% { --pennant: #8fa0ad; }
-    36%, 37%, 88%, 95% { --pennant: var(--msg-receive); }
-    38%, 45% { --pennant: var(--msg-reply); }
+    0%, 37.5%, 88.5%, 100% { --pennant: var(--msg-receive); }
+    38.5%, 87.5% { --pennant: var(--msg-reply); }
   }
 
   /* Leading: one lap every 14s. Each boat starts at its own point on the same
