@@ -39,7 +39,10 @@ const decodeScopeError = Schema.decodeUnknownEffect(EnvironmentScopeRequiredErro
 const decodeRequestError = Schema.decodeUnknownEffect(
   Schema.Struct({ error: Schema.String, message: Schema.String }),
 );
-const TestLayer = Layer.mergeAll(NodeSqliteClient.layerMemory(), NodeServices.layer);
+const TestLayer = Layer.mergeAll(
+  NodeSqliteClient.layer({ filename: ":memory:" }),
+  NodeServices.layer,
+);
 const fixture = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;

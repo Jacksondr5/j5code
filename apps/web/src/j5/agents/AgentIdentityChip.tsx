@@ -40,27 +40,30 @@ export function AgentIdentityChip(props: {
   );
 }
 
-/** Runtime rows know only the child thread; look up its shell for the pinned assignment. */
+/**
+ * Persona chip plus handoff link for upstream's lineage rows and subagent cards
+ * (#12835 replaced the Agents panel). Both are interactive, so callers mount this
+ * beside the row's navigation button, never inside it. Runtime rows know only the
+ * child thread; look up its shell for the pinned assignment.
+ */
 export function AgentRowIdentity(props: {
-  readonly environmentId: EnvironmentId | null;
+  readonly environmentId: EnvironmentId;
   readonly childThreadId: string | null;
 }) {
   const shell = useThreadShell(
-    props.environmentId !== null && props.childThreadId !== null
+    props.childThreadId !== null
       ? { environmentId: props.environmentId, threadId: props.childThreadId as ThreadId }
       : null,
   );
+  const assignment = shell?.agentPersonaAssignment;
+  if (assignment === undefined || props.childThreadId === null) return null;
   return (
     <>
-      <AgentIdentityChip assignment={shell?.agentPersonaAssignment} />
-      {shell?.agentPersonaAssignment !== undefined &&
-      props.environmentId !== null &&
-      props.childThreadId !== null ? (
-        <AgentHandoffChip
-          environmentId={props.environmentId}
-          threadId={props.childThreadId as ThreadId}
-        />
-      ) : null}
+      <AgentIdentityChip assignment={assignment} />
+      <AgentHandoffChip
+        environmentId={props.environmentId}
+        threadId={props.childThreadId as ThreadId}
+      />
     </>
   );
 }

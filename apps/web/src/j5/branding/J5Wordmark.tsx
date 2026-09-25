@@ -1,9 +1,9 @@
 /** Fork-owned mark used where the upstream client renders its compact T3 wordmark. */
-export function J5Wordmark() {
+export function J5Wordmark({ className = "h-2.5 w-auto shrink-0" }: { className?: string }) {
   return (
     <svg
       aria-label="J5"
-      className="h-2.5 w-auto shrink-0"
+      className={className}
       viewBox="0 0 94 57"
       xmlns="http://www.w3.org/2000/svg"
     >

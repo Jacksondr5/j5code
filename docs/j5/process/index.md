@@ -11,3 +11,4 @@ is deliberately not here: that lives in the operator's playbooks, outside the re
 
 - [Working in the repo](working-in-the-repo.md) — durable tool traps, repo facts, and the contributor
   rules that govern the code itself.
+- [Merging upstream](upstream-merge.md) — the checklist every upstream T3 Code advance follows.

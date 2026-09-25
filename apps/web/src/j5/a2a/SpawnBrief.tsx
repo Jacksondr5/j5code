@@ -1,7 +1,7 @@
 import { ThreadId } from "@t3tools/contracts";
 
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
-import type { DisplayedUserMessageState } from "~/lib/terminalContext";
+import type { ResolvedUserMessageContext } from "~/lib/composerContextRecords";
 import type { ChatMessage } from "~/types";
 
 import {
@@ -87,20 +87,13 @@ export function participantIdsForSpawnBrief(message: ChatMessage): ReadonlyArray
 }
 
 /**
- * A brief is literal authored text. The composer never appends its
- * `<terminal_context>`, `<element_context>`, or preview-annotation blocks to
- * it, so the user row must not run those trailing-block extractors over it: a
- * brief that quotes one of those tags would otherwise lose its tail.
+ * A brief is literal authored text. The composer never attaches context
+ * records to it, so the user row must not upgrade legacy trailing blocks
+ * (`<terminal_context>`, `<element_context>`, preview annotations) out of it:
+ * a brief that quotes one of those tags would otherwise lose its tail.
  */
-export function displayedSpawnBriefState(brief: string): DisplayedUserMessageState {
-  return {
-    visibleText: brief,
-    copyText: brief,
-    contextCount: 0,
-    previewTitle: null,
-    contexts: [],
-    elementContexts: [],
-  };
+export function resolvedSpawnBriefContext(brief: string): ResolvedUserMessageContext {
+  return { text: brief, records: [], recordsById: new Map() };
 }
 
 /** The spawner's name when known; otherwise the honest unnamed label with the id as a tooltip. */
