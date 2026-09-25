@@ -44,6 +44,7 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
+import { useSettingsScopeEnvironments } from "../settingsScopeEnvironment";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -76,21 +77,26 @@ export function SkillInstallerSettings() {
       }),
     [environments, primaryEnvironmentId],
   );
+  const {
+    candidates: pickerEnvironments,
+    pinnedEnvironmentId,
+    initialEnvironmentId,
+  } = useSettingsScopeEnvironments(orderedEnvironments, primaryEnvironmentId);
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(
-    primaryEnvironmentId,
+    initialEnvironmentId,
   );
-  const effectiveEnvironmentId = orderedEnvironments.some(
-    (environment) => environment.environmentId === selectedEnvironmentId,
-  )
-    ? selectedEnvironmentId
-    : (orderedEnvironments[0]?.environmentId ?? null);
+  const effectiveEnvironmentId =
+    pinnedEnvironmentId ??
+    (pickerEnvironments.some((environment) => environment.environmentId === selectedEnvironmentId)
+      ? selectedEnvironmentId
+      : (pickerEnvironments[0]?.environmentId ?? null));
   const selectedEnvironment = orderedEnvironments.find(
     (environment) => environment.environmentId === effectiveEnvironmentId,
   );
 
   return (
     <SettingsPageContainer>
-      {orderedEnvironments.length > 1 ? (
+      {pinnedEnvironmentId === null && pickerEnvironments.length > 1 ? (
         <SettingsSection title="Environment">
           <SettingsRow
             title="Environment"
@@ -99,7 +105,7 @@ export function SkillInstallerSettings() {
               <Select
                 value={effectiveEnvironmentId ?? undefined}
                 onValueChange={(value) => {
-                  const environment = orderedEnvironments.find(
+                  const environment = pickerEnvironments.find(
                     (candidate) => candidate.environmentId === value,
                   );
                   if (environment) setSelectedEnvironmentId(environment.environmentId);
@@ -109,7 +115,7 @@ export function SkillInstallerSettings() {
                   <SelectValue>{selectedEnvironment?.label}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {orderedEnvironments.map((environment) => (
+                  {pickerEnvironments.map((environment) => (
                     <SelectItem key={environment.environmentId} value={environment.environmentId}>
                       {environment.label}
                     </SelectItem>
@@ -349,7 +355,8 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
               placeholder="https://github.com/your-team/skills.git or /path/to/catalog"
               autoComplete="off"
               spellCheck={false}
-              className="w-full font-mono sm:w-80"
+              font="mono"
+              className="w-full sm:w-80"
               onChange={(event) => {
                 setDraft(event.target.value);
                 setNotice(null);
@@ -600,30 +607,32 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
               affects every environment using these provider skill folders.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="grid gap-4">
-            {replacementOptions.map((option) => (
-              <label key={option.linkPath} className="flex min-w-0 items-start gap-3 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  aria-label={`Replace ${option.linkPath}`}
-                  checked={replacementPaths?.includes(option.linkPath) ?? false}
-                  onChange={(event) =>
-                    setReplacementPaths((paths) =>
-                      event.target.checked
-                        ? [...(paths ?? []), option.linkPath]
-                        : (paths ?? []).filter((path) => path !== option.linkPath),
-                    )
-                  }
-                />
-                <span className="grid min-w-0 gap-1 break-words">
-                  <strong>{option.skill}</strong>
-                  <span>Link: {option.linkPath}</span>
-                  <span>Current target: {option.currentTarget}</span>
-                  <span>New target: {option.target}</span>
-                </span>
-              </label>
-            ))}
+          <DialogPanel>
+            <div className="grid gap-4">
+              {replacementOptions.map((option) => (
+                <label key={option.linkPath} className="flex min-w-0 items-start gap-3 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    aria-label={`Replace ${option.linkPath}`}
+                    checked={replacementPaths?.includes(option.linkPath) ?? false}
+                    onChange={(event) =>
+                      setReplacementPaths((paths) =>
+                        event.target.checked
+                          ? [...(paths ?? []), option.linkPath]
+                          : (paths ?? []).filter((path) => path !== option.linkPath),
+                      )
+                    }
+                  />
+                  <span className="grid min-w-0 gap-1 break-words">
+                    <strong>{option.skill}</strong>
+                    <span>Link: {option.linkPath}</span>
+                    <span>Current target: {option.currentTarget}</span>
+                    <span>New target: {option.target}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
           </DialogPanel>
           <DialogFooter>
             <Button variant="outline" onClick={() => setReplacementPaths(null)}>

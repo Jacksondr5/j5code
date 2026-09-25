@@ -67,6 +67,20 @@ export function resolveNewThreadShortcutDestination(
  * A thread with a durable Registrar home keeps that home when it starts its
  * next draft. Threads without one may only use the ready/exact-one shortcut.
  */
+/**
+ * The Squadron the current-thread header names and starts new threads in: the thread's
+ * durable home, else the Squadron a draft has explicitly chosen, else none (the header
+ * then falls back to the directory shortcut or the picker).
+ */
+export function resolveHeaderSquadronRef(input: {
+  readonly environmentId: EnvironmentId;
+  readonly durableHomeId: string | null;
+  readonly draftSquadronId: string | null;
+}): ScopedSquadronRef | null {
+  const squadronId = input.durableHomeId ?? input.draftSquadronId;
+  return squadronId === null ? null : { environmentId: input.environmentId, squadronId };
+}
+
 export function resolveCurrentThreadNewThreadDestination(
   activeSquadron: ScopedSquadronRef | null,
   directoryStatus: SquadronDirectoryState["status"],

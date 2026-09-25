@@ -28,7 +28,7 @@ export interface CommandPaletteOpenDetail {
   readonly linkedThreads?: CommandPaletteLinkedThreads;
   /**
    * Opts into returning the normal Add Project picker result instead of opening a thread.
-   * Absent callers retain the normal Add Project navigation behavior.
+   * J5: without this or `sourcePicker`, Add Project opens Create Squadron instead (case 13).
    */
   readonly onProjectSelected?: (selection: CommandPaletteProjectSelection) => void;
   /** Select an existing folder or repository URL without creating a project or cloning. */

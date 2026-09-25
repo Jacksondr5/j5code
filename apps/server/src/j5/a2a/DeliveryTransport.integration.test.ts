@@ -23,6 +23,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   CommandId,
+  EventId,
   MessageId,
   type ModelSelection,
   type OrchestrationV2ProviderSession,
@@ -69,6 +70,7 @@ import {
   ProjectServiceLayerLive,
 } from "../../orchestration-v2/runtimeLayer.ts";
 import { ProjectEnrichmentService } from "../../project/ProjectEnrichmentService.ts";
+import { SourceControlProviderRegistry } from "../../sourceControl/SourceControlProviderRegistry.ts";
 import { WorkspacePaths } from "../../workspace/WorkspacePaths.ts";
 import { CodexProviderCapabilitiesV2 } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import {
@@ -87,13 +89,18 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import {
+  A2ADeliveryHeldError,
   A2ADeliveryTransport,
   astraPeerSteeringRun,
   deliveryMessageId,
   formatAgentDeliveryEnvelope,
   live as deliveryTransportLayer,
 } from "./DeliveryTransport.ts";
-import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
+import {
+  A2ADeliveryWorker,
+  heldQueueRecheckMs,
+  manualLayer as deliveryWorkerLayer,
+} from "./DeliveryWorker.ts";
 import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts";
 import {
   A2AHomeRegistrar,
@@ -102,6 +109,7 @@ import {
 } from "./HomeRegistrar.ts";
 import { deliveryCommandId } from "./DeliveryTransport.ts";
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
+import { limitRecoveryCommand } from "../../orchestration-v2/UsageLimitRecoveryWorker.ts";
 import { ProviderRuntimeRecoveryService } from "../../orchestration-v2/ProviderRuntimeRecoveryService.ts";
 import { ProviderSessionManagerV2 } from "../../orchestration-v2/ProviderSessionManager.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
@@ -331,6 +339,11 @@ const makeTestLayer = (
     OrchestrationV2EventSinkLayerLive,
   ).pipe(
     Layer.provide(Layer.mock(GitWorkflow.GitWorkflowService)({})),
+    Layer.provide(
+      Layer.mock(SourceControlProviderRegistry)({
+        resolveLink: () => Effect.die("unused title link"),
+      }),
+    ),
     Layer.provide(
       Layer.mock(ProjectService.ProjectService)({
         getById: () => Effect.succeed(Option.none()),
@@ -1546,6 +1559,7 @@ for (const refusal of ["wrong home", "unavailable participant"] as const) {
               : { receiverId: ParticipantId.make("agent:unavailable") }),
           })
           .pipe(Effect.flip);
+        if (error._tag !== "A2ADeliveryTransportError") return yield* Effect.die(error);
         assert.equal(error.operation, "deliver agent");
         assert.include(String(error.cause), "membership disappeared before delivery");
         assert.deepStrictEqual(yield* Ref.get(harness.deliveryInvocations), []);
@@ -1956,69 +1970,6 @@ for (const enabled of [false, true]) {
         }).pipe(
           Effect.provide(
             makeMessageLifecycleLayer(harness, { continueThreadsAfterServerUpdate: enabled }),
-          ),
-        );
-      }),
-  );
-}
-
-for (const prepared of [false, true]) {
-  it.effect(
-    `does not restart an explicitly stopped active recipient before provider acknowledgment (intent prepared=${prepared})`,
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* makeHarness;
-        yield* Effect.gen(function* () {
-          const target = yield* seedTarget(
-            "restart-stop",
-            modelSelection.model,
-            yield* A2AHomeRegistrar,
-          );
-          yield* (yield* A2ADeliveryTransport).deliverAgent(target.delivery);
-          yield* startPendingTestTurn(target.threadId);
-          const threads = yield* ThreadManagementService;
-          const before = yield* threads.getThreadProjection(target.threadId);
-          const sourceRun = before.runs[0]!;
-          if (prepared) yield* (yield* ProviderRuntimeRecoveryService).prepareForShutdown;
-          yield* threads.interruptThread({
-            commandId: CommandId.make("command:restart-stop:interrupt"),
-            projectId: target.projectId,
-            threadId: target.threadId,
-            runId: sourceRun.id,
-            reason: "The user explicitly stopped this work.",
-          });
-          const stopped = yield* threads.getThreadProjection(target.threadId);
-          assert.isTrue(
-            stopped.turnItems.some(
-              (item) => item.type === "run_interrupt_request" && item.runId === sourceRun.id,
-            ),
-          );
-          assert.lengthOf(yield* Ref.get(harness.interruptInputs), 0);
-          yield* (yield* ProviderRuntimeRecoveryService).recover;
-          const continuation = yield* (yield* EffectOutboxV2).get(
-            `effect:restart-continuation:${sourceRun.id}`,
-          );
-          assert.equal(
-            Option.isSome(continuation),
-            prepared,
-            "Recovery must not admit new continuation intent after a committed stop",
-          );
-          yield* (yield* ProviderSessionManagerV2).shutdown;
-          yield* (yield* OrchestrationEffectWorkerV2).drain();
-          const after = yield* threads.getThreadProjection(target.threadId);
-          assert.lengthOf(
-            after.messages.filter((message) =>
-              String(message.id).startsWith("message:restart-continuation:"),
-            ),
-            0,
-            "A committed stop request must prevent automatic restart before the provider acknowledges it",
-          );
-          assert.lengthOf(after.runs, 1);
-          assert.equal(after.runs[0]?.status, "cancelled");
-          assert.lengthOf(yield* Ref.get(harness.startedInputs), 1);
-        }).pipe(
-          Effect.provide(
-            makeMessageLifecycleLayer(harness, { continueThreadsAfterServerUpdate: true }),
           ),
         );
       }),
@@ -2961,5 +2912,232 @@ it.effect("rejects a stale Astra steer after Stop commits before admission", () 
       );
       assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
     }).pipe(Effect.provide(makeTestLayer(harness)));
+  }),
+);
+
+for (const stopped of [true, false]) {
+  it.effect(
+    `${stopped ? "refuses" : "admits"} the automatic usage-limit continuation ${stopped ? "after a committed Stop" : "without a Stop"}`,
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness;
+        yield* Effect.gen(function* () {
+          const target = yield* seedTarget(`stop-usage-limit-${stopped}`);
+          const threads = yield* ThreadManagementService;
+          const orchestrator = yield* OrchestratorV2;
+          const worker = yield* OrchestrationEffectWorkerV2;
+          const sink = yield* EventSinkV2;
+          const started = yield* threads.sendToThread({
+            commandId: CommandId.make("command:stop-usage-limit:start"),
+            projectId: target.projectId,
+            threadId: target.threadId,
+            messageId: MessageId.make("message:stop-usage-limit:start"),
+            text: "Work until the plan limit",
+            attachments: [],
+            mode: "queue",
+            createdBy: "user",
+            creationSource: "web",
+          });
+          yield* startPendingTestTurn(target.threadId);
+          // Readiness #5: Stop commits, then the provider still reports a usage-limit failure.
+          if (stopped)
+            yield* threads.dispatch({
+              type: "run.interrupt",
+              commandId: CommandId.make("command:stop-usage-limit:stop"),
+              threadId: target.threadId,
+              runId: started.run.id,
+            });
+          const turn = (yield* Ref.get(harness.activeTurns)).get(target.threadId)!;
+          const resetAt = DateTime.formatIso(DateTime.add(yield* DateTime.now, { minutes: 1 }));
+          const failed = yield* sink.stream({ threadId: target.threadId }).pipe(
+            Stream.filter(
+              (stored) =>
+                stored.event.type === "run.updated" &&
+                stored.event.runId === started.run.id &&
+                stored.event.payload.status === "failed",
+            ),
+            Stream.runHead,
+            Effect.forkChild({ startImmediately: true }),
+          );
+          yield* PubSub.publish(turn.events, {
+            type: "turn.terminal",
+            driver,
+            providerThreadId: turn.providerThreadId,
+            providerTurnId: turn.providerTurnId,
+            runOrdinal: turn.runOrdinal,
+            failureItemOrdinal: turn.runOrdinal * 100 + 50,
+            status: "failed",
+            failure: {
+              class: "usage_limit",
+              message: "Plan limit reached.",
+              code: "usageLimitExceeded",
+              retryable: null,
+              resetAt,
+            },
+            threadDisposition: "reusable",
+          });
+          yield* runWorkerUntil(worker, failed);
+          const shell = orchestrator
+            .getShellSnapshot()
+            .pipe(
+              Effect.map((snapshot) =>
+                snapshot.threads.find((thread) => thread.id === target.threadId)!,
+              ),
+            );
+          const arm = limitRecoveryCommand(
+            yield* shell,
+            true,
+            DateTime.toEpochMillis(yield* DateTime.now),
+          );
+          assert.equal(arm?.type, "thread.metadata.update");
+          yield* orchestrator.dispatch(arm!);
+          yield* TestClock.adjust("2 minutes");
+          const resume = limitRecoveryCommand(
+            yield* shell,
+            true,
+            DateTime.toEpochMillis(yield* DateTime.now),
+          );
+          assert.equal(resume?.type, "message.dispatch");
+          yield* orchestrator.dispatch(resume!);
+          const after = yield* orchestrator.getThreadProjection(target.threadId);
+          assert.lengthOf(after.runs, stopped ? 1 : 2);
+          assert.lengthOf(
+            after.messages.filter((message) => message.role === "user"),
+            stopped ? 1 : 2,
+          );
+        }).pipe(Effect.provide(makeTestLayer(harness)));
+      }),
+  );
+}
+
+/** Holds a target's queue the way upstream restart recovery does, behind real active work. */
+const holdTargetQueue = Effect.fn("A2AIntegration.holdTargetQueue")(function* (target: {
+  readonly projectId: ProjectId;
+  readonly threadId: ThreadId;
+}) {
+  const threads = yield* ThreadManagementService;
+  yield* threads.sendToThread({
+    projectId: target.projectId,
+    threadId: target.threadId,
+    commandId: CommandId.make(`command:held:active:${target.threadId}`),
+    messageId: MessageId.make(`message:held:active:${target.threadId}`),
+    text: "Active work",
+    attachments: [],
+    mode: "queue",
+    createdBy: "user",
+    creationSource: "web",
+  });
+  const earlier = yield* threads.sendToThread({
+    projectId: target.projectId,
+    threadId: target.threadId,
+    commandId: CommandId.make(`command:held:earlier:${target.threadId}`),
+    messageId: MessageId.make(`message:held:earlier:${target.threadId}`),
+    text: "Earlier work",
+    attachments: [],
+    mode: "queue",
+    createdBy: "user",
+    creationSource: "web",
+  });
+  yield* (yield* EventSinkV2).write({
+    events: [
+      {
+        id: EventId.make(`event:held:earlier:${target.threadId}`),
+        type: "run.updated",
+        threadId: target.threadId,
+        runId: earlier.run.id,
+        providerInstanceId: earlier.run.providerInstanceId,
+        occurredAt: yield* DateTime.now,
+        payload: { ...earlier.run, status: "queued", queueHeld: true },
+      },
+    ],
+  });
+});
+
+it.effect("keeps held delivery pending and reuses the same message when the queue resumes", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const target = yield* seedTarget("held-queue", "gpt-5.4");
+      const threads = yield* ThreadManagementService;
+      const transport = yield* A2ADeliveryTransport;
+      yield* holdTargetQueue(target);
+      for (let retry = 0; retry < 2; retry++) {
+        const error = yield* transport.deliverAgent(target.delivery).pipe(Effect.flip);
+        assert.instanceOf(error, A2ADeliveryHeldError);
+      }
+      const held = yield* threads.getThreadProjection(target.threadId);
+      assert.lengthOf(
+        held.messages.filter((row) => row.id === deliveryMessageId(target.messageId)),
+        1,
+      );
+      assert.isTrue(
+        held.runs.find((row) => row.userMessageId === deliveryMessageId(target.messageId))
+          ?.queueHeld,
+      );
+      yield* threads.dispatch({
+        type: "queue.resume",
+        commandId: CommandId.make("command:held:resume"),
+        threadId: target.threadId,
+      });
+      yield* transport.deliverAgent(target.delivery);
+      assert.lengthOf(
+        (yield* threads.getThreadProjection(target.threadId)).messages.filter(
+          (row) => row.id === deliveryMessageId(target.messageId),
+        ),
+        1,
+      );
+    }).pipe(Effect.provide(makeTestLayer(harness)));
+  }),
+);
+
+it.effect("settles a held peer delivery once after resume without alarming", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const source = yield* seedTarget("held-worker-source");
+      const target = yield* seedTarget(
+        "held-worker-target",
+        modelSelection.model,
+        undefined,
+        source.squadronId,
+      );
+      const threads = yield* ThreadManagementService;
+      const worker = yield* A2ADeliveryWorker;
+      const sql = yield* SqlClient.SqlClient;
+      yield* holdTargetQueue(target);
+      const sent = yield* (yield* A2ASendService).send({
+        commandId: CommCommandId.make("held-worker:send"),
+        senderThreadId: source.threadId,
+        to: target.receiverId,
+        message: "Wait behind the held queue",
+        acceptedAt: "2026-09-24T00:00:00.000Z",
+      });
+      // Well past the ordinary alarm threshold: a held queue waits for a person.
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        const milestone = yield* worker.runOnce;
+        assert.equal(milestone?.state, "retry_scheduled");
+        assert.equal(milestone?.attempt, attempt);
+        yield* TestClock.adjust(heldQueueRecheckMs(attempt));
+      }
+      assert.lengthOf(yield* worker.listAlarms, 0);
+      yield* threads.dispatch({
+        type: "queue.resume",
+        commandId: CommandId.make("command:held-worker:resume"),
+        threadId: target.threadId,
+      });
+      assert.equal((yield* worker.runOnce)?.state, "delivered");
+      assert.isNull(yield* worker.runOnce);
+      assert.lengthOf(yield* worker.listAlarms, 0);
+      assert.deepStrictEqual(
+        yield* sql`SELECT status FROM j5_a2a_delivery WHERE message_id = ${sent.messageId}`,
+        [{ status: "delivered" }],
+      );
+      const messages = (yield* threads.getThreadProjection(target.threadId)).messages.filter(
+        (row) => row.id === deliveryMessageId(sent.messageId),
+      );
+      assert.lengthOf(messages, 1);
+      // Upstream links the peer message to its sending thread.
+      assert.equal(messages[0]?.senderThreadId, source.threadId);
+    }).pipe(Effect.provide(makeLifecycleTestLayer(harness)));
   }),
 );
