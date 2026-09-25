@@ -644,7 +644,7 @@ indicate approval. The deleted hook remains explicitly marked.
 | `packages/effect-codex-app-server/src/protocol.test.ts`                                                    | A       | G                                         |
 | `packages/effect-codex-app-server/src/schema.test.ts`                                                      | N       | G                                         |
 | `packages/effect-codex-app-server/test/fixtures/codex-app-server-mock-peer.ts`                             | R       | G                                         |
-| `packages/shared/package.json`                                                                             | N       | 43                                        |
+| `packages/shared/package.json`                                                                             | N       | 43, 46                                    |
 | `packages/shared/src/devHome.test.ts`                                                                      | R       | H                                         |
 | `packages/shared/src/devHome.ts`                                                                           | R       | H                                         |
 | `packages/shared/src/model.test.ts`                                                                        | A       | 32                                        |
