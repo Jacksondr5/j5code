@@ -17,13 +17,13 @@ export const NPM_PACKAGE_URL = `https://www.npmjs.com/package/${NPM_PACKAGE}`;
 export type ShipStatus = "underway" | "charted" | "horizon";
 
 export const STATUS_LABEL: Record<ShipStatus, string> = {
-  underway: "Underway",
+  underway: "Shipped",
   charted: "Charted",
   horizon: "Horizon",
 };
 
 export const STATUS_HELP: Record<ShipStatus, string> = {
-  underway: "Shipped and in daily use.",
-  charted: "Defined in the product docs and being built.",
-  horizon: "Direction, not a promise.",
+  underway: "Ready to use",
+  charted: "In dry dock, being built",
+  horizon: "On our roadmap, coming soon",
 };

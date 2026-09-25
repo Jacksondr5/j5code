@@ -1,12 +1,11 @@
 ---
 /**
- * Two servers on one horizon. A Captain and its seats sit on the work server,
- * two seats on the home server, and an Exchange crosses between them: blue
- * out, brass back. Sits on the horizon line that closes the section.
+ * Two fleets on one horizon, far apart, and an Exchange crossing between them:
+ * orange out, green back. Sits on the horizon line that closes the section.
  */
 ---
 
-<svg class="hz" viewBox="0 0 1200 130" preserveAspectRatio="xMidYMax meet" role="img" aria-label="Agents on two servers exchanging a message across the horizon" data-motion>
+<svg class="hz" viewBox="0 0 1200 130" preserveAspectRatio="xMidYMax meet" role="img" aria-label="Two groups of agents exchanging a message across the horizon" data-motion>
   <path class="hz-arc" d="M372 60 Q 640 -30 908 62" />
 
   <g transform="translate(240 66) scale(0.95)"><g class="bob hz-c"><use class="boat boat--dark" href="#j5-captain" /></g></g>
@@ -16,8 +15,6 @@
   <g transform="translate(860 74) scale(0.75)"><g class="bob hz-s3"><use class="boat boat--dark" href="#j5-boat" /></g></g>
   <g transform="translate(930 74) scale(0.75)"><g class="bob hz-s4"><use class="boat boat--dark boat--waiting" href="#j5-boat" /></g></g>
 
-  <text class="hz-label" x="270" y="124" text-anchor="middle">work server</text>
-  <text class="hz-label" x="920" y="124" text-anchor="middle">home server</text>
 
   <circle class="hz-dot hz-dot--ask" r="4" />
   <circle class="hz-dot hz-dot--reply" r="4" />
@@ -39,13 +36,6 @@
     stroke-dasharray: 3 7;
   }
 
-  .hz-label {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    fill: var(--foam-dim, rgba(223, 233, 238, 0.48));
-  }
 
   .hz-c { --bob-dur: 6s; }
   .hz-s1 { --bob-dur: 5.1s; --bob-delay: -2s; }

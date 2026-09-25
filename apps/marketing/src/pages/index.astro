@@ -172,11 +172,7 @@ const harnesses = [
     </div>
     <div class="container">
       <div class="section-head">
-        <h2 class="display">Organize the work. Let the agents talk. Read the state.</h2>
-        <p>
-          T3 Code is built around one agent at a time. J5 is built for the moment you have twelve,
-          most of them not talking to you, and you still need to know who is waiting on whom.
-        </p>
+        <h2 class="display">Tools to Make Your Agents Better</h2>
       </div>
 
       <div class="legend" aria-label="Status legend">
@@ -300,61 +296,37 @@ const harnesses = [
     </div>
   </section>
 
-  <!-- ── Standing orders ──────────────────────────────────────── -->
-  <section class="sec-orders" aria-label="Standing orders" data-motion>
-    <div class="container orders-inner">
-      <span class="orders-boat" aria-hidden="true"><Boat tone="dark" size={52} class="bob" style="--bob-dur:6s" /></span>
-      <ul class="orders">
-        <li><span class="order-n">I</span><span>The platform delivers facts, never judgment.</span></li>
-        <li><span class="order-n">II</span><span>Status is read, never asked.</span></li>
-        <li><span class="order-n">III</span><span>Nothing vanishes silently.</span></li>
-        <li><span class="order-n">IV</span><span>The hierarchy carries decisions, never messages.</span></li>
-      </ul>
-    </div>
-  </section>
-
-  <!-- ── Over the horizon ─────────────────────────────────────── -->
+  <!-- ── On the horizon ───────────────────────────────────────── -->
   <section id="horizon" class="sec-horizon">
     <div class="container">
       <div class="section-head">
-        <h2 class="display">One person, many servers. Then many people.</h2>
+        <h2 class="display">On the Horizon</h2>
         <p>
-          The architecture was drawn for more than one machine and more than one person from the
-          first day, so nothing here needs a rewrite. Here is what is sailing and what is still on the chart.
+          These features will take your agents even further. Fleets communicating across servers,
+          multi-human collaboration, and better sharing.
         </p>
       </div>
 
       <div class="horizon-grid">
         <article class="horizon-col">
-          <Pennant status="underway" />
-          <h3>Multi-server</h3>
-          <p>Your work server and your home server, one inbox.</p>
+          <Pennant status="charted" />
+          <h3>Cross-server A2A</h3>
+          <p>Let agents message other agents, no matter where they are.</p>
           <ul>
-            <li>Servers peer pairwise. Exchanges cross between them, and the receiving server writes its own record.</li>
-            <li>Authority never replicates, so there is no sync to break. Views merge in the client.</li>
-            <li>An unreachable server shows its last-known state with a staleness clock, never as fine.</li>
-          </ul>
-        </article>
-
-        <article class="horizon-col">
-          <span class="pennant-pair"><Pennant status="underway" /><span class="pennant-then">then</span><Pennant status="charted" /></span>
-          <h3>Multi-agent collaboration</h3>
-          <p>Crews and agent-to-agent messaging are live. Next up:</p>
-          <ul>
-            <li>Playbooks, so long procedures survive context decay and progress is a read.</li>
-            <li>Memos, so an agent's "let's talk about that later" is not lost with its context.</li>
-            <li>Cost per Squadron on the Fleet page, with the agents beneath it.</li>
+            <li>Build on T3's server connections to peer servers together.</li>
+            <li>Never worry about putting an agent on the right machine, it can borrow capabilities from anywhere.</li>
+            <li>Messages in your inbox get pulled from everywhere.</li>
           </ul>
         </article>
 
         <article class="horizon-col">
           <Pennant status="charted" />
-          <h3>Multi-person</h3>
-          <p>Shared Squadrons: several people, one server, the same agents.</p>
+          <h3>Cross-person A2A</h3>
+          <p>Remove the meat proxy, let your agents talk to other people's agents.</p>
           <ul>
-            <li>A support team hands a Squadron from one shift to the next with no context transfer.</li>
-            <li>Two developers stand in front of the same agent instead of relaying its output over chat.</li>
-            <li>Every ledger row already carries a person id, so nothing assumes there is exactly one of you.</li>
+            <li>Share agents with others, securely.</li>
+            <li>Collaborate with agents and people in the same place, where the agents can get work done.</li>
+            <li>Hand off an agent and their work to someone else.</li>
           </ul>
         </article>
       </div>
@@ -998,49 +970,6 @@ const harnesses = [
     text-underline-offset: 3px;
   }
 
-  /* ── Standing orders ──────────────────────────────────────── */
-  .sec-orders {
-    padding: 72px 0 56px;
-    background: var(--navy-800);
-  }
-
-  .orders-inner {
-    position: relative;
-  }
-
-  /* Rides above the list now that the strip has no label. */
-  .orders-boat {
-    position: absolute;
-    right: 32px;
-    top: -54px;
-  }
-
-
-  .orders {
-    list-style: none;
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 24px;
-  }
-
-  .orders li {
-    display: flex;
-    gap: 14px;
-    align-items: baseline;
-    font-family: var(--font-display);
-    font-size: 19px;
-    line-height: 1.35;
-    color: var(--foam);
-    padding-left: 16px;
-    border-left: 1px solid var(--line-strong);
-  }
-
-  .order-n {
-    font-size: 13px;
-    color: var(--brass);
-    font-family: var(--font-mono);
-    letter-spacing: 0.1em;
-  }
 
   /* ── Horizon ──────────────────────────────────────────────── */
   .sec-horizon {
@@ -1068,8 +997,9 @@ const harnesses = [
 
   .horizon-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 28px;
+    max-width: 900px;
   }
 
   .horizon-col {
@@ -1119,18 +1049,6 @@ const harnesses = [
     background: var(--brass);
   }
 
-  .pennant-pair {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .pennant-then {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    color: var(--foam-dim);
-    letter-spacing: 0.08em;
-  }
 
   /* ── CTA ──────────────────────────────────────────────────── */
   .sec-cta {
@@ -1208,13 +1126,7 @@ const harnesses = [
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .orders {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
 
-    .horizon-grid {
-      grid-template-columns: 1fr;
-    }
   }
 
   @media (max-width: 820px) {
@@ -1234,7 +1146,7 @@ const harnesses = [
     .feature-grid,
     .feature-grid--minor,
     .feature--wide,
-    .orders {
+    .horizon-grid {
       grid-template-columns: 1fr;
     }
 
@@ -1261,10 +1173,6 @@ const harnesses = [
       gap: 12px;
     }
 
-    .orders-boat {
-      right: 20px;
-      top: -46px;
-    }
 
     .harness-float {
       height: 130px;
