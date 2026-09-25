@@ -86,6 +86,10 @@ import {
   unknownRecord,
 } from "../../provider/acp/AcpClientPolicy.ts";
 import {
+  j5AcpMcpElicitationDisposition,
+  j5AcpPermissionResponse,
+} from "../../j5/a2a/mcp/acpToolApproval.ts";
+import {
   makeAcpClientTerminals,
   resolveEmbeddedTerminalContent,
   type AcpClientTerminals,
@@ -5214,6 +5218,15 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
                 handlerGeneration,
                 Effect.gen(function* () {
                   const context = yield* activeContext;
+                  // J5 fork extension: one-time allow for proven J5 calls (see acpToolApproval.ts).
+                  const j5Response = j5AcpPermissionResponse(
+                    context.input.runtimePolicy,
+                    params,
+                    context.tools,
+                    context.nativeThreadId,
+                  );
+                  if (j5Response !== undefined)
+                    return { _tag: "Immediate" as const, response: j5Response };
                   const disposition = acpPermissionDisposition(context.input.runtimePolicy, params);
                   if (disposition === "allow") {
                     const optionId = selectAutoApprovedPermissionOption(params);
@@ -5339,11 +5352,21 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
                   handlerGeneration,
                   Effect.gen(function* () {
                     const context = yield* activeContext;
-                    const disposition = acpMcpToolApprovalElicitationDisposition(
-                      context.input.runtimePolicy,
-                      params,
-                      transportRequestId,
-                    );
+                    const disposition =
+                      j5AcpMcpElicitationDisposition(
+                        context.input.runtimePolicy,
+                        transportRequestId,
+                        "sessionId" in params && typeof params.sessionId === "string"
+                          ? params.sessionId
+                          : undefined,
+                        context.tools,
+                        context.nativeThreadId,
+                      ) ??
+                      acpMcpToolApprovalElicitationDisposition(
+                        context.input.runtimePolicy,
+                        params,
+                        transportRequestId,
+                      );
                     if (disposition === undefined || disposition === "ask") {
                       return disposition;
                     }
