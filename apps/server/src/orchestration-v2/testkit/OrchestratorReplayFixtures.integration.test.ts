@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import type { OrchestrationV2DomainEvent, ProviderReplayTranscript } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 
 import { ClaudeOrchestratorReplayHarness } from "../Adapters/ClaudeAdapterV2.testkit.ts";
 import { CodexOrchestratorReplayHarness } from "../Adapters/CodexAdapterV2.testkit.ts";
@@ -25,15 +26,13 @@ import {
 } from "./ProviderReplayHarness.ts";
 import { checkpointWorkspace } from "./ReplayFixtureWorkspace.ts";
 import {
-  decodeProviderReplayNdjson,
   materializeReplayTranscriptRuntimeInstructions,
   materializeReplayTranscriptWorkspace,
+  readProviderReplayTranscript,
 } from "./ReplayTranscriptNdjson.ts";
 
 const readTranscript = Effect.fn("readOrchestratorReplayTranscript")(function* (file: URL) {
-  const fs = yield* FileSystem.FileSystem;
-  const text = yield* fs.readFileString(decodeURIComponent(file.pathname));
-  return yield* decodeProviderReplayNdjson(text);
+  return yield* readProviderReplayTranscript(file);
 }, Effect.provide(NodeServices.layer));
 
 function normalizeTestError(cause: unknown): Error {
@@ -80,7 +79,6 @@ const runFixtureProvider = Effect.fn("runOrchestratorReplayFixture")(function* <
   readonly buildInput: () => OrchestratorFixtureInput;
   readonly driver: ProviderOrchestratorReplayVariant;
   readonly harness: OrchestratorV2ProviderReplayHarness<Transcript, Error>;
-  readonly enableLegacyTokenStreaming?: boolean;
 }) {
   const rawTranscript = yield* readTranscript(input.driver.transcriptFile);
   const replayTranscript = materializeReplayTranscriptRuntimeInstructions(
@@ -111,16 +109,27 @@ const runFixtureProvider = Effect.fn("runOrchestratorReplayFixture")(function* <
     },
   };
 
-  const result = yield* runOrchestratorV2ProviderReplayScenario(scenario, input.harness, {
-    enableLegacyTokenStreaming: input.enableLegacyTokenStreaming ?? false,
-  }).pipe(provideDeterministicTestRuntime);
+  const result = yield* runOrchestratorV2ProviderReplayScenario(scenario, input.harness).pipe(
+    provideDeterministicTestRuntime,
+  );
   input.driver.assertOutput(result, transcript);
-  if (input.enableLegacyTokenStreaming !== true) {
-    assert.isFalse(
-      result.domainEvents.some(isStreamingAssistantEvent),
-      "buffered delivery must not persist streaming assistant artifacts",
-    );
+  const expectedAbsentWorkspacePaths = input.driver.expectedAbsentWorkspacePaths;
+  if (expectedAbsentWorkspacePaths !== undefined) {
+    yield* Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      for (const relativePath of expectedAbsentWorkspacePaths) {
+        assert.isFalse(
+          yield* fs.exists(path.join(workspace, relativePath)),
+          `${input.fixtureName}/${input.driver.driver} must not create ${relativePath} in the replay workspace`,
+        );
+      }
+    }).pipe(Effect.provide(NodeServices.layer));
   }
+  assert.isFalse(
+    result.domainEvents.some(isStreamingAssistantEvent),
+    "buffered delivery must not persist streaming assistant artifacts",
+  );
   const projectionThreadId = materialized.projectionThreadIds[0];
   assert.isDefined(projectionThreadId);
   const projection = result.projections.get(projectionThreadId);
@@ -144,7 +153,6 @@ function runFixtureProviderWithRegisteredHarness(input: {
   readonly fixtureName: string;
   readonly buildInput: () => OrchestratorFixtureInput;
   readonly driver: ProviderOrchestratorReplayVariant;
-  readonly enableLegacyTokenStreaming?: boolean;
 }) {
   switch (input.driver.driver) {
     case "codex":
@@ -211,32 +219,6 @@ describe("orchestrator replay fixtures", () => {
         fixtureName: "message_steering",
         buildInput: messageRestartInput,
         driver: cursorSteeringProvider,
-      }),
-    );
-  }
-
-  const simpleFixture = ORCHESTRATOR_REPLAY_FIXTURES.find((fixture) => fixture.name === "simple");
-  const simpleCursorProvider = simpleFixture?.providers.find(
-    (provider) => provider.driver === "cursor",
-  );
-  if (simpleFixture !== undefined && simpleCursorProvider !== undefined) {
-    it.effect("streams Cursor assistant artifacts only when streaming is enabled", () =>
-      Effect.gen(function* () {
-        const result = yield* runFixtureProviderWithRegisteredHarness({
-          fixtureName: "simple-cursor-streaming",
-          buildInput: simpleFixture.buildInput,
-          driver: simpleCursorProvider,
-          enableLegacyTokenStreaming: true,
-        });
-
-        assert.deepEqual(
-          Array.from(
-            new Set(
-              result.domainEvents.filter(isStreamingAssistantEvent).map((event) => event.type),
-            ),
-          ).toSorted(),
-          ["message.updated", "node.updated", "turn-item.updated"],
-        );
       }),
     );
   }

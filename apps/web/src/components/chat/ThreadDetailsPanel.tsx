@@ -5,7 +5,6 @@ import type {
   ResolvedKeybindingsConfig,
   ThreadId,
 } from "@t3tools/contracts";
-import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import { AlertTriangleIcon, XIcon } from "lucide-react";
 
 import type { DraftId } from "../../composerDraftStore";
@@ -19,9 +18,10 @@ import ProjectScriptsControl, {
   type ProjectScriptActionResult,
 } from "../ProjectScriptsControl";
 import { Button } from "../ui/button";
-import { ScrollArea } from "../ui/scroll-area";
-import { cn } from "../../lib/utils";
+import type { ComponentProps } from "react";
+import { ThreadDetailsCard } from "./ThreadDetailsCard";
 import { OpenInPicker } from "./OpenInPicker";
+import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 
@@ -31,11 +31,12 @@ interface VersionMismatchIssue {
   readonly serverLabel: string;
 }
 
-export interface ThreadDetailsPanelProps {
-  mode: "inline" | "popover";
-  onClose?: () => void;
+export interface ThreadDetailsPanelProps extends Pick<
+  ComponentProps<typeof ThreadDetailsCard>,
+  "anchor" | "handle" | "onPresentationChange"
+> {
+  forceNewWorktree?: boolean;
   environmentId: EnvironmentId;
-  environmentConnection: EnvironmentConnectionPresentation | null;
   threadId: ThreadId;
   draftId?: DraftId;
   activeProjectName: string | undefined;
@@ -48,6 +49,8 @@ export interface ThreadDetailsPanelProps {
   isGitRepo: boolean;
   envLocked: boolean;
   availableEnvironments: readonly EnvironmentOption[];
+  autoEnvironmentLabel?: string | undefined;
+  onAutoEnvironment?: (() => void) | undefined;
   onEnvironmentChange: (environmentId: EnvironmentId) => void;
   onEnvModeChange: (mode: EnvMode) => void;
   effectiveEnvModeOverride?: EnvMode;
@@ -58,8 +61,6 @@ export interface ThreadDetailsPanelProps {
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest: () => void;
   onOpenChanges?: () => void;
-  onReconnectEnvironment: () => void;
-  onOpenConnectionSettings: () => void;
   versionMismatch: VersionMismatchIssue | null;
   onDismissVersionMismatch: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
@@ -76,13 +77,6 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
     props.environmentId,
     props.activeProjectScripts ? props.gitCwd : null,
   );
-  const connectionIssue =
-    props.environmentConnection !== null &&
-    props.environmentConnection.phase !== "connected" &&
-    props.environmentConnection.phase !== "available";
-  const isReconnecting =
-    props.environmentConnection?.phase === "connecting" ||
-    props.environmentConnection?.phase === "reconnecting";
   const branchToolbarProps = {
     showGitControls: props.isGitRepo,
     environmentId: props.environmentId,
@@ -101,180 +95,132 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
       ? { onActiveThreadBranchOverrideChange: props.onActiveThreadBranchOverrideChange }
       : {}),
     envLocked: props.envLocked,
+    forceNewWorktree: props.forceNewWorktree ?? false,
     onComposerFocusRequest: props.onComposerFocusRequest,
     ...(props.onCheckoutPullRequestRequest
       ? { onCheckoutPullRequestRequest: props.onCheckoutPullRequestRequest }
       : {}),
   };
 
-  const card = (
-    <div
-      className={cn(
-        // A single-track grid, because a grid area is a definite containing block: the card's own
-        // height is "content, clamped by max-height", which percentages treat as indefinite — as
-        // a plain block (or even a flex column) every `h-full`/`max-h-full` down the chain
-        // resolved to nothing, the scroll area's viewport stayed at its content height, and the
-        // card's overflow-hidden clipped the content instead of scrolling it. `minmax(0,1fr)`
-        // still shrink-wraps short content while letting the clamp bite on tall content.
-        "dropdown-glass isolate contain-paint grid max-h-full grid-rows-[minmax(0,1fr)] overflow-hidden rounded-[20px]",
-        // The popup's real ceiling is what base-ui measured for it — the anchor's clipping
-        // ancestors, which is how an open terminal drawer shrinks it — less the popover
-        // viewport's own p-2. The dvh term is the fallback's fallback, from before.
-        props.mode === "popover" &&
-          "max-h-[min(calc(100dvh-6.5rem),calc(var(--available-height,100dvh)-1rem))]",
-      )}
-      data-thread-details-card
+  return (
+    <ThreadDetailsCard
+      threadRef={{ environmentId: props.environmentId, threadId: props.threadId }}
+      anchor={props.anchor}
+      handle={props.handle}
+      onPresentationChange={props.onPresentationChange}
     >
-      <ScrollArea scrollFade className="min-h-0">
-        <section aria-labelledby="thread-details-workspace-heading">
-          <div className="flex min-h-10 items-center justify-between gap-3 px-3.5 pb-1 pt-3">
-            <h3
-              id="thread-details-workspace-heading"
-              className="text-[11px] font-medium text-muted-foreground"
-            >
-              Workspace
-            </h3>
-          </div>
-
-          {connectionIssue ? (
-            <div className="mx-3 mb-2 rounded-xl border border-warning/30 bg-warning/6 p-3">
-              <div className="flex gap-2">
+      {(density) => (
+        <>
+          <ThreadDetailsSection
+            headingId="thread-details-workspace-heading"
+            title="Workspace"
+            separated={false}
+            showHeading={density === "full"}
+          >
+            {props.versionMismatch ? (
+              <div className="mx-1 mb-2 flex gap-2 rounded-xl border border-warning/30 bg-warning/6 p-3">
                 <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium">Environment unavailable</p>
+                  <p className="text-xs font-medium">Client and server versions differ</p>
                   <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                    {props.environmentConnection?.error ??
-                      "Reconnect this environment before sending messages or running actions."}
+                    Client {props.versionMismatch.clientVersion} ·{" "}
+                    {props.versionMismatch.serverLabel} {props.versionMismatch.serverVersion}
                   </p>
-                  <div className="mt-2 flex items-center gap-1.5">
-                    <Button
-                      size="xs"
-                      disabled={isReconnecting}
-                      onClick={props.onReconnectEnvironment}
-                    >
-                      {isReconnecting ? "Reconnecting..." : "Reconnect"}
-                    </Button>
-                    <Button size="xs" variant="ghost" onClick={props.onOpenConnectionSettings}>
-                      Connections
-                    </Button>
-                  </div>
                 </div>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label="Dismiss version mismatch warning"
+                  onClick={props.onDismissVersionMismatch}
+                >
+                  <XIcon className="size-3.5" />
+                </Button>
               </div>
-            </div>
-          ) : null}
-
-          {props.versionMismatch ? (
-            <div className="mx-3 mb-2 flex gap-2 rounded-xl border border-warning/30 bg-warning/6 p-3">
-              <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium">Client and server versions differ</p>
-                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                  Client {props.versionMismatch.clientVersion} · {props.versionMismatch.serverLabel}{" "}
-                  {props.versionMismatch.serverVersion}
-                </p>
-              </div>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                aria-label="Dismiss version mismatch warning"
-                onClick={props.onDismissVersionMismatch}
-              >
-                <XIcon className="size-3.5" />
-              </Button>
-            </div>
-          ) : null}
-
-          <div className="flex flex-col px-2 pb-2.5">
-            {props.availableEnvironments.length > 1 ? (
-              <BranchToolbarEnvironmentSelector
-                displayMode="panel"
-                envLocked={props.envLocked}
-                environmentId={props.environmentId}
-                availableEnvironments={props.availableEnvironments}
-                onEnvironmentChange={props.onEnvironmentChange}
-              />
             ) : null}
 
-            <BranchToolbar layout="panel" panelSection="workspace" {...branchToolbarProps} />
-
-            {props.showOpenInPicker ? (
-              <OpenInPicker
-                environmentId={props.environmentId}
-                keybindings={props.keybindings}
-                availableEditors={props.availableEditors}
-                openInCwd={props.gitCwd}
-                displayMode="panel"
-              />
-            ) : null}
-
-            {props.activeProjectScripts ? (
-              <ProjectScriptsControl
-                displayMode="panel"
-                scripts={props.activeProjectScripts}
-                fileScripts={fileScripts}
-                keybindings={props.keybindings}
-                preferredScriptId={props.preferredScriptId}
-                onRunScript={props.onRunProjectScript}
-                onAddScript={props.onAddProjectScript}
-                onUpdateScript={props.onUpdateProjectScript}
-                onDeleteScript={props.onDeleteProjectScript}
-              />
-            ) : null}
-          </div>
-        </section>
-
-        {props.gitCwd ? (
-          <section
-            aria-labelledby="thread-details-version-control-heading"
-            className="border-t border-border/65"
-          >
-            <div className="px-3.5 pb-1 pt-3">
-              <h3
-                id="thread-details-version-control-heading"
-                className="text-[11px] font-medium text-muted-foreground"
-              >
-                Version Control
-              </h3>
-            </div>
-            <div className="flex flex-col px-2 pb-2.5">
-              {props.isGitRepo ? (
-                <BranchToolbar layout="panel" panelSection="branch" {...branchToolbarProps} />
-              ) : null}
-              {props.activeProjectName ? (
-                <GitActionsControl
+            <div className="flex flex-col">
+              {density === "full" && props.availableEnvironments.length > 1 ? (
+                <BranchToolbarEnvironmentSelector
                   displayMode="panel"
-                  gitCwd={props.gitCwd}
-                  activeThreadRef={{ environmentId: props.environmentId, threadId: props.threadId }}
-                  {...(props.draftId ? { draftId: props.draftId } : {})}
-                  {...(props.onOpenChanges ? { onOpenChanges: props.onOpenChanges } : {})}
+                  autoEnvironmentLabel={props.autoEnvironmentLabel}
+                  onAutoEnvironment={props.onAutoEnvironment}
+                  envLocked={props.envLocked}
+                  environmentId={props.environmentId}
+                  availableEnvironments={props.availableEnvironments}
+                  onEnvironmentChange={props.onEnvironmentChange}
+                />
+              ) : null}
+
+              {density === "full" ? (
+                <BranchToolbar layout="panel" panelSection="workspace" {...branchToolbarProps} />
+              ) : null}
+
+              {density !== "essential" && props.showOpenInPicker ? (
+                <OpenInPicker
+                  environmentId={props.environmentId}
+                  keybindings={props.keybindings}
+                  availableEditors={props.availableEditors}
+                  openInCwd={props.gitCwd}
+                  displayMode="panel"
+                />
+              ) : null}
+
+              {props.activeProjectScripts ? (
+                <ProjectScriptsControl
+                  displayMode="panel"
+                  scripts={props.activeProjectScripts}
+                  fileScripts={fileScripts}
+                  keybindings={props.keybindings}
+                  preferredScriptId={props.preferredScriptId}
+                  onRunScript={props.onRunProjectScript}
+                  onAddScript={props.onAddProjectScript}
+                  onUpdateScript={props.onUpdateProjectScript}
+                  onDeleteScript={props.onDeleteProjectScript}
                 />
               ) : null}
             </div>
-          </section>
-        ) : null}
+          </ThreadDetailsSection>
 
-        {!props.draftId ? (
-          <ThreadAutomationsPanel environmentId={props.environmentId} threadId={props.threadId} />
-        ) : null}
+          {props.gitCwd ? (
+            <ThreadDetailsSection
+              headingId="thread-details-version-control-heading"
+              title="Version Control"
+              showHeading={density === "full"}
+              separated={density === "full"}
+            >
+              <div className="flex flex-col">
+                {props.isGitRepo ? (
+                  <BranchToolbar layout="panel" panelSection="branch" {...branchToolbarProps} />
+                ) : null}
+                {props.activeProjectName ? (
+                  <GitActionsControl
+                    displayMode="panel"
+                    compact={density !== "full"}
+                    gitCwd={props.gitCwd}
+                    activeThreadRef={{
+                      environmentId: props.environmentId,
+                      threadId: props.threadId,
+                    }}
+                    {...(props.draftId ? { draftId: props.draftId } : {})}
+                    {...(props.onOpenChanges ? { onOpenChanges: props.onOpenChanges } : {})}
+                  />
+                ) : null}
+              </div>
+            </ThreadDetailsSection>
+          ) : null}
 
-        {!props.draftId ? (
-          <ThreadRelationshipsPanel environmentId={props.environmentId} threadId={props.threadId} />
-        ) : null}
-      </ScrollArea>
-    </div>
-  );
+          {density === "full" && !props.draftId ? (
+            <ThreadAutomationsPanel environmentId={props.environmentId} threadId={props.threadId} />
+          ) : null}
 
-  if (props.mode === "popover") {
-    return <div data-thread-details-panel="popover">{card}</div>;
-  }
-
-  return (
-    <aside
-      aria-label="Thread details"
-      className="absolute inset-y-0 right-[var(--app-scrollbar-width)] z-20 w-[var(--thread-details-panel-width)] p-3"
-      data-thread-details-panel="inline"
-    >
-      {card}
-    </aside>
+          {density === "full" && !props.draftId ? (
+            <ThreadRelationshipsPanel
+              environmentId={props.environmentId}
+              threadId={props.threadId}
+            />
+          ) : null}
+        </>
+      )}
+    </ThreadDetailsCard>
   );
 }

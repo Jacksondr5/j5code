@@ -16,7 +16,7 @@ const monitoring = SquadronId.make("squadron:monitoring");
 const support = SquadronId.make("squadron:support");
 
 const makeTestLayer = () => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const machines = machineParticipantLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   return Layer.mergeAll(database, ledger, machines);

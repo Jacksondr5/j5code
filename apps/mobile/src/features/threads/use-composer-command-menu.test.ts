@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { ProviderDriverKind } from "@t3tools/contracts";
+vi.mock("react-native", () => ({ Alert: { alert: vi.fn() } }));
 
 vi.mock("../../j5/agents/useAgentMentionPicker", () => ({
   useAgentMentionPicker: () => ({ items: [], isPending: false, error: null }),
@@ -7,7 +8,13 @@ vi.mock("../../j5/agents/useAgentMentionPicker", () => ({
 
 vi.mock("../../state/queries", () => ({
   useComposerPathSearch: () => ({ entries: [], isPending: false }),
+  useComposerPullRequestSearch: () => ({ entries: [], isPending: false, error: null }),
 }));
+vi.mock("../../state/use-composer-drafts", () => ({
+  getComposerDraftSnapshot: vi.fn(),
+  setComposerDraftContext: vi.fn(),
+}));
+vi.mock("../../lib/uuid", () => ({ uuidv4: () => "context-id" }));
 vi.mock("../../state/server", () => ({
   serverEnvironment: { refreshProviders: Symbol("refreshProviders") },
 }));

@@ -156,7 +156,7 @@ T3_MCP_BEARER_TOKEN=<provider-session-token>
 
 The extension connects to that HTTP endpoint, lists tools, and registers each
 one with `pi.registerTool` under a `mcp__t3-code__` namespace
-(`mcp__t3-code__delegate_task`, `mcp__t3-code__t3_thread_start`, and the rest).
+(`mcp__t3-code__delegate_task`, `mcp__t3-code__t3_thread_launch`, and the rest).
 The bridge calls the original MCP tool name over HTTP. Follow-up requests send
 `mcp-protocol-version: 2025-06-18`; Effect's MCP transport returns 400
 without it. The first turn of a session also receives the shared T3
@@ -170,13 +170,16 @@ extension is installed, the adapter observes its documented `details.results`
 shape and projects task cards with no child thread id. Unknown result shapes
 remain ordinary dynamic tool output.
 
-### Initial Provider Support
+### Provider Support
 
-The V2 provider adapters are Codex, Claude Agent SDK, Cursor Agent SDK, Grok
-plus generic registry agents over ACP, OpenCode, OpenCode 2, and Pi.
-Capability discovery still reports other registered provider instances, but marks them
-unavailable for orchestration when no V2 adapter exists. This keeps provider
-selection model-visible without allowing a request that cannot run.
+A provider instance can run child tasks when its live `ProviderInstance`
+exposes a V2 `orchestrationAdapter` — the same registration the orchestrator
+resolves when a `delegated_task.request` executes. That covers Codex, Claude
+Agent SDK, Cursor Agent SDK, Grok, generic registry agents over ACP, OpenCode,
+OpenCode 2, Pi, Antigravity, and any future driver that builds an adapter.
+Capability discovery still reports other registered provider instances, but
+marks them unavailable for orchestration when no adapter resolves. This keeps
+provider selection model-visible without allowing a request that cannot run.
 
 ## Tool Surface
 
@@ -219,7 +222,10 @@ type DelegateTaskInput = {
 ```
 
 Provider, model, runtime mode, and interaction mode inherit from the parent
-when omitted. Selecting a different provider without a model uses that
+when omitted. A driver-only target inherits the parent's provider instance
+when it can run child tasks, and otherwise selects an available instance of
+that driver; an explicit `providerInstanceId` is honored exactly and fails
+when unavailable. Selecting a different provider without a model uses that
 provider's first advertised model.
 
 Delegation requires an active parent run owned by the MCP credential's
@@ -295,12 +301,20 @@ inherit the parent's project, branch, and worktree path, but they have no
 sub-agent lineage. Entries with a prompt immediately dispatch a run; entries
 without a prompt remain idle.
 
-### `t3_thread_start`
+### `t3_thread_launch`
 
-Creates one ordinary top-level thread and immediately dispatches its first
-prompt. It is the single-thread convenience form of `create_threads` and
-returns the created thread and run IDs. Use `clientRequestId` when a caller may
-retry the request.
+Launches one ordinary top-level thread through the app's launch service. Use an
+explicit `workspaceStrategy` to create a new worktree (`worktree` with `baseRef`),
+attach an existing checkout (`existing_worktree` with `worktreePath`), or use the
+project root (`root`, also the default). The thread is bound to that workspace
+before the agent starts. Creating a worktree in the task prompt does not update
+this binding.
+
+Pass the task in `message`. Project, model, and modes inherit when omitted;
+workspace does not. For stacked PRs, use the parent branch as `baseRef` with
+`startFromOrigin: false`. Launch requires a full-access/default caller and has
+no retry key, so inspect existing threads after a failed or lost response before
+launching again. `create_threads` remains the batch option for a shared checkout.
 
 ### `t3_thread_list`
 

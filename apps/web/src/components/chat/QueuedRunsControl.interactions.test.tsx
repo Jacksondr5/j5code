@@ -28,7 +28,6 @@ vi.mock("../../state/threads", () => ({
     reorderQueuedRun: "reorder",
     promoteQueuedRun: "promote",
     cancelQueuedRun: "cancel",
-    interruptTurn: "interrupt",
   },
 }));
 vi.mock("../../state/use-atom-command", () => ({
@@ -59,42 +58,39 @@ const attachment = {
   mimeType: "image/png",
   sizeBytes: 10,
 };
-const projection = (steerable: boolean, nativeSteer = true) =>
-  ({
-    thread: { id: threadId, activeProviderThreadId: "provider-thread" },
-    runs: [
-      {
-        id: "active",
-        status: steerable ? "running" : "starting",
-        activeAttemptId: "attempt",
-        providerThreadId: "provider-thread",
-        ordinal: 1,
-      },
-      { id: "queue-1", status: "queued", userMessageId: "message-1", ordinal: 2, queuePosition: 1 },
-      { id: "queue-2", status: "queued", userMessageId: "message-2", ordinal: 3, queuePosition: 2 },
-    ],
-    messages: [
-      { id: "message-1", text: peerMessage, attachments: [attachment] },
-      { id: "message-2", text: "Second message", attachments: [] },
-    ],
-    providerThreads: [
-      { id: "provider-thread", appThreadId: threadId, providerSessionId: "session" },
-    ],
-    providerSessions: [
-      {
-        id: "session",
-        status: "running",
-        capabilities: {
-          turns: {
-            supportsQueuedMessages: true,
-            supportsActiveSteering: nativeSteer,
-            supportsSteeringByInterruptRestart: true,
-          },
+const projection = {
+  thread: { id: threadId, activeProviderThreadId: "provider-thread" },
+  runs: [
+    {
+      id: "active",
+      status: "running",
+      activeAttemptId: "attempt",
+      providerThreadId: "provider-thread",
+      ordinal: 1,
+    },
+    { id: "queue-1", status: "queued", userMessageId: "message-1", ordinal: 2, queuePosition: 1 },
+    { id: "queue-2", status: "queued", userMessageId: "message-2", ordinal: 3, queuePosition: 2 },
+  ],
+  messages: [
+    { id: "message-1", text: peerMessage, attachments: [attachment] },
+    { id: "message-2", text: "Second message", attachments: [] },
+  ],
+  providerThreads: [{ id: "provider-thread", appThreadId: threadId, providerSessionId: "session" }],
+  providerSessions: [
+    {
+      id: "session",
+      status: "running",
+      capabilities: {
+        turns: {
+          supportsQueuedMessages: true,
+          supportsActiveSteering: false,
+          supportsSteeringByInterruptRestart: true,
         },
       },
-    ],
-    providerTurns: steerable ? [{ runAttemptId: "attempt", status: "running" }] : [],
-  }) as unknown as OrchestrationV2ThreadProjection;
+    },
+  ],
+  providerTurns: [{ runAttemptId: "attempt", status: "running" }],
+} as unknown as OrchestrationV2ThreadProjection;
 let renderer: ReactTestRenderer | undefined;
 const onEditQueuedRun = vi.fn();
 const render = () => (
@@ -122,7 +118,7 @@ afterEach(async () => {
 
 describe("queued peer rows in the upstream queue controls", () => {
   it("retains attachments and edit payloads, reorders with the keyboard, and promotes against the selected environment", async () => {
-    fixture.projection = projection(true, false);
+    fixture.projection = projection;
     await act(() => {
       renderer = create(render());
     });
@@ -150,40 +146,12 @@ describe("queued peer rows in the upstream queue controls", () => {
     });
     const promote = root
       .findAllByType("button")
-      .find((button) => button.children.includes("Interrupt and restart with this message"))!;
+      .find((button) => button.children.includes("Steer"))!;
     expect(promote.props.disabled).toBe(false);
     await act(() => promote.props.onClick());
     expect(fixture.command).toHaveBeenLastCalledWith("promote", {
       environmentId,
       input: { threadId, queuedRunId: "queue-1", targetRunId: "active" },
     });
-  });
-
-  it("keeps unavailable steer separate from collapse and allows explicit interruption", async () => {
-    fixture.projection = projection(false);
-    await act(() => {
-      renderer = create(render());
-    });
-    const root = renderer!.root;
-    const buttons = root.findAllByType("button");
-    const steer = buttons.find((button) => button.children.includes("Steer"))!;
-    expect(steer.props.disabled).toBe(true);
-    const collapse = buttons.find(
-      (button) => button.props["aria-label"] === "Collapse queued messages",
-    )!;
-    expect(collapse.findAllByType("button")).toHaveLength(1);
-    await act(() => collapse.props.onClick());
-    expect(
-      root
-        .findAllByType("button")
-        .some((button) => button.props["aria-label"] === "Expand queued messages"),
-    ).toBe(true);
-    const interrupt = buttons.find((button) => button.children.includes("Interrupt"))!;
-    await act(() => interrupt.props.onClick());
-    expect(fixture.command).toHaveBeenCalledExactlyOnceWith("interrupt", {
-      environmentId,
-      input: { threadId },
-    });
-    expect(root.findAllByType("li")).toHaveLength(2);
   });
 });
