@@ -1,6 +1,5 @@
 import {
   type CommandId,
-  type OrchestrationV2ThreadProjection,
   type ProviderApprovalDecision,
   type ProviderUserInputAnswers,
   type RuntimeRequestId,
@@ -9,12 +8,15 @@ import {
 import type { CrewRuntimeRequestItem } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import type { SqlError } from "effect/unstable/sql/SqlError";
 
+import { pendingCrewThreadRequests } from "@t3tools/shared/j5/crewRuntimeRequests";
+import type { OrchestratorV2Error } from "../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
+import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 
 /** The thread a request lives on, and where it sits in its Crew. */
 interface CrewThread {
@@ -24,62 +26,7 @@ interface CrewThread {
   readonly seat: string | null;
 }
 
-/**
- * Pending provider approvals and questions on one thread, the same selection the web composer
- * shows inline (`derivePendingThreadRequests` in client-runtime, which the server cannot import):
- * pending requests only, questions with their `user_input_request` item, and approvals minus
- * `auth_refresh` and `dynamic_tool_call`, which are not the person's to answer.
- */
-type PendingCrewThreadRequest = Pick<
-  CrewRuntimeRequestItem,
-  "requestId" | "createdAt" | "responseCapability" | "request"
->;
-
-export const pendingCrewThreadRequests = (
-  projection: Pick<OrchestrationV2ThreadProjection, "runtimeRequests" | "turnItems">,
-): ReadonlyArray<PendingCrewThreadRequest> =>
-  projection.runtimeRequests.flatMap((request): Array<PendingCrewThreadRequest> => {
-    if (request.status !== "pending") return [];
-    const base = {
-      requestId: request.id,
-      createdAt: DateTime.formatIso(request.createdAt),
-      responseCapability: request.responseCapability.type,
-    };
-    if (request.kind === "user_input") {
-      const item = projection.turnItems.findLast(
-        (candidate) =>
-          candidate.type === "user_input_request" && candidate.requestId === request.id,
-      );
-      return item?.type === "user_input_request"
-        ? [{ ...base, request: { kind: "user_input" as const, questions: item.questions } }]
-        : [];
-    }
-    if (request.kind === "auth_refresh" || request.kind === "dynamic_tool_call") return [];
-    const item = projection.turnItems.findLast(
-      (candidate) => candidate.type === "approval_request" && candidate.requestId === request.id,
-    );
-    const approval = item?.type === "approval_request" ? item : undefined;
-    return [
-      {
-        ...base,
-        request: {
-          kind: "approval" as const,
-          requestKind: request.kind,
-          detail: approval?.prompt || null,
-          appName: approval?.appName || null,
-          options: approval?.options ?? null,
-        },
-      },
-    ];
-  });
-
-/** The orchestrator's own reason when it gave one, rather than its generic dispatch message. */
-const dispatchReason = (error: unknown): string => {
-  const record =
-    typeof error === "object" && error !== null ? (error as Record<string, unknown>) : {};
-  if (typeof record.cause === "string" && record.cause.length > 0) return record.cause;
-  return typeof record.message === "string" ? record.message : String(error);
-};
+export { pendingCrewThreadRequests } from "@t3tools/shared/j5/crewRuntimeRequests";
 
 export class CrewRuntimeRequestNotFoundError extends Data.TaggedError(
   "CrewRuntimeRequestNotFoundError",
@@ -106,6 +53,18 @@ export class CrewRuntimeRequestInvalidError extends Data.TaggedError(
   }
 }
 
+/** The answer could not be sent for a reason other than the request's state; the route logs it. */
+export class CrewRuntimeRequestDispatchError extends Data.TaggedError(
+  "CrewRuntimeRequestDispatchError",
+)<{ readonly cause: OrchestratorV2Error }> {
+  override get message() {
+    return "The answer could not be sent.";
+  }
+}
+
+/** Reading the Crews or a thread failed; never read as "nothing pending" or "not found". */
+type CrewRuntimeRequestReadError = SqlError | OrchestratorV2Error;
+
 export interface RespondToCrewRuntimeRequestInput {
   readonly threadId: ThreadId;
   readonly requestId: RuntimeRequestId;
@@ -117,7 +76,7 @@ export interface RespondToCrewRuntimeRequestInput {
 
 export interface CrewRuntimeRequestServiceShape {
   /** Every pending approval and question on a live Crew's Captain and seat threads. */
-  readonly list: Effect.Effect<ReadonlyArray<CrewRuntimeRequestItem>>;
+  readonly list: Effect.Effect<ReadonlyArray<CrewRuntimeRequestItem>, CrewRuntimeRequestReadError>;
   readonly respond: (
     input: RespondToCrewRuntimeRequestInput,
   ) => Effect.Effect<
@@ -125,6 +84,8 @@ export interface CrewRuntimeRequestServiceShape {
     | CrewRuntimeRequestNotFoundError
     | CrewRuntimeRequestConflictError
     | CrewRuntimeRequestInvalidError
+    | CrewRuntimeRequestDispatchError
+    | CrewRuntimeRequestReadError
   >;
 }
 
@@ -159,35 +120,44 @@ export const layer = Layer.effect(
       ),
     );
 
-    /** A reserved seat may have no thread yet, and an archived one takes no answers. */
+    /**
+     * A reserved seat may have no thread yet, and an archived one takes no answers; both read as
+     * null. Any other store failure propagates, so an outage is an error, not an empty Inbox.
+     */
     const liveProjection = (threadId: ThreadId) =>
-      threads.getThreadProjection(threadId).pipe(
-        Effect.map((projection) => (projection.thread.archivedAt === null ? projection : null)),
-        Effect.catchCause(() => Effect.succeed(null)),
+      getThreadProjectionIfPresent(threads, threadId).pipe(
+        Effect.map((projection) =>
+          projection !== null && projection.thread.archivedAt === null ? projection : null,
+        ),
       );
 
     const list: CrewRuntimeRequestServiceShape["list"] = Effect.gen(function* () {
-      const items: Array<CrewRuntimeRequestItem> = [];
-      for (const entry of yield* liveCrewThreads) {
-        const projection = yield* liveProjection(entry.threadId);
-        if (projection === null) continue;
-        for (const pending of pendingCrewThreadRequests(projection))
-          items.push({
-            ...pending,
-            threadId: entry.threadId,
-            crewInstanceId: entry.crew.id,
-            crewName: entry.crew.displayName,
-            squadronId: entry.crew.squadronId,
-            seat: entry.seat,
-            threadTitle: projection.thread.title,
-          });
-      }
-      return items.toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("J5 crew runtime request read failed", { cause }).pipe(Effect.as([])),
-      ),
-    );
+      const entries = yield* liveCrewThreads;
+      // Independent reads, so a Crew's threads are read side by side rather than one by one.
+      const perThread = yield* Effect.forEach(
+        entries,
+        (entry) =>
+          liveProjection(entry.threadId).pipe(
+            Effect.map((projection): Array<CrewRuntimeRequestItem> =>
+              projection === null
+                ? []
+                : pendingCrewThreadRequests(projection).map((pending) => ({
+                    ...pending,
+                    threadId: entry.threadId,
+                    crewInstanceId: entry.crew.id,
+                    crewName: entry.crew.displayName,
+                    squadronId: entry.crew.squadronId,
+                    seat: entry.seat,
+                    threadTitle: projection.thread.title,
+                  })),
+            ),
+          ),
+        { concurrency: 8 },
+      );
+      return perThread
+        .flat()
+        .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
+    });
 
     const respond: CrewRuntimeRequestServiceShape["respond"] = (input) =>
       Effect.gen(function* () {
@@ -195,26 +165,36 @@ export const layer = Layer.effect(
           threadId: input.threadId,
           requestId: input.requestId,
         });
-        const onCrew = (yield* liveCrewThreads.pipe(Effect.orElseSucceed(() => []))).some(
-          (entry) => entry.threadId === input.threadId,
-        );
+        const onCrew = (yield* liveCrewThreads).some((entry) => entry.threadId === input.threadId);
         if (!onCrew) return yield* notFound;
         const projection = yield* liveProjection(input.threadId);
         if (projection === null) return yield* notFound;
-        const request = projection.runtimeRequests.find((entry) => entry.id === input.requestId);
-        if (request === undefined) return yield* notFound;
-        if (request.status !== "pending")
+        // The same selection `list` shows, so a request the Inbox never listed is never answered.
+        const pending = pendingCrewThreadRequests(projection).find(
+          (entry) => entry.requestId === input.requestId,
+        );
+        if (pending === undefined) {
+          const resolved = projection.runtimeRequests.find(
+            (entry) => entry.id === input.requestId && entry.status !== "pending",
+          );
+          if (resolved === undefined) return yield* notFound;
           return yield* new CrewRuntimeRequestConflictError({
-            detail: `This request is already ${request.status}; it may have been answered on another device.`,
+            detail: `This request is already ${resolved.status}; it may have been answered on another device.`,
           });
-        if (
-          request.kind === "user_input" ? input.answers === undefined : input.decision === undefined
-        )
-          return yield* new CrewRuntimeRequestInvalidError({
+        }
+        if (pending.responseCapability !== "live")
+          return yield* new CrewRuntimeRequestConflictError({
             detail:
-              request.kind === "user_input"
-                ? "Answering a question requires answers."
-                : "Answering an approval requires a decision.",
+              pending.responseCapability === "message"
+                ? "This question is answered by sending a message; answer it in its thread."
+                : "This request can no longer be answered; open its thread to see where it stopped.",
+          });
+        const isQuestion = pending.request.kind === "user_input";
+        if (isQuestion ? input.answers === undefined : input.decision === undefined)
+          return yield* new CrewRuntimeRequestInvalidError({
+            detail: isQuestion
+              ? "Answering a question requires answers."
+              : "Answering an approval requires a decision.",
           });
         yield* threads
           .dispatch({
@@ -222,18 +202,20 @@ export const layer = Layer.effect(
             commandId: input.commandId,
             threadId: input.threadId,
             requestId: input.requestId,
-            ...(request.kind === "user_input"
-              ? { answers: input.answers }
-              : { decision: input.decision }),
+            ...(isQuestion ? { answers: input.answers } : { decision: input.decision }),
           })
           .pipe(
-            // The orchestrator refuses a request that resolved between our read and this command;
-            // its reason ("... is resolved", "Provider session ... was not found") rides in `cause`.
-            Effect.mapError(
-              (error) =>
-                new CrewRuntimeRequestConflictError({
-                  detail: `The request could not be answered: ${dispatchReason(error)}`,
-                }),
+            // The decider refuses with its reason as a string ("... is resolved", "Provider session
+            // ... was not found"): a conflict the person can read. Any other cause is a failure to
+            // send, reported as one.
+            Effect.mapError((error) =>
+              (error._tag === "OrchestratorDispatchError" ||
+                error._tag === "OrchestratorCommandRejectedError") &&
+              typeof error.cause === "string"
+                ? new CrewRuntimeRequestConflictError({
+                    detail: `The request could not be answered: ${error.cause}`,
+                  })
+                : new CrewRuntimeRequestDispatchError({ cause: error }),
             ),
           );
       });

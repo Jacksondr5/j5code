@@ -13,6 +13,11 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import {
+  OrchestratorDispatchError,
+  OrchestratorProjectionError,
+} from "../../orchestration-v2/Orchestrator.ts";
+import { ProjectionStoreThreadNotFoundError } from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import {
   AgentCrewInstanceService,
@@ -41,12 +46,16 @@ const request = (
   kind: Request["kind"],
   status: Request["status"] = "pending",
   minute = 0,
+  capability: "live" | "message" = "live",
 ): Request =>
   ({
     id: RuntimeRequestId.make(id),
     kind,
     status,
-    responseCapability: { type: "live", providerSessionId: "session:1" },
+    responseCapability:
+      capability === "live"
+        ? { type: "live", providerSessionId: "session:1" }
+        : { type: "message" },
     createdAt: DateTime.add(at, { minutes: minute }),
     resolvedAt: null,
   }) as unknown as Request;
@@ -86,6 +95,8 @@ const makeThreads = () => {
           request("req:builder-auth", "auth_refresh"),
           request("req:builder-tool", "dynamic_tool_call"),
           request("req:builder-done", "command", "resolved"),
+          // Answerable only by sending a message: listed, but not answered from the Inbox.
+          request("req:builder-message", "command", "pending", 3, "message"),
         ],
         [
           {
@@ -108,6 +119,10 @@ const makeThreads = () => {
   ]);
   const dispatched: Array<OrchestrationV2Command> = [];
   const racing = new Set<string>();
+  /** Threads whose store read fails for a reason other than the thread being absent. */
+  const broken = new Set<ThreadId>();
+  /** Requests whose dispatch fails for a reason other than the decider's refusal. */
+  const failing = new Set<string>();
   const resolve = (threadId: ThreadId, requestId: string) => {
     const projection = state.get(threadId)!;
     state.set(threadId, {
@@ -118,10 +133,20 @@ const makeThreads = () => {
     });
   };
   const layer = Layer.mock(ThreadManagementService)({
+    // Fails the way the real service does: a typed projection error whose cause says why.
     getThreadProjection: (threadId) => {
       const projection = state.get(threadId);
+      if (broken.has(threadId))
+        return Effect.fail(
+          new OrchestratorProjectionError({ threadId, cause: new Error("database is locked") }),
+        );
       return projection === undefined
-        ? Effect.die(new Error(`no thread ${threadId}`))
+        ? Effect.fail(
+            new OrchestratorProjectionError({
+              threadId,
+              cause: new ProjectionStoreThreadNotFoundError({ threadId }),
+            }),
+          )
         : Effect.succeed(projection);
     },
     dispatch: (command) =>
@@ -132,17 +157,25 @@ const makeThreads = () => {
           ?.runtimeRequests.find((entry) => entry.id === command.requestId);
         // Resolved on another device after the service read it: the orchestrator refuses.
         if (racing.has(command.requestId)) resolve(command.threadId, command.requestId);
+        if (failing.has(command.requestId))
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: new Error("event store write failed"),
+          });
+        // The decider's refusal carries its reason as a string.
         if (pending?.status !== "pending" || racing.has(command.requestId))
-          return yield* Effect.fail({
-            message: "Failed to dispatch orchestration command runtime-request.respond.",
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
             cause: `Runtime request ${command.requestId} is resolved.`,
-          } as never);
+          });
         dispatched.push(command);
         resolve(command.threadId, command.requestId);
         return { sequence: dispatched.length } as never;
       }),
   });
-  return { layer, dispatched, resolve, racing };
+  return { layer, dispatched, resolve, racing, broken, failing };
 };
 
 const setup = Effect.gen(function* () {
@@ -229,8 +262,11 @@ it.effect(
           [
             ["req:builder-approval", "builder", "Release Crew", "approval"],
             ["req:captain-question", null, "Release Crew", "user_input"],
+            ["req:builder-message", "builder", "Release Crew", "approval"],
           ],
         );
+        // An approval answerable only by message reads as the composer shows it: not here.
+        assert.equal(listed[2]!.responseCapability, "not_resumable");
         const approval = listed[0]!;
         if (approval.request.kind === "approval")
           assert.equal(approval.request.detail, "Run the test suite?");
@@ -260,7 +296,10 @@ it.effect(
         );
         assert.equal(late._tag, "CrewRuntimeRequestConflictError");
         assert.lengthOf(threads.dispatched, 1);
-        assert.deepStrictEqual(yield* service.list, []);
+        assert.deepStrictEqual(
+          (yield* service.list).map((item) => item.requestId),
+          ["req:builder-message"],
+        );
 
         // A thread outside every live Crew is never answered here.
         const stranger = yield* Effect.flip(
@@ -306,6 +345,52 @@ it.effect("refuses an answer of the wrong kind and forgets a retired Crew's requ
         service.respond(answer("req:builder-approval", builderThread, { decision: "accept" }, 2)),
       );
       assert.equal(retired._tag, "CrewRuntimeRequestNotFoundError");
+      assert.lengthOf(threads.dispatched, 0);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("answers only what it lists, and reports a store or dispatch failure as one", () =>
+  Effect.gen(function* () {
+    const context = yield* setup;
+    const threads = makeThreads();
+    const layer = crewRuntimeRequestLayer.pipe(
+      Layer.provideMerge(threads.layer),
+      Layer.provideMerge(Layer.succeedContext(context)),
+    );
+    yield* Effect.gen(function* () {
+      const service = yield* CrewRuntimeRequestService;
+      // Hidden from the list because they are not the person's to answer: never answered here.
+      for (const hidden of ["req:builder-auth", "req:builder-tool"]) {
+        const refused = yield* Effect.flip(
+          service.respond(answer(hidden, builderThread, { decision: "accept" }, 1)),
+        );
+        assert.equal(refused._tag, "CrewRuntimeRequestNotFoundError");
+      }
+      // Listed but answerable only by message: refused with the way out, nothing sent.
+      const message = yield* Effect.flip(
+        service.respond(answer("req:builder-message", builderThread, { decision: "accept" }, 2)),
+      );
+      assert.equal(message._tag, "CrewRuntimeRequestConflictError");
+      assert.lengthOf(threads.dispatched, 0);
+
+      // A dispatch that failed for any reason but the decider's refusal is a failure, not a 409.
+      threads.failing.add("req:builder-approval");
+      const failed = yield* Effect.flip(
+        service.respond(answer("req:builder-approval", builderThread, { decision: "accept" }, 3)),
+      );
+      assert.equal(failed._tag, "CrewRuntimeRequestDispatchError");
+      threads.failing.clear();
+
+      // A thread the store cannot read is an error, never an empty Inbox or a missing request.
+      threads.broken.add(builderThread);
+      const listFailure = yield* Effect.flip(service.list);
+      assert.equal(listFailure._tag, "OrchestratorProjectionError");
+      const answerFailure = yield* Effect.flip(
+        service.respond(answer("req:builder-approval", builderThread, { decision: "accept" }, 4)),
+      );
+      assert.notEqual(answerFailure._tag, "CrewRuntimeRequestNotFoundError");
+      assert.equal(answerFailure._tag, "OrchestratorProjectionError");
       assert.lengthOf(threads.dispatched, 0);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
