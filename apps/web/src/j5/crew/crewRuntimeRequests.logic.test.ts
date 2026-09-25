@@ -71,6 +71,22 @@ describe("Crew thread requests answered from the Inbox", () => {
     expect(inboxRequestIdsForThread(merged, envA, null).size).toBe(0);
   });
 
+  it("leaves a request the Inbox cannot answer in the composer as well", () => {
+    const notLive = mergeCrewRuntimeRequestSources(
+      sources([
+        [
+          envA,
+          [
+            { ...item("q-message"), responseCapability: "message" },
+            { ...item("a-gone"), responseCapability: "not_resumable" },
+            item("a-live"),
+          ],
+        ],
+      ]),
+    );
+    expect([...inboxRequestIdsForThread(notLive, envA, seatThread)]).toEqual(["a-live"]);
+  });
+
   it("scopes a thread's requests to its own environment", () => {
     expect([...inboxRequestIdsForThread(merged, envB, seatThread)]).toEqual(["a9"]);
   });

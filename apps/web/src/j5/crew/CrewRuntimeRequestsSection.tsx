@@ -95,7 +95,8 @@ export function CrewRuntimeRequestsSection(props: {
         {props.requests.map((request) => {
           const key = itemKey(request);
           const busy = busyKey === key;
-          const answerable = request.responseCapability !== "not_resumable";
+          // Only a live request takes an answer here; the server refuses the rest (#308).
+          const answerable = request.responseCapability === "live";
           const draft = drafts[key] ?? {};
           return (
             <li key={key} className="rounded-lg border border-border bg-card px-4 py-3 text-sm">
@@ -242,7 +243,9 @@ export function CrewRuntimeRequestsSection(props: {
               )}
               {answerable ? null : (
                 <p className="mt-2 text-muted-foreground">
-                  This request can no longer be answered. Open the thread to see where it stopped.
+                  {request.responseCapability === "message"
+                    ? "This question is answered by sending a message. Open the thread to answer it."
+                    : "This request can no longer be answered. Open the thread to see where it stopped."}
                 </p>
               )}
             </li>

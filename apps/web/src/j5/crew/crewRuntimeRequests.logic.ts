@@ -14,7 +14,11 @@ export const mergeCrewRuntimeRequestSources = (
     (source.data ?? []).map((request) => ({ ...request, environmentId: source.environmentId })),
   );
 
-/** The request ids the Inbox currently holds for one thread on one environment. */
+/**
+ * The request ids the Inbox can answer for one thread on one environment. A request answered by
+ * message, or one that is no longer resumable, stays in the composer too, since the Inbox only
+ * points to the thread for those.
+ */
 export const inboxRequestIdsForThread = (
   requests: ReadonlyArray<ScopedCrewRuntimeRequest>,
   environmentId: EnvironmentId | undefined,
@@ -25,7 +29,10 @@ export const inboxRequestIdsForThread = (
       ? []
       : requests
           .filter(
-            (request) => request.environmentId === environmentId && request.threadId === threadId,
+            (request) =>
+              request.environmentId === environmentId &&
+              request.threadId === threadId &&
+              request.responseCapability === "live",
           )
           .map((request) => request.requestId),
   );
