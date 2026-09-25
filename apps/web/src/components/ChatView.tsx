@@ -19,6 +19,7 @@ import {
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
 import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
 import { CrewRosterGate } from "../j5/crew/CrewRosterGate";
+import { useJ5CrewRoutedRequests } from "../j5/crew/crewRuntimeRequestsClient";
 import { expandPlaybookPrompt } from "@t3tools/client-runtime/j5/playbooks";
 import { PlaybookBoard } from "../j5/playbooks/PlaybookBoard";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
@@ -2901,12 +2902,19 @@ export default function ChatView(props: ChatViewProps) {
     conversationProviderStatus !== null &&
     conversationProviderStatus.supportsConversationRollback !== false;
   const phase = derivePhase(activeRuntime);
-  const pendingRequests = useMemo(
+  const providerPendingRequests = useMemo(
     () =>
       serverProjection === null
         ? { approvals: [], userInputs: [] }
         : derivePendingThreadRequests(serverProjection),
     [serverProjection],
+  );
+  // J5 fork extension (FORK.md, "Crew thread requests in the Inbox"): a Crew thread's requests
+  // are answered in the Inbox.
+  const pendingRequests = useJ5CrewRoutedRequests(
+    environmentId,
+    activeThreadId,
+    providerPendingRequests,
   );
   const pendingApprovals = useMemo(
     () => derivePendingApprovals(pendingRequests.approvals),

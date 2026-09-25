@@ -21,6 +21,8 @@ import {
   CrewProposalResolveResponse,
   CrewProposalPreviewResponse,
   CrewProposalsResponse,
+  CrewRuntimeRequestRespondResponse,
+  CrewRuntimeRequestsResponse,
   CrewArchiveResponse,
   CrewStopResponse,
   DeleteSquadronResponse,
@@ -37,6 +39,7 @@ import {
   type CrewProposalPreviewRequest,
   type CrewArchiveRequest,
   type CrewStopRequest,
+  type CrewRuntimeRequestRespondRequest,
   type FleetReadRequest,
   j5SquadronActionPath,
 } from "@t3tools/contracts/j5";
@@ -372,4 +375,26 @@ export const stopCrew = Effect.fn("j5.http.stopCrew")(function* (
   );
   const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
   return yield* HttpClientResponse.schemaBodyJson(CrewStopResponse)(response);
+});
+
+/** Provider approvals and questions waiting on this environment's live Crew threads. */
+export const listCrewRuntimeRequests = Effect.fn("j5.http.listCrewRuntimeRequests")(function* (
+  prepared: PreparedConnection,
+) {
+  const request = yield* HttpClientRequest.post(J5_API_PATHS.crewRuntimeRequests).pipe(
+    HttpClientRequest.bodyJson({}),
+  );
+  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
+  return (yield* HttpClientResponse.schemaBodyJson(CrewRuntimeRequestsResponse)(response)).requests;
+});
+
+export const respondCrewRuntimeRequest = Effect.fn("j5.http.respondCrewRuntimeRequest")(function* (
+  prepared: PreparedConnection,
+  input: CrewRuntimeRequestRespondRequest,
+) {
+  const request = yield* HttpClientRequest.post(J5_API_PATHS.crewRuntimeRequestRespond).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(CrewRuntimeRequestRespondResponse)(response);
 });

@@ -32,6 +32,8 @@ export const inboxCountQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.openCount({ environmentId, input: {} });
 export const crewProposalsQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.crewProposals({ environmentId, input: {} });
+export const crewRuntimeRequestsQueryAtom = (environmentId: EnvironmentId) =>
+  j5Environment.crewRuntimeRequests({ environmentId, input: {} });
 export const fleetQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.fleet({ environmentId, input: {} });
 export const fleetDetailQueryAtom = (environmentId: EnvironmentId) =>
@@ -60,6 +62,13 @@ export const crewProposalSourcesAtom = createJ5ReadSourcesAtom({
   label: "web-j5:crew-proposal-sources",
   capability: "j5HumanInbox",
   queryAtom: crewProposalsQueryAtom,
+});
+// A server without the route fails its source alone, and its threads keep their inline panels.
+export const crewRuntimeRequestSourcesAtom = createJ5ReadSourcesAtom({
+  ...sourcesInput,
+  label: "web-j5:crew-runtime-request-sources",
+  capability: "j5HumanInbox",
+  queryAtom: crewRuntimeRequestsQueryAtom,
 });
 export const fleetSourcesAtom = createJ5ReadSourcesAtom({
   ...sourcesInput,
