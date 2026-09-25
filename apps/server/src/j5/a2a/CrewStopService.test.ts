@@ -191,7 +191,7 @@ const ghostFixture = (ghost: "missing" | "unreadable" | "homed") =>
     const ghostThread = ThreadId.make("thread:ghost");
     const context = yield* Layer.build(
       Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
-        Layer.provideMerge(NodeSqliteClient.layerMemory()),
+        Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
       ),
     );
     yield* runJ5A2AMigrations().pipe(Effect.provide(context));
