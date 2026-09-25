@@ -32,6 +32,11 @@ export interface ArchiveCrewMemberFacts {
   readonly participantId: ParticipantId;
   readonly threadId: ThreadId;
   readonly alreadyArchived: boolean;
+  /**
+   * The seat's row was recorded but its thread never came to exist (a launch or addition that
+   * failed before reaching it). Nothing runs there, so the unit retires past it.
+   */
+  readonly neverCreated: boolean;
   readonly facts: ArchiveAgentConsequenceFacts;
 }
 
@@ -64,7 +69,7 @@ export interface ArchiveCrewInput {
 export interface ArchiveCrewMemberResult {
   readonly seatName: string;
   readonly participantId: ParticipantId;
-  readonly result: ArchiveAgentResult;
+  readonly result: ArchiveAgentResult | "never_created";
 }
 
 export interface ArchiveCrewOutcome {
@@ -328,13 +333,17 @@ export const layer = Layer.effect(
           seatName: member.seatName,
           participantId: member.participantId,
           threadId: member.threadId,
-          alreadyArchived: state.threadArchived && state.retired,
-          facts: state.facts,
+          alreadyArchived: state !== null && state.threadArchived && state.retired,
+          neverCreated: state === null,
+          facts: state?.facts ?? { openExchanges: [], runningTurn: null },
         });
       }
       return { members } satisfies ArchiveCrewConsequenceFacts;
     });
 
+    // The roster is read, confirmed, and retired as one unit step, so an approved launch or
+    // addition either lands before the read and retires with the rest, or waits and meets the
+    // retired stamp before it reserves a seat.
     const archive: ArchiveCrewServiceShape["archive"] = (input) =>
       Effect.gen(function* () {
         const decodedToken =
@@ -365,14 +374,16 @@ export const layer = Layer.effect(
         const facts = yield* readFacts(instance);
         if (
           instance.archivedAt !== null &&
-          facts.members.every((member) => member.alreadyArchived)
+          facts.members.every((member) => member.alreadyArchived || member.neverCreated)
         ) {
           return {
             status: "already_archived" as const,
             members: facts.members.map((member) => ({
               seatName: member.seatName,
               participantId: member.participantId,
-              result: "already_archived" as const,
+              result: member.neverCreated
+                ? ("never_created" as const)
+                : ("already_archived" as const),
             })),
           };
         }
@@ -402,6 +413,14 @@ export const layer = Layer.effect(
 
         const results: Array<ArchiveCrewMemberResult> = [];
         for (const member of facts.members) {
+          if (member.neverCreated) {
+            results.push({
+              seatName: member.seatName,
+              participantId: member.participantId,
+              result: "never_created",
+            });
+            continue;
+          }
           const ids = input.commandIds(member.seatName);
           const result = yield* archiveAgent
             .archive({
@@ -426,7 +445,9 @@ export const layer = Layer.effect(
                 (cause) =>
                   new ArchiveCrewPartialFailureError({
                     crewInstanceId: instance.id,
-                    archivedSeats: results.map(({ seatName }) => seatName),
+                    archivedSeats: results
+                      .filter(({ result }) => result !== "never_created")
+                      .map(({ seatName }) => seatName),
                     failedSeat: member.seatName,
                     cause,
                   }),
@@ -436,7 +457,7 @@ export const layer = Layer.effect(
         }
         yield* crews.markArchived(instance.id, input.archivedAt).pipe(Effect.orDie);
         return { status: "archived" as const, members: results };
-      });
+      }).pipe((unit) => crews.serialize(input.crewInstanceId, unit));
 
     const readCaptainFacts: ArchiveCrewServiceShape["readCaptainFacts"] = (input) =>
       Effect.gen(function* () {

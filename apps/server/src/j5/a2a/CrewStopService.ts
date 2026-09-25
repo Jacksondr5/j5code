@@ -5,10 +5,17 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
+import { AgentCrewInstanceService, type AgentCrewMember } from "./AgentCrewInstanceService.ts";
+import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import type { ParticipantId, SquadronId } from "./contracts.ts";
+import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 
-export type CrewSeatStopResult = "interrupt_requested" | "already_idle" | "archived";
+/** `never_created`: the seat's row was recorded but its thread never came to exist. */
+export type CrewSeatStopResult =
+  | "interrupt_requested"
+  | "already_idle"
+  | "archived"
+  | "never_created";
 
 export interface StopCrewInput {
   /** The Captain calling over MCP, or null when a person stops the Crew from the app. */
@@ -77,7 +84,33 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const crews = yield* AgentCrewInstanceService;
     const threads = yield* ThreadManagementService;
+    const archiveFacts = yield* A2AArchiveFacts;
 
+    const seatError = (phase: string, seatName: string) => (cause: unknown) =>
+      new CrewStopOperationError({ phase, seatName, cause });
+
+    /**
+     * A seat's projection, or null when its thread provably never came to exist: the store
+     * answers not-found and no home was ever registered for it. Held under the Crew's unit lock,
+     * so no launch or addition is creating it meanwhile. A store that cannot answer, or a home
+     * with no thread behind it, fails the stop rather than skipping a seat that may be live.
+     */
+    const readSeat = Effect.fn("j5.a2a.crewStop.readSeat")(function* (member: AgentCrewMember) {
+      const projection = yield* getThreadProjectionIfPresent(threads, member.threadId).pipe(
+        Effect.mapError(seatError("reading a seat", member.seatName)),
+      );
+      if (projection !== null) return projection;
+      const home = yield* archiveFacts
+        .readForThread(member.threadId)
+        .pipe(Effect.mapError(seatError("reading a seat's home", member.seatName)));
+      if (home.state === "not-an-a2a-participant") return null;
+      return yield* seatError(
+        "reading a seat",
+        member.seatName,
+      )(new Error(`seat thread ${member.threadId} has a home but no thread`));
+    });
+
+    // Under the Crew's unit lock, like archive, so a seat mid-spawn is never read as missing.
     const stop: CrewStopServiceShape["stop"] = (input) =>
       Effect.gen(function* () {
         const instance = yield* crews
@@ -113,16 +146,13 @@ export const layer = Layer.effect(
           instance.members,
           (member) =>
             Effect.gen(function* () {
-              const projection = yield* threads.getThreadProjection(member.threadId).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new CrewStopOperationError({
-                      phase: "reading a seat",
-                      seatName: member.seatName,
-                      cause,
-                    }),
-                ),
-              );
+              const projection = yield* readSeat(member);
+              if (projection === null)
+                return {
+                  seatName: member.seatName,
+                  participantId: member.participantId,
+                  result: "never_created" as const,
+                };
               if (projection.thread.archivedAt !== null)
                 return {
                   seatName: member.seatName,
@@ -157,7 +187,7 @@ export const layer = Layer.effect(
           { concurrency: 1 },
         );
         return { crewInstanceId: instance.id, members };
-      });
+      }).pipe((unit) => crews.serialize(input.crewInstanceId, unit));
 
     return CrewStopService.of({ stop });
   }),
