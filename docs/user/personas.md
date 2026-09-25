@@ -1,21 +1,14 @@
 # Personas
 
-Open **Agents** from a task's right panel to see the runtime agents connected to that task:
+Agents a task has launched appear in the **Lineage** section of the thread details panel and as subagent cards in the conversation. A child launched as a persona shows its persona chip beside its row and beside its card.
 
-- **Direct spawns** are provider-native child agents launched by the task.
-- **Workflows** group agents launched together and show their current phase.
-
-The panel reports live status, activity, elapsed time, and token usage. It remains empty until the task launches an agent or workflow.
-
-Persona definitions are separate from runtime activity, so only agents and workflows that have actually launched appear in a task's Agents panel.
-
-The right-panel view is available in the web and desktop clients.
+Persona definitions are separate from runtime activity, so only agents that have actually launched appear there.
 
 ## Starting a task as a persona
 
 In a new task, the composer offers a **Persona** control beside the model picker whenever the selected environment has launchable personas. Choose one and the model and reasoning controls are replaced by the persona's name and its fixed route; use the **×** control to go back to a regular task before sending. On send, the server resolves the persona's route and pins it to the thread, so the thread shows the same persona chip afterwards. If the persona's definition changes later, the chip shows **Changed**; the running task keeps the definition it started with, and a new task uses the current one.
 
-Threads launched as a persona show the persona beside their home in the thread list, and delegated children in the Agents panel show which persona ran them.
+Threads launched as a persona show the persona beside their home in the thread list, and delegated children show which persona ran them in the Lineage section and on their subagent cards.
 
 ## Persona library
 
@@ -23,12 +16,12 @@ To run a persona inside a conversation, type `@persona:` followed by its ID, or 
 
 Open **Settings → Personas** on web, desktop, or mobile to see the reusable personas in a connected environment. Select an environment to inspect its library and available model routes. Personas can be authored in folders and shared through git; supplied examples are starting points you can customize.
 
-To create a personal persona without writing a file, use **Create persona** beside **Scoped personas**. Give it a name, a stable ID for `@persona:` mentions, a one-line description, markdown instructions, a runtime policy, and primary and fallback models. The persona is stored in the selected environment as an imported definition, so it can be edited, switched off, or removed like any import. Instructions describe behavior; only the runtime policy is enforced.
+To create a personal persona without writing a file, use **Create persona** beside **Library**. Give it a name, a stable ID for `@persona:` mentions, a one-line description, markdown instructions, a runtime policy, and primary and fallback models. The persona is stored in the selected environment as an imported definition, so it can be edited, switched off, or removed like any import. Instructions describe behavior; only the runtime policy is enforced.
 
 To import definitions written as files:
 
 1. Open **Settings → Personas** and select the destination environment.
-2. Use **Import** beside **Scoped personas**. Choose **Folder** to include all YAML definitions (`.yaml` or `.yml`) in that folder and its subfolders, or **Import → Persona file** to select one YAML file. Other files are ignored. Each file must contain one persona definition with its own unique ID.
+2. Use **Import** beside **Library**. Choose **Folder** to include all YAML definitions (`.yaml` or `.yml`) in that folder and its subfolders, or **Import → Persona file** to select one YAML file. Other files are ignored. Each file must contain one persona definition with its own unique ID.
 3. The library refreshes after a successful import. Import and removal results appear as temporary toast notifications. A selection can contain up to 50 definitions, each at most 64 KiB. If any definition is invalid, none of the selection is imported; the error identifies the file.
 
 Definitions are YAML files. Use `instructions: |` followed by indented text for multiline instructions. Keep one definition per file; JSON files are not imported.
@@ -61,7 +54,7 @@ When a member needs help, it tells the Captain. The Captain can request another 
 
 When a Captain or member needs your approval for a tool, or asks you a question, it appears under **Crew agent requests** in the Inbox and counts on the Inbox badge. Answer it there; the agent's own conversation shows a note pointing to the Inbox instead. The mobile app has no Inbox yet, so it still shows these prompts in the conversation.
 
-Every member is instructed to send its result, evidence, and unresolved issues to the Captain. A saved persona that explicitly declares a handoff artifact still owes that report in the project's Artifacts page, but it can share findings before the report is ready. Completion notices tell the Captain how the member's run ended and whether a declared report was written, missing, or never required. A missing declared report prompts one reminder; custom members do not need a handoff file unless their assignment asks for one.
+Every member is instructed to send its result, evidence, and unresolved issues to the Captain. A saved persona that explicitly declares a handoff artifact still owes that report in the project's Artifacts page, but it can share findings before the report is ready. Completion notices tell the Captain how the member's run ended and whether a declared report was written, missing, or never required. A missing declared report prompts one reminder; custom members do not need a handoff artifact unless their assignment asks for one.
 
 Crews are a web and desktop feature; the mobile app shows crew members as ordinary agents and has no roster gate. Members stay out of the thread list so it shows the conversations you started; the Captain's row shows an anchor mark (hover it for the crews it commands) and, for each crew it runs, a toggle named for that crew that opens into its members with seat, status, and last activity; agents it started outside a crew get a toggle of their own. When a member finishes and owes no reply, the Captain is told how it ended; the member's thread settles under the same rules as any other thread. **Fleet**, from the radar icon beside the Inbox, shows every agent by Squadron with each crew under its Captain.
 
@@ -81,10 +74,10 @@ When a folder lives in a git checkout, the row notes uncommitted changes in that
 
 ### Handoff artifacts
 
-A persona whose definition declares an output artifact (for example the bundled Critic's `ReviewHandoff`) writes it as a shared project artifact instead of leaving it in the transcript. The persona's instructions name the exact file, `handoffs/<persona>/<Artifact>-<task>.md` under the project's artifacts, and the required contents. When a run ends without that file, the agent is asked once to write it. The reminder runs as a follow-up in the agent's own task; the task that delegated the work is told the agent finished as usual and is not held back. If the follow-up also ends without the file, the handoff is recorded as **missing**, no further reminder is sent, and the task should be treated as incomplete. Rewriting a handoff does not replace it: each rewrite adds a version to the top of the same file, so you can compare a revised review with the earlier one on the Artifacts page.
+A persona whose definition declares an output artifact (for example the bundled Critic's `ReviewHandoff`) writes it as a shared project artifact instead of leaving it in the transcript. The persona's instructions name the exact file, `handoffs/<persona>/<Artifact>-<task>.md` under the project's artifacts, and the required contents. When a run ends without that file, the agent is asked once to write it. The reminder runs as a follow-up in the agent's own task; the task that delegated the work is told the agent finished as usual and is not held back. If the follow-up also ends without the file, the handoff artifact is recorded as **missing**, no further reminder is sent, and the task should be treated as incomplete. Rewriting a handoff artifact does not replace it: each rewrite adds a version to the top of the same file, so you can compare a revised review with the earlier one on the Artifacts page.
 
-The task's persona control (web, desktop, and mobile) and its row in the Agents right panel show the handoff status: the artifact name when written, **pending** after the reminder, or **missing**. On web and desktop the chip opens the file in the Artifacts page. Declared input artifacts are read the same way, so a Builder started after a Navigator finds the `PlanHandoff` under `handoffs/`.
+The task's persona control (web, desktop, and mobile) and, on web and desktop, the persona chip beside a delegated child's Lineage row and subagent card show the handoff artifact's status: the artifact name when written, **pending** after the reminder, or **missing**. On web and desktop the chip opens the file in the Artifacts page. Declared input artifacts are read the same way, so a Builder started after a Navigator finds the `PlanHandoff` under `handoffs/`.
 
-The persona library is separate from the task's Agents right panel, which shows runtime activity.
+The persona library is separate from the Lineage section and subagent cards, which show runtime activity.
 
 For environment setup, see [Configure a persona library](../operations/persona-library.md).

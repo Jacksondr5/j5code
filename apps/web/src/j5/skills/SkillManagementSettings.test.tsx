@@ -231,6 +231,7 @@ function renderedText() {
 function textContent(node: ReactTestInstance): string {
   return node.children
     .map((child) => (typeof child === "string" ? child : textContent(child)))
+    .filter((text) => text.trim().length > 0)
     .join(" ");
 }
 function discoveryText() {

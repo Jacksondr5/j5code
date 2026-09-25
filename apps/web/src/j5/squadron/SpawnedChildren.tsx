@@ -221,7 +221,7 @@ function SpawnedChildGroupRows(props: {
                   {/* Same anatomy as the parent card: time on the top line, provider on the bottom. */}
                   <span className="flex min-w-0 items-center gap-1.5 text-xs">
                     {showSeat && child.seat !== null ? (
-                      <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
+                      <Badge variant="outline" size="sm" className="shrink-0">
                         {child.seat.seat}
                       </Badge>
                     ) : null}
