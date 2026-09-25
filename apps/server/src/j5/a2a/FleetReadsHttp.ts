@@ -51,30 +51,52 @@ export const projectFleetSquadron = (input: {
   const agents = input.participants.filter(
     (row) => row.participant.kind === "agent" && row.archivedAt == null,
   );
+  // A seat on a live roster that the ledger has no row for (reserved, never created) is still a
+  // seat of that Crew: it rides under its Captain with no thread, so the client counts it as
+  // unknown instead of dropping it. A seat whose row was archived is retired, not unknown.
+  const recorded = new Set(input.participants.map((row) => row.participantId as string));
+  const unrecordedSeats = input.crews.flatMap((crew) =>
+    crew.archivedAt !== null
+      ? []
+      : crew.members
+          .filter((member) => !recorded.has(member.participantId))
+          .map((member): FleetAgent => ({
+            participantId: member.participantId,
+            threadId: null,
+            displayName: member.seatName,
+            origin: "agent",
+            placementParentId: crew.captainParticipantId,
+            crew: seatByParticipant.get(member.participantId) ?? null,
+            openAsks: 0,
+          })),
+  );
   return {
     id: input.squadron.id,
     name: input.squadron.name,
-    agents: agents.map((row) => ({
-      participantId: row.participantId,
-      threadId: row.threadId,
-      displayName:
-        "displayName" in row.participant && typeof row.participant.displayName === "string"
-          ? row.participant.displayName
-          : null,
-      // Every agent-created path (spawn_agent, Crew seats, join_squadron) records a placement
-      // at creation, so an agent with a Squadron home and no placement row is one a person
-      // launched through the composer: `unrecorded` is that measured fact, not a guess. Recorded
-      // `unknown` (a native thread that joined later) stays `?`.
-      origin:
-        row.provenance.kind === "spawned-by"
-          ? "agent"
-          : row.provenance.kind === "unknown"
-            ? "unknown"
-            : "human",
-      placementParentId: row.placementParentId,
-      crew: seatByParticipant.get(row.participantId) ?? null,
-      openAsks: input.openAsks.get(row.participantId) ?? 0,
-    })),
+    agents: [
+      ...agents.map((row): FleetAgent => ({
+        participantId: row.participantId,
+        threadId: row.threadId,
+        displayName:
+          "displayName" in row.participant && typeof row.participant.displayName === "string"
+            ? row.participant.displayName
+            : null,
+        // Every agent-created path (spawn_agent, Crew seats, join_squadron) records a placement
+        // at creation, so an agent with a Squadron home and no placement row is one a person
+        // launched through the composer: `unrecorded` is that measured fact, not a guess. Recorded
+        // `unknown` (a native thread that joined later) stays `?`.
+        origin:
+          row.provenance.kind === "spawned-by"
+            ? "agent"
+            : row.provenance.kind === "unknown"
+              ? "unknown"
+              : "human",
+        placementParentId: row.placementParentId,
+        crew: seatByParticipant.get(row.participantId) ?? null,
+        openAsks: input.openAsks.get(row.participantId) ?? 0,
+      })),
+      ...unrecordedSeats,
+    ],
     // Archived Crews ride along with their roster snapshot: the brief, the seats, and who
     // approved each stay readable for whoever proposes the successor (Crews AC20).
     crews: input.crews.map((crew) => ({

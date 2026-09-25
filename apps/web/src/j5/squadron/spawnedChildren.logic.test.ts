@@ -157,4 +157,36 @@ describe("spawned children under a sidebar row", () => {
     );
     expect([...next.keys()].toSorted()).toEqual([key("other"), key("solo")].toSorted());
   });
+
+  it("keeps a Crew seat with no thread as unknown, and measures it once its thread arrives", () => {
+    const known = new Map([
+      ["builder", thread("builder", "2026-09-09T10:00:00Z", { runtime: { status: "running" } })],
+    ]);
+    const seats = [child("builder", "builder"), child("critic", "critic")];
+    const [review] = groupSpawnedChildren(selectSpawnedChildRows(seats, known));
+    expect(review!.summary).toBe("2 seats · 1 running · 1 unknown");
+    // The seat with no facts sorts last and carries none.
+    expect(review!.rows.map(({ child, thread }) => [child.threadId, thread?.id ?? null])).toEqual([
+      ["builder", "builder"],
+      ["critic", null],
+    ]);
+    const [later] = groupSpawnedChildren(
+      selectSpawnedChildRows(
+        seats,
+        new Map([...known, ["critic", thread("critic", "2026-09-09T11:00:00Z")]]),
+      ),
+    );
+    expect(later!.summary).toBe("2 seats · 1 running");
+  });
+
+  it("names a Crew with no loaded seat at all instead of dropping it", () => {
+    const groups = groupSpawnedChildren(
+      selectSpawnedChildRows([child("builder", "builder"), child("critic", "critic")], new Map()),
+    );
+    expect(groups.map((group) => [group.crew?.crewName ?? null, group.summary])).toEqual([
+      ["Review Pair", "2 seats · 2 unknown"],
+    ]);
+    expect(stoppableCrew(groups[0]!)).toBeNull();
+    expect(spawnedChildrenNeedAttention(groups[0]!.rows)).toBe(false);
+  });
 });
