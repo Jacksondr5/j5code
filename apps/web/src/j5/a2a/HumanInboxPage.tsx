@@ -148,7 +148,7 @@ function OpenThreadButton({
   const available = environmentAvailable && item.senderThreadId !== null;
   return (
     <Button
-      className="w-fit gap-1.5"
+      className="w-fit"
       disabled={!available}
       onClick={() => onOpen(item)}
       size="sm"
@@ -191,8 +191,8 @@ function OpenInboxItem({
     <li className="border-b border-border/70 last:border-b-0">
       <details className="group/details">
         <summary className="flex cursor-pointer list-none items-start gap-3 px-1 py-4 outline-hidden marker:hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:gap-4 [&::-webkit-details-marker]:hidden">
-          <Badge className="mt-0.5 uppercase tracking-wide" variant={urgency.variant}>
-            {urgency.label}
+          <Badge className="mt-0.5" variant={urgency.variant}>
+            <span className="uppercase tracking-wide">{urgency.label}</span>
           </Badge>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
@@ -235,7 +235,7 @@ function OpenInboxItem({
           <div className="mt-4 flex flex-col gap-3">
             <Textarea
               aria-label={`Answer ${item.intent}`}
-              className="min-h-24 resize-y text-base sm:text-sm"
+              className="min-h-24 resize-y"
               onChange={(event) =>
                 captureHumanInboxAnswer(event, scopedInboxItemKey(item), setAnswers)
               }
@@ -492,7 +492,7 @@ export function HumanInboxPage() {
   );
 
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header
           className={cn(

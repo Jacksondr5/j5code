@@ -27,6 +27,7 @@ import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { VcsProcess } from "../../vcs/VcsProcess.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { layer as outboxLayer } from "../../orchestration-v2/EffectOutbox.ts";
+import { ProviderAdapterRegistryV2 } from "../../orchestration-v2/ProviderAdapterRegistry.ts";
 import { A2ADeliveryTransport, live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import { j5AuthenticatedRoutesLayer } from "./J5AuthenticatedRoutes.ts";
 
@@ -57,7 +58,7 @@ const archiveDependencies = Layer.mergeAll(
 const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
   Effect.scoped(
     Effect.gen(function* () {
-      const databaseContext = yield* Layer.build(NodeSqliteClient.layerMemory());
+      const databaseContext = yield* Layer.build(NodeSqliteClient.layer({ filename: ":memory:" }));
       const database = Layer.succeed(
         SqlClient.SqlClient,
         Context.get(databaseContext, SqlClient.SqlClient),
@@ -105,7 +106,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
 it.effect("shares one runtime and outbox across the production HTTP and MCP registrations", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const databaseContext = yield* Layer.build(NodeSqliteClient.layerMemory());
+      const databaseContext = yield* Layer.build(NodeSqliteClient.layer({ filename: ":memory:" }));
       const database = Layer.succeed(
         SqlClient.SqlClient,
         Context.get(databaseContext, SqlClient.SqlClient),
@@ -186,6 +187,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
                 Layer.mock(ProjectService)({}),
                 Layer.mock(ProjectSetupScriptRunner)({}),
                 Layer.mock(ProviderRegistry)({}),
+                Layer.mock(ProviderAdapterRegistryV2)({}),
                 Layer.mock(ScheduledTaskService)({}),
                 Layer.mock(GitWorkflowService)({}),
                 Layer.mock(VcsStatusBroadcaster)({}),

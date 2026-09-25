@@ -73,11 +73,12 @@ export function ThreadCardIdentityView(props: {
       ) : (
         <Badge
           variant="outline"
-          className="max-w-[14ch] shrink-0 truncate px-1.5 py-0 text-[10px] font-medium"
+          size="sm"
+          className="max-w-[14ch] shrink-0"
           title={chip.title}
           data-testid="thread-card-crew-chip"
         >
-          {chip.label}
+          <span className="truncate">{chip.label}</span>
         </Badge>
       )}
     </span>

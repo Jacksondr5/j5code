@@ -19,7 +19,7 @@ import {
 
 const timestamp = "2026-08-16T12:00:00.000Z";
 
-const database = NodeSqliteClient.layerMemory();
+const database = NodeSqliteClient.layer({ filename: ":memory:" });
 const ledger = ledgerLayer.pipe(Layer.provide(database));
 const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
 const testLayer = Layer.mergeAll(database, ledger, send);

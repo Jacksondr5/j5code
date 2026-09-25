@@ -72,11 +72,11 @@ export function AgentFolderPickerDialog(props: {
             Folders on {props.environmentLabel}. Open a folder to browse into it, then choose it.
           </DialogDescription>
         </DialogHeader>
-        <DialogPanel className="grid gap-3">
+        <DialogPanel>
           <Input
             value={pathInput}
             aria-label="Folder path"
-            className="font-mono"
+            font="mono"
             autoComplete="off"
             spellCheck={false}
             onChange={(event) => setPathInput(event.target.value)}

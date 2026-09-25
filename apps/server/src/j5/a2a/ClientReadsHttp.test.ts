@@ -367,7 +367,7 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
           Layer.provide(NodeServices.layer),
         ),
       ),
-      Layer.provide(NodeSqliteClient.layerMemory()),
+      Layer.provide(NodeSqliteClient.layer({ filename: ":memory:" })),
       Layer.provide(agentHandoffRefreshesLayer),
       Layer.provideMerge(auth),
     )

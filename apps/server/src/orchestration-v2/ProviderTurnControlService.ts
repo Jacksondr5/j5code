@@ -1,3 +1,4 @@
+import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 import {
   MessageId,
   ProviderSessionId,
@@ -171,8 +172,17 @@ export const layer: Layer.Layer<
       interrupt: (input) =>
         Effect.gen(function* () {
           const loaded = yield* load({ ...input, operation: "interrupt" });
-          if (Option.isNone(loaded.session)) return;
-          yield* loaded.session.value.interruptTurn({
+          const session = Option.isSome(loaded.session)
+            ? loaded.session
+            : yield* sessions.get(input.providerSessionId);
+          if (Option.isNone(session)) return;
+          if (
+            loaded.providerTurn.status !== "running" &&
+            (session.value.hasPendingBackgroundWorkForThread === undefined ||
+              !(yield* session.value.hasPendingBackgroundWorkForThread(loaded.providerThread)))
+          )
+            return;
+          yield* session.value.interruptTurn({
             providerThread: loaded.providerThread,
             providerTurnId: loaded.providerTurn.id,
             requestRuntimeRestart: true,
@@ -260,7 +270,9 @@ export const layer: Layer.Layer<
           const context = yield* projections.getProviderControlContext(input.threadId, input);
           const ownership = context.message?.delegatedCompletion;
           if (ownership !== undefined) {
-            const projection = yield* projections.getThreadProjection(input.threadId);
+            const projection = yield* projections.getThreadRecords(input.threadId, ["runs"], {
+              runIds: [ownership.parentRunId],
+            });
             const cohort = projection.runs.find(
               (run) => run.id === ownership.parentRunId,
             )?.delegatedCompletion;
@@ -298,13 +310,19 @@ export const layer: Layer.Layer<
               providerTurnId: loaded.providerTurn.id,
               message: {
                 messageId: message.id,
-                text: message.text,
+                text: projectComposerContextForProvider({
+                  text: message.text,
+                  records: message.context?.records ?? [],
+                }),
                 attachments: message.attachments,
                 createdBy: message.createdBy,
                 creationSource: message.creationSource,
                 ...(message.scheduledTaskId === undefined
                   ? {}
                   : { scheduledTaskId: message.scheduledTaskId }),
+                ...(message.senderThreadId === undefined
+                  ? {}
+                  : { senderThreadId: message.senderThreadId }),
               },
             })
             .pipe(
