@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  CommandId,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -10,14 +11,19 @@ import {
   type OrchestrationV2ThreadProjection,
   type ServerProvider,
 } from "@t3tools/contracts";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
 import { guardAgentPersonaThreadCreate } from "../agents/agentPersonaOrchestration.ts";
+import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import { ServerConfig } from "../../config.ts";
 import {
   OrchestratorDispatchError,
@@ -33,7 +39,10 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import {
   AgentCrewInstanceService,
   layer as crewInstanceLayer,
+  type AgentCrewInstance,
 } from "./AgentCrewInstanceService.ts";
+import { ArchiveAgentService } from "./ArchiveAgentService.ts";
+import { ArchiveCrewService, layer as archiveCrewLayer } from "./ArchiveCrewService.ts";
 import { describeCrewSeatRuntime } from "./crewRuntimePreview.ts";
 import { CrewLaunchService, layer as crewLaunchLayer } from "./CrewLaunchService.ts";
 import { A2AHomeConflictError, participantIdForThread } from "./HomeRegistrar.ts";
@@ -132,6 +141,10 @@ const dependencies = (
   archived: Set<string> = new Set(),
   realThreads = false,
   failBriefOnce: Set<string> = new Set(),
+  /** Runs before each command lands, so a test can hold a spawn open. */
+  beforeDispatch: (
+    command: OrchestrationV2Command,
+  ) => Effect.Effect<void, OrchestratorDispatchError> = () => Effect.void,
 ) =>
   Layer.mergeAll(
     Layer.mock(ThreadManagementService)({
@@ -175,6 +188,7 @@ const dependencies = (
               } as unknown as OrchestrationV2ThreadProjection),
       dispatch: (command) =>
         Effect.gen(function* () {
+          yield* beforeDispatch(command);
           if (command.type === "message.dispatch" && failBriefOnce.delete(command.threadId))
             return yield* new OrchestratorDispatchError({
               commandId: command.commandId,
@@ -1259,4 +1273,295 @@ it.effect("a retry that drops the failed seat keeps the briefs the other seats a
       assert.isFalse(briefs.some((brief) => brief.threadId === failedThread));
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
+);
+
+/**
+ * The real launcher and the real unit archive over one Crew store, so a launch or addition and an
+ * archive can be interleaved step by step. Every unit step announces its Crew on `entered` as it
+ * asks for the Crew's lock; a member archive can be held open with `holdArchive`, a spawn with
+ * `beforeDispatch`. Seat facts come from the commands that landed: a seat with no thread.create
+ * reads as never created, as the real archive reads a thread with neither home nor projection.
+ */
+const unitFixture = Effect.gen(function* () {
+  const { context, commands, captain } = yield* fixture;
+  const codex = provider("codex", "codex", [
+    { slug: "gpt-5.6-sol", options: ["high"] },
+    { slug: "gpt-5.6-terra", options: ["high"] },
+  ]);
+  const entered = yield* Queue.unbounded<string>();
+  const archivedSeats = yield* Ref.make<ReadonlyArray<ThreadId>>([]);
+  const factsRead = yield* Ref.make<ReadonlyArray<ThreadId>>([]);
+  const holdArchive = yield* Ref.make<Effect.Effect<void>>(Effect.void);
+  const holdDispatch = yield* Ref.make<
+    (command: OrchestrationV2Command) => Effect.Effect<void, OrchestratorDispatchError>
+  >(() => Effect.void);
+  const real = Context.get(context, AgentCrewInstanceService);
+  const crews = Layer.succeed(AgentCrewInstanceService, {
+    ...real,
+    serialize: (id, effect) =>
+      Queue.offer(entered, id).pipe(Effect.andThen(real.serialize(id, effect))),
+  });
+  const created = (threadId: ThreadId) =>
+    Ref.get(commands).pipe(
+      Effect.map((items) =>
+        items.some((command) => command.type === "thread.create" && command.threadId === threadId),
+      ),
+    );
+  const archiveAgent = Layer.mock(ArchiveAgentService)({
+    readFacts: (target) =>
+      Effect.gen(function* () {
+        yield* Ref.update(factsRead, (items) => [...items, target.threadId]);
+        if (!(yield* created(target.threadId))) return null;
+        const archived = (yield* Ref.get(archivedSeats)).includes(target.threadId);
+        return {
+          facts: { openExchanges: [], runningTurn: null },
+          threadArchived: archived,
+          retired: archived,
+        };
+      }),
+    archive: (input) =>
+      Effect.gen(function* () {
+        yield* Effect.flatten(Ref.get(holdArchive));
+        yield* Ref.update(archivedSeats, (items) => [...items, input.target.threadId]);
+        return "archived" as const;
+      }),
+  });
+  const layer = Layer.mergeAll(
+    crewLaunchLayer,
+    archiveCrewLayer.pipe(
+      Layer.provide(archiveAgent),
+      Layer.provide(
+        Layer.mock(ServerSecretStore)({
+          getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(7)),
+        }),
+      ),
+    ),
+  ).pipe(
+    Layer.provideMerge(crews),
+    Layer.provideMerge(
+      dependencies(commands, [codex], new Set(), new Set(), new Set(), true, new Set(), (command) =>
+        Ref.get(holdDispatch).pipe(Effect.flatMap((hold) => hold(command))),
+      ),
+    ),
+    Layer.provideMerge(Layer.succeedContext(context)),
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-unit-" })),
+    Layer.provideMerge(NodeServices.layer),
+  );
+  const archiveInput = (crewInstanceId: string) => ({
+    providerSessionId: "session",
+    callerParticipantId: null,
+    squadronId: null,
+    crewInstanceId,
+    clientRequestKey: "archive-1",
+    confirmationSatisfied: true,
+    archivedAt: "2026-09-09T17:00:00.000Z",
+    commandIds: (seat: string) => ({
+      interruptCommandId: CommandId.make(`interrupt:${seat}`),
+      archiveCommandId: CommandId.make(`archive:${seat}`),
+    }),
+  });
+  const seatThread = (requestKey: string, seat: string) =>
+    spawnThreadId({
+      providerSessionId: "session",
+      requestKey: crewSeatRequestKey(requestKey, seat),
+    });
+  const launchPair = Effect.gen(function* () {
+    const launcher = yield* CrewLaunchService;
+    return yield* launcher.launch({
+      providerSessionId: "session",
+      requestKey: "unit-1",
+      captain,
+      displayName: "Review Pair",
+      seats: [{ name: "builder", agentId: "builder", reason: "Implements" }],
+      brief: "Ship the login fix.",
+    });
+  });
+  const addSentry = (instance: AgentCrewInstance) =>
+    Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      return yield* launcher.addSeats({
+        providerSessionId: "session",
+        requestKey: "add-sentry",
+        captain,
+        instance,
+        seats: [{ name: "sentry", agentId: "sentry", reason: "Security pass" }],
+      });
+    });
+  return {
+    layer,
+    commands,
+    entered,
+    archivedSeats,
+    factsRead,
+    holdArchive,
+    holdDispatch,
+    archiveInput,
+    seatThread,
+    launchPair,
+    addSentry,
+  };
+});
+
+it.effect(
+  "an addition approved while the unit archive runs is refused before any seat of it exists",
+  () =>
+    Effect.gen(function* () {
+      const unit = yield* unitFixture;
+      yield* Effect.gen(function* () {
+        const archive = yield* ArchiveCrewService;
+        const crews = yield* AgentCrewInstanceService;
+        const instance = yield* unit.launchPair;
+        yield* Queue.clear(unit.entered);
+
+        // The archive has read the roster and is retiring its first member when the addition,
+        // already past the gate's checks, asks to reserve its seat. This proves the outcome, not
+        // the lock: without it the addition may still happen to reserve after the stamp. The
+        // mid-spawn test below is the one that fails without the lock.
+        const archiving = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        yield* Ref.set(
+          unit.holdArchive,
+          Deferred.succeed(archiving, undefined).pipe(Effect.andThen(Deferred.await(release))),
+        );
+        const archiveFiber = yield* archive
+          .archive(unit.archiveInput(instance.id))
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(archiving);
+        const addFiber = yield* unit.addSentry(instance).pipe(Effect.flip, Effect.forkChild);
+        assert.deepStrictEqual(
+          [yield* Queue.take(unit.entered), yield* Queue.take(unit.entered)],
+          [instance.id, instance.id],
+        );
+        yield* Deferred.succeed(release, undefined);
+
+        const archived = yield* Fiber.join(archiveFiber);
+        assert.equal(archived.status, "archived");
+        assert.deepStrictEqual(
+          archived.members.map((member) => member.seatName),
+          ["builder"],
+        );
+        const refused = yield* Fiber.join(addFiber);
+        assert.equal(refused._tag, "CrewLaunchOperationError");
+        assert.include(refused.message, "is retired");
+
+        const sentry = unit.seatThread("add-sentry", "sentry");
+        const commands = yield* Ref.get(unit.commands);
+        assert.isFalse(
+          commands.some((command) => "threadId" in command && command.threadId === sentry),
+        );
+        const after = (yield* crews.read(instance.id))!;
+        assert.isNotNull(after.archivedAt);
+        assert.deepStrictEqual(
+          after.members.map((member) => member.seatName),
+          ["builder"],
+        );
+      }).pipe(Effect.provide(unit.layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a unit archive that arrives while an addition spawns reads the roster after the seat exists and retires it",
+  () =>
+    Effect.gen(function* () {
+      const unit = yield* unitFixture;
+      yield* Effect.gen(function* () {
+        const archive = yield* ArchiveCrewService;
+        const crews = yield* AgentCrewInstanceService;
+        const instance = yield* unit.launchPair;
+        yield* Queue.clear(unit.entered);
+        const sentry = unit.seatThread("add-sentry", "sentry");
+
+        // The addition has reserved its row and its seat thread is being created.
+        const spawning = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        yield* Ref.set(unit.holdDispatch, (command) =>
+          command.type === "thread.create" && command.threadId === sentry
+            ? Deferred.succeed(spawning, undefined).pipe(Effect.andThen(Deferred.await(release)))
+            : Effect.void,
+        );
+        const addFiber = yield* unit.addSentry(instance).pipe(Effect.forkChild);
+        yield* Deferred.await(spawning);
+        const reserved = (yield* crews.read(instance.id))!;
+        assert.deepStrictEqual(
+          reserved.members.map((member) => member.seatName),
+          ["builder", "sentry"],
+        );
+
+        const archiveFiber = yield* archive
+          .archive(unit.archiveInput(instance.id))
+          .pipe(Effect.forkChild);
+        assert.deepStrictEqual(
+          [yield* Queue.take(unit.entered), yield* Queue.take(unit.entered)],
+          [instance.id, instance.id],
+        );
+        // Waiting on the addition, the archive has not read a single seat.
+        assert.lengthOf(yield* Ref.get(unit.factsRead), 0);
+        yield* Deferred.succeed(release, undefined);
+
+        const grown = yield* Fiber.join(addFiber);
+        assert.deepStrictEqual(
+          grown.members.map((member) => member.seatName),
+          ["builder", "sentry"],
+        );
+        const archived = yield* Fiber.join(archiveFiber);
+        assert.equal(archived.status, "archived");
+        assert.deepStrictEqual(
+          archived.members.map((member) => [member.seatName, member.result]),
+          [
+            ["builder", "archived"],
+            ["sentry", "archived"],
+          ],
+        );
+        assert.include(yield* Ref.get(unit.archivedSeats), sentry);
+        assert.isNotNull((yield* crews.read(instance.id))!.archivedAt);
+      }).pipe(Effect.provide(unit.layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a unit archive finishes over an addition that reserved its seat but never spawned it",
+  () =>
+    Effect.gen(function* () {
+      const unit = yield* unitFixture;
+      yield* Effect.gen(function* () {
+        const archive = yield* ArchiveCrewService;
+        const crews = yield* AgentCrewInstanceService;
+        const instance = yield* unit.launchPair;
+        const sentry = unit.seatThread("add-sentry", "sentry");
+        yield* Ref.set(unit.holdDispatch, (command) =>
+          command.type === "thread.create" && command.threadId === sentry
+            ? Effect.fail(
+                new OrchestratorDispatchError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                }),
+              )
+            : Effect.void,
+        );
+        const failed = yield* unit.addSentry(instance).pipe(Effect.flip);
+        assert.equal(failed._tag, "CrewLaunchOperationError");
+        assert.deepStrictEqual(
+          (yield* crews.read(instance.id))!.members.map((member) => member.seatName),
+          ["builder", "sentry"],
+        );
+
+        const archived = yield* archive.archive(unit.archiveInput(instance.id));
+        assert.equal(archived.status, "archived");
+        assert.deepStrictEqual(
+          archived.members.map((member) => [member.seatName, member.result]),
+          [
+            ["builder", "archived"],
+            ["sentry", "never_created"],
+          ],
+        );
+        assert.notInclude(yield* Ref.get(unit.archivedSeats), sentry);
+        const retired = (yield* crews.read(instance.id))!;
+        assert.isNotNull(retired.archivedAt);
+        // The reserved row stays on the retired roster; the result says it never ran.
+        assert.deepStrictEqual(
+          retired.members.map((member) => member.seatName),
+          ["builder", "sentry"],
+        );
+      }).pipe(Effect.provide(unit.layer));
+    }).pipe(Effect.scoped),
 );

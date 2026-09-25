@@ -14,6 +14,11 @@ import * as Layer from "effect/Layer";
 
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import { base64UrlEncode, signPayload } from "../../auth/utils.ts";
+import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
+import {
+  ProjectionStoreReadError,
+  ProjectionStoreThreadNotFoundError,
+} from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import {
@@ -438,3 +443,82 @@ it.effect("recovers forward after a committed thread archive and incomplete noti
     assert.isFalse(state.open);
   }).pipe(Effect.provide(harness.layer));
 });
+
+/**
+ * `readFacts` for a Crew seat row: null only when both stores say the thread never existed. The
+ * home is read from the archive facts, the thread from the projection store.
+ */
+const readFactsFor = (home: "none" | "registered", thread: "missing" | "unreadable" | "present") =>
+  Effect.gen(function* () {
+    const service = yield* ArchiveAgentService;
+    return yield* service.readFacts(target);
+  }).pipe(
+    Effect.provide(
+      archiveAgentLayer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(A2AArchiveFacts)({
+              readForThread: () =>
+                Effect.succeed(
+                  home === "none"
+                    ? {
+                        state: "not-an-a2a-participant",
+                        threadId,
+                        openExchanges: [],
+                        placementSubtree: { state: "not-applicable" },
+                      }
+                    : {
+                        state: "registered",
+                        threadId,
+                        squadronId,
+                        participantId,
+                        retired: false,
+                        archived: false,
+                        openExchanges: [],
+                        placementSubtree: { state: "none" },
+                      },
+                ),
+            }),
+            Layer.mock(ThreadManagementService)({
+              getThreadProjection: () =>
+                thread === "present"
+                  ? Effect.succeed({
+                      thread: { id: threadId, projectId, archivedAt: null },
+                      runs: [],
+                    } as never)
+                  : Effect.fail(
+                      new OrchestratorProjectionError({
+                        threadId,
+                        cause:
+                          thread === "missing"
+                            ? new ProjectionStoreThreadNotFoundError({ threadId })
+                            : new ProjectionStoreReadError({ threadId }),
+                      }),
+                    ),
+            }),
+            Layer.mock(A2ALedger)({}),
+            Layer.mock(ThreadLifecycleService)({}),
+            Layer.mock(A2ALifecycleService)({}),
+            Layer.mock(ServerSecretStore)({
+              getOrCreateRandom: () => Effect.succeed(signingSecret),
+            }),
+          ),
+        ),
+      ),
+    ),
+  );
+
+it.effect("reads a target as never created only when neither its home nor its thread exists", () =>
+  Effect.gen(function* () {
+    assert.isNull(yield* readFactsFor("none", "missing"));
+    // A store that cannot answer is not an absence.
+    const outage = yield* readFactsFor("none", "unreadable").pipe(Effect.flip);
+    assert.equal(outage._tag, "ArchiveAgentOperationError");
+    // A home with no thread behind it is a broken target, not one that never existed.
+    const homed = yield* readFactsFor("registered", "missing").pipe(Effect.flip);
+    assert.equal(homed._tag, "ArchiveAgentOperationError");
+    // A thread with no home is the mismatch it always was.
+    const unhomed = yield* readFactsFor("none", "present").pipe(Effect.flip);
+    assert.instanceOf(unhomed, ArchiveAgentTargetMismatchError);
+  }),
+);

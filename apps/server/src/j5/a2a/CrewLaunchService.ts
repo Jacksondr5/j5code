@@ -706,8 +706,19 @@ export const layer = Layer.effect(
         yield* spawnSeats(input.captain, planned);
         yield* startBriefs(input.captain, instance, planned, input.brief);
         return instance;
-      });
+      }).pipe((launch) =>
+        // One unit step from the record through the briefs, so a unit archive waits for every
+        // seat to exist before it reads the roster.
+        crews.serialize(
+          spawnCrewInstanceId({
+            providerSessionId: input.providerSessionId,
+            requestKey: input.requestKey,
+          }),
+          launch,
+        ),
+      );
 
+    // One unit step from the reservation through the briefs, like a launch.
     const addSeats: CrewLaunchServiceShape["addSeats"] = (input) =>
       Effect.gen(function* () {
         const resolved = input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats));
@@ -773,7 +784,7 @@ export const layer = Layer.effect(
           input.brief ?? reservation.instance.brief,
         );
         return reservation.instance;
-      });
+      }).pipe((addition) => crews.serialize(input.instance.id, addition));
 
     return CrewLaunchService.of({ launch, addSeats, resolveSeats });
   }),

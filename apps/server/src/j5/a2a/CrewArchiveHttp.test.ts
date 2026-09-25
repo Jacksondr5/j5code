@@ -56,6 +56,11 @@ it("archives a crew for operators only, with the person's confirmation already s
                 participantId: ParticipantId.make("agent:j5:a2a:thread:critic"),
                 result: "already_archived" as const,
               },
+              {
+                seatName: "ghost",
+                participantId: ParticipantId.make("agent:j5:a2a:thread:ghost"),
+                result: "never_created" as const,
+              },
             ],
           })
         : Effect.fail(new ArchiveCrewNotFoundError({ crewInstanceId: input.crewInstanceId }));
@@ -88,6 +93,7 @@ it("archives a crew for operators only, with the person's confirmation already s
       members: Array<{ seat: string; result: string }>;
     };
     assert.equal(body.status, "archived");
+    // The never-created ghost seat is left out, so every client decodes the members it gets.
     assert.deepStrictEqual(
       body.members.map((member) => [member.seat, member.result]),
       [
