@@ -10,7 +10,7 @@ import {
 } from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
-export type ComposerTriggerKind = "agent" | "path" | "slash-command" | "skill";
+export type ComposerTriggerKind = "agent" | "path" | "slash-command" | "slash-playbook" | "skill";
 export type ComposerSlashCommand = "model" | "plan" | "default" | "playbook";
 export type ComposerSubmissionIntent = "foreground" | "background";
 
@@ -234,6 +234,15 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
       return {
         kind: "slash-command",
         query: commandQuery,
+        rangeStart: lineStart,
+        rangeEnd: cursor,
+      };
+    }
+    const playbookMatch = /^\/playbook[ \t]+([^ \t\r\n]*)$/i.exec(linePrefix);
+    if (playbookMatch) {
+      return {
+        kind: "slash-playbook",
+        query: playbookMatch[1] ?? "",
         rangeStart: lineStart,
         rangeEnd: cursor,
       };

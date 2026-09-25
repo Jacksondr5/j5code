@@ -8,6 +8,10 @@ vi.mock("../../j5/agents/useAgentMentionPicker", () => ({
 vi.mock("../../state/queries", () => ({
   useComposerPathSearch: () => ({ entries: [], isPending: false }),
 }));
+vi.mock("../../state/query", () => ({
+  useEnvironmentQuery: () => ({ data: null, isPending: false }),
+}));
+vi.mock("../../j5/state", () => ({ j5Environment: { playbookLibrary: vi.fn() } }));
 vi.mock("../../state/server", () => ({
   serverEnvironment: { refreshProviders: Symbol("refreshProviders") },
 }));
@@ -21,7 +25,23 @@ import {
 } from "./use-composer-command-menu";
 
 describe("mobile slash commands", () => {
-  it("expands a playbook into ordinary text without changing interaction mode", () => {
+  it("inserts the registered playbook name", () => {
+    expect(
+      resolveComposerCommandSelection({
+        draftMessage: "/playbook deb",
+        trigger: { rangeStart: 0, rangeEnd: 13 },
+        item: {
+          id: "playbook:debugging",
+          type: "playbook",
+          name: "debugging",
+          label: "Debug",
+          description: "",
+        },
+        allowInteractionMode: false,
+      }),
+    ).toEqual({ text: "/playbook debugging ", cursor: 20, interactionMode: null });
+  });
+  it("keeps the playbook command active to search names", () => {
     const item = buildComposerSlashCommandItems({
       query: "playbook",
       atMessageStart: true,
@@ -32,14 +52,14 @@ describe("mobile slash commands", () => {
     if (!item) throw new Error("Expected playbook command");
     expect(
       resolveComposerCommandSelection({
-        draftMessage: "/playbook release",
-        trigger: { rangeStart: 0, rangeEnd: 10 },
+        draftMessage: "/playbook",
+        trigger: { rangeStart: 0, rangeEnd: 9 },
         item,
         allowInteractionMode: false,
       }),
     ).toEqual({
-      text: "Start playbook release",
-      cursor: 15,
+      text: "/playbook ",
+      cursor: 10,
       interactionMode: null,
     });
   });

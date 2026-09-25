@@ -339,6 +339,7 @@ export function NewTaskDraftScreen(props: {
     draftMessage: flow.prompt,
     ownerKey: flow.draftKey,
     environmentId: selectedProject?.environmentId ?? null,
+    projectId: selectedProject?.id ?? null,
     projectCwd:
       (flow.workspaceMode === "worktree"
         ? selectedProject?.workspaceRoot

@@ -32,6 +32,13 @@ export type ComposerCommandItem =
     }
   | {
       readonly id: string;
+      readonly type: "playbook";
+      readonly name: string;
+      readonly label: string;
+      readonly description: string;
+    }
+  | {
+      readonly id: string;
       readonly type: "provider-slash-command";
       readonly command: ServerProviderSlashCommand;
       readonly label: string;
@@ -84,6 +91,7 @@ function itemIcon(item: ComposerCommandItem): AppSymbolName | null {
     case "agent":
       return "person.crop.circle";
     case "slash-command":
+    case "playbook":
     case "provider-slash-command":
       return "terminal";
     case "skill":
@@ -99,6 +107,8 @@ function groupLabel(triggerKind: ComposerTriggerKind | null): string | null {
       return "Personas";
     case "slash-command":
       return "Commands";
+    case "slash-playbook":
+      return "Playbooks";
     case "skill":
       return "Skills";
     case "path":
@@ -121,6 +131,8 @@ function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean):
       return "No skills found.";
     case "slash-command":
       return "No matching commands.";
+    case "slash-playbook":
+      return "No matching playbooks.";
     default:
       return "No results.";
   }

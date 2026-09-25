@@ -356,6 +356,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     draftMessage: props.draftMessage,
     ownerKey: composerOwnerKey,
     environmentId: props.environmentId,
+    projectId: props.selectedThread.projectId,
+    threadId: props.selectedThread.id,
     projectCwd: props.projectCwd,
     selectedProviderStatus,
     hasThread: true,

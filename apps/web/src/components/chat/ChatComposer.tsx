@@ -13,6 +13,7 @@ import type {
   ChatFileAttachment,
   EnvironmentId,
   ModelSelection,
+  ProjectId,
   OrchestrationV2AgentPersonaAssignment,
   PreviewAnnotationPayload,
   ProviderApprovalDecision,
@@ -33,6 +34,8 @@ import {
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+import { j5Environment } from "../../j5/state";
+import { useEnvironmentQuery } from "../../state/query";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
 import {
@@ -1395,6 +1398,7 @@ export interface ChatComposerHandle {
 export interface ChatComposerProps {
   composerDraftTarget: ScopedThreadRef | DraftId;
   environmentId: EnvironmentId;
+  projectId: ProjectId | null;
   attachmentUploadsCapabilityKnown: boolean;
   supportsAttachmentUploads: boolean;
   supportsQuestionAttachments: boolean;
@@ -1562,6 +1566,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const {
     composerDraftTarget,
     environmentId,
+    projectId,
     attachmentUploadsCapabilityKnown,
     supportsAttachmentUploads,
     supportsQuestionAttachments,
@@ -2230,6 +2235,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     cwd: isPathTrigger ? gitCwd : null,
     query: isPathTrigger ? pathTriggerQuery : null,
   });
+  const playbookQuery = useEnvironmentQuery(
+    composerTriggerKind === "slash-playbook" && projectId
+      ? j5Environment.playbookLibrary({
+          environmentId,
+          input: {
+            projectId,
+            ...(isServerThread && activeThreadId ? { threadId: activeThreadId } : {}),
+          },
+        })
+      : null,
+  );
   const compactSlashCommandAvailable =
     composerTrigger?.kind === "slash-command" &&
     prompt.slice(0, composerTrigger.rangeStart).trim() === "" &&
@@ -2252,6 +2268,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "agent") return agentPicker.items;
+    if (composerTrigger.kind === "slash-playbook") {
+      const query = composerTrigger.query.trim().toLowerCase();
+      return (playbookQuery.data?.playbooks ?? [])
+        .filter(
+          (playbook) =>
+            !playbook.issue &&
+            (playbook.name.toLowerCase().includes(query) ||
+              playbook.title.toLowerCase().includes(query)),
+        )
+        .map((playbook) => ({
+          id: `playbook:${playbook.name}`,
+          type: "playbook" as const,
+          name: playbook.name,
+          label: playbook.name,
+          description: playbook.title,
+        }));
+    }
     if (composerTrigger.kind === "path") {
       return [
         // J5: personas whose id or name starts with the typed text lead the file results.
@@ -2353,6 +2386,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return [];
   }, [
     agentPicker.items,
+    playbookQuery.data,
     compactSlashCommandAvailable,
     composerTrigger,
     planModeUiEnabled,
@@ -2433,8 +2467,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const isComposerMenuLoading =
     (composerTriggerKind === "agent" && agentPicker.isPending) ||
+    (composerTriggerKind === "slash-playbook" && playbookQuery.isPending) ||
     (composerTriggerKind === "path" && pathTriggerQuery.length > 0 && workspaceEntries.isPending);
   const composerMenuEmptyState = useMemo(() => {
+    if (composerTriggerKind === "slash-playbook")
+      return playbookQuery.error ?? "No matching playbooks.";
     if (composerTriggerKind === "agent") return agentPicker.error ?? "No available personas found.";
     if (composerTriggerKind === "skill") {
       return "No skills found. Try / to browse provider commands.";
@@ -2442,7 +2479,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return composerTriggerKind === "path"
       ? "No matching files or folders."
       : "No matching command.";
-  }, [composerTriggerKind, agentPicker.error]);
+  }, [composerTriggerKind, agentPicker.error, playbookQuery.error]);
 
   // ------------------------------------------------------------------
   // Provider traits UI
@@ -3078,6 +3115,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       });
       const { snapshot, trigger } = resolveActiveComposerTrigger();
       if (!trigger) return;
+      if (item.type === "playbook") {
+        applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, `/playbook ${item.name} `, {
+          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+        });
+        setComposerHighlightedItemId(null);
+        return;
+      }
       if (item.type === "agent") {
         if (applyAgentMentionSelection(item, trigger, snapshot.value, applyPromptReplacement))
           setComposerHighlightedItemId(null);
@@ -3103,7 +3147,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       if (item.type === "slash-command") {
         if (item.command === "playbook") {
-          applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "Start playbook ", {
+          applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "/playbook ", {
             expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
           });
           setComposerHighlightedItemId(null);
