@@ -27,7 +27,7 @@ export function agentPersonaMentionItems(
               value.toLowerCase().includes(search),
             )),
     )
-    .toSorted((a, b) => a.displayName.localeCompare(b.displayName))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName))
     .slice(0, 20)
     .map((persona) => ({
       id: `agent:${persona.personaId}`,

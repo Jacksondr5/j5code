@@ -1,10 +1,6 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import {
-  deriveSteerState,
-  queuedRowSteerTitle,
-  steerActLabel,
-} from "@t3tools/client-runtime/j5/steer-state";
 import { deriveThreadQueueWorkflowState } from "@t3tools/client-runtime/state/thread-workflows";
+import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import type {
   ChatAttachment as ContractChatAttachment,
   EnvironmentId,
@@ -18,8 +14,9 @@ import {
   GripVerticalIcon,
   ListOrderedIcon,
   PencilIcon,
+  PauseIcon,
 } from "lucide-react";
-import { useId, useMemo, useRef, useState } from "react";
+import { useId, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 
 import { useAssetUrls } from "../../assets/assetUrls";
 import {
@@ -27,7 +24,6 @@ import {
   participantIdsForThreadA2AEnvelope,
 } from "../../j5/a2a/ThreadA2ARenderer";
 import { useParticipantLabels } from "../../j5/a2a/ParticipantIdentitiesClient";
-import { QueueSteerState } from "../../j5/composer/QueueSteerState";
 import { threadEnvironment } from "../../state/threads";
 import { useThreadProjection } from "../../state/entities";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -52,7 +48,18 @@ interface QueuedRowThumbnail {
 
 const QUEUED_RUN_DRAG_TYPE = "application/x-t3code-queued-run";
 
-export function QueuedRunsControl(props: {
+export interface QueuedRunsControlHandle {
+  steerNext: (repeat: boolean) => boolean;
+  editLatest: (repeat: boolean) => boolean;
+}
+
+export function QueuedRunsControl({
+  ref,
+  ...props
+}: {
+  readonly ref?: Ref<QueuedRunsControlHandle>;
+  readonly steerShortcutLabel?: string | null;
+  readonly editShortcutLabel?: string | null;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly optimisticMessages: ReadonlyArray<
@@ -69,6 +76,8 @@ export function QueuedRunsControl(props: {
   const reorder = useAtomCommand(threadEnvironment.reorderQueuedRun);
   const promote = useAtomCommand(threadEnvironment.promoteQueuedRun);
   const cancel = useAtomCommand(threadEnvironment.cancelQueuedRun);
+  const resume = useAtomCommand(threadEnvironment.resumeThreadQueue);
+  const [resuming, setResuming] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const queueListId = useId();
   const [busyRunId, setBusyRunId] = useState<RunId | null>(null);
@@ -168,12 +177,6 @@ export function QueuedRunsControl(props: {
     items.flatMap((item) => participantIdsForThreadA2AEnvelope(item.text)),
   );
 
-  if (items.length === 0) return null;
-
-  // J5 QS3/QS4: the steer control says what it does on this provider, or the
-  // run's actual phase when nothing is steerable.
-  const steerState = projection ? deriveSteerState(projection) : ({ kind: "idle" } as const);
-
   const move = async (runId: RunId, beforeRunId: RunId | null) => {
     setBusyRunId(runId);
     try {
@@ -197,8 +200,10 @@ export function QueuedRunsControl(props: {
     void move(runId, queued[insertIndex]?.run.id ?? null);
   };
 
+  const steerInFlightRef = useRef(false);
   const steer = async (queuedRunId: RunId) => {
-    if (activeRun === null || steerState.kind !== "steerable") return;
+    if (activeRun === null || !workflow?.canPromoteToSteer || steerInFlightRef.current) return;
+    steerInFlightRef.current = true;
     setBusyRunId(queuedRunId);
     try {
       await promote({
@@ -206,9 +211,37 @@ export function QueuedRunsControl(props: {
         input: { threadId: props.threadId, queuedRunId, targetRunId: activeRun.id },
       });
     } finally {
+      steerInFlightRef.current = false;
       setBusyRunId(null);
     }
   };
+
+  useImperativeHandle(ref, () => ({
+    steerNext(repeat) {
+      const next = queued[0];
+      if (!next || !workflow?.canPromoteToSteer) return false;
+      if (!repeat && busyRunId === null) void steer(next.run.id);
+      return true;
+    },
+    // Declines while a queued message is already being edited so the key keeps
+    // moving the caret inside that draft.
+    editLatest(repeat) {
+      const latest = queued.at(-1);
+      if (!latest || props.editingRunId !== null || busyRunId !== null) return false;
+      if (!repeat) {
+        setExpanded(true);
+        props.onEditQueuedRun({
+          runId: latest.run.id,
+          messageId: latest.run.userMessageId,
+          text: latest.text,
+          attachments: latest.attachments,
+        });
+      }
+      return true;
+    },
+  }));
+
+  if (items.length === 0) return null;
 
   const remove = async (runId: RunId) => {
     setBusyRunId(runId);
@@ -242,24 +275,44 @@ export function QueuedRunsControl(props: {
           <ComposerBanner.Icon>
             <ListOrderedIcon />
           </ComposerBanner.Icon>
-          <ComposerBanner.Content className="text-muted-foreground">Queued</ComposerBanner.Content>
+          <ComposerBanner.Content className="text-muted-foreground">
+            {workflow?.isHeld ? "Queue held after restart" : "Queued"}
+          </ComposerBanner.Content>
           <ComposerBanner.Actions>
             <ComposerBanner.Count>{items.length}</ComposerBanner.Count>
             <ComposerBanner.ToggleIcon expanded={expanded} />
           </ComposerBanner.Actions>
         </ComposerBanner.Row>
-        {steerState.kind === "not-steerable" ? (
-          <ComposerBanner.Row>
-            <QueueSteerState
-              environmentId={props.environmentId}
-              threadId={props.threadId}
-              state={steerState}
-            />
+        {workflow?.isHeld && (
+          <ComposerBanner.Row layout="wrap-actions">
+            <ComposerBanner.Icon>
+              <PauseIcon />
+            </ComposerBanner.Icon>
+            <ComposerBanner.Content>Messages stay saved until you resume.</ComposerBanner.Content>
+            <ComposerBanner.Actions>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={resuming || busyRunId !== null}
+                onClick={() => {
+                  setResuming(true);
+                  void resume({
+                    environmentId: props.environmentId,
+                    input: { threadId: props.threadId },
+                  }).finally(() => setResuming(false));
+                }}
+              >
+                Resume queue
+              </Button>
+            </ComposerBanner.Actions>
           </ComposerBanner.Row>
-        ) : null}
+        )}
         <ComposerBanner.Scroll className={cn("max-h-32", !expanded && "hidden")}>
           <ComposerBanner.Children render={<ol />} id={queueListId}>
             {items.map((item) => {
+              const previewText = replaceComposerContextReferences(item.text, (reference) =>
+                reference.kind === "image" && item.thumbnails.length > 0 ? "" : reference.label,
+              ).trim();
               const delivery = formatThreadA2AQueuedDelivery(item.text, participantLabels);
               const rowRunId = item.runId;
               const rowServerIndex = item.serverIndex;
@@ -382,11 +435,11 @@ export function QueuedRunsControl(props: {
                     ) : null}
                     <Tooltip>
                       <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>
-                        {delivery?.label ?? item.text}
+                        {delivery?.label ?? previewText}
                       </TooltipTrigger>
                       <TooltipPopup side="top" className="max-w-96 break-words">
                         {delivery === null
-                          ? item.text
+                          ? previewText
                           : (delivery.tooltipParticipantId ?? delivery.label)}
                       </TooltipPopup>
                     </Tooltip>
@@ -426,7 +479,9 @@ export function QueuedRunsControl(props: {
                           >
                             <PencilIcon />
                           </TooltipTrigger>
-                          <TooltipPopup>Edit in the composer</TooltipPopup>
+                          <TooltipPopup>
+                            {`Edit in the composer${item.serverIndex === queued.length - 1 && props.editShortcutLabel ? ` (${props.editShortcutLabel})` : ""}`}
+                          </TooltipPopup>
                         </Tooltip>
                         <Tooltip>
                           <TooltipTrigger render={<span className="flex shrink-0" />}>
@@ -436,8 +491,7 @@ export function QueuedRunsControl(props: {
                               disabled={
                                 item.runId === null ||
                                 busyRunId !== null ||
-                                !workflow?.canPromoteToSteer ||
-                                steerState.kind !== "steerable"
+                                !workflow?.canPromoteToSteer
                               }
                               onClick={() => {
                                 if (item.runId !== null) {
@@ -446,12 +500,14 @@ export function QueuedRunsControl(props: {
                               }}
                             >
                               <CornerUpRightIcon />
-                              {steerState.kind === "steerable"
-                                ? steerActLabel(steerState.act)
-                                : "Steer"}
+                              Steer
                             </Button>
                           </TooltipTrigger>
-                          <TooltipPopup>{queuedRowSteerTitle(steerState)}</TooltipPopup>
+                          <TooltipPopup>
+                            {activeRun === null
+                              ? "There is no active run to steer"
+                              : `Send as a steer instead${item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}
+                          </TooltipPopup>
                         </Tooltip>
                         <Tooltip>
                           <TooltipTrigger

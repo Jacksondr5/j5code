@@ -5,6 +5,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { make as makeJsonSchemaGenerator } from "@effect/openapi-generator/JsonSchemaGenerator";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import type * as JsonSchema from "effect/JsonSchema";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
@@ -323,6 +324,19 @@ function normalizeNullableTypes(value: Schema.Json): Schema.Json {
   };
 }
 
+// Effect's rc.115 importer reads an object without `additionalProperties` as open and
+// emits `StructWithRest`, which the hand-written client cannot extend. Codex never
+// relies on extra keys, and a plain `Struct` still ignores unknown keys when decoding.
+// Schemas combining variants keep their shape so the variants stay decodable.
+function closeObjectProperties(schema: JsonSchema.JsonSchema): JsonSchema.JsonSchema {
+  const isPlainObject =
+    (schema.type === "object" || "properties" in schema) &&
+    !("oneOf" in schema || "anyOf" in schema || "allOf" in schema);
+  return isPlainObject && !("additionalProperties" in schema)
+    ? { ...schema, additionalProperties: false }
+    : schema;
+}
+
 // Effect's OpenAPI importer cannot intersect a common object with a oneOf.
 // Codex flattens elicitation variants this way. Distribute only disjoint
 // properties; schemas with other object constraints keep their original shape.
@@ -416,7 +430,7 @@ function addAsyncQuestionFields(value: Schema.Json): Schema.Json {
     return {
       ...value,
       properties: {
-        ...properties,
+        ...Object.fromEntries(Object.entries(properties).filter(([key]) => key !== "type")),
         delivery: { anyOf: [{ type: "string", enum: ["async"] }, { type: "null" }] },
         questions: {
           anyOf: [
@@ -436,6 +450,7 @@ function addAsyncQuestionFields(value: Schema.Json): Schema.Json {
             { type: "null" },
           ],
         },
+        type: itemType,
       },
     };
   }
@@ -772,7 +787,9 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
   }
 
   const generatedEntries = new Map<string, string>();
-  const output = generator.generate("openapi-3.1", aggregateSchemas as never, false).trim();
+  const output = generator
+    .generate("openapi-3.1", aggregateSchemas as never, false, { onEnter: closeObjectProperties })
+    .trim();
   if (output.length > 0) {
     for (const entry of collectSchemaEntries(output)) {
       if (!generatedEntries.has(entry.name)) {

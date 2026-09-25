@@ -10,6 +10,7 @@ import {
   runMigrations,
 } from "../../persistence/Migrations.ts";
 import collapse from "./reviewed-v2-collapse.v1.json" with { type: "json" };
+import renumber from "./reviewed-v2-renumber.v1.json" with { type: "json" };
 import { septemberV2RemainingSteps } from "./SeptemberV2Steps.ts";
 import legacy from "./legacy-upstream-migrations.v1.json" with { type: "json" };
 
@@ -93,11 +94,38 @@ const verifyHistoricalSchema = Effect.fn("J5.verifyHistoricalUpstreamSchema")(fu
   }
 });
 
+const failed = (id: number, name: string) => (cause: unknown) =>
+  new Migrator.MigrationError({
+    kind: "Failed",
+    message: `Migration "${id}_${name}" failed`,
+    cause,
+  });
+
+// Keep the many-to-one source history as durable upgrade provenance.
+const archiveHistory = Effect.fn("J5.archiveUpstreamMigrationHistory")(function* (
+  sourceRef: string,
+  rows: ReadonlyArray<(typeof History.Type)[number]>,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`CREATE TABLE IF NOT EXISTS j5_upstream_migration_history (
+    source_ref TEXT NOT NULL,
+    migration_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (source_ref, migration_id)
+  )`;
+  yield* sql`INSERT INTO j5_upstream_migration_history ${sql.insert(
+    rows.map((row) => ({ source_ref: sourceRef, ...row })),
+  )}`;
+});
+
 /**
- * Completes only missing historical steps before recording upstream's composed V2
- * migration. Original IDs/names/timestamps are retained separately; the composed
- * row is timestamped when this upgrade completes. All SQL and history changes
- * share the outer transaction, including subsequent upstream migrations.
+ * Upgrades histories that upstream's ordinary migrator cannot: the pin's
+ * `51 = OrchestrationV2` (renumbered to 54 upstream) and the older August and
+ * September V2 histories. Only missing SQL runs; V2 is never replayed over an
+ * existing V2 schema. Original IDs/names/timestamps are archived in
+ * `j5_upstream_migration_history`. All SQL and history changes share the outer
+ * transaction, including subsequent upstream migrations.
  */
 export const runJ5CompatibleUpstreamMigrations = Effect.fn("J5.runCompatibleUpstreamMigrations")(
   function* () {
@@ -113,6 +141,57 @@ export const runJ5CompatibleUpstreamMigrations = Effect.fn("J5.runCompatibleUpst
           );
         if (matches(migrationManifest)) return yield* runMigrations();
 
+        if (history.some((row) => row.migration_id === 53 && row.name === "OrchestrationV2")) {
+          return yield* badState(
+            "53 = OrchestrationV2 is an upstream T3 Code V2 preview database; J5 does not share databases with T3 Code and does not upgrade them",
+          );
+        }
+        const reviewedTarget = renumber.targetMigrations.map(({ id, name }) => [id, name] as const);
+        if (
+          migrationManifest.length !== reviewedTarget.length ||
+          !migrationManifest.every(
+            ([id, name], index) =>
+              reviewedTarget[index]?.[0] === id && reviewedTarget[index]?.[1] === name,
+          )
+        ) {
+          return yield* badState("the candidate no longer matches the reviewed composition");
+        }
+        // The manifest was just verified to be the reviewed contiguous 1–55 list.
+        const entry = (id: number) => migrationEntries[id - 1]!;
+        const v2Id = 54;
+        const v2 = entry(v2Id);
+
+        const pin =
+          history.length === renumber.sourceMigrations.length &&
+          matches(renumber.sourceMigrations.map(({ id, name }) => [id, name] as const));
+        if (pin) {
+          yield* verifyHistoricalSchema(renumber.schema.objectNames, renumber.schema.sha256);
+          const inserted = [51, 52, 53].map(entry);
+          for (const [id, name, migration] of inserted) {
+            yield* Effect.mapError(migration, failed(id, name));
+          }
+          yield* archiveHistory(
+            renumber.sourceRef,
+            history.filter((row) => row.migration_id === 51),
+          );
+          // UPDATE keeps the original completion timestamp of the V2 schema.
+          yield* sql`UPDATE effect_sql_migrations SET migration_id = ${v2Id}
+            WHERE migration_id = 51 AND name = ${v2[1]}`;
+          yield* sql`INSERT INTO effect_sql_migrations ${sql.insert(
+            inserted.map(([migration_id, name]) => ({ migration_id, name })),
+          )}`;
+          const executed = yield* runMigrations();
+          const applied = [...inserted.map(([id, name]) => [id, name] as const), ...executed];
+          yield* Effect.log("J5 upgraded upstream migration history").pipe(
+            Effect.annotateLogs({
+              source: `pin ${renumber.sourceRef}`,
+              applied: applied.map(([id, name]) => `${id}_${name}`),
+              remapped: [`51_${v2[1]} -> ${v2Id}_${v2[1]}`],
+            }),
+          );
+          return applied;
+        }
+
         const august =
           history.length === legacy.migrations.length &&
           matches(legacy.migrations.map(({ id, name }) => [id, name] as const));
@@ -124,15 +203,6 @@ export const runJ5CompatibleUpstreamMigrations = Effect.fn("J5.runCompatibleUpst
             "history is neither a current prefix nor a reviewed historical history",
           );
         }
-        if (
-          !collapse.targetMigrations.every(
-            (row, index) =>
-              migrationManifest[index]?.[0] === row.id &&
-              migrationManifest[index]?.[1] === row.name,
-          )
-        ) {
-          return yield* badState("the candidate no longer matches the reviewed composition");
-        }
         const through = august ? 56 : history.length;
         const digest = august
           ? legacy.schema.sha256
@@ -143,42 +213,43 @@ export const runJ5CompatibleUpstreamMigrations = Effect.fn("J5.runCompatibleUpst
           digest,
         );
 
-        const missing = migrationEntries.filter(([id]) => id >= (august ? 41 : 48) && id <= 50);
+        // Target SQL that precedes V2 in upstream's order, then only the V2 steps
+        // this history has not completed.
+        const firstMissing = august ? 41 : 48;
+        const missing = migrationEntries.filter(([id]) => id >= firstMissing && id < v2Id);
         for (const [id, name, migration] of [
           ...missing,
           ...septemberV2RemainingSteps.filter(([id]) => id > through),
         ]) {
-          yield* Effect.mapError(
-            migration,
-            (cause) =>
-              new Migrator.MigrationError({
-                kind: "Failed",
-                message: `Migration "${id}_${name}" failed`,
-                cause,
-              }),
-          );
+          yield* Effect.mapError(migration, failed(id, name));
         }
 
-        // Keep the many-to-one source history as durable upgrade provenance.
-        yield* sql`CREATE TABLE IF NOT EXISTS j5_upstream_migration_history (
-          source_ref TEXT NOT NULL,
-          migration_id INTEGER NOT NULL,
-          name TEXT NOT NULL,
-          created_at TEXT NOT NULL,
-          PRIMARY KEY (source_ref, migration_id)
-        )`;
-        yield* sql`INSERT INTO j5_upstream_migration_history ${sql.insert(
-          history.map((row) => ({ source_ref: august ? legacy.ref : collapse.sourceRef, ...row })),
-        )}`;
-        yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= ${august ? 41 : 48}`;
+        const sourceRef = august ? legacy.ref : collapse.sourceRef;
+        yield* archiveHistory(sourceRef, history);
+        yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= ${firstMissing}`;
         const completed = [
           ...missing.map(([id, name]) => [id, name] as const),
-          [51, "OrchestrationV2"] as const,
+          [v2Id, v2[1]] as const,
         ];
         yield* sql`INSERT INTO effect_sql_migrations ${sql.insert(
           completed.map(([migration_id, name]) => ({ migration_id, name })),
         )}`;
         const executed = yield* runMigrations();
+        yield* Effect.log("J5 upgraded upstream migration history").pipe(
+          Effect.annotateLogs({
+            source: `${august ? "August" : "September"} ${sourceRef} through ${through}`,
+            applied: [
+              ...missing.map(([id, name]) => `${id}_${name}`),
+              ...septemberV2RemainingSteps
+                .filter(([id]) => id > through)
+                .map(([id, name]) => `september ${id}_${name}`),
+              ...executed.map(([id, name]) => `${id}_${name}`),
+            ],
+            remapped: history
+              .filter(({ migration_id }) => migration_id >= firstMissing)
+              .map(({ migration_id, name }) => `${migration_id}_${name} -> ${v2Id}_${v2[1]}`),
+          }),
+        );
         return [...completed, ...executed];
       }),
     );

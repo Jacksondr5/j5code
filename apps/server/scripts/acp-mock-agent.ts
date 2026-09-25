@@ -23,6 +23,7 @@ const emitToolCalls = process.env.T3_ACP_EMIT_TOOL_CALLS === "1";
 const emitInterleavedAssistantToolCalls =
   process.env.T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS === "1";
 const emitV2Fidelity = process.env.T3_ACP_EMIT_V2_FIDELITY === "1";
+const vibeRetryOutcome = process.env.T3_ACP_VIBE_RETRY_OUTCOME;
 const emitGenericToolPlaceholders = process.env.T3_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS === "1";
 const emitPostSettleMonitorFlow = process.env.T3_ACP_EMIT_POST_SETTLE_MONITOR_FLOW === "1";
 const emitInTurnTaskOutputThenLateDuplicate =
@@ -43,6 +44,8 @@ const emitXAiAskUserQuestionThenHang =
 const emitContentThenHang = process.env.T3_ACP_EMIT_CONTENT_THEN_HANG === "1";
 const emitPlanThenHang = process.env.T3_ACP_EMIT_PLAN_THEN_HANG === "1";
 const emitActiveToolThenHang = process.env.T3_ACP_EMIT_ACTIVE_TOOL_THEN_HANG === "1";
+const emitGrokMonitorPostTurnPoll = process.env.T3_ACP_EMIT_GROK_MONITOR_POST_TURN_POLL === "1";
+const emitGrokBackgroundTaskStarted = process.env.T3_ACP_EMIT_GROK_BACKGROUND_TASK_STARTED === "1";
 const emitForeignSessionUpdates = process.env.T3_ACP_EMIT_FOREIGN_SESSION_UPDATES === "1";
 const waitForResumeRelease = process.env.T3_ACP_WAIT_FOR_RESUME_RELEASE === "1";
 const completeFirstPromptOnCancel = process.env.T3_ACP_COMPLETE_FIRST_PROMPT_ON_CANCEL === "1";
@@ -862,6 +865,70 @@ const program = Effect.gen(function* () {
       beginAcpMockPrompt(cancelledSessions, requestedSessionId);
       promptCount += 1;
 
+      if (vibeRetryOutcome !== undefined) {
+        if (vibeRetryOutcome === "recovered") {
+          yield* Effect.sync(() =>
+            writeJsonRpcNotification("session/update", {
+              sessionId: requestedSessionId,
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "tool-before-retry",
+                title: "Read file",
+                kind: "read",
+                status: "in_progress",
+              },
+            }),
+          );
+        }
+        for (const [index, noticeSessionId] of [
+          "unrelated-session",
+          requestedSessionId,
+          requestedSessionId,
+        ].entries()) {
+          // Progress from an earlier tool must not end the retry.
+          if (index === 2 && vibeRetryOutcome === "recovered") {
+            yield* Effect.sync(() =>
+              writeJsonRpcNotification("session/update", {
+                sessionId: requestedSessionId,
+                update: {
+                  sessionUpdate: "tool_call_update",
+                  toolCallId: "tool-before-retry",
+                  status: "in_progress",
+                  rawOutput: { progress: "still reading" },
+                },
+              }),
+            );
+          }
+          yield* Effect.sync(() =>
+            writeJsonRpcNotification("_session/retrying", {
+              sessionId: noticeSessionId,
+              category: "rate_limited",
+              detail: "Rate limit reached. Retrying. api_key=private-key",
+            }),
+          );
+        }
+        if (vibeRetryOutcome === "failed") {
+          return yield* new AcpError.AcpRequestError({
+            code: -31001,
+            errorMessage: "Rate limit exceeded for mistral (model: mistral-vibe-cli-latest).",
+          });
+        }
+        if (vibeRetryOutcome === "completed") {
+          return yield* finishPrompt(requestedSessionId, "end_turn");
+        }
+        if (vibeRetryOutcome === "cancelled") {
+          return yield* finishPrompt(requestedSessionId, "cancelled");
+        }
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "Recovered answer" },
+          },
+        });
+        return yield* finishPrompt(requestedSessionId, "end_turn");
+      }
+
       if (emitV2Fidelity) {
         yield* agent.client.sessionUpdate({
           sessionId: `${requestedSessionId}-child`,
@@ -1338,7 +1405,7 @@ const program = Effect.gen(function* () {
           update: {
             sessionUpdate: "agent_message_chunk",
             messageId: "mock-agent-message",
-            content: { type: "text", text: "hello from " },
+            content: { type: "text", text: "hello from" },
           },
         });
 
@@ -1382,15 +1449,119 @@ const program = Effect.gen(function* () {
           });
         }
 
+        for (const text of [" ", "mo", "ck"]) {
+          writeJsonRpcNotification("session/update", {
+            sessionId: requestedSessionId,
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              messageId: "mock-agent-message",
+              content: { type: "text", text },
+            },
+          });
+        }
+
+        return yield* Effect.never;
+      }
+
+      if (emitGrokMonitorPostTurnPoll) {
+        const monitorCallId = "call-monitor-1";
+        const pollCallId = "call-monitor-poll-1";
+        const taskId = "01a05f41-5107-7550-821e-79e8d1cd7687";
+        const description = "Watch count-sheet Typst unit until done";
         writeJsonRpcNotification("session/update", {
           sessionId: requestedSessionId,
           update: {
-            sessionUpdate: "agent_message_chunk",
-            messageId: "mock-agent-message",
-            content: { type: "text", text: "mock" },
+            sessionUpdate: "tool_call",
+            toolCallId: monitorCallId,
+            title: "monitor",
+            kind: "other",
+            status: "pending",
+            rawInput: { description },
+            _meta: {
+              "x.ai/tool": { version: 1, name: "monitor", kind: "task", namespace: "grok_build" },
+            },
           },
         });
+        writeJsonRpcNotification("session/update", {
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: monitorCallId,
+            status: "completed",
+            rawInput: { description },
+            rawOutput: {
+              type: "Monitor",
+              taskId,
+              timeoutMs: 36_000_000,
+            },
+          },
+        });
+        writeJsonRpcNotification("_x.ai/session/prompt_complete", {
+          sessionId: requestedSessionId,
+          promptId: promptIdFromRequestMeta(request) ?? "mock-xai-prompt-1",
+          stopReason: "end_turn",
+          agentResult: null,
+        });
+        yield* Effect.sleep("120 millis");
+        writeJsonRpcNotification("session/update", {
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: pollCallId,
+            title: "get_command_or_subagent_output",
+            kind: "other",
+            status: "completed",
+            rawInput: { variant: "TaskOutput", task_ids: [taskId], timeout_ms: 0 },
+            rawOutput: {
+              type: "TaskOutput",
+              Result: {
+                task_id: taskId,
+                command: `[monitor] ${description}`,
+                status: "completed",
+                exit_code: 0,
+                output: "Monitor finished.",
+              },
+            },
+          },
+        });
+        return yield* Effect.never;
+      }
 
+      if (emitGrokBackgroundTaskStarted) {
+        const toolCallId = "call-fb9d0000-0000-0000-0000-000000000026";
+        const command = "sleep 40; echo done-a";
+        writeJsonRpcNotification("session/update", {
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId,
+            title: "run_terminal_command",
+            kind: "execute",
+            status: "in_progress",
+            rawInput: { command },
+          },
+        });
+        writeJsonRpcNotification("session/update", {
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            status: "completed",
+            rawOutput: {
+              type: "BackgroundTaskStarted",
+              task_id: toolCallId,
+              task_type: "bash",
+              status: "running",
+              command,
+            },
+          },
+        });
+        writeJsonRpcNotification("_x.ai/session/prompt_complete", {
+          sessionId: requestedSessionId,
+          promptId: promptIdFromRequestMeta(request) ?? "mock-xai-prompt-1",
+          stopReason: "end_turn",
+          agentResult: null,
+        });
         return yield* Effect.never;
       }
 

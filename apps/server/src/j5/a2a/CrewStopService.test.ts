@@ -50,7 +50,7 @@ it.effect("interrupts only running seats, for the Captain or a person, and nobod
   Effect.gen(function* () {
     const context = yield* Layer.build(
       Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
-        Layer.provideMerge(NodeSqliteClient.layerMemory()),
+        Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
       ),
     );
     yield* runJ5A2AMigrations().pipe(Effect.provide(context));

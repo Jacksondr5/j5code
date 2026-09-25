@@ -145,6 +145,7 @@ function commandThreadIds(command: OrchestrationV2Command): ReadonlyArray<Thread
     case "prepared-run.fail":
     case "run.interrupt":
     case "queued-message.promote-to-steer":
+    case "queue.resume":
     case "queued-run.reorder":
     case "queued-run.cancel":
     case "queued-run.edit":
@@ -487,17 +488,17 @@ export function runOrchestratorV2Scenario(
           );
         });
 
-      const releaseReplayGate = Effect.fn("releaseReplayGate")(function* (label: string) {
-        const reached = yield* Effect.promise(
-          () => options.replayGate?.waitUntilReached(label) ?? Promise.resolve(false),
-        );
+      const releaseReplayGate = Effect.fn("scenario.releaseReplayGate")(function* (label: string) {
+        const gate = options.replayGate;
+        const reached =
+          gate === undefined ? false : yield* Effect.promise(() => gate.waitForReached(label));
         if (!reached) {
           return yield* new OrchestratorV2ScenarioStepError({
             scenario: scenario.name,
-            step: `release_replay_gate:${label}:reached=false`,
+            step: `release_replay_gate:${label}:not_configured`,
           });
         }
-        options.replayGate?.release(label);
+        gate?.release(label);
       });
 
       for (const step of scenarioSteps(scenario)) {
