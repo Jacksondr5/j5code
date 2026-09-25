@@ -200,7 +200,6 @@ const fixture = Effect.gen(function* () {
     readonly id: string;
     readonly requested: ReadonlyArray<ReturnType<typeof seat>>;
     readonly approved: ReadonlyArray<ReturnType<typeof seat>>;
-    readonly claimOnly?: boolean;
   }) =>
     Effect.gen(function* () {
       const crewId = `crew:${input.id}`;
@@ -216,7 +215,6 @@ const fixture = Effect.gen(function* () {
         requestedSeats: input.requested,
         createdAt: at,
       });
-      yield* proposals.claim({ id: input.id, decision: "approve", approvedSeats: input.approved });
       yield* crews.record({
         id: crewId,
         squadronId,
@@ -236,14 +234,23 @@ const fixture = Effect.gen(function* () {
           };
         }),
       });
-      if (input.claimOnly) yield* proposals.attachInstance(input.id, crewId);
-      else
-        yield* proposals.complete({
-          id: input.id,
-          decision: "approve",
-          crewInstanceId: crewId,
-          resolvedAt: at,
-        });
+      // A launched seat's thread exists with no run yet; tests add runs as the seat moves.
+      yield* Ref.update(threads, (map) => {
+        const next = new Map(map);
+        for (const entry of input.approved) {
+          const threadId = crewSeatThreadId(input.id, entry.seat);
+          if (!next.has(threadId)) next.set(threadId, projection(threadId, []));
+        }
+        return next;
+      });
+      // As the gate does it: the Crew is recorded and linked, then the proposal resolves once.
+      yield* proposals.attachInstance(input.id, crewId);
+      yield* proposals.resolve({
+        id: input.id,
+        decision: "approve",
+        approvedSeats: input.approved,
+        resolvedAt: at,
+      });
       return crewId;
     });
   const setSeat = (proposalId: string, seatName: string, runs: ReadonlyArray<RunFacts>) =>
@@ -261,11 +268,20 @@ const fixture = Effect.gen(function* () {
         ),
       ),
     );
+  /** A seat whose thread never came to exist, as a restart mid-launch can leave it. */
+  const dropThread = (proposalId: string, seatName: string) =>
+    Ref.update(threads, (map) => {
+      const next = new Map(map);
+      next.delete(crewSeatThreadId(proposalId, seatName));
+      return next;
+    });
   return {
     layer,
     proposals,
+    crews,
     approvedLaunch,
     setSeat,
+    dropThread,
     reports,
     receipts,
     setOnRead: (hook: typeof onRead) => {
@@ -273,6 +289,70 @@ const fixture = Effect.gen(function* () {
     },
   };
 });
+
+it.effect(
+  "a launch that dropped a never-created seat and failed another's brief reports both by name",
+  () =>
+    Effect.gen(function* () {
+      const { layer, crews, approvedLaunch, setSeat, dropThread, reports } = yield* fixture;
+      const id = "proposal:partial";
+      const roster = [seat("first", "scout"), seat("second", "critic"), seat("third", "sentry")];
+      const crewId = yield* approvedLaunch({ id, requested: roster, approved: roster });
+      // What the launch left: second's thread was never created and its row was dropped; third
+      // exists but its brief did not go out.
+      yield* dropThread(id, "second");
+      yield* crews.removeMembers(crewId, ["second"]);
+      yield* setSeat(id, "first", [
+        { status: "running", activity: true, userMessageId: crewSeatBriefMessageId(id, "first") },
+      ]);
+      yield* Effect.gen(function* () {
+        const reporter = yield* CrewLaunchReporter;
+        yield* reporter.watch(id, [
+          { seatName: "first", kind: "created" },
+          { seatName: "second", kind: "not_created", detail: "thread.create was refused" },
+          { seatName: "third", kind: "not_started", detail: "starting its brief failed: busy" },
+        ]);
+        // Every seat is decided, so the report posts at once.
+        const [report] = yield* reports();
+        assert.isDefined(report);
+        assert.include(
+          report!,
+          "launch: 1 started, 1 failed, 1 not created, 0 start unconfirmed after 60s",
+        );
+        assert.include(report!, "seat_not_created: second | thread.create was refused");
+        assert.include(
+          report!,
+          "seat_failed: third | not_started | starting its brief failed: busy",
+        );
+        assert.notInclude(report!, "- second:");
+        assert.include(report!, `thread_id=${crewSeatThreadId(id, "third")} start=failed`);
+        assert.include(report!, "request_crew_member");
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect("after a restart mid-launch, a seat row with no thread is reported as not created", () =>
+  Effect.gen(function* () {
+    const { layer, approvedLaunch, setSeat, dropThread, reports } = yield* fixture;
+    const id = "proposal:restart";
+    const roster = [seat("first", "scout"), seat("second", "critic")];
+    yield* approvedLaunch({ id, requested: roster, approved: roster });
+    yield* dropThread(id, "second");
+    yield* setSeat(id, "first", [
+      { status: "completed", userMessageId: crewSeatBriefMessageId(id, "first") },
+    ]);
+    yield* Effect.gen(function* () {
+      const reporter = yield* CrewLaunchReporter;
+      // The boot sweep has no launch outcomes; it measures each seat from its thread.
+      yield* reporter.reconcile;
+      const [report] = yield* reports();
+      assert.isDefined(report);
+      assert.include(report!, "launch: 1 started, 0 failed, 1 not created");
+      assert.include(report!, "seat_not_created: second | its thread was never created");
+      assert.lengthOf(yield* reports(), 1);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
 
 it.effect("posts one report once every seat has started or failed, with the run's error", () =>
   Effect.gen(function* () {
@@ -322,7 +402,10 @@ it.effect("posts one report once every seat has started or failed, with the run'
       assert.equal(yield* reporter.handleStoredEvent(running), id);
       const [report] = yield* reports();
       assert.isDefined(report);
-      assert.include(report!, "launch: 2 started, 1 failed, 0 start unconfirmed after 60s");
+      assert.include(
+        report!,
+        "launch: 2 started, 1 failed, 0 not created, 0 start unconfirmed after 60s",
+      );
       assert.include(report!, "changes: added prosecutor");
       assert.include(
         report!,
@@ -370,7 +453,10 @@ it.effect(
         let texts = yield* reports();
         assert.lengthOf(texts, 1);
         assert.include(texts[0]!, `proposal_id: ${lost}`);
-        assert.include(texts[0]!, "launch: 1 started, 0 failed, 0 start unconfirmed after 60s");
+        assert.include(
+          texts[0]!,
+          "launch: 1 started, 0 failed, 0 not created, 0 start unconfirmed after 60s",
+        );
         assert.isNotNull((yield* proposals.read(lost))!.reportedAt);
         assert.isNull((yield* proposals.read(slow))!.reportedAt);
         // The slow seat's thread never even exists; when the window closes the Captain is told so.
@@ -379,7 +465,10 @@ it.effect(
         texts = yield* reports();
         assert.lengthOf(texts, 2);
         assert.include(texts[1]!, `proposal_id: ${slow}`);
-        assert.include(texts[1]!, "launch: 0 started, 0 failed, 1 start unconfirmed after 60s");
+        assert.include(
+          texts[1]!,
+          "launch: 0 started, 0 failed, 0 not created, 1 start unconfirmed after 60s",
+        );
         assert.include(texts[1]!, "seat_pending: setup");
         assert.include(texts[1]!, "1 seat has no confirmed provider activity after 60s");
         assert.isNotNull((yield* proposals.read(slow))!.reportedAt);
@@ -473,7 +562,10 @@ it.effect("a provider activity update during initial reads is handled after the 
       yield* Fiber.join(watching);
       yield* Fiber.join(update);
       assert.lengthOf(yield* reports(), 1);
-      assert.include((yield* reports())[0]!, "launch: 2 started, 0 failed, 0 start unconfirmed");
+      assert.include(
+        (yield* reports())[0]!,
+        "launch: 2 started, 0 failed, 0 not created, 0 start unconfirmed",
+      );
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );
@@ -498,7 +590,10 @@ it.effect(
         // No stream event was delivered; the timeout must use current facts.
         yield* TestClock.adjust(CREW_LAUNCH_REPORT_WINDOW_MS);
         yield* Queue.take(receipts);
-        assert.include((yield* reports())[0]!, "launch: 1 started, 0 failed, 0 start unconfirmed");
+        assert.include(
+          (yield* reports())[0]!,
+          "launch: 1 started, 0 failed, 0 not created, 0 start unconfirmed",
+        );
         const run = runEvent(threadId, { status: "failed", userMessageId }).event
           .payload as OrchestrationV2Run;
         assert.isFalse(yield* reporter.coversFailure(threadId, run));
@@ -507,16 +602,15 @@ it.effect(
 );
 
 it.effect(
-  "a claim covers early failures before approval completes, and provider items confirm startup",
+  "an approved launch covers early failures before its report, and provider items confirm startup",
   () =>
     Effect.gen(function* () {
-      const { layer, proposals, approvedLaunch, setSeat, reports } = yield* fixture;
+      const { layer, approvedLaunch, setSeat, reports } = yield* fixture;
       const id = "proposal:claim";
-      const crewId = yield* approvedLaunch({
+      yield* approvedLaunch({
         id,
         requested: [seat("first", "scout")],
         approved: [seat("first", "scout")],
-        claimOnly: true,
       });
       const threadId = crewSeatThreadId(id, "first");
       const userMessageId = crewSeatBriefMessageId(id, "first");
@@ -529,12 +623,6 @@ it.effect(
               .payload as OrchestrationV2Run,
           ),
         );
-        yield* proposals.complete({
-          id,
-          decision: "approve",
-          crewInstanceId: crewId,
-          resolvedAt: at,
-        });
         yield* setSeat(id, "first", [{ status: "running", userMessageId }]);
         yield* reporter.watch(id);
         assert.lengthOf(yield* reports(), 0);

@@ -9,10 +9,7 @@ import { layer as archiveCrewLayer } from "./ArchiveCrewService.ts";
 import { layer as agentCrewProposalLayer } from "./AgentCrewProposalService.ts";
 import { manualLayer as crewLaunchReporterLayer } from "./CrewLaunchReporter.ts";
 import { layer as crewLaunchLayer } from "./CrewLaunchService.ts";
-import {
-  bootSweepLayer as crewProposalBootSweepLayer,
-  layer as crewProposalLayer,
-} from "./CrewProposalService.ts";
+import { layer as crewProposalLayer } from "./CrewProposalService.ts";
 import { layer as crewSeatFinishNotifierLayer } from "./CrewSeatFinishNotifier.ts";
 import { layer as captainArchiveCascadeLayer } from "./CrewCaptainArchiveCascade.ts";
 import { layer as crewStopLayer } from "./CrewStopService.ts";
@@ -108,10 +105,6 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(crewLaunchProvided),
     Layer.provideMerge(crewLaunchReporterProvided),
   );
-  // Same layer object, so the sweep runs against the one gate instance the routes use.
-  const crewProposalBootSweepProvided = crewProposalBootSweepLayer.pipe(
-    Layer.provide(crewProposalProvided),
-  );
   // A person's archive of a Captain retires its Crews from the same event stream the notifier reads.
   const captainArchiveCascadeProvided = captainArchiveCascadeLayer.pipe(
     Layer.provideMerge(archiveCrewProvided),
@@ -144,7 +137,6 @@ export const makeJ5A2AAuxiliaryLayer = (
     agentCrewInstanceLayer,
     archiveCrewProvided,
     crewProposalProvided,
-    crewProposalBootSweepProvided,
     crewStopProvided,
     crewSeatFinishNotifierProvided,
   );

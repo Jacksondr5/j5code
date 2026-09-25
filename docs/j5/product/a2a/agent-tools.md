@@ -206,14 +206,14 @@ nothing spawns until a human approves it.
 Bounds: `name` and `seat` up to 100 characters, `reason` up to 500, `brief` and `instructions` up
 to 8,000.
 
-Result: `proposal_id`, `status` (`open`, `approving`, `declining`, `approved`, `declined`),
+Result: `proposal_id`, `status` (`open`, `approved`, `declined`),
 `crew_instance_id`, and `members` (seat, persona_id, participant_id, thread_id) once spawned.
 Semantics: the caller must have a usable home and must not sit in a Crew (R20). Seats are validated
 against the library before anything is recorded: unknown or disabled agents, duplicate seat names,
 or more than twelve seats refuse with the next step. An open roster proposal waits for the human
 gate inline above the Captain's composer (additions wait in the Inbox); approval spawns the approved roster (the human may have edited it) as persona-backed Peer
 Agents under the caller, records the Crew snapshot with each member's approver and reason, and posts
-a `<j5_crew_gate>` launch report into the caller's thread once every seat has started or failed to start (or a minute has passed): the roster, what the user changed against the proposal, and per seat `start=started|failed|pending`, with a `seat_failed` line carrying the run's error. Declines post the decline at once.
+a `<j5_crew_gate>` launch report into the caller's thread once every seat has started or failed to start (or a minute has passed): the roster, what the user changed against the proposal, and per seat `start=started|failed|pending`, with a `seat_failed` line carrying the run's error (`not_started` when the seat's thread exists but its brief never went out) and a `seat_not_created` line for an approved seat whose thread was never created, which is left off the roster. A proposal resolves once: a seat that fails does not stop the others or reopen the gate. Declines post the decline at once.
 Human approval is the authority (Bryant, 2026-09-10): seats run with their own agent's runtime
 policy, so a read-only Captain may command writing seats once a person approved them; a seat's
 permissions never come from its Captain's.
@@ -243,8 +243,9 @@ Result: as `propose_crew`. Semantics: the caller must command the Crew; the seat
 the cap counts current members plus seats in other open requests for the same Crew. Approval
 reserves the seat inside one store transaction (count, cap, version bump, and ordinal decided
 together under an optimistic version check, so two approvals landing at once cannot both pass),
-then spawns the seat under the Captain and posts the updated roster to the Captain. Seat ids are
-deterministic, so a retry after a failed spawn finds its reservation and converges.
+then spawns the seat under the Captain and posts the updated roster to the Captain. If the approval
+cannot be recorded, the reservation is released and the request stays open; once the seat starts
+spawning the request is approved, and a seat that was never created is reported, not retried.
 
 ### Handoff artifacts in Crews
 
@@ -343,7 +344,7 @@ stopping retires nothing.
 15. `list_squadrons` can be called by a thread with no Squadron home and returns every Squadron with its project ids and the caller's own project id.
 16. `join_squadron` establishes a home only for a thread that has none, only in a Squadron that references the thread's project, leaves the thread and its running work untouched, returns the existing registration when the thread is already homed there, and refuses a thread homed elsewhere, an archived or deleted thread, and a retired identity.
 17. `list_personas` returns every persona with its availability and route; `propose_crew` and `request_crew_member` file a human gate and refuse unknown, disabled, duplicate, or over-cap seats before anything is recorded; both succeed under every sandbox and approval policy, including Codex approval policy `never`.
-18. Approving a proposal spawns exactly once; a second approval finds it claimed; a spawn that fails after reserving its seats reopens the gate, and the retry converges on those seats.
+18. Approving a proposal spawns exactly once; a second approval finds it resolved; a seat that fails to spawn is reported by name in the launch report and the other seats still start.
 19. `archive_crew` is Captain-only, refuses with per-seat facts and a token when any seat has an open Exchange or a running turn, and finishes a partial archive on retry; `t3_thread_organize` refuses an active Crew member, while Captain archive retains the unit cascade.
 20. `stop_crew` is Captain-only, interrupts every seat with a running turn and reports each seat as interrupted, already idle, or archived; it settles, retires, and closes nothing, and a non-Captain or an archived Crew is refused naming the next step. The person's Stop crew control does the same through the operate scope.
 
