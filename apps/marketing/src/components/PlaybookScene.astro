@@ -2,7 +2,10 @@
 /**
  * A Captain leads three seats along a channel past numbered buoys. The four
  * boats share one 24s clock with the step marker in the Playbooks card, so
- * passing a buoy and the marker advancing read as one event.
+ * passing a buoy and the marker advancing read as one event. Flags change on
+ * two of the steps: past buoy 2 the Captain goes orange while it sends the
+ * next step; past buoy 3 the seats go blue as they receive it, and everyone
+ * is green again by buoy 4.
  */
 ---
 
@@ -14,10 +17,10 @@
   <g class="pb-buoy" style="offset-distance: 60%"><circle r="7" /><text y="2.6">3</text></g>
   <g class="pb-buoy" style="offset-distance: 80%"><circle r="7" /><text y="2.6">4</text></g>
 
-  <g class="pb-boat pb-boat--captain"><g transform="translate(-35 -44) scale(1.1)"><use class="boat" href="#j5-captain" /></g></g>
-  <g class="pb-boat pb-boat--s1"><g transform="translate(-27 -34) scale(0.85)"><use class="boat" href="#j5-boat" /></g></g>
-  <g class="pb-boat pb-boat--s2"><g transform="translate(-27 -34) scale(0.85)"><use class="boat" href="#j5-boat" /></g></g>
-  <g class="pb-boat pb-boat--s3"><g transform="translate(-27 -34) scale(0.85)"><use class="boat boat--waiting" href="#j5-boat" /></g></g>
+  <g class="pb-boat pb-boat--captain"><g transform="translate(-35 -44) scale(1.1)"><use class="boat pb-flag pb-flag--captain" href="#j5-captain" /></g></g>
+  <g class="pb-boat pb-boat--s1"><g transform="translate(-27 -34) scale(0.85)"><use class="boat pb-flag pb-flag--s1" href="#j5-boat" /></g></g>
+  <g class="pb-boat pb-boat--s2"><g transform="translate(-27 -34) scale(0.85)"><use class="boat pb-flag pb-flag--s2" href="#j5-boat" /></g></g>
+  <g class="pb-boat pb-boat--s3"><g transform="translate(-27 -34) scale(0.85)"><use class="boat pb-flag pb-flag--s3" href="#j5-boat" /></g></g>
 </svg>
 
 <style>
@@ -76,8 +79,31 @@
     100% { offset-distance: 100%; opacity: 0; }
   }
 
+  /* Flags share each boat's 24s clock and delay, so a color change lands as
+     the boat passes a buoy. Buoys sit at 20, 40, 60 and 80 percent. */
+  .pb-flag {
+    --pennant: var(--msg-reply);
+    animation-duration: 24s;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    animation-play-state: var(--motion-state, paused);
+  }
+  .pb-flag--captain { animation-name: pb-flag-captain; animation-delay: -6.6s; }
+  .pb-flag--s1 { animation-name: pb-flag-seat; animation-delay: -4.4s; }
+  .pb-flag--s2 { animation-name: pb-flag-seat; animation-delay: -2.2s; }
+  .pb-flag--s3 { animation-name: pb-flag-seat; animation-delay: 0s; }
+
+  @keyframes pb-flag-captain {
+    0%, 40%, 61%, 100% { --pennant: var(--msg-reply); }
+    41%, 60% { --pennant: var(--msg-ask); }
+  }
+  @keyframes pb-flag-seat {
+    0%, 60%, 81%, 100% { --pennant: var(--msg-reply); }
+    61%, 80% { --pennant: var(--msg-receive); }
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .pb-boat { animation: none; opacity: 1; }
+    .pb-boat, .pb-flag { animation: none; opacity: 1; }
     .pb-boat--captain { offset-distance: 66%; }
     .pb-boat--s1 { offset-distance: 56%; }
     .pb-boat--s2 { offset-distance: 47%; }

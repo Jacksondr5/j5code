@@ -1,9 +1,11 @@
 ---
 /**
- * Three boats talking. A blue ask travels the arc from one mast to another,
- * the receiver nods, and a brass reply comes back. The second pair shows the
- * conversation is any-to-any, not a hub. One 12s loop, transform and offset
- * only, gated by the motion controller through --motion-state.
+ * Three boats talking. An orange ask travels the arc from one mast to another,
+ * the receiver nods, and a green reply comes back. Flags follow the messages:
+ * orange on send, blue on receive, green on reply, held until the next event,
+ * and each boat starts the loop in the color it ends with. The second pair
+ * shows the conversation is any-to-any, not a hub. One 12s loop, gated by the
+ * motion controller through --motion-state.
  */
 ---
 
@@ -12,9 +14,9 @@
   <path class="a2a-arc" d="M98 86 Q 228 14 358 86" />
   <path class="a2a-arc" d="M618 86 Q 488 14 358 86" />
 
-  <g transform="translate(60 88) scale(1.2)"><g class="bob a2a-b1"><use class="boat" href="#j5-boat" /></g></g>
-  <g transform="translate(320 88) scale(1.2)"><g class="bob a2a-b2"><use class="boat boat--waiting" href="#j5-boat" /></g></g>
-  <g transform="translate(580 88) scale(1.2)"><g class="bob a2a-b3"><use class="boat" href="#j5-boat" /></g></g>
+  <g transform="translate(60 88) scale(1.2)"><g class="bob a2a-b1"><use class="boat a2a-flag a2a-flag-a" href="#j5-boat" /></g></g>
+  <g transform="translate(320 88) scale(1.2)"><g class="bob a2a-b2"><use class="boat a2a-flag a2a-flag-b" href="#j5-boat" /></g></g>
+  <g transform="translate(580 88) scale(1.2)"><g class="bob a2a-b3"><use class="boat a2a-flag a2a-flag-c" href="#j5-boat" /></g></g>
 
   <circle class="a2a-dot a2a-dot--ask a2a-d1" r="4.5" />
   <circle class="a2a-dot a2a-dot--reply a2a-d2" r="4.5" />
@@ -117,8 +119,34 @@
     86%, 100% { offset-distance: 100%; opacity: 0; }
   }
 
+  /* Flags on the 12s clock. A: sends at 2, receives the reply at 36.
+     B: receives at 14, replies at 24, receives at 64, replies at 74.
+     C: sends at 52, receives the reply at 86. */
+  .a2a-flag {
+    animation-duration: 12s;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-play-state: var(--motion-state, paused);
+  }
+  .a2a-flag-a { --pennant: var(--msg-receive); animation-name: a2a-flag-a; }
+  .a2a-flag-b { --pennant: var(--msg-reply); animation-name: a2a-flag-b; }
+  .a2a-flag-c { --pennant: var(--msg-receive); animation-name: a2a-flag-c; }
+
+  @keyframes a2a-flag-a {
+    0%, 1.5%, 36.5%, 100% { --pennant: var(--msg-receive); }
+    2.5%, 35.5% { --pennant: var(--msg-ask); }
+  }
+  @keyframes a2a-flag-b {
+    0%, 13.5%, 24.5%, 63.5%, 74.5%, 100% { --pennant: var(--msg-reply); }
+    14.5%, 23.5%, 64.5%, 73.5% { --pennant: var(--msg-receive); }
+  }
+  @keyframes a2a-flag-c {
+    0%, 51.5%, 86.5%, 100% { --pennant: var(--msg-receive); }
+    52.5%, 85.5% { --pennant: var(--msg-ask); }
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .a2a-b2 { animation: none; }
+    .a2a-b2, .a2a-flag { animation: none; }
     .a2a-dot { animation: none; opacity: 0; }
   }
 </style>

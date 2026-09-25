@@ -323,6 +323,13 @@ const socialImageUrl = new URL("/og.png", Astro.site);
     }
   }
 
+  /* Registered so animated flag colors fade instead of flipping where supported. */
+  @property --pennant {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: #8fa0ad;
+  }
+
   /*
    * Boats bob on their own phase. Continuous, so every .bob sits inside a
    * [data-motion] scene whose --motion-state the controller in lib/motion.ts
