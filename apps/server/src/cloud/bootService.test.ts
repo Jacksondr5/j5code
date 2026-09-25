@@ -967,8 +967,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
   );
 });
 
-// J5: the pre-0.0.43 J5 unit used upstream's names. It is retired only when it
-// names J5CODE_HOME; an upstream T3 Code unit at the same path is never touched.
+// J5: the npm-era (0.0.43 and earlier) J5 unit used upstream's names. It is
+// retired only when it names J5CODE_HOME; an upstream T3 Code unit at the same
+// path is never touched.
 it.layer(NodeServices.layer)("legacy J5 service handover", (it) => {
   const legacySystemdUnit = (home: string) =>
     [

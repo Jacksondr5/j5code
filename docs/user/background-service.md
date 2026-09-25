@@ -23,7 +23,7 @@ Uninstalling the service leaves your projects, threads, and settings intact.
 Running `j5 service install` again repairs a service that `j5 service status`
 reports as broken.
 
-J5 releases up to 0.0.42 installed the service as `t3code.service` /
+J5 releases up to 0.0.43 installed the service as `t3code.service` /
 `com.t3tools.t3code.service`, the same names an installed T3 Code uses.
 `j5 service install` replaces that old service automatically, but only when its
 unit names `J5CODE_HOME`; a T3 Code service is never touched. Settings you added
@@ -39,7 +39,7 @@ to pick up the new version. Wait for any remote update already in progress
 before updating; to match a remote client's version, follow
 [Updating T3 Code](./updating.md).
 
-Pass an exact version (`j5 update 0.0.43`) to pin one, `--channel nightly` to
+Pass an exact version (`j5 update 0.0.44`) to pin one, `--channel nightly` to
 switch trains, or `--allow-downgrade` to move backwards. `preview` is a
 maintainers' test train: its builds can be broken and are never offered as
 updates, so the installer and `j5 update` ask for confirmation before
@@ -100,7 +100,7 @@ that session open.
 | `user-manager-unavailable`              | Run `systemctl --user status` in a login session for the service user; check your distribution's systemd user-session support.                                                            |
 | `service-disabled` or `service-stopped` | Read the log and `systemctl --user status j5code.service`, then use the repair command printed by T3 Code.                                                                                |
 | `restart-pending`                       | A newer version is installed but the service still runs the previous one. Run `j5 service restart`.                                                                                       |
-| `legacy-service-present`                | The pre-0.0.43 J5 service (`t3code.service` / `com.t3tools.t3code.service`) is still installed. Run `j5 service install`.                                                                 |
+| `legacy-service-present`                | The old J5 service from 0.0.43 or earlier (`t3code.service` / `com.t3tools.t3code.service`) is still installed. Run `j5 service install`.                                                 |
 | `foreign-service-present`               | A `j5code.service` / `codes.jackson.j5code.service` that J5 did not write already exists. Remove or rename it, then run `j5 service install`.                                             |
 | `service-dropin-conditions`             | A drop-in in `~/.config/systemd/user/j5code.service.d/` has a `Condition…=` or `Assert…=` line that can make systemd skip the start. Review and remove it, then run `j5 service install`. |
 
