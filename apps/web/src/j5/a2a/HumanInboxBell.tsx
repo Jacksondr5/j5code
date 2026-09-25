@@ -8,6 +8,8 @@ import { useSidebar } from "../../components/ui/sidebar";
 import { cn } from "../../lib/utils";
 import { inboxCrewRequests } from "../crew/crewProposals.logic";
 import { mergeCrewProposalSources, useCrewProposalsRefresh } from "../crew/crewProposalsClient";
+import { inboxBadgeCount } from "../crew/crewRuntimeRequests.logic";
+import { useCrewRuntimeRequests } from "../crew/crewRuntimeRequestsClient";
 import {
   crewProposalSourcesAtom,
   inboxCountQueryAtom,
@@ -28,11 +30,12 @@ export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean })
   const sources = useAtomValue(inboxCountSourcesAtom);
   const crewSources = useAtomValue(crewProposalSourcesAtom);
   const merged = mergeOpenInboxCounts(sources);
-  // Mid-run seat requests are a human gate too; the inbox badge counts them beside open questions.
-  // The initial roster is answered inline in the Captain's thread and stays off the inbox badge.
+  // Mid-run seat requests and Crew threads' provider requests wait on the person too; the badge
+  // counts them beside open questions. The initial roster is answered inline in the Captain's
+  // thread and stays off the inbox badge.
   const crewRequests = inboxCrewRequests(mergeCrewProposalSources(crewSources)).length;
-  const count =
-    merged.count === null ? (crewRequests > 0 ? crewRequests : null) : merged.count + crewRequests;
+  const runtimeRequests = useCrewRuntimeRequests().length;
+  const count = inboxBadgeCount(merged.count, crewRequests, runtimeRequests);
   const incomplete = merged.incomplete;
   useCountRefresh();
   useCrewProposalsRefresh();

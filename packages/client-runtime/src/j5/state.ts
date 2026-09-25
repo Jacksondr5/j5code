@@ -7,6 +7,7 @@ import type {
   CrewProposalPreviewRequest,
   CrewArchiveRequest,
   CrewStopRequest,
+  CrewRuntimeRequestRespondRequest,
   FleetReadRequest,
   PlaybookLibraryRequest,
   PlaybookDeleteRequest,
@@ -155,6 +156,20 @@ export function createJ5EnvironmentAtoms<R, E>(
       label: "j5:archive-crew",
       execute: (input: CrewArchiveRequest) =>
         preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.archiveCrew(prepared, input))),
+    }),
+    // Crew threads' provider approvals and questions answered from the Inbox; same cadence as gates.
+    crewRuntimeRequests: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:crew-runtime-requests",
+      staleTimeMs: 7_500,
+      execute: (_input: Record<string, never>) =>
+        preparedConnection.pipe(Effect.flatMap(J5Http.listCrewRuntimeRequests)),
+    }),
+    respondCrewRuntimeRequest: createEnvironmentCommand(runtime, {
+      label: "j5:respond-crew-runtime-request",
+      execute: (input: CrewRuntimeRequestRespondRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.respondCrewRuntimeRequest(prepared, input)),
+        ),
     }),
     stopCrew: createEnvironmentCommand(runtime, {
       label: "j5:stop-crew",
