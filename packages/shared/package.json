@@ -219,6 +219,10 @@
       "types": "./src/j5/agentMention.ts",
       "import": "./src/j5/agentMention.ts"
     },
+    "./j5/crewRuntimeRequests": {
+      "types": "./src/j5/crewRuntimeRequests.ts",
+      "import": "./src/j5/crewRuntimeRequests.ts"
+    },
     "./composerTrigger": {
       "types": "./src/composerTrigger.ts",
       "import": "./src/composerTrigger.ts"

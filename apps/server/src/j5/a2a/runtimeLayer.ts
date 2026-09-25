@@ -16,6 +16,7 @@ import {
 import { layer as crewSeatFinishNotifierLayer } from "./CrewSeatFinishNotifier.ts";
 import { layer as captainArchiveCascadeLayer } from "./CrewCaptainArchiveCascade.ts";
 import { layer as crewStopLayer } from "./CrewStopService.ts";
+import { layer as crewRuntimeRequestLayer } from "./CrewRuntimeRequestService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import {
@@ -104,6 +105,10 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(agentCrewInstanceLayer),
     Layer.provideMerge(archiveFactsProvided),
   );
+  // Provider approvals and questions on live Crew threads, read and answered from the Inbox.
+  const crewRuntimeRequestProvided = crewRuntimeRequestLayer.pipe(
+    Layer.provideMerge(agentCrewInstanceLayer),
+  );
   const crewProposalProvided = crewProposalLayer.pipe(
     Layer.provideMerge(crewLaunchProvided),
     Layer.provideMerge(crewLaunchReporterProvided),
@@ -146,6 +151,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     crewProposalProvided,
     crewProposalBootSweepProvided,
     crewStopProvided,
+    crewRuntimeRequestProvided,
     crewSeatFinishNotifierProvided,
   );
   return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));
