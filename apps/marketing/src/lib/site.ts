@@ -5,6 +5,8 @@ export const PRODUCT_DOCS_URL = `${GITHUB_REPOSITORY_URL}/tree/j5/main/docs/j5/p
 export const FORK_DISCIPLINE_URL = `${GITHUB_REPOSITORY_URL}/blob/j5/main/FORK.md`;
 
 export const UPSTREAM_REPOSITORY_URL = "https://github.com/pingdotgg/t3code";
+/** Upstream's long-running orchestrator rewrite, the branch the fork tracks. */
+export const UPSTREAM_V2_PR_URL = "https://github.com/pingdotgg/t3code/pull/2829";
 export const T3_SITE_URL = "https://t3.codes";
 
 export const NPM_PACKAGE = "@jacksondr5/j5code";

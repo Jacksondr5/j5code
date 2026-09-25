@@ -6,8 +6,6 @@ export interface ForkFacts {
   pin: string;
   /** ISO date the pin was selected, from FORK.md. */
   pinSelectedOn: string | undefined;
-  /** Number of inventoried integration cases into upstream-owned files. */
-  integrationCases: number | undefined;
 }
 
 /**
@@ -29,8 +27,8 @@ function findForkFile(): string | undefined {
 }
 
 /**
- * Reads the fork's upstream pin and integration inventory size from FORK.md at
- * build time so the Foundation section never carries a hand-typed number.
+ * Reads the fork's upstream pin from FORK.md at build time so the Foundation
+ * section never carries a hand-typed commit.
  * Returns undefined when the file or the sentence it depends on is missing, and
  * the page then omits the line rather than showing a stale value.
  */
@@ -42,11 +40,8 @@ export function readForkFacts(): ForkFacts | undefined {
   const pin = /^Current pin: `([0-9a-f]{7,40})`(?: \(selected (\d{4}-\d{2}-\d{2}))?/m.exec(text);
   if (!pin?.[1]) return undefined;
 
-  const cases = /the inventory has (\d+) cases/.exec(text);
-
   return {
     pin: pin[1].slice(0, 7),
     pinSelectedOn: pin[2],
-    integrationCases: cases?.[1] ? Number(cases[1]) : undefined,
   };
 }

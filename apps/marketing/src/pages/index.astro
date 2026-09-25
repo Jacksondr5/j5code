@@ -17,6 +17,7 @@ import {
   STATUS_HELP,
   T3_SITE_URL,
   UPSTREAM_REPOSITORY_URL,
+  UPSTREAM_V2_PR_URL,
 } from "../lib/site";
 
 const fork = readForkFacts();
@@ -94,7 +95,7 @@ const harnesses = [
     <div class="container">
       <div class="section-head">
         <div class="eyebrow">Foundation</div>
-        <h2>Built on T3 Code. Kept on T3 Code.</h2>
+        <h2>Built on T3 Code. Kept up to date.</h2>
         <p>
           Everything T3 Code does, J5 Code does: six agent harnesses on your own subscriptions,
           desktop, web and mobile clients, remote control over your tailnet, a checkpoint on every
@@ -107,7 +108,7 @@ const harnesses = [
           <ul class="checklist">
             <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>Bring your own subscription. No keys resold, no quota caps.</li>
             <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>Desktop, web, and mobile. Control a server from a phone.</li>
-            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>Event-sourced core with a checkpoint on every turn. Diff and restore.</li>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>A strong commitment to performance and quality.</li>
             <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>Commit, push, and open a PR from one button.</li>
             <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>MIT licensed, both of us.</li>
           </ul>
@@ -120,7 +121,7 @@ const harnesses = [
             ))}
           </div>
           <p class="foundation-t3">
-            Want plain T3 Code? It is excellent.
+            Want normal T3 Code? It is excellent.
             <a href={T3_SITE_URL} target="_blank" rel="noopener noreferrer">Get it at t3.codes<span aria-hidden="true"> &#8599;</span></a>
           </p>
         </div>
@@ -128,16 +129,18 @@ const harnesses = [
         <div class="sync-card tile">
           <div class="sync-head">
             <span class="sync-title">How J5 stays in sync</span>
-            <a class="sync-link" href={FORK_DISCIPLINE_URL} target="_blank" rel="noopener noreferrer">FORK.md<span aria-hidden="true"> &#8599;</span></a>
           </div>
           <dl class="sync-rows">
             <div class="sync-row">
               <dt>Upstream</dt>
-              <dd><a href={UPSTREAM_REPOSITORY_URL} target="_blank" rel="noopener noreferrer">pingdotgg/t3code</a></dd>
+              <dd>
+                <a href={UPSTREAM_REPOSITORY_URL} target="_blank" rel="noopener noreferrer">pingdotgg/t3code</a>
+                <span class="sync-dim"> · tracking the <a href={UPSTREAM_V2_PR_URL} target="_blank" rel="noopener noreferrer">V2 orchestration branch</a></span>
+              </dd>
             </div>
             {fork && (
               <div class="sync-row">
-                <dt>Pinned at</dt>
+                <dt>Latest upstream commit</dt>
                 <dd>
                   <code>{fork.pin}</code>
                   {fork.pinSelectedOn && <span class="sync-dim"> · selected {fork.pinSelectedOn}</span>}
@@ -145,25 +148,15 @@ const harnesses = [
               </div>
             )}
             <div class="sync-row">
-              <dt>Policy</dt>
-              <dd>Add, don't modify. J5 code lives in J5-owned files.</dd>
-            </div>
-            {fork?.integrationCases !== undefined && (
-              <div class="sync-row">
-                <dt>Touchpoints</dt>
-                <dd>{fork.integrationCases} inventoried cases into upstream files, each with its own rebase test.</dd>
-              </div>
-            )}
-            <div class="sync-row">
-              <dt>Advance</dt>
-              <dd>By review, not by schedule. Each upstream advance is a review, not a rewrite.</dd>
-            </div>
-            <div class="sync-row">
               <dt>Cadence</dt>
-              <dd>A weekly full build runs the whole suite and packages the desktop app.</dd>
+              <dd>We stay as up to date as we can, but these guys are shipping like crazy. Please be patient.</dd>
+            </div>
+            <div class="sync-row">
+              <dt>Policy</dt>
+              <dd>Read our <a href={FORK_DISCIPLINE_URL} target="_blank" rel="noopener noreferrer">FORK.md</a> to see how we're merging with T3 Code.</dd>
             </div>
           </dl>
-          <p class="sync-foot">The pin and the touchpoint count on this card are read from FORK.md when the site builds.</p>
+          <p class="sync-foot">The commit on this card is read from FORK.md when the site builds.</p>
         </div>
       </div>
     </div>
@@ -729,6 +722,8 @@ const harnesses = [
 
   .sync-card {
     padding: 22px 24px;
+    background: var(--bg-elev, #0c0c0e);
+    border-color: var(--border-strong);
   }
 
   .sync-head {
@@ -762,7 +757,7 @@ const harnesses = [
 
   .sync-row {
     display: grid;
-    grid-template-columns: 110px minmax(0, 1fr);
+    grid-template-columns: 150px minmax(0, 1fr);
     gap: 16px;
     padding: 11px 0;
     border-top: 1px solid var(--border);
@@ -1281,6 +1276,12 @@ const harnesses = [
 
     .harness-float {
       height: 130px;
+    }
+
+    /* Labels above values: the two-column card has no room on a phone. */
+    .sync-row {
+      grid-template-columns: 1fr;
+      gap: 4px;
     }
 
     .horizon-scene {

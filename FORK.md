@@ -39,7 +39,7 @@ Treat these upstream areas as off-limits except for those explicit appended case
 
 ### Replaced wholesale
 
-`apps/marketing` is the one directory where the rule above is deliberately broken. Upstream's T3 Code marketing site carries nothing the fork wants, so J5 replaced its contents with the j5.codes site (Astro, same package name and root scripts, upstream's fonts and harness marks kept). On a pin advance take ours for the whole directory; do not merge upstream's marketing changes in. The site reads the current pin and the inventory count from this file at build time (`apps/marketing/src/lib/forkFacts.ts`), so keep the `Current pin:` line and the "the inventory has N cases" sentence in their present shape or update that parser with them.
+`apps/marketing` is the one directory where the rule above is deliberately broken. Upstream's T3 Code marketing site carries nothing the fork wants, so J5 replaced its contents with the j5.codes site (Astro, same package name and root scripts, upstream's fonts and harness marks kept). On a pin advance take ours for the whole directory; do not merge upstream's marketing changes in. The site reads the current pin from this file at build time (`apps/marketing/src/lib/forkFacts.ts`), so keep the `Current pin:` line in its present shape or update that parser with it.
 
 ### Sanctioned appended integration cases
 
