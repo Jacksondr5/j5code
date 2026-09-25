@@ -147,7 +147,7 @@ it.effect("reopens crew proposals a claimed launch left mid-flight and keeps res
         { id: "p-open", status: "open", approved_seats: null, resolved_at: null },
       ],
     );
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("creates the exact namespaced ledger schema and receiver correlation constraint", () =>
