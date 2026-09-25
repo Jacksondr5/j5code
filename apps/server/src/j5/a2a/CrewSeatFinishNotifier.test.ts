@@ -22,6 +22,7 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { agentHandoffArtifactPath } from "../agents/agentPersonaArtifacts.ts";
 import {
   ArtifactWorkspace,
+  ArtifactWorkspaceError,
   layer as artifactWorkspaceLayer,
 } from "../artifacts/ArtifactWorkspace.ts";
 import {
@@ -640,6 +641,160 @@ it.effect(
           (yield* Ref.get(dispatched)).map((command) => command.type),
           ["message.dispatch"],
         );
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "an unreadable handoff is never reported missing: the notice waits and the retry carries the file",
+  () =>
+    Effect.gen(function* () {
+      const database = NodeSqliteClient.layer({ filename: ":memory:" });
+      const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
+        Layer.provideMerge(database),
+      );
+      const context = yield* Layer.build(storage);
+      yield* runJ5A2AMigrations().pipe(Effect.provide(context));
+      yield* Context.get(context, A2ALedger).createSquadron({
+        squadron: { id: squadronId, name: "Unreadable", createdAt: DateTime.formatIso(createdAt) },
+      });
+      yield* Context.get(context, AgentCrewInstanceService).record({
+        id: "crew:unreadable",
+        squadronId,
+        captainParticipantId: participantIdForThread(captainThread),
+        captainThreadId: captainThread,
+        displayName: "Unreadable Crew",
+        brief: "Finish the work.",
+        createdAt: DateTime.formatIso(createdAt),
+        members: [
+          {
+            seatName: "builder",
+            agentId: "builder",
+            participantId: participantIdForThread(builderThread),
+            threadId: builderThread,
+            reason: null,
+          },
+          {
+            seatName: "critic",
+            agentId: "critic",
+            participantId: participantIdForThread(criticThread),
+            threadId: criticThread,
+            reason: null,
+          },
+        ],
+      });
+      const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+      const captain = yield* Ref.make(captainProjection({ running: false, messages: [] }));
+      const readsFail = yield* Ref.make(false);
+      const flakyWorkspace = Layer.effect(
+        ArtifactWorkspace,
+        Effect.gen(function* () {
+          const real = yield* ArtifactWorkspace;
+          return ArtifactWorkspace.of({
+            ...real,
+            read: (input) =>
+              Ref.get(readsFail).pipe(
+                Effect.flatMap((fail) =>
+                  fail
+                    ? Effect.fail(new ArtifactWorkspaceError({ operation: "read", detail: "EIO" }))
+                    : real.read(input),
+                ),
+              ),
+          });
+        }),
+      ).pipe(Layer.provide(artifactWorkspaceLayer));
+      // The builder's finish is outstanding for the boot sweep; the critic has no run on record.
+      const builderFinished = {
+        ...projection(builderThread),
+        runs: [
+          {
+            id: RunId.make("run:b1"),
+            ordinal: 1,
+            threadId: builderThread,
+            status: "completed",
+            completedAt: createdAt,
+          },
+        ],
+      } as unknown as OrchestrationV2ThreadProjection;
+      const layer = notifierLayer.pipe(
+        Layer.provideMerge(
+          Layer.mock(CrewLaunchReporter)({ coversFailure: () => Effect.succeed(false) }),
+        ),
+        Layer.provideMerge(
+          Layer.mock(ThreadManagementService)({
+            getThreadProjection: (threadId) =>
+              threadId === captainThread
+                ? Ref.get(captain)
+                : Effect.succeed(
+                    threadId === builderThread ? builderFinished : projection(threadId),
+                  ),
+            dispatch: (command) =>
+              Ref.update(dispatched, (items) => [...items, command]).pipe(
+                Effect.as({ events: [], effects: [] } as never),
+              ),
+          }),
+        ),
+        Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+        Layer.provideMerge(flakyWorkspace),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(
+          ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-unreadable-" }),
+        ),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const notifier = yield* CrewSeatFinishNotifier;
+        const workspace = yield* ArtifactWorkspace;
+        const notices = Ref.get(dispatched).pipe(
+          Effect.map((commands) =>
+            commands.flatMap((command) => (command.type === "message.dispatch" ? [command] : [])),
+          ),
+        );
+        // A file that was checked and is not there is missing.
+        assert.equal(
+          yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:c1")),
+          criticThread,
+        );
+        const [missing] = yield* notices;
+        assert.include(missing?.text ?? "", "handoff: missing (ReviewHandoff)");
+
+        // A read that failed for any other reason sends nothing, so the finish stays unreported.
+        yield* workspace.write({
+          projectId: ProjectId.make("project:crew-finish"),
+          relativePath: agentHandoffArtifactPath({
+            personaId: "builder",
+            artifact: "CodeCompleteHandoff",
+            threadId: builderThread,
+          }),
+          content: "# Done\n\nShipped.\n",
+        });
+        yield* Ref.set(readsFail, true);
+        assert.isNull(yield* notifier.handleStoredEvent(terminalRunEvent(builderThread, "run:b1")));
+        assert.lengthOf(yield* Ref.get(dispatched), 1);
+
+        // After recovery the boot sweep delivers the written handoff as the finish's first notice.
+        yield* Ref.set(readsFail, false);
+        assert.deepStrictEqual(yield* notifier.reconcile, [builderThread]);
+        const delivered = (yield* notices)[1];
+        assert.lengthOf(yield* Ref.get(dispatched), 2);
+        assert.include(delivered?.text ?? "", "handoff: written (CodeCompleteHandoff)");
+        assert.match(delivered?.text ?? "", /handoff_digest: [0-9a-f]{12}/);
+        assert.include(delivered?.text ?? "", "<handoff_body>\n# Done");
+
+        // The Captain now holds that notice; the same unchanged handoff is not sent again.
+        yield* Ref.set(
+          captain,
+          captainProjection({
+            running: false,
+            messages: [
+              { id: "msg:missing", text: missing?.text ?? "", at: "2026-09-09T16:02:00Z" },
+              { id: "msg:written", text: delivered?.text ?? "", at: "2026-09-09T16:03:00Z" },
+            ],
+          }),
+        );
+        yield* notifier.reconcile;
+        yield* notifier.handleStoredEvent(terminalRunEvent(builderThread, "run:b1"));
+        assert.lengthOf(yield* Ref.get(dispatched), 2);
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );
