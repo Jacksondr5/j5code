@@ -112,6 +112,7 @@ const fixture = Effect.gen(function* () {
             }),
         }),
         Layer.mock(AgentCrewInstanceService)({
+          serialize: (_id, effect) => effect,
           read: (id) =>
             Ref.get(crewArchivedAt).pipe(
               Effect.map((archivedAt) => (id === instance.id ? { ...instance, archivedAt } : null)),
