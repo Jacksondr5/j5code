@@ -77,7 +77,7 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
         { sharedHome: sourceDir },
       );
 
-      assert.equal(result.databasePath, path.join(destDir, "userdata", "state.sqlite"));
+      assert.equal(result.databasePath, path.join(destDir, "userdata", "statev2.sqlite"));
       const kept = yield* withDatabase(
         result.databasePath,
         Effect.gen(function* () {
@@ -100,6 +100,47 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
         ["stopped-thread"],
       );
       assert.equal(kept.authCount, 0);
+    }),
+  );
+
+  it.effect("copies statev2.sqlite by default once the V2 cutover has run", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const sharedDir = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-default-" });
+      const destDir = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-default-dest-" });
+      const legacySource = yield* createFixtureSource(sharedDir);
+      const readTitle = Effect.gen(function* () {
+        const result = yield* runMigrateDevDb(
+          { baseDir: destDir, projects: 5, threadsPerProject: 10 },
+          { sharedHome: sharedDir },
+        );
+        return yield* withDatabase(
+          result.databasePath,
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            const [row] = yield* sql<{ title: string }>`
+              SELECT title FROM projection_threads WHERE thread_id = 'stopped-thread'`;
+            return row?.title;
+          }),
+        );
+      });
+
+      // Before the cutover only state.sqlite exists.
+      assert.equal(yield* readTitle, "stopped-thread");
+
+      // After it, state.sqlite is frozen and statev2.sqlite carries live data.
+      const v2Source = path.join(sharedDir, "userdata", "statev2.sqlite");
+      yield* fs.copyFile(legacySource, v2Source);
+      yield* withDatabase(
+        v2Source,
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`UPDATE projection_threads SET title = 'after-cutover'
+            WHERE thread_id = 'stopped-thread'`;
+        }),
+      );
+      assert.equal(yield* readTitle, "after-cutover");
     }),
   );
 
@@ -166,7 +207,7 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
       const destDir = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-overlap-dest-" });
       // A leftover snapshot from a prior failed run, passed as --source: it
       // must not be deleted before it is read.
-      const leftoverSnapshot = path.join(destDir, "userdata", "state.sqlite.migrate-dev-db-tmp");
+      const leftoverSnapshot = path.join(destDir, "userdata", "statev2.sqlite.migrate-dev-db-tmp");
       yield* fs.makeDirectory(path.dirname(leftoverSnapshot), { recursive: true });
       yield* fs.writeFileString(leftoverSnapshot, "not a real db");
 

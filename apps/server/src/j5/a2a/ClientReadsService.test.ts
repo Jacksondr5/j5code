@@ -20,7 +20,7 @@ const firstPerson = ParticipantId.make("human:person-one");
 const secondPerson = ParticipantId.make("human:person-two");
 
 const makeTestLayer = () => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   const clientReads = clientReadsLayer.pipe(Layer.provide(inbox), Layer.provide(database));

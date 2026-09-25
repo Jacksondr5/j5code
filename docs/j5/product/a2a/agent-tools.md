@@ -258,25 +258,25 @@ together under an optimistic version check, so two approvals landing at once can
 then spawns the seat under the Captain and posts the updated roster to the Captain. Seat ids are
 deterministic, so a retry after a failed spawn finds its reservation and converges.
 
-### Handoffs in Crews
+### Handoff artifacts in Crews
 
 There is no Crew-specific artifact verb. A seat whose definition declares an output artifact writes
-it with the project `write_artifact` tool to the same handoff file every persona writes
+it with the project `write_artifact` tool to the same handoff artifact every persona writes
 (`handoffs/<agent>/<Artifact>-<task>.md`, see the [persona contract](../agent-personas/index.md));
 its first turn carries `<seat_obligation>` naming that exact path. The handoff gate checks for the
 file when a run ends and reminds the seat once. When a seat's run fails, or completes while the seat owes
 no reply, the seat finish notifier posts one platform-composed `<j5_seat_finished>` notice into the
 Captain's thread: the run status (completed or failed, with the run's error when it failed), the
-seat, its Crew, its participant and thread ids, and the handoff as `written`, `missing`, or `none
-declared` with its path. `missing` means the file was checked and is not there; a handoff that
-cannot be read sends nothing, and the next finish or the boot sweep retries. A written handoff up
+seat, its Crew, its participant and thread ids, and the handoff artifact as `written`, `missing`, or `none
+declared` with its path. `missing` means the file was checked and is not there; a handoff artifact that
+cannot be read sends nothing, and the next finish or the boot sweep retries. A written handoff artifact up
 to 4,000 characters rides inline with its size and digest; longer ones name the path for the
 project `read_artifact` tool. A notice posts the first time a seat finishes and again only when
 its facts changed, and a notice that arrives while the Captain's turn runs folds into the one
 queued behind it. Interrupted and cancelled runs are not finishes: `stop_crew` interrupts seats so
 they can be briefed again, and nothing is reported then. Ids
 derive from the run, so a redelivered event cannot post twice. Read-only Codex and Claude personas have `write_artifact` pre-approved for this reason, and `delegate_task` with `task_status` and `task_cancel` beside it, because a Crew member refused `spawn_agent` is sent to provider-native Subagents and a verb the sandbox then rejects is no way out:
-handoffs live in application storage, never in the sandboxed workspace. (Withdrawn on 2026-09-14:
+handoff artifacts live in application storage, never in the sandboxed workspace. (Withdrawn on 2026-09-14:
 the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `read_artifact` and
 `list_artifacts`, which collided with the project artifact toolkit's names.)
 
@@ -388,3 +388,4 @@ stopping retires nothing.
 - 2026-09-15 — machine participants appear in `list_participants` as named senders that receive nothing (issue #74).
 - 2026-09-17 — personas, not agents: `list_agents` becomes `list_personas`, the `agent` parameter on `spawn_agent`, `delegate_task`, and crew seats becomes `persona` (no alias: pre-dogfood, no legacy-compatibility code), crew results carry `persona_id`, and the mention is `@persona:ID`; "agent" keeps meaning a running participant (Bryant; [record](../../worklog/2026-09-16-crew-command-decoupling.md)).
 - 2026-09-24 — the `propose_crew` and `request_crew_member` contract strings match the shipped descriptions (custom-seat `model_selection` and `runtime_mode`, direct coordination); the snapshot keeps each member's reason, since the person approves every seat; seat finish notices post on change for completed and failed runs, and `missing` means the file was checked and is not there ([#229](https://github.com/Jacksondr5/j5code/issues/229), [#234](https://github.com/Jacksondr5/j5code/issues/234)).
+- 2026-09-24 — the J5 document is named "handoff artifact" to distinguish it from upstream's context handoffs.

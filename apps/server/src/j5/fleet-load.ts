@@ -33,6 +33,7 @@ import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexA
 import { OrchestratorV2, type OrchestratorV2Shape } from "../orchestration-v2/Orchestrator.ts";
 import type { ProviderAdapterV2Shape } from "../orchestration-v2/ProviderAdapter.ts";
 import { makeSqlitePersistenceLive } from "../persistence/Layers/Sqlite.ts";
+import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
 import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
@@ -50,7 +51,7 @@ const INTERACTIVE_BATCH_MS = 1_000;
 
 const keepState = process.argv.includes("--keep-state");
 const stateRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "j5-fleet-load-"));
-const dbPath = NodePath.join(stateRoot, "userdata", "state.sqlite");
+const dbPath = NodePath.join(stateRoot, "userdata", "statev2.sqlite");
 
 const modelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
@@ -104,6 +105,11 @@ const SqlitePersistenceLive = makeSqlitePersistenceLive(dbPath).pipe(
 
 const HarnessLayer = Layer.merge(OrchestrationV2LayerLive, OrchestrationV2EventSinkLayerLive).pipe(
   Layer.provide(Layer.mock(GitWorkflowService)({})),
+  Layer.provide(
+    Layer.mock(SourceControlProviderRegistry)({
+      resolveLink: () => Effect.die("The J5 load harness does not resolve title links."),
+    }),
+  ),
   Layer.provide(Layer.mock(ProjectService)({ getById: () => Effect.succeed(Option.none()) })),
   Layer.provide(mcpSessionRegistryTestLayer),
   Layer.provideMerge(SqlitePersistenceLive),

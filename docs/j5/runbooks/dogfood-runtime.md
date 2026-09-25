@@ -312,13 +312,23 @@ package_manager="$(fnm exec --using "$(cat .nvmrc)" node -p 'require("./package.
 fnm exec --using "$(cat .nvmrc)" npm install --global "$package_manager"
 fnm exec --using "$(cat .nvmrc)" pnpm install --frozen-lockfile
 fnm exec --using "$(cat .nvmrc)" pnpm exec vp run --filter t3 build
-rm -f ~/.j5code/userdata/state.sqlite ~/.j5code/userdata/state.sqlite-wal ~/.j5code/userdata/state.sqlite-shm
-cp ~/.j5code/db-snapshots/<pre-update-snapshot>/state.sqlite ~/.j5code/userdata/state.sqlite
+db=statev2.sqlite   # the file name inside the snapshot directory: statev2.sqlite or state.sqlite
+rm -f ~/.j5code/userdata/$db ~/.j5code/userdata/$db-wal ~/.j5code/userdata/$db-shm
+cp ~/.j5code/db-snapshots/<pre-update-snapshot>/$db ~/.j5code/userdata/$db
 systemctl --user start j5code.service
 ```
 
 Restoring the snapshot is required whenever the bad version ran migrations, and safe otherwise —
-when in doubt, restore. Ledger writes made between the snapshot and the rollback are lost; that is
+when in doubt, restore.
+
+The server keeps its database in `userdata/statev2.sqlite`. The first start of a V2 build copies
+`state.sqlite` to `statev2.sqlite` and never touches `state.sqlite` again, so the snapshot names
+whichever file was live. Rolling back to a build from before that copy is one-way: the old build
+reads `state.sqlite` and cannot see anything written to `statev2.sqlite`. Stop the service first,
+restore `state.sqlite` if the pre-update snapshot is named that, and move `statev2.sqlite` (with its
+`-wal`/`-shm`) aside rather than deleting it; an existing `statev2.sqlite` always wins, so leaving it
+in place would hide the old build's writes from the next V2 start. Never run an old and a new
+server against the two files at once. Ledger writes made between the snapshot and the rollback are lost; that is
 the accepted cost, which is why updates happen at quiet moments. If the bad version never actually
 started (build failure), skip the restore and just rebuild at the previous commit.
 
@@ -326,6 +336,7 @@ started (build failure), skip the restore and just rebuild at the previous commi
 
 Interim story until the client-pulled backup design lands: the nightly snapshot timer plus the
 pre-update snapshots, both under `~/.j5code/db-snapshots/` with a retention cap enforced by the
-snapshot script. Snapshots cover `state.sqlite` only — `secrets/` and `settings.json` change
+snapshot script. Snapshots cover the live database only (`statev2.sqlite`, or `state.sqlite`
+before the first V2 start) — `secrets/` and `settings.json` change
 rarely; copy them by hand after changing them. Off-box copies follow whatever backup regime the
 box already has; the snapshot directory is the thing to include in it.

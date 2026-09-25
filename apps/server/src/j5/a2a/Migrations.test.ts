@@ -85,7 +85,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [19, "PlaybookRunMaintenance"],
       ],
     );
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("adds playbooks after an environment has applied the Crew migrations", () =>
@@ -103,7 +103,7 @@ it.effect("adds playbooks after an environment has applied the Crew migrations",
       [{ name: "j5_playbook_request" }, { name: "j5_playbook_run" }],
     );
     yield* runJ5A2AMigrations();
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("creates the exact namespaced ledger schema and receiver correlation constraint", () =>
@@ -322,7 +322,7 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       WHERE participant_id = 'human:forbidden-membership'
     `;
     assert.deepStrictEqual(forbiddenRows, [{ count: 0 }]);
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("requires a non-null, non-blank reparent actor subject", () =>
@@ -388,7 +388,7 @@ it.effect("requires a non-null, non-blank reparent actor subject", () =>
         actor_subject: "human:placement-owner",
       },
     ]);
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("adds lifecycle terminal state without mutating the A4 human inbox projection", () =>
@@ -641,7 +641,7 @@ it.effect("adds lifecycle terminal state without mutating the A4 human inbox pro
         '2026-08-23T00:01:00.000Z', 'lifecycle_notice'
       )
     `;
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("reports conflicting thread ids before creating the immutable-home index", () =>
@@ -756,7 +756,7 @@ it.effect("reports conflicting thread ids before creating the immutable-home ind
       WHERE type = 'index' AND name = 'j5_a2a_comm_event_agent_home_thread_idx'
     `;
     assert.deepStrictEqual(indexes, [{ count: 0 }]);
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect(
@@ -1030,7 +1030,7 @@ it.effect(
       WHERE value = 'human:global'
     `;
       assert.deepStrictEqual(remainingGlobalReferences, [{ count: 0 }]);
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("renames existing Squadron data without changing ledger semantics", () =>
@@ -1154,7 +1154,7 @@ it.effect("renames existing Squadron data without changing ledger semantics", ()
         )
     `;
     assert.deepStrictEqual(legacySchema, []);
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("runs the J5 migration lane during normal SQLite setup", () =>
@@ -1224,7 +1224,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
       proposalColumns.map((column) => column.name),
       "runbook_declared",
     );
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect(
@@ -1272,7 +1272,7 @@ it.effect(
         indexes.map((row) => row.name),
         "j5_agent_crew_proposal_open_idx",
       );
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 for (const skipped15 of [false, true]) {
@@ -1317,7 +1317,7 @@ for (const skipped15 of [false, true]) {
           yield* sql`SELECT "notnull" FROM pragma_table_info('j5_agent_crew_member') WHERE name='agent_id'`;
         assert.deepStrictEqual(columns, [{ notnull: 0 }]);
         assert.lengthOf(yield* sql`SELECT * FROM j5_a2a_migrations WHERE migration_id=17`, 1);
-      }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 }
 
@@ -1364,5 +1364,5 @@ it.effect(
         2,
       );
       yield* runJ5A2AMigrations();
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );

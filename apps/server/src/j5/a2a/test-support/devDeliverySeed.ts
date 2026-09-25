@@ -1,4 +1,5 @@
 import { J5SquadronCreationLayer } from "../runtimeLayer.ts";
+import { SourceControlProviderRegistry } from "../../../sourceControl/SourceControlProviderRegistry.ts";
 import * as GitWorkflow from "../../../git/GitWorkflowService.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 /**
@@ -254,7 +255,7 @@ export const validateIsolatedBaseDir = (baseDir: string) =>
   });
 
 const databasePathFor = (path: Path.Path, baseDir: string) =>
-  path.resolve(baseDir, "userdata", "state.sqlite");
+  path.resolve(baseDir, "userdata", "statev2.sqlite");
 
 const seededId = (runId: string, suffix: string) => `${runId}:${suffix}`;
 
@@ -310,6 +311,11 @@ const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
     OrchestrationV2EventSinkLayerLive,
   ).pipe(
     Layer.provide(Layer.mock(GitWorkflow.GitWorkflowService)({})),
+    Layer.provide(
+      Layer.mock(SourceControlProviderRegistry)({
+        resolveLink: () => Effect.die("The delivery seed does not resolve title links."),
+      }),
+    ),
     Layer.provide(
       Layer.mock(ProjectService.ProjectService)({
         getById: () => Effect.succeed(Option.none()),

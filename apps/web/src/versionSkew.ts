@@ -116,7 +116,7 @@ export function supportsServerUpdateThreadContinuation(
 
 /** The command to hand users whose server cannot update itself. */
 export function manualServerUpdateCommand(targetVersion: string): string {
-  return `npx @jacksondr5/j5code@${targetVersion}`;
+  return `j5 update ${targetVersion}`;
 }
 
 export function serverUpdateGuidance(capability: ServerSelfUpdateCapability): string {

@@ -25,7 +25,7 @@ an agent creates, edits, or removes a project artifact.
 
 When a provider emits a structured proposed plan, J5 Code saves the completed plan automatically as
 the shared `artifacts/plan.md`. Agents use J5 Code's artifact tools to create and read other planning
-documents. Files under `handoffs/` are persona handoffs and keep every version inside the one
+documents. Files under `handoffs/` are persona handoff artifacts and keep every version inside the one
 file, newest first, when an agent rewrites them; every other artifact is replaced on write. Artifacts are shared by every agent working in the project rather than partitioned by
 thread. The `artifacts/` prefix shown in chat is a logical path and does not create a directory in
 the repository, so no Git ignore rule is needed.
@@ -33,7 +33,6 @@ the repository, so no Git ignore rule is needed.
 Artifacts are local to the environment and project where they were generated. They are
 not synced between machines or treated as shared Squadron documents.
 
-Handoff reports from personas, including crew members, land here too, under `handoffs/`,
-one file per agent task. A rewritten report adds its new version at the top of the same file, and
-the earlier versions stay below it. See **Handoff
-artifacts** in [Personas](personas.md).
+Handoff artifacts from personas, including crew members, land here too, under `handoffs/`,
+one file per agent task. A rewritten handoff artifact adds its new version at the top of the same
+file, and the earlier versions stay below it. See **Handoffartifacts** in [Personas](personas.md).
