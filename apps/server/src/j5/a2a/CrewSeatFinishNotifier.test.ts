@@ -649,7 +649,7 @@ it.effect(
   "an unreadable handoff is never reported missing: the notice waits and the retry carries the file",
   () =>
     Effect.gen(function* () {
-      const database = NodeSqliteClient.layerMemory();
+      const database = NodeSqliteClient.layer({ filename: ":memory:" });
       const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
         Layer.provideMerge(database),
       );
