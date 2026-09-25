@@ -70,6 +70,14 @@ export const pendingCrewThreadRequests = (
     ];
   });
 
+/** The orchestrator's own reason when it gave one, rather than its generic dispatch message. */
+const dispatchReason = (error: unknown): string => {
+  const record =
+    typeof error === "object" && error !== null ? (error as Record<string, unknown>) : {};
+  if (typeof record.cause === "string" && record.cause.length > 0) return record.cause;
+  return typeof record.message === "string" ? record.message : String(error);
+};
+
 export class CrewRuntimeRequestNotFoundError extends Data.TaggedError(
   "CrewRuntimeRequestNotFoundError",
 )<{ readonly threadId: ThreadId; readonly requestId: RuntimeRequestId }> {
@@ -216,11 +224,12 @@ export const layer = Layer.effect(
               : { decision: input.decision }),
           })
           .pipe(
-            // The orchestrator refuses a request that resolved between our read and this command.
+            // The orchestrator refuses a request that resolved between our read and this command;
+            // its reason ("... is resolved", "Provider session ... was not found") rides in `cause`.
             Effect.mapError(
               (error) =>
                 new CrewRuntimeRequestConflictError({
-                  detail: `The request could not be answered: ${error.message}`,
+                  detail: `The request could not be answered: ${dispatchReason(error)}`,
                 }),
             ),
           );

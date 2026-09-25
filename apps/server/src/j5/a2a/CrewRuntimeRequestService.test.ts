@@ -107,6 +107,7 @@ const makeThreads = () => {
     [strangerThread, projectionOf(strangerThread, [request("req:stranger", "command")])],
   ]);
   const dispatched: Array<OrchestrationV2Command> = [];
+  const racing = new Set<string>();
   const resolve = (threadId: ThreadId, requestId: string) => {
     const projection = state.get(threadId)!;
     state.set(threadId, {
@@ -129,14 +130,19 @@ const makeThreads = () => {
         const pending = state
           .get(command.threadId)
           ?.runtimeRequests.find((entry) => entry.id === command.requestId);
-        if (pending?.status !== "pending")
-          return yield* Effect.fail({ message: "Runtime request is resolved." } as never);
+        // Resolved on another device after the service read it: the orchestrator refuses.
+        if (racing.has(command.requestId)) resolve(command.threadId, command.requestId);
+        if (pending?.status !== "pending" || racing.has(command.requestId))
+          return yield* Effect.fail({
+            message: "Failed to dispatch orchestration command runtime-request.respond.",
+            cause: `Runtime request ${command.requestId} is resolved.`,
+          } as never);
         dispatched.push(command);
         resolve(command.threadId, command.requestId);
         return { sequence: dispatched.length } as never;
       }),
   });
-  return { layer, dispatched, resolve };
+  return { layer, dispatched, resolve, racing };
 };
 
 const setup = Effect.gen(function* () {
@@ -275,6 +281,16 @@ it.effect("refuses an answer of the wrong kind and forgets a retired Crew's requ
     );
     yield* Effect.gen(function* () {
       const service = yield* CrewRuntimeRequestService;
+      // Lost a race at dispatch: refused with the orchestrator's own reason, nothing recorded.
+      threads.racing.add("req:builder-approval");
+      const raced = yield* Effect.flip(
+        service.respond(answer("req:builder-approval", builderThread, { decision: "accept" }, 9)),
+      );
+      assert.equal(raced._tag, "CrewRuntimeRequestConflictError");
+      assert.include(raced.message, "Runtime request req:builder-approval is resolved.");
+      assert.lengthOf(threads.dispatched, 0);
+      threads.racing.clear();
+
       const wrong = yield* Effect.flip(
         service.respond(answer("req:captain-question", captainThread, { decision: "accept" }, 1)),
       );
