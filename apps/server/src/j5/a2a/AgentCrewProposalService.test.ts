@@ -10,8 +10,6 @@ import {
   layer as proposalLayer,
   type CreateCrewProposalInput,
 } from "./AgentCrewProposalService.ts";
-import { crewSeatThreadId } from "./crewSeatIds.ts";
-import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
@@ -40,17 +38,6 @@ const rosterMember = (crewId: string, name: string) => ({
 });
 
 /** The row an addition reserves for one of its seats, under the ids the launcher derives. */
-const reservedMember = (proposalId: string, name: string) => {
-  const threadId = crewSeatThreadId(proposalId, name);
-  return {
-    seatName: name,
-    agentId: "scout",
-    participantId: participantIdForThread(threadId),
-    threadId,
-    reason: null,
-  };
-};
-
 const addition = (
   id: string,
   crewInstanceId: string,
@@ -99,17 +86,11 @@ it.effect(
         maxSeats: 12,
       });
       assert.equal(declined.status, "created");
-      const claimed = yield* proposals.claim({
-        id: "proposal:d",
-        decision: "decline",
-        approvedSeats: null,
-      });
-      assert.isNotNull(claimed);
       assert.isNotNull(
-        yield* proposals.complete({
+        yield* proposals.resolve({
           id: "proposal:d",
           decision: "decline",
-          crewInstanceId: crewId,
+          approvedSeats: null,
           resolvedAt: createdAt,
         }),
       );
@@ -138,7 +119,7 @@ it.effect(
     }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("an open addition whose failed launch left its reserved row is counted once", () =>
+it.effect("a proposal resolves once: the second resolution finds it closed", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     yield* (yield* A2ALedger).createSquadron({
@@ -146,31 +127,50 @@ it.effect("an open addition whose failed launch left its reserved row is counted
     });
     const crews = yield* AgentCrewInstanceService;
     const proposals = yield* AgentCrewProposalService;
-    const crewId = "crew:reserved";
+    const crewId = "crew:resolve-once";
     yield* crews.record({
       id: crewId,
       squadronId,
       captainParticipantId: captain,
       captainThreadId,
-      displayName: "Reserved",
+      displayName: "Resolve once",
       brief: "Join in.",
       createdAt,
-      members: Array.from({ length: 10 }, (_, index) => rosterMember(crewId, `s${index}`)),
+      members: [rosterMember(crewId, "s0")],
     });
-    // P is open again after its launch failed, with its one reserved row still on the Crew.
-    const p = yield* proposals.admit(addition("proposal:p", crewId, ["p"]), { maxSeats: 12 });
-    assert.equal(p.status, "created");
-    assert.equal(
-      (yield* crews.addMembers(crewId, [reservedMember("proposal:p", "p")])).status,
-      "added",
-    );
-
-    // Eleven held, not twelve: Q takes the last seat and R is refused.
-    const q = yield* proposals.admit(addition("proposal:q", crewId, ["q"]), { maxSeats: 12 });
-    assert.equal(q.status, "created");
+    const filed = yield* proposals.admit(addition("proposal:once", crewId, ["p"]), {
+      maxSeats: 12,
+    });
+    assert.equal(filed.status, "created");
+    const approvedSeats = [
+      { ...addition("proposal:once", crewId, ["renamed"]).requestedSeats[0]! },
+    ];
+    const approved = yield* proposals.resolve({
+      id: "proposal:once",
+      decision: "approve",
+      approvedSeats,
+      resolvedAt: createdAt,
+    });
+    assert.equal(approved?.status, "approved");
     assert.deepStrictEqual(
-      yield* proposals.admit(addition("proposal:r", crewId, ["r"]), { maxSeats: 12 }),
-      { status: "cap-exceeded", held: 12, adding: 1 },
+      approved?.approvedSeats?.map(({ seat }) => seat),
+      ["renamed"],
+    );
+    // Neither a second approval nor a decline can follow the first resolution.
+    for (const decision of ["approve", "decline"] as const)
+      assert.isNull(
+        yield* proposals.resolve({
+          id: "proposal:once",
+          decision,
+          approvedSeats: null,
+          resolvedAt: createdAt,
+        }),
+      );
+    assert.equal((yield* proposals.read("proposal:once"))?.status, "approved");
+    // An approved request is no longer counted as pending; its seat is held once it is a row.
+    assert.deepStrictEqual(
+      yield* proposals.admit(addition("proposal:next", crewId, ["q"]), { maxSeats: 1 }),
+      { status: "cap-exceeded", held: 1, adding: 1 },
     );
   }).pipe(Effect.provide(testLayer)),
 );

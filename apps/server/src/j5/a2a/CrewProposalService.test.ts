@@ -136,15 +136,37 @@ const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
             .pipe(
               Effect.mapError(launchFailure),
               Effect.tap((instance) => input.onRecorded?.(instance) ?? Effect.void),
+              // Launch once: a seat that fails to spawn is an outcome, not an error. "Boom after
+              // record" loses its second seat, which the real launcher drops from the record.
               Effect.flatMap((instance) =>
                 input.displayName === "Boom after record"
-                  ? Effect.fail(launchFailure(new Error("second seat failed to spawn")))
-                  : Effect.succeed(instance),
+                  ? crews.removeMembers(instance.id, [input.seats[1]!.name]).pipe(
+                      Effect.mapError(launchFailure),
+                      Effect.andThen(crews.read(instance.id).pipe(Effect.mapError(launchFailure))),
+                      Effect.map((current) => ({
+                        instance: current!,
+                        seats: input.seats.map((seat, index) =>
+                          index === 1
+                            ? {
+                                seatName: seat.name,
+                                kind: "not_created" as const,
+                                detail: "second seat failed to spawn",
+                              }
+                            : { seatName: seat.name, kind: "created" as const },
+                        ),
+                      })),
+                    )
+                  : Effect.succeed({
+                      instance,
+                      seats: input.seats.map((seat) => ({
+                        seatName: seat.name,
+                        kind: "created" as const,
+                      })),
+                    }),
               ),
             ),
-    // Additions reserve rows under the real deterministic ids before spawning, like the launcher;
-    // a brief of "fail once" (or "fail twice") then fails that many spawns to leave the
-    // reservation behind.
+    // Additions reserve rows under the real deterministic ids before spawning, like the launcher,
+    // then resolve the proposal through `onReserved` before any seat spawns.
     addSeats: (input) =>
       Effect.gen(function* () {
         const outcome = yield* crews.addMembers(
@@ -163,17 +185,24 @@ const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
             };
           }),
         );
-        const wanted = input.brief === "fail twice" ? 2 : input.brief === "fail once" ? 1 : 0;
-        const failedSoFar = failures.get(input.requestKey) ?? 0;
-        if (failedSoFar < wanted) {
-          failures.set(input.requestKey, failedSoFar + 1);
-          return yield* Effect.fail(launchFailure(new Error("spawn failed after reserving")));
-        }
-        return outcome.instance!;
+        if (outcome.instance === null) return yield* launchFailure(new Error("crew is gone"));
+        if (input.onReserved !== undefined)
+          yield* input.onReserved(outcome.instance).pipe(
+            Effect.tapError(() =>
+              crews
+                .removeMembers(
+                  outcome.instance!.id,
+                  input.seats.map((seat) => seat.name),
+                )
+                .pipe(Effect.ignore),
+            ),
+          );
+        return {
+          instance: outcome.instance,
+          seats: input.seats.map((seat) => ({ seatName: seat.name, kind: "created" as const })),
+        };
       }).pipe(Effect.mapError(launchFailure)),
   });
-/** How many times each addition request has failed so far; briefs "fail once" and "fail twice". */
-const failures = new Map<string, number>();
 
 const withPreview = (gate: CrewProposalService["Service"]): CrewProposalService["Service"] => ({
   ...gate,
@@ -247,17 +276,16 @@ const fixture = Effect.gen(function* () {
   // An approval is told to the Captain by the launch report, once its seats have started; here the
   // reporter records which proposals it was handed.
   const watched = yield* Ref.make<ReadonlyArray<string>>([]);
-  // While set, recording a resolution lands nothing: the store answers as if the row were no
-  // longer claimed, which is what a decline sees when its final write fails after the notice.
-  const completeFailure = yield* Ref.make(false);
+  // While set, a resolution lands nothing: the store answers as if the row were no longer open.
+  const resolveFailure = yield* Ref.make(false);
   // While set, the proposal-to-Crew link write fails with a database error.
   const attachFailure = yield* Ref.make(false);
   const store = Context.get(context, AgentCrewProposalService);
   const flakyStore = Layer.succeed(AgentCrewProposalService, {
     ...store,
-    complete: (input) =>
-      Ref.get(completeFailure).pipe(
-        Effect.flatMap((failing) => (failing ? Effect.succeed(null) : store.complete(input))),
+    resolve: (input) =>
+      Ref.get(resolveFailure).pipe(
+        Effect.flatMap((failing) => (failing ? Effect.succeed(null) : store.resolve(input))),
       ),
     attachInstance: (id, crewInstanceId) =>
       Ref.get(attachFailure).pipe(
@@ -337,7 +365,7 @@ const fixture = Effect.gen(function* () {
     archivedThreads,
     deletedThreads,
     noticeFailure,
-    completeFailure,
+    resolveFailure,
     attachFailure,
     captainModel,
   };
@@ -541,15 +569,15 @@ it.effect("gates every roster on the human and gates additions with the seat cap
 );
 
 it.effect(
-  "claims a proposal before spawning and refuses approved seats the roster already has",
+  "resolves a proposal before spawning and refuses approved seats the roster already has",
   () =>
     Effect.gen(function* () {
-      const { layer } = yield* fixture;
+      const { layer, resolveFailure } = yield* fixture;
       yield* Effect.gen(function* () {
         const gate = withPreview(yield* CrewProposalService);
         const proposals = yield* AgentCrewProposalService;
 
-        // A failed spawn hands the gate back instead of recording a phantom approval.
+        // A failure before the Crew is recorded launches nothing and leaves the proposal open.
         const boom = yield* gate.propose({
           requestKey: "boom-1",
           captain,
@@ -577,7 +605,7 @@ it.effect(
         assert.equal(approved.proposal.status, "approved");
         assert.equal(approved.proposal.crewInstanceId, approved.instance?.id);
 
-        // A second approval finds the proposal claimed and never spawns again.
+        // A second approval finds the proposal resolved and never spawns again.
         const again = yield* gate
           .resolve({ proposalId: roster.proposal.id, decision: "approve" })
           .pipe(Effect.flip);
@@ -605,24 +633,27 @@ it.effect(
           1,
         );
 
-        // A spawn that fails after reserving its seat hands the gate back; the retry must
-        // recognize its own reservation instead of refusing the seat as taken forever.
+        // An addition whose approval cannot be recorded after its seat is reserved releases the
+        // reservation and stays open, so approving it again is not refused as a name clash.
         const flaky = yield* gate.requestMember({
           requestKey: "flaky-add-1",
           captain,
           crewInstanceId: approved.instance!.id,
           seat: { seat: "sentry", agentId: "critic", reason: "Security pass" },
-          brief: "fail once",
+          brief: null,
         });
+        yield* Ref.set(resolveFailure, true);
         const firstTry = yield* gate
           .resolve({ proposalId: flaky.proposal.id, decision: "approve" })
           .pipe(Effect.flip);
+        yield* Ref.set(resolveFailure, false);
         assert.equal(firstTry._tag, "CrewLaunchOperationError");
         assert.equal((yield* proposals.read(flaky.proposal.id))?.status, "open");
-        const reserved = (yield* (yield* AgentCrewInstanceService).read(approved.instance!.id))!;
         assert.sameMembers(
-          reserved.members.map(({ seatName }) => seatName),
-          ["builder", "sentry"],
+          (yield* (yield* AgentCrewInstanceService).read(approved.instance!.id))!.members.map(
+            ({ seatName }) => seatName,
+          ),
+          ["builder"],
         );
         const secondTry = yield* gate.resolve({
           proposalId: flaky.proposal.id,
@@ -630,30 +661,6 @@ it.effect(
         });
         assert.equal(secondTry.proposal.status, "approved");
         assert.lengthOf(secondTry.instance!.members, 2);
-        // Declining after a failed spawn releases the reservation the spawn left behind.
-        const abandoned = yield* gate.requestMember({
-          requestKey: "abandoned-add-1",
-          captain,
-          crewInstanceId: approved.instance!.id,
-          seat: { seat: "ranger", agentId: "critic", reason: "Recon" },
-          brief: "fail once",
-        });
-        yield* gate
-          .resolve({ proposalId: abandoned.proposal.id, decision: "approve" })
-          .pipe(Effect.flip);
-        assert.include(
-          (yield* (yield* AgentCrewInstanceService).read(approved.instance!.id))!.members.map(
-            ({ seatName }) => seatName,
-          ),
-          "ranger",
-        );
-        yield* gate.resolve({ proposalId: abandoned.proposal.id, decision: "decline" });
-        assert.sameMembers(
-          (yield* (yield* AgentCrewInstanceService).read(approved.instance!.id))!.members.map(
-            ({ seatName }) => seatName,
-          ),
-          ["builder", "sentry"],
-        );
         // A different proposal asking for that same seat name is still a clash.
         const clash = yield* gate
           .requestMember({
@@ -667,155 +674,6 @@ it.effect(
         assert.include(clash.message, "already has a seat named sentry");
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
-);
-
-it.effect("declining a roster whose launch failed partway retires what the launch created", () =>
-  Effect.gen(function* () {
-    const { layer, notices } = yield* fixture;
-    yield* Effect.gen(function* () {
-      const gate = withPreview(yield* CrewProposalService);
-      const proposals = yield* AgentCrewProposalService;
-      const crews = yield* AgentCrewInstanceService;
-      const opened = yield* gate.propose({
-        requestKey: "partial-1",
-        captain,
-        displayName: "Boom after record",
-        brief: "The second seat never spawns.",
-        seats: [
-          { seat: "builder", agentId: "builder", reason: "Builds" },
-          { seat: "critic", agentId: "critic", reason: "Reviews" },
-        ],
-      });
-      const edited = [
-        { seat: "builder", agentId: "builder", reason: "Builds" },
-        { seat: "reviewer", agentId: "critic", reason: "Renamed on the card" },
-      ];
-      const failed = yield* gate
-        .resolve({ proposalId: opened.proposal.id, decision: "approve", seats: edited })
-        .pipe(Effect.flip);
-      assert.equal(failed._tag, "CrewLaunchOperationError");
-      // The gate is handed back with the person's edits and the Crew it already names intact.
-      const reopened = (yield* proposals.read(opened.proposal.id))!;
-      assert.equal(reopened.status, "open");
-      assert.deepStrictEqual(reopened.approvedSeats, edited);
-      assert.equal(reopened.crewInstanceId, `crew:${opened.proposal.id}`);
-      assert.isNotNull(yield* crews.read(reopened.crewInstanceId!));
-
-      const declined = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "decline" });
-      assert.equal(declined.proposal.status, "declined");
-      const retired = (yield* crews.read(reopened.crewInstanceId!))!;
-      assert.isNotNull(retired.archivedAt);
-      // Every seat the failed launch created is archived, under its own stable command id.
-      const archived = (yield* Ref.get(notices)).filter(
-        (command) => command.type === "thread.archive",
-      );
-      assert.sameMembers(
-        archived.map((command) => command.threadId),
-        [ThreadId.make("thread:builder"), ThreadId.make("thread:reviewer")],
-      );
-      // Nothing of it is seated any more, and the Captain heard the decline.
-      assert.isNull(yield* crews.findMembership(ParticipantId.make("agent:j5:a2a:thread:builder")));
-      const notice = (yield* Ref.get(notices)).at(-1);
-      assert.equal(notice?.type, "message.dispatch");
-      if (notice?.type === "message.dispatch") assert.include(notice.text, "decision: declined");
-    }).pipe(Effect.provide(layer));
-  }).pipe(Effect.scoped),
-);
-
-it.effect("a decline cleans up before it is recorded, and releases every name it reserved", () =>
-  Effect.gen(function* () {
-    const { layer, notices, archiveFailures } = yield* fixture;
-    yield* Effect.gen(function* () {
-      const gate = withPreview(yield* CrewProposalService);
-      const proposals = yield* AgentCrewProposalService;
-      const crews = yield* AgentCrewInstanceService;
-
-      // A roster whose launch failed partway: while a seat's archive fails, the decline is not
-      // recorded, so the person can decline again once the store recovers.
-      const roster = yield* gate.propose({
-        requestKey: "cleanup-1",
-        captain,
-        displayName: "Boom after record",
-        brief: "The second seat never spawns.",
-        seats: [
-          { seat: "builder", agentId: "builder", reason: "Builds" },
-          { seat: "critic", agentId: "critic", reason: "Reviews" },
-        ],
-      });
-      yield* gate
-        .resolve({ proposalId: roster.proposal.id, decision: "approve" })
-        .pipe(Effect.flip);
-      yield* Ref.set(archiveFailures, new Set(["thread:critic"]));
-      const stuck = yield* gate
-        .resolve({ proposalId: roster.proposal.id, decision: "decline" })
-        .pipe(Effect.flip);
-      assert.equal(stuck._tag, "CrewProposalOperationError");
-      const stillOpen = (yield* proposals.read(roster.proposal.id))!;
-      assert.equal(stillOpen.status, "open");
-      assert.isNull((yield* crews.read(stillOpen.crewInstanceId!))!.archivedAt);
-      yield* Ref.set(archiveFailures, new Set());
-      const declined = yield* gate.resolve({ proposalId: roster.proposal.id, decision: "decline" });
-      assert.equal(declined.proposal.status, "declined");
-      assert.isNotNull((yield* crews.read(stillOpen.crewInstanceId!))!.archivedAt);
-
-      // An addition renamed between two failed attempts reserved two names; declining releases
-      // both, not only the last one the person approved.
-      const live = yield* gate.propose({
-        requestKey: "cleanup-2",
-        captain,
-        displayName: "Live Crew",
-        brief: "Build it.",
-        // The fake launcher mints seat ids from names alone, so this roster reuses none above.
-        seats: [{ seat: "maker", agentId: "builder", reason: "Builds" }],
-      });
-      const approved = yield* gate.resolve({ proposalId: live.proposal.id, decision: "approve" });
-      const addition = yield* gate.requestMember({
-        requestKey: "cleanup-add-1",
-        captain,
-        crewInstanceId: approved.instance!.id,
-        seat: { seat: "scout", agentId: "critic", reason: "Recon" },
-        brief: "fail twice",
-      });
-      yield* gate
-        .resolve({ proposalId: addition.proposal.id, decision: "approve" })
-        .pipe(Effect.flip);
-      yield* gate
-        .resolve({
-          proposalId: addition.proposal.id,
-          decision: "approve",
-          seats: [{ seat: "ranger", agentId: "critic", reason: "Renamed on the card" }],
-        })
-        .pipe(Effect.flip);
-      assert.sameMembers(
-        (yield* crews.read(approved.instance!.id))!.members.map(({ seatName }) => seatName),
-        ["maker", "scout", "ranger"],
-      );
-      // The reopened gate carries the person's edit, which is what the card reseeds from.
-      assert.deepStrictEqual(
-        (yield* proposals.read(addition.proposal.id))!.approvedSeats?.map(({ seat }) => seat),
-        ["ranger"],
-      );
-      yield* gate.resolve({ proposalId: addition.proposal.id, decision: "decline" });
-      const afterwards = (yield* crews.read(approved.instance!.id))!;
-      assert.deepStrictEqual(
-        afterwards.members.map(({ seatName }) => seatName),
-        ["maker"],
-      );
-      assert.isNull(afterwards.archivedAt);
-      // Both reserved seat threads were archived under their own stable command ids.
-      const archived = (yield* Ref.get(notices))
-        .filter((command) => command.type === "thread.archive")
-        .map((command) => command.threadId);
-      for (const seat of ["scout", "ranger"])
-        assert.include(
-          archived,
-          spawnThreadId({
-            providerSessionId: "j5-crew-proposal",
-            requestKey: crewSeatRequestKey(addition.proposal.id, seat),
-          }),
-        );
-    }).pipe(Effect.provide(layer));
-  }).pipe(Effect.scoped),
 );
 
 it.effect("holds every door to the same seat shape and seats nobody into a retired Crew", () =>
@@ -893,212 +751,94 @@ it.effect("holds every door to the same seat shape and seats nobody into a retir
 
 it.effect("a decision that races another device's on the same gate is refused, not undone", () =>
   Effect.gen(function* () {
-    const { layer } = yield* fixture;
+    const { layer, watched } = yield* fixture;
     yield* Effect.gen(function* () {
       const gate = withPreview(yield* CrewProposalService);
       const proposals = yield* AgentCrewProposalService;
-      const crews = yield* AgentCrewInstanceService;
-
-      // A roster whose launch failed partway, handed back with its Crew already recorded: the
-      // shape both devices see when they resolve the reopened gate at once.
       const roster = yield* gate.propose({
         requestKey: "race-1",
         captain,
-        displayName: "Boom after record",
-        brief: "The second seat never spawns.",
+        displayName: "Race Pair",
+        brief: "Two devices decide at once.",
         seats: [
           { seat: "builder", agentId: "builder", reason: "Builds" },
           { seat: "critic", agentId: "critic", reason: "Reviews" },
         ],
       });
-      yield* gate
-        .resolve({ proposalId: roster.proposal.id, decision: "approve" })
-        .pipe(Effect.flip);
-      const crewId = (yield* proposals.read(roster.proposal.id))!.crewInstanceId!;
-
-      // Device A's approval holds the claim while its launch runs; device B's decline arrives.
-      const held = yield* proposals.claim({
-        id: roster.proposal.id,
-        decision: "approve",
-        approvedSeats: null,
-      });
-      assert.equal(held?.status, "approving");
-      const refused = yield* gate
-        .resolve({ proposalId: roster.proposal.id, decision: "decline" })
-        .pipe(Effect.flip);
-      assert.equal(refused._tag, "CrewProposalNotOpenError");
-      if (refused._tag === "CrewProposalNotOpenError") assert.equal(refused.status, "approving");
-      // The decline did no cleanup over the approval: the Crew A is launching is still live.
-      assert.isNull((yield* crews.read(crewId))!.archivedAt);
-      assert.equal((yield* proposals.read(roster.proposal.id))!.status, "approving");
-
-      // The mirror image: a decline holds the claim while it cleans up; an approval arrives.
-      yield* proposals.reopen(roster.proposal.id);
-      const declining = yield* proposals.claim({
-        id: roster.proposal.id,
-        decision: "decline",
-        approvedSeats: null,
-      });
-      assert.equal(declining?.status, "declining");
-      const lateApproval = yield* gate
-        .resolve({ proposalId: roster.proposal.id, decision: "approve" })
-        .pipe(Effect.flip);
-      assert.equal(lateApproval._tag, "CrewProposalNotOpenError");
-      // Only the claim holder can write the final status; a second claim finds nothing open.
-      assert.isNull(
-        yield* proposals.claim({
-          id: roster.proposal.id,
-          decision: "approve",
-          approvedSeats: null,
-        }),
-      );
-
-      // Once the claim is released the person decides again and the decline goes through whole.
-      yield* proposals.reopen(roster.proposal.id);
-      const declined = yield* gate.resolve({ proposalId: roster.proposal.id, decision: "decline" });
-      assert.equal(declined.proposal.status, "declined");
-      assert.isNotNull((yield* crews.read(crewId))!.archivedAt);
-    }).pipe(Effect.provide(layer));
-  }).pipe(Effect.scoped),
-);
-
-it.effect("a decline whose notice committed is never handed back to the opposite choice", () =>
-  Effect.gen(function* () {
-    const { layer, notices, completeFailure } = yield* fixture;
-    yield* Effect.gen(function* () {
-      const gate = yield* CrewProposalService;
-      const proposals = yield* AgentCrewProposalService;
-      const roster = yield* gate.propose({
-        requestKey: "declined-stays-1",
-        captain,
-        displayName: "Declined stays declined",
-        brief: "Build it.",
-        seats: [{ seat: "maker", agentId: "builder", reason: "Builds" }],
-      });
-      // The Captain's decline card is durable, then the final status write fails.
-      yield* Ref.set(completeFailure, true);
-      const failed = yield* gate
-        .resolve({ proposalId: roster.proposal.id, decision: "decline" })
-        .pipe(Effect.flip);
-      assert.equal(failed._tag, "CrewProposalOperationError");
-      const told = (yield* Ref.get(notices)).findLast(
-        (command) => command.type === "message.dispatch",
-      );
-      if (told?.type === "message.dispatch") assert.include(told.text, "decision: declined");
-      else assert.fail("the decline notice was not dispatched");
-      // Reopening now would let an approval launch a Crew beneath a card that says declined;
-      // a claimed row refuses every resolution until the boot sweep records the decline.
-      assert.equal((yield* proposals.read(roster.proposal.id))!.status, "declining");
-      // The boot sweep finishes the lost decline once the store recovers.
-      yield* Ref.set(completeFailure, false);
-      assert.deepStrictEqual(yield* gate.reconcile, [roster.proposal.id]);
-      assert.equal((yield* proposals.read(roster.proposal.id))!.status, "declined");
-    }).pipe(Effect.provide(layer));
-  }).pipe(Effect.scoped),
-);
-
-it.effect("the boot sweep finishes a decline the server lost and hands a lost approval back", () =>
-  Effect.gen(function* () {
-    const { layer, notices } = yield* fixture;
-    yield* Effect.gen(function* () {
-      const gate = withPreview(yield* CrewProposalService);
-      const proposals = yield* AgentCrewProposalService;
-      const crews = yield* AgentCrewInstanceService;
-
-      // A decline claimed, then the server died before the cleanup and the final status landed.
-      const lost = yield* gate.propose({
-        requestKey: "sweep-1",
-        captain,
-        displayName: "Boom after record",
-        brief: "The second seat never spawns.",
-        seats: [
-          { seat: "builder", agentId: "builder", reason: "Builds" },
-          { seat: "critic", agentId: "critic", reason: "Reviews" },
+      // Device A approves while device B declines: exactly one resolution lands.
+      const [approval, decline] = yield* Effect.all(
+        [
+          Effect.result(gate.resolve({ proposalId: roster.proposal.id, decision: "approve" })),
+          Effect.result(gate.resolve({ proposalId: roster.proposal.id, decision: "decline" })),
         ],
-      });
-      yield* gate.resolve({ proposalId: lost.proposal.id, decision: "approve" }).pipe(Effect.flip);
-      yield* proposals.claim({ id: lost.proposal.id, decision: "decline", approvedSeats: null });
-      // An approval claimed, then lost the same way; its launch converges on a retry, so the
-      // gate is handed back rather than guessed at.
-      const handedBack = yield* gate.propose({
-        requestKey: "sweep-2",
-        captain,
-        displayName: "Sweep Crew",
-        brief: "Build it.",
-        seats: [{ seat: "maker", agentId: "builder", reason: "Builds" }],
-      });
-      yield* proposals.claim({
-        id: handedBack.proposal.id,
-        decision: "approve",
-        approvedSeats: handedBack.proposal.requestedSeats,
-      });
-
-      assert.sameMembers([...(yield* gate.reconcile)], [lost.proposal.id, handedBack.proposal.id]);
-      const declined = (yield* proposals.read(lost.proposal.id))!;
-      assert.equal(declined.status, "declined");
-      assert.isNotNull((yield* crews.read(declined.crewInstanceId!))!.archivedAt);
-      const notice = (yield* Ref.get(notices)).findLast(
-        (command) => command.type === "message.dispatch",
+        { concurrency: "unbounded" },
       );
-      if (notice?.type === "message.dispatch") assert.include(notice.text, "decision: declined");
-      const reopened = (yield* proposals.read(handedBack.proposal.id))!;
-      assert.equal(reopened.status, "open");
-      assert.deepStrictEqual(reopened.approvedSeats, handedBack.proposal.requestedSeats);
-      // Nothing left claimed; a second sweep is a no-op.
-      assert.deepStrictEqual(yield* gate.reconcile, []);
-    }).pipe(Effect.provide(layer));
-  }).pipe(Effect.scoped),
-);
-
-it.effect("a seat thread that never existed is skipped; a store that cannot answer is not", () =>
-  Effect.gen(function* () {
-    const { layer, notices, missingThreads, unreadableThreads } = yield* fixture;
-    yield* Effect.gen(function* () {
-      const gate = withPreview(yield* CrewProposalService);
-      const proposals = yield* AgentCrewProposalService;
-      const crews = yield* AgentCrewInstanceService;
-      const roster = yield* gate.propose({
-        requestKey: "reads-1",
-        captain,
-        displayName: "Boom after record",
-        brief: "The second seat never spawns.",
-        seats: [
-          { seat: "builder", agentId: "builder", reason: "Builds" },
-          { seat: "critic", agentId: "critic", reason: "Reviews" },
-        ],
-      });
-      yield* gate
-        .resolve({ proposalId: roster.proposal.id, decision: "approve" })
-        .pipe(Effect.flip);
-      const crewId = (yield* proposals.read(roster.proposal.id))!.crewInstanceId!;
-
-      // The store cannot read the builder's thread: the decline fails, the gate is handed back,
-      // and no row is dropped from under a thread that may well be live.
-      yield* Ref.set(unreadableThreads, new Set(["thread:builder"]));
-      const failed = yield* gate
-        .resolve({ proposalId: roster.proposal.id, decision: "decline" })
-        .pipe(Effect.flip);
-      assert.equal(failed._tag, "CrewProposalOperationError");
-      assert.include(failed.message, "reading seat builder");
-      assert.equal((yield* proposals.read(roster.proposal.id))!.status, "open");
-      assert.isNull((yield* crews.read(crewId))!.archivedAt);
-      assert.lengthOf((yield* crews.read(crewId))!.members, 2);
-
-      // The critic's thread never came to exist: that is a fact, so the decline passes it by and
-      // archives only the builder's.
-      yield* Ref.set(unreadableThreads, new Set());
-      yield* Ref.set(missingThreads, new Set(["thread:critic"]));
-      const declined = yield* gate.resolve({ proposalId: roster.proposal.id, decision: "decline" });
-      assert.equal(declined.proposal.status, "declined");
-      assert.isNotNull((yield* crews.read(crewId))!.archivedAt);
+      const outcomes = [approval, decline].map((result) =>
+        Result.isSuccess(result) ? result.success.proposal.status : result.failure._tag,
+      );
+      assert.sameMembers(
+        outcomes,
+        outcomes.includes("approved")
+          ? ["approved", "CrewProposalNotOpenError"]
+          : ["declined", "CrewProposalNotOpenError"],
+      );
+      const final = (yield* proposals.read(roster.proposal.id))!;
+      assert.include(["approved", "declined"], final.status);
+      // Only a winning approval launches and is reported.
       assert.deepStrictEqual(
-        (yield* Ref.get(notices))
-          .filter((command) => command.type === "thread.archive")
-          .map((command) => command.threadId),
-        [ThreadId.make("thread:builder")],
+        yield* Ref.get(watched),
+        final.status === "approved" ? [roster.proposal.id] : [],
       );
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "an approval launches once: a seat that is never created is reported, and nothing can resolve it again",
+  () =>
+    Effect.gen(function* () {
+      const { layer, watched } = yield* fixture;
+      yield* Effect.gen(function* () {
+        const gate = withPreview(yield* CrewProposalService);
+        const proposals = yield* AgentCrewProposalService;
+        const crews = yield* AgentCrewInstanceService;
+        const roster = yield* gate.propose({
+          requestKey: "once-1",
+          captain,
+          displayName: "Boom after record",
+          brief: "The second seat never spawns.",
+          seats: [
+            { seat: "builder", agentId: "builder", reason: "Builds" },
+            { seat: "critic", agentId: "critic", reason: "Reviews" },
+          ],
+        });
+        // The approval resolves the card even though one seat was never created.
+        const approved = yield* gate.resolve({
+          proposalId: roster.proposal.id,
+          decision: "approve",
+        });
+        assert.equal(approved.proposal.status, "approved");
+        assert.deepStrictEqual(
+          approved.instance?.members.map((member) => member.seatName),
+          ["builder"],
+        );
+        assert.deepStrictEqual(
+          (yield* crews.read(approved.instance!.id))!.members.map((member) => member.seatName),
+          ["builder"],
+        );
+        assert.deepStrictEqual(yield* Ref.get(watched), [roster.proposal.id]);
+        // Neither a second approval nor a decline follows; nothing is launched or retired.
+        for (const decision of ["approve", "decline"] as const) {
+          const again = yield* gate
+            .resolve({ proposalId: roster.proposal.id, decision })
+            .pipe(Effect.flip);
+          assert.equal(again._tag, "CrewProposalNotOpenError");
+        }
+        assert.isNull((yield* crews.read(approved.instance!.id))!.archivedAt);
+        assert.equal((yield* proposals.read(roster.proposal.id))!.status, "approved");
+        assert.lengthOf(yield* Ref.get(watched), 1);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
 );
 
 it.effect("a failed decline notice leaves the decision retryable", () =>
@@ -1193,7 +933,7 @@ it.effect(
 );
 
 it.effect(
-  "persists custom runtime overrides through proposal storage, human edits, and failed-launch recovery",
+  "persists custom runtime overrides through proposal storage, human edits, and approval",
   () =>
     Effect.gen(function* () {
       const { layer } = yield* fixture;
@@ -1215,7 +955,7 @@ it.effect(
         const open = yield* gate.propose({
           requestKey: "custom-config-recovery",
           captain,
-          displayName: "Boom",
+          displayName: "Custom Review",
           brief: "Review",
           seats: [proposed],
         });
@@ -1238,22 +978,8 @@ it.effect(
           .pipe(Effect.flip);
         assert.equal(stale._tag, "CrewProposalRequestError");
         const current = yield* gate.preview({ proposalId: open.proposal.id, seats: [edited] });
-        const failed = yield* gate
-          .resolve({
-            proposalId: open.proposal.id,
-            decision: "approve",
-            seats: [edited],
-            approvalToken: current.approvalToken,
-          })
-          .pipe(Effect.flip);
-        assert.equal(failed._tag, "CrewLaunchOperationError");
-        const reopened = (yield* store.read(open.proposal.id))!;
-        assert.equal(reopened.status, "open");
-        assert.deepStrictEqual(reopened.approvedSeats, [edited]);
-        const retry = yield* gate.preview({ proposalId: open.proposal.id });
-        assert.equal(retry.approvalToken, current.approvalToken);
-        assert.deepStrictEqual(retry.seats[0]?.modelSelection, edited.modelSelection);
-        assert.equal(retry.seats[0]?.runtimeMode, edited.runtimeMode);
+        assert.deepStrictEqual(current.seats[0]?.modelSelection, edited.modelSelection);
+        assert.equal(current.seats[0]?.runtimeMode, edited.runtimeMode);
         const savedSeat = { ...edited, agentId: "critic" };
         const savedOverride = yield* gate.preview({
           proposalId: open.proposal.id,
@@ -1271,14 +997,13 @@ it.effect(
           })
           .pipe(Effect.flip);
         assert.equal(stalePersona._tag, "CrewProposalRequestError");
-        yield* gate
-          .resolve({
-            proposalId: open.proposal.id,
-            seats: [savedSeat],
-            decision: "approve",
-            approvalToken: savedOverride.approvalToken,
-          })
-          .pipe(Effect.flip);
+        const approved = yield* gate.resolve({
+          proposalId: open.proposal.id,
+          seats: [savedSeat],
+          decision: "approve",
+          approvalToken: savedOverride.approvalToken,
+        });
+        assert.equal(approved.proposal.status, "approved");
         assert.deepStrictEqual((yield* store.read(open.proposal.id))?.approvedSeats, [savedSeat]);
         const agentOverride = yield* gate
           .propose({

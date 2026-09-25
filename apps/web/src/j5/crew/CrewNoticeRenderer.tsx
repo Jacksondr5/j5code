@@ -144,6 +144,19 @@ function CrewGateCard(props: {
               </li>
             );
           })}
+          {notice.notCreated.map((seat) => (
+            <li key={seat.seat}>
+              <div className="flex min-w-0 items-center gap-2 px-1.5 py-1 text-sm">
+                <Badge variant="outline" size="sm" className="shrink-0">
+                  {seat.seat}
+                </Badge>
+                <span className="ms-auto shrink-0 rounded-md bg-red-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-red-700 dark:text-red-300">
+                  Not created
+                </span>
+              </div>
+              <p className="ps-1.5 text-xs text-muted-foreground">{seat.detail}</p>
+            </li>
+          ))}
         </ul>
       ) : notice.requestedSeats.length > 0 ? (
         <p className="mt-2 text-xs text-muted-foreground">

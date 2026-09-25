@@ -73,6 +73,8 @@ export type CrewNoticePresentation =
       readonly failures: ReadonlyArray<SeatStartFailure>;
       /** Seats whose first turn had not started when the report's window closed. */
       readonly pendingSeats: ReadonlyArray<string>;
+      /** Approved seats whose thread was never created; they are not on the roster. */
+      readonly notCreated: ReadonlyArray<{ readonly seat: string; readonly detail: string }>;
     };
 
 const GATE_BLOCK = /^<j5_crew_gate>\n([\s\S]*?)\n<\/j5_crew_gate>/;
@@ -137,6 +139,13 @@ const parseGate = (text: string): CrewNoticePresentation | null => {
       ? []
       : [{ seat, runStatus, detail: decodeFailureField(rest.join(" | ")) }];
   });
+  // `seat_not_created: <seat> | <error>`, the same escaping as a failure's error.
+  const notCreated = fields(block, "seat_not_created").flatMap((entry) => {
+    const [seat, ...rest] = entry.split(" | ");
+    return seat === undefined || rest.length === 0
+      ? []
+      : [{ seat, detail: decodeFailureField(rest.join(" | ")) }];
+  });
   const changes = field(block, "changes");
   const requestedSeats = (field(block, "requested_seats") ?? "")
     .split(",")
@@ -161,6 +170,7 @@ const parseGate = (text: string): CrewNoticePresentation | null => {
     changes: changes === null || changes === "none" ? null : changes,
     failures,
     pendingSeats: fields(block, "seat_pending"),
+    notCreated,
   };
 };
 
@@ -271,9 +281,10 @@ export const artifactPanelPath = (logicalPath: string) =>
 export const crewGateTitle = (notice: Extract<CrewNoticePresentation, { kind: "gate" }>) => {
   if (notice.decision === "declined")
     return notice.requestKind === "roster" ? "Crew declined" : "Seat declined";
-  if (notice.failures.length > 0)
+  const failed = notice.failures.length + notice.notCreated.length;
+  if (failed > 0)
     return notice.requestKind === "roster"
-      ? `Crew launched, ${notice.failures.length} ${notice.failures.length === 1 ? "seat" : "seats"} failed`
+      ? `Crew launched, ${failed} ${failed === 1 ? "seat" : "seats"} failed`
       : "Seat failed";
   return notice.requestKind === "roster" ? "Crew launched" : "Seat added";
 };
@@ -286,6 +297,10 @@ export const crewGateFooter = (notice: Extract<CrewNoticePresentation, { kind: "
   if (notice.failures.length > 0)
     parts.push(
       `${notice.failures.length} ${notice.failures.length === 1 ? "seat" : "seats"} failed; the Captain has each reason.`,
+    );
+  if (notice.notCreated.length > 0)
+    parts.push(
+      `${notice.notCreated.length} ${notice.notCreated.length === 1 ? "seat was" : "seats were"} never created; the Captain can ask for ${notice.notCreated.length === 1 ? "it" : "them"} again.`,
     );
   if (notice.pendingSeats.length > 0)
     parts.push(

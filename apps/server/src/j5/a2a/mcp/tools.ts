@@ -238,7 +238,7 @@ export type J5RequestCrewMemberInput = typeof J5RequestCrewMemberInput.Type;
 
 export const J5CrewProposalResult = Schema.Struct({
   proposal_id: NonEmptyString,
-  status: Schema.Literals(["open", "approving", "declining", "approved", "declined"]),
+  status: Schema.Literals(["open", "approved", "declined"]),
   crew_instance_id: Schema.NullOr(NonEmptyString),
   members: Schema.Array(
     Schema.Struct({
