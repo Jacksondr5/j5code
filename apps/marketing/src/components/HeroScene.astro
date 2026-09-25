@@ -1,94 +1,108 @@
 ---
 /**
- * Three vignettes playing at once across the hero: agents trading quick asks
- * and replies, a Captain leading its Crew around a circle, and an agent
- * spawning Peer Agents that spawn their own. Each loops on its own clock.
- * Everything is transform, opacity or offset only, gated by --motion-state
- * from lib/motion.ts.
+ * Three teasers around the hero copy, each on its own loop: agents trading
+ * asks and replies (flags turn orange when an agent sends, blue when one
+ * receives, green when one replies), a Captain leading its Crew around a
+ * circle, and an agent spawning two peers beside it, which each spawn one
+ * below. On wide screens they sit in the flanks; below that they form a row
+ * under the copy, and a column on phones. Everything is transform, opacity,
+ * offset or a registered custom property, gated by --motion-state.
  */
 ---
 
 <div class="hs">
-  <!-- Talking -->
-  <figure class="hs-fig" data-motion>
-    <svg viewBox="0 0 380 240" role="img" aria-label="Four agents exchanging asks and replies">
-      <path class="hs-arc" d="M62 111 Q 110 40 190 31" />
-      <path class="hs-arc" d="M318 111 Q 270 170 190 151" />
-      <path class="hs-arc" d="M62 111 Q 190 -20 318 111" />
-      <path class="hs-arc" d="M190 31 Q 235 91 190 151" />
+  <svg class="hv hv--talk" viewBox="0 0 380 240" role="img" aria-label="Four agents exchanging asks and replies" data-motion>
+    <path class="hs-arc" d="M62 111 Q 110 40 190 31" />
+    <path class="hs-arc" d="M318 111 Q 270 170 190 151" />
+    <path class="hs-arc" d="M62 111 Q 190 -20 318 111" />
+    <path class="hs-arc" d="M190 31 Q 235 91 190 151" />
 
-      <g transform="translate(30 110)"><g class="bob" style="--bob-dur:4.6s"><use class="boat boat--dark" href="#j5-boat" /></g></g>
-      <g transform="translate(158 30)"><g class="bob" style="--bob-dur:5.2s;--bob-delay:-1.4s"><use class="boat boat--dark" href="#j5-boat" /></g></g>
-      <g transform="translate(286 110)"><g class="bob" style="--bob-dur:4.9s;--bob-delay:-2.8s"><use class="boat boat--dark" href="#j5-boat" /></g></g>
-      <g transform="translate(158 150)"><g class="bob" style="--bob-dur:5.5s;--bob-delay:-0.7s"><use class="boat boat--dark boat--waiting" href="#j5-boat" /></g></g>
+    <g transform="translate(30 110)"><g class="bob" style="--bob-dur:4.6s"><use class="boat boat--dark flag flag-a" href="#j5-boat" /></g></g>
+    <g transform="translate(158 30)"><g class="bob" style="--bob-dur:5.2s;--bob-delay:-1.4s"><use class="boat boat--dark flag flag-b" href="#j5-boat" /></g></g>
+    <g transform="translate(286 110)"><g class="bob" style="--bob-dur:4.9s;--bob-delay:-2.8s"><use class="boat boat--dark flag flag-c" href="#j5-boat" /></g></g>
+    <g transform="translate(158 150)"><g class="bob" style="--bob-dur:5.5s;--bob-delay:-0.7s"><use class="boat boat--dark flag flag-d" href="#j5-boat" /></g></g>
 
-      <circle class="hs-dot hs-ask d1" r="4" />
-      <circle class="hs-dot hs-reply d2" r="4" />
-      <circle class="hs-dot hs-ask d3" r="4" />
-      <circle class="hs-dot hs-reply d4" r="4" />
-      <circle class="hs-dot hs-ask d5" r="4" />
-      <circle class="hs-dot hs-reply d6" r="4" />
-      <circle class="hs-dot hs-ask d7" r="4" />
-    </svg>
-    <figcaption>Any agent can message any agent</figcaption>
-  </figure>
+    <circle class="hs-dot hs-ask d1" r="4" />
+    <circle class="hs-dot hs-reply d2" r="4" />
+    <circle class="hs-dot hs-ask d3" r="4" />
+    <circle class="hs-dot hs-reply d4" r="4" />
+    <circle class="hs-dot hs-ask d5" r="4" />
+    <circle class="hs-dot hs-reply d6" r="4" />
+    <circle class="hs-dot hs-ask d7" r="4" />
+  </svg>
 
-  <!-- Leading -->
-  <figure class="hs-fig" data-motion>
-    <svg viewBox="0 0 380 240" role="img" aria-label="A Captain leading three agents around a circle">
-      <circle class="hs-ring" cx="190" cy="120" r="72" />
-      <g class="orbit orbit--captain"><g transform="translate(-38 -37) scale(1.2)"><g class="bob" style="--bob-dur:5s"><use class="boat boat--dark" href="#j5-captain" /></g></g></g>
-      <g class="orbit orbit--s1"><g transform="translate(-32 -30)"><g class="bob" style="--bob-dur:4.7s;--bob-delay:-1s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
-      <g class="orbit orbit--s2"><g transform="translate(-32 -30)"><g class="bob" style="--bob-dur:5.3s;--bob-delay:-2s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
-      <g class="orbit orbit--s3"><g transform="translate(-32 -30)"><g class="bob" style="--bob-dur:4.4s;--bob-delay:-3s"><use class="boat boat--dark boat--waiting" href="#j5-boat" /></g></g></g>
-    </svg>
-    <figcaption>A Captain leads its Crew</figcaption>
-  </figure>
+  <svg class="hv hv--lead" viewBox="0 0 380 240" role="img" aria-label="A Captain leading three agents around a circle" data-motion>
+    <circle class="hs-ring" cx="190" cy="120" r="72" />
+    <g class="orbit orbit--captain"><g transform="translate(-38 -37) scale(1.2)"><g class="bob" style="--bob-dur:5s"><use class="boat boat--dark" href="#j5-captain" /></g></g></g>
+    <g class="orbit orbit--s1"><g transform="translate(-32 -30)"><g class="bob" style="--bob-dur:4.7s;--bob-delay:-1s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
+    <g class="orbit orbit--s2"><g transform="translate(-32 -30)"><g class="bob" style="--bob-dur:5.3s;--bob-delay:-2s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
+    <g class="orbit orbit--s3"><g transform="translate(-32 -30)"><g class="bob" style="--bob-dur:4.4s;--bob-delay:-3s"><use class="boat boat--dark boat--waiting" href="#j5-boat" /></g></g></g>
+  </svg>
 
-  <!-- Spawning -->
-  <figure class="hs-fig" data-motion>
-    <svg viewBox="0 0 380 240" role="img" aria-label="An agent spawning Peer Agents, which spawn their own">
-      <g transform="translate(152 64) scale(1.2)"><g class="bob" style="--bob-dur:5.4s"><use class="boat boat--dark" href="#j5-boat" /></g></g>
-      <g class="kids">
-        <g class="sp sp-1"><g transform="translate(-32 -30)"><g class="bob" style="--bob-dur:4.8s;--bob-delay:-1s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
-        <g class="sp sp-2"><g transform="translate(-32 -30)"><g class="bob" style="--bob-dur:5.1s;--bob-delay:-2s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
-        <g class="sp sp-3"><g transform="translate(-26 -24) scale(0.82)"><g class="bob" style="--bob-dur:4.5s;--bob-delay:-0.5s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
-        <g class="sp sp-4"><g transform="translate(-26 -24) scale(0.82)"><g class="bob" style="--bob-dur:5.6s;--bob-delay:-2.5s"><use class="boat boat--dark boat--waiting" href="#j5-boat" /></g></g></g>
-      </g>
-    </svg>
-    <figcaption>Agents spawn Peer Agents</figcaption>
-  </figure>
+  <svg class="hv hv--spawn" viewBox="0 0 380 240" role="img" aria-label="An agent spawning two peers beside it, which each spawn one more" data-motion>
+    <g transform="translate(152 60) scale(1.2)"><g class="bob" style="--bob-dur:5.4s"><use class="boat boat--dark" href="#j5-boat" /></g></g>
+    <g class="kids">
+      <g class="sp sp-1"><g transform="translate(-32 -30)"><g class="bob" style="--bob-dur:4.8s;--bob-delay:-1s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
+      <g class="sp sp-2"><g transform="translate(-32 -30)"><g class="bob" style="--bob-dur:5.1s;--bob-delay:-2s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
+      <g class="sp sp-3"><g transform="translate(-26 -24) scale(0.82)"><g class="bob" style="--bob-dur:4.5s;--bob-delay:-0.5s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
+      <g class="sp sp-4"><g transform="translate(-26 -24) scale(0.82)"><g class="bob" style="--bob-dur:5.6s;--bob-delay:-2.5s"><use class="boat boat--dark boat--waiting" href="#j5-boat" /></g></g></g>
+    </g>
+  </svg>
 </div>
 
 <style>
+  /* Registered so the flag colors fade instead of flipping where supported. */
+  @property --pennant {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: #8fa0ad;
+  }
+
+  /* Wide: flanks around the copy. Narrow: a row under it. Phones: a column. */
   .hs {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 24px;
-    width: 100%;
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
   }
 
-  .hs-fig {
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .hs-fig svg {
+  .hv {
+    position: absolute;
     display: block;
-    width: 100%;
+    width: clamp(220px, 20vw, 320px);
     height: auto;
     overflow: visible;
   }
 
-  .hs-fig figcaption {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    text-align: center;
-    color: var(--foam-dim);
+  .hv--talk { left: 1.5vw; top: 64px; }
+  .hv--lead { right: 1.5vw; top: 170px; }
+  .hv--spawn { left: 1.5vw; top: 330px; }
+
+  @media (max-width: 1279px) {
+    .hs {
+      position: relative;
+      inset: auto;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      max-width: 1200px;
+      margin: 40px auto 0;
+      padding: 0 32px;
+    }
+
+    .hv {
+      position: static;
+      width: 100%;
+    }
+  }
+
+  @media (max-width: 820px) {
+    .hs {
+      grid-template-columns: 1fr;
+      max-width: 360px;
+      padding: 0 20px;
+      gap: 24px;
+    }
   }
 
   .hs-arc,
@@ -109,8 +123,8 @@
     animation-iteration-count: infinite;
     animation-play-state: var(--motion-state, paused);
   }
-  .hs-ask { fill: var(--sea); }
-  .hs-reply { fill: var(--brass); }
+  .hs-ask { fill: var(--msg-ask); }
+  .hs-reply { fill: var(--msg-reply); }
 
   .d1 { offset-path: path("M62 111 Q 110 40 190 31"); animation-name: hop-1; }
   .d2 { offset-path: path("M190 31 Q 110 40 62 111"); animation-name: hop-2; }
@@ -127,6 +141,43 @@
   @keyframes hop-5 { 0%, 52% { offset-distance: 0%; opacity: 0; } 53% { opacity: 1; } 61% { opacity: 1; } 62%, 100% { offset-distance: 100%; opacity: 0; } }
   @keyframes hop-6 { 0%, 64% { offset-distance: 0%; opacity: 0; } 65% { opacity: 1; } 73% { opacity: 1; } 74%, 100% { offset-distance: 100%; opacity: 0; } }
   @keyframes hop-7 { 0%, 78% { offset-distance: 0%; opacity: 0; } 79% { opacity: 1; } 87% { opacity: 1; } 88%, 100% { offset-distance: 100%; opacity: 0; } }
+
+  /* Flags follow the hops on the same 8s clock: orange on send, blue on
+     receive, green on reply, grey between. */
+  .flag {
+    --pennant: #8fa0ad;
+    animation-duration: 8s;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-play-state: var(--motion-state, paused);
+  }
+  .flag-a { animation-name: flag-a; }
+  .flag-b { animation-name: flag-b; }
+  .flag-c { animation-name: flag-c; }
+  .flag-d { animation-name: flag-d; }
+
+  @keyframes flag-a {
+    0%, 1%, 11%, 23%, 33%, 51%, 61%, 73%, 83%, 100% { --pennant: #8fa0ad; }
+    2%, 9%, 52%, 59% { --pennant: var(--msg-ask); }
+    24%, 31%, 74%, 81% { --pennant: var(--msg-receive); }
+  }
+  @keyframes flag-b {
+    0%, 11%, 23%, 77%, 87%, 100% { --pennant: #8fa0ad; }
+    12%, 13% { --pennant: var(--msg-receive); }
+    14%, 21% { --pennant: var(--msg-reply); }
+    78%, 85% { --pennant: var(--msg-ask); }
+  }
+  @keyframes flag-c {
+    0%, 25%, 35%, 47%, 57%, 61%, 73%, 100% { --pennant: #8fa0ad; }
+    26%, 33% { --pennant: var(--msg-ask); }
+    48%, 55%, 62%, 63% { --pennant: var(--msg-receive); }
+    64%, 71% { --pennant: var(--msg-reply); }
+  }
+  @keyframes flag-d {
+    0%, 35%, 47%, 87%, 97%, 100% { --pennant: #8fa0ad; }
+    36%, 37%, 88%, 95% { --pennant: var(--msg-receive); }
+    38%, 45% { --pennant: var(--msg-reply); }
+  }
 
   /* Leading: one lap every 14s. Each boat starts at its own point on the same
      circle, Captain in front. */
@@ -145,8 +196,8 @@
     to { offset-distance: 100%; }
   }
 
-  /* Spawning: children pop out of the parent, then spawn their own, then the
-     brood fades so it can happen again. 10s loop. */
+  /* Spawning: two peers pop out beside the parent on the same row, then each
+     spawns one below itself. The brood fades so it can happen again. 10s loop. */
   .kids {
     animation: brood 10s ease-in-out infinite;
     animation-play-state: var(--motion-state, paused);
@@ -169,32 +220,17 @@
   .sp-3 { animation-name: sp-3; }
   .sp-4 { animation-name: sp-4; }
 
-  @keyframes sp-1 { 0%, 12% { transform: translate(190px, 100px) scale(0); } 20%, 100% { transform: translate(100px, 140px) scale(1); } }
-  @keyframes sp-2 { 0%, 16% { transform: translate(190px, 100px) scale(0); } 24%, 100% { transform: translate(280px, 140px) scale(1); } }
-  @keyframes sp-3 { 0%, 44% { transform: translate(100px, 140px) scale(0); } 52%, 100% { transform: translate(40px, 185px) scale(1); } }
-  @keyframes sp-4 { 0%, 50% { transform: translate(280px, 140px) scale(0); } 58%, 100% { transform: translate(340px, 185px) scale(1); } }
-
-  @media (max-width: 1024px) {
-    .hs {
-      gap: 16px;
-    }
-  }
-
-  @media (max-width: 820px) {
-    .hs {
-      grid-template-columns: 1fr;
-      max-width: 360px;
-      margin: 0 auto;
-      gap: 28px;
-    }
-  }
+  @keyframes sp-1 { 0%, 12% { transform: translate(190px, 96px) scale(0); } 20%, 100% { transform: translate(88px, 96px) scale(1); } }
+  @keyframes sp-2 { 0%, 16% { transform: translate(190px, 96px) scale(0); } 24%, 100% { transform: translate(292px, 96px) scale(1); } }
+  @keyframes sp-3 { 0%, 44% { transform: translate(88px, 96px) scale(0); } 52%, 100% { transform: translate(88px, 178px) scale(1); } }
+  @keyframes sp-4 { 0%, 50% { transform: translate(292px, 96px) scale(0); } 58%, 100% { transform: translate(292px, 178px) scale(1); } }
 
   @media (prefers-reduced-motion: reduce) {
-    .hs-dot, .orbit, .kids, .sp { animation: none; }
+    .hs-dot, .flag, .orbit, .kids, .sp { animation: none; }
     .hs-dot { opacity: 0; }
-    .sp-1 { transform: translate(100px, 140px); }
-    .sp-2 { transform: translate(280px, 140px); }
-    .sp-3 { transform: translate(40px, 185px); }
-    .sp-4 { transform: translate(340px, 185px); }
+    .sp-1 { transform: translate(88px, 96px); }
+    .sp-2 { transform: translate(292px, 96px); }
+    .sp-3 { transform: translate(88px, 178px); }
+    .sp-4 { transform: translate(292px, 178px); }
   }
 </style>

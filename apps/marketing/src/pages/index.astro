@@ -56,14 +56,13 @@ const harnesses = [
 
     <div class="container hero-inner">
       <h1 class="hero-title display">
-        <span data-rise>Steer fleets of agents</span><br /><span data-rise style="--d:90ms">with tools that make them effective</span>
+        <span data-rise>Steer fleets of agents,</span><br /><span data-rise style="--d:90ms">not just a few chats</span>
       </h1>
 
       <p class="hero-sub" data-rise style="--d:260ms">
         We believe the next frontier of agentic work will come from giving your agents tools that
-        help them work effectively in groups. Personas to capture roles for the agents to fill,
-        playbooks to organize long running tasks, crews to manage your attention, and much more.
-        We're building J5 Code to push the tooling further and explore this frontier.
+        help them work effectively in groups. We're building J5 Code to push the tooling further
+        and explore this frontier.
       </p>
 
       <div class="hero-actions" data-rise style="--d:360ms">
@@ -82,9 +81,10 @@ const harnesses = [
         Early software, in daily use by its author. Expect rough edges.
       </p>
 
-      <div class="hero-stage" data-rise style="--d:520ms">
-        <HeroScene />
-      </div>
+    </div>
+
+    <div class="hero-teasers" data-rise style="--d:520ms">
+      <HeroScene />
     </div>
   </section>
 
@@ -189,7 +189,7 @@ const harnesses = [
 
       <div class="scene scene--a2a">
         <A2AScene />
-        <p class="scene-caption">An ask travels mast to mast. The receiver owes a reply, and the platform knows it until the brass one comes back.</p>
+        <p class="scene-caption">An ask travels mast to mast. The receiver owes a reply, and the platform knows it until the green one comes back.</p>
       </div>
 
       <div class="legend" aria-label="Status legend">
@@ -482,6 +482,7 @@ const harnesses = [
   /* ── Hero ─────────────────────────────────────────────────── */
   .hero {
     padding: 64px 0 80px;
+    min-height: 0;
     overflow: hidden;
     border-top: 0;
     background:
@@ -512,8 +513,15 @@ const harnesses = [
   .hero-title {
     font-size: clamp(36px, 5vw, 68px);
     margin: 56px auto 24px;
-    max-width: 22ch;
+    max-width: 20ch;
     text-wrap: balance;
+  }
+
+  @media (min-width: 1280px) {
+    .hero {
+      padding-bottom: 120px;
+      min-height: 620px;
+    }
   }
   /* Inline boxes ignore transforms, so each rising line needs its own block. */
   .hero-title span {
@@ -523,7 +531,7 @@ const harnesses = [
   .hero-sub {
     color: var(--fg-muted);
     font-size: clamp(16px, 1.4vw, 19px);
-    max-width: 720px;
+    max-width: 640px;
     margin: 0 auto 34px;
     line-height: 1.6;
   }
@@ -572,8 +580,13 @@ const harnesses = [
     display: block;
   }
 
-  .hero-stage {
-    margin: 48px auto 0;
+  /* The teasers sit in the section's flanks on wide screens (see HeroScene). */
+  .hero-teasers {
+    position: static;
+  }
+
+  .hero-inner {
+    z-index: 2;
   }
 
   /* ── Foundation (T3 theme) ────────────────────────────────── */
