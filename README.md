@@ -22,17 +22,17 @@ We wanted something performant, remote-ready, and truly open. If we ever go the 
 > - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
 > - Antigravity: enable it in Settings, then use **Install Antigravity** and **Sign in with Google**. No CLI is required.
 
-### Try it out (install-free)
+### Command line
 
-The easiest way to test T3 Code is to run the server in your terminal (requires Node.js 22.16+, 23.11+, or 24.10+):
+J5 Code publishes a self-contained command-line server for macOS (Apple silicon) and Linux x64. No Node.js or npm is needed:
 
 ```bash
-npx @jacksondr5/j5code@latest
+curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh | sh
 ```
 
-This will launch T3 Code's backend on your machine as well as the local web app to control your agents.
+Then run `j5` to start the server and open the local web app. `j5 service install` keeps it running in the background, `j5 update` moves to a newer release, and `j5 --help` has the full reference. Data lives in `~/.j5code` (override with `J5CODE_HOME`).
 
-Tip: Use `npx @jacksondr5/j5code@latest --help` for the full CLI reference.
+Upgrading a server installed from npm (`@jacksondr5/j5code` 0.0.42 or earlier)? Follow [Migrating to release archives](./docs/user/migrating-to-release-archives.md) once.
 
 ### Desktop app
 

@@ -246,19 +246,19 @@ together under an optimistic version check, so two approvals landing at once can
 then spawns the seat under the Captain and posts the updated roster to the Captain. Seat ids are
 deterministic, so a retry after a failed spawn finds its reservation and converges.
 
-### Handoffs in Crews
+### Handoff artifacts in Crews
 
 There is no Crew-specific artifact verb. A seat whose definition declares an output artifact writes
-it with the project `write_artifact` tool to the same handoff file every persona writes
+it with the project `write_artifact` tool to the same handoff artifact every persona writes
 (`handoffs/<agent>/<Artifact>-<task>.md`, see the [persona contract](../agent-personas/index.md));
 its first turn carries `<seat_obligation>` naming that exact path. The handoff gate checks for the
 file when a run ends and reminds the seat once. When a seat finishes, the seat finish notifier posts
 one platform-composed `<j5_seat_finished>` notice per finished run into the Captain's thread: the seat,
-its participant and thread ids, the run status (completed, failed, or cancelled), and the handoff
-as `written`, `missing`, or `none declared` with its path; a written handoff up to 4,000
+its participant and thread ids, the run status (completed, failed, or cancelled), and the handoff artifact
+as `written`, `missing`, or `none declared` with its path; a written handoff artifact up to 4,000
 characters rides inline, longer ones name the path for the project `read_artifact` tool. Ids
 derive from the run, so a redelivered event cannot post twice. Read-only Codex and Claude personas have `write_artifact` pre-approved for this reason, and `delegate_task` with `task_status` and `task_cancel` beside it, because a Crew member refused `spawn_agent` is sent to provider-native Subagents and a verb the sandbox then rejects is no way out:
-handoffs live in application storage, never in the sandboxed workspace. (Withdrawn on 2026-09-14:
+handoff artifacts live in application storage, never in the sandboxed workspace. (Withdrawn on 2026-09-14:
 the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `read_artifact` and
 `list_artifacts`, which collided with the project artifact toolkit's names.)
 
@@ -369,3 +369,4 @@ stopping retires nothing.
 - 2026-09-14 — `delegate_task`, `task_status`, and `task_cancel` return to the J5 surface, with a saved-agent `agent` parameter on `delegate_task` replacing the J5-only `invoke_agent` ([review](https://github.com/Jacksondr5/j5code/pull/124#issuecomment-5663559782)).
 - 2026-09-15 — machine participants appear in `list_participants` as named senders that receive nothing (issue #74).
 - 2026-09-17 — personas, not agents: `list_agents` becomes `list_personas`, the `agent` parameter on `spawn_agent`, `delegate_task`, and crew seats becomes `persona` (no alias: pre-dogfood, no legacy-compatibility code), crew results carry `persona_id`, and the mention is `@persona:ID`; "agent" keeps meaning a running participant (Bryant; [record](../../worklog/2026-09-16-crew-command-decoupling.md)).
+- 2026-09-24 — the J5 document is named "handoff artifact" to distinguish it from upstream's context handoffs.
