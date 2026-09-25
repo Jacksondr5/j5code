@@ -41,7 +41,12 @@ export const J5_PI_PREAPPROVAL_SOURCE = `\
       .filter((name) => name.startsWith("mcp__t3-code__")),
   );
   const j5OwnPath = env(${JSON.stringify(J5_PI_EXTENSION_PATH_ENV)});
-  const { resolve: j5ResolvePath } = await import("node:path");
+  // Synchronous and import-free, so the preamble adds no await and loads in any host; without
+  // it, paths must match exactly, which is stricter.
+  const j5Path = (
+    globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } }
+  ).process?.getBuiltinModule?.("node:path") as { resolve(path: string): string } | undefined;
+  const j5ResolvePath = (path: string): string => (j5Path === undefined ? path : j5Path.resolve(path));
   const j5OwnParameters = new Map<string, unknown>();
   try {
     const j5RegisterTool = pi.registerTool.bind(pi);
