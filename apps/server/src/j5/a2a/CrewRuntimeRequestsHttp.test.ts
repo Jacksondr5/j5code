@@ -20,7 +20,7 @@ import {
 } from "./CrewRuntimeRequestService.ts";
 import { makeCrewRuntimeRequestsHttpRouteLayer } from "./CrewRuntimeRequestsHttp.ts";
 
-const paths = { list: "/raw/crew-requests", respond: "/raw/crew-requests/respond" };
+const paths = { list: "/raw/crew-requests", respond: "/raw/crew-requests/respond" } as const;
 const threadId = ThreadId.make("thread:builder");
 
 const authWith = (scopes: ReadonlyArray<string>) =>

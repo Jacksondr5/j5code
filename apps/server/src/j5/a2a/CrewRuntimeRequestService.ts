@@ -30,12 +30,15 @@ interface CrewThread {
  * pending requests only, questions with their `user_input_request` item, and approvals minus
  * `auth_refresh` and `dynamic_tool_call`, which are not the person's to answer.
  */
+type PendingCrewThreadRequest = Pick<
+  CrewRuntimeRequestItem,
+  "requestId" | "createdAt" | "responseCapability" | "request"
+>;
+
 export const pendingCrewThreadRequests = (
   projection: Pick<OrchestrationV2ThreadProjection, "runtimeRequests" | "turnItems">,
-): ReadonlyArray<
-  Pick<CrewRuntimeRequestItem, "requestId" | "createdAt" | "responseCapability" | "request">
-> =>
-  projection.runtimeRequests.flatMap((request) => {
+): ReadonlyArray<PendingCrewThreadRequest> =>
+  projection.runtimeRequests.flatMap((request): Array<PendingCrewThreadRequest> => {
     if (request.status !== "pending") return [];
     const base = {
       requestId: request.id,
