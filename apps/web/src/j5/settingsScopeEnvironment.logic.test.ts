@@ -3,7 +3,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { resolveSettingsScope } from "../components/settings/settingsScope";
 import type { SidebarProjectGroupMember, SidebarProjectSnapshot } from "../sidebarProjectGrouping";
-import { isProjectInSettingsScope } from "./settingsScopeEnvironment.logic";
+import {
+  isProjectInSettingsScope,
+  lockedSettingsScopeProject,
+} from "./settingsScopeEnvironment.logic";
 
 const laptopId = EnvironmentId.make("laptop");
 const serverId = EnvironmentId.make("server");
@@ -68,5 +71,31 @@ describe("isProjectInSettingsScope", () => {
 
   it("keeps nothing for an unavailable selection", () => {
     expect(inScope({ project: "missing" })).toEqual([]);
+  });
+});
+
+describe("lockedSettingsScopeProject", () => {
+  const locked = (
+    search: Parameters<typeof resolveSettingsScope>[0],
+    environmentId: EnvironmentId,
+  ) =>
+    lockedSettingsScopeProject(resolveSettingsScope(search, groups, environments), environmentId)
+      ?.id ?? null;
+
+  it("leaves the picker free when no project is named", () => {
+    expect(locked({}, laptopId)).toBeNull();
+    expect(locked({ machine: laptopId }, laptopId)).toBeNull();
+    expect(lockedSettingsScopeProject(undefined, laptopId)).toBeNull();
+  });
+
+  it("locks to the named project's checkout on the page's environment", () => {
+    expect(locked({ project: "t3code" }, laptopId)).toBe("t3-laptop");
+    expect(locked({ project: "t3code" }, serverId)).toBe("t3-server");
+    expect(locked({ project: "t3code", machine: serverId }, serverId)).toBe("t3-server");
+  });
+
+  it("leaves the picker free when the project has no checkout on the environment", () => {
+    expect(locked({ project: "t3code", machine: serverId }, laptopId)).toBeNull();
+    expect(locked({ project: "missing" }, laptopId)).toBeNull();
   });
 });

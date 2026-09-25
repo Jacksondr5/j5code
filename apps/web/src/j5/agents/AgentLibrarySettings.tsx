@@ -455,7 +455,7 @@ export function AgentLibrarySettings() {
       </SettingsSection>
 
       <SettingsSection
-        title="Scoped personas"
+        title="Library"
         headerAction={
           <div className="flex flex-wrap items-center gap-2">
             <Button

@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import { useEnvironment } from "../../state/environments";
+import { lockedSettingsScopeProject } from "../settingsScopeEnvironment.logic";
 import { useProjects } from "../../state/entities";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -90,17 +91,17 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
   const environment = useEnvironment(environmentId);
   const allProjects = useProjects();
   const projects = allProjects.filter((project) => project.environmentId === environmentId);
-  // A project named in the settings scope sentence is the starting project here.
-  const settingsScope = useOptionalSettingsScope()?.scope;
-  const scopedProjectId =
-    settingsScope?.kind === "project" || settingsScope?.kind === "checkout"
-      ? settingsScope.members.find((member) => member.environmentId === environmentId)?.id
-      : undefined;
-  const [projectId, setProjectId] = useState<string | null>(scopedProjectId ?? null);
+  // A project named in the settings scope sentence locks the inventory to its checkout.
+  const lockedProject = lockedSettingsScopeProject(
+    useOptionalSettingsScope()?.scope,
+    environmentId,
+  );
+  const [projectId, setProjectId] = useState<string | null>(null);
   const project =
-    projectId === ""
+    lockedProject ??
+    (projectId === ""
       ? undefined
-      : (projects.find((entry) => entry.id === projectId) ?? projects[0]);
+      : (projects.find((entry) => entry.id === projectId) ?? projects[0]));
   // Make the primitive explicit so React Compiler preserves the inventory memoization.
   const cwd = project ? String(project.workspaceRoot) : undefined;
   const providers =
@@ -253,6 +254,7 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
           Project
           <Select
             value={project?.id ?? ""}
+            disabled={lockedProject !== null}
             onValueChange={(value) => {
               setProjectId(value ?? "");
               setLinkSelection(null);

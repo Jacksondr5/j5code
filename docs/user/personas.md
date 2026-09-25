@@ -16,12 +16,12 @@ To run a persona inside a conversation, type `@persona:` followed by its ID, or 
 
 Open **Settings → Personas** on web, desktop, or mobile to see the reusable personas in a connected environment. Select an environment to inspect its library and available model routes. Personas can be authored in folders and shared through git; supplied examples are starting points you can customize.
 
-To create a personal persona without writing a file, use **Create persona** beside **Scoped personas**. Give it a name, a stable ID for `@persona:` mentions, a one-line description, markdown instructions, a runtime policy, and primary and fallback models. The persona is stored in the selected environment as an imported definition, so it can be edited, switched off, or removed like any import. Instructions describe behavior; only the runtime policy is enforced.
+To create a personal persona without writing a file, use **Create persona** beside **Library**. Give it a name, a stable ID for `@persona:` mentions, a one-line description, markdown instructions, a runtime policy, and primary and fallback models. The persona is stored in the selected environment as an imported definition, so it can be edited, switched off, or removed like any import. Instructions describe behavior; only the runtime policy is enforced.
 
 To import definitions written as files:
 
 1. Open **Settings → Personas** and select the destination environment.
-2. Use **Import** beside **Scoped personas**. Choose **Folder** to include all YAML definitions (`.yaml` or `.yml`) in that folder and its subfolders, or **Import → Persona file** to select one YAML file. Other files are ignored. Each file must contain one persona definition with its own unique ID.
+2. Use **Import** beside **Library**. Choose **Folder** to include all YAML definitions (`.yaml` or `.yml`) in that folder and its subfolders, or **Import → Persona file** to select one YAML file. Other files are ignored. Each file must contain one persona definition with its own unique ID.
 3. The library refreshes after a successful import. Import and removal results appear as temporary toast notifications. A selection can contain up to 50 definitions, each at most 64 KiB. If any definition is invalid, none of the selection is imported; the error identifies the file.
 
 Definitions are YAML files. Use `instructions: |` followed by indented text for multiline instructions. Keep one definition per file; JSON files are not imported.

@@ -7,8 +7,10 @@ chat but does not have this settings page.
 
 The Installed section shows each provider instance's discovered skills and their
 sources. Choose a project to inspect its workspace discovery, or the environment
-view for user skills. Refresh after editing skill files outside the app. A missing
-or failed discovery result does not prove that a skill is unavailable.
+view for user skills. When settings apply to one project, the inventory stays on
+that project; switch the settings scope to All projects to pick another. Refresh
+after editing skill files outside the app. A missing or failed discovery result
+does not prove that a skill is unavailable.
 
 Cursor, Grok, OpenCode and Antigravity keep their existing composer discovery;
 this settings inventory does not add management controls for those providers.
