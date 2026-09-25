@@ -17,14 +17,19 @@ import { refreshCrewRuntimeRequests, respondCrewRuntimeRequest } from "./crewRun
 const itemKey = (request: ScopedCrewRuntimeRequest) =>
   `${request.environmentId}:${request.threadId}:${request.requestId}`;
 
-/** The provider's advertised choices, or approve and decline when it advertised none. */
+/** The composer's defaults (`ComposerPendingApprovalActions`), so both places offer the same choices. */
+const DEFAULT_APPROVAL_CHOICES: ReadonlyArray<ProviderApprovalOption> = [
+  { decision: "cancel", label: "Cancel" },
+  { decision: "decline", label: "Decline" },
+  { decision: "acceptForSession", label: "Always allow this session" },
+  { decision: "accept", label: "Approve" },
+];
+
+/** The provider's advertised choices, or the composer's defaults when it advertised none. */
 const approvalChoices = (
   options: ReadonlyArray<ProviderApprovalOption> | null,
 ): ReadonlyArray<{ readonly decision: ProviderApprovalDecision; readonly label: string }> =>
-  options ?? [
-    { decision: "accept", label: "Approve" },
-    { decision: "decline", label: "Decline" },
-  ];
+  options ?? DEFAULT_APPROVAL_CHOICES;
 
 const REQUEST_KIND_LABEL: Record<string, string> = {
   command: "Run a command",

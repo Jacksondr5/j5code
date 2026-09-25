@@ -76,7 +76,7 @@ export function CrewRosterGate(props: {
   const note =
     inboxWaiting === 0 ? null : (
       <p
-        className="mb-2 flex items-center gap-2 text-sm text-muted-foreground"
+        className="mb-2 flex items-center gap-2 px-4 text-sm text-muted-foreground"
         data-testid="crew-inbox-request-note"
       >
         <InboxIcon aria-hidden className="size-4 shrink-0" />
