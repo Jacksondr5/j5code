@@ -1,0 +1,231 @@
+---
+/**
+ * One paper boat refolds through five personas: Researcher, Designer, Builder,
+ * Reviewer, Tester. The hull says how heavy the model is (skiff, sloop,
+ * freighter); the gear says the job. Each persona holds for about four
+ * seconds, folds flat, and the next unfolds. Twenty-second loop, transform and
+ * opacity only, gated by --motion-state.
+ */
+const personas = [
+  { key: "researcher", name: "Researcher", note: "light, fast model" },
+  { key: "designer", name: "Designer", note: "light, fast model" },
+  { key: "builder", name: "Builder", note: "heavy model" },
+  { key: "reviewer", name: "Reviewer", note: "standard route" },
+  { key: "tester", name: "Tester", note: "heavy model" },
+];
+---
+
+<svg class="ps" viewBox="0 0 320 168" role="img" aria-label="One agent refolding through five personas: Researcher, Designer, Builder, Reviewer and Tester" data-motion>
+  <defs>
+    <g id="ps-skiff">
+      <polygon class="ps-paper" points="6,34 58,34 50,44 14,44" />
+      <polygon class="ps-shade" points="28,26 44,26 48,34 24,34" />
+      <path class="ps-fold" d="M8 39h44" />
+      <circle class="ps-eye" cx="24" cy="39.5" r="1.3" /><circle class="ps-eye" cx="40" cy="39.5" r="1.3" />
+    </g>
+    <g id="ps-freighter">
+      <polygon class="ps-paper" points="0,30 64,30 58,46 6,46" />
+      <rect class="ps-paper" x="44" y="16" width="12" height="14" />
+      <rect x="46.5" y="19" width="3" height="3" fill="#dfe9ee" /><rect x="51" y="19" width="3" height="3" fill="#dfe9ee" />
+      <rect class="ps-paper" x="58" y="21" width="4" height="9" />
+      <path class="ps-fold" d="M4 38h56" />
+      <circle class="ps-eye" cx="22" cy="39" r="1.4" /><circle class="ps-eye" cx="40" cy="39" r="1.4" />
+      <path class="ps-line" d="M50 16v-9" />
+      <polygon class="ps-pennant" points="50,6 62,9 50,12" />
+    </g>
+  </defs>
+
+  <path class="ps-water" d="M0 130 Q 40 124 80 130 T 160 130 T 240 130 T 320 130" />
+
+  <!-- Researcher: skiff, tall mast, crow's nest. -->
+  <g class="ps-p ps-p1">
+    <g transform="translate(96 30) scale(2)"><g class="bob" style="--bob-dur:5s">
+      <use href="#ps-skiff" />
+      <path class="ps-line" d="M36 26V0" />
+      <polygon class="ps-shade" points="31,13 41,13 39.5,18 32.5,18" />
+      <polygon class="ps-pennant" points="36,-1 48,2.5 36,6" />
+    </g></g>
+  </g>
+
+  <!-- Designer: skiff, pennant at the masthead, a string of lights to the stern. -->
+  <g class="ps-p ps-p2">
+    <g transform="translate(96 30) scale(2)"><g class="bob" style="--bob-dur:5.4s">
+      <use href="#ps-skiff" />
+      <path class="ps-line" d="M40 26V12" />
+      <polygon class="ps-pennant" points="40,11 52,14 40,17" />
+      <path class="ps-string" d="M40 17 Q 50 30 58 33" />
+      <circle cx="44.2" cy="21.6" r="1.7" fill="var(--msg-ask)" /><circle cx="48.4" cy="26.6" r="1.7" fill="var(--msg-receive)" /><circle cx="52.8" cy="30.2" r="1.7" fill="var(--msg-reply)" /><circle cx="56.6" cy="32.6" r="1.7" fill="var(--brass)" />
+    </g></g>
+  </g>
+
+  <!-- Builder: freighter with a bow crane lifting a box. -->
+  <g class="ps-p ps-p3">
+    <g transform="translate(96 30) scale(2)"><g class="bob" style="--bob-dur:6s">
+      <use href="#ps-freighter" />
+      <rect class="ps-shade" x="7" y="26" width="7" height="4" />
+      <path class="ps-line ps-line--thick" d="M10.5 26V8" />
+      <path class="ps-line ps-line--boom" d="M10.5 10L30 4" />
+      <path class="ps-line ps-line--brace" d="M10.5 16L22 6.5" />
+      <path class="ps-line ps-line--thin" d="M30 4v9" />
+      <path class="ps-line ps-line--thin" d="M28 13q2 3 4 0" />
+      <rect class="ps-shade" x="25" y="16" width="10" height="7" />
+    </g></g>
+  </g>
+
+  <!-- Reviewer: sloop with a bow spotlight. -->
+  <g class="ps-p ps-p4">
+    <g transform="translate(96 30) scale(2)"><g class="bob" style="--bob-dur:5.2s">
+      <polygon class="ps-beam" points="9,20 -12,6 -12,30" />
+      <use class="boat" href="#j5-boat" />
+      <path class="ps-line" d="M12 30v-8" />
+      <rect class="ps-brass" x="8.5" y="17" width="7" height="6" rx="1.5" />
+      <path d="M8.5 18.5v3" stroke="#fbf7ee" stroke-width="1.4" />
+    </g></g>
+  </g>
+
+  <!-- Tester: freighter, anchor forward on the hull, life ring aft. -->
+  <g class="ps-p ps-p5">
+    <g transform="translate(96 30) scale(2)"><g class="bob" style="--bob-dur:5.8s">
+      <use href="#ps-freighter" />
+      <path class="ps-line ps-line--chain" d="M10 30v6" />
+      <circle cx="10" cy="36.6" r="1.2" fill="none" stroke="#12202f" stroke-width="0.9" />
+      <path class="ps-line ps-line--thin" d="M10 37.8v5.6M7.6 39.3h4.8" />
+      <path class="ps-line ps-line--thin" d="M6.8 41.2q3.2 3.6 6.4 0" />
+      <circle cx="50" cy="38" r="3.6" fill="#fbf7ee" stroke="#c8442d" stroke-width="2.2" />
+      <path d="M46.4 38h7.2M50 34.4v7.2" stroke="#fbf7ee" stroke-width="1" />
+    </g></g>
+  </g>
+
+  {personas.map((p, i) => (
+    <g class:list={["ps-label", `ps-l${i + 1}`]}>
+      <text class="ps-name" x="160" y="150">{p.name}</text>
+      <text class="ps-note" x="160" y="163">{p.note}</text>
+    </g>
+  ))}
+</svg>
+
+<style>
+  .ps {
+    display: block;
+    width: 100%;
+    max-width: 340px;
+    height: auto;
+    margin: 0 auto;
+    overflow: visible;
+  }
+
+  .ps-paper { fill: #fbf7ee; stroke: #12202f; stroke-width: 1.6; stroke-linejoin: round; }
+  .ps-shade { fill: #e5ddc8; stroke: #12202f; stroke-width: 1.6; stroke-linejoin: round; }
+  .ps-brass { fill: var(--brass); stroke: #12202f; stroke-width: 1.4; }
+  .ps-fold { stroke: #12202f; stroke-opacity: 0.25; stroke-width: 1; fill: none; }
+  .ps-eye { fill: #12202f; }
+  .ps-line { stroke: #12202f; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+  .ps-line--thick { stroke-width: 2.2; }
+  .ps-line--boom { stroke-width: 1.8; }
+  .ps-line--brace { stroke-width: 1; stroke-opacity: 0.6; }
+  .ps-line--thin { stroke-width: 1; }
+  .ps-line--chain { stroke-width: 1; stroke-dasharray: 1.5 1.5; }
+  .ps-string { stroke: #12202f; stroke-width: 1; fill: none; }
+  .ps-pennant { fill: var(--msg-reply); }
+  .ps-beam { fill: var(--brass); fill-opacity: 0.22; }
+
+  .ps-water {
+    fill: none;
+    stroke: var(--sea);
+    stroke-opacity: 0.45;
+    stroke-width: 1.2;
+  }
+
+  .ps-name {
+    font-family: var(--font-display);
+    font-size: 15px;
+    text-anchor: middle;
+    fill: var(--fg);
+  }
+
+  .ps-note {
+    font-family: var(--font-mono);
+    font-size: 8.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    text-anchor: middle;
+    fill: var(--fg-dim);
+  }
+
+  /* Each persona owns a fifth of the 20s loop: unfold over the first half
+     second, hold, fold flat over the last half second. The fold squashes the
+     whole boat toward its waterline, which reads as paper going flat. */
+  .ps-p {
+    opacity: 0;
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+    animation-duration: 20s;
+    animation-timing-function: cubic-bezier(0.2, 0.7, 0.2, 1);
+    animation-iteration-count: infinite;
+    animation-play-state: var(--motion-state, paused);
+  }
+  .ps-p1 { animation-name: refold-1; }
+  .ps-p2 { animation-name: refold-2; }
+  .ps-p3 { animation-name: refold-3; }
+  .ps-p4 { animation-name: refold-4; }
+  .ps-p5 { animation-name: refold-5; }
+
+  @keyframes refold-1 {
+    0% { opacity: 1; transform: scaleY(0.06); }
+    2.5%, 17% { opacity: 1; transform: scaleY(1); }
+    19.5% { opacity: 1; transform: scaleY(0.06); }
+    20%, 100% { opacity: 0; transform: scaleY(0.06); }
+  }
+  @keyframes refold-2 {
+    0%, 19.9% { opacity: 0; transform: scaleY(0.06); }
+    20% { opacity: 1; transform: scaleY(0.06); }
+    22.5%, 37% { opacity: 1; transform: scaleY(1); }
+    39.5% { opacity: 1; transform: scaleY(0.06); }
+    40%, 100% { opacity: 0; transform: scaleY(0.06); }
+  }
+  @keyframes refold-3 {
+    0%, 39.9% { opacity: 0; transform: scaleY(0.06); }
+    40% { opacity: 1; transform: scaleY(0.06); }
+    42.5%, 57% { opacity: 1; transform: scaleY(1); }
+    59.5% { opacity: 1; transform: scaleY(0.06); }
+    60%, 100% { opacity: 0; transform: scaleY(0.06); }
+  }
+  @keyframes refold-4 {
+    0%, 59.9% { opacity: 0; transform: scaleY(0.06); }
+    60% { opacity: 1; transform: scaleY(0.06); }
+    62.5%, 77% { opacity: 1; transform: scaleY(1); }
+    79.5% { opacity: 1; transform: scaleY(0.06); }
+    80%, 100% { opacity: 0; transform: scaleY(0.06); }
+  }
+  @keyframes refold-5 {
+    0%, 79.9% { opacity: 0; transform: scaleY(0.06); }
+    80% { opacity: 1; transform: scaleY(0.06); }
+    82.5%, 97% { opacity: 1; transform: scaleY(1); }
+    99.5% { opacity: 1; transform: scaleY(0.06); }
+    100% { opacity: 0; transform: scaleY(0.06); }
+  }
+
+  .ps-label {
+    opacity: 0;
+    animation-duration: 20s;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-play-state: var(--motion-state, paused);
+  }
+  .ps-l1 { animation-name: label-1; }
+  .ps-l2 { animation-name: label-2; }
+  .ps-l3 { animation-name: label-3; }
+  .ps-l4 { animation-name: label-4; }
+  .ps-l5 { animation-name: label-5; }
+
+  @keyframes label-1 { 0% { opacity: 0; } 2.5%, 17.5% { opacity: 1; } 20%, 100% { opacity: 0; } }
+  @keyframes label-2 { 0%, 20% { opacity: 0; } 22.5%, 37.5% { opacity: 1; } 40%, 100% { opacity: 0; } }
+  @keyframes label-3 { 0%, 40% { opacity: 0; } 42.5%, 57.5% { opacity: 1; } 60%, 100% { opacity: 0; } }
+  @keyframes label-4 { 0%, 60% { opacity: 0; } 62.5%, 77.5% { opacity: 1; } 80%, 100% { opacity: 0; } }
+  @keyframes label-5 { 0%, 80% { opacity: 0; } 82.5%, 97.5% { opacity: 1; } 100% { opacity: 0; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ps-p, .ps-label { animation: none; }
+    .ps-p3, .ps-l3 { opacity: 1; transform: none; }
+  }
+</style>

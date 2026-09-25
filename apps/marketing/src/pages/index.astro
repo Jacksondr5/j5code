@@ -7,6 +7,7 @@ import A2AScene from "../components/A2AScene.astro";
 import PlaybookScene from "../components/PlaybookScene.astro";
 import HorizonScene from "../components/HorizonScene.astro";
 import HeroScene from "../components/HeroScene.astro";
+import PersonaScene from "../components/PersonaScene.astro";
 import { readForkFacts } from "../lib/forkFacts";
 import {
   FORK_DISCIPLINE_URL,
@@ -180,11 +181,6 @@ const harnesses = [
         </p>
       </div>
 
-      <div class="scene scene--a2a">
-        <A2AScene />
-        <p class="scene-caption">An ask travels mast to mast. The receiver owes a reply, and the platform knows it until the green one comes back.</p>
-      </div>
-
       <div class="legend" aria-label="Status legend">
         {(["underway", "charted", "horizon"] as const).map((s) => (
           <span class="legend-item"><Pennant status={s} /><span class="legend-help">{STATUS_HELP[s]}</span></span>
@@ -192,6 +188,66 @@ const harnesses = [
       </div>
 
       <div class="feature-grid">
+        <article class="feature feature--wide feature--a2a">
+          <div class="feature-wide-copy">
+            <div class="feature-top">
+              <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h11l-3-3M21 16H10l3 3"/><circle cx="19" cy="8" r="1.6"/><circle cx="5" cy="16" r="1.6"/></svg>
+              <Pennant status="underway" />
+            </div>
+            <h3>Agent-to-agent messaging</h3>
+            <p>
+              Agents communicate freely with each other to get work done. J5 integrates A2A with the
+              platform managing your agents. Messages flow reliably and feel natural to you and your agents.
+            </p>
+          </div>
+          <div class="feature-stage">
+            <A2AScene />
+          </div>
+        </article>
+
+        <article class="feature feature--wide feature--personas">
+          <div class="feature-wide-copy">
+            <div class="feature-top">
+              <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 0-3 3z"/><path d="M5 4v16a3 3 0 0 1 3-3h11"/><path d="M9 9h6M9 12.5h4"/></svg>
+              <Pennant status="underway" />
+            </div>
+            <h3>Personas</h3>
+            <p>
+              Pick the right model for the job. Give it a personality. Share it with everyone on your team.
+            </p>
+          </div>
+          <div class="feature-stage">
+            <PersonaScene />
+          </div>
+        </article>
+
+        <article class="feature feature--wide">
+          <div class="feature-wide-copy">
+            <div class="feature-top">
+              <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18c3-6 6 2 9-4s4-6 7-8"/><circle cx="4" cy="18" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="20" cy="6" r="1.6" fill="currentColor"/></svg>
+              <Pennant status="charted" />
+            </div>
+            <h3>Playbooks</h3>
+            <p>
+              Keep agents on track during long running work. Steer a crew towards a common goal. See how
+              the work is going at a glance.
+            </p>
+          </div>
+          <div class="pb-side" data-motion>
+            <PlaybookScene />
+            <ol class="steps" aria-label="Example Playbook">
+              <span class="steps-marker" aria-hidden="true"></span>
+              <li class="step"><span class="step-n">1</span><span>Build and test</span><span class="step-who">Builder</span></li>
+              <li class="step"><span class="step-n">2</span><span>Independent review</span><span class="step-who">Critic</span></li>
+              <li class="step"><span class="step-n">3</span><span>Sit on CI, triage failures</span><span class="step-who">Sitter</span></li>
+              <li class="step"><span class="step-n">4</span><span>Is the migration safe to run?</span><span class="step-who">Captain</span></li>
+              <li class="step"><span class="step-n">5</span><span>Merge and report</span><span class="step-who">Sitter</span></li>
+            </ol>
+          </div>
+        </article>
+      </div>
+
+      <div class="feature-grid feature-grid--minor">
         <article class="feature">
           <div class="feature-top">
             <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2.2"/><path d="M12 7.5V21M5 12h14M4 15c1.5 4 4.5 6 8 6s6.5-2 8-6M4 15l-1.5-1.5M20 15l1.5-1.5"/></svg>
@@ -220,20 +276,6 @@ const harnesses = [
 
         <article class="feature">
           <div class="feature-top">
-            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h11l-3-3M21 16H10l3 3"/><circle cx="19" cy="8" r="1.6"/><circle cx="5" cy="16" r="1.6"/></svg>
-            <Pennant status="underway" />
-          </div>
-          <h3>Agent-to-agent messaging</h3>
-          <p>
-            Durable, measured, legible. Every message lands in an append-only ledger. An ask opens an
-            Exchange, so the platform can say who owes whom an answer, about what, and for how long.
-            When a turn ends without the reply it owed, the platform records the silence. Scheduled
-            scripts send in as registered machine participants.
-          </p>
-        </article>
-
-        <article class="feature">
-          <div class="feature-top">
             <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 13l2.5-7h13L21 13v6H3z"/><path d="M3 13h5l1.5 3h5L16 13h5"/></svg>
             <Pennant status="underway" />
           </div>
@@ -242,19 +284,6 @@ const harnesses = [
             Only asks that need you, from every Squadron on every connected server. Your answer,
             exactly as written, is the reply that closes the Exchange and reaches the agent. No relay,
             no summary. The count on the bell means exactly "things waiting on me."
-          </p>
-        </article>
-
-        <article class="feature">
-          <div class="feature-top">
-            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 0-3 3z"/><path d="M5 4v16a3 3 0 0 1 3-3h11"/><path d="M9 9h6M9 12.5h4"/></svg>
-            <Pennant status="underway" />
-          </div>
-          <h3>Roles</h3>
-          <p>
-            Reusable, user-authored agent definitions in plain YAML: purpose, instructions, model route
-            and fallbacks. Portable and shareable, git optional. Import a folder or write one in
-            Settings. Every launch pins the definition it started with.
           </p>
         </article>
 
@@ -269,33 +298,6 @@ const harnesses = [
             waiting on, when it last did anything, and whether something broke. Active, settled, and
             retired, with each Crew under its Captain. An unknown renders as unknown.
           </p>
-        </article>
-
-        <article class="feature feature--wide">
-          <div class="feature-wide-copy">
-            <div class="feature-top">
-              <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18c3-6 6 2 9-4s4-6 7-8"/><circle cx="4" cy="18" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="20" cy="6" r="1.6" fill="currentColor"/></svg>
-              <Pennant status="charted" />
-            </div>
-            <h3>Playbooks</h3>
-            <p>
-              Step-by-step content a Role or Crew follows. An agent declares a step complete through
-              a tool call, the platform delivers the next step's instructions fresh into every seat's
-              context, and the Fleet page shows which step each Crew is on. Long procedures stop
-              decaying into the back pages of context. Linear first, no platform-owned branching.
-            </p>
-          </div>
-          <div class="pb-side" data-motion>
-            <PlaybookScene />
-            <ol class="steps" aria-label="Example Playbook">
-              <span class="steps-marker" aria-hidden="true"></span>
-              <li class="step"><span class="step-n">1</span><span>Build and test</span><span class="step-who">Builder</span></li>
-              <li class="step"><span class="step-n">2</span><span>Independent review</span><span class="step-who">Critic</span></li>
-              <li class="step"><span class="step-n">3</span><span>Sit on CI, triage failures</span><span class="step-who">Sitter</span></li>
-              <li class="step"><span class="step-n">4</span><span>Is the migration safe to run?</span><span class="step-who">Captain</span></li>
-              <li class="step"><span class="step-n">5</span><span>Merge and report</span><span class="step-who">Sitter</span></li>
-            </ol>
-          </div>
         </article>
       </div>
 
@@ -832,16 +834,6 @@ const harnesses = [
     gap: 22px;
   }
 
-  .scene {
-    margin: -8px 0 40px;
-  }
-
-  .scene-caption {
-    margin-top: 6px;
-    text-align: center;
-    font-size: 13px;
-    color: var(--fg-dim);
-  }
 
   .legend {
     display: flex;
@@ -909,9 +901,26 @@ const harnesses = [
   .feature--wide {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
     gap: 32px;
     align-items: center;
+  }
+
+  .feature-stage {
+    min-width: 0;
+  }
+
+  .feature-grid--minor {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-top: 18px;
+  }
+
+  .feature-grid--minor h3 {
+    font-size: 20px;
+  }
+
+  .feature-grid--minor p {
+    font-size: 14px;
   }
 
   .pb-side {
@@ -1215,7 +1224,8 @@ const harnesses = [
 
   /* ── Responsive ───────────────────────────────────────────── */
   @media (max-width: 1024px) {
-    .feature-grid {
+    .feature-grid,
+    .feature-grid--minor {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
@@ -1243,6 +1253,7 @@ const harnesses = [
 
     .foundation-grid,
     .feature-grid,
+    .feature-grid--minor,
     .feature--wide,
     .orders {
       grid-template-columns: 1fr;
