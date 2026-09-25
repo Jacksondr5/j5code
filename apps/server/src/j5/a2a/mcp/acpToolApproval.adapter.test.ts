@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
 import { assert, describe, it } from "@effect/vitest";
 import {
   MessageId,
@@ -231,6 +232,7 @@ const openTurn = Effect.fnUntraced(function* (
     fileSystem: yield* FileSystem.FileSystem,
     idAllocator: yield* IdAllocatorV2,
     serverConfig: yield* ServerConfig,
+    selfInvocation: yield* resolveSelfInvocation(),
   });
   const threadId = ThreadId.make(`thread-${label}`);
   const runtimePolicy = ProviderAdapterV2RuntimePolicy.make({
