@@ -334,7 +334,7 @@ it.effect("refuses to delete a Squadron that still has an active agent or an una
   }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("a forced delete archives the Crews, then the remaining agents, then deletes", () =>
+it.effect("a forced delete archives the Crews, then every agent member, then deletes", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* sql`PRAGMA foreign_keys = ON`;
@@ -365,9 +365,11 @@ it.effect("a forced delete archives the Crews, then the remaining agents, then d
 
     yield* service.delete(staffed.squadron.id, { force: true });
 
+    // The archived member goes through again: a half-finished archive already reads as archived.
     assert.deepStrictEqual(archiveCalls, [
       "crew:crew:live",
       `agent:${agentFor(staffed.squadron.id, 1).id}`,
+      `agent:${agentFor(staffed.squadron.id, 2).id}`,
     ]);
     assert.deepStrictEqual(
       (yield* service.list()).map(({ squadron }) => squadron.id),

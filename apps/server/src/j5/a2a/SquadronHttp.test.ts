@@ -11,6 +11,7 @@ import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { ConnectionError, SqlError } from "effect/unstable/sql/SqlError";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
+import { ArchiveCrewPartialFailureError } from "./ArchiveCrewService.ts";
 import { SquadronNotFoundError } from "./LedgerService.ts";
 import {
   SquadronDeleteBlockedError,
@@ -267,11 +268,22 @@ it("renames a Squadron by encoded id and maps blank names and unknown ids", asyn
 it("deletes a Squadron, passes force through, and reports 409 with the blocker when refused", async () => {
   const deleted: Array<{ readonly id: string; readonly force: boolean | undefined }> = [];
   const blockedId = SquadronId.make("squadron:blocked");
+  const partialId = SquadronId.make("squadron:partial");
   const management = Layer.mock(SquadronManagementService)({
     list: () => Effect.die("not reached"),
     create: () => Effect.die("not reached"),
     rename: () => Effect.die("not reached"),
     delete: (id, options) => {
+      if (id === partialId) {
+        return Effect.fail(
+          new ArchiveCrewPartialFailureError({
+            crewInstanceId: "crew:ops",
+            archivedSeats: ["builder"],
+            failedSeat: "reviewer",
+            cause: "provider unavailable",
+          }),
+        );
+      }
       if (id === blockedId) {
         return Effect.fail(
           new SquadronDeleteBlockedError({
@@ -328,6 +340,14 @@ it("deletes a Squadron, passes force through, and reports 409 with the blocker w
 
     const missing = await remove("squadron:missing");
     assert.equal(missing.status, 404);
+
+    const partial = await remove(partialId, { force: true });
+    assert.equal(partial.status, 500);
+    assert.deepStrictEqual(await partial.json(), {
+      error: "ArchiveCrewPartialFailureError",
+      message:
+        "Archiving the Squadron's agents stopped partway; the ones already archived stay archived. Try again.",
+    });
   } finally {
     await dispose();
   }

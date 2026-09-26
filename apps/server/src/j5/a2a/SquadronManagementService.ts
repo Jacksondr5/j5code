@@ -242,7 +242,10 @@ export const layer: Layer.Layer<
       );
 
     // The person confirmed the delete dialog, so both archives run with confirmation satisfied.
-    // Crews go first so their seats retire as units; any agent left is archived on its own.
+    // Crews go first so their seats retire as units; then every agent member goes through the
+    // agent archive, archived ones included. Membership is marked archived before its Exchanges
+    // close, so a half-finished archive reads as archived; the service reports a finished one as
+    // already archived and completes the rest before the Squadron and its home disappear.
     const archiveLiveMembers = Effect.fn("j5.a2a.squadronManagement.archiveLiveMembers")(function* (
       squadronId: SquadronId,
     ) {
@@ -277,7 +280,7 @@ export const layer: Layer.Layer<
       }
       const agents = yield* sql<{ readonly participant_id: string; readonly thread_id: string }>`
         SELECT participant_id, thread_id FROM j5_a2a_squadron_membership
-        WHERE squadron_id = ${squadronId} AND archived_at IS NULL AND thread_id IS NOT NULL
+        WHERE squadron_id = ${squadronId} AND thread_id IS NOT NULL
         ORDER BY joined_seq
       `;
       for (const agent of agents) {
