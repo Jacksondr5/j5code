@@ -1,11 +1,13 @@
 import { AuthOrchestrationOperateScope, AuthOrchestrationReadScope } from "@t3tools/contracts";
 import {
   CreateSquadronRequest,
+  DeleteSquadronRequest,
   J5_API_PATHS,
   RenameSquadronRequest,
   type SquadronListResponse,
   type CreateSquadronResponse,
   type DeleteSquadronResponse,
+  type SquadronDeletePreviewResponse,
   type RenameSquadronResponse,
 } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
@@ -35,8 +37,12 @@ const SQUADRONS_PATH = J5_API_PATHS.squadrons;
 // Rename and delete ride POST so browser clients on other origins pass the CORS method allowlist.
 const SQUADRON_RENAME_PATH = `${SQUADRONS_PATH}/:id/rename` as const;
 const SQUADRON_DELETE_PATH = `${SQUADRONS_PATH}/:id/delete` as const;
+const SQUADRON_DELETE_PREVIEW_PATH = `${SQUADRONS_PATH}/:id/delete-preview` as const;
 const decodeCreateSquadronRequest = Schema.decodeUnknownEffect(CreateSquadronRequest);
 const decodeRenameSquadronRequest = Schema.decodeUnknownEffect(RenameSquadronRequest);
+const decodeDeleteSquadronRequest = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(DeleteSquadronRequest),
+);
 const decodeSquadronId = Schema.decodeUnknownOption(SquadronId);
 
 /** The router hands params back raw, so the client's encoded `squadron:<uuid>` is decoded here. */
@@ -75,6 +81,12 @@ export const operationFailure = (error: unknown) => {
       ? String(error._tag)
       : "SquadronOperationError";
   const message = error instanceof Error ? error.message : "Squadron operation failed.";
+  // A forced delete that stopped partway keeps what it committed; the cause stays in the log.
+  if (tag === "SquadronDeleteIncompleteError") {
+    return Effect.logError("J5 Squadron delete stopped partway", { cause: error }).pipe(
+      Effect.as(HttpServerResponse.jsonUnsafe({ error: tag, message }, { status: 500 })),
+    );
+  }
   const status =
     tag === "SquadronProjectNotFoundError" ||
     tag === "SquadronProjectReferenceSquadronNotFoundError" ||
@@ -201,7 +213,17 @@ export const squadronHttpRouteLayer = Layer.unwrap(
           return yield* operationFailure(new SquadronNotFoundError({ squadronId: param.raw }));
         }
         const squadronId = param.id.value;
-        const result = yield* Effect.result(management.delete(squadronId));
+        // An empty body is a plain delete, which refuses while live agents or Crews remain.
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const text = yield* Effect.result(request.text);
+        if (Result.isFailure(text)) return requestFailure("The request body could not be read.");
+        const decoded = yield* Effect.result(
+          decodeDeleteSquadronRequest(text.success.trim() === "" ? "{}" : text.success),
+        );
+        if (Result.isFailure(decoded)) return requestFailure("force must be a boolean.");
+        const result = yield* Effect.result(
+          management.delete(squadronId, { force: decoded.success.force === true }),
+        );
         if (Result.isSuccess(result)) {
           return HttpServerResponse.jsonUnsafe({
             deleted: true,
@@ -217,6 +239,31 @@ export const squadronHttpRouteLayer = Layer.unwrap(
         }),
       ),
     );
-    return Layer.mergeAll(listRoute, createRoute, renameRoute, deleteRoute);
+    const deletePreviewRoute = HttpRouter.add(
+      "GET",
+      SQUADRON_DELETE_PREVIEW_PATH,
+      Effect.gen(function* () {
+        yield* annotateEnvironmentRequest("j5.squadron.deletePreview");
+        yield* authenticate(AuthOrchestrationReadScope);
+        const param = yield* squadronIdParam;
+        if (Option.isNone(param.id)) {
+          return yield* operationFailure(new SquadronNotFoundError({ squadronId: param.raw }));
+        }
+        const result = yield* Effect.result(management.deletePreview(param.id.value));
+        if (Result.isSuccess(result)) {
+          return HttpServerResponse.jsonUnsafe(
+            result.success satisfies typeof SquadronDeletePreviewResponse.Type,
+          );
+        }
+        return yield* operationFailure(result.failure);
+      }).pipe(
+        Effect.catchTags({
+          EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+          EnvironmentInternalError: HttpServerRespondable.toResponse,
+          EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+        }),
+      ),
+    );
+    return Layer.mergeAll(listRoute, createRoute, renameRoute, deleteRoute, deletePreviewRoute);
   }),
 );

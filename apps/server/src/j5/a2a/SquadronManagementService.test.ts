@@ -7,7 +7,18 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as ProjectService from "../../project/ProjectService.ts";
+import {
+  ThreadLifecycleError,
+  ThreadLifecycleService,
+} from "../../orchestration-v2/ThreadLifecycleService.ts";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
+import {
+  AgentCrewInstanceService,
+  layer as agentCrewInstanceLayer,
+} from "./AgentCrewInstanceService.ts";
+import { ArchiveAgentService } from "./ArchiveAgentService.ts";
+import { ArchiveCrewService } from "./ArchiveCrewService.ts";
 import { ClientReadsService, layer as clientReadsLayer } from "./ClientReadsService.ts";
 import { layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
@@ -26,7 +37,98 @@ const references = squadronProjectReferencesLayer.pipe(Layer.provide(database));
 const projects = Layer.mock(ProjectService.ProjectService)({
   getById: () => Effect.succeed(Option.some({ id: projectId } as never)),
 });
+const crewInstances = agentCrewInstanceLayer.pipe(Layer.provide(database));
+const archiveCalls: Array<string> = [];
+// The archive services are exercised in their own suites; here they only record their order and
+// leave the archived state the real ones commit.
+const archiveCrews = Layer.effect(
+  ArchiveCrewService,
+  Effect.gen(function* () {
+    const instances = yield* AgentCrewInstanceService;
+    return ArchiveCrewService.of({
+      archive: (input) =>
+        instances.markArchived(input.crewInstanceId, input.archivedAt).pipe(
+          Effect.tap(() => Effect.sync(() => archiveCalls.push(`crew:${input.crewInstanceId}`))),
+          Effect.as({ status: "archived" as const, members: [] }),
+          Effect.orDie,
+        ),
+      readCaptainFacts: () => Effect.die("not reached"),
+    });
+  }),
+).pipe(Layer.provide(crewInstances));
+// Runs once inside the next agent archive, standing in for work another client does meanwhile.
+let duringAgentArchive: Effect.Effect<void, never, A2ALedger> | null = null;
+const archiveAgents = Layer.effect(
+  ArchiveAgentService,
+  Effect.gen(function* () {
+    const a2aLedger = yield* A2ALedger;
+    return ArchiveAgentService.of({
+      archive: (input) =>
+        Effect.gen(function* () {
+          const hook = duringAgentArchive;
+          duringAgentArchive = null;
+          if (hook !== null) yield* hook;
+          yield* a2aLedger.append({
+            commandId: CommCommandId.make(`command:archive:${input.target.participantId}`),
+            squadronId: input.target.squadronId,
+            acceptedAt: input.archivedAt,
+            event: {
+              kind: "participant.archived",
+              sender: null,
+              receiver: input.target.participantId,
+              exchangeId: null,
+              correlationId: null,
+              payload: {
+                participant: {
+                  kind: "agent",
+                  id: input.target.participantId,
+                  threadId: input.target.threadId,
+                },
+              },
+              createdAt: input.archivedAt,
+            },
+          });
+          archiveCalls.push(`agent:${input.target.participantId}`);
+          return "archived" as const;
+        }).pipe(Effect.provideService(A2ALedger, a2aLedger), Effect.orDie),
+      readFacts: () => Effect.die("not reached"),
+    });
+  }),
+).pipe(Layer.provide(ledger));
+const deletedThreads: Array<string> = [];
+const deleteCommandIds: Array<string> = [];
+const alreadyDeleted = new Set<string>();
+let failNextDelete = false;
+const threadLifecycle = Layer.mock(ThreadLifecycleService)({
+  delete: (input) =>
+    Effect.suspend(() => {
+      deleteCommandIds.push(input.commandId);
+      if (failNextDelete) {
+        failNextDelete = false;
+        return Effect.fail(
+          new ThreadLifecycleError({
+            operation: "delete",
+            threadId: input.threadId,
+            cause: "transient delete failure",
+          }),
+        );
+      }
+      deletedThreads.push(input.threadId);
+      alreadyDeleted.add(input.threadId);
+      return Effect.succeed({ thread: {} } as never);
+    }),
+});
+// The shell read answers null for a deleted thread, the way the projection store does.
+const threadManagement = Layer.mock(ThreadManagementService)({
+  getThreadShell: (threadId) =>
+    Effect.succeed(alreadyDeleted.has(threadId) ? null : ({ id: threadId } as never)),
+});
 const management = squadronManagementServiceLayer.pipe(
+  Layer.provide(threadLifecycle),
+  Layer.provide(threadManagement),
+  Layer.provide(archiveCrews),
+  Layer.provide(archiveAgents),
+  Layer.provide(crewInstances),
   Layer.provide(ledger),
   Layer.provide(references),
   Layer.provide(projects),
@@ -89,7 +191,7 @@ const agentFor = (squadronId: SquadronId, index: number) => ({
 const appendMembership = (
   squadronId: SquadronId,
   index: number,
-  kind: "participant.joined" | "participant.archived",
+  kind: "participant.joined" | "participant.archived" | "participant.deleted",
 ) =>
   Effect.gen(function* () {
     const ledger = yield* A2ALedger;
@@ -265,5 +367,114 @@ it.effect("refuses to delete a Squadron that still has an active agent or an una
       "Staffed",
     ]);
     assert.equal(yield* countWhere("j5_a2a_comm_event", staffed.squadron.id), 2);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect(
+  "a forced delete archives the members, deletes every thread that joined, then the Squadron",
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`PRAGMA foreign_keys = ON`;
+      yield* runJ5A2AMigrations();
+      archiveCalls.length = 0;
+      deletedThreads.length = 0;
+      const service = yield* SquadronManagementService;
+      const staffed = yield* service.create({ name: "Staffed", projectId });
+      const kept = yield* service.create({ name: "Kept", projectId });
+      yield* joinAgent(staffed.squadron.id, 1);
+      yield* joinAgent(staffed.squadron.id, 2);
+      yield* appendMembership(staffed.squadron.id, 2, "participant.archived");
+      yield* joinAgent(staffed.squadron.id, 3);
+      yield* appendMembership(staffed.squadron.id, 3, "participant.deleted");
+      alreadyDeleted.add(agentFor(staffed.squadron.id, 3).threadId);
+      yield* joinAgent(kept.squadron.id, 1);
+      for (const [id, squadronId, archivedAt] of [
+        ["crew:live", staffed.squadron.id, null],
+        ["crew:retired", staffed.squadron.id, timestamp],
+        ["crew:elsewhere", kept.squadron.id, null],
+      ] as const) {
+        yield* sql`
+        INSERT INTO j5_agent_crew_instance (
+          id, squadron_id, captain_participant_id, captain_thread_id, display_name, brief, version,
+          created_at, archived_at
+        ) VALUES (
+          ${id}, ${squadronId}, 'agent:captain', 'thread:captain', 'Crew', 'brief', 1,
+          ${timestamp}, ${archivedAt}
+        )
+      `;
+      }
+
+      // Agents 1 and 2 still have threads; agent 3's is already deleted.
+      assert.deepStrictEqual(yield* service.deletePreview(staffed.squadron.id), {
+        threadCount: 2,
+      });
+
+      yield* service.delete(staffed.squadron.id, { force: true });
+
+      // The archived member goes through again: a half-finished archive already reads as archived.
+      assert.deepStrictEqual(archiveCalls, [
+        "crew:crew:live",
+        `agent:${agentFor(staffed.squadron.id, 1).id}`,
+        `agent:${agentFor(staffed.squadron.id, 2).id}`,
+      ]);
+      // Archived members' threads go too; an already deleted one is passed by.
+      assert.deepStrictEqual(deletedThreads.sort(), [
+        agentFor(staffed.squadron.id, 1).threadId,
+        agentFor(staffed.squadron.id, 2).threadId,
+      ]);
+      assert.deepStrictEqual(
+        (yield* service.list()).map(({ squadron }) => squadron.id),
+        [kept.squadron.id],
+      );
+      assert.equal(yield* countWhere("j5_agent_crew_instance", kept.squadron.id), 1);
+      assert.equal(yield* countWhere("j5_a2a_squadron_membership", kept.squadron.id), 1);
+    }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a forced delete refuses when an agent joins meanwhile, and a retry deletes it too", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`PRAGMA foreign_keys = ON`;
+    yield* runJ5A2AMigrations();
+    deletedThreads.length = 0;
+    const service = yield* SquadronManagementService;
+    const busy = yield* service.create({ name: "Busy", projectId });
+    yield* joinAgent(busy.squadron.id, 1);
+    duringAgentArchive = joinAgent(busy.squadron.id, 2).pipe(Effect.orDie);
+
+    const refused = yield* Effect.flip(service.delete(busy.squadron.id, { force: true }));
+    assert.equal(refused._tag, "SquadronDeleteBlockedError");
+    assert.deepStrictEqual(deletedThreads, [agentFor(busy.squadron.id, 1).threadId]);
+
+    yield* service.delete(busy.squadron.id, { force: true });
+    assert.deepStrictEqual(deletedThreads, [
+      agentFor(busy.squadron.id, 1).threadId,
+      agentFor(busy.squadron.id, 2).threadId,
+    ]);
+    assert.deepStrictEqual(yield* service.list(), []);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a retry after a failed thread delete uses fresh command ids and finishes", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`PRAGMA foreign_keys = ON`;
+    yield* runJ5A2AMigrations();
+    deleteCommandIds.length = 0;
+    const service = yield* SquadronManagementService;
+    const flaky = yield* service.create({ name: "Flaky", projectId });
+    yield* joinAgent(flaky.squadron.id, 1);
+    failNextDelete = true;
+
+    const failed = yield* Effect.flip(service.delete(flaky.squadron.id, { force: true }));
+    assert.equal(failed._tag, "SquadronDeleteIncompleteError");
+    assert.equal((yield* service.list()).length, 1);
+
+    yield* service.delete(flaky.squadron.id, { force: true });
+    // The orchestrator keeps a rejected command id rejected, so the retry must not reuse it.
+    assert.equal(deleteCommandIds.length, 2);
+    assert.notEqual(deleteCommandIds[0], deleteCommandIds[1]);
+    assert.deepStrictEqual(yield* service.list(), []);
   }).pipe(Effect.provide(testLayer)),
 );

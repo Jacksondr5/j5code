@@ -14,6 +14,7 @@ import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import { SquadronNotFoundError } from "./LedgerService.ts";
 import {
   SquadronDeleteBlockedError,
+  SquadronDeleteIncompleteError,
   SquadronManagementService,
   SquadronNameRequiredError,
 } from "./SquadronManagementService.ts";
@@ -188,7 +189,7 @@ const operatorAuth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
     }),
 });
 
-const itemUrl = (id: string, action: "rename" | "delete") =>
+const itemUrl = (id: string, action: "rename" | "delete" | "delete-preview") =>
   `http://environment.test/api/j5/squadrons/${encodeURIComponent(id)}/${action}`;
 
 it("renames a Squadron by encoded id and maps blank names and unknown ids", async () => {
@@ -264,14 +265,21 @@ it("renames a Squadron by encoded id and maps blank names and unknown ids", asyn
   }
 });
 
-it("deletes an empty Squadron and reports 409 with the blocker when refused", async () => {
-  const deleted: Array<string> = [];
+it("deletes a Squadron, passes force through, and reports 409 with the blocker when refused", async () => {
+  const deleted: Array<{ readonly id: string; readonly force: boolean | undefined }> = [];
   const blockedId = SquadronId.make("squadron:blocked");
+  const partialId = SquadronId.make("squadron:partial");
   const management = Layer.mock(SquadronManagementService)({
     list: () => Effect.die("not reached"),
     create: () => Effect.die("not reached"),
     rename: () => Effect.die("not reached"),
-    delete: (id) => {
+    deletePreview: () => Effect.succeed({ threadCount: 3 }),
+    delete: (id, options) => {
+      if (id === partialId) {
+        return Effect.fail(
+          new SquadronDeleteIncompleteError({ squadronId: id, cause: "provider unavailable" }),
+        );
+      }
       if (id === blockedId) {
         return Effect.fail(
           new SquadronDeleteBlockedError({
@@ -285,7 +293,7 @@ it("deletes an empty Squadron and reports 409 with the blocker when refused", as
         );
       }
       if (id !== squadronId) return Effect.fail(new SquadronNotFoundError({ squadronId: id }));
-      deleted.push(id);
+      deleted.push({ id, force: options?.force });
       return Effect.void;
     },
   });
@@ -295,13 +303,28 @@ it("deletes an empty Squadron and reports 409 with the blocker when refused", as
     Layer.provide(HttpServer.layerServices),
   );
   const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
-  const remove = (id: string) => handler(new Request(itemUrl(id, "delete"), { method: "POST" }));
+  const remove = (id: string, body?: unknown) =>
+    handler(
+      new Request(itemUrl(id, "delete"), {
+        method: "POST",
+        ...(body === undefined
+          ? {}
+          : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+      }),
+    );
 
   try {
     const ok = await remove(squadronId);
     assert.equal(ok.status, 200);
     assert.deepStrictEqual(await ok.json(), { deleted: true, squadronId });
-    assert.deepStrictEqual(deleted, [squadronId]);
+    const forced = await remove(squadronId, { force: true });
+    assert.equal(forced.status, 200);
+    assert.deepStrictEqual(deleted, [
+      { id: squadronId, force: false },
+      { id: squadronId, force: true },
+    ]);
+    const invalid = await remove(squadronId, { force: "yes" });
+    assert.equal(invalid.status, 400);
 
     const blocked = await remove(blockedId);
     assert.equal(blocked.status, 409);
@@ -313,6 +336,17 @@ it("deletes an empty Squadron and reports 409 with the blocker when refused", as
 
     const missing = await remove("squadron:missing");
     assert.equal(missing.status, 404);
+
+    const preview = await handler(new Request(itemUrl(squadronId, "delete-preview")));
+    assert.equal(preview.status, 200);
+    assert.deepStrictEqual(await preview.json(), { threadCount: 3 });
+
+    const partial = await remove(partialId, { force: true });
+    assert.equal(partial.status, 500);
+    assert.deepStrictEqual(await partial.json(), {
+      error: "SquadronDeleteIncompleteError",
+      message: "Deleting the Squadron stopped partway. Try again to finish.",
+    });
   } finally {
     await dispose();
   }

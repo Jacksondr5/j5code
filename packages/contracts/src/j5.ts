@@ -25,6 +25,10 @@ export const CreateSquadronRequest = Schema.Struct({ name: Schema.String, projec
 export const CreateSquadronResponse = Schema.Struct({ squadron: ManagedSquadron });
 export const RenameSquadronRequest = Schema.Struct({ name: Schema.String });
 export const RenameSquadronResponse = Schema.Struct({ squadron: ManagedSquadron });
+/** `force` deletes every agent thread in the Squadron first instead of refusing while any is live. */
+export const DeleteSquadronRequest = Schema.Struct({ force: Schema.optional(Schema.Boolean) });
+/** How many agent threads a forced delete would remove, for the confirmation to name. */
+export const SquadronDeletePreviewResponse = Schema.Struct({ threadCount: Schema.Number });
 export const DeleteSquadronResponse = Schema.Struct({
   deleted: Schema.Literal(true),
   squadronId: Schema.String,
@@ -371,8 +375,10 @@ export const J5_API_PATHS = {
  * Action path for one Squadron; ids carry a colon so they are encoded. Both
  * actions are POST so cross-origin browser clients pass the CORS allowlist.
  */
-export const j5SquadronActionPath = (squadronId: string, action: "rename" | "delete"): string =>
-  `${J5_API_PATHS.squadrons}/${encodeURIComponent(squadronId)}/${action}`;
+export const j5SquadronActionPath = (
+  squadronId: string,
+  action: "rename" | "delete" | "delete-preview",
+): string => `${J5_API_PATHS.squadrons}/${encodeURIComponent(squadronId)}/${action}`;
 
 /**
  * Machine participants: registered non-agent senders (cron jobs, watchdogs,

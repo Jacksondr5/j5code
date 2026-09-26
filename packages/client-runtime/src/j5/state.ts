@@ -175,9 +175,16 @@ export function createJ5EnvironmentAtoms<R, E>(
           Effect.flatMap((prepared) => J5Http.renameSquadron(prepared, input)),
         ),
     }),
+    previewSquadronDelete: createEnvironmentCommand(runtime, {
+      label: "j5:preview-squadron-delete",
+      execute: (input: { readonly squadronId: string }) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.previewSquadronDelete(prepared, input)),
+        ),
+    }),
     deleteSquadron: createEnvironmentCommand(runtime, {
       label: "j5:delete-squadron",
-      execute: (input: { readonly squadronId: string }) =>
+      execute: (input: { readonly squadronId: string; readonly force?: boolean }) =>
         preparedConnection.pipe(
           Effect.flatMap((prepared) => J5Http.deleteSquadron(prepared, input)),
         ),

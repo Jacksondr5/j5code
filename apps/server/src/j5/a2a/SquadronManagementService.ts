@@ -1,4 +1,4 @@
-import { ProjectId } from "@t3tools/contracts";
+import { ProjectId, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -9,13 +9,20 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import * as ProjectService from "../../project/ProjectService.ts";
+import type { OrchestratorV2Error } from "../../orchestration-v2/Orchestrator.ts";
+import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { randomUuidV4 } from "../../orchestration-v2/RandomUuid.ts";
+import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
+import { ArchiveAgentService } from "./ArchiveAgentService.ts";
+import { ArchiveCrewService } from "./ArchiveCrewService.ts";
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 import {
   SquadronProjectReferences,
   type SquadronProjectReferenceError,
 } from "./SquadronProjectReferences.ts";
-import { SquadronId, type Squadron } from "./contracts.ts";
+import { ParticipantId, SquadronId, type Squadron } from "./contracts.ts";
+import { crewSeatRequestKey, lifecycleCommandId } from "./spawnIds.ts";
 
 export interface ManagedSquadron {
   readonly squadron: Squadron;
@@ -81,6 +88,8 @@ export const SQUADRON_RESTRICT_TABLES = [
   "j5_a2a_comm_event",
 ] as const;
 
+const SQUADRON_DELETE_SESSION = "j5-squadron-delete-human";
+
 const joinBlockers = (labels: ReadonlyArray<string>): string =>
   labels.length <= 1
     ? (labels[0] ?? "")
@@ -102,13 +111,25 @@ export class SquadronDeleteBlockedError extends Schema.TaggedError<SquadronDelet
   }
 }
 
+/** A forced delete stopped while archiving or deleting threads; what committed stays, a retry finishes. */
+export class SquadronDeleteIncompleteError extends Schema.TaggedError<SquadronDeleteIncompleteError>()(
+  "SquadronDeleteIncompleteError",
+  { squadronId: SquadronId, cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Deleting the Squadron stopped partway. Try again to finish.";
+  }
+}
+
 export type SquadronManagementError =
   | A2ALedgerError
   | ProjectService.ProjectServiceError
   | SquadronProjectReferenceError
   | SquadronNameRequiredError
   | SquadronProjectNotFoundError
-  | SquadronDeleteBlockedError;
+  | SquadronDeleteBlockedError
+  | SquadronDeleteIncompleteError
+  | OrchestratorV2Error;
 
 export interface SquadronManagementServiceShape {
   readonly list: () => Effect.Effect<ReadonlyArray<ManagedSquadron>, SquadronManagementError>;
@@ -118,7 +139,18 @@ export interface SquadronManagementServiceShape {
   readonly rename: (
     input: RenameSquadronInput,
   ) => Effect.Effect<ManagedSquadron, SquadronManagementError>;
-  readonly delete: (squadronId: SquadronId) => Effect.Effect<void, SquadronManagementError>;
+  /**
+   * Refuses while live agents or Crews remain. With `force`, deletes every thread that ever joined
+   * the Squadron first, the way upstream's forced project delete removes the project's threads.
+   */
+  readonly delete: (
+    squadronId: SquadronId,
+    options?: { readonly force?: boolean },
+  ) => Effect.Effect<void, SquadronManagementError>;
+  /** How many threads a forced delete would remove, for the confirmation to name. */
+  readonly deletePreview: (
+    squadronId: SquadronId,
+  ) => Effect.Effect<{ readonly threadCount: number }, SquadronManagementError>;
 }
 
 /**
@@ -133,7 +165,15 @@ export class SquadronManagementService extends Context.Service<
 export const layer: Layer.Layer<
   SquadronManagementService,
   never,
-  A2ALedger | ProjectService.ProjectService | SquadronProjectReferences | SqlClient.SqlClient
+  | A2ALedger
+  | AgentCrewInstanceService
+  | ArchiveAgentService
+  | ArchiveCrewService
+  | ProjectService.ProjectService
+  | SquadronProjectReferences
+  | SqlClient.SqlClient
+  | ThreadLifecycleService
+  | ThreadManagementService
 > = Layer.effect(
   SquadronManagementService,
   Effect.gen(function* () {
@@ -141,6 +181,11 @@ export const layer: Layer.Layer<
     const projects = yield* ProjectService.ProjectService;
     const references = yield* SquadronProjectReferences;
     const sql = yield* SqlClient.SqlClient;
+    const crewInstances = yield* AgentCrewInstanceService;
+    const archiveAgents = yield* ArchiveAgentService;
+    const archiveCrews = yield* ArchiveCrewService;
+    const threadLifecycle = yield* ThreadLifecycleService;
+    const threadManagement = yield* ThreadManagementService;
 
     const list = Effect.fn("j5.a2a.squadronManagement.list")(function* () {
       const squadrons = yield* ledger.listSquadrons();
@@ -217,12 +262,128 @@ export const layer: Layer.Layer<
         { discard: true },
       );
 
-    // Hard delete in one transaction. Live agents or unarchived Crews refuse
-    // with a named blocker; otherwise history and derived rows are purged and
-    // threads that were homed here read as unknown-home afterwards.
-    const remove = Effect.fn("j5.a2a.squadronManagement.delete")(function* (
+    // The last participant.joined in the ledger; a forced delete works on the agents that joined up
+    // to here, and the final transaction refuses if anyone joined after it.
+    const lastJoinSeq = (squadronId: SquadronId) =>
+      sql<{ readonly seq: number | null }>`
+        SELECT MAX(seq) AS seq FROM j5_a2a_comm_event
+        WHERE squadron_id = ${squadronId} AND kind = 'participant.joined'
+      `.pipe(Effect.map((rows) => Number(rows[0]?.seq ?? 0)));
+
+    // Every thread whose agent joined here, live, archived, or retired, that still exists: the
+    // Squadron is their only home. `joinedThrough` bounds it to the joins a delete started with.
+    const memberThreads = Effect.fn("j5.a2a.squadronManagement.memberThreads")(function* (
+      squadronId: SquadronId,
+      joinedThrough: number,
+    ) {
+      const rows = yield* sql<{ readonly thread_id: string }>`
+        SELECT DISTINCT json_extract(payload, '$.participant.threadId') AS thread_id
+        FROM j5_a2a_comm_event
+        WHERE squadron_id = ${squadronId} AND kind = 'participant.joined' AND seq <= ${joinedThrough}
+          AND json_extract(payload, '$.participant.kind') = 'agent'
+      `;
+      const threadIds: Array<ThreadId> = [];
+      for (const row of rows) {
+        const threadId = ThreadId.make(row.thread_id);
+        // The shell read answers null for a thread that is gone or already deleted.
+        if ((yield* threadManagement.getThreadShell(threadId)) !== null) threadIds.push(threadId);
+      }
+      return threadIds;
+    });
+
+    const deletePreview = Effect.fn("j5.a2a.squadronManagement.deletePreview")(function* (
       squadronId: SquadronId,
     ) {
+      yield* ledger.readSquadron(squadronId);
+      const threadIds = yield* memberThreads(squadronId, yield* lastJoinSeq(squadronId));
+      return { threadCount: threadIds.length };
+    });
+
+    // The person confirmed the delete dialog, so both archives run with confirmation satisfied.
+    // Archiving first closes Exchanges (including ones other Squadrons own) while this Squadron
+    // still resolves as their home; the thread.deleted reactors alone could lose that race with
+    // the purge. Crews go first so their seats retire as units; then every agent member goes
+    // through the agent archive, archived ones included: membership is marked archived before its
+    // Exchanges close, so a half-finished archive reads as archived, and the service completes it.
+    // Then their threads are deleted. Ids are scoped to this attempt, since a rejected command id
+    // stays rejected; a retry skips threads already deleted.
+    const clearMembers = Effect.fn("j5.a2a.squadronManagement.clearMembers")(function* (
+      squadronId: SquadronId,
+      joinedThrough: number,
+    ) {
+      const requestKey = yield* randomUuidV4;
+      const archivedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+      const commandId = (key: string, operation: string) =>
+        lifecycleCommandId({
+          providerSessionId: SQUADRON_DELETE_SESSION,
+          requestKey: key,
+          operation,
+        });
+      const archiveCommandIds = (key: string) => ({
+        interruptCommandId: commandId(key, "delete-squadron-interrupt"),
+        archiveCommandId: commandId(key, "delete-squadron-archive"),
+      });
+      const crews = yield* crewInstances.listForSquadron(squadronId);
+      for (const crew of crews) {
+        if (crew.archivedAt !== null) continue;
+        yield* archiveCrews.archive({
+          providerSessionId: SQUADRON_DELETE_SESSION,
+          callerParticipantId: null,
+          squadronId,
+          crewInstanceId: crew.id,
+          clientRequestKey: `${requestKey}:${crew.id}`,
+          confirmationSatisfied: true,
+          archivedAt,
+          commandIds: (seatName) =>
+            archiveCommandIds(crewSeatRequestKey(`${requestKey}:${crew.id}`, seatName)),
+        });
+      }
+      const agents = yield* sql<{ readonly participant_id: string; readonly thread_id: string }>`
+        SELECT participant_id, thread_id FROM j5_a2a_squadron_membership
+        WHERE squadron_id = ${squadronId} AND thread_id IS NOT NULL
+          AND joined_seq <= ${joinedThrough}
+        ORDER BY joined_seq
+      `;
+      for (const agent of agents) {
+        const participantId = ParticipantId.make(agent.participant_id);
+        yield* archiveAgents.archive({
+          providerSessionId: SQUADRON_DELETE_SESSION,
+          // No participant asks for this archive; the token payload needs one, so it names itself.
+          callerParticipantId: participantId,
+          target: { squadronId, participantId, threadId: ThreadId.make(agent.thread_id) },
+          clientRequestKey: `${requestKey}:${participantId}`,
+          confirmationSatisfied: true,
+          archivedAt,
+          ...archiveCommandIds(`${requestKey}:${participantId}`),
+        });
+      }
+      for (const threadId of yield* memberThreads(squadronId, joinedThrough)) {
+        yield* threadLifecycle.delete({
+          commandId: commandId(`${requestKey}:${threadId}`, "delete-squadron-thread"),
+          threadId,
+        });
+      }
+    });
+
+    // Hard delete in one transaction. Live agents or unarchived Crews refuse
+    // with a named blocker; otherwise history and derived rows are purged and
+    // threads that were homed here read as unknown-home afterwards. A forced
+    // delete clears the members first; that runs orchestration commands, so
+    // it sits outside the transaction, and an agent that joins meanwhile
+    // refuses the delete so a retry clears it too.
+    const remove = Effect.fn("j5.a2a.squadronManagement.delete")(function* (
+      squadronId: SquadronId,
+      options?: { readonly force?: boolean },
+    ) {
+      const force = options?.force === true;
+      let joinedThrough = 0;
+      if (force) {
+        yield* ledger.readSquadron(squadronId);
+        joinedThrough = yield* lastJoinSeq(squadronId);
+        yield* clearMembers(squadronId, joinedThrough).pipe(
+          Effect.mapError((cause) => new SquadronDeleteIncompleteError({ squadronId, cause })),
+        );
+      }
       yield* sql.withTransaction(
         Effect.gen(function* () {
           const squadron = yield* ledger.readSquadron(squadronId);
@@ -231,6 +392,15 @@ export const layer: Layer.Layer<
           for (const kind of SquadronDeleteBlockerKind.literals) {
             const count = yield* counts[kind];
             if (count > 0) blockers.push({ kind, count });
+          }
+          if (force && blockers.length === 0) {
+            const joinedSince = yield* sql<{ readonly count: number }>`
+              SELECT COUNT(*) AS count FROM j5_a2a_comm_event
+              WHERE squadron_id = ${squadronId} AND kind = 'participant.joined'
+                AND seq > ${joinedThrough}
+            `;
+            const count = Number(joinedSince[0]?.count ?? 0);
+            if (count > 0) blockers.push({ kind: "agents", count });
           }
           if (blockers.length > 0) {
             return yield* new SquadronDeleteBlockedError({
@@ -245,6 +415,6 @@ export const layer: Layer.Layer<
       );
     });
 
-    return SquadronManagementService.of({ list, create, rename, delete: remove });
+    return SquadronManagementService.of({ list, create, rename, delete: remove, deletePreview });
   }),
 );
