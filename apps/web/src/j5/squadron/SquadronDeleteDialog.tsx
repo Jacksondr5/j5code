@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "../../components/ui/button";
 import {
@@ -11,7 +11,7 @@ import {
   AlertDialogTitle,
 } from "../../components/ui/alert-dialog";
 import { describeSquadronDeleteFailure } from "./SquadronActions.logic";
-import { deleteSquadron } from "./squadronClient";
+import { deleteSquadron, previewSquadronDelete } from "./squadronClient";
 import { forgetDeletedSquadron } from "./SquadronDraftState";
 import type { SquadronActionTarget } from "./SquadronRenameDialog";
 import { refreshAfterSquadronChange } from "./refreshAfterSquadronChange";
@@ -30,6 +30,22 @@ export function SquadronDeleteDialog({
   const [failure, setFailure] = useState<ReturnType<typeof describeSquadronDeleteFailure> | null>(
     null,
   );
+  // Read on every open, since agents come and go; the title omits the count until it lands, and
+  // closing clears it so a reopen never shows a stale one.
+  const [threadCount, setThreadCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    let current = true;
+    previewSquadronDelete(target.environmentId, { squadronId: target.id }).then(
+      (preview) => {
+        if (current) setThreadCount(preview.threadCount);
+      },
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, [open, target.environmentId, target.id]);
 
   const confirm = async () => {
     setSubmitting(true);
@@ -54,12 +70,18 @@ export function SquadronDeleteDialog({
         onOpenChange(next);
       }}
       onOpenChangeComplete={(next) => {
-        if (!next) setFailure(null);
+        if (next) return;
+        setFailure(null);
+        setThreadCount(null);
       }}
     >
       <AlertDialogPopup>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete “{target.name}”?</AlertDialogTitle>
+          <AlertDialogTitle>
+            {threadCount === null || threadCount === 0
+              ? `Delete “${target.name}”?`
+              : `Delete “${target.name}” and its ${threadCount} agent thread${threadCount === 1 ? "" : "s"}?`}
+          </AlertDialogTitle>
           <AlertDialogDescription>
             This permanently deletes every agent thread in this Squadron, including archived ones
             and Crew seats, and stops any running work. The Squadron’s message history is deleted

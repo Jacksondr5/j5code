@@ -118,11 +118,10 @@ const threadLifecycle = Layer.mock(ThreadLifecycleService)({
       return Effect.succeed({ thread: {} } as never);
     }),
 });
+// The shell read answers null for a deleted thread, the way the projection store does.
 const threadManagement = Layer.mock(ThreadManagementService)({
-  getThreadProjection: (threadId) =>
-    Effect.succeed({
-      thread: { id: threadId, deletedAt: alreadyDeleted.has(threadId) ? timestamp : null },
-    } as never),
+  getThreadShell: (threadId) =>
+    Effect.succeed(alreadyDeleted.has(threadId) ? null : ({ id: threadId } as never)),
 });
 const management = squadronManagementServiceLayer.pipe(
   Layer.provide(threadLifecycle),
@@ -405,6 +404,11 @@ it.effect(
         )
       `;
       }
+
+      // Agents 1 and 2 still have threads; agent 3's is already deleted.
+      assert.deepStrictEqual(yield* service.deletePreview(staffed.squadron.id), {
+        threadCount: 2,
+      });
 
       yield* service.delete(staffed.squadron.id, { force: true });
 

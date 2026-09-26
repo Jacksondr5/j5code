@@ -54,6 +54,19 @@ export async function assignImportedThreads(
   return result.value;
 }
 
+/** How many agent threads deleting the Squadron would remove. */
+export async function previewSquadronDelete(
+  environmentId: EnvironmentId,
+  input: { readonly squadronId: string },
+) {
+  const result = await j5Environment.previewSquadronDelete.run(appAtomRegistry, {
+    environmentId,
+    input,
+  });
+  if (result._tag === "Failure") throw Cause.squash(result.cause);
+  return result.value;
+}
+
 /** Hard delete. Without `force` the server answers 409 while live agents or Crews remain; with it, their threads are deleted too. */
 export async function deleteSquadron(
   environmentId: EnvironmentId,

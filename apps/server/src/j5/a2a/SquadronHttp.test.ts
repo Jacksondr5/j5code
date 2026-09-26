@@ -189,7 +189,7 @@ const operatorAuth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
     }),
 });
 
-const itemUrl = (id: string, action: "rename" | "delete") =>
+const itemUrl = (id: string, action: "rename" | "delete" | "delete-preview") =>
   `http://environment.test/api/j5/squadrons/${encodeURIComponent(id)}/${action}`;
 
 it("renames a Squadron by encoded id and maps blank names and unknown ids", async () => {
@@ -273,6 +273,7 @@ it("deletes a Squadron, passes force through, and reports 409 with the blocker w
     list: () => Effect.die("not reached"),
     create: () => Effect.die("not reached"),
     rename: () => Effect.die("not reached"),
+    deletePreview: () => Effect.succeed({ threadCount: 3 }),
     delete: (id, options) => {
       if (id === partialId) {
         return Effect.fail(
@@ -335,6 +336,10 @@ it("deletes a Squadron, passes force through, and reports 409 with the blocker w
 
     const missing = await remove("squadron:missing");
     assert.equal(missing.status, 404);
+
+    const preview = await handler(new Request(itemUrl(squadronId, "delete-preview")));
+    assert.equal(preview.status, 200);
+    assert.deepStrictEqual(await preview.json(), { threadCount: 3 });
 
     const partial = await remove(partialId, { force: true });
     assert.equal(partial.status, 500);

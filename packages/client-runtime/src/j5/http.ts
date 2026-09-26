@@ -24,6 +24,7 @@ import {
   CrewArchiveResponse,
   CrewStopResponse,
   DeleteSquadronResponse,
+  SquadronDeletePreviewResponse,
   FleetResponse,
   HumanInboxResponse,
   J5_API_PATHS,
@@ -227,6 +228,18 @@ export const deleteSquadron = Effect.fn("j5.http.deleteSquadron")(function* (
   ).pipe(HttpClientRequest.bodyJson({ force: input.force === true }));
   const response = yield* executeJ5Request(prepared, request, SQUADRON_DELETE_TIMEOUT_MS);
   yield* HttpClientResponse.schemaBodyJson(DeleteSquadronResponse)(response);
+});
+
+export const previewSquadronDelete = Effect.fn("j5.http.previewSquadronDelete")(function* (
+  prepared: PreparedConnection,
+  input: { readonly squadronId: string },
+) {
+  const response = yield* executeJ5Request(
+    prepared,
+    HttpClientRequest.get(j5SquadronActionPath(input.squadronId, "delete-preview")),
+    READ_TIMEOUT_MS,
+  );
+  return yield* HttpClientResponse.schemaBodyJson(SquadronDeletePreviewResponse)(response);
 });
 
 export const assignImportedThreads = Effect.fn("j5.http.assignImportedThreads")(function* (
