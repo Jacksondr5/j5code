@@ -1,6 +1,6 @@
-# Migrating a J5 server to release archives (0.0.42 → 0.0.43+)
+# Migrating a J5 server to release archives (0.0.43 → 0.0.44+)
 
-Run this once on each machine where J5 Code 0.0.42 or earlier was installed from
+Run this once on each machine where J5 Code 0.0.43 or earlier was installed from
 npm (`@jacksondr5/j5code`). It is written so an agent can follow it step by
 step. Stop and ask the owner wherever it says to.
 
@@ -20,9 +20,10 @@ step. Stop and ask the owner wherever it says to.
   copies `state.sqlite` to `statev2.sqlite` and uses the copy from then on. Work
   done after the upgrade exists only in `statev2.sqlite`.
 - **Updating from the app:** the app shows **Update server** when its version is
-  newer than the server's. That button cannot move an npm-installed 0.0.42
-  server to a release archive: the old server only knows how to update itself
-  from npm, and 0.0.43 is not published there, so it reports a failure. Run the
+  newer than the server's. That button cannot move an npm-installed server
+  (0.0.43 or earlier) to a release archive: the old server only knows how to
+  update itself from npm, and J5 stopped publishing there after 0.0.43, so it
+  reports a failure. Run the
   steps below on the server machine once instead. After this migration,
   **Update server** and `j5 update` work again.
 
@@ -102,7 +103,7 @@ step. Stop and ask the owner wherever it says to.
 
 ```sh
 curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh | sh
-~/.local/bin/j5 --version    # prints "j5 v0.0.43" or later
+~/.local/bin/j5 --version    # prints "j5 v0.0.44" or later
 ```
 
 The installer unpacks the release into `~/.j5code/runtime/versions/<version>/`
@@ -179,10 +180,10 @@ old unit was recreated), and step 1 showed the unit is J5's, run
 ## 6. Report the upgrade (final step)
 
 J5 still carries the code that upgrades databases from the August and September
-2026 builds. It stays only until every J5 install has started once on 0.0.43 or
+2026 builds. It stays only until every J5 install has started once on 0.0.44 or
 later, and this report is how we know.
 
-After the first successful start on 0.0.43 or later (step 5 passed), comment on
+After the first successful start on 0.0.44 or later (step 5 passed), comment on
 [Jacksondr5/j5code#275](https://github.com/Jacksondr5/j5code/issues/275) with
 the machine or owner name and the version, for example:
 
@@ -201,7 +202,7 @@ Keep the old files until you are sure you will not roll back.
 - `~/.j5code/runtime/service-launcher.mjs` (the old launcher).
 - Old npm runtimes: directories in `~/.j5code/runtime/versions/` that contain
   `node_modules/@jacksondr5/j5code` and no `t3` program at their top level
-  (versions 0.0.42 and earlier). Keep every directory that has a `t3` program.
+  (versions 0.0.43 and earlier). Keep every directory that has a `t3` program.
 - `~/j5-migration-backup/` once you no longer need a rollback.
 - **Keep** `~/.j5code/userdata/state.sqlite`: it is the database as it was before
   the upgrade.

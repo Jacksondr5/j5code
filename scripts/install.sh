@@ -197,7 +197,7 @@ else
   fetch_status=0
   fetch "${base_url}/v${version}/SHA256SUMS" "${staging}/SHA256SUMS" || fetch_status=$?
   if [ "$fetch_status" -eq 44 ]; then
-    fail "j5 ${version} has no release archive for ${platform}-${arch}; J5 releases before 0.0.43 were published to npm as @jacksondr5/j5code"
+    fail "j5 ${version} has no release archive for ${platform}-${arch}; J5 releases 0.0.43 and earlier were published to npm as @jacksondr5/j5code"
   elif [ "$fetch_status" -ne 0 ]; then
     fail "could not download the release checksums"
   fi
