@@ -29,6 +29,8 @@ The J5 vocabulary, in one place, so that a name used anywhere in these docs reso
 | placement           | Where an agent sits in the display tree                                                            | [features/squadron.md](features/squadron.md)                 |
 | provenance          | The recorded fact of how an agent came to exist — spawned by whom, forked from what, or unrecorded | [features/squadron.md](features/squadron.md)                 |
 | **Shared Squadron** | Several people sharing one Squadron on one server                                                  | [features/shared-squadrons.md](features/shared-squadrons.md) |
+| upstream            | T3 Code, the product J5 is a fork of, and the people who build it                                  | [upstream.md](upstream.md)                                   |
+| divergence          | A place where J5 makes upstream's product behave differently                                       | [upstream.md](upstream.md)                                   |
 
 ## Agents
 

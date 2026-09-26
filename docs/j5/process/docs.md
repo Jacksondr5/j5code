@@ -39,7 +39,7 @@ Every feature definition has the same sections, in this order:
 
 Scenarios use one shared example fleet so a reader recognizes it from doc to doc, and never a real project: Squadrons **Billing Migration**, **Website Redesign**, and **L2 Support Rotation** (a non-development Squadron); repositories **the app repository** and **the infrastructure repository**; the person is simply **the user**.
 
-Core definitions (`principles.md`, `problems.md`, `glossary.md`, `use-cases.md`, `fleet-vision.md`, `cross-device.md`) keep their own shapes but follow the same rule: rewritten, never appended; cited by name.
+Core definitions (`overview.md`, `upstream.md`, `principles.md`, `problems.md`, `glossary.md`, `use-cases.md`, `fleet-vision.md`, `cross-device.md`) keep their own shapes but follow the same rule: rewritten, never appended; cited by name.
 
 **Who edits definitions.** Anyone may propose a change — in a record, an issue, or a PR — but a definition is changed only through a reviewed docs PR that Product has checked against the other definitions and the principles. This is what keeps definitions from contradicting each other: a decision written down in a session is a proposal until the definition carries it.
 

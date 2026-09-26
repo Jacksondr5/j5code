@@ -9,8 +9,9 @@ Durable, non-obvious facts about this repository and its tooling, plus the rules
 code itself. Each entry earned its place by producing a wrong conclusion, a broken CI run, or a
 rebase tax at least once. The test for what belongs here: **is it a fact about the codebase?**
 How the fleet or its operator works — gates, evidence, staffing, personal preferences — is
-deliberately not here; that lives in the operator's playbooks outside the repo. Nothing here goes
-into upstream-owned files (`CLAUDE.md`, `README.md`): J5 guidance lives only under `docs/j5/`.
+deliberately not here; that lives in the operator's playbooks outside the repo. J5 guidance lives
+under `docs/j5/` and in `AGENTS.md`, which J5 owns outright (see FORK.md); it never goes into other
+upstream-owned files such as `README.md`.
 
 ## Contributor rules — what governs the code
 
@@ -26,6 +27,8 @@ One line each, with the why.
   only as the integration cases enumerated in [`FORK.md`](../../../FORK.md)** ("Add, don't modify").
   Every edit to an upstream-owned file is a permanent rebase-conflict tax against upstream; the
   fork's discipline is add-beside, and the sanctioned exceptions are listed there, not improvised.
+  The case is recorded in the same PR as the edit. Changing what upstream's _product_ does is a
+  separate, larger question that the person decides ([J5 and upstream](../product/upstream.md)).
 - **UI copy capitalization follows upstream's measured convention** (Jackson, 2026-09-01).
   Capitalization and copy style for labels, menus, and options are determined by measuring
   comparable upstream surfaces, never assumed — a codebase-consistency fact, not taste.
