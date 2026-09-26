@@ -58,6 +58,11 @@ Two different things share the word "handoff". J5 docs call upstream's history t
 - **J5:** Playbooks are step tracking for agent-led work: a workspace library of definitions, persisted runs that agents advance through MCP tools, progress and run history on web and mobile. They carry no scheduling, git, or worktree behavior of their own.
 - **Watch for:** upstream workflows or multi-step automations with durable progress, which would overlap Playbooks; and scheduled tasks that bind to a Squadron (#273).
 
+## Known upstream gaps we don't fix
+
+- **Codex background commands survive archive and delete.** When a Codex turn ends with a command still running in the background, archiving or deleting the thread leaves that process alive under the shared app-server, and it can hold the session open past its idle timeout. `ProviderSessionManager.detach` interrupts only turns marked `running`, without `requestRuntimeRestart`, so the Codex adapter never calls `thread/backgroundTerminals/terminate`; only the composer's Stop button does. Squadron delete inherits this through `thread.delete`. Checked 2026-09-26; the maintainer chose to wait for upstream.
+- **Watch for:** a change to `detach` or to archive/delete cleanup that terminates retained background work. Nothing on the J5 side needs to change when it lands.
+
 ## Give-back
 
 Fixes J5 carries that belong upstream are tracked in #276. Offer them once V2 merges upstream.
