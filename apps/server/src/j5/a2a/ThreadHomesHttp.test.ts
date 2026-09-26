@@ -13,6 +13,7 @@ import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
 import { AgentCrewProposalService } from "./AgentCrewProposalService.ts";
 import { CrewProposalService } from "./CrewProposalService.ts";
 import { ArchiveCrewService } from "./ArchiveCrewService.ts";
+import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
 import { ArchiveAgentService } from "./ArchiveAgentService.ts";
 import { CrewStopService } from "./CrewStopService.ts";
 import { ParticipantPlacementService } from "./PlacementService.ts";
@@ -129,6 +130,7 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
           Layer.mock(CrewStopService)({}),
           Layer.mock(ArchiveCrewService)({}),
           Layer.mock(ArchiveAgentService)({}),
+          Layer.mock(ThreadLifecycleService)({}),
           Layer.mock(ParticipantPlacementService)({}),
         ),
       ),

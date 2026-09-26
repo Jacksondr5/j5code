@@ -79,7 +79,7 @@ export const operationFailure = (error: unknown) => {
       ? String(error._tag)
       : "SquadronOperationError";
   const message = error instanceof Error ? error.message : "Squadron operation failed.";
-  // A forced delete archives agents first; one that stops partway keeps what it archived.
+  // A forced delete archives agents before deleting their threads; retrying resumes the rest.
   if (tag === "ArchiveAgentPartialFailureError" || tag === "ArchiveCrewPartialFailureError") {
     return Effect.logError("J5 Squadron delete stopped while archiving", { cause: error }).pipe(
       Effect.as(
@@ -87,7 +87,7 @@ export const operationFailure = (error: unknown) => {
           {
             error: tag,
             message:
-              "Archiving the Squadron's agents stopped partway; the ones already archived stay archived. Try again.",
+              "Deleting the Squadron stopped partway while stopping its agents. Try again to finish.",
           },
           { status: 500 },
         ),

@@ -78,7 +78,7 @@ export const isJ5UnsupportedError = (error: unknown): boolean =>
 
 const READ_TIMEOUT_MS = 10_000;
 const WRITE_TIMEOUT_MS = 15_000;
-// A forced Squadron delete archives each live agent in turn, about 160ms apiece.
+// A forced Squadron delete archives and then deletes each agent in turn, well over 100ms apiece.
 const SQUADRON_DELETE_TIMEOUT_MS = 120_000;
 
 export const readPlaybookLibrary = Effect.fn("j5.http.readPlaybookLibrary")(function* (

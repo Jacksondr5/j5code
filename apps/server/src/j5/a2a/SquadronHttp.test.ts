@@ -346,7 +346,7 @@ it("deletes a Squadron, passes force through, and reports 409 with the blocker w
     assert.deepStrictEqual(await partial.json(), {
       error: "ArchiveCrewPartialFailureError",
       message:
-        "Archiving the Squadron's agents stopped partway; the ones already archived stay archived. Try again.",
+        "Deleting the Squadron stopped partway while stopping its agents. Try again to finish.",
     });
   } finally {
     await dispose();

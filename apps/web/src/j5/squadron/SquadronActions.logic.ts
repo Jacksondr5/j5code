@@ -80,7 +80,7 @@ export type SquadronDeleteFailure =
 
 /**
  * A forced delete can still be refused with 409 when an agent joins while the others are being
- * archived; the server's message names what blocks it and is shown verbatim.
+ * deleted; the server's message names what blocks it and is shown verbatim.
  */
 export const describeSquadronDeleteFailure = (error: unknown): SquadronDeleteFailure => {
   if (error instanceof Error) {

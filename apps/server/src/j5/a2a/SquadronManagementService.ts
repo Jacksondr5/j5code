@@ -9,6 +9,12 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import * as ProjectService from "../../project/ProjectService.ts";
+import type { OrchestratorV2Error } from "../../orchestration-v2/Orchestrator.ts";
+import {
+  ThreadLifecycleService,
+  type ThreadLifecycleError,
+} from "../../orchestration-v2/ThreadLifecycleService.ts";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { randomUuidV4 } from "../../orchestration-v2/RandomUuid.ts";
 import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
 import { ArchiveAgentService, type ArchiveAgentError } from "./ArchiveAgentService.ts";
@@ -20,6 +26,7 @@ import {
 } from "./SquadronProjectReferences.ts";
 import { ParticipantId, SquadronId, type Squadron } from "./contracts.ts";
 import { crewSeatRequestKey, lifecycleCommandId } from "./spawnIds.ts";
+import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 
 export interface ManagedSquadron {
   readonly squadron: Squadron;
@@ -116,7 +123,9 @@ export type SquadronManagementError =
   | SquadronProjectNotFoundError
   | SquadronDeleteBlockedError
   | ArchiveAgentError
-  | ArchiveCrewError;
+  | ArchiveCrewError
+  | OrchestratorV2Error
+  | ThreadLifecycleError;
 
 export interface SquadronManagementServiceShape {
   readonly list: () => Effect.Effect<ReadonlyArray<ManagedSquadron>, SquadronManagementError>;
@@ -127,8 +136,8 @@ export interface SquadronManagementServiceShape {
     input: RenameSquadronInput,
   ) => Effect.Effect<ManagedSquadron, SquadronManagementError>;
   /**
-   * Refuses while live agents or Crews remain. With `force`, archives them first (stopping their
-   * running turns), the way upstream's forced project delete removes the project's threads.
+   * Refuses while live agents or Crews remain. With `force`, deletes every thread that ever joined
+   * the Squadron first, the way upstream's forced project delete removes the project's threads.
    */
   readonly delete: (
     squadronId: SquadronId,
@@ -155,6 +164,8 @@ export const layer: Layer.Layer<
   | ProjectService.ProjectService
   | SquadronProjectReferences
   | SqlClient.SqlClient
+  | ThreadLifecycleService
+  | ThreadManagementService
 > = Layer.effect(
   SquadronManagementService,
   Effect.gen(function* () {
@@ -165,6 +176,8 @@ export const layer: Layer.Layer<
     const crewInstances = yield* AgentCrewInstanceService;
     const archiveAgents = yield* ArchiveAgentService;
     const archiveCrews = yield* ArchiveCrewService;
+    const threadLifecycle = yield* ThreadLifecycleService;
+    const threadManagement = yield* ThreadManagementService;
 
     const list = Effect.fn("j5.a2a.squadronManagement.list")(function* () {
       const squadrons = yield* ledger.listSquadrons();
@@ -298,11 +311,40 @@ export const layer: Layer.Layer<
       }
     });
 
+    // Every thread whose agent joined here, live, archived, or retired: the Squadron is their only
+    // home, so none of them is reachable once it goes. Command ids are stable per thread, so a
+    // retry after a partial run replays the deletions already committed.
+    const deleteThreads = Effect.fn("j5.a2a.squadronManagement.deleteThreads")(function* (
+      squadronId: SquadronId,
+    ) {
+      const rows = yield* sql<{ readonly thread_id: string }>`
+        SELECT DISTINCT json_extract(payload, '$.participant.threadId') AS thread_id
+        FROM j5_a2a_comm_event
+        WHERE squadron_id = ${squadronId} AND kind = 'participant.joined'
+          AND json_extract(payload, '$.participant.kind') = 'agent'
+      `;
+      for (const row of rows) {
+        const threadId = ThreadId.make(row.thread_id);
+        const projection = yield* getThreadProjectionIfPresent(threadManagement, threadId);
+        if (projection === null || projection.thread.deletedAt !== null) continue;
+        yield* threadLifecycle.delete({
+          commandId: lifecycleCommandId({
+            providerSessionId: SQUADRON_DELETE_SESSION,
+            requestKey: `${squadronId}:${threadId}`,
+            operation: "delete-squadron-thread",
+          }),
+          threadId,
+        });
+      }
+    });
+
     // Hard delete in one transaction. Live agents or unarchived Crews refuse
     // with a named blocker; otherwise history and derived rows are purged and
     // threads that were homed here read as unknown-home afterwards. A forced
-    // delete archives them first, outside the transaction because archive runs
-    // orchestration commands; anything that joins meanwhile still refuses.
+    // delete first archives the live members, which closes their Exchanges
+    // (including ones other Squadrons own) before the home disappears, then
+    // deletes their threads. Both run orchestration commands, so they sit
+    // outside the transaction; anything that joins meanwhile still refuses.
     const remove = Effect.fn("j5.a2a.squadronManagement.delete")(function* (
       squadronId: SquadronId,
       options?: { readonly force?: boolean },
@@ -310,6 +352,7 @@ export const layer: Layer.Layer<
       if (options?.force === true) {
         yield* ledger.readSquadron(squadronId);
         yield* archiveLiveMembers(squadronId);
+        yield* deleteThreads(squadronId);
       }
       yield* sql.withTransaction(
         Effect.gen(function* () {

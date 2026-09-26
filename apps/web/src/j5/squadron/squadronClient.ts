@@ -54,7 +54,7 @@ export async function assignImportedThreads(
   return result.value;
 }
 
-/** Hard delete. Without `force` the server answers 409 while live agents or Crews remain; with it, it archives them first. */
+/** Hard delete. Without `force` the server answers 409 while live agents or Crews remain; with it, their threads are deleted too. */
 export async function deleteSquadron(
   environmentId: EnvironmentId,
   input: { readonly squadronId: string; readonly force?: boolean },

@@ -7,6 +7,8 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as ProjectService from "../../project/ProjectService.ts";
+import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
 import {
   AgentCrewInstanceService,
@@ -89,7 +91,24 @@ const archiveAgents = Layer.effect(
     });
   }),
 ).pipe(Layer.provide(ledger));
+const deletedThreads: Array<string> = [];
+const alreadyDeleted = new Set<string>();
+const threadLifecycle = Layer.mock(ThreadLifecycleService)({
+  delete: (input) =>
+    Effect.sync(() => {
+      deletedThreads.push(input.threadId);
+      return { thread: {} } as never;
+    }),
+});
+const threadManagement = Layer.mock(ThreadManagementService)({
+  getThreadProjection: (threadId) =>
+    Effect.succeed({
+      thread: { id: threadId, deletedAt: alreadyDeleted.has(threadId) ? timestamp : null },
+    } as never),
+});
 const management = squadronManagementServiceLayer.pipe(
+  Layer.provide(threadLifecycle),
+  Layer.provide(threadManagement),
   Layer.provide(archiveCrews),
   Layer.provide(archiveAgents),
   Layer.provide(crewInstances),
@@ -155,7 +174,7 @@ const agentFor = (squadronId: SquadronId, index: number) => ({
 const appendMembership = (
   squadronId: SquadronId,
   index: number,
-  kind: "participant.joined" | "participant.archived",
+  kind: "participant.joined" | "participant.archived" | "participant.deleted",
 ) =>
   Effect.gen(function* () {
     const ledger = yield* A2ALedger;
@@ -334,25 +353,31 @@ it.effect("refuses to delete a Squadron that still has an active agent or an una
   }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("a forced delete archives the Crews, then every agent member, then deletes", () =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    yield* sql`PRAGMA foreign_keys = ON`;
-    yield* runJ5A2AMigrations();
-    archiveCalls.length = 0;
-    const service = yield* SquadronManagementService;
-    const staffed = yield* service.create({ name: "Staffed", projectId });
-    const kept = yield* service.create({ name: "Kept", projectId });
-    yield* joinAgent(staffed.squadron.id, 1);
-    yield* joinAgent(staffed.squadron.id, 2);
-    yield* appendMembership(staffed.squadron.id, 2, "participant.archived");
-    yield* joinAgent(kept.squadron.id, 1);
-    for (const [id, squadronId, archivedAt] of [
-      ["crew:live", staffed.squadron.id, null],
-      ["crew:retired", staffed.squadron.id, timestamp],
-      ["crew:elsewhere", kept.squadron.id, null],
-    ] as const) {
-      yield* sql`
+it.effect(
+  "a forced delete archives the members, deletes every thread that joined, then the Squadron",
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`PRAGMA foreign_keys = ON`;
+      yield* runJ5A2AMigrations();
+      archiveCalls.length = 0;
+      deletedThreads.length = 0;
+      const service = yield* SquadronManagementService;
+      const staffed = yield* service.create({ name: "Staffed", projectId });
+      const kept = yield* service.create({ name: "Kept", projectId });
+      yield* joinAgent(staffed.squadron.id, 1);
+      yield* joinAgent(staffed.squadron.id, 2);
+      yield* appendMembership(staffed.squadron.id, 2, "participant.archived");
+      yield* joinAgent(staffed.squadron.id, 3);
+      yield* appendMembership(staffed.squadron.id, 3, "participant.deleted");
+      alreadyDeleted.add(agentFor(staffed.squadron.id, 3).threadId);
+      yield* joinAgent(kept.squadron.id, 1);
+      for (const [id, squadronId, archivedAt] of [
+        ["crew:live", staffed.squadron.id, null],
+        ["crew:retired", staffed.squadron.id, timestamp],
+        ["crew:elsewhere", kept.squadron.id, null],
+      ] as const) {
+        yield* sql`
         INSERT INTO j5_agent_crew_instance (
           id, squadron_id, captain_participant_id, captain_thread_id, display_name, brief, version,
           created_at, archived_at
@@ -361,21 +386,26 @@ it.effect("a forced delete archives the Crews, then every agent member, then del
           ${timestamp}, ${archivedAt}
         )
       `;
-    }
+      }
 
-    yield* service.delete(staffed.squadron.id, { force: true });
+      yield* service.delete(staffed.squadron.id, { force: true });
 
-    // The archived member goes through again: a half-finished archive already reads as archived.
-    assert.deepStrictEqual(archiveCalls, [
-      "crew:crew:live",
-      `agent:${agentFor(staffed.squadron.id, 1).id}`,
-      `agent:${agentFor(staffed.squadron.id, 2).id}`,
-    ]);
-    assert.deepStrictEqual(
-      (yield* service.list()).map(({ squadron }) => squadron.id),
-      [kept.squadron.id],
-    );
-    assert.equal(yield* countWhere("j5_agent_crew_instance", kept.squadron.id), 1);
-    assert.equal(yield* countWhere("j5_a2a_squadron_membership", kept.squadron.id), 1);
-  }).pipe(Effect.provide(testLayer)),
+      // The archived member goes through again: a half-finished archive already reads as archived.
+      assert.deepStrictEqual(archiveCalls, [
+        "crew:crew:live",
+        `agent:${agentFor(staffed.squadron.id, 1).id}`,
+        `agent:${agentFor(staffed.squadron.id, 2).id}`,
+      ]);
+      // Archived members' threads go too; an already deleted one is passed by.
+      assert.deepStrictEqual(deletedThreads.sort(), [
+        agentFor(staffed.squadron.id, 1).threadId,
+        agentFor(staffed.squadron.id, 2).threadId,
+      ]);
+      assert.deepStrictEqual(
+        (yield* service.list()).map(({ squadron }) => squadron.id),
+        [kept.squadron.id],
+      );
+      assert.equal(yield* countWhere("j5_agent_crew_instance", kept.squadron.id), 1);
+      assert.equal(yield* countWhere("j5_a2a_squadron_membership", kept.squadron.id), 1);
+    }).pipe(Effect.provide(testLayer)),
 );

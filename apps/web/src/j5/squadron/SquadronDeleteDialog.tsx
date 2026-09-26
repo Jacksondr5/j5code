@@ -61,10 +61,9 @@ export function SquadronDeleteDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Delete “{target.name}”?</AlertDialogTitle>
           <AlertDialogDescription>
-            Its active agents and Crews are archived first, which stops any running turns. Agents
-            that called this Squadron home keep their threads, but their thread labels lose their
-            Squadron home and appear only under All Squadrons. The Squadron’s message history is
-            deleted with it. This cannot be undone.
+            This permanently deletes every agent thread in this Squadron, including archived ones
+            and Crew seats, and stops any running work. The Squadron’s message history is deleted
+            with it. Files on disk are not touched. This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         {failure !== null ? (
@@ -76,7 +75,7 @@ export function SquadronDeleteDialog({
           <AlertDialogClose disabled={submitting} render={<Button variant="outline" />}>
             Cancel
           </AlertDialogClose>
-          {/* A failure stays retryable: archiving is idempotent and the server re-checks. */}
+          {/* A failure stays retryable: the server resumes where a partial delete stopped. */}
           <Button disabled={submitting} variant="destructive" onClick={() => void confirm()}>
             {submitting ? "Deleting…" : "Delete Squadron"}
           </Button>
