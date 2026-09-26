@@ -7,7 +7,10 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as ProjectService from "../../project/ProjectService.ts";
-import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
+import {
+  ThreadLifecycleError,
+  ThreadLifecycleService,
+} from "../../orchestration-v2/ThreadLifecycleService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
 import {
@@ -53,14 +56,19 @@ const archiveCrews = Layer.effect(
     });
   }),
 ).pipe(Layer.provide(crewInstances));
+// Runs once inside the next agent archive, standing in for work another client does meanwhile.
+let duringAgentArchive: Effect.Effect<void, never, A2ALedger> | null = null;
 const archiveAgents = Layer.effect(
   ArchiveAgentService,
   Effect.gen(function* () {
     const a2aLedger = yield* A2ALedger;
     return ArchiveAgentService.of({
       archive: (input) =>
-        a2aLedger
-          .append({
+        Effect.gen(function* () {
+          const hook = duringAgentArchive;
+          duringAgentArchive = null;
+          if (hook !== null) yield* hook;
+          yield* a2aLedger.append({
             commandId: CommCommandId.make(`command:archive:${input.target.participantId}`),
             squadronId: input.target.squadronId,
             acceptedAt: input.archivedAt,
@@ -79,25 +87,35 @@ const archiveAgents = Layer.effect(
               },
               createdAt: input.archivedAt,
             },
-          })
-          .pipe(
-            Effect.tap(() =>
-              Effect.sync(() => archiveCalls.push(`agent:${input.target.participantId}`)),
-            ),
-            Effect.as("archived" as const),
-            Effect.orDie,
-          ),
+          });
+          archiveCalls.push(`agent:${input.target.participantId}`);
+          return "archived" as const;
+        }).pipe(Effect.provideService(A2ALedger, a2aLedger), Effect.orDie),
       readFacts: () => Effect.die("not reached"),
     });
   }),
 ).pipe(Layer.provide(ledger));
 const deletedThreads: Array<string> = [];
+const deleteCommandIds: Array<string> = [];
 const alreadyDeleted = new Set<string>();
+let failNextDelete = false;
 const threadLifecycle = Layer.mock(ThreadLifecycleService)({
   delete: (input) =>
-    Effect.sync(() => {
+    Effect.suspend(() => {
+      deleteCommandIds.push(input.commandId);
+      if (failNextDelete) {
+        failNextDelete = false;
+        return Effect.fail(
+          new ThreadLifecycleError({
+            operation: "delete",
+            threadId: input.threadId,
+            cause: "transient delete failure",
+          }),
+        );
+      }
       deletedThreads.push(input.threadId);
-      return { thread: {} } as never;
+      alreadyDeleted.add(input.threadId);
+      return Effect.succeed({ thread: {} } as never);
     }),
 });
 const threadManagement = Layer.mock(ThreadManagementService)({
@@ -408,4 +426,51 @@ it.effect(
       assert.equal(yield* countWhere("j5_agent_crew_instance", kept.squadron.id), 1);
       assert.equal(yield* countWhere("j5_a2a_squadron_membership", kept.squadron.id), 1);
     }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a forced delete refuses when an agent joins meanwhile, and a retry deletes it too", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`PRAGMA foreign_keys = ON`;
+    yield* runJ5A2AMigrations();
+    deletedThreads.length = 0;
+    const service = yield* SquadronManagementService;
+    const busy = yield* service.create({ name: "Busy", projectId });
+    yield* joinAgent(busy.squadron.id, 1);
+    duringAgentArchive = joinAgent(busy.squadron.id, 2).pipe(Effect.orDie);
+
+    const refused = yield* Effect.flip(service.delete(busy.squadron.id, { force: true }));
+    assert.equal(refused._tag, "SquadronDeleteBlockedError");
+    assert.deepStrictEqual(deletedThreads, [agentFor(busy.squadron.id, 1).threadId]);
+
+    yield* service.delete(busy.squadron.id, { force: true });
+    assert.deepStrictEqual(deletedThreads, [
+      agentFor(busy.squadron.id, 1).threadId,
+      agentFor(busy.squadron.id, 2).threadId,
+    ]);
+    assert.deepStrictEqual(yield* service.list(), []);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a retry after a failed thread delete uses fresh command ids and finishes", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`PRAGMA foreign_keys = ON`;
+    yield* runJ5A2AMigrations();
+    deleteCommandIds.length = 0;
+    const service = yield* SquadronManagementService;
+    const flaky = yield* service.create({ name: "Flaky", projectId });
+    yield* joinAgent(flaky.squadron.id, 1);
+    failNextDelete = true;
+
+    const failed = yield* Effect.flip(service.delete(flaky.squadron.id, { force: true }));
+    assert.equal(failed._tag, "SquadronDeleteIncompleteError");
+    assert.equal((yield* service.list()).length, 1);
+
+    yield* service.delete(flaky.squadron.id, { force: true });
+    // The orchestrator keeps a rejected command id rejected, so the retry must not reuse it.
+    assert.equal(deleteCommandIds.length, 2);
+    assert.notEqual(deleteCommandIds[0], deleteCommandIds[1]);
+    assert.deepStrictEqual(yield* service.list(), []);
+  }).pipe(Effect.provide(testLayer)),
 );

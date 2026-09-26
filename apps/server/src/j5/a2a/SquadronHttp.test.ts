@@ -11,10 +11,10 @@ import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { ConnectionError, SqlError } from "effect/unstable/sql/SqlError";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
-import { ArchiveCrewPartialFailureError } from "./ArchiveCrewService.ts";
 import { SquadronNotFoundError } from "./LedgerService.ts";
 import {
   SquadronDeleteBlockedError,
+  SquadronDeleteIncompleteError,
   SquadronManagementService,
   SquadronNameRequiredError,
 } from "./SquadronManagementService.ts";
@@ -276,12 +276,7 @@ it("deletes a Squadron, passes force through, and reports 409 with the blocker w
     delete: (id, options) => {
       if (id === partialId) {
         return Effect.fail(
-          new ArchiveCrewPartialFailureError({
-            crewInstanceId: "crew:ops",
-            archivedSeats: ["builder"],
-            failedSeat: "reviewer",
-            cause: "provider unavailable",
-          }),
+          new SquadronDeleteIncompleteError({ squadronId: id, cause: "provider unavailable" }),
         );
       }
       if (id === blockedId) {
@@ -344,9 +339,8 @@ it("deletes a Squadron, passes force through, and reports 409 with the blocker w
     const partial = await remove(partialId, { force: true });
     assert.equal(partial.status, 500);
     assert.deepStrictEqual(await partial.json(), {
-      error: "ArchiveCrewPartialFailureError",
-      message:
-        "Deleting the Squadron stopped partway while stopping its agents. Try again to finish.",
+      error: "SquadronDeleteIncompleteError",
+      message: "Deleting the Squadron stopped partway. Try again to finish.",
     });
   } finally {
     await dispose();

@@ -79,19 +79,10 @@ export const operationFailure = (error: unknown) => {
       ? String(error._tag)
       : "SquadronOperationError";
   const message = error instanceof Error ? error.message : "Squadron operation failed.";
-  // A forced delete archives agents before deleting their threads; retrying resumes the rest.
-  if (tag === "ArchiveAgentPartialFailureError" || tag === "ArchiveCrewPartialFailureError") {
-    return Effect.logError("J5 Squadron delete stopped while archiving", { cause: error }).pipe(
-      Effect.as(
-        HttpServerResponse.jsonUnsafe(
-          {
-            error: tag,
-            message:
-              "Deleting the Squadron stopped partway while stopping its agents. Try again to finish.",
-          },
-          { status: 500 },
-        ),
-      ),
+  // A forced delete that stopped partway keeps what it committed; the cause stays in the log.
+  if (tag === "SquadronDeleteIncompleteError") {
+    return Effect.logError("J5 Squadron delete stopped partway", { cause: error }).pipe(
+      Effect.as(HttpServerResponse.jsonUnsafe({ error: tag, message }, { status: 500 })),
     );
   }
   const status =
@@ -102,9 +93,6 @@ export const operationFailure = (error: unknown) => {
       : tag === "A2AHomeConflictError" ||
           tag === "SquadronThreadCreationProjectReferenceError" ||
           tag === "SquadronDeleteBlockedError" ||
-          tag === "ArchiveAgentTargetMismatchError" ||
-          tag === "ArchiveCrewNotFoundError" ||
-          tag === "ArchiveCrewSquadronMismatchError" ||
           tag === "SquadronJoinProjectReferenceError"
         ? 409
         : tag === "SquadronNameRequiredError" ||
