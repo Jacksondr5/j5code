@@ -54,10 +54,10 @@ export async function assignImportedThreads(
   return result.value;
 }
 
-/** Hard delete; the server answers 409 while live members, Crews, or other rows still depend on it. */
+/** Hard delete. Without `force` the server answers 409 while live agents or Crews remain; with it, it archives them first. */
 export async function deleteSquadron(
   environmentId: EnvironmentId,
-  input: { readonly squadronId: string },
+  input: { readonly squadronId: string; readonly force?: boolean },
 ) {
   const result = await j5Environment.deleteSquadron.run(appAtomRegistry, { environmentId, input });
   if (result._tag === "Failure") throw Cause.squash(result.cause);

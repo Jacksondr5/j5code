@@ -20,6 +20,7 @@ import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
 import { AgentCrewProposalService } from "./AgentCrewProposalService.ts";
 import { CrewProposalService } from "./CrewProposalService.ts";
 import { ArchiveCrewService } from "./ArchiveCrewService.ts";
+import { ArchiveAgentService } from "./ArchiveAgentService.ts";
 import { CrewStopService } from "./CrewStopService.ts";
 import { ParticipantPlacementService } from "./PlacementService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
@@ -354,6 +355,7 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
           Layer.mock(CrewProposalService)({}),
           Layer.mock(CrewStopService)({}),
           Layer.mock(ArchiveCrewService)({}),
+          Layer.mock(ArchiveAgentService)({}),
           Layer.mock(ParticipantPlacementService)({}),
         ),
       ),

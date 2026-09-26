@@ -79,8 +79,8 @@ export type SquadronDeleteFailure =
   | { readonly kind: "failed"; readonly message: string };
 
 /**
- * The server refuses with 409 when live members, Crews, or other rows still depend on the
- * Squadron; its message names what blocks the deletion and is shown verbatim.
+ * A forced delete can still be refused with 409 when an agent joins while the others are being
+ * archived; the server's message names what blocks it and is shown verbatim.
  */
 export const describeSquadronDeleteFailure = (error: unknown): SquadronDeleteFailure => {
   if (error instanceof Error) {

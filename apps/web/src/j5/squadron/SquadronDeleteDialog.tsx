@@ -35,7 +35,7 @@ export function SquadronDeleteDialog({
     setSubmitting(true);
     setFailure(null);
     try {
-      await deleteSquadron(target.environmentId, { squadronId: target.id });
+      await deleteSquadron(target.environmentId, { squadronId: target.id, force: true });
       forgetDeletedSquadron({ environmentId: target.environmentId, squadronId: target.id });
       await refreshAfterSquadronChange(target.environmentId);
       onOpenChange(false);
@@ -61,10 +61,10 @@ export function SquadronDeleteDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Delete “{target.name}”?</AlertDialogTitle>
           <AlertDialogDescription>
-            Agents that called this Squadron home keep their threads, but their thread labels lose
-            their Squadron home and appear only under All Squadrons. The Squadron’s message history
-            is deleted with it. A Squadron with unarchived agents or Crews cannot be deleted;
-            archive them first. This cannot be undone.
+            Its active agents and Crews are archived first, which stops any running turns. Agents
+            that called this Squadron home keep their threads, but their thread labels lose their
+            Squadron home and appear only under All Squadrons. The Squadron’s message history is
+            deleted with it. This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         {failure !== null ? (
@@ -76,7 +76,7 @@ export function SquadronDeleteDialog({
           <AlertDialogClose disabled={submitting} render={<Button variant="outline" />}>
             Cancel
           </AlertDialogClose>
-          {/* A refusal stays retryable: the blockers may be archived elsewhere meanwhile. */}
+          {/* A failure stays retryable: archiving is idempotent and the server re-checks. */}
           <Button disabled={submitting} variant="destructive" onClick={() => void confirm()}>
             {submitting ? "Deleting…" : "Delete Squadron"}
           </Button>

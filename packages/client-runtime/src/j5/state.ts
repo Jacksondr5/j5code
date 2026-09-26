@@ -177,7 +177,7 @@ export function createJ5EnvironmentAtoms<R, E>(
     }),
     deleteSquadron: createEnvironmentCommand(runtime, {
       label: "j5:delete-squadron",
-      execute: (input: { readonly squadronId: string }) =>
+      execute: (input: { readonly squadronId: string; readonly force?: boolean }) =>
         preparedConnection.pipe(
           Effect.flatMap((prepared) => J5Http.deleteSquadron(prepared, input)),
         ),

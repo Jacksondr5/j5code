@@ -78,6 +78,8 @@ export const isJ5UnsupportedError = (error: unknown): boolean =>
 
 const READ_TIMEOUT_MS = 10_000;
 const WRITE_TIMEOUT_MS = 15_000;
+// A forced Squadron delete archives each live agent in turn, about 160ms apiece.
+const SQUADRON_DELETE_TIMEOUT_MS = 120_000;
 
 export const readPlaybookLibrary = Effect.fn("j5.http.readPlaybookLibrary")(function* (
   prepared: PreparedConnection,
@@ -218,13 +220,12 @@ export const renameSquadron = Effect.fn("j5.http.renameSquadron")(function* (
 
 export const deleteSquadron = Effect.fn("j5.http.deleteSquadron")(function* (
   prepared: PreparedConnection,
-  input: { readonly squadronId: string },
+  input: { readonly squadronId: string; readonly force?: boolean },
 ) {
-  const response = yield* executeJ5Request(
-    prepared,
-    HttpClientRequest.post(j5SquadronActionPath(input.squadronId, "delete")),
-    WRITE_TIMEOUT_MS,
-  );
+  const request = yield* HttpClientRequest.post(
+    j5SquadronActionPath(input.squadronId, "delete"),
+  ).pipe(HttpClientRequest.bodyJson({ force: input.force === true }));
+  const response = yield* executeJ5Request(prepared, request, SQUADRON_DELETE_TIMEOUT_MS);
   yield* HttpClientResponse.schemaBodyJson(DeleteSquadronResponse)(response);
 });
 

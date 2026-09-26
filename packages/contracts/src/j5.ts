@@ -25,6 +25,8 @@ export const CreateSquadronRequest = Schema.Struct({ name: Schema.String, projec
 export const CreateSquadronResponse = Schema.Struct({ squadron: ManagedSquadron });
 export const RenameSquadronRequest = Schema.Struct({ name: Schema.String });
 export const RenameSquadronResponse = Schema.Struct({ squadron: ManagedSquadron });
+/** `force` archives the Squadron's live agents and Crews first instead of refusing. */
+export const DeleteSquadronRequest = Schema.Struct({ force: Schema.optional(Schema.Boolean) });
 export const DeleteSquadronResponse = Schema.Struct({
   deleted: Schema.Literal(true),
   squadronId: Schema.String,

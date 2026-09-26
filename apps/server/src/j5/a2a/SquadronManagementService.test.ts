@@ -8,6 +8,12 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as ProjectService from "../../project/ProjectService.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
+import {
+  AgentCrewInstanceService,
+  layer as agentCrewInstanceLayer,
+} from "./AgentCrewInstanceService.ts";
+import { ArchiveAgentService } from "./ArchiveAgentService.ts";
+import { ArchiveCrewService } from "./ArchiveCrewService.ts";
 import { ClientReadsService, layer as clientReadsLayer } from "./ClientReadsService.ts";
 import { layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
@@ -26,7 +32,67 @@ const references = squadronProjectReferencesLayer.pipe(Layer.provide(database));
 const projects = Layer.mock(ProjectService.ProjectService)({
   getById: () => Effect.succeed(Option.some({ id: projectId } as never)),
 });
+const crewInstances = agentCrewInstanceLayer.pipe(Layer.provide(database));
+const archiveCalls: Array<string> = [];
+// The archive services are exercised in their own suites; here they only record their order and
+// leave the archived state the real ones commit.
+const archiveCrews = Layer.effect(
+  ArchiveCrewService,
+  Effect.gen(function* () {
+    const instances = yield* AgentCrewInstanceService;
+    return ArchiveCrewService.of({
+      archive: (input) =>
+        instances.markArchived(input.crewInstanceId, input.archivedAt).pipe(
+          Effect.tap(() => Effect.sync(() => archiveCalls.push(`crew:${input.crewInstanceId}`))),
+          Effect.as({ status: "archived" as const, members: [] }),
+          Effect.orDie,
+        ),
+      readCaptainFacts: () => Effect.die("not reached"),
+    });
+  }),
+).pipe(Layer.provide(crewInstances));
+const archiveAgents = Layer.effect(
+  ArchiveAgentService,
+  Effect.gen(function* () {
+    const a2aLedger = yield* A2ALedger;
+    return ArchiveAgentService.of({
+      archive: (input) =>
+        a2aLedger
+          .append({
+            commandId: CommCommandId.make(`command:archive:${input.target.participantId}`),
+            squadronId: input.target.squadronId,
+            acceptedAt: input.archivedAt,
+            event: {
+              kind: "participant.archived",
+              sender: null,
+              receiver: input.target.participantId,
+              exchangeId: null,
+              correlationId: null,
+              payload: {
+                participant: {
+                  kind: "agent",
+                  id: input.target.participantId,
+                  threadId: input.target.threadId,
+                },
+              },
+              createdAt: input.archivedAt,
+            },
+          })
+          .pipe(
+            Effect.tap(() =>
+              Effect.sync(() => archiveCalls.push(`agent:${input.target.participantId}`)),
+            ),
+            Effect.as("archived" as const),
+            Effect.orDie,
+          ),
+      readFacts: () => Effect.die("not reached"),
+    });
+  }),
+).pipe(Layer.provide(ledger));
 const management = squadronManagementServiceLayer.pipe(
+  Layer.provide(archiveCrews),
+  Layer.provide(archiveAgents),
+  Layer.provide(crewInstances),
   Layer.provide(ledger),
   Layer.provide(references),
   Layer.provide(projects),
@@ -265,5 +331,49 @@ it.effect("refuses to delete a Squadron that still has an active agent or an una
       "Staffed",
     ]);
     assert.equal(yield* countWhere("j5_a2a_comm_event", staffed.squadron.id), 2);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a forced delete archives the Crews, then the remaining agents, then deletes", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`PRAGMA foreign_keys = ON`;
+    yield* runJ5A2AMigrations();
+    archiveCalls.length = 0;
+    const service = yield* SquadronManagementService;
+    const staffed = yield* service.create({ name: "Staffed", projectId });
+    const kept = yield* service.create({ name: "Kept", projectId });
+    yield* joinAgent(staffed.squadron.id, 1);
+    yield* joinAgent(staffed.squadron.id, 2);
+    yield* appendMembership(staffed.squadron.id, 2, "participant.archived");
+    yield* joinAgent(kept.squadron.id, 1);
+    for (const [id, squadronId, archivedAt] of [
+      ["crew:live", staffed.squadron.id, null],
+      ["crew:retired", staffed.squadron.id, timestamp],
+      ["crew:elsewhere", kept.squadron.id, null],
+    ] as const) {
+      yield* sql`
+        INSERT INTO j5_agent_crew_instance (
+          id, squadron_id, captain_participant_id, captain_thread_id, display_name, brief, version,
+          created_at, archived_at
+        ) VALUES (
+          ${id}, ${squadronId}, 'agent:captain', 'thread:captain', 'Crew', 'brief', 1,
+          ${timestamp}, ${archivedAt}
+        )
+      `;
+    }
+
+    yield* service.delete(staffed.squadron.id, { force: true });
+
+    assert.deepStrictEqual(archiveCalls, [
+      "crew:crew:live",
+      `agent:${agentFor(staffed.squadron.id, 1).id}`,
+    ]);
+    assert.deepStrictEqual(
+      (yield* service.list()).map(({ squadron }) => squadron.id),
+      [kept.squadron.id],
+    );
+    assert.equal(yield* countWhere("j5_agent_crew_instance", kept.squadron.id), 1);
+    assert.equal(yield* countWhere("j5_a2a_squadron_membership", kept.squadron.id), 1);
   }).pipe(Effect.provide(testLayer)),
 );

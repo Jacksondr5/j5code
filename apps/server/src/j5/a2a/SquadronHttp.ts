@@ -1,6 +1,7 @@
 import { AuthOrchestrationOperateScope, AuthOrchestrationReadScope } from "@t3tools/contracts";
 import {
   CreateSquadronRequest,
+  DeleteSquadronRequest,
   J5_API_PATHS,
   RenameSquadronRequest,
   type SquadronListResponse,
@@ -37,6 +38,9 @@ const SQUADRON_RENAME_PATH = `${SQUADRONS_PATH}/:id/rename` as const;
 const SQUADRON_DELETE_PATH = `${SQUADRONS_PATH}/:id/delete` as const;
 const decodeCreateSquadronRequest = Schema.decodeUnknownEffect(CreateSquadronRequest);
 const decodeRenameSquadronRequest = Schema.decodeUnknownEffect(RenameSquadronRequest);
+const decodeDeleteSquadronRequest = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(DeleteSquadronRequest),
+);
 const decodeSquadronId = Schema.decodeUnknownOption(SquadronId);
 
 /** The router hands params back raw, so the client's encoded `squadron:<uuid>` is decoded here. */
@@ -201,7 +205,17 @@ export const squadronHttpRouteLayer = Layer.unwrap(
           return yield* operationFailure(new SquadronNotFoundError({ squadronId: param.raw }));
         }
         const squadronId = param.id.value;
-        const result = yield* Effect.result(management.delete(squadronId));
+        // An empty body is a plain delete, which refuses while live agents or Crews remain.
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const text = yield* Effect.result(request.text);
+        if (Result.isFailure(text)) return requestFailure("The request body could not be read.");
+        const decoded = yield* Effect.result(
+          decodeDeleteSquadronRequest(text.success.trim() === "" ? "{}" : text.success),
+        );
+        if (Result.isFailure(decoded)) return requestFailure("force must be a boolean.");
+        const result = yield* Effect.result(
+          management.delete(squadronId, { force: decoded.success.force === true }),
+        );
         if (Result.isSuccess(result)) {
           return HttpServerResponse.jsonUnsafe({
             deleted: true,
