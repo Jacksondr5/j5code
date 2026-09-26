@@ -78,6 +78,8 @@ For a public release:
    GitHub restricts release creation with the standard Actions token when the target commit is no
    longer a branch head or tag.
 3. After CI and the signed build pass, run `J5 Release` with that build's numeric run ID.
+4. After publication, bring the version bump into `j5/main` with a PR so `j5/main` never reports an
+   older version than the latest release.
 
 `J5 Release` publishes one GitHub Release, tagged `v<version>` at the build's commit, containing:
 
