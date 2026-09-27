@@ -336,6 +336,47 @@ const harnesses = [
     </div>
   </section>
 
+  <!-- ── Q&A ──────────────────────────────────────────────────── -->
+  <section id="qa" class="sec-qa" data-motion>
+    <div class="container">
+      <div class="section-head qa-head">
+        <h2 class="display">Q&amp;A</h2>
+        <span class="qa-boat" aria-hidden="true"><Boat tone="dark" size={56} class="bob" style="--bob-dur:5.8s" /></span>
+      </div>
+      <dl class="qa">
+        <div class="qa-item">
+          <dt>Why did you build this?</dt>
+          <dd>
+            We found that the existing tools were great for single agent use cases, but multi-agent
+            orchestration features were few and far between. So, we decided to fork the tool with the
+            best starting point and build the things we wanted to see.
+          </dd>
+        </div>
+        <div class="qa-item">
+          <dt>Why did you call it J5 Code?</dt>
+          <dd>
+            We wanted to make sure that you could install this alongside T3 Code and not clash with
+            your existing setup. Having a separate app, separate workspace, and separate server needed
+            a different name. "J5" is just the first and last character of the original maintainer's
+            GitHub username. Nothing special.
+          </dd>
+        </div>
+        <div class="qa-item">
+          <dt>Can I fork this and build my own thing?</dt>
+          <dd>Of course!</dd>
+        </div>
+        <div class="qa-item">
+          <dt>Will you be contributing back to T3 Code?</dt>
+          <dd>
+            If we find any bugs or small items that match their contribution guide, we will gladly
+            give back. But, they've stated they're not interested in new features, so we'll not be
+            trying to get those back in.
+          </dd>
+        </div>
+      </dl>
+    </div>
+  </section>
+
   <!-- ── CTA ──────────────────────────────────────────────────── -->
   <section id="download" class="sec-cta" data-motion>
     <div class="container cta-inner">
@@ -1050,6 +1091,48 @@ const harnesses = [
   }
 
 
+  /* ── Q&A ──────────────────────────────────────────────────── */
+  .sec-qa {
+    background: var(--navy-950);
+  }
+
+  .qa-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    max-width: none;
+    margin-bottom: 40px;
+  }
+
+  .qa-head h2 {
+    margin-bottom: 0;
+  }
+
+  .qa {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 28px 40px;
+  }
+
+  .qa-item {
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+  }
+
+  .qa-item dt {
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 500;
+    margin-bottom: 10px;
+  }
+
+  .qa-item dd {
+    color: var(--foam-muted);
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
   /* ── CTA ──────────────────────────────────────────────────── */
   .sec-cta {
     padding: 112px 0 120px;
@@ -1146,7 +1229,8 @@ const harnesses = [
     .feature-grid,
     .feature-grid--minor,
     .feature--wide,
-    .horizon-grid {
+    .horizon-grid,
+    .qa {
       grid-template-columns: 1fr;
     }
 
