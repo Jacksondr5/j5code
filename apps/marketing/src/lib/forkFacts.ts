@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 export interface ForkFacts {
   /** Short SHA of the upstream commit the fork is pinned to. */
   pin: string;
-  /** ISO date the pin was selected, from FORK.md. */
+  /** ISO date the pin was selected or frozen, from FORK.md. */
   pinSelectedOn: string | undefined;
 }
 
@@ -36,12 +36,16 @@ export function readForkFacts(): ForkFacts | undefined {
   const file = findForkFile();
   if (!file) return undefined;
 
+  // FORK.md has written this line two ways so far:
+  //   Current pin: `<sha>` (selected 2026-09-05; ...)
+  //   Current candidate pin: `<sha>`, from `<branch>` (frozen 2026-09-24).
   const text = NodeFS.readFileSync(file, "utf8");
-  const pin = /^Current pin: `([0-9a-f]{7,40})`(?: \(selected (\d{4}-\d{2}-\d{2}))?/m.exec(text);
+  const pin = /^Current (?:candidate )?pin: `([0-9a-f]{7,40})`([^\n]*)/m.exec(text);
   if (!pin?.[1]) return undefined;
+  const date = /(?:selected|frozen) (\d{4}-\d{2}-\d{2})/.exec(pin[2] ?? "");
 
   return {
     pin: pin[1].slice(0, 7),
-    pinSelectedOn: pin[2],
+    pinSelectedOn: date?.[1],
   };
 }
