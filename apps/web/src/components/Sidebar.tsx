@@ -1083,6 +1083,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   onCancelRename: () => void;
   isRenaming: boolean;
   renamingTitle: string;
+  // A thread being renamed that has no row of its own: one of the spawned children below.
+  renamingChildThreadKey: string | null;
   onContextMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => void;
   onSettle: (threadRef: ScopedThreadRef) => void;
   onUnsettle: (threadRef: ScopedThreadRef) => void;
@@ -2044,7 +2046,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         </TooltipTrigger>
         {detailsTooltip}
       </Tooltip>
-      <SpawnedChildren thread={thread} />
+      <SpawnedChildren
+        thread={thread}
+        renamingThreadKey={props.renamingChildThreadKey}
+        onContextMenu={onContextMenu}
+        onCommitRename={onCommitRename}
+        onCancelRename={onCancelRename}
+      />
     </li>
   );
 });
@@ -2793,6 +2801,9 @@ export default function Sidebar() {
   // event and defeat row memoization during streaming.
   const threadByKeyRef = useRef(threadByKey);
   threadByKeyRef.current = threadByKey;
+  // Spawned children are not listed rows; their menu reads them from every shell.
+  const threadsRef = useRef(threads);
+  threadsRef.current = threads;
   // handleNewThread is inherently unstable (depends on the projects list);
   // a ref keeps it out of attemptSettle's dependency array.
   const handleNewThreadRef = useRef(newThreadContext.handleNewThread);
@@ -2952,6 +2963,8 @@ export default function Sidebar() {
     setRenamingTitle(title);
   }, []);
   const cancelThreadRename = useCallback(() => setRenamingThreadKey(null), []);
+  const renamingChildThreadKey =
+    renamingThreadKey !== null && !threadByKey.has(renamingThreadKey) ? renamingThreadKey : null;
   const commitThreadRename = useCallback(
     (threadRef: ScopedThreadRef, title: string, originalTitle: string) => {
       void (async () => {
@@ -4043,7 +4056,13 @@ export default function Sidebar() {
           await handleMultiSelectContextMenu(position);
           return;
         }
-        const thread = threadByKeyRef.current.get(threadKey);
+        const listedThread = threadByKeyRef.current.get(threadKey);
+        const thread =
+          listedThread ??
+          threadsRef.current.find(
+            (shell) =>
+              shell.environmentId === threadRef.environmentId && shell.id === threadRef.threadId,
+          );
         if (!thread) return;
         const threadWorkspacePath =
           thread.worktreePath ??
@@ -4063,8 +4082,21 @@ export default function Sidebar() {
           serverConfigs.get(thread.environmentId)?.environment.capabilities
             .threadTitleRegeneration === true;
         const isRegeneratingTitle = thread.titleRegeneration != null;
-        const isSettled = settledThreadKeysRef.current.has(threadKey);
-        const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
+        // A spawned child has no sidebar section, so it classifies off its shell the same way.
+        const childSection = listedThread
+          ? null
+          : resolveSidebarThreadSection({
+              snoozed:
+                supportsSnooze && effectiveSnoozed(thread, { now: new Date().toISOString() }),
+              settled: supportsSettlement && thread.settledOverride === "settled",
+              pinned: thread.pinnedAt != null,
+            });
+        const isSettled = listedThread
+          ? settledThreadKeysRef.current.has(threadKey)
+          : childSection === "settled";
+        const isSnoozed = listedThread
+          ? snoozedThreadKeysRef.current.has(threadKey)
+          : childSection === "snoozed";
         const isPinned = thread.pinnedAt != null;
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
@@ -4658,6 +4690,7 @@ export default function Sidebar() {
                             onCancelRename={cancelThreadRename}
                             isRenaming={renamingThreadKey === threadKey}
                             renamingTitle={renamingThreadKey === threadKey ? renamingTitle : ""}
+                            renamingChildThreadKey={renamingChildThreadKey}
                             onContextMenu={handleThreadContextMenu}
                             onSettle={attemptSettle}
                             onUnsettle={attemptUnsettle}
