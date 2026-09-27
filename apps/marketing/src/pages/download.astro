@@ -3,10 +3,10 @@ import Layout from "../layouts/Layout.astro";
 import CopyCommand from "../components/CopyCommand.astro";
 import Boat from "../components/Boat.astro";
 import { RELEASES_URL } from "../lib/releases";
-import { NPX_COMMAND, NPM_PACKAGE_URL } from "../lib/site";
+import { INSTALL_COMMAND, INSTALL_DOCS_URL } from "../lib/site";
 ---
 
-<Layout title="Download — J5 Code" description="Download J5 Code for Apple Silicon Macs, or run the server anywhere with npx.">
+<Layout title="Download — J5 Code" description="Download the J5 Code desktop app for Apple Silicon Macs, or install the self-contained server on macOS or Linux.">
   <div class="download-page" data-motion>
     <div class="heading-boat"><Boat tone="dark" size={64} class="bob" /></div>
     <h1 class="heading display">Download J5 Code</h1>
@@ -28,29 +28,28 @@ import { NPX_COMMAND, NPM_PACKAGE_URL } from "../lib/site";
           </a>
         </div>
         <p class="note">
-          Intel Macs are not packaged yet. Run the server with the command below instead.
+          The only desktop build today. Intel Macs, Windows and Linux desktops are not packaged.
         </p>
       </section>
 
       <section class="platform-section">
         <div class="platform-header">
           <svg class="platform-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17l6-5-6-5" /><path d="M12 19h8" /></svg>
-          <h2 class="platform-name">Any machine with Node</h2>
+          <h2 class="platform-name">Command line</h2>
         </div>
         <p class="note note-lead">
-          Windows, Linux, Intel Macs, or a remote box on your tailnet. The command starts the J5 server and the local web app.
-          Needs Node.js 22.16 or newer.
+          A self-contained server for macOS (Apple silicon) and Linux x64. No Node.js or npm needed.
+          Then run <code>j5</code> to start the server and open the web app, and <code>j5 update</code> to move to a newer release.
         </p>
-        <CopyCommand command={NPX_COMMAND} />
+        <CopyCommand command={INSTALL_COMMAND} />
         <p class="note">
-          Add <code>--help</code> for the CLI reference. Package on <a class="inline-link" href={NPM_PACKAGE_URL} target="_blank" rel="noopener noreferrer">npm</a>.
+          Intel Macs, Linux on ARM and Windows have no build yet; the <a class="inline-link" href={INSTALL_DOCS_URL} target="_blank" rel="noopener noreferrer">install guide</a> covers running from source there.
         </p>
       </section>
     </div>
 
     <p class="releases-link">
-      Every build, including nightlies, is on the
-      <a class="inline-link" href={RELEASES_URL} target="_blank" rel="noopener noreferrer">GitHub releases page<span aria-hidden="true"> &#8599;</span></a>.
+      Every build is on the <a class="inline-link" href={RELEASES_URL} target="_blank" rel="noopener noreferrer">GitHub releases page<span aria-hidden="true"> &#8599;</span></a>.
     </p>
   </div>
 </Layout>
@@ -138,7 +137,7 @@ import { NPX_COMMAND, NPM_PACKAGE_URL } from "../lib/site";
 
   .platforms {
     width: 100%;
-    max-width: 680px;
+    max-width: 760px;
     display: flex;
     flex-direction: column;
     gap: 2.75rem;
@@ -216,6 +215,11 @@ import { NPX_COMMAND, NPM_PACKAGE_URL } from "../lib/site";
   .note-lead {
     font-size: 0.9rem;
     color: var(--foam-muted);
+  }
+
+  .platforms :global(.copy-cmd) {
+    width: 100%;
+    font-size: 12px;
   }
 
   .note code {

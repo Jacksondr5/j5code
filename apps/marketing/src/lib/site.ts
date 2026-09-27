@@ -9,9 +9,9 @@ export const UPSTREAM_REPOSITORY_URL = "https://github.com/pingdotgg/t3code";
 export const UPSTREAM_V2_PR_URL = "https://github.com/pingdotgg/t3code/pull/2829";
 export const T3_SITE_URL = "https://t3.codes";
 
-export const NPM_PACKAGE = "@jacksondr5/j5code";
-export const NPX_COMMAND = `npx ${NPM_PACKAGE}@latest`;
-export const NPM_PACKAGE_URL = `https://www.npmjs.com/package/${NPM_PACKAGE}`;
+/** The self-contained server for macOS (Apple silicon) and Linux x64; no Node needed. */
+export const INSTALL_COMMAND = `curl -fsSL ${GITHUB_REPOSITORY_URL}/releases/latest/download/install.sh | sh`;
+export const INSTALL_DOCS_URL = `${GITHUB_REPOSITORY_URL}/blob/j5/main/docs/user/install.md`;
 
 /** Status words used on every card. Copy must not claim more than the word allows. */
 export type ShipStatus = "underway" | "charted" | "horizon";

@@ -2,7 +2,7 @@
 import dmSansLatinUrl from "../assets/fonts/dm-sans-latin.woff2?url";
 import "../styles/fonts.css";
 import BoatSprite from "../components/BoatSprite.astro";
-import { GITHUB_REPOSITORY_URL, LICENSE_URL, T3_SITE_URL, NPM_PACKAGE_URL, GITHUB_RELEASES_URL } from "../lib/site";
+import { GITHUB_REPOSITORY_URL, LICENSE_URL, T3_SITE_URL, INSTALL_DOCS_URL, GITHUB_RELEASES_URL } from "../lib/site";
 
 interface Props {
   title?: string;
@@ -76,14 +76,13 @@ const socialImageUrl = new URL("/og.png", Astro.site);
           <div class="footer-brand">
             <img src="/j5-app-icon.svg" alt="" width="20" height="20" loading="lazy" decoding="async" />
             <span>
-              J5 Code is a tracking fork of <a href={T3_SITE_URL} target="_blank" rel="noopener noreferrer">T3 Code</a>.
-              <a href={LICENSE_URL} target="_blank" rel="noopener noreferrer">MIT licensed</a>.
+              J5 Code is a tracking fork of <a href={T3_SITE_URL} target="_blank" rel="noopener noreferrer">T3 Code</a>. <a href={LICENSE_URL} target="_blank" rel="noopener noreferrer">MIT licensed</a>.
             </span>
           </div>
           <div class="footer-links">
             <a href={GITHUB_REPOSITORY_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
             <a href={GITHUB_RELEASES_URL} target="_blank" rel="noopener noreferrer">Releases</a>
-            <a href={NPM_PACKAGE_URL} target="_blank" rel="noopener noreferrer">npm</a>
+            <a href={INSTALL_DOCS_URL} target="_blank" rel="noopener noreferrer">Install guide</a>
             <a href="/download">Download</a>
             <a href={T3_SITE_URL} target="_blank" rel="noopener noreferrer">T3 Code</a>
           </div>
