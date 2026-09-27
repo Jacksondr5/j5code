@@ -66,12 +66,17 @@ import Boat from "./Boat.astro";
     inset: 0;
     pointer-events: none;
     z-index: 1;
+    /* The hero copy's width: the headline caps at 680px, the body at 52vw. */
+    --hero-copy: min(680px, 52vw);
   }
 
+  /* Each teaser is centered in the flank between the copy's edge and the page
+     edge: the flank is (100% - copy) / 2 wide, so its center is a quarter in. */
   .hv {
+    --hv-w: clamp(220px, 19vw, 320px);
     position: absolute;
     display: block;
-    width: clamp(220px, 19vw, 320px);
+    width: var(--hv-w);
     height: auto;
     overflow: visible;
     animation: hv-in 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) 520ms both;
@@ -84,9 +89,9 @@ import Boat from "./Boat.astro";
 
   /* Talking upper left, spawning lower left, the Captain's lap lower right and
      larger. The compass rose already fills the upper right. */
-  .hv--talk { left: 3vw; top: 72px; }
-  .hv--spawn { left: 3vw; top: 330px; }
-  .hv--lead { right: 2.5vw; top: 300px; width: clamp(280px, 25vw, 400px); }
+  .hv--talk { left: calc((100% - var(--hero-copy)) / 4 - var(--hv-w) / 2); top: 72px; }
+  .hv--spawn { left: calc((100% - var(--hero-copy)) / 4 - var(--hv-w) / 2); top: 330px; }
+  .hv--lead { --hv-w: clamp(280px, 25vw, 400px); right: calc((100% - var(--hero-copy)) / 4 - var(--hv-w) / 2); top: 300px; }
 
   .hs-mobile {
     display: none;
@@ -95,10 +100,10 @@ import Boat from "./Boat.astro";
   /* Laptops and tablets: same flanks, sized by the viewport so they stay clear
      of the copy, which also narrows at these widths (see .hero-sub). */
   @media (max-width: 1279px) and (min-width: 821px) {
-    .hv { width: 16vw; }
-    .hv--talk { left: 2vw; top: 72px; }
-    .hv--spawn { left: 2vw; top: 290px; }
-    .hv--lead { right: 2vw; top: 270px; width: 21vw; }
+    .hv { --hv-w: 16vw; }
+    .hv--talk { top: 72px; }
+    .hv--spawn { top: 290px; }
+    .hv--lead { --hv-w: 21vw; top: 270px; }
   }
 
   @media (max-width: 820px) {
