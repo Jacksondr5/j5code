@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
+    "dev": "node scripts/stage-install-script.mjs && astro dev",
+    "build": "node scripts/stage-install-script.mjs && astro build",
     "preview": "astro preview",
     "typecheck": "astro check"
   },

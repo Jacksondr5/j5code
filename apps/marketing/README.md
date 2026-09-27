@@ -6,7 +6,10 @@ are upstream's.
 
 - `vp run dev:marketing` serves it on port 4173.
 - `vp run build:marketing` writes `dist/`.
-- Deployed by Vercel from this directory; `vercel.ts` carries the install and build commands.
+- Deployed by Vercel from this directory; `vercel.ts` carries the install and build commands and
+  the headers for `/install.sh`. The Vercel project needs Root Directory `apps/marketing` with
+  files outside the root included, because the build reads `FORK.md` and stages
+  `scripts/install.sh` from the repository root.
 
 Status words on the site are deliberate: **Underway** means shipped, **Charted** means defined in
 `docs/j5/product` and being built, **Horizon** means direction. The upstream pin and the size of
